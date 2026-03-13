@@ -26,11 +26,11 @@ class TestIssue419FilterInOrParseException:
         assert rows[0]["Name"] == "Alice"
         assert rows[0]["Value"] == 1234
 
-    def test_filter_in_or_string_literal_no_parse_exception(self, spark, spark_backend):
+    def test_filter_in_or_string_literal_no_parse_exception(self, spark, spark_mode):
         """F.expr parses 'Value in ('1234') or (Name == 'Alice')' without ParseException."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports(spark_backend)
+        imports = get_imports(spark_mode)
         F = imports.F
         # This previously raised ParseException (Sparkless) - parses successfully in both backends
         expr = F.expr("Value in ('1234') or (Name == 'Alice')")

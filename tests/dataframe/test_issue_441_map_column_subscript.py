@@ -6,7 +6,7 @@ PySpark supports using a Column as the lookup key for a map column:
 Fixed by #440 - Column.__getitem__ now delegates to getItem for Column keys.
 
 Run in PySpark mode first, then mock mode:
-  SPARKLESS_TEST_BACKEND=pyspark pytest tests/test_issue_441_map_column_subscript.py -v
+  SPARKLESS_TEST_MODE=pyspark pytest tests/test_issue_441_map_column_subscript.py -v
   pytest tests/test_issue_441_map_column_subscript.py -v
 
 https://github.com/eddiethedean/sparkless/issues/441
@@ -14,13 +14,13 @@ https://github.com/eddiethedean/sparkless/issues/441
 
 import pytest
 
-from tests.fixtures.spark_backend import BackendType
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import get_imports
 
 
-def test_map_column_subscript_with_column_key_exact_issue_441(spark, spark_backend):
+def test_map_column_subscript_with_column_key_exact_issue_441(spark, spark_mode):
     """Exact scenario from #441 - map in column, lookup key from another column."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     # Use string keys for cross-backend compatibility (Polars createDataFrame + int map keys)
     df = spark.createDataFrame(
@@ -38,9 +38,9 @@ def test_map_column_subscript_with_column_key_exact_issue_441(spark, spark_backe
     assert rows[1]["Size"] == "Medium"
 
 
-def test_map_column_subscript_key_not_found(spark, spark_backend):
+def test_map_column_subscript_key_not_found(spark, spark_mode):
     """map_col[key_col] returns None when key not in map."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -55,9 +55,9 @@ def test_map_column_subscript_key_not_found(spark, spark_backend):
     assert rows[1]["v"] is None
 
 
-def test_map_column_subscript_in_select(spark, spark_backend):
+def test_map_column_subscript_in_select(spark, spark_mode):
     """map_col[key_col] works in select."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame([{"id": 1, "key": "x", "data": {"x": 10, "y": 20}}])
     result = df.select(F.col("data")[F.col("key")].alias("val"))
@@ -67,16 +67,16 @@ def test_map_column_subscript_in_select(spark, spark_backend):
 
 
 def test_map_column_subscript_exact_issue_441_with_int_keys_pyspark(
-    spark, spark_backend
+    spark, spark_mode
 ):
     """Exact issue #441 scenario: createDataFrame with int-keyed map (PySpark only).
 
     Polars createDataFrame may not support int keys in map columns.
     """
-    if spark_backend != BackendType.PYSPARK:
+    if spark_mode != Mode.PYSPARK:
         pytest.skip("Int-keyed map in createDataFrame only tested with PySpark")
 
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -93,9 +93,9 @@ def test_map_column_subscript_exact_issue_441_with_int_keys_pyspark(
     assert rows[1]["Size"] == "Medium"
 
 
-def test_map_column_subscript_then_filter(spark, spark_backend):
+def test_map_column_subscript_then_filter(spark, spark_mode):
     """map_col[key_col] then filter on result."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -114,9 +114,9 @@ def test_map_column_subscript_then_filter(spark, spark_backend):
     assert rows[1]["v"] == 2
 
 
-def test_map_column_subscript_null_key_returns_null(spark, spark_backend):
+def test_map_column_subscript_null_key_returns_null(spark, spark_mode):
     """map_col[key_col] returns null when key column is null."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -131,9 +131,9 @@ def test_map_column_subscript_null_key_returns_null(spark, spark_backend):
     assert rows[1]["v"] is None
 
 
-def test_map_column_subscript_coalesce_default(spark, spark_backend):
+def test_map_column_subscript_coalesce_default(spark, spark_mode):
     """coalesce(map_col[key_col], lit(default)) for missing keys."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -148,9 +148,9 @@ def test_map_column_subscript_coalesce_default(spark, spark_backend):
     assert rows[1]["v"] == -1
 
 
-def test_map_column_subscript_multiple_in_select(spark, spark_backend):
+def test_map_column_subscript_multiple_in_select(spark, spark_mode):
     """Multiple map lookups in single select."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -167,9 +167,9 @@ def test_map_column_subscript_multiple_in_select(spark, spark_backend):
     assert rows[0]["v2"] == 20
 
 
-def test_map_column_subscript_orderby_result(spark, spark_backend):
+def test_map_column_subscript_orderby_result(spark, spark_mode):
     """orderBy on map lookup result."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -186,9 +186,9 @@ def test_map_column_subscript_orderby_result(spark, spark_backend):
     assert [r["v"] for r in rows] == [1, 2, 3]
 
 
-def test_map_column_subscript_when_otherwise(spark, spark_backend):
+def test_map_column_subscript_when_otherwise(spark, spark_mode):
     """map lookup in when/otherwise expression."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -208,9 +208,9 @@ def test_map_column_subscript_when_otherwise(spark, spark_backend):
     assert rows[1]["tier"] == "L"
 
 
-def test_map_column_subscript_chained_with_columns(spark, spark_backend):
+def test_map_column_subscript_chained_with_columns(spark, spark_mode):
     """Chained withColumn calls using map lookups."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame([{"k": "b", "m": {"a": 1, "b": 2, "c": 3}}])
     df = df.withColumn("v", F.col("m")[F.col("k")]).withColumn(
@@ -222,11 +222,11 @@ def test_map_column_subscript_chained_with_columns(spark, spark_backend):
     assert rows[0]["doubled"] == 4
 
 
-def test_map_column_subscript_create_map_with_column_key(spark, spark_backend):
+def test_map_column_subscript_create_map_with_column_key(spark, spark_mode):
     """create_map expression with map[col] lookup - overlaps with #440."""
     from itertools import chain
 
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [{"Name": "Alice", "Value": 1}, {"Name": "Bob", "Value": 3}]

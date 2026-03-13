@@ -6,9 +6,9 @@ The result must allow resolving the key column case-insensitively (e.g. select("
 when the column is named "id"), matching the Rust join_column_resolution_case_insensitive test.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 
 

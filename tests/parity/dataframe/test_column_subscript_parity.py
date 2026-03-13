@@ -2,12 +2,12 @@
 PySpark parity tests for Issue #339: Column subscript notation for struct access.
 
 Tests that Column subscript notation (e.g., F.col("StructVal")["E1"]) matches PySpark behavior.
-Uses get_spark_imports from fixture only; same logic for both backends.
+Uses get_imports from fixture only; same logic for both backends.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 

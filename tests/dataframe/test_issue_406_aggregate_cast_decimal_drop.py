@@ -26,9 +26,9 @@ class TestIssue406AggregateCastDecimalDrop:
 
     def test_groupby_agg_cast_decimal_drop(self, spark):
         """Exact scenario from issue #406: groupBy, agg with sum().cast(DecimalType(38,6)), drop."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DecimalType = imports.DecimalType
         df = spark.createDataFrame(
@@ -49,9 +49,9 @@ class TestIssue406AggregateCastDecimalDrop:
 
     def test_agg_cast_decimal_drop_different_precision_scale(self, spark):
         """DecimalType(10, 2) and DecimalType(5, 1) with sum + drop."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DecimalType = imports.DecimalType
         df = spark.createDataFrame(
@@ -75,9 +75,9 @@ class TestIssue406AggregateCastDecimalDrop:
 
     def test_agg_cast_decimal_drop_with_nulls(self, spark):
         """Group with nulls in value; sum cast to Decimal + drop key."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DecimalType = imports.DecimalType
         df = spark.createDataFrame(
@@ -98,9 +98,9 @@ class TestIssue406AggregateCastDecimalDrop:
 
     def test_avg_cast_decimal_drop(self, spark):
         """avg() cast to Decimal + drop (not just sum)."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DecimalType = imports.DecimalType
         df = spark.createDataFrame(
@@ -120,9 +120,9 @@ class TestIssue406AggregateCastDecimalDrop:
 
     def test_min_max_cast_decimal_drop(self, spark):
         """min() and max() cast to Decimal + drop key."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DecimalType = imports.DecimalType
         df = spark.createDataFrame(
@@ -144,9 +144,9 @@ class TestIssue406AggregateCastDecimalDrop:
 
     def test_agg_cast_decimal_drop_then_show_and_collect(self, spark):
         """show() then collect() after aggregate + cast Decimal + drop."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DecimalType = imports.DecimalType
         df = spark.createDataFrame(
@@ -163,9 +163,9 @@ class TestIssue406AggregateCastDecimalDrop:
 
     def test_single_group_agg_cast_decimal_drop(self, spark):
         """Single group: one row after agg; drop key leaves one decimal column."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DecimalType = imports.DecimalType
         df = spark.createDataFrame([{"x": "only", "y": 1.0}, {"x": "only", "y": 2.0}])

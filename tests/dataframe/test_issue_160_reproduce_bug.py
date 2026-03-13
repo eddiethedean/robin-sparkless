@@ -1,14 +1,14 @@
 """
 Test to reproduce issue #160: cannot resolve error when execution plan references dropped columns.
 
-Uses get_spark_imports from fixture only.
+Uses get_imports from fixture only.
 """
 
 from datetime import datetime, timedelta
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 

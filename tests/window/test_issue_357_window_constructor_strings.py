@@ -3,14 +3,14 @@ Tests for #357: Window constructor and partitionBy/orderBy accept string column 
 
 PySpark: Window(), Window.partitionBy("col").orderBy("col") with strings.
 Robin-sparkless now provides Window() (no-arg) and partitionBy/orderBy already accept str or Column.
-Uses shared spark fixture and get_spark_imports().
+Uses shared spark fixture and get_imports().
 """
 
 from __future__ import annotations
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 Window = _imports.Window
 

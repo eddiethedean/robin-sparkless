@@ -2,14 +2,14 @@
 Test for Issue #214: DataFrame.sort() with list parameter.
 
 This test verifies that df.sort(["dept", "name"]) and df.sort(df.columns) work correctly.
-Uses get_spark_imports from fixture only.
+Uses get_imports from fixture only.
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 
 

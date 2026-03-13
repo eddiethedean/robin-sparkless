@@ -16,11 +16,11 @@ from datetime import date
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
-from tests.fixtures.spark_backend import get_backend_type, BackendType
+from sparkless.testing import get_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
 
 
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 F = imports.F
 StructType = imports.StructType
@@ -35,8 +35,8 @@ TimestampType = imports.TimestampType
 
 def _is_pyspark_mode() -> bool:
     """Check if running in PySpark backend mode."""
-    backend = get_backend_type()
-    return backend == BackendType.PYSPARK
+    backend = get_mode()
+    return backend == Mode.PYSPARK
 
 
 class TestIssue261Between:

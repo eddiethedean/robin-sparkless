@@ -9,12 +9,12 @@ from typing import Any
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 from tests.utils import assert_rows_equal
-from tests.fixtures.spark_backend import get_backend_type, BackendType
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
 
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
@@ -49,7 +49,7 @@ def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
     """select(regexp_extract_all(...).alias('m')) matches PySpark."""
     # regexp_extract_all is a sparkless extension; skip when running against
     # a real PySpark backend.
-    if get_backend_type() == BackendType.PYSPARK:
+    if get_mode() == Mode.PYSPARK:
         pytest.skip("regexp_extract_all is not available in PySpark backend")
     spark = _spark()
     data = [
@@ -68,7 +68,7 @@ def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
 
 def test_regexp_extract_all_select_varargs_pyspark_parity() -> None:
     """select(expr) with single expression as vararg matches PySpark."""
-    if get_backend_type() == BackendType.PYSPARK:
+    if get_mode() == Mode.PYSPARK:
         pytest.skip("regexp_extract_all is not available in PySpark backend")
     spark = _spark()
     data = [
@@ -89,7 +89,7 @@ def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity()
     None
 ):
     """select('s', expr.alias('m')) - column name + expression matches PySpark."""
-    if get_backend_type() == BackendType.PYSPARK:
+    if get_mode() == Mode.PYSPARK:
         pytest.skip("regexp_extract_all is not available in PySpark backend")
     spark = _spark()
     data = [
@@ -106,7 +106,7 @@ def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity()
 
 def test_regexp_extract_all_empty_string_and_null_pyspark_parity() -> None:
     """regexp_extract_all with empty string returns [], null returns None."""
-    if get_backend_type() == BackendType.PYSPARK:
+    if get_mode() == Mode.PYSPARK:
         pytest.skip("regexp_extract_all is not available in PySpark backend")
     spark = _spark()
     data = [

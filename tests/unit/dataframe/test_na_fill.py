@@ -5,15 +5,15 @@ This module tests that sparkless correctly supports the .na.fill() syntax
 for filling null values in DataFrames, matching PySpark behavior.
 
 These tests work with both sparkless (mock) and PySpark backends.
-Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
+Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 # Get imports from fixture (same logic for both backends)
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 StringType = imports.StringType
 IntegerType = imports.IntegerType
@@ -169,9 +169,9 @@ class TestNaFill:
 
     def test_na_fill_different_types(self, spark):
         """Test .na.fill() with different data types."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         StructType = imports.StructType
         StructField = imports.StructField
         StringType = imports.StringType
@@ -280,9 +280,9 @@ class TestNaFill:
 
     def test_na_fill_empty_dataframe(self, spark):
         """Test .na.fill() on empty DataFrame."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         StructType = imports.StructType
         StructField = imports.StructField
         StringType = imports.StringType
@@ -345,9 +345,9 @@ class TestNaFill:
 
     def test_na_fill_subset_string(self, spark):
         """Test .na.fill() with subset as string (single column)."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         StructType = imports.StructType
         StructField = imports.StructField
         StringType = imports.StringType
@@ -376,9 +376,9 @@ class TestNaFill:
 
     def test_na_fill_subset_tuple(self, spark):
         """Test .na.fill() with subset as tuple."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         StructType = imports.StructType
         StructField = imports.StructField
         StringType = imports.StringType
@@ -406,9 +406,9 @@ class TestNaFill:
 
     def test_na_fill_all_nulls(self, spark):
         """Test .na.fill() when all values are null."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         StructType = imports.StructType
         StructField = imports.StructField
         StringType = imports.StringType

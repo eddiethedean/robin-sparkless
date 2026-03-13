@@ -1,12 +1,12 @@
 """Test issue #358: Column.getField for array index (PySpark API parity).
 
 PySpark supports F.col("ArrayVal").getField(0) for array element access.
-Uses get_spark_imports from fixture only.
+Uses get_imports from fixture only.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 StructType = _imports.StructType

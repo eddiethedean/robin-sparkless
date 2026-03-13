@@ -1,7 +1,7 @@
 import pytest
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 StructType = _imports.StructType
 StructField = _imports.StructField

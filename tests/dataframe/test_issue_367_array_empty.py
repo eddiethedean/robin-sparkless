@@ -5,7 +5,7 @@ PySpark supports F.array() and F.array([]) which return an empty array column.
 Sparkless now supports both (PySpark parity).
 
 Works with both sparkless (mock) and PySpark backends.
-Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
+Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
 import pytest
@@ -16,9 +16,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_no_args_returns_empty_array(self, spark):
         """Exact scenario from issue #367: withColumn + F.array()."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame([{"Name": "Alice"}, {"Name": "Bob"}])
         df = df.withColumn("NewArray", F.array())
         rows = df.collect()
@@ -28,9 +28,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_list_returns_empty_array(self, spark):
         """F.array([]) returns empty array [] (issue #367)."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame([{"Name": "Alice"}, {"Name": "Bob"}])
         df = df.withColumn("NewArray", F.array([]))
         rows = df.collect()
@@ -40,9 +40,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_show(self, spark):
         """Exact issue scenario: withColumn + F.array() + show()."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame([{"Name": "Alice"}, {"Name": "Bob"}])
         df = df.withColumn("NewArray", F.array())
         df.show()
@@ -53,9 +53,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_in_select(self, spark):
         """F.array() in select statement."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame([{"id": 1}, {"id": 2}, {"id": 3}])
         result = df.select(F.col("id"), F.array().alias("empty_array"))
         rows = result.collect()
@@ -66,9 +66,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_list_and_array_equivalent(self, spark):
         """F.array() and F.array([]) produce identical results."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame([{"id": 1}, {"id": 2}])
         result = df.select(
             F.col("id"),
@@ -84,9 +84,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_after_filter(self, spark):
         """F.array() works after filter."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame(
             [
                 {"id": 1, "value": 10},
@@ -103,9 +103,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_in_union(self, spark):
         """F.array() works with union."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df1 = spark.createDataFrame([{"id": 1, "val": "a"}])
         df2 = spark.createDataFrame([{"id": 2, "val": "b"}])
         df1_with_arr = df1.withColumn("arr", F.array())
@@ -118,9 +118,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_tuple_raises_like_pyspark(self, spark):
         """F.array(()) raises in Sparkless (matches PySpark, which rejects tuple)."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         with pytest.raises(
             Exception
         ):  # PySparkTypeError in PySpark, ValueError in Sparkless
@@ -128,9 +128,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_multiple_times(self, spark):
         """Multiple F.array() in a single select."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame([{"id": 1}])
         result = df.select(
             F.col("id"),
@@ -146,9 +146,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_with_different_data_types(self, spark):
         """F.array() with DataFrames containing different data types."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df1 = spark.createDataFrame([{"name": "Alice"}])
         assert df1.withColumn("arr", F.array()).collect()[0]["arr"] == []
 
@@ -160,9 +160,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_with_computed_columns(self, spark):
         """F.array() alongside computed columns."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame([{"a": 10, "b": 20}])
         result = df.select(
             F.col("a"),
@@ -177,9 +177,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_in_join(self, spark):
         """F.array() works in join operations."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df1 = spark.createDataFrame([{"id": 1, "name": "Alice"}])
         df2 = spark.createDataFrame([{"id": 1, "age": 25}])
         df1_with_arr = df1.withColumn("arr", F.array())
@@ -192,9 +192,9 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_two_equivalent(self, spark):
         """F.array() and F.array([]) produce identical results (PySpark parity)."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame([{"id": 1}, {"id": 2}])
         result = df.select(
             F.col("id"),

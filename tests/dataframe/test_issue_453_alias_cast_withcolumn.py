@@ -7,7 +7,7 @@ did not validate _original_column for aliased columns (same fix pattern as #435)
 https://github.com/eddiethedean/sparkless/issues/453
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _row_val(row, key):
@@ -17,9 +17,9 @@ def _row_val(row, key):
     return getattr(row, key, None)
 
 
-def test_alias_cast_withcolumn_exact_issue_453(spark, spark_backend):
+def test_alias_cast_withcolumn_exact_issue_453(spark, spark_mode):
     """Exact scenario from #453 - alias().cast() in withColumn."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -34,9 +34,9 @@ def test_alias_cast_withcolumn_exact_issue_453(spark, spark_backend):
     assert _row_val(rows[0], "y_as_int") == 2
 
 
-def test_alias_cast_withcolumn_multiple_columns(spark, spark_backend):
+def test_alias_cast_withcolumn_multiple_columns(spark, spark_mode):
     """Multiple alias().cast() in withColumn."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -51,9 +51,9 @@ def test_alias_cast_withcolumn_multiple_columns(spark, spark_backend):
     assert _row_val(rows[0], "b_int") == 2
 
 
-def test_alias_cast_select_still_works(spark, spark_backend):
+def test_alias_cast_select_still_works(spark, spark_mode):
     """alias().cast() in select - regression check (#435)."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -65,9 +65,9 @@ def test_alias_cast_select_still_works(spark, spark_backend):
     assert _row_val(rows[0], "y_int") == 2
 
 
-def test_alias_cast_withcolumn_then_select(spark, spark_backend):
+def test_alias_cast_withcolumn_then_select(spark, spark_mode):
     """withColumn with alias().cast() then select."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -83,9 +83,9 @@ def test_alias_cast_withcolumn_then_select(spark, spark_backend):
 
 
 # --- Robust edge-case tests ---
-def test_alias_cast_withcolumn_string_type(spark, spark_backend):
+def test_alias_cast_withcolumn_string_type(spark, spark_mode):
     """alias().cast(StringType()) in withColumn."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
 
@@ -96,9 +96,9 @@ def test_alias_cast_withcolumn_string_type(spark, spark_backend):
     assert _row_val(rows[0], "num_str") == "123"
 
 
-def test_alias_cast_withcolumn_double_type(spark, spark_backend):
+def test_alias_cast_withcolumn_double_type(spark, spark_mode):
     """alias().cast(DoubleType()) in withColumn."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.DoubleType
 
@@ -109,9 +109,9 @@ def test_alias_cast_withcolumn_double_type(spark, spark_backend):
     assert abs(_row_val(rows[0], "dbl") - 3.14) < 1e-9
 
 
-def test_alias_cast_withcolumn_long_type(spark, spark_backend):
+def test_alias_cast_withcolumn_long_type(spark, spark_mode):
     """alias().cast(LongType()) in withColumn."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.LongType
 
@@ -122,9 +122,9 @@ def test_alias_cast_withcolumn_long_type(spark, spark_backend):
     assert _row_val(rows[0], "lng") == 9999999999
 
 
-def test_alias_cast_withcolumn_with_nulls(spark, spark_backend):
+def test_alias_cast_withcolumn_with_nulls(spark, spark_mode):
     """alias().cast() in withColumn with null values."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -137,9 +137,9 @@ def test_alias_cast_withcolumn_with_nulls(spark, spark_backend):
     assert _row_val(rows[2], "a_int") == 3
 
 
-def test_alias_cast_withcolumn_then_filter(spark, spark_backend):
+def test_alias_cast_withcolumn_then_filter(spark, spark_mode):
     """withColumn alias().cast() then filter on new column."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -159,9 +159,9 @@ def test_alias_cast_withcolumn_then_filter(spark, spark_backend):
     assert names == {"b", "c"}
 
 
-def test_alias_cast_withcolumn_column_with_underscore(spark, spark_backend):
+def test_alias_cast_withcolumn_column_with_underscore(spark, spark_mode):
     """alias().cast() in withColumn on column with underscore."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -172,9 +172,9 @@ def test_alias_cast_withcolumn_column_with_underscore(spark, spark_backend):
     assert _row_val(rows[0], "mc_int") == 42
 
 
-def test_alias_cast_withcolumn_mixed_with_plain(spark, spark_backend):
+def test_alias_cast_withcolumn_mixed_with_plain(spark, spark_mode):
     """withColumn alias().cast() mixed with plain withColumn."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -190,9 +190,9 @@ def test_alias_cast_withcolumn_mixed_with_plain(spark, spark_backend):
     assert _row_val(rows[0], "doubled") == 2
 
 
-def test_alias_cast_withcolumn_replace_existing_column(spark, spark_backend):
+def test_alias_cast_withcolumn_replace_existing_column(spark, spark_mode):
     """withColumn alias().cast() - output name same as different input (replacement)."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -204,9 +204,9 @@ def test_alias_cast_withcolumn_replace_existing_column(spark, spark_backend):
     assert _row_val(rows[0], "b") == 1
 
 
-def test_alias_cast_withcolumn_chain_three_ops(spark, spark_backend):
+def test_alias_cast_withcolumn_chain_three_ops(spark, spark_mode):
     """Chained withColumn with alias().cast() three times."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -223,9 +223,9 @@ def test_alias_cast_withcolumn_chain_three_ops(spark, spark_backend):
     assert _row_val(rows[0], "z_int") == 3
 
 
-def test_alias_cast_withcolumn_after_filter(spark, spark_backend):
+def test_alias_cast_withcolumn_after_filter(spark, spark_mode):
     """withColumn alias().cast() after filter."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 
@@ -241,9 +241,9 @@ def test_alias_cast_withcolumn_after_filter(spark, spark_backend):
     assert _row_val(rows[1], "val_int") == 30
 
 
-def test_alias_cast_withcolumn_empty_dataframe(spark, spark_backend):
+def test_alias_cast_withcolumn_empty_dataframe(spark, spark_mode):
     """withColumn alias().cast() on empty DataFrame."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
 

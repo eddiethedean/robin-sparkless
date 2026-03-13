@@ -3,7 +3,7 @@
 These tests ensure that Sparkless's log() function behavior matches PySpark exactly.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestLogFloatConstantParity:
@@ -11,7 +11,7 @@ class TestLogFloatConstantParity:
 
     def test_log_with_float_base_parity(self, spark):
         """Test log with float constant as base matches PySpark."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(
@@ -41,7 +41,7 @@ class TestLogFloatConstantParity:
         """Test natural log matches PySpark."""
         import math
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(
@@ -60,7 +60,7 @@ class TestLogFloatConstantParity:
 
     def test_log_with_different_bases_parity(self, spark):
         """Test log with different bases matches PySpark."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(

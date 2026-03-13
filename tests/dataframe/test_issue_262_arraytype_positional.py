@@ -6,10 +6,10 @@ like ArrayType(DoubleType(), True) without raising a TypeError about specifying
 both 'elementType' and 'element_type'.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 # Get imports based on backend
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 StringType = imports.StringType
 DoubleType = imports.DoubleType

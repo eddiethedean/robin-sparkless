@@ -6,10 +6,10 @@ internal validation system incorrectly expects StringType, causing validation fa
 with the error: "invalid series dtype: expected `String`, got `datetime[μs]`".
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 # Get the appropriate imports based on backend (sparkless or PySpark)
-imports = get_spark_imports()
+imports = get_imports()
 F = imports.F
 col = F.col
 to_timestamp = F.to_timestamp

@@ -4,7 +4,7 @@ PySpark parity tests for advanced SQL operations.
 Tests validate that Sparkless advanced SQL queries behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
+from tests.tools.parity_base import ParityTestBase
 
 
 class TestSQLAdvancedParity(ParityTestBase):

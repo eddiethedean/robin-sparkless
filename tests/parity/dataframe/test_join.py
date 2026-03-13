@@ -6,10 +6,10 @@ Expected outputs use aliased right-side columns (dept_id_right, name_right) for
 unique names; we select with those aliases and orderBy id for stable comparison.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
-F = get_spark_imports().F
+F = get_imports().F
 
 
 def _join_result_with_aliases(emp_df, dept_df, join_type):

@@ -1,15 +1,12 @@
 """Regression test for #1405: date.add_months parity."""
 
-from tests.fixtures.spark_backend import BackendType, SparkBackend
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, create_session, get_imports
 
 
 def test_add_months_parity():
-    imports = get_spark_imports(BackendType.ROBIN)
+    imports = get_imports(Mode.SPARKLESS)
     F = imports.F
-    spark = SparkBackend.create_mock_spark_session(
-        "add_months_1405", backend_type="robin"
-    )
+    spark = create_session(app_name="add_months_1405", mode=Mode.SPARKLESS)
 
     df = spark.createDataFrame(
         [("2020-01-31",), ("2020-02-29",), (None,)],
@@ -27,3 +24,5 @@ def test_add_months_parity():
     assert vals[0].strftime("%Y-%m-%d") == "2020-02-29"
     assert vals[1].strftime("%Y-%m-%d") == "2020-03-29"
     assert vals[2] is None
+
+    spark.stop()

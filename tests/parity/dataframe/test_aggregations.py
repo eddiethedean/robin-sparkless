@@ -4,8 +4,8 @@ PySpark parity tests for aggregation operations.
 Tests validate that Sparkless aggregation operations behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestAggregationsParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_sum_aggregation(self, spark):
         """Test sum aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "sum_aggregation")
         df = spark.createDataFrame(expected["input_data"])
@@ -22,7 +22,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_avg_aggregation(self, spark):
         """Test avg aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "avg_aggregation")
         df = spark.createDataFrame(expected["input_data"])
@@ -31,7 +31,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_count_aggregation(self, spark):
         """Test count aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "count_aggregation")
         df = spark.createDataFrame(expected["input_data"])
@@ -40,7 +40,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_max_aggregation(self, spark):
         """Test max aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "max_aggregation")
         df = spark.createDataFrame(expected["input_data"])
@@ -49,7 +49,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_min_aggregation(self, spark):
         """Test min aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "min_aggregation")
         df = spark.createDataFrame(expected["input_data"])
@@ -58,7 +58,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_multiple_aggregations(self, spark):
         """Test multiple aggregations match PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "multiple_aggregations")
         df = spark.createDataFrame(expected["input_data"])
@@ -72,7 +72,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_groupby_multiple_columns(self, spark):
         """Test groupBy with multiple columns matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "groupby_multiple_columns")
         df = spark.createDataFrame(expected["input_data"])
@@ -83,7 +83,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_global_aggregation(self, spark):
         """Test global aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "global_aggregation")
         df = spark.createDataFrame(expected["input_data"])
@@ -96,7 +96,7 @@ class TestAggregationsParity(ParityTestBase):
 
     def test_aggregation_with_nulls(self, spark):
         """Test aggregation with nulls matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("aggregations", "aggregation_with_nulls")
         df = spark.createDataFrame(expected["input_data"])

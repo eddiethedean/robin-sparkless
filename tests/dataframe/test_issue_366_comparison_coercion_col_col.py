@@ -9,9 +9,9 @@ in filter use coerce_for_pyspark_comparison when types differ.
 
 from __future__ import annotations
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 
 

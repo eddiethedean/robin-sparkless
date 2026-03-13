@@ -1,4 +1,4 @@
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def test_coalesce_column_name_matches_expected(spark) -> None:
@@ -8,7 +8,7 @@ def test_coalesce_column_name_matches_expected(spark) -> None:
     \"coalesce(salary, 0)\"; this test asserts that the DataFrame produced by
     the corresponding operation uses that exact column name.
     """
-    imports = get_spark_imports()
+    imports = get_imports()
     F = imports.F
 
     try:

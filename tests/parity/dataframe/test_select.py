@@ -4,7 +4,7 @@ PySpark parity tests for DataFrame select operations.
 Tests validate that Sparkless select operations behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
+from tests.tools.parity_base import ParityTestBase
 
 
 class TestSelectParity(ParityTestBase):

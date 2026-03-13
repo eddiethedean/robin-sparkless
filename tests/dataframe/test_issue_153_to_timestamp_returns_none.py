@@ -9,9 +9,9 @@ This test verifies that to_timestamp() actually parses string dates into
 timestamp values, not just returns None.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 F = imports.F
 
 

@@ -6,7 +6,7 @@ Sparkless SQLExprParser previously raised ParseException for these expressions.
 Now parses LIKE and NOT LIKE in F.expr() for PySpark parity.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestIssue394LikeInExpr:
@@ -97,7 +97,7 @@ class TestIssue394LikeInExpr:
 
     def test_expr_like_standalone(self, spark):
         """F.expr with LIKE used in select/withColumn."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -180,7 +180,7 @@ class TestIssue394LikeInExpr:
 
     def test_expr_not_like_in_with_column(self, spark):
         """F.expr NOT LIKE in withColumn."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [

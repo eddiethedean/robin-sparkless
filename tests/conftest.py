@@ -1,9 +1,9 @@
 """
-Global pytest configuration for unified Python tests.
+Global pytest configuration using sparkless.testing.
 
-Uses sparkless.testing as the primary testing framework. For backward
-compatibility, legacy environment variables (MOCK_SPARK_TEST_BACKEND,
-SPARKLESS_TEST_BACKEND) are mapped to SPARKLESS_TEST_MODE.
+Uses SPARKLESS_TEST_MODE environment variable to select the test backend:
+- SPARKLESS_TEST_MODE=sparkless (default): Run with sparkless backend
+- SPARKLESS_TEST_MODE=pyspark: Run with PySpark backend
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import gc
 import os
 import re
 import sys
+import tempfile
 import uuid
 
 import pytest
@@ -20,92 +21,37 @@ import pytest
 # Prevent numpy crashes on macOS ARM chips with Python 3.9
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 
-# Ensure PySpark workers use the same Python as the driver (avoids PYTHON_VERSION_MISMATCH)
+# Ensure PySpark workers use the same Python as the driver
 if "PYSPARK_PYTHON" not in os.environ:
     os.environ["PYSPARK_PYTHON"] = sys.executable
 if "PYSPARK_DRIVER_PYTHON" not in os.environ:
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
+# Import from sparkless.testing
+from sparkless.testing import (
+    Mode,
+    get_mode,
+    is_pyspark_mode,
+    create_session,
+    get_imports,
+    SparkImports,
+)
+from sparkless.testing.fixtures import _SharedSessionWrapper
 
-# --- Legacy Environment Variable Mapping ---
-# Map old env vars to the new SPARKLESS_TEST_MODE for backward compatibility.
-# This allows existing test commands to continue working.
-def _map_legacy_env_vars() -> None:
-    """Map legacy env vars to SPARKLESS_TEST_MODE."""
-    if "SPARKLESS_TEST_MODE" in os.environ:
-        return  # New var takes precedence
+# Register sparkless.testing as the pytest plugin
+pytest_plugins = ["sparkless.testing"]
 
-    legacy_value = (
-        os.getenv("MOCK_SPARK_TEST_BACKEND")
-        or os.getenv("SPARKLESS_TEST_BACKEND")
-        or ""
-    ).strip().lower()
-
-    if legacy_value == "pyspark":
-        os.environ["SPARKLESS_TEST_MODE"] = "pyspark"
-    elif legacy_value in ("mock", "robin", "sparkless", ""):
-        os.environ["SPARKLESS_TEST_MODE"] = "sparkless"
-
-
-_map_legacy_env_vars()
-
-
-# --- Import sparkless.testing ---
-# After mapping env vars, import from sparkless.testing
-try:
-    from sparkless.testing import (
-        Mode,
-        get_mode,
-        is_pyspark_mode,
-        create_session,
-        get_imports,
-        SparkImports,
-    )
-    from sparkless.testing.fixtures import _SharedSessionWrapper
-
-    _HAS_SPARKLESS_TESTING = True
-except ImportError:
-    _HAS_SPARKLESS_TESTING = False
-    # Fallback definitions for when sparkless.testing is not available
-    from enum import Enum
-
-    class Mode(Enum):  # type: ignore[no-redef]
-        SPARKLESS = "sparkless"
-        PYSPARK = "pyspark"
-
-    def get_mode() -> Mode:  # type: ignore[no-redef]
-        return Mode.PYSPARK if os.getenv("SPARKLESS_TEST_MODE") == "pyspark" else Mode.SPARKLESS
-
-    def is_pyspark_mode() -> bool:  # type: ignore[no-redef]
-        return get_mode() == Mode.PYSPARK
-
-    class _SharedSessionWrapper:  # type: ignore[no-redef]
-        __slots__ = ("_session",)
-
-        def __init__(self, session):
-            self._session = session
-
-        def stop(self):
-            pass
-
-        def __getattr__(self, name):
-            return getattr(self._session, name)
-
-
-# In non-PySpark mode, configure sparkless for multiprocessing (pytest-xdist).
+# Configure sparkless for multiprocessing (pytest-xdist) in sparkless mode
 if not is_pyspark_mode():
     try:
-        import sparkless as _rs  # type: ignore[import-not-found]
+        import sparkless as _rs
     except ImportError:
         _rs = None  # type: ignore[assignment]
-    if (
-        _rs is not None
-        and getattr(_rs, "_configure_for_multiprocessing", None) is not None
-    ):
+    if _rs is not None and getattr(_rs, "_configure_for_multiprocessing", None) is not None:
         _rs._configure_for_multiprocessing()
 
 
-# Set JAVA_HOME for PySpark if not already set - must be done before any PySpark imports
+# Set JAVA_HOME for PySpark if not already set
 if "JAVA_HOME" not in os.environ:
     java_home_candidates = [
         "/opt/homebrew/opt/openjdk@11",
@@ -143,17 +89,12 @@ def cleanup_after_each_test():
 
 
 def _use_shared_session() -> bool:
-    """Use a single session per worker/run for sparkless backend.
+    """Check if shared session mode is enabled.
 
-    Default is per-test sessions so sequential and parallel (-n N) runs have the same
-    pass/fail set and no cross-test catalog pollution. Set SPARKLESS_SHARED_SESSION=1
-    to use one session per run (faster but requires unique table names via table_prefix).
+    Default is per-test sessions. Set SPARKLESS_SHARED_SESSION=1 to use
+    one session per run (faster but requires unique table names via table_prefix).
     """
-    if os.environ.get("SPARKLESS_SHARED_SESSION", "0").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    ):
+    if os.environ.get("SPARKLESS_SHARED_SESSION", "0").strip().lower() in ("1", "true", "yes"):
         if os.environ.get("PYTEST_XDIST_WORKER"):
             return False
         return not is_pyspark_mode()
@@ -162,18 +103,13 @@ def _use_shared_session() -> bool:
 
 @pytest.fixture(scope="session")
 def _shared_sparkless_session():
-    """One SparkSession for the whole test run (sparkless backend). Speeds tests; table names must be unique per test via table_prefix."""
+    """One SparkSession for the whole test run (sparkless backend)."""
     if not _use_shared_session():
         pytest.skip("shared session disabled")
     if is_pyspark_mode():
         pytest.skip("shared session only for sparkless backend")
 
-    if _HAS_SPARKLESS_TESTING:
-        session = create_session(app_name="shared_sparkless_test", mode=Mode.SPARKLESS)
-    else:
-        from sparkless.sql import SparkSession
-        session = SparkSession.builder.app_name("shared_sparkless_test").get_or_create()
-
+    session = create_session(app_name="shared_sparkless_test", mode=Mode.SPARKLESS)
     yield session
     with contextlib.suppress(BaseException):
         session.stop()
@@ -182,7 +118,7 @@ def _shared_sparkless_session():
 
 @pytest.fixture(scope="session")
 def _shared_pyspark_session():
-    """One PySpark SparkSession per worker (session scope). Speeds PySpark tests; use table_prefix for any tables/views."""
+    """One PySpark SparkSession per worker (session scope)."""
     if not _use_shared_session():
         pytest.skip("shared session disabled")
     if not is_pyspark_mode():
@@ -190,17 +126,7 @@ def _shared_pyspark_session():
 
     session = None
     try:
-        if _HAS_SPARKLESS_TESTING:
-            session = create_session(app_name="shared_pyspark_worker", mode=Mode.PYSPARK)
-        else:
-            from pyspark.sql import SparkSession as PySparkSession
-            session = (
-                PySparkSession.builder
-                .master("local[1]")
-                .appName("shared_pyspark_worker")
-                .config("spark.driver.bindAddress", "127.0.0.1")
-                .getOrCreate()
-            )
+        session = create_session(app_name="shared_pyspark_worker", mode=Mode.PYSPARK)
         yield session
     except ImportError as e:
         if "pyspark" in str(e).lower() or "PySpark is not available" in str(e):
@@ -215,7 +141,7 @@ def _shared_pyspark_session():
 
 @pytest.fixture
 def table_prefix(request: pytest.FixtureRequest) -> str:
-    """Unique prefix for table/view names when using the shared session. Use e.g. saveAsTable(f'{table_prefix}_mytable')."""
+    """Unique prefix for table/view names when using the shared session."""
     name = getattr(request.node, "name", "test")[:40]
     safe = re.sub(r"[^a-zA-Z0-9_]", "_", name)
     return f"t_{safe}_{uuid.uuid4().hex[:6]}"
@@ -230,39 +156,7 @@ def spark_mode() -> Mode:
 @pytest.fixture
 def spark_imports() -> SparkImports:
     """Get mode-appropriate Spark imports."""
-    if _HAS_SPARKLESS_TESTING:
-        return get_imports()
-    # Fallback
-    if is_pyspark_mode():
-        from pyspark.sql import SparkSession, functions as F
-        from pyspark.sql import Window
-        from pyspark.sql.types import Row
-
-        class _Imports:
-            pass
-
-        imports = _Imports()
-        imports.SparkSession = SparkSession  # type: ignore[attr-defined]
-        imports.F = F  # type: ignore[attr-defined]
-        imports.functions = F  # type: ignore[attr-defined]
-        imports.Window = Window  # type: ignore[attr-defined]
-        imports.Row = Row  # type: ignore[attr-defined]
-        return imports  # type: ignore[return-value]
-    else:
-        from sparkless.sql import SparkSession, functions as F
-        from sparkless.sql.window import Window
-        from sparkless.sql.types import Row
-
-        class _Imports:
-            pass
-
-        imports = _Imports()
-        imports.SparkSession = SparkSession  # type: ignore[attr-defined]
-        imports.F = F  # type: ignore[attr-defined]
-        imports.functions = F  # type: ignore[attr-defined]
-        imports.Window = Window  # type: ignore[attr-defined]
-        imports.Row = Row  # type: ignore[attr-defined]
-        return imports  # type: ignore[return-value]
+    return get_imports()
 
 
 @pytest.fixture
@@ -272,20 +166,7 @@ def isolated_session(request: pytest.FixtureRequest):
     session_name = f"test_isolated_{uuid.uuid4().hex[:8]}"
 
     try:
-        if _HAS_SPARKLESS_TESTING:
-            session = create_session(app_name=session_name, mode=mode)
-        elif mode == Mode.PYSPARK:
-            from pyspark.sql import SparkSession as PySparkSession
-            session = (
-                PySparkSession.builder
-                .master("local[1]")
-                .appName(session_name)
-                .config("spark.driver.bindAddress", "127.0.0.1")
-                .getOrCreate()
-            )
-        else:
-            from sparkless.sql import SparkSession
-            session = SparkSession.builder.app_name(session_name).get_or_create()
+        session = create_session(app_name=session_name, mode=mode)
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
         if "pyspark" in error_msg.lower() or "Java" in error_msg:
@@ -303,13 +184,13 @@ def spark(request: pytest.FixtureRequest):
     """Unified SparkSession fixture. Uses SPARKLESS_TEST_MODE to select backend."""
     mode = get_mode()
 
-    # Check for @pytest.mark.backend marker (legacy support)
+    # Check for @pytest.mark.backend marker
     marker = request.node.get_closest_marker("backend")
     if marker and marker.args:
         marker_backend = marker.args[0].lower()
         if marker_backend == "pyspark":
             mode = Mode.PYSPARK
-        elif marker_backend in ("mock", "robin", "sparkless"):
+        elif marker_backend == "sparkless":
             mode = Mode.SPARKLESS
 
     # Use shared session if enabled
@@ -328,22 +209,7 @@ def spark(request: pytest.FixtureRequest):
         test_name = f"test_{request.node.name[:50]}"
 
     try:
-        if _HAS_SPARKLESS_TESTING:
-            session = create_session(app_name=test_name, mode=mode)
-        elif mode == Mode.PYSPARK:
-            from pyspark.sql import SparkSession as PySparkSession
-            session = (
-                PySparkSession.builder
-                .master("local[1]")
-                .appName(test_name)
-                .config("spark.driver.bindAddress", "127.0.0.1")
-                .config("spark.driver.host", "127.0.0.1")
-                .config("spark.ui.enabled", "false")
-                .getOrCreate()
-            )
-        else:
-            from sparkless.sql import SparkSession
-            session = SparkSession.builder.app_name(test_name).get_or_create()
+        session = create_session(app_name=test_name, mode=mode)
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
         if (
@@ -364,72 +230,9 @@ def spark(request: pytest.FixtureRequest):
     gc.collect()
 
 
-# --- Legacy fixtures for backward compatibility ---
-
-@pytest.fixture
-def spark_backend(request: pytest.FixtureRequest):
-    """Get the current backend type being used (legacy, returns Mode now)."""
-    return get_mode()
-
-
-@pytest.fixture
-def mock_spark_session(request: pytest.FixtureRequest):
-    """Create a sparkless SparkSession with automatic cleanup (legacy name)."""
-    if _HAS_SPARKLESS_TESTING:
-        session = create_session(app_name="test_app", mode=Mode.SPARKLESS)
-    else:
-        from sparkless.sql import SparkSession
-        session = SparkSession.builder.app_name("test_app").get_or_create()
-
-    yield session
-    with contextlib.suppress(BaseException):
-        session.stop()
-    gc.collect()
-
-
-@pytest.fixture
-def mock_spark(request: pytest.FixtureRequest):
-    """Provide sparkless session for compatibility tests (legacy name)."""
-    if _HAS_SPARKLESS_TESTING:
-        session = create_session(app_name="test_app", mode=Mode.SPARKLESS)
-    else:
-        from sparkless.sql import SparkSession
-        session = SparkSession.builder.app_name("test_app").get_or_create()
-
-    yield session
-    with contextlib.suppress(BaseException):
-        session.stop()
-    gc.collect()
-
-
-@pytest.fixture
-def pyspark_session(request: pytest.FixtureRequest):
-    """Create a PySpark SparkSession for comparison testing."""
-    try:
-        if _HAS_SPARKLESS_TESTING:
-            session = create_session(app_name="test_app", mode=Mode.PYSPARK)
-        else:
-            from pyspark.sql import SparkSession as PySparkSession
-            session = (
-                PySparkSession.builder
-                .master("local[1]")
-                .appName("test_app")
-                .config("spark.driver.bindAddress", "127.0.0.1")
-                .getOrCreate()
-            )
-        yield session
-        with contextlib.suppress(BaseException):
-            session.stop()
-        gc.collect()
-    except (ImportError, RuntimeError) as e:
-        pytest.skip(f"PySpark not available: {e}")
-
-
 @pytest.fixture
 def temp_file_storage_path():
     """Provide a temporary directory for file storage backend tests."""
-    import tempfile
-
     with tempfile.TemporaryDirectory() as tmp_dir:
         storage_path = os.path.join(tmp_dir, "test_storage")
         yield storage_path
@@ -437,7 +240,6 @@ def temp_file_storage_path():
 
 def pytest_configure(config: pytest.Config) -> None:
     """Configure pytest with custom markers."""
-    # Register markers
     config.addinivalue_line(
         "markers", "delta: mark test as requiring Delta Lake (may be skipped)"
     )

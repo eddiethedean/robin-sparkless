@@ -1,14 +1,14 @@
 """
-PySpark parity tests for Issue #336: WindowFunction comparison. Uses get_spark_imports from fixture only.
+PySpark parity tests for Issue #336: WindowFunction comparison. Uses get_imports from fixture only.
 """
 
 import os
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 Window = _imports.Window
@@ -18,8 +18,8 @@ class TestWindowFunctionComparisonParity:
     """PySpark parity tests for WindowFunction comparison operators."""
 
     @pytest.mark.skipif(
-        os.getenv("MOCK_SPARK_TEST_BACKEND") != "pyspark",
-        reason="PySpark parity test - only run with MOCK_SPARK_TEST_BACKEND=pyspark",
+        os.getenv("SPARKLESS_TEST_MODE") != "pyspark",
+        reason="PySpark parity test - only run with SPARKLESS_TEST_MODE=pyspark",
     )
     def test_window_function_gt_comparison_parity(self):
         """Test WindowFunction > comparison matches PySpark."""
@@ -46,8 +46,8 @@ class TestWindowFunctionComparisonParity:
             spark.stop()
 
     @pytest.mark.skipif(
-        os.getenv("MOCK_SPARK_TEST_BACKEND") != "pyspark",
-        reason="PySpark parity test - only run with MOCK_SPARK_TEST_BACKEND=pyspark",
+        os.getenv("SPARKLESS_TEST_MODE") != "pyspark",
+        reason="PySpark parity test - only run with SPARKLESS_TEST_MODE=pyspark",
     )
     def test_window_function_eq_comparison_parity(self):
         """Test WindowFunction == comparison matches PySpark."""
@@ -77,8 +77,8 @@ class TestWindowFunctionComparisonParity:
             spark.stop()
 
     @pytest.mark.skipif(
-        os.getenv("MOCK_SPARK_TEST_BACKEND") != "pyspark",
-        reason="PySpark parity test - only run with MOCK_SPARK_TEST_BACKEND=pyspark",
+        os.getenv("SPARKLESS_TEST_MODE") != "pyspark",
+        reason="PySpark parity test - only run with SPARKLESS_TEST_MODE=pyspark",
     )
     def test_window_function_comparison_in_filter_parity(self):
         """Test WindowFunction comparison in filter matches PySpark."""

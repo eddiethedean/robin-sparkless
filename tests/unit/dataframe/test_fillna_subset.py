@@ -10,15 +10,15 @@ These tests ensure that:
 6. Edge cases are handled correctly
 
 These tests work with both sparkless (mock) and PySpark backends.
-Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
+Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 # Get imports from fixture (same logic for both backends)
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 StringType = imports.StringType
 IntegerType = imports.IntegerType
@@ -32,7 +32,7 @@ class TestFillnaSubset:
 
     These tests work with both sparkless (mock) and PySpark backends.
     Use the unified 'spark' fixture from conftest.py which automatically
-    selects the backend based on MOCK_SPARK_TEST_BACKEND environment variable.
+    selects the backend based on SPARKLESS_TEST_MODE environment variable.
     """
 
     @pytest.fixture

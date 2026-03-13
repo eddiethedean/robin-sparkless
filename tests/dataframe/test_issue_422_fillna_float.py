@@ -6,11 +6,11 @@ Tests for issue #422: fillna(0.0) fails to replace None in calculated numeric co
 
 PySpark allows fillna(0.0) to fill both integer and float columns (coerces as needed).
 
-Run with PySpark first: MOCK_SPARK_TEST_BACKEND=pyspark pytest tests/test_issue_422_fillna_float.py -v
+Run with PySpark first: SPARKLESS_TEST_MODE=pyspark pytest tests/test_issue_422_fillna_float.py -v
 Then mock: pytest tests/test_issue_422_fillna_float.py -v
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _row_val(row: object, key: str) -> object:
@@ -23,9 +23,9 @@ def _row_val(row: object, key: str) -> object:
 class TestIssue422FillnaFloat:
     """Test fillna(0.0) with calculated columns and integer columns."""
 
-    def test_fillna_float_subset_calculated_column(self, spark, spark_backend):
+    def test_fillna_float_subset_calculated_column(self, spark, spark_mode):
         """fillna(0.0, subset=['V3']) fills None in calculated float column V3 (V1/V2)."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -118,9 +118,9 @@ class TestIssue422FillnaFloat:
             and _row_val(rows[1], "C") == 1.5
         )
 
-    def test_fillna_float_all_nulls_integer_column(self, spark, spark_backend):
+    def test_fillna_float_all_nulls_integer_column(self, spark, spark_mode):
         """fillna(0.0) when every row has None in integer column."""
-        imports = get_spark_imports(spark_backend)
+        imports = get_imports(spark_mode)
         schema = imports.StructType(
             [
                 imports.StructField("name", imports.StringType()),
@@ -145,9 +145,9 @@ class TestIssue422FillnaFloat:
         rows = result.collect()
         assert len(rows) == 0
 
-    def test_fillna_float_single_row_with_null_int(self, spark, spark_backend):
+    def test_fillna_float_single_row_with_null_int(self, spark, spark_mode):
         """Single row, int column None, fillna(0.0) fills it."""
-        imports = get_spark_imports(spark_backend)
+        imports = get_imports(spark_mode)
         schema = imports.StructType(
             [
                 imports.StructField("a", imports.IntegerType()),
@@ -160,9 +160,9 @@ class TestIssue422FillnaFloat:
         assert len(rows) == 1
         assert _row_val(rows[0], "a") == 0.0 and _row_val(rows[0], "b") == 1
 
-    def test_fillna_float_multiple_calculated_columns(self, spark, spark_backend):
+    def test_fillna_float_multiple_calculated_columns(self, spark, spark_mode):
         """Two calculated columns; fillna(0.0, subset=[...]) fills both."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -184,9 +184,9 @@ class TestIssue422FillnaFloat:
         # Row 2: None/1 -> None -> 0.0, None+1 -> None -> 0.0
         assert _row_val(rows[2], "ratio") == 0.0 and _row_val(rows[2], "sum") == 0.0
 
-    def test_fillna_float_after_filter(self, spark, spark_backend):
+    def test_fillna_float_after_filter(self, spark, spark_mode):
         """withColumn -> filter -> fillna(0.0, subset=[calculated]) preserves fill."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [

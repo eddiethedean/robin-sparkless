@@ -5,7 +5,7 @@ PySpark supports spark.createDataFrame(df.rdd, schema=...) to create a new
 DataFrame from an existing DataFrame's RDD. Sparkless now supports this.
 
 Works with both sparkless (mock) and PySpark backends.
-Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
+Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
 
@@ -41,9 +41,9 @@ class TestIssue361CreateDataFrameRdd:
 
     def test_createDataFrame_from_rdd_empty_dataframe(self, spark):
         """createDataFrame(empty_df.rdd, schema=...) with explicit StructType schema."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         schema = imports.StructType(
             [
                 imports.StructField("Name", imports.StringType()),

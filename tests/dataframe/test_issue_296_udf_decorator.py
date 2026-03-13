@@ -1,10 +1,10 @@
 """
-Tests for issue #296: UDF decorator interface support. Uses get_spark_imports from fixture only.
+Tests for issue #296: UDF decorator interface support. Uses get_imports from fixture only.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 T = _imports

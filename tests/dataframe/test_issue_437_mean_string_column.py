@@ -9,7 +9,7 @@ F.mean() on string columns. Sparkless now coerces string columns to numeric
 
 import math
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _norm(val):
@@ -26,7 +26,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_exact_issue_scenario(self, spark):
         """Exact scenario from issue #437: F.mean() on string X and int Y."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -51,7 +51,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_groupby(self, spark):
         """F.mean() on string column with groupBy."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -71,7 +71,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_decimal_values(self, spark):
         """F.mean() on string column with decimal-like values."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -87,7 +87,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_with_nulls(self, spark):
         """F.mean() on string column with nulls - nulls excluded from mean."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -105,7 +105,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_single_row_per_group(self, spark):
         """F.mean() on string column with single row per group."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -123,7 +123,7 @@ class TestIssue437MeanStringColumn:
 
     def test_avg_string_column_same_as_mean(self, spark):
         """F.avg() on string column - same behavior as F.mean()."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -139,7 +139,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_multiple_aggregations(self, spark):
         """F.mean() + F.sum() + F.count() on string column."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -166,7 +166,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_select_after(self, spark):
         """F.mean() on string column, then select."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -185,7 +185,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_scientific_notation(self, spark):
         """F.mean() on string column with scientific notation (PySpark parity)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -202,7 +202,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_mixed_int_float_strings(self, spark):
         """F.mean() on string column with mixed '1' and '1.0' style values."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -218,7 +218,7 @@ class TestIssue437MeanStringColumn:
 
     def test_mean_string_column_all_nulls_returns_none(self, spark):
         """F.mean() on string column with all nulls in group returns None/NaN."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [

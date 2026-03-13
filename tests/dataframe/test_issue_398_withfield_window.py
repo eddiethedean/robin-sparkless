@@ -5,7 +5,7 @@ Sparkless previously stored WindowFunction object instead of evaluating it,
 and select(edge.apples_div_count) failed with ColumnNotFoundError.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _get_col(row, *names):
@@ -22,7 +22,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_window_exact_issue(self, spark):
         """Exact scenario from issue #398."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame(
@@ -59,7 +59,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_window_select_struct(self, spark):
         """Select full struct after withField + window."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame(
@@ -81,7 +81,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_row_number(self, spark):
         """withField with row_number() over window."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame(
@@ -108,7 +108,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_sum(self, spark):
         """withField with sum() over window."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame(
@@ -127,7 +127,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_avg(self, spark):
         """withField with avg() over window - values are evaluated (not WindowFunction)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame([{"g": 1, "v": 10.0}, {"g": 1, "v": 20.0}])
@@ -145,7 +145,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_window_with_nulls_in_partition(self, spark):
         """withField + window when partition column has nulls."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame(
@@ -164,7 +164,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_multiple_window_fields(self, spark):
         """Struct with multiple window-derived fields."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame([{"g": 1, "v": 10}, {"g": 1, "v": 20}])
@@ -185,7 +185,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_window_then_filter(self, spark):
         """withField + window, then filter, then select."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame(
@@ -209,7 +209,7 @@ class TestIssue398WithFieldWindow:
 
     def test_withfield_chain_three_with_window_middle(self, spark):
         """Three chained withFields, window in the middle."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         df = spark.createDataFrame([{"k": 1, "a": 5}, {"k": 1, "a": 15}])

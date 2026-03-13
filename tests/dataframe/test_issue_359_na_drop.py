@@ -2,12 +2,12 @@
 Tests for issue #359: NAHandler.drop method.
 
 PySpark supports df.na.drop() for dropping rows with null values.
-Uses get_spark_imports for types; same logic for both backends.
+Uses get_imports for types; same logic for both backends.
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestIssue359NADrop:
@@ -162,7 +162,7 @@ class TestIssue359NADropRobust:
     def test_na_drop_thresh_one_keeps_rows_with_at_least_one_non_null(self, spark):
         """na.drop(thresh=1) keeps rows with >= 1 non-null value."""
 
-        imports = get_spark_imports()
+        imports = get_imports()
         StructType = imports.StructType
         StructField = imports.StructField
         IntegerType = imports.IntegerType
@@ -201,7 +201,7 @@ class TestIssue359NADropRobust:
     def test_na_drop_after_filter(self, spark):
         """na.drop() after filter drops nulls in remaining rows."""
 
-        F = get_spark_imports().F
+        F = get_imports().F
         df = spark.createDataFrame(
             [
                 {"id": 1, "name": "Alice", "score": 90},
@@ -268,7 +268,7 @@ class TestIssue359NADropRobust:
     def test_na_drop_preserves_schema(self, spark):
         """na.drop() preserves DataFrame schema."""
 
-        imports = get_spark_imports()
+        imports = get_imports()
         StructType = imports.StructType
         StructField = imports.StructField
         StringType = imports.StringType

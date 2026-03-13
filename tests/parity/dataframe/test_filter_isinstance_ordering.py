@@ -13,16 +13,16 @@ returns True for ColumnOperation objects when checked before ColumnOperation.
 import os
 
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 def _table_format_and_options(spark):
     """Use parquet when PySpark backend (no Delta); otherwise delta."""
     backend = (
         (
-            os.getenv("MOCK_SPARK_TEST_BACKEND")
-            or os.getenv("SPARKLESS_TEST_BACKEND")
+            os.getenv("SPARKLESS_TEST_MODE")
+            or os.getenv("SPARKLESS_TEST_MODE")
             or ""
         )
         .strip()
@@ -42,7 +42,7 @@ class TestIsInstanceOrdering(ParityTestBase):
         This test ensures that when we filter with comparison operations (==, !=, etc.),
         they are properly evaluated rather than just checking if a column exists.
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         # Create DataFrame with test data
@@ -84,7 +84,7 @@ class TestIsInstanceOrdering(ParityTestBase):
         on tables with complex schemas because comparison operations were
         incorrectly handled.
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         # Create schema

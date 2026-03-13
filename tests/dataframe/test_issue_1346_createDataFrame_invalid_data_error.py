@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from tests.fixtures.spark_backend import BackendType, get_backend_type
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 
 # SparklessError is PySparkTypeError alias
@@ -23,7 +23,7 @@ except ImportError:
 
 def test_createDataFrame_invalid_data_raises_pyspark_like_error(spark):
     """createDataFrame(non-list, schema) raises; SparklessError+CANNOT_ACCEPT_OBJECT (#1346) or TypeError."""
-    if get_backend_type() == BackendType.PYSPARK:
+    if get_mode() == Mode.PYSPARK:
         pytest.skip("Test for sparkless error shape; PySpark has its own message")
     with pytest.raises((SparklessError, RuntimeError, TypeError)) as exc_info:
         spark.createDataFrame("invalid_data", "id INT")

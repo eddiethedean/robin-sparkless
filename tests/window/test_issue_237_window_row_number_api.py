@@ -4,15 +4,15 @@ Tests for issue #237: Window/row_number not exposed in Python API.
 With robin-sparkless 0.6.0, the Python API was missing F.row_number and
 Window.partitionBy/orderBy, so patterns like
 F.row_number().over(Window.partitionBy(...).orderBy(...)) could not be expressed.
-Uses shared spark fixture and get_spark_imports().
+Uses shared spark fixture and get_imports().
 """
 
 from __future__ import annotations
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 from tests.utils import _row_to_dict, assert_rows_equal
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 Window = _imports.Window
 

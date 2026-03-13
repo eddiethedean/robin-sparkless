@@ -1,7 +1,7 @@
 """PySpark parity test for aggregate function cast (Issue #265)."""
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestAggregateCastParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestAggregateCastParity(ParityTestBase):
         This test verifies the exact example from issue #265:
         https://github.com/eddiethedean/sparkless/issues/265
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -53,7 +53,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_all_aggregate_functions_with_string_cast(self, spark):
         """Test all major aggregate functions with string cast."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -110,7 +110,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_cast_to_different_types(self, spark):
         """Test casting aggregates to different data types."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -197,7 +197,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_cast_with_null_values(self, spark):
         """Test cast operations with null values in data."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -270,7 +270,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_cast_column_name_format(self, spark):
         """Test that cast column names match PySpark format exactly."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -304,7 +304,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_multiple_casts_same_aggregate(self, spark):
         """Test multiple casts on the same aggregate function."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -367,7 +367,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_cast_with_empty_groups(self, spark):
         """Test cast operations with groups that have no matching rows."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -418,7 +418,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_cast_with_different_numeric_types(self, spark):
         """Test cast with different numeric input types."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -452,7 +452,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_cast_chain_operations(self, spark):
         """Test cast with chained aggregate operations."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -504,7 +504,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_cast_with_count_distinct(self, spark):
         """Test cast with countDistinct aggregate function."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -546,7 +546,7 @@ class TestAggregateCastParity(ParityTestBase):
 
     def test_cast_with_stddev_variance(self, spark):
         """Test cast with statistical aggregate functions."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [

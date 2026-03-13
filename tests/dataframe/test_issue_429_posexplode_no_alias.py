@@ -9,13 +9,13 @@ when _alias_names was explicitly None (posexplode without alias), causing len(No
 https://github.com/eddiethedean/sparkless/issues/429
 """
 
-from tests.fixtures.spark_backend import BackendType
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import get_imports
 
 
-def test_posexplode_without_alias_no_type_error(spark, spark_backend):
+def test_posexplode_without_alias_no_type_error(spark, spark_mode):
     """posexplode() without alias must not raise TypeError (#429). Uses session fixture."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"Name": "Alice", "Values": [10, 20]},
@@ -31,9 +31,9 @@ def test_posexplode_without_alias_no_type_error(spark, spark_backend):
     result.show()  # Previously failed here
 
 
-def test_posexplode_without_alias_schema_projection(spark, spark_backend):
+def test_posexplode_without_alias_schema_projection(spark, spark_mode):
     """Schema projection (df.schema) must not raise - error occurred in _project_schema_with_operations."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"id": 1, "arr": [10, 20, 30]},
@@ -49,9 +49,9 @@ def test_posexplode_without_alias_schema_projection(spark, spark_backend):
     assert "id" in field_names
 
 
-def test_posexplode_outer_without_alias_no_type_error(spark, spark_backend):
+def test_posexplode_outer_without_alias_no_type_error(spark, spark_mode):
     """posexplode_outer() without alias must not raise TypeError - same fix as posexplode."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [(1, [10, 20]), (2, None)],
         schema="id: int, arr: array<int>",
@@ -63,9 +63,9 @@ def test_posexplode_outer_without_alias_no_type_error(spark, spark_backend):
     assert schema is not None
 
 
-def test_posexplode_without_alias_chained_operations(spark, spark_backend):
+def test_posexplode_without_alias_chained_operations(spark, spark_mode):
     """posexplode without alias in chained select/filter/limit must not raise."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"name": "A", "vals": [1, 2]},
@@ -83,9 +83,9 @@ def test_posexplode_without_alias_chained_operations(spark, spark_backend):
     assert schema is not None
 
 
-def test_posexplode_without_alias_empty_array(spark, spark_backend):
+def test_posexplode_without_alias_empty_array(spark, spark_mode):
     """posexplode without alias on empty array - schema projection must not raise."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     # Use row with non-empty array so PySpark can infer schema; add empty via union if needed.
     # PySpark cannot infer type from [] alone; use schema or mixed data.
     df = spark.createDataFrame(
@@ -101,22 +101,22 @@ def test_posexplode_without_alias_empty_array(spark, spark_backend):
     assert len(schema.fields) == 3  # id, pos, col
 
 
-def test_posexplode_without_alias_single_element(spark, spark_backend):
+def test_posexplode_without_alias_single_element(spark, spark_mode):
     """posexplode without alias on single-element array."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"id": 1, "arr": [42]}])
     result = df.select("id", F_backend.posexplode("arr"))
     rows = result.collect()
     assert len(rows) >= 1
     assert "pos" in result.columns and "col" in result.columns
-    if spark_backend == BackendType.PYSPARK and len(rows) == 1:
+    if spark_mode == Mode.PYSPARK and len(rows) == 1:
         assert rows[0]["pos"] == 0
         assert rows[0]["col"] == 42
 
 
-def test_posexplode_without_alias_mixed_columns(spark, spark_backend):
+def test_posexplode_without_alias_mixed_columns(spark, spark_mode):
     """select(col1, posexplode(col2), col3) - posexplode among other columns."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"a": "x", "arr": [1, 2], "b": 10},
@@ -126,9 +126,9 @@ def test_posexplode_without_alias_mixed_columns(spark, spark_backend):
     assert result.columns == ["a", "pos", "col", "b"] or "pos" in result.columns
 
 
-def test_posexplode_without_alias_column_object(spark, spark_backend):
+def test_posexplode_without_alias_column_object(spark, spark_mode):
     """posexplode(F.col('x')) without alias - Column object, not string."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"x": [1, 2, 3]}])
     result = df.select(F_backend.posexplode(F_backend.col("x")))
     assert "pos" in result.columns and "col" in result.columns

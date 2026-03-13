@@ -1,10 +1,10 @@
-"""Tests for #377: WindowSpec.rowsBetween() and rangeBetween() (PySpark parity). Uses shared spark fixture and get_spark_imports()."""
+"""Tests for #377: WindowSpec.rowsBetween() and rangeBetween() (PySpark parity). Uses shared spark fixture and get_imports()."""
 
 from __future__ import annotations
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 Window = _imports.Window
 

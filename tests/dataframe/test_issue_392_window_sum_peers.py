@@ -7,11 +7,11 @@ Rows with the same ORDER BY value are peers and share the same frame.
 When orderBy("Type") and partitionBy("Type"), all rows in partition have same
 order key -> both should get partition sum (30), not cumulative (10, 30).
 
-Uses get_spark_imports() for backend-aware F/Window - runs with both
-sparkless and PySpark (MOCK_SPARK_TEST_BACKEND=pyspark).
+Uses get_imports() for backend-aware F/Window - runs with both
+sparkless and PySpark (SPARKLESS_TEST_MODE=pyspark).
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _norm(val):
@@ -28,7 +28,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_order_by_same_as_partition_by(self, spark):
         """Exact scenario from issue #392: partitionBy(Type).orderBy(Type)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -47,7 +47,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_order_by_subset_of_partition_by(self, spark):
         """orderBy is subset of partitionBy -> all rows in partition are peers."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -69,7 +69,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_order_by_differs_from_partition_running_sum(self, spark):
         """When orderBy is NOT subset of partitionBy, use running sum (cumulative)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -87,7 +87,7 @@ class TestIssue392WindowSumPeers:
 
     def test_avg_order_by_subset_of_partition_by(self, spark):
         """AVG with orderBy subset of partitionBy -> peers get partition avg."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -105,7 +105,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_order_by_col_desc_still_subset(self, spark):
         """orderBy(F.col('Type').desc()) - order col still subset of partitionBy."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -121,7 +121,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_single_row_partition(self, spark):
         """Single row in partition -> sum is that row's value."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame([{"Type": "A", "Value": 42}])
         w = Window.partitionBy("Type").orderBy("Type")
@@ -132,7 +132,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_three_rows_all_peers(self, spark):
         """Three rows, all same partition+order key -> all get partition sum."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -150,7 +150,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_with_nulls_excluded(self, spark):
         """Sum over window excludes nulls (standard SQL behavior)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -168,7 +168,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_order_by_multiple_cols_subset_of_partition_by(self, spark):
         """orderBy(A,B) with partitionBy(A,B) -> all peers."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -190,7 +190,7 @@ class TestIssue392WindowSumPeers:
 
     def test_sum_no_order_by_partition_total(self, spark):
         """No orderBy -> partition sum (baseline, no fix needed)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [

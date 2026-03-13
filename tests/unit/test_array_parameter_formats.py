@@ -9,12 +9,12 @@ This module tests that array() function accepts all parameter formats that PySpa
 Uses conftest spark fixture so PySpark mode gets correct backend (type coercion may differ).
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 import pytest
 
 # Backend-appropriate imports (spark from fixture; PySpark or Robin API)
-imports = get_spark_imports()
+imports = get_imports()
 F = imports.F
 StructType = imports.StructType
 StructField = imports.StructField

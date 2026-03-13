@@ -2,7 +2,7 @@
 Robust tests for the date_trunc function across backends.
 
 These tests are designed to run against both:
-  - The real PySpark backend (SPARKLESS_TEST_BACKEND=pyspark)
+  - The real PySpark backend (SPARKLESS_TEST_MODE=pyspark)
   - The Sparkless backends (mock / polars)
 
 They focus on positive, parity-style behavior that should be consistent
@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import datetime as _dt
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 F = imports.F
 
 

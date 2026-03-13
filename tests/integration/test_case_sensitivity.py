@@ -1,5 +1,5 @@
 """
-Integration tests for case sensitivity configuration. Uses get_spark_imports from fixture only.
+Integration tests for case sensitivity configuration. Uses get_imports from fixture only.
 Uses shared spark / spark_case_sensitive fixtures; backend-agnostic Row and conf helpers.
 """
 
@@ -7,9 +7,9 @@ import uuid
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 StructType = _imports.StructType
@@ -43,7 +43,7 @@ def _is_case_sensitive(spark):
 @pytest.fixture
 def spark_case_sensitive(request):
     """Session with spark.sql.caseSensitive=true; created and stopped per use."""
-    from tests.fixtures.spark_backend import get_backend_type
+    from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
 
     _ = get_backend_type(request)
     app_name = f"integration_case_sensitive_{uuid.uuid4().hex[:8]}"

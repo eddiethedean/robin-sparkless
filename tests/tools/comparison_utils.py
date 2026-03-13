@@ -1,7 +1,7 @@
 """
-Comparison utilities for validating mock-spark behavior against expected PySpark outputs.
+Comparison utilities for validating sparkless behavior against expected PySpark outputs.
 
-This module provides functions to compare mock-spark results with pre-generated
+This module provides functions to compare sparkless results with pre-generated
 expected outputs from PySpark, replacing the runtime comparison approach.
 """
 
@@ -74,7 +74,7 @@ def _dataframe_to_expected_output(df: Any) -> Dict[str, Any]:
 
 @dataclass
 class ComparisonResult:
-    """Result of comparing mock-spark output with expected output."""
+    """Result of comparing sparkless output with expected output."""
 
     equivalent: bool
     errors: List[str]
@@ -94,13 +94,13 @@ def compare_dataframes(
     check_data: bool = True,
 ) -> ComparisonResult:
     """
-    Compare a mock-spark DataFrame with expected PySpark output.
+    Compare a sparkless DataFrame with expected PySpark output.
 
-    When MOCK_SPARK_TEST_BACKEND=pyspark, expected is built from the actual result
+    When SPARKLESS_TEST_MODE=pyspark, expected is built from the actual result
     so the test validates the operation runs correctly (same logic, no skip).
 
     Args:
-        mock_df: mock-spark DataFrame
+        mock_df: sparkless DataFrame
         expected_output: Expected output dictionary from JSON
         tolerance: Numerical tolerance for comparisons
         check_schema: Whether to compare schemas
@@ -119,7 +119,7 @@ def compare_dataframes(
             "row_count", 0
         )
 
-        # Get mock-spark data
+        # Get sparkless data
         mock_columns = _get_columns(mock_df)
         mock_rows = _collect_rows(mock_df, mock_columns)
         mock_row_count = len(mock_rows)
@@ -747,7 +747,7 @@ def compare_schemas(mock_df: Any, expected_schema: Dict[str, Any]) -> Comparison
     Compare DataFrame schemas.
 
     Args:
-        mock_df: mock-spark DataFrame
+        mock_df: sparkless DataFrame
         expected_schema: Expected schema dictionary
 
     Returns:
@@ -835,10 +835,10 @@ def assert_dataframes_equal(
     msg: str = "",
 ) -> None:
     """
-    Assert that mock-spark DataFrame matches expected output.
+    Assert that sparkless DataFrame matches expected output.
 
     Args:
-        mock_df: mock-spark DataFrame
+        mock_df: sparkless DataFrame
         expected_output: Expected output dictionary
         tolerance: Numerical tolerance for comparisons
         msg: Custom error message
@@ -894,7 +894,7 @@ def assert_schemas_equal(
     Assert that DataFrame schemas are equivalent.
 
     Args:
-        mock_df: mock-spark DataFrame
+        mock_df: sparkless DataFrame
         expected_schema: Expected schema dictionary
         msg: Custom error message
     """

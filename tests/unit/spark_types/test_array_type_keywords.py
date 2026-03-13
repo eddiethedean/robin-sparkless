@@ -1,15 +1,15 @@
 """
 Unit tests for ArrayType elementType keyword argument support.
 
-Uses get_spark_imports() so types match the backend (PySpark or Robin).
+Uses get_imports() so types match the backend (PySpark or Robin).
 Tests use only public API (elementType) so they run in both backends.
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 ArrayType = _imports.ArrayType
 StringType = _imports.StringType
 IntegerType = _imports.IntegerType

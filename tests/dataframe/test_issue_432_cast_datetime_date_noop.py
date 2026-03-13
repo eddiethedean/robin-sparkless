@@ -8,12 +8,12 @@ https://github.com/eddiethedean/sparkless/issues/432
 
 import datetime
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
-def test_cast_datetime_to_timestamp_noop(spark, spark_backend):
+def test_cast_datetime_to_timestamp_noop(spark, spark_mode):
     """F.col('DateTime').cast('timestamp') on datetime column must not raise (#432)."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"Name": "Alice", "DateTime": datetime.datetime(2023, 1, 1, 12, 0, 0)},
@@ -27,9 +27,9 @@ def test_cast_datetime_to_timestamp_noop(spark, spark_backend):
     assert rows[1]["DateTime"] == datetime.datetime(2024, 1, 1, 12, 0, 0)
 
 
-def test_cast_date_to_date_noop(spark, spark_backend):
+def test_cast_date_to_date_noop(spark, spark_mode):
     """F.col('Date').cast('date') on date column must not raise (#432)."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"Name": "Alice", "Date": datetime.date(2024, 1, 1)},
@@ -43,9 +43,9 @@ def test_cast_date_to_date_noop(spark, spark_backend):
     assert rows[1]["Date"] == datetime.date(2024, 6, 15)
 
 
-def test_exact_scenario_from_issue_432(spark, spark_backend):
+def test_exact_scenario_from_issue_432(spark, spark_mode):
     """Exact scenario from issue #432 - must not raise and show correctly."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {
@@ -77,9 +77,9 @@ def test_exact_scenario_from_issue_432(spark, spark_backend):
     assert rows[1]["Name"] == "Bob"
 
 
-def test_cast_string_to_timestamp_still_works(spark, spark_backend):
+def test_cast_string_to_timestamp_still_works(spark, spark_mode):
     """String->timestamp cast must still work."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "2024-01-15 10:30:00"}])
     result = df.withColumn("s", F_backend.col("s").cast("timestamp"))
     rows = result.collect()
@@ -87,9 +87,9 @@ def test_cast_string_to_timestamp_still_works(spark, spark_backend):
     assert rows[0]["s"] == datetime.datetime(2024, 1, 15, 10, 30, 0)
 
 
-def test_cast_string_to_date_still_works(spark, spark_backend):
+def test_cast_string_to_date_still_works(spark, spark_mode):
     """String->date cast must still work."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "2024-01-15"}])
     result = df.withColumn("s", F_backend.col("s").cast("date"))
     rows = result.collect()
@@ -100,9 +100,9 @@ def test_cast_string_to_date_still_works(spark, spark_backend):
 # --- Robust edge-case tests ---
 
 
-def test_cast_datetime_to_timestamp_with_nulls(spark, spark_backend):
+def test_cast_datetime_to_timestamp_with_nulls(spark, spark_mode):
     """datetime.cast('timestamp') with None values must not raise and preserve nulls."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"id": 1, "dt": datetime.datetime(2023, 1, 1, 12, 0, 0)},
@@ -118,9 +118,9 @@ def test_cast_datetime_to_timestamp_with_nulls(spark, spark_backend):
     assert rows[2]["dt"] == datetime.datetime(2024, 6, 15, 0, 0, 0)
 
 
-def test_cast_date_to_date_with_nulls(spark, spark_backend):
+def test_cast_date_to_date_with_nulls(spark, spark_mode):
     """date.cast('date') with None values must not raise and preserve nulls."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"id": 1, "d": datetime.date(2024, 1, 1)},
@@ -136,9 +136,9 @@ def test_cast_date_to_date_with_nulls(spark, spark_backend):
     assert rows[2]["d"] == datetime.date(2024, 12, 31)
 
 
-def test_cast_date_to_timestamp_midnight(spark, spark_backend):
+def test_cast_date_to_timestamp_midnight(spark, spark_mode):
     """date.cast('timestamp') must become datetime at midnight."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"d": datetime.date(2024, 3, 15)}])
     result = df.withColumn("ts", F_backend.col("d").cast("timestamp"))
     rows = result.collect()
@@ -146,9 +146,9 @@ def test_cast_date_to_timestamp_midnight(spark, spark_backend):
     assert rows[0]["ts"] == datetime.datetime(2024, 3, 15, 0, 0, 0)
 
 
-def test_cast_datetime_to_date_truncates_time(spark, spark_backend):
+def test_cast_datetime_to_date_truncates_time(spark, spark_mode):
     """datetime.cast('date') must keep only the date part."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"dt": datetime.datetime(2024, 5, 10, 14, 30, 45)}])
     result = df.withColumn("d", F_backend.col("dt").cast("date"))
     rows = result.collect()
@@ -156,9 +156,9 @@ def test_cast_datetime_to_date_truncates_time(spark, spark_backend):
     assert rows[0]["d"] == datetime.date(2024, 5, 10)
 
 
-def test_cast_date_only_string_to_timestamp(spark, spark_backend):
+def test_cast_date_only_string_to_timestamp(spark, spark_mode):
     """'YYYY-MM-DD' string cast to timestamp must become midnight."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "2024-01-15"}])
     result = df.withColumn("ts", F_backend.col("s").cast("timestamp"))
     rows = result.collect()
@@ -166,9 +166,9 @@ def test_cast_date_only_string_to_timestamp(spark, spark_backend):
     assert rows[0]["ts"] == datetime.datetime(2024, 1, 15, 0, 0, 0)
 
 
-def test_cast_select_with_cast(spark, spark_backend):
+def test_cast_select_with_cast(spark, spark_mode):
     """select(F.col('DateTime').cast('timestamp')) must work on datetime column."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [{"Name": "A", "DateTime": datetime.datetime(2023, 1, 1, 12, 0, 0)}]
     )
@@ -181,9 +181,9 @@ def test_cast_select_with_cast(spark, spark_backend):
     assert rows[0]["DateTime"] == datetime.datetime(2023, 1, 1, 12, 0, 0)
 
 
-def test_cast_filter_after_cast(spark, spark_backend):
+def test_cast_filter_after_cast(spark, spark_mode):
     """withColumn(cast) then filter must work."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"id": 1, "dt": datetime.datetime(2023, 1, 1, 12, 0, 0)},
@@ -198,9 +198,9 @@ def test_cast_filter_after_cast(spark, spark_backend):
     assert rows[0]["id"] == 2
 
 
-def test_cast_with_datatype_objects(spark, spark_backend):
+def test_cast_with_datatype_objects(spark, spark_mode):
     """cast(TimestampType()) and cast(DateType()) on typed columns must work."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F_backend = imports.F
     TimestampType = imports.TimestampType
     DateType = imports.DateType
@@ -221,9 +221,9 @@ def test_cast_with_datatype_objects(spark, spark_backend):
     assert rows[0]["d"] == datetime.date(2024, 1, 1)
 
 
-def test_cast_leap_day(spark, spark_backend):
+def test_cast_leap_day(spark, spark_mode):
     """Leap day 2024-02-29 must cast correctly."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"d": datetime.date(2024, 2, 29)},

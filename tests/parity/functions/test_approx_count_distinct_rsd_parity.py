@@ -1,7 +1,7 @@
 """PySpark parity test for approx_count_distinct with rsd parameter (Issue #266)."""
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestApproxCountDistinctRsdParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestApproxCountDistinctRsdParity(ParityTestBase):
         This test verifies the exact example from issue #266:
         https://github.com/eddiethedean/sparkless/issues/266
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
 
@@ -54,7 +54,7 @@ class TestApproxCountDistinctRsdParity(ParityTestBase):
 
     def test_approx_count_distinct_rsd_parity(self, spark):
         """Test approx_count_distinct with rsd parameter matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -86,7 +86,7 @@ class TestApproxCountDistinctRsdParity(ParityTestBase):
 
     def test_approx_count_distinct_window_parity(self, spark):
         """Test approx_count_distinct in Window functions matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
 
@@ -121,7 +121,7 @@ class TestApproxCountDistinctRsdParity(ParityTestBase):
 
     def test_approx_count_distinct_without_rsd_parity(self, spark):
         """Test approx_count_distinct without rsd parameter matches PySpark."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -151,7 +151,7 @@ class TestApproxCountDistinctRsdParity(ParityTestBase):
 
     def test_approx_count_distinct_rsd_different_values_parity(self, spark):
         """Test that different rsd values are accepted (API compatibility)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [{"value": 1}, {"value": 2}, {"value": 1}]
@@ -175,7 +175,7 @@ class TestApproxCountDistinctRsdParity(ParityTestBase):
 
     def test_approx_count_distinct_window_without_rsd_parity(self, spark):
         """Test approx_count_distinct in Window without rsd (backward compatibility)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
 

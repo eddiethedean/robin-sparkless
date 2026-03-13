@@ -5,15 +5,15 @@ This module contains comprehensive tests that verify edge cases and specific
 PySpark behaviors for ArrayType initialization with elementType keyword.
 
 These tests work with both sparkless (mock) and PySpark backends.
-Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
+Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 # Get imports based on backend
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 StringType = imports.StringType
 IntegerType = imports.IntegerType

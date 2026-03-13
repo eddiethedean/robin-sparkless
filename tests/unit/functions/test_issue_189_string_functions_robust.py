@@ -4,12 +4,12 @@ Robust tests for issue #189 string/JSON functions.
 These tests validate edge cases and common PySpark behaviors. They are designed
 to run against both sparkless (mock) and the real PySpark backend.
 
-Set MOCK_SPARK_TEST_BACKEND=pyspark to run with real PySpark.
+Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 F = imports.F
 
 

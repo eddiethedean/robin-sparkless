@@ -7,16 +7,16 @@ to ensure case-insensitive resolution works correctly across all operations.
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _backend_imports():
     """F and types that match the test backend (PySpark vs sparkless)."""
-    imp = get_spark_imports()
+    imp = get_imports()
     return imp
 
 
-# Use backend-appropriate F and types (PySpark or sparkless via get_spark_imports)
+# Use backend-appropriate F and types (PySpark or sparkless via get_imports)
 _imp = _backend_imports()
 F = _imp.F
 StructType = _imp.StructType

@@ -8,9 +8,9 @@ for these when called from Python.)
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 F = imports.F
 

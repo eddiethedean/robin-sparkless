@@ -4,15 +4,15 @@ PySpark parity tests for DataFrame window operations.
 Tests validate that Sparkless window operations behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
-from tests.fixtures.spark_backend import get_backend_type, BackendType
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
 
 
 def _is_pyspark_mode() -> bool:
     """Check if running in PySpark mode."""
-    backend = get_backend_type()
-    return backend == BackendType.PYSPARK
+    backend = get_mode()
+    return backend == Mode.PYSPARK
 
 
 class TestWindowOperationsParity(ParityTestBase):
@@ -20,7 +20,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_row_number(self, spark):
         """Test row_number window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "row_number")
@@ -33,7 +33,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_rank(self, spark):
         """Test rank window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "rank")
@@ -46,7 +46,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_dense_rank(self, spark):
         """Test dense_rank window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "dense_rank")
@@ -59,7 +59,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_sum_over_window(self, spark):
         """Test sum over window matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "sum_over_window")
@@ -74,7 +74,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_lag(self, spark):
         """Test lag window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "lag")
@@ -87,7 +87,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_lead(self, spark):
         """Test lead window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "lead")
@@ -100,7 +100,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_cume_dist(self, spark):
         """Test cume_dist window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "cume_dist")
@@ -113,7 +113,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_first_value(self, spark):
         """Test first_value window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "first_value")
@@ -126,7 +126,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_last_value(self, spark):
         """Test last_value window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "last_value")
@@ -139,7 +139,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_percent_rank(self, spark):
         """Test percent_rank window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "percent_rank")
@@ -152,7 +152,7 @@ class TestWindowOperationsParity(ParityTestBase):
 
     def test_ntile(self, spark):
         """Test ntile window function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         Window = imports.Window
         expected = self.load_expected("windows", "ntile")

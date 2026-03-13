@@ -5,14 +5,14 @@ Tests validate that Sparkless Catalog operations behave identically to PySpark.
 """
 
 import pytest
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_backend import get_backend_type, BackendType
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
 
 
 def _is_pyspark_mode() -> bool:
     """Check if running in PySpark mode."""
-    backend = get_backend_type()
-    return backend == BackendType.PYSPARK
+    backend = get_mode()
+    return backend == Mode.PYSPARK
 
 
 class TestCatalogParity(ParityTestBase):

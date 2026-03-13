@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import pytest
 
-from tests.fixtures.spark_backend import BackendType, get_backend_type
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 
 
 def test_spark_session_type_module_identifies_sparkless(spark):
     """type(spark).__module__ should contain 'sparkless' for engine detection (#1344)."""
-    if get_backend_type() == BackendType.PYSPARK:
+    if get_mode() == Mode.PYSPARK:
         pytest.skip("PySpark reports pyspark.sql.session; test is for sparkless")
     t = type(spark)
     assert "sparkless" in t.__module__, (

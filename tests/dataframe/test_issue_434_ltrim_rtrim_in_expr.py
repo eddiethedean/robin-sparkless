@@ -7,12 +7,12 @@ Now parses LTRIM, RTRIM, and nested function calls in F.expr() for PySpark parit
 https://github.com/eddiethedean/sparkless/issues/434
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
-def test_expr_ltrim_rtrim_exact_issue_434(spark, spark_backend):
+def test_expr_ltrim_rtrim_exact_issue_434(spark, spark_mode):
     """Exact scenario from issue #434 - LTRIM(RTRIM(Value))."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"Name": "Alice", "Value": "  sales department"},
@@ -30,9 +30,9 @@ def test_expr_ltrim_rtrim_exact_issue_434(spark, spark_backend):
     assert rows[2][col_name] == "ceo"
 
 
-def test_expr_ltrim_only(spark, spark_backend):
+def test_expr_ltrim_only(spark, spark_mode):
     """LTRIM alone."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "  hello"}])
     result = df.select(F_backend.expr("LTRIM(s)").alias("t"))
     rows = result.collect()
@@ -40,9 +40,9 @@ def test_expr_ltrim_only(spark, spark_backend):
     assert rows[0]["t"] == "hello"
 
 
-def test_expr_rtrim_only(spark, spark_backend):
+def test_expr_rtrim_only(spark, spark_mode):
     """RTRIM alone."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "hello  "}])
     result = df.select(F_backend.expr("RTRIM(s)").alias("t"))
     rows = result.collect()
@@ -50,9 +50,9 @@ def test_expr_rtrim_only(spark, spark_backend):
     assert rows[0]["t"] == "hello"
 
 
-def test_expr_nested_ltrim_rtrim_with_column(spark, spark_backend):
+def test_expr_nested_ltrim_rtrim_with_column(spark, spark_mode):
     """LTRIM(RTRIM(col)) in withColumn."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [{"Name": "Alice", "Value": "  x  "}, {"Name": "Bob", "Value": "  y  "}]
     )
@@ -63,9 +63,9 @@ def test_expr_nested_ltrim_rtrim_with_column(spark, spark_backend):
     assert rows[1]["trimmed"] == "y"
 
 
-def test_expr_rtrim_ltrim_order(spark, spark_backend):
+def test_expr_rtrim_ltrim_order(spark, spark_mode):
     """RTRIM(LTRIM(col)) - opposite order."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "  hello  "}])
     result = df.select(F_backend.expr("RTRIM(LTRIM(s))").alias("t"))
     rows = result.collect()
@@ -73,9 +73,9 @@ def test_expr_rtrim_ltrim_order(spark, spark_backend):
     assert rows[0]["t"] == "hello"
 
 
-def test_expr_trim_with_ltrim_rtrim(spark, spark_backend):
+def test_expr_trim_with_ltrim_rtrim(spark, spark_mode):
     """TRIM works with nested LTRIM/RTRIM - ensure TRIM still works."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "  hello  "}])
     result = df.select(F_backend.expr("TRIM(s)").alias("t"))
     rows = result.collect()
@@ -83,9 +83,9 @@ def test_expr_trim_with_ltrim_rtrim(spark, spark_backend):
     assert rows[0]["t"] == "hello"
 
 
-def test_expr_ltrim_rtrim_with_filter(spark, spark_backend):
+def test_expr_ltrim_rtrim_with_filter(spark, spark_mode):
     """LTRIM(RTRIM(col)) then filter."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"Value": "  a  "},
@@ -104,9 +104,9 @@ def test_expr_ltrim_rtrim_with_filter(spark, spark_backend):
 # --- Robust edge-case tests ---
 
 
-def test_expr_ltrim_rtrim_with_nulls(spark, spark_backend):
+def test_expr_ltrim_rtrim_with_nulls(spark, spark_mode):
     """LTRIM/RTRIM with null values - null propagates."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"s": "  a  "},
@@ -122,9 +122,9 @@ def test_expr_ltrim_rtrim_with_nulls(spark, spark_backend):
     assert rows[2]["t"] == "b"
 
 
-def test_expr_ltrim_empty_string(spark, spark_backend):
+def test_expr_ltrim_empty_string(spark, spark_mode):
     """LTRIM on empty string returns empty string."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": ""}])
     result = df.select(F_backend.expr("LTRIM(s)").alias("t"))
     rows = result.collect()
@@ -132,9 +132,9 @@ def test_expr_ltrim_empty_string(spark, spark_backend):
     assert rows[0]["t"] == ""
 
 
-def test_expr_rtrim_empty_string(spark, spark_backend):
+def test_expr_rtrim_empty_string(spark, spark_mode):
     """RTRIM on empty string returns empty string."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": ""}])
     result = df.select(F_backend.expr("RTRIM(s)").alias("t"))
     rows = result.collect()
@@ -142,9 +142,9 @@ def test_expr_rtrim_empty_string(spark, spark_backend):
     assert rows[0]["t"] == ""
 
 
-def test_expr_triple_nested_trim(spark, spark_backend):
+def test_expr_triple_nested_trim(spark, spark_mode):
     """TRIM(LTRIM(RTRIM(col))) - triple nested."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "  hello  "}])
     result = df.select(F_backend.expr("TRIM(LTRIM(RTRIM(s)))").alias("t"))
     rows = result.collect()
@@ -152,9 +152,9 @@ def test_expr_triple_nested_trim(spark, spark_backend):
     assert rows[0]["t"] == "hello"
 
 
-def test_expr_ltrim_rtrim_column_with_underscore(spark, spark_backend):
+def test_expr_ltrim_rtrim_column_with_underscore(spark, spark_mode):
     """LTRIM/RTRIM on column with underscore."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"my_col": "  x  "}])
     result = df.select(F_backend.expr("LTRIM(RTRIM(my_col))").alias("t"))
     rows = result.collect()
@@ -162,9 +162,9 @@ def test_expr_ltrim_rtrim_column_with_underscore(spark, spark_backend):
     assert rows[0]["t"] == "x"
 
 
-def test_expr_ltrim_inside_upper(spark, spark_backend):
+def test_expr_ltrim_inside_upper(spark, spark_mode):
     """UPPER(LTRIM(col)) - LTRIM as arg to another function."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "  hello  "}])
     result = df.select(F_backend.expr("UPPER(LTRIM(s))").alias("t"))
     rows = result.collect()
@@ -172,9 +172,9 @@ def test_expr_ltrim_inside_upper(spark, spark_backend):
     assert rows[0]["t"] == "HELLO  "
 
 
-def test_expr_filter_with_ltrim(spark, spark_backend):
+def test_expr_filter_with_ltrim(spark, spark_mode):
     """filter(F.expr('LTRIM(Value) == ...'))."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame(
         [
             {"Value": "  x"},
@@ -188,9 +188,9 @@ def test_expr_filter_with_ltrim(spark, spark_backend):
     assert rows[0]["Value"] == "  y"
 
 
-def test_expr_ltrim_rtrim_case_insensitive(spark, spark_backend):
+def test_expr_ltrim_rtrim_case_insensitive(spark, spark_mode):
     """ltrim and rtrim keywords are case-insensitive."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "  hello  "}])
     result = df.select(F_backend.expr("ltrim(rtrim(s))").alias("t"))
     rows = result.collect()
@@ -198,9 +198,9 @@ def test_expr_ltrim_rtrim_case_insensitive(spark, spark_backend):
     assert rows[0]["t"] == "hello"
 
 
-def test_expr_multiple_columns_ltrim_rtrim(spark, spark_backend):
+def test_expr_multiple_columns_ltrim_rtrim(spark, spark_mode):
     """Select LTRIM(col1) and RTRIM(col2)."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"a": "  x  ", "b": "  y  "}])
     result = df.select(
         F_backend.expr("LTRIM(a)").alias("la"),
@@ -212,9 +212,9 @@ def test_expr_multiple_columns_ltrim_rtrim(spark, spark_backend):
     assert rows[0]["rb"] == "  y"
 
 
-def test_expr_ltrim_whitespace_only(spark, spark_backend):
+def test_expr_ltrim_whitespace_only(spark, spark_mode):
     """LTRIM(RTRIM(s)) on string with spaces and tab - PySpark trims spaces only, not tabs."""
-    F_backend = get_spark_imports(spark_backend).F
+    F_backend = get_imports(spark_mode).F
     df = spark.createDataFrame([{"s": "   \t  "}])
     result = df.select(F_backend.expr("LTRIM(RTRIM(s))").alias("t"))
     rows = result.collect()

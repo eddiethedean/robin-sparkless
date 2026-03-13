@@ -2,16 +2,16 @@
 Tests for issue #289: struct function support.
 
 PySpark supports the struct function for creating struct-type columns.
-Uses get_spark_imports from fixture only.
+Uses get_imports from fixture only.
 """
 
 import os
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 StructType = _imports.StructType
@@ -455,8 +455,8 @@ class TestIssue289StructFunction:
 
     @pytest.mark.skipif(
         (
-            os.environ.get("SPARKLESS_TEST_BACKEND")
-            or os.environ.get("MOCK_SPARK_TEST_BACKEND")
+            os.environ.get("SPARKLESS_TEST_MODE")
+            or os.environ.get("SPARKLESS_TEST_MODE")
             or ""
         )
         .strip()

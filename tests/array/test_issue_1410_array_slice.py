@@ -1,10 +1,10 @@
 """Regression test for #1410: array.slice parity."""
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def test_array_slice_parity(spark):
-    imports = get_spark_imports()
+    imports = get_imports()
     F = imports.F
 
     df = spark.createDataFrame(

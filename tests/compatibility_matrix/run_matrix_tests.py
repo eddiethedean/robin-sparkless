@@ -2,7 +2,7 @@
 """
 Compatibility Matrix Test Runner
 
-Tests mock-spark against multiple Python and PySpark version combinations
+Tests sparkless against multiple Python and PySpark version combinations
 using Docker containers.
 """
 
@@ -82,7 +82,7 @@ class CompatibilityTester:
         self, python_version: str, pyspark_version: str, java_version: str
     ) -> bool:
         """Build Docker image for specific version combination."""
-        image_name = f"mock-spark-test:py{python_version}-spark{pyspark_version}"
+        image_name = f"sparkless-test:py{python_version}-spark{pyspark_version}"
 
         print(f"\n{'=' * 70}")
         print(f"Building image: {image_name}")
@@ -127,7 +127,7 @@ class CompatibilityTester:
         self, python_version: str, pyspark_version: str, java_version: str
     ) -> TestResult:
         """Run tests in Docker container."""
-        image_name = f"mock-spark-test:py{python_version}-spark{pyspark_version}"
+        image_name = f"sparkless-test:py{python_version}-spark{pyspark_version}"
 
         print(f"\n{'=' * 70}")
         print(f"Running tests: Python {python_version} + PySpark {pyspark_version}")
@@ -140,7 +140,7 @@ class CompatibilityTester:
             "run",
             "--rm",
             "--name",
-            f"mock-spark-test-{python_version}-{pyspark_version}".replace(".", "-"),
+            f"sparkless-test-{python_version}-{pyspark_version}".replace(".", "-"),
             image_name,
         ]
 

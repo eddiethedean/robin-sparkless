@@ -1,6 +1,6 @@
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 
 """Tests for issue #369: DataFrame.alias() for subqueries (PySpark parity)."""

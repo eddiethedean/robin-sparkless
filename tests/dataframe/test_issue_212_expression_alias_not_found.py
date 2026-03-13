@@ -4,10 +4,10 @@ Alias output names (when().otherwise().alias('result'), rank().over([]).alias('r
 etc.) must not be resolved as input columns; they are preserved by resolve_expr_column_names (see #200).
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 Window = _imports.Window

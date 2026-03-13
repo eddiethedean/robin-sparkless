@@ -1,6 +1,6 @@
 """Tests for issue #259: datetime/date/Timestamp vs string comparisons.
 
-Uses get_spark_imports from fixture only.
+Uses get_imports from fixture only.
 """
 
 from datetime import date, datetime
@@ -8,9 +8,9 @@ from typing import Iterable, List, Tuple
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 

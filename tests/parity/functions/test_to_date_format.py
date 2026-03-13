@@ -1,12 +1,12 @@
 """
-Test to_date function with format strings. Uses get_spark_imports from fixture only.
+Test to_date function with format strings. Uses get_imports from fixture only.
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 StructType = _imports.StructType

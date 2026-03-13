@@ -1,20 +1,20 @@
 """
-Comprehensive tests for Delta Lake schema evolution in mock-spark.
+Comprehensive tests for Delta Lake schema evolution in sparkless.
 
-These tests validate that mock-spark behaves like PySpark for schema evolution,
+These tests validate that sparkless behaves like PySpark for schema evolution,
 specifically for Delta Lake features like overwriteSchema and schema merging.
 
-Note: These tests are primarily for mock-spark's schema evolution features.
+Note: These tests are primarily for sparkless's schema evolution features.
 When running with PySpark, some tests may be skipped or need special handling
 due to differences in table management and schema evolution behavior.
 """
 
 import pytest
 
-from tests.fixtures.spark_backend import get_backend_type, BackendType
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 StringType = _imports.StringType
 IntegerType = _imports.IntegerType
@@ -25,13 +25,13 @@ DateType = _imports.DateType
 BooleanType = _imports.BooleanType
 StructField = _imports.StructField
 
-_backend = get_backend_type()
+_backend = get_mode()
 
 
 def _is_sparkless_mode() -> bool:
     """Check if running in sparkless mode."""
-    backend = get_backend_type()
-    return backend == BackendType.MOCK
+    backend = get_mode()
+    return backend == Mode.SPARKLESS
 
 
 @pytest.mark.xdist_group(name="delta_serial")
@@ -242,7 +242,7 @@ class TestDeltaLakeSchemaEvolution:
 
     def test_delta_create_or_replace_table_as_select(self, spark):
         """CTAS with OR REPLACE should allow schema evolution for Delta tables."""
-        if _backend != BackendType.MOCK:
+        if _backend != Mode.SPARKLESS:
             pytest.skip(
                 "Delta CTAS replacement is only validated in sparkless mock mode"
             )
@@ -477,7 +477,7 @@ class TestDeltaLakeSchemaEvolution:
         import uuid
 
         # When PySpark session has no Delta, skip (mergeSchema with append requires Delta)
-        if _backend == BackendType.PYSPARK:
+        if _backend == Mode.PYSPARK:
             try:
                 spark.conf.get("spark.sql.catalog.spark_catalog")
             except Exception:
@@ -536,7 +536,7 @@ class TestDeltaLakeSchemaEvolution:
         import uuid
 
         # When PySpark session has no Delta, skip (mergeSchema requires Delta)
-        if _backend == BackendType.PYSPARK:
+        if _backend == Mode.PYSPARK:
             try:
                 spark.createDataFrame([(1,)]).write.format("delta").mode(
                     "overwrite"

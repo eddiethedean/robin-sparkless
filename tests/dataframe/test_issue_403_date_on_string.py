@@ -5,9 +5,9 @@ Tests for #403: date functions (hour, minute, etc.) on string timestamp column (
 from __future__ import annotations
 
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 
 

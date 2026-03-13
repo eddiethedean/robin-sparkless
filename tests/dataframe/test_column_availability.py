@@ -5,14 +5,14 @@ This test suite verifies that columns created in transforms require
 materialization before they can be accessed, matching PySpark behavior.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
-from tests.fixtures.spark_backend import get_backend_type, BackendType
+from sparkless.testing import get_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
 
 
 def _is_sparkless_mode() -> bool:
     """Check if running in sparkless mode."""
-    backend = get_backend_type()
-    return backend == BackendType.MOCK
+    backend = get_mode()
+    return backend == Mode.SPARKLESS
 
 
 class TestColumnAvailability:
@@ -34,7 +34,7 @@ class TestColumnAvailability:
 
     def test_columns_available_after_collect(self, spark):
         """Test that columns are available after collect()."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         StructType = imports.StructType
         StructField = imports.StructField
@@ -62,7 +62,7 @@ class TestColumnAvailability:
 
     def test_columns_available_after_show(self, spark):
         """Test that columns are available after show()."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         StructType = imports.StructType
         StructField = imports.StructField
@@ -90,7 +90,7 @@ class TestColumnAvailability:
 
     def test_dataframe_is_marked_materialized(self, spark):
         """Test that DataFrame is marked as materialized after actions."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         StructType = imports.StructType
         StructField = imports.StructField

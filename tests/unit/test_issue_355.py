@@ -1,10 +1,10 @@
 """
-Test for issue #355: unionByName diamond dependency. Uses get_spark_imports from fixture only.
+Test for issue #355: unionByName diamond dependency. Uses get_imports from fixture only.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 Window = _imports.Window
 

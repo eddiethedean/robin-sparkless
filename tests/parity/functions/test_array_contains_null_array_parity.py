@@ -1,17 +1,14 @@
 """Parity test for #1408: array_contains(null_array, value) returns null (PySpark parity)."""
 
 from tests.utils import assert_rows_equal, run_with_pyspark_expected, _row_to_dict
-from tests.fixtures.spark_backend import SparkBackend, BackendType
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, create_session, get_imports
 
 
 def test_array_contains_null_array_matches_pyspark():
-    imports = get_spark_imports(BackendType.ROBIN)
+    imports = get_imports(Mode.SPARKLESS)
     F = imports.F
 
-    spark = SparkBackend.create_mock_spark_session(
-        "array_contains_null_array_1408", backend_type="robin"
-    )
+    spark = create_session(app_name="array_contains_null_array_1408", mode=Mode.SPARKLESS)
     try:
         base = spark.range(0, 3).select(
             F.col("id"),

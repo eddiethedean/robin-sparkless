@@ -4,8 +4,8 @@ PySpark parity tests for format_string function.
 Tests validate that Sparkless format_string function behaves identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestFormatStringParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestFormatStringParity(ParityTestBase):
 
     def test_format_string_basic_parity(self, spark):
         """Test format_string basic functionality matches PySpark (issue #326)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         # Exact example from issue #326
@@ -42,7 +42,7 @@ class TestFormatStringParity(ParityTestBase):
 
     def test_format_string_multiple_args_parity(self, spark):
         """Test format_string with multiple arguments matches PySpark."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(
@@ -73,7 +73,7 @@ class TestFormatStringParity(ParityTestBase):
 
     def test_format_string_with_null_parity(self, spark):
         """Test format_string with null values matches PySpark."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(
