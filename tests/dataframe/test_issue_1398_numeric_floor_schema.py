@@ -19,14 +19,11 @@ an integral type (bigint in PySpark, LongType in Sparkless).
 
 from __future__ import annotations
 
-import pytest
 
-from sparkless.sql import functions as F
-from sparkless.sql.types import LongType
+def test_issue_1398_numeric_floor_schema_is_long(spark, spark_imports) -> None:
+    F = spark_imports.F
+    LongType = spark_imports.LongType
 
-
-@pytest.mark.sparkless_only
-def test_issue_1398_numeric_floor_schema_is_long(spark) -> None:
     df = spark.createDataFrame(
         [(1.9,), (-1.1,), (None,)],
         ["x"],

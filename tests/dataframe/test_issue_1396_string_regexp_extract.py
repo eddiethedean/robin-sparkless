@@ -15,13 +15,9 @@ This test locks in that behavior for Sparkless.
 
 from __future__ import annotations
 
-import pytest
 
-from sparkless.sql import functions as F
-
-
-@pytest.mark.sparkless_only
-def test_issue_1396_string_regexp_extract_null_and_no_match(spark) -> None:
+def test_issue_1396_string_regexp_extract_null_and_no_match(spark, spark_imports) -> None:
+    F = spark_imports.F
     df = spark.createDataFrame(
         [("abc123",), ("zzz",), (None,)],
         ["s"],

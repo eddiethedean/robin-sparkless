@@ -19,13 +19,9 @@ This test locks in three expectations:
 
 from __future__ import annotations
 
-import pytest
 
-from sparkless.sql import functions as F
-
-
-@pytest.mark.sparkless_only
-def test_issue_1400_numeric_pmod_values(spark) -> None:
+def test_issue_1400_numeric_pmod_values(spark, spark_imports) -> None:
+    F = spark_imports.F
     df = spark.createDataFrame(
         [(-5, 3), (5, 3), (None, 3)],
         ["a", "b"],

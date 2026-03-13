@@ -18,13 +18,9 @@ This test locks in Sparkless behavior for:
 
 from __future__ import annotations
 
-import pytest
 
-from sparkless.sql import functions as F
-
-
-@pytest.mark.sparkless_only
-def test_issue_1390_split_limit_schema_and_explain(spark) -> None:
+def test_issue_1390_split_limit_schema_and_explain(spark, spark_imports) -> None:
+    F = spark_imports.F
     df = spark.createDataFrame([("a,b,c,d",)], ["s"])
     out = df.select(F.split(F.col("s"), ",", 2).alias("arr"))
 

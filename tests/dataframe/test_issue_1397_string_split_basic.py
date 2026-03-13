@@ -17,13 +17,9 @@ DataFrame with an array<string> column.
 
 from __future__ import annotations
 
-import pytest
 
-from sparkless.sql import functions as F
-
-
-@pytest.mark.sparkless_only
-def test_issue_1397_string_split_basic_no_unresolved_column_error(spark) -> None:
+def test_issue_1397_string_split_basic_no_unresolved_column_error(spark, spark_imports) -> None:
+    F = spark_imports.F
     df = spark.createDataFrame(
         [("a,b,c",), ("a",), (None,)],
         ["s"],

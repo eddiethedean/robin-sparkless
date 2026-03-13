@@ -35,14 +35,14 @@ This test locks in Sparkless behavior for:
 
 from __future__ import annotations
 
-import pytest
 
-from sparkless.sql import functions as F
-from sparkless.sql.types import StructType, StructField, StringType, IntegerType
+def test_issue_1394_struct_getfield_alias_schema_and_explain(spark, spark_imports) -> None:
+    F = spark_imports.F
+    StructType = spark_imports.StructType
+    StructField = spark_imports.StructField
+    StringType = spark_imports.StringType
+    IntegerType = spark_imports.IntegerType
 
-
-@pytest.mark.sparkless_only
-def test_issue_1394_struct_getfield_alias_schema_and_explain(spark) -> None:
     schema = StructType(
         [
             StructField(

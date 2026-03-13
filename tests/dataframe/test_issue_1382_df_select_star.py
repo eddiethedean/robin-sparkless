@@ -14,10 +14,6 @@ This test exercises the same scenario against sparkless, ensuring that:
 - ``df.explain()`` on the selected DataFrame returns a non-empty plan string.
 """
 
-import pytest
-
-
-@pytest.mark.sparkless_only
 def test_issue_1382_select_star_schema_and_explain(spark) -> None:
     """df.select_star: select(\"*\") + schema + explain should behave sensibly (issue #1382)."""
     df = spark.createDataFrame([(1, 2, 3)], ["a", "b", "c"])

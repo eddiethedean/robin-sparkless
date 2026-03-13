@@ -25,15 +25,10 @@ This test exercises the same scenario against sparkless, ensuring that:
 - The computed last_sal values match the PySpark semantics.
 """
 
-import pytest
-
-from sparkless.sql import functions as F
-from sparkless.window import Window
-
-
-@pytest.mark.sparkless_only
-def test_issue_1384_window_last_default_frame_schema_ui_and_data(spark) -> None:
+def test_issue_1384_window_last_default_frame_schema_ui_and_data(spark, spark_imports) -> None:
     """window.last_default_frame: last over partition with default frame (issue #1384)."""
+    F = spark_imports.F
+    Window = spark_imports.Window
     df = spark.createDataFrame(
         [(1, 100, "a"), (2, 90, "a"), (3, 80, "b")],
         ["id", "salary", "dept"],

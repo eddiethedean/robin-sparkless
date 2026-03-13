@@ -5,14 +5,9 @@ PySpark: struct<m:int>, data [{'m': None}, {'m': 12}]
 Sparkless (before fix): struct<m:string>, data [{'m': '12'}, {'m': None}]
 """
 
-import pytest
-
-from sparkless.sql import functions as F
-
-
-@pytest.mark.sparkless_only
-def test_month_returns_integer_type_not_string(spark):
+def test_month_returns_integer_type_not_string(spark, spark_imports):
     """Exact repro from issue #1402: month result schema and data must be int, not string."""
+    F = spark_imports.F
     df = spark.createDataFrame([("2020-12-02",), (None,)], ["s"])
     result = df.select(F.month(F.col("s")).alias("m"))
 

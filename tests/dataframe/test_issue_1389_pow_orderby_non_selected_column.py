@@ -19,13 +19,9 @@ produce the squared values.
 
 from __future__ import annotations
 
-import pytest
 
-from sparkless.sql import functions as F
-
-
-@pytest.mark.sparkless_only
-def test_issue_1389_pow_orderby_non_selected_column(spark) -> None:
+def test_issue_1389_pow_orderby_non_selected_column(spark, spark_imports) -> None:
+    F = spark_imports.F
     df = spark.createDataFrame([(3,), (5,)], ["x"])
     out = df.select((F.col("x") ** F.lit(2)).alias("sq")).orderBy("x")
 

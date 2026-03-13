@@ -15,10 +15,6 @@ This test exercises the same scenario against sparkless, ensuring that:
 - The default null sort order (ascending) places NULL values first.
 """
 
-import pytest
-
-
-@pytest.mark.sparkless_only
 def test_issue_1383_orderby_null_default_schema_ui_and_data(spark) -> None:
     """orderby.null_default: orderBy(\"x\") null ordering, schema, and explain (issue #1383)."""
     df = spark.createDataFrame([(None,), (1,), (0,)], ["x"])

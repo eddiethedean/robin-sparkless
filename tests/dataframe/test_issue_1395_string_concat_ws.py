@@ -26,13 +26,9 @@ This test locks in the PySpark semantics:
 
 from __future__ import annotations
 
-import pytest
 
-from sparkless.sql import functions as F
-
-
-@pytest.mark.sparkless_only
-def test_issue_1395_string_concat_ws_null_handling(spark) -> None:
+def test_issue_1395_string_concat_ws_null_handling(spark, spark_imports) -> None:
+    F = spark_imports.F
     df = spark.createDataFrame(
         [("a", "b"), ("a", None), (None, "c")],
         ["a", "b"],

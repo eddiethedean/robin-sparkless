@@ -18,14 +18,10 @@ Sparkless raised:
 
 from datetime import date
 
-import pytest
 
-from sparkless.sql import functions as F
-
-
-@pytest.mark.sparkless_only
-def test_issue_1401_date_to_date_no_unresolved_column(spark) -> None:
+def test_issue_1401_date_to_date_no_unresolved_column(spark, spark_imports) -> None:
     """date.to_date on a single string column must not raise (issue #1401)."""
+    F = spark_imports.F
     df = spark.createDataFrame(
         [("2020-01-02",), ("invalid",), (None,)],
         ["s"],

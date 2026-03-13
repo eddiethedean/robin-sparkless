@@ -15,10 +15,7 @@ This test locks in Sparkless behavior for:
 
 from __future__ import annotations
 
-import pytest
 
-
-@pytest.mark.sparkless_only
 def test_issue_1391_session_conf_app_name_schema_and_explain(spark) -> None:
     conf = spark.conf() if callable(getattr(spark, "conf", None)) else spark.conf
     app_name = conf.get("spark.app.name")
