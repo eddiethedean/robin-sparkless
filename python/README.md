@@ -10,14 +10,14 @@ _No JVM · PySpark-like API · Rust/Polars engine · Fast local tests_
 
 ---
 
-## Sparkless 3 vs 4.x
+## Sparkless v3 vs v4
 
 | Version   | Backend              | Where it lives |
 | --------- | -------------------- | -------------- |
-| **Sparkless 3.x** | [Polars](https://pola.rs/) **Python** package | [github.com/eddiethedean/sparkless](https://github.com/eddiethedean/sparkless) — pure Python, `pip install sparkless` |
-| **Sparkless 4.x** | **Rust** crate ([robin-sparkless](https://github.com/eddiethedean/robin-sparkless)) using Polars in Rust | This repo — Python API + native extension; `pip install ./python` |
+| **Sparkless v3** | [Polars](https://pola.rs/) **Python** package | [github.com/eddiethedean/sparkless](https://github.com/eddiethedean/sparkless) — pure Python, `pip install sparkless` |
+| **Sparkless v4** | **Rust** crate ([robin-sparkless](https://github.com/eddiethedean/robin-sparkless)) using Polars in Rust | This repo — Python API + native extension; `pip install ./python` |
 
-**4.x** keeps the same PySpark-like API but swaps the execution engine from Polars (Python) to **robin-sparkless** (Rust). You get a single native extension that talks to the Rust engine—no Polars Python dependency at runtime, and the same `from sparkless.sql import SparkSession` usage.
+**v4** keeps the same PySpark-like API but swaps the execution engine from Polars (Python) to **robin-sparkless** (Rust). You get a single native extension that talks to the Rust engine—no Polars Python dependency at runtime, and the same `from sparkless.sql import SparkSession` usage.
 
 ---
 
@@ -199,13 +199,13 @@ Transformations are queued; execution happens on actions (`collect()`, `count()`
 
 ---
 
-## Backend (4.x)
+## Backend (v4)
 
-Sparkless 4.x is the **Python face** of the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust crate. The Python package wraps a native extension (`sparkless._native`) built from the **sparkless-native** crate, which calls into **robin-sparkless** (Polars in Rust). There is no JVM and no Polars Python dependency—execution is entirely in the Rust engine.
+Sparkless v4 is the **Python face** of the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust crate. The Python package wraps a native extension (`sparkless._native`) built from the **sparkless-native** crate, which calls into **robin-sparkless** (Polars in Rust). There is no JVM and no Polars Python dependency—execution is entirely in the Rust engine.
 
 ---
 
-## Testing with sparkless.testing
+## Testing with sparkless.testing (new in v4.4)
 
 The `sparkless.testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
 
@@ -289,5 +289,5 @@ MIT — see [LICENSE](https://github.com/eddiethedean/robin-sparkless/blob/main/
 ## Links
 
 - **Repository (this package):** [github.com/eddiethedean/robin-sparkless](https://github.com/eddiethedean/robin-sparkless) — Rust engine + Python bindings
-- **Sparkless 3.x (Polars Python backend):** [github.com/eddiethedean/sparkless](https://github.com/eddiethedean/sparkless)
+- **Sparkless v3 (Polars Python backend):** [github.com/eddiethedean/sparkless](https://github.com/eddiethedean/sparkless)
 - **Documentation:** [robin-sparkless.readthedocs.io](https://robin-sparkless.readthedocs.io/)
