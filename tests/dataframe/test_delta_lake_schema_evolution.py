@@ -240,6 +240,7 @@ class TestDeltaLakeSchemaEvolution:
         except Exception:
             pass
 
+    @pytest.mark.delta
     def test_delta_create_or_replace_table_as_select(self):
         """CTAS with OR REPLACE should allow schema evolution for Delta tables."""
         if _backend != Mode.SPARKLESS:
