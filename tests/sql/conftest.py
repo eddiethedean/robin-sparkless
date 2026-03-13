@@ -72,7 +72,7 @@ def postgres_container() -> Generator[JdbcConnection, None, None]:
         # Wait for PostgreSQL to be ready
         host = postgres.get_container_host_ip()
         port = postgres.get_exposed_port(5432)
-        
+
         # Retry connection a few times
         for attempt in range(10):
             try:
@@ -88,7 +88,7 @@ def postgres_container() -> Generator[JdbcConnection, None, None]:
                 if attempt == 9:
                     pytest.skip("PostgreSQL container failed to start")
                 time.sleep(2)
-        
+
         # Create test tables
         cursor = conn.cursor()
         cursor.execute(
@@ -351,7 +351,7 @@ def mssql_jdbc(mssql_container: JdbcConnection) -> JdbcConnection:
 @pytest.fixture(scope="session")
 def oracle_container() -> Generator[JdbcConnection, None, None]:
     """Start an Oracle container for testing.
-    
+
     NOTE: Oracle containers take 2-3+ minutes to start, which exceeds normal
     test timeouts. Set SPARKLESS_TEST_ORACLE=1 to enable Oracle tests.
     """
@@ -402,12 +402,8 @@ def oracle_container() -> Generator[JdbcConnection, None, None]:
         except Exception:
             pass  # Table may already exist
         try:
-            cursor.execute(
-                "INSERT INTO sparkless_jdbc_test (id, name) VALUES (1, 'a')"
-            )
-            cursor.execute(
-                "INSERT INTO sparkless_jdbc_test (id, name) VALUES (2, 'b')"
-            )
+            cursor.execute("INSERT INTO sparkless_jdbc_test (id, name) VALUES (1, 'a')")
+            cursor.execute("INSERT INTO sparkless_jdbc_test (id, name) VALUES (2, 'b')")
         except Exception:
             pass  # Data may already exist
         try:
@@ -445,16 +441,16 @@ def oracle_jdbc(oracle_container: JdbcConnection) -> JdbcConnection:
 def db2_container() -> Generator[JdbcConnection, None, None]:
     """Start a DB2 container for testing."""
     import platform
-    
+
     # DB2 Docker images are not available for ARM64 (Apple Silicon)
     if platform.machine() in ("arm64", "aarch64"):
         pytest.skip("DB2 Docker image not available for ARM64 architecture")
-    
+
     if not _is_docker_available():
         pytest.skip("Docker is not available")
 
     try:
-        from testcontainers.db2 import Db2Container
+        from testcontainers.db2 import Db2Container  # noqa: F401
     except ImportError:
         pytest.skip("testcontainers[db2] not installed")
 

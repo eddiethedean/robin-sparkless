@@ -30,7 +30,9 @@ def jdbc_url(request, spark):
         conn = request.getfixturevalue("oracle_jdbc")
         return conn.url
     except pytest.FixtureLookupError:
-        pytest.skip("Oracle container not available and SPARKLESS_TEST_JDBC_ORACLE_URL not set")
+        pytest.skip(
+            "Oracle container not available and SPARKLESS_TEST_JDBC_ORACLE_URL not set"
+        )
 
 
 @pytest.fixture
@@ -50,7 +52,9 @@ def jdbc_props(request):
 
 
 def test_read_jdbc_table_round_trip(spark, jdbc_url, jdbc_props) -> None:
-    df = spark.read.jdbc(url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props)
+    df = spark.read.jdbc(
+        url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props
+    )
     rows = df.collect()
     assert isinstance(rows, list)
     assert len(rows) >= 2

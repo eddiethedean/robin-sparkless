@@ -32,7 +32,9 @@ def jdbc_url(request, spark):
         conn = request.getfixturevalue("postgres_jdbc")
         return conn.url
     except pytest.FixtureLookupError:
-        pytest.skip("PostgreSQL container not available and SPARKLESS_TEST_JDBC_URL not set")
+        pytest.skip(
+            "PostgreSQL container not available and SPARKLESS_TEST_JDBC_URL not set"
+        )
 
 
 @pytest.fixture
@@ -52,7 +54,9 @@ def jdbc_props(request):
 
 def test_read_jdbc_table_round_trip(spark, jdbc_url, jdbc_props) -> None:
     """spark.read.jdbc(url, table, properties) returns a DataFrame with rows."""
-    df = spark.read.jdbc(url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props)
+    df = spark.read.jdbc(
+        url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props
+    )
     rows = df.collect()
     assert isinstance(rows, list)
     assert len(rows) >= 2
@@ -96,9 +100,13 @@ def test_write_jdbc_append(spark, jdbc_url, jdbc_props) -> None:
     df = spark.createDataFrame(
         [(100, "append_a"), (101, "append_b")], schema="id bigint, name string"
     )
-    df.write.jdbc(url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props, mode="append")
+    df.write.jdbc(
+        url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props, mode="append"
+    )
 
-    read_df = spark.read.jdbc(url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props)
+    read_df = spark.read.jdbc(
+        url=jdbc_url, table="sparkless_jdbc_test", properties=jdbc_props
+    )
     rows = read_df.collect()
     assert len(rows) >= 2
 
