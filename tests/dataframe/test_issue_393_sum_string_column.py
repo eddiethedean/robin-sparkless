@@ -6,7 +6,7 @@ InvalidOperationError: cum_sum operation not supported for dtype str.
 Sparkless now casts string/Utf8 columns to Float64 before sum/avg (PySpark parity).
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _norm(val):
@@ -23,7 +23,7 @@ class TestIssue393SumStringColumn:
 
     def test_sum_string_column_partition_by_order_by(self, spark):
         """Exact scenario from issue #393: Value as string '10','20'."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -40,7 +40,7 @@ class TestIssue393SumStringColumn:
 
     def test_avg_string_column(self, spark):
         """avg() on string column with numeric content."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -57,7 +57,7 @@ class TestIssue393SumStringColumn:
 
     def test_sum_string_column_running_sum(self, spark):
         """sum() on string column with orderBy different from partitionBy -> running sum."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -75,7 +75,7 @@ class TestIssue393SumStringColumn:
 
     def test_sum_string_column_with_show(self, spark):
         """Exact issue scenario: withColumn + show() (issue #393)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -92,7 +92,7 @@ class TestIssue393SumStringColumn:
 
     def test_sum_string_column_with_nulls(self, spark):
         """sum() on string column with nulls - nulls excluded from sum."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -109,7 +109,7 @@ class TestIssue393SumStringColumn:
 
     def test_sum_string_column_no_partition_running_sum(self, spark):
         """sum() on string column with orderBy only -> running sum (no partition = whole table)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -128,7 +128,7 @@ class TestIssue393SumStringColumn:
 
     def test_avg_string_column_multiple_partitions(self, spark):
         """avg() on string column with multiple partitions."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -150,7 +150,7 @@ class TestIssue393SumStringColumn:
 
     def test_sum_string_column_decimal_like(self, spark):
         """sum() on string column with decimal-like values."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [
@@ -166,7 +166,7 @@ class TestIssue393SumStringColumn:
 
     def test_sum_string_column_single_row_partition(self, spark):
         """sum() on string column with single row in partition."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame([{"Type": "A", "Value": "42"}])
         w = Window().partitionBy("Type").orderBy("Type")
@@ -177,7 +177,7 @@ class TestIssue393SumStringColumn:
 
     def test_sum_string_column_select_after(self, spark):
         """sum() on string column, then select and filter."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [

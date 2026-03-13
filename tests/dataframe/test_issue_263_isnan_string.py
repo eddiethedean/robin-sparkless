@@ -12,15 +12,15 @@ import math
 
 import pytest
 
-from tests.fixtures.spark_backend import BackendType, get_backend_type
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import get_imports
 
 
 def _is_pyspark_mode() -> bool:
-    return bool(get_backend_type() == BackendType.PYSPARK)
+    return bool(get_mode() == Mode.PYSPARK)
 
 
-imports = get_spark_imports()
+imports = get_imports()
 F = imports.F
 
 

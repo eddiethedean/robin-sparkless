@@ -7,9 +7,9 @@ This issue occurs when:
 4. Validation uses the final schema (after select) instead of the schema at queue time
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 from datetime import datetime, timedelta

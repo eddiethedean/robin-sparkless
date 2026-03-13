@@ -8,18 +8,18 @@ Sparkless previously raised:
   '[str, dyn int, dyn int]' in expression 'is_between'
 
 Run in PySpark mode first, then mock mode:
-  SPARKLESS_TEST_BACKEND=pyspark pytest tests/test_issue_445_between_string_column_numeric_bounds.py -v
+  SPARKLESS_TEST_MODE=pyspark pytest tests/test_issue_445_between_string_column_numeric_bounds.py -v
   pytest tests/test_issue_445_between_string_column_numeric_bounds.py -v
 
 https://github.com/eddiethedean/sparkless/issues/445
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
-def test_between_string_column_numeric_bounds_exact_issue_445(spark, spark_backend):
+def test_between_string_column_numeric_bounds_exact_issue_445(spark, spark_mode):
     """Exact scenario from #445 - string column with numeric bounds."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -35,9 +35,9 @@ def test_between_string_column_numeric_bounds_exact_issue_445(spark, spark_backe
     assert rows[0]["Value"] == "5"
 
 
-def test_between_string_column_numeric_bounds_both_in_range(spark, spark_backend):
+def test_between_string_column_numeric_bounds_both_in_range(spark, spark_mode):
     """Both rows in range when bounds are wide."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -51,9 +51,9 @@ def test_between_string_column_numeric_bounds_both_in_range(spark, spark_backend
     assert len(rows) == 2
 
 
-def test_between_string_column_numeric_bounds_none_in_range(spark, spark_backend):
+def test_between_string_column_numeric_bounds_none_in_range(spark, spark_mode):
     """No rows in range."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -67,9 +67,9 @@ def test_between_string_column_numeric_bounds_none_in_range(spark, spark_backend
     assert len(rows) == 0
 
 
-def test_between_string_column_float_bounds(spark, spark_backend):
+def test_between_string_column_float_bounds(spark, spark_mode):
     """String column with float bounds."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -84,9 +84,9 @@ def test_between_string_column_float_bounds(spark, spark_backend):
     assert rows[0]["val"] == "3.5"
 
 
-def test_between_string_column_invalid_numeric_returns_null(spark, spark_backend):
+def test_between_string_column_invalid_numeric_returns_null(spark, spark_mode):
     """String that can't parse as number -> null -> excluded from filter."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -102,9 +102,9 @@ def test_between_string_column_invalid_numeric_returns_null(spark, spark_backend
     assert rows[0]["val"] == "5"
 
 
-def test_between_integer_column_numeric_bounds_unchanged(spark, spark_backend):
+def test_between_integer_column_numeric_bounds_unchanged(spark, spark_mode):
     """Integer column with numeric bounds - existing behavior unchanged."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -119,9 +119,9 @@ def test_between_integer_column_numeric_bounds_unchanged(spark, spark_backend):
     assert rows[0]["val"] == 5
 
 
-def test_between_string_column_with_lit_bounds(spark, spark_backend):
+def test_between_string_column_with_lit_bounds(spark, spark_mode):
     """between with F.lit() for bounds."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -136,9 +136,9 @@ def test_between_string_column_with_lit_bounds(spark, spark_backend):
     assert rows[0]["val"] == "4"
 
 
-def test_between_string_column_in_select_expression(spark, spark_backend):
+def test_between_string_column_in_select_expression(spark, spark_mode):
     """between in select creates boolean column."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -157,9 +157,9 @@ def test_between_string_column_in_select_expression(spark, spark_backend):
     assert rows[1]["in_range"] is False
 
 
-def test_between_string_column_inclusive_boundaries(spark, spark_backend):
+def test_between_string_column_inclusive_boundaries(spark, spark_mode):
     """String values equal to lower/upper bound are included."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -177,9 +177,9 @@ def test_between_string_column_inclusive_boundaries(spark, spark_backend):
     assert vals == {"1", "5", "10"}
 
 
-def test_between_string_column_null_excluded(spark, spark_backend):
+def test_between_string_column_null_excluded(spark, spark_mode):
     """Null string column value is excluded from filter (null between -> null -> excluded)."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -194,9 +194,9 @@ def test_between_string_column_null_excluded(spark, spark_backend):
     assert rows[0]["id"] == 1
 
 
-def test_between_string_column_negative_numbers(spark, spark_backend):
+def test_between_string_column_negative_numbers(spark, spark_mode):
     """String column with negative numbers."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -212,9 +212,9 @@ def test_between_string_column_negative_numbers(spark, spark_backend):
     assert rows[0]["val"] == "-5"
 
 
-def test_between_string_column_then_orderby(spark, spark_backend):
+def test_between_string_column_then_orderby(spark, spark_mode):
     """Filter with between then orderBy."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -230,9 +230,9 @@ def test_between_string_column_then_orderby(spark, spark_backend):
     assert [r["val"] for r in rows] == ["3", "5", "8"]
 
 
-def test_between_string_column_in_when_otherwise(spark, spark_backend):
+def test_between_string_column_in_when_otherwise(spark, spark_mode):
     """between inside when/otherwise expression."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -255,9 +255,9 @@ def test_between_string_column_in_when_otherwise(spark, spark_backend):
     assert tier_map[3] == "high"
 
 
-def test_between_string_column_not_between(spark, spark_backend):
+def test_between_string_column_not_between(spark, spark_mode):
     """~between (NOT between) filters inverse."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -272,9 +272,9 @@ def test_between_string_column_not_between(spark, spark_backend):
     assert rows[0]["val"] == "15"
 
 
-def test_between_string_column_chained_with_select(spark, spark_backend):
+def test_between_string_column_chained_with_select(spark, spark_mode):
     """filter + select + filter chain with string column between."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -294,9 +294,9 @@ def test_between_string_column_chained_with_select(spark, spark_backend):
     assert rows[0]["val"] == "7"
 
 
-def test_between_string_column_zero_bounds(spark, spark_backend):
+def test_between_string_column_zero_bounds(spark, spark_mode):
     """between with zero in bounds."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [

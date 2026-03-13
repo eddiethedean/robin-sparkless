@@ -6,11 +6,11 @@ Polars over() expects descending: bool and supports it only from 1.22+.
 Sparkless supports polars>=0.20.0, so we must handle older Polars and avoid
 passing List[bool] where a single bool is expected.
 
-Uses get_spark_imports() for backend-aware F/Window - runs with both
-sparkless and PySpark (MOCK_SPARK_TEST_BACKEND=pyspark).
+Uses get_imports() for backend-aware F/Window - runs with both
+sparkless and PySpark (SPARKLESS_TEST_MODE=pyspark).
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _norm(val):
@@ -27,7 +27,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_row_number_over_partition_order_desc(self, spark):
         """row_number().over(partitionBy, orderBy(F.desc)) must not raise."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("a", 1), ("a", 2), ("a", 3), ("b", 1), ("b", 2)],
@@ -50,7 +50,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_row_number_over_order_desc_no_partition(self, spark):
         """row_number().over(orderBy(F.desc)) without partition must not raise."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [(1,), (2,), (3,)],
@@ -65,7 +65,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_row_number_over_partition_order_asc(self, spark):
         """row_number().over(partitionBy, orderBy(F.asc)) must still work."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("a", 1), ("a", 2), ("b", 1)],
@@ -83,7 +83,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_row_number_with_column_pattern(self, spark):
         """withColumn + row_number().over(partitionBy.orderBy(desc)) - common pattern."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("x", 10), ("x", 20), ("y", 5)],
@@ -100,7 +100,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_sum_over_partition_order_desc(self, spark):
         """sum().over(partitionBy, orderBy(F.desc)) - running sum descending."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("a", 1), ("a", 2), ("a", 3), ("b", 10)],
@@ -120,7 +120,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_lag_over_partition_order_desc(self, spark):
         """lag().over(partitionBy, orderBy(F.desc)) - previous row in desc order."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("a", 3), ("a", 2), ("a", 1), ("b", 2), ("b", 1)],
@@ -139,7 +139,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_first_over_partition_order_desc(self, spark):
         """first().over(partitionBy, orderBy(F.desc)) - first value in desc order."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("a", 1), ("a", 2), ("a", 3), ("b", 10)],
@@ -158,7 +158,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_mixed_order_asc_desc(self, spark):
         """orderBy(F.asc(a), F.desc(b)) - mixed directions must not raise."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("a", 1), ("a", 2), ("a", 3), ("b", 1), ("b", 2)],
@@ -179,7 +179,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_single_row_per_partition(self, spark):
         """Partition with single row - edge case."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("a", 1), ("b", 2), ("c", 3)],
@@ -193,7 +193,7 @@ class TestIssue414RowNumberOverDescending:
 
     def test_avg_over_partition_order_desc(self, spark):
         """avg().over(partitionBy, orderBy(F.desc)) - running average descending."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, Window = imports.F, imports.Window
         df = spark.createDataFrame(
             [("a", 2.0), ("a", 4.0), ("a", 6.0)],

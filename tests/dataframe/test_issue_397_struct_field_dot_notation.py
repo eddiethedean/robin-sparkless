@@ -8,9 +8,9 @@ struct field names in the schema, so we use lowercase field names in tests.
 
 from __future__ import annotations
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 
 

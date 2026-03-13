@@ -13,9 +13,9 @@ import pytest
 
 def _supports_single_column_schema() -> bool:
     """True if the binding accepts createDataFrame([1,2,3], 'bigint') (single type as schema)."""
-    from tests.fixtures.spark_imports import get_spark_imports
+    from sparkless.testing import get_imports
 
-    _imports = get_spark_imports()
+    _imports = get_imports()
     _session = _imports.SparkSession.builder.appName("single_col_check").getOrCreate()
     try:
         try:

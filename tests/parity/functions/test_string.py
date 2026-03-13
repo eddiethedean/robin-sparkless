@@ -4,8 +4,8 @@ PySpark parity tests for string functions.
 Tests validate that Sparkless string functions behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestStringFunctionsParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_upper(self, spark):
         """Test upper function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_upper")
         df = spark.createDataFrame(expected["input_data"])
@@ -22,7 +22,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_lower(self, spark):
         """Test lower function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_lower")
         df = spark.createDataFrame(expected["input_data"])
@@ -31,7 +31,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_length(self, spark):
         """Test length function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_length")
         df = spark.createDataFrame(expected["input_data"])
@@ -40,7 +40,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_substring(self, spark):
         """Test substring function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_substring")
         df = spark.createDataFrame(expected["input_data"])
@@ -49,7 +49,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_substr_method(self, spark):
         """Test substr method matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         # Test the exact example from issue #238
         df = spark.createDataFrame(
@@ -68,7 +68,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_column_astype_method(self, spark):
         """Test astype method matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         # Test the exact example from issue #239
         df = spark.createDataFrame(
@@ -91,7 +91,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_concat(self, spark):
         """Test concat function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_concat")
         df = spark.createDataFrame(expected["input_data"])
@@ -100,7 +100,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_split(self, spark):
         """Test split function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_split")
         df = spark.createDataFrame(expected["input_data"])
@@ -109,7 +109,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_regexp_extract(self, spark):
         """Test regexp_extract function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_regexp_extract")
         df = spark.createDataFrame(expected["input_data"])
@@ -118,7 +118,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_trim(self, spark):
         """Test trim function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_trim")
         df = spark.createDataFrame(expected["input_data"])
@@ -127,7 +127,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_ltrim(self, spark):
         """Test ltrim function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_ltrim")
         df = spark.createDataFrame(expected["input_data"])
@@ -136,7 +136,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_rtrim(self, spark):
         """Test rtrim function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_rtrim")
         df = spark.createDataFrame(expected["input_data"])
@@ -145,7 +145,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_lpad(self, spark):
         """Test lpad function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_lpad")
         df = spark.createDataFrame(expected["input_data"])
@@ -154,7 +154,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_rpad(self, spark):
         """Test rpad function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_rpad")
         df = spark.createDataFrame(expected["input_data"])
@@ -163,7 +163,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_like(self, spark):
         """Test like function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_like")
         df = spark.createDataFrame(expected["input_data"])
@@ -172,7 +172,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_string_rlike(self, spark):
         """Test rlike function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "string_rlike")
         df = spark.createDataFrame(expected["input_data"])
@@ -181,7 +181,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_concat_ws(self, spark):
         """Test concat_ws function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "concat_ws")
         df = spark.createDataFrame(expected["input_data"])
@@ -190,7 +190,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_ascii(self, spark):
         """Test ascii function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "ascii")
         df = spark.createDataFrame(expected["input_data"])
@@ -199,7 +199,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_hex(self, spark):
         """Test hex function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "hex")
         df = spark.createDataFrame(expected["input_data"])
@@ -208,7 +208,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_base64(self, spark):
         """Test base64 function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "base64")
         df = spark.createDataFrame(expected["input_data"])
@@ -217,7 +217,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_initcap(self, spark):
         """Test initcap function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "initcap")
         df = spark.createDataFrame(expected["input_data"])
@@ -226,7 +226,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_soundex(self, spark):
         """Test soundex function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "soundex")
         df = spark.createDataFrame(expected["input_data"])
@@ -235,7 +235,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_translate(self, spark):
         """Test translate function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "translate")
         df = spark.createDataFrame(expected["input_data"])
@@ -244,7 +244,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_levenshtein(self, spark):
         """Test levenshtein function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "levenshtein")
         df = spark.createDataFrame(expected["input_data"])
@@ -253,7 +253,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_crc32(self, spark):
         """Test crc32 function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "crc32")
         df = spark.createDataFrame(expected["input_data"])
@@ -262,7 +262,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_xxhash64(self, spark):
         """Test xxhash64 function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "xxhash64")
         df = spark.createDataFrame(expected["input_data"])
@@ -271,7 +271,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_get_json_object(self, spark):
         """Test get_json_object function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "get_json_object")
         df = spark.createDataFrame(expected["input_data"])
@@ -282,7 +282,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_json_tuple(self, spark):
         """Test json_tuple function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "json_tuple")
         df = spark.createDataFrame(expected["input_data"])
@@ -293,7 +293,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_substring_index(self, spark):
         """Test substring_index function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "substring_index")
         df = spark.createDataFrame(expected["input_data"])
@@ -302,7 +302,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_repeat(self, spark):
         """Test repeat function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "repeat")
         df = spark.createDataFrame(expected["input_data"])
@@ -311,7 +311,7 @@ class TestStringFunctionsParity(ParityTestBase):
 
     def test_reverse(self, spark):
         """Test reverse function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "reverse")
         df = spark.createDataFrame(expected["input_data"])

@@ -1,6 +1,6 @@
 """PySpark parity tests for PivotGroupedData aggregate methods (Issue #267)."""
 
-from tests.fixtures.parity_base import ParityTestBase
+from tests.tools.parity_base import ParityTestBase
 
 
 class TestPivotGroupedDataParity(ParityTestBase):

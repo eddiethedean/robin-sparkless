@@ -4,7 +4,7 @@ PySpark parity tests for GroupedData.mean() method.
 Tests validate that Sparkless GroupedData.mean() behaves identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
+from tests.tools.parity_base import ParityTestBase
 
 
 class TestGroupedDataMeanParity(ParityTestBase):

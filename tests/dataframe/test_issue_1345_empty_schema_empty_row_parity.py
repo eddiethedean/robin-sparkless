@@ -6,9 +6,9 @@ PySpark accepts both; sparkless now matches (empty schema + empty row -> 1 row, 
 
 from __future__ import annotations
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 StructType = imports.StructType
 

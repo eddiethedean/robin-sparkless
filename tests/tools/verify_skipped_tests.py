@@ -13,9 +13,9 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from tests.fixtures.spark_imports import get_spark_imports  # noqa: E402
+from sparkless.testing import get_imports  # noqa: E402
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 Window = _imports.Window

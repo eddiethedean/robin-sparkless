@@ -1,10 +1,10 @@
 """Regression test for #1414: window sum().over() schema should be BIGINT for integer inputs."""
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def test_window_sum_over_schema_bigint(spark) -> None:
-    imports = get_spark_imports()
+    imports = get_imports()
     F = imports.F
     Window = imports.Window
 

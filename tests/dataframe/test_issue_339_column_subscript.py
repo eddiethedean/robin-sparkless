@@ -2,15 +2,15 @@
 Unit tests for Issue #339: Column subscript notation for struct access.
 
 Tests that Column supports subscript notation (e.g., F.col("StructVal")["E1"])
-matching PySpark behavior. Uses get_spark_imports from fixture only.
+matching PySpark behavior. Uses get_imports from fixture only.
 """
 
 import os
 
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 Window = _imports.Window
@@ -391,8 +391,8 @@ class TestIssue339ColumnSubscript:
             # PySpark allows non-string keys for array access, but for structs it should fail.
             # In sparkless, we raise TypeError. In PySpark, it might behave differently.
             backend = (
-                os.getenv("MOCK_SPARK_TEST_BACKEND")
-                or os.getenv("SPARKLESS_TEST_BACKEND")
+                os.getenv("SPARKLESS_TEST_MODE")
+                or os.getenv("SPARKLESS_TEST_MODE")
                 or "sparkless"
             )
             if backend == "pyspark":

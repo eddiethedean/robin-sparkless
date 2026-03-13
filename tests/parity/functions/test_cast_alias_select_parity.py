@@ -4,7 +4,7 @@ PySpark parity tests for Issue #332: Column resolution with cast+alias+select.
 These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestCastAliasSelectParity:
@@ -12,7 +12,7 @@ class TestCastAliasSelectParity:
 
     def test_cast_alias_select_basic_parity(self):
         """Test basic cast+alias+select scenario matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
         DoubleType = spark_imports.DoubleType
@@ -56,7 +56,7 @@ class TestCastAliasSelectParity:
 
     def test_cast_alias_select_multiple_aggregations_parity(self):
         """Test multiple aggregations with cast+alias matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
         DoubleType = spark_imports.DoubleType
@@ -103,7 +103,7 @@ class TestCastAliasSelectParity:
 
     def test_cast_alias_select_with_filter_parity(self):
         """Test cast+alias+select with filter matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
         DoubleType = spark_imports.DoubleType

@@ -1,14 +1,14 @@
 """
-PySpark parity tests for SparkSession operations. Uses get_spark_imports from fixture only.
+PySpark parity tests for SparkSession operations. Uses get_imports from fixture only.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 def _schema_for_spark(spark):
     """Return StructType/StructField schema for the current backend."""
-    _imports = get_spark_imports()
+    _imports = get_imports()
     StructType = _imports.StructType
     StructField = _imports.StructField
     StringType = _imports.StringType

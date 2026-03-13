@@ -3,7 +3,7 @@
 Tests fix for issue #112: Table data not visible after append write.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
+from tests.tools.parity_base import ParityTestBase
 
 
 class TestTableAppendPersistence(ParityTestBase):

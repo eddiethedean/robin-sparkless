@@ -6,9 +6,9 @@ class TestFunctionAPIs:
 
     def test_current_date_is_function_not_method(self, spark):
         """Test that current_date is a function, not DataFrame method."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame([{"id": 1}], ["id"])
@@ -23,9 +23,9 @@ class TestFunctionAPIs:
 
     def test_current_timestamp_is_function_not_method(self, spark):
         """Test that current_timestamp is a function, not DataFrame method."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame([{"id": 1}], ["id"])
@@ -40,9 +40,9 @@ class TestFunctionAPIs:
 
     def test_functions_are_static_methods(self, spark):
         """Test that functions are accessible as static methods."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         # All these should work as static method calls
@@ -60,9 +60,9 @@ class TestFunctionAPIs:
 
     def test_function_signatures_match_pyspark(self, spark):
         """Test that function signatures match PySpark patterns."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame([{"id": 1, "value": 10}], ["id", "value"])

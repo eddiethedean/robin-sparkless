@@ -49,6 +49,7 @@ nav:
   - Doc index: DOC_INDEX.md
   - Python (Sparkless v4):
     - Getting started: python_getting_started.md
+    - Testing Guide: TESTING_GUIDE.md
     - Migration (PySpark / Sparkless 3): python_migration.md
   - Getting started:
     - User guide: USER_GUIDE.md

@@ -4,8 +4,8 @@ PySpark parity tests for array functions.
 Tests validate that Sparkless array functions behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestArrayFunctionsParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_array_contains(self, spark):
         """Test array_contains function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "array_contains")
         df = spark.createDataFrame(expected["input_data"])
@@ -22,7 +22,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_array_position(self, spark):
         """Test array_position function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "array_position")
         df = spark.createDataFrame(expected["input_data"])
@@ -31,7 +31,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_size(self, spark):
         """Test size function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "size")
         df = spark.createDataFrame(expected["input_data"])
@@ -40,7 +40,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_element_at(self, spark):
         """Test element_at function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "element_at")
         df = spark.createDataFrame(expected["input_data"])
@@ -49,7 +49,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_explode(self, spark):
         """Test explode function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "explode")
         df = spark.createDataFrame(expected["input_data"])
@@ -58,7 +58,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_array_distinct(self, spark):
         """Test array_distinct function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "array_distinct")
         df = spark.createDataFrame(expected["input_data"])
@@ -74,7 +74,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_array_join(self, spark):
         """Test array_join function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "array_join")
         df = spark.createDataFrame(expected["input_data"])
@@ -83,7 +83,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_array_union(self, spark):
         """Test array_union function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "array_union")
         df = spark.createDataFrame(expected["input_data"])
@@ -92,7 +92,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_array_sort(self, spark):
         """Test array_sort function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "array_sort")
         df = spark.createDataFrame(expected["input_data"])
@@ -101,7 +101,7 @@ class TestArrayFunctionsParity(ParityTestBase):
 
     def test_array_remove(self, spark):
         """Test array_remove function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("arrays", "array_remove")
         df = spark.createDataFrame(expected["input_data"])

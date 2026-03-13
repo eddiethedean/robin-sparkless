@@ -2,12 +2,12 @@
 Unit tests for Issue #330: Struct field selection with alias fails.
 
 Uses PySpark APIs only: struct fields via getField("E1"), getField("E2") (case as in schema).
-StructType/Window from get_spark_imports().
+StructType/Window from get_imports().
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 StructType = _imports.StructType

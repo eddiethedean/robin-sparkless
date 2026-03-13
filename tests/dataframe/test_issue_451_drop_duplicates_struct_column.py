@@ -6,13 +6,13 @@ when calling dropDuplicates() after materialization on a DataFrame with a struct
 The fix was applied in PR #462 (issue #448): _make_hashable handles both list and dict.
 
 Tests are written PySpark-first: run with PySpark, then mock:
-  SPARKLESS_TEST_BACKEND=pyspark pytest tests/test_issue_451_drop_duplicates_struct_column.py -v
+  SPARKLESS_TEST_MODE=pyspark pytest tests/test_issue_451_drop_duplicates_struct_column.py -v
   pytest tests/test_issue_451_drop_duplicates_struct_column.py -v
 
 https://github.com/eddiethedean/sparkless/issues/451
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _row_val(row, key):
@@ -23,14 +23,14 @@ def _row_val(row, key):
 
 
 def test_drop_duplicates_struct_column_after_materialization_exact_issue_451(
-    spark, spark_backend
+    spark, spark_mode
 ):
     """Exact scenario from #451: struct column + materialize + dropDuplicates.
 
     Previously raised TypeError: unhashable type: 'dict' because struct columns
     materialize as dict and were not hashable for set membership.
     """
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -55,9 +55,9 @@ def test_drop_duplicates_struct_column_after_materialization_exact_issue_451(
         assert struct_val is not None
 
 
-def test_drop_duplicates_struct_column_before_materialization(spark, spark_backend):
+def test_drop_duplicates_struct_column_before_materialization(spark, spark_mode):
     """dropDuplicates before materialization (workaround from issue - should still work)."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -77,9 +77,9 @@ def test_drop_duplicates_struct_column_before_materialization(spark, spark_backe
     assert ids == {"1", "2"}
 
 
-def test_distinct_struct_column_after_materialization(spark, spark_backend):
+def test_distinct_struct_column_after_materialization(spark, spark_mode):
     """distinct() with struct column after materialization."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [
@@ -97,9 +97,9 @@ def test_distinct_struct_column_after_materialization(spark, spark_backend):
     assert {_row_val(r, "id") for r in rows} == {1, 2}
 
 
-def test_drop_duplicates_subset_with_struct_column(spark, spark_backend):
+def test_drop_duplicates_subset_with_struct_column(spark, spark_mode):
     """dropDuplicates(subset) when struct column exists but subset excludes it."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
 
     df = spark.createDataFrame(
         [

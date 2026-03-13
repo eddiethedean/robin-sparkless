@@ -7,11 +7,11 @@ Sparkless was returning:
 Instead of PySpark behavior:
 - [1, 2, 3] (integers, deduplicated, original element type preserved)
 
-Run with PySpark first: SPARKLESS_TEST_BACKEND=pyspark pytest tests/test_issue_439_array_distinct.py -v
+Run with PySpark first: SPARKLESS_TEST_MODE=pyspark pytest tests/test_issue_439_array_distinct.py -v
 Then mock: pytest tests/test_issue_439_array_distinct.py -v
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def _row_val(row: object, key: str) -> object:
@@ -24,9 +24,9 @@ def _row_val(row: object, key: str) -> object:
 class TestIssue439ArrayDistinct:
     """Test array_distinct preserves element type and deduplicates correctly."""
 
-    def test_array_distinct_integer_arrays_preserves_type(self, spark, spark_backend):
+    def test_array_distinct_integer_arrays_preserves_type(self, spark, spark_mode):
         """array_distinct on int arrays returns int array, not string array."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -56,9 +56,9 @@ class TestIssue439ArrayDistinct:
         for v in bob_valset:
             assert isinstance(v, int), f"Expected int, got {type(v).__name__}: {v!r}"
 
-    def test_array_distinct_string_arrays(self, spark, spark_backend):
+    def test_array_distinct_string_arrays(self, spark, spark_mode):
         """array_distinct on string arrays returns deduplicated string array."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -83,9 +83,9 @@ class TestIssue439ArrayDistinct:
         assert list(row1) == ["x"]
         assert isinstance(row1[0], str)
 
-    def test_array_distinct_with_column_expr(self, spark, spark_backend):
+    def test_array_distinct_with_column_expr(self, spark, spark_mode):
         """array_distinct(F.col('Value')) works same as string column name."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -103,13 +103,13 @@ class TestIssue439ArrayDistinct:
         for v in vals:
             assert isinstance(v, int)
 
-    def test_array_distinct_empty_array(self, spark, spark_backend):
+    def test_array_distinct_empty_array(self, spark, spark_mode):
         """array_distinct on empty array returns empty array."""
-        F = get_spark_imports(spark_backend).F
-        StructType = get_spark_imports(spark_backend).StructType
-        StructField = get_spark_imports(spark_backend).StructField
-        ArrayType = get_spark_imports(spark_backend).ArrayType
-        IntegerType = get_spark_imports(spark_backend).IntegerType
+        F = get_imports(spark_mode).F
+        StructType = get_imports(spark_mode).StructType
+        StructField = get_imports(spark_mode).StructField
+        ArrayType = get_imports(spark_mode).ArrayType
+        IntegerType = get_imports(spark_mode).IntegerType
 
         schema = StructType([StructField("arr", ArrayType(IntegerType()))])
         df = spark.createDataFrame([{"arr": []}], schema=schema)
@@ -121,9 +121,9 @@ class TestIssue439ArrayDistinct:
         assert vals is not None
         assert vals == []
 
-    def test_array_distinct_single_element(self, spark, spark_backend):
+    def test_array_distinct_single_element(self, spark, spark_mode):
         """array_distinct on single-element array returns same."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -142,9 +142,9 @@ class TestIssue439ArrayDistinct:
     # Robust / edge-case tests
     # -------------------------------------------------------------------------
 
-    def test_array_distinct_with_nulls_in_array(self, spark, spark_backend):
+    def test_array_distinct_with_nulls_in_array(self, spark, spark_mode):
         """array_distinct deduplicates nulls: [1, None, 1, None] -> [1, None]."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -164,13 +164,13 @@ class TestIssue439ArrayDistinct:
         assert row1 is not None
         assert len(row1) == 1 and row1[0] is None
 
-    def test_array_distinct_null_array_returns_null(self, spark, spark_backend):
+    def test_array_distinct_null_array_returns_null(self, spark, spark_mode):
         """array_distinct on null array (whole column null) returns null."""
-        F = get_spark_imports(spark_backend).F
-        StructType = get_spark_imports(spark_backend).StructType
-        StructField = get_spark_imports(spark_backend).StructField
-        ArrayType = get_spark_imports(spark_backend).ArrayType
-        IntegerType = get_spark_imports(spark_backend).IntegerType
+        F = get_imports(spark_mode).F
+        StructType = get_imports(spark_mode).StructType
+        StructField = get_imports(spark_mode).StructField
+        ArrayType = get_imports(spark_mode).ArrayType
+        IntegerType = get_imports(spark_mode).IntegerType
 
         schema = StructType([StructField("a", ArrayType(IntegerType()), True)])
         df = spark.createDataFrame([{"a": None}], schema=schema)
@@ -178,9 +178,9 @@ class TestIssue439ArrayDistinct:
         rows = result.collect()
         assert _row_val(rows[0], "d") is None
 
-    def test_array_distinct_float_arrays_preserves_type(self, spark, spark_backend):
+    def test_array_distinct_float_arrays_preserves_type(self, spark, spark_mode):
         """array_distinct on float arrays preserves float type."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame([{"a": [1.5, 1.5, 2.0, 3.14]}])
         result = df.withColumn("d", F.array_distinct("a"))
@@ -194,9 +194,9 @@ class TestIssue439ArrayDistinct:
                 f"Expected float, got {type(v).__name__}: {v!r}"
             )
 
-    def test_array_distinct_boolean_arrays(self, spark, spark_backend):
+    def test_array_distinct_boolean_arrays(self, spark, spark_mode):
         """array_distinct on boolean arrays preserves type."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame([{"a": [True, False, True, False]}])
         result = df.withColumn("d", F.array_distinct("a"))
@@ -208,9 +208,9 @@ class TestIssue439ArrayDistinct:
         for v in vals:
             assert isinstance(v, bool), f"Expected bool, got {type(v).__name__}: {v!r}"
 
-    def test_array_distinct_all_duplicates_int(self, spark, spark_backend):
+    def test_array_distinct_all_duplicates_int(self, spark, spark_mode):
         """array_distinct when all elements are same returns single int."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame([{"a": [7, 7, 7]}, {"a": [99, 99, 99]}])
         result = df.withColumn("d", F.array_distinct("a"))
@@ -221,9 +221,9 @@ class TestIssue439ArrayDistinct:
         assert list(_row_val(rows[1], "d")) == [99]
         assert isinstance(_row_val(rows[1], "d")[0], int)
 
-    def test_array_distinct_all_duplicates_string(self, spark, spark_backend):
+    def test_array_distinct_all_duplicates_string(self, spark, spark_mode):
         """array_distinct when all elements are same returns single string."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame([{"a": ["x", "x"]}, {"a": ["y", "y", "y"]}])
         result = df.withColumn("d", F.array_distinct("a"))
@@ -234,9 +234,9 @@ class TestIssue439ArrayDistinct:
         assert list(_row_val(rows[1], "d")) == ["y"]
         assert isinstance(_row_val(rows[1], "d")[0], str)
 
-    def test_array_distinct_zero_values(self, spark, spark_backend):
+    def test_array_distinct_zero_values(self, spark, spark_mode):
         """array_distinct with zeros: [0, 0, 1] -> [0, 1]."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame([{"a": [0, 0, 1, 1, 0]}])
         result = df.withColumn("d", F.array_distinct("a"))
@@ -248,9 +248,9 @@ class TestIssue439ArrayDistinct:
         for v in vals:
             assert isinstance(v, int)
 
-    def test_array_distinct_chained_with_filter(self, spark, spark_backend):
+    def test_array_distinct_chained_with_filter(self, spark, spark_mode):
         """array_distinct after filter/select preserves type."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -271,9 +271,9 @@ class TestIssue439ArrayDistinct:
             for v in _row_val(row, "unique_vals"):
                 assert isinstance(v, int)
 
-    def test_array_distinct_unicode_strings(self, spark, spark_backend):
+    def test_array_distinct_unicode_strings(self, spark, spark_mode):
         """array_distinct on unicode string arrays preserves type."""
-        F = get_spark_imports(spark_backend).F
+        F = get_imports(spark_mode).F
 
         df = spark.createDataFrame(
             [
@@ -289,13 +289,13 @@ class TestIssue439ArrayDistinct:
         for v in vals:
             assert isinstance(v, str)
 
-    def test_array_distinct_multiple_rows_mixed(self, spark, spark_backend):
+    def test_array_distinct_multiple_rows_mixed(self, spark, spark_mode):
         """array_distinct across multiple rows with different array content."""
-        F = get_spark_imports(spark_backend).F
-        StructType = get_spark_imports(spark_backend).StructType
-        StructField = get_spark_imports(spark_backend).StructField
-        ArrayType = get_spark_imports(spark_backend).ArrayType
-        IntegerType = get_spark_imports(spark_backend).IntegerType
+        F = get_imports(spark_mode).F
+        StructType = get_imports(spark_mode).StructType
+        StructField = get_imports(spark_mode).StructField
+        ArrayType = get_imports(spark_mode).ArrayType
+        IntegerType = get_imports(spark_mode).IntegerType
 
         schema = StructType(
             [

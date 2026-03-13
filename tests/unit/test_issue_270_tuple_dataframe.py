@@ -7,7 +7,7 @@ downstream operations work correctly.
 """
 
 import pytest
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestIssue270TupleDataFrame:
@@ -15,7 +15,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_with_structtype_schema(self, spark):
         """Test that tuple data with StructType schema converts to dicts."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1), ("Bob", 2)]
@@ -41,7 +41,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_show_works(self, spark):
         """Test that show() works with tuple-based data."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1), ("Bob", 2)]
@@ -63,7 +63,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_unionByName_works(self, spark):
         """Test that unionByName() works with tuple-based data."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data1 = [("Alice", 1), ("Bob", 2)]
@@ -84,7 +84,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_operations_work(self, spark):
         """Test various operations that use .get(), .items(), .copy() work."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1, "IT"), ("Bob", 2, "HR")]
@@ -112,7 +112,7 @@ class TestIssue270TupleDataFrame:
 
     def test_mixed_tuple_and_dict_data(self, spark):
         """Test mixed tuple and dict data with StructType schema."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1), {"Name": "Bob", "Value": 2}]
@@ -128,7 +128,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_single_column(self, spark):
         """Test tuple data with single column schema."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice",), ("Bob",)]
@@ -144,7 +144,7 @@ class TestIssue270TupleDataFrame:
         PySpark raises PySparkValueError for mismatched lengths.
         Sparkless should match this behavior.
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice",), ("Bob", 2)]  # First tuple missing a value
@@ -169,7 +169,7 @@ class TestIssue270TupleDataFrame:
         PySpark raises PySparkValueError for mismatched lengths.
         Robin raises with LENGTH_SHOULD_BE_THE_SAME (default backend).
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1), ("Bob", 2)]
@@ -184,7 +184,7 @@ class TestIssue270TupleDataFrame:
 
     def test_list_data_with_structtype_schema(self, spark):
         """Test that list data (not just tuples) also converts correctly."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [["Alice", 1], ["Bob", 2]]
@@ -200,7 +200,7 @@ class TestIssue270TupleDataFrame:
 
     def test_pyspark_parity_exact_example(self, spark):
         """Test the exact example from issue #270."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1), ("Bob", 2)]
@@ -226,7 +226,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_with_none_values(self, spark):
         """Test tuple data with None values."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", None), ("Bob", 2), (None, 3)]
@@ -248,7 +248,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_with_different_data_types(self, spark):
         """Test tuple data with various data types."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [
@@ -276,7 +276,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_with_long_schema(self, spark):
         """Test tuple data with many columns."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [tuple(range(10)), tuple(range(10, 20))]
@@ -294,7 +294,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_single_row(self, spark):
         """Test tuple data with single row."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1)]
@@ -311,7 +311,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_empty_dataframe_with_schema(self, spark):
         """Test empty DataFrame with schema from tuple format."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = []
@@ -332,7 +332,7 @@ class TestIssue270TupleDataFrame:
 
         Note: Row objects need named fields when used with positional data.
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
         Row = imports.Row
 
@@ -352,7 +352,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_operations_comprehensive(self, spark):
         """Test comprehensive operations on tuple-based DataFrame."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1, "IT"), ("Bob", 2, "HR"), ("Charlie", 3, "IT")]
@@ -396,7 +396,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_union_operations(self, spark):
         """Test union operations with tuple-based DataFrames."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data1 = [("Alice", 1), ("Bob", 2)]
@@ -421,7 +421,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_join_operations(self, spark):
         """Test join operations with tuple-based DataFrames."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         employees = [("Alice", 1, "IT"), ("Bob", 2, "HR")]
@@ -449,7 +449,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_error_message_matches_pyspark(self, spark):
         """Test that error messages match PySpark exactly."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         # Test mismatched length - first tuple too short
@@ -483,7 +483,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_all_operations_from_issue(self, spark):
         """Test all operations mentioned in issue #270."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1), ("Bob", 2)]
@@ -511,7 +511,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_with_array_type(self, spark):
         """Test tuple data with ArrayType in schema."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", [1, 2, 3]), ("Bob", [4, 5])]
@@ -528,7 +528,7 @@ class TestIssue270TupleDataFrame:
 
     def test_tuple_data_preserves_order(self, spark):
         """Test that tuple-to-dict conversion preserves field order."""
-        imports = get_spark_imports()
+        imports = get_imports()
         T = imports
 
         data = [("Alice", 1, "IT")]

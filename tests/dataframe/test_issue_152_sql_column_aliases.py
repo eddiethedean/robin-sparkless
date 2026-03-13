@@ -10,10 +10,10 @@ Error:
     Available columns: dept_id, name
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 # Get the appropriate imports based on backend (sparkless or PySpark)
-imports = get_spark_imports()
+imports = get_imports()
 F = imports.F
 
 

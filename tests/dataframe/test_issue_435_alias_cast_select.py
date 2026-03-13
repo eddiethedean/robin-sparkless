@@ -7,12 +7,12 @@ PySpark supports this combination - alias is output name, validation should use 
 https://github.com/eddiethedean/sparkless/issues/435
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
-def test_alias_cast_select_exact_issue_435(spark, spark_backend):
+def test_alias_cast_select_exact_issue_435(spark, spark_mode):
     """Exact scenario from issue #435 - alias().cast() in select."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
     df = spark.createDataFrame(
@@ -32,9 +32,9 @@ def test_alias_cast_select_exact_issue_435(spark, spark_backend):
     assert rows[1]["Name"] == "Bob" and rows[1]["ValueNew"] == 456
 
 
-def test_alias_without_cast_still_works(spark, spark_backend):
+def test_alias_without_cast_still_works(spark, spark_mode):
     """alias() without cast - regression check."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
     df = spark.createDataFrame([{"a": 1, "b": 2}])
     result = df.select(
         F.col("a"),
@@ -45,9 +45,9 @@ def test_alias_without_cast_still_works(spark, spark_backend):
     assert rows[0]["B_renamed"] == 2
 
 
-def test_cast_without_alias_still_works(spark, spark_backend):
+def test_cast_without_alias_still_works(spark, spark_mode):
     """cast() without alias - regression check."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
     df = spark.createDataFrame([{"s": "123"}])
@@ -57,9 +57,9 @@ def test_cast_without_alias_still_works(spark, spark_backend):
     assert rows[0]["s"] == 123
 
 
-def test_alias_cast_string_type(spark, spark_backend):
+def test_alias_cast_string_type(spark, spark_mode):
     """alias().cast(StringType()) in select."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame([{"num": 123}])
@@ -69,9 +69,9 @@ def test_alias_cast_string_type(spark, spark_backend):
     assert rows[0]["num_str"] == "123"
 
 
-def test_alias_cast_multiple_columns(spark, spark_backend):
+def test_alias_cast_multiple_columns(spark, spark_mode):
     """Multiple alias().cast() in select."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
     df = spark.createDataFrame([{"a": "1", "b": "2", "c": "3"}])
@@ -88,9 +88,9 @@ def test_alias_cast_multiple_columns(spark, spark_backend):
 # --- Robust edge-case tests ---
 
 
-def test_alias_cast_double_type(spark, spark_backend):
+def test_alias_cast_double_type(spark, spark_mode):
     """alias().cast(DoubleType()) in select."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.DoubleType
     df = spark.createDataFrame([{"s": "3.14"}])
@@ -100,9 +100,9 @@ def test_alias_cast_double_type(spark, spark_backend):
     assert rows[0]["dbl"] == 3.14
 
 
-def test_alias_cast_with_nulls(spark, spark_backend):
+def test_alias_cast_with_nulls(spark, spark_mode):
     """alias().cast() with null values in column."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
     df = spark.createDataFrame(
@@ -120,9 +120,9 @@ def test_alias_cast_with_nulls(spark, spark_backend):
     assert rows[2]["a_int"] == 3
 
 
-def test_alias_cast_then_filter(spark, spark_backend):
+def test_alias_cast_then_filter(spark, spark_mode):
     """alias().cast() in select then filter on new column."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
     df = spark.createDataFrame(
@@ -142,9 +142,9 @@ def test_alias_cast_then_filter(spark, spark_backend):
     assert names == {"b", "c"}
 
 
-def test_alias_cast_column_with_underscore(spark, spark_backend):
+def test_alias_cast_column_with_underscore(spark, spark_mode):
     """alias().cast() on column with underscore in name."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
     df = spark.createDataFrame([{"my_column": "42"}])
@@ -154,9 +154,9 @@ def test_alias_cast_column_with_underscore(spark, spark_backend):
     assert rows[0]["mc_int"] == 42
 
 
-def test_alias_cast_then_select_subset(spark, spark_backend):
+def test_alias_cast_then_select_subset(spark, spark_mode):
     """alias().cast() then select subset of columns."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
     df = spark.createDataFrame([{"a": "1", "b": "2", "c": "3"}])
@@ -170,9 +170,9 @@ def test_alias_cast_then_select_subset(spark, spark_backend):
     assert rows[0]["A"] == 1 and rows[0]["C"] == 3
 
 
-def test_alias_cast_long_type(spark, spark_backend):
+def test_alias_cast_long_type(spark, spark_mode):
     """alias().cast(LongType()) in select."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.LongType
     df = spark.createDataFrame([{"s": "9999999999"}])
@@ -182,9 +182,9 @@ def test_alias_cast_long_type(spark, spark_backend):
     assert rows[0]["lng"] == 9999999999
 
 
-def test_alias_cast_mixed_with_plain_select(spark, spark_backend):
+def test_alias_cast_mixed_with_plain_select(spark, spark_mode):
     """alias().cast() mixed with plain column select."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.IntegerType
     df = spark.createDataFrame([{"id": 1, "score": "100", "name": "Alice"}])

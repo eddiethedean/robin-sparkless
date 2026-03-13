@@ -3,7 +3,7 @@
 Generate expected outputs from PySpark for compatibility testing.
 
 This script runs test operations against real PySpark and captures
-the outputs to JSON files for later comparison with mock-spark.
+the outputs to JSON files for later comparison with sparkless.
 
 Usage:
     python tests/tools/generate_expected_outputs.py --all

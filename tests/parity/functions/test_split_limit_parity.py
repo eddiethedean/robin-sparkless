@@ -4,8 +4,8 @@ PySpark parity tests for split() function with limit parameter.
 Tests validate that Sparkless split() function with limit behaves identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestSplitLimitParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestSplitLimitParity(ParityTestBase):
 
     def test_split_with_limit_parity(self, spark):
         """Test split with limit parameter matches PySpark (issue #328)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         # Exact example from issue #328
@@ -41,7 +41,7 @@ class TestSplitLimitParity(ParityTestBase):
 
     def test_split_with_limit_1_parity(self, spark):
         """Test split with limit=1 matches PySpark (no split, returns original)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(
@@ -61,7 +61,7 @@ class TestSplitLimitParity(ParityTestBase):
 
     def test_split_without_limit_parity(self, spark):
         """Test split without limit matches PySpark default behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(
@@ -85,7 +85,7 @@ class TestSplitLimitParity(ParityTestBase):
 
     def test_split_with_limit_minus_one_parity(self, spark):
         """Test split with limit=-1 (no limit) matches PySpark."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(

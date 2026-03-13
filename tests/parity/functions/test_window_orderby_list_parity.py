@@ -4,7 +4,7 @@ PySpark parity tests for Issue #335: Window().orderBy() should accept list of co
 These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestWindowOrderByListParity:
@@ -12,7 +12,7 @@ class TestWindowOrderByListParity:
 
     def test_window_orderby_list_basic_parity(self):
         """Test basic Window().orderBy() with list matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
         Window = spark_imports.Window
@@ -42,7 +42,7 @@ class TestWindowOrderByListParity:
 
     def test_window_orderby_list_multiple_columns_parity(self):
         """Test Window().orderBy() with multiple columns in list matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
         Window = spark_imports.Window
@@ -73,7 +73,7 @@ class TestWindowOrderByListParity:
 
     def test_window_partitionby_list_parity(self):
         """Test Window().partitionBy() with list matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
         Window = spark_imports.Window

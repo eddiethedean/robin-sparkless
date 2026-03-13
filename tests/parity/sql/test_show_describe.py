@@ -4,7 +4,7 @@ PySpark parity tests for SQL SHOW and DESCRIBE operations.
 Tests validate that Sparkless SHOW and DESCRIBE statements behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
+from tests.tools.parity_base import ParityTestBase
 
 
 class TestSQLShowDescribeParity(ParityTestBase):

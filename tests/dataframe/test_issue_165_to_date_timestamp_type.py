@@ -9,9 +9,9 @@ class TestIssue165ToDateTimestampType:
 
     def test_to_date_with_timestamp_type(self, spark):
         """Test that to_date() accepts TimestampType input, just like PySpark."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         self._configure_time_parser(spark)
@@ -52,9 +52,9 @@ class TestIssue165ToDateTimestampType:
 
     def test_to_date_with_string_type(self, spark):
         """Test that to_date() still works with StringType input."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         self._configure_time_parser(spark)
@@ -86,10 +86,10 @@ class TestIssue165ToDateTimestampType:
 
     def test_to_date_with_date_type(self, spark):
         """Test that to_date() works with DateType input."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
         from datetime import date
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         self._configure_time_parser(spark)

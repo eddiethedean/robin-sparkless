@@ -4,22 +4,22 @@ These tests use the unified `spark` fixture and run with either PySpark or
 Sparkless (mock). PySpark results are the baseline; Sparkless should match.
 
 Run with PySpark first to establish baseline:
-  MOCK_SPARK_TEST_BACKEND=pyspark pytest tests/test_issues_376_382_robust.py -v
+  SPARKLESS_TEST_MODE=pyspark pytest tests/test_issues_376_382_robust.py -v
 
 Then run with Sparkless to verify parity:
-  MOCK_SPARK_TEST_BACKEND=mock pytest tests/test_issues_376_382_robust.py -v
+  SPARKLESS_TEST_MODE=mock pytest tests/test_issues_376_382_robust.py -v
 
 All 8 tests pass with PySpark. With Sparkless, some tests may fail until
 remaining executor/join/select resolution gaps are addressed (self-join,
 multi-JOIN, compound join condition, select t1.id resolution).
 
-Uses get_spark_imports from fixture only.
+Uses get_imports from fixture only.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 
 

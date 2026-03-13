@@ -4,8 +4,8 @@ PySpark parity tests for null handling functions.
 Tests validate that Sparkless null handling functions behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestNullHandlingFunctionsParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
 
     def test_coalesce(self, spark):
         """Test coalesce function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("null_handling", "coalesce")
         df = spark.createDataFrame(expected["input_data"])
@@ -22,7 +22,7 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
 
     def test_isnull(self, spark):
         """Test isnull function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("null_handling", "isnull")
         df = spark.createDataFrame(expected["input_data"])
@@ -31,7 +31,7 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
 
     def test_isnotnull(self, spark):
         """Test isnotnull function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("null_handling", "isnotnull")
         df = spark.createDataFrame(expected["input_data"])
@@ -40,7 +40,7 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
 
     def test_when_otherwise(self, spark):
         """Test when/otherwise function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("null_handling", "when_otherwise")
         df = spark.createDataFrame(expected["input_data"])
@@ -49,7 +49,7 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
 
     def test_nvl(self, spark):
         """Test nvl function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("null_handling", "nvl")
         df = spark.createDataFrame(expected["input_data"])
@@ -58,7 +58,7 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
 
     def test_nullif(self, spark):
         """Test nullif function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("null_handling", "nullif")
         df = spark.createDataFrame(expected["input_data"])
@@ -67,7 +67,7 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
 
     def test_ifnull(self, spark):
         """Test ifnull function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "ifnull")
         df = spark.createDataFrame(expected["input_data"])
@@ -76,7 +76,7 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
 
     def test_nanvl(self, spark):
         """Test nanvl function matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "nanvl")
         df = spark.createDataFrame(expected["input_data"])

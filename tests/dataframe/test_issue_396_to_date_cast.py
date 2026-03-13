@@ -6,7 +6,7 @@ DateNumber is LongType. Sparkless was rejecting it because validation checked
 the source column type instead of recognizing the cast-to-string.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestIssue396ToDateCast:
@@ -14,7 +14,7 @@ class TestIssue396ToDateCast:
 
     def test_to_date_cast_string_type_exact_issue(self, spark):
         """Exact scenario from issue #396: cast(StringType())."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, StringType = imports.F, imports.StringType
         df = spark.createDataFrame(
             [
@@ -32,7 +32,7 @@ class TestIssue396ToDateCast:
 
     def test_to_date_cast_string_literal(self, spark):
         """Alternate syntax: cast('string')."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -50,7 +50,7 @@ class TestIssue396ToDateCast:
 
     def test_to_date_cast_with_show(self, spark):
         """withColumn + show() as in issue example."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, StringType = imports.F, imports.StringType
         df = spark.createDataFrame(
             [
@@ -68,7 +68,7 @@ class TestIssue396ToDateCast:
 
     def test_to_date_cast_in_select(self, spark):
         """to_date cast in select()."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -87,7 +87,7 @@ class TestIssue396ToDateCast:
 
     def test_to_date_cast_with_nulls(self, spark):
         """to_date cast with null values in column."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -107,7 +107,7 @@ class TestIssue396ToDateCast:
 
     def test_to_date_cast_different_format(self, spark):
         """to_date cast with yyyy-MM-dd format (hyphen)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         # Store as string representation of int: 20260203 -> parse as yyyyMMdd
         df = spark.createDataFrame([{"DateNumber": 20260203}])
@@ -119,7 +119,7 @@ class TestIssue396ToDateCast:
 
     def test_to_date_cast_then_filter(self, spark):
         """to_date cast then filter on result."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -137,7 +137,7 @@ class TestIssue396ToDateCast:
 
     def test_to_date_cast_integer_type_column(self, spark):
         """to_date cast on IntegerType column (not just LongType)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F, IntegerType, StructType, StructField = (
             imports.F,
             imports.IntegerType,

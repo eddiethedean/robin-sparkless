@@ -7,9 +7,9 @@ class TestToTimestampCompatibility:
         This is the exact scenario from issue #131.
         """
         from datetime import datetime
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         # Create DataFrame with timestamp string
@@ -35,9 +35,9 @@ class TestToTimestampCompatibility:
     def test_to_timestamp_string_type_with_format(self, spark):
         """Test that to_timestamp() works with StringType input and format string."""
         from datetime import datetime
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [("2024-01-01T10:00:00",)]
@@ -55,9 +55,9 @@ class TestToTimestampCompatibility:
     def test_to_timestamp_string_type_without_format(self, spark):
         """Test that to_timestamp() works with StringType input without format."""
         from datetime import datetime
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [("2024-01-01 10:00:00",)]
@@ -72,9 +72,9 @@ class TestToTimestampCompatibility:
     def test_to_timestamp_integer_type_unix_timestamp(self, spark):
         """Test that to_timestamp() accepts IntegerType input (Unix timestamp in seconds)."""
         from datetime import datetime
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         IntegerType = imports.IntegerType
         StructType = imports.StructType
@@ -94,9 +94,9 @@ class TestToTimestampCompatibility:
     def test_to_timestamp_long_type_unix_timestamp(self, spark):
         """Test that to_timestamp() accepts LongType input (Unix timestamp in seconds)."""
         from datetime import datetime
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         LongType = imports.LongType
         StructType = imports.StructType
@@ -116,9 +116,9 @@ class TestToTimestampCompatibility:
     def test_to_timestamp_date_type_conversion(self, spark):
         """Test that to_timestamp() accepts DateType input (converts Date to Timestamp)."""
         from datetime import date, datetime
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DateType = imports.DateType
         StructType = imports.StructType
@@ -138,9 +138,9 @@ class TestToTimestampCompatibility:
     def test_to_timestamp_double_type_unix_timestamp(self, spark):
         """Test that to_timestamp() accepts DoubleType input (Unix timestamp with decimal seconds)."""
         from datetime import datetime
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         DoubleType = imports.DoubleType
         StructType = imports.StructType
@@ -159,9 +159,9 @@ class TestToTimestampCompatibility:
 
     def test_to_timestamp_rejects_unsupported_type(self, spark):
         """Test that to_timestamp() rejects unsupported input types."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         BooleanType = imports.BooleanType
         StructType = imports.StructType
@@ -184,9 +184,9 @@ class TestToTimestampCompatibility:
         with SchemaError when used on a column created by regexp_replace.
         """
         from datetime import datetime, timedelta
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         StructType = imports.StructType
         StructField = imports.StructField

@@ -2,15 +2,15 @@
 Tests for strict type checking in functions.
 
 Asserts PySpark behavior: to_timestamp/to_date accept or reject types per PySpark.
-All tests use backend-agnostic imports (spark fixture + get_spark_imports).
+All tests use backend-agnostic imports (spark fixture + get_imports).
 """
 
 import pytest
 from datetime import datetime, date
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 F = imports.F
 StructType = imports.StructType

@@ -4,8 +4,8 @@ PySpark parity tests for aggregate functions.
 Tests validate that Sparkless aggregate functions behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestAggregateFunctionsParity(ParityTestBase):
@@ -13,7 +13,7 @@ class TestAggregateFunctionsParity(ParityTestBase):
 
     def test_agg_sum(self, spark):
         """Test sum aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "agg_sum")
         df = spark.createDataFrame(expected["input_data"])
@@ -22,7 +22,7 @@ class TestAggregateFunctionsParity(ParityTestBase):
 
     def test_agg_avg(self, spark):
         """Test avg aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "agg_avg")
         df = spark.createDataFrame(expected["input_data"])
@@ -31,7 +31,7 @@ class TestAggregateFunctionsParity(ParityTestBase):
 
     def test_agg_count(self, spark):
         """Test count aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "agg_count")
         df = spark.createDataFrame(expected["input_data"])
@@ -40,7 +40,7 @@ class TestAggregateFunctionsParity(ParityTestBase):
 
     def test_agg_max(self, spark):
         """Test max aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "agg_max")
         df = spark.createDataFrame(expected["input_data"])
@@ -49,7 +49,7 @@ class TestAggregateFunctionsParity(ParityTestBase):
 
     def test_agg_min(self, spark):
         """Test min aggregation matches PySpark behavior."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         expected = self.load_expected("functions", "agg_min")
         df = spark.createDataFrame(expected["input_data"])

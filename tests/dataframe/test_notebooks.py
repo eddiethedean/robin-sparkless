@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test script to verify notebook code works."""
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 import random
 from datetime import datetime, timedelta
 import time
@@ -9,7 +9,7 @@ import time
 
 def test_quickstart(spark):
     """Test quickstart notebook code."""
-    imports = get_spark_imports()
+    imports = get_imports()
     F = imports.F
 
     print("Testing Quickstart Tutorial...")
@@ -141,7 +141,7 @@ def test_quickstart(spark):
 
 def test_dataframe_operations(spark):
     """Test dataframe operations notebook code."""
-    imports = get_spark_imports()
+    imports = get_imports()
     F = imports.F
 
     print("Testing DataFrame Operations Tutorial...")

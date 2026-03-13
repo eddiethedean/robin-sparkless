@@ -5,10 +5,10 @@ Tests for #402: format_string accepts variadic columns (PySpark parity).
 from __future__ import annotations
 
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 

@@ -5,9 +5,9 @@ window functions, chained arithmetic) must not raise RuntimeError: not found: <a
 Fixed by the same resolve_expr_column_names behavior as #212 (#200).
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 Window = _imports.Window
 

@@ -146,9 +146,9 @@ class TestIssue395FilterAndStringExpr:
 
     def test_expr_and_string_with_column(self, spark):
         """F.expr with AND and string in withColumn."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [

@@ -1,16 +1,16 @@
 """
 Test for issue #164: Type comparison error: 'cannot compare string with numeric type (i32)'
 
-Uses get_spark_imports from fixture only.
+Uses get_imports from fixture only.
 """
 
 import os
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 
@@ -79,8 +79,8 @@ class TestIssue164SchemaInferenceNumeric:
 
     @pytest.mark.skipif(
         (
-            os.environ.get("SPARKLESS_TEST_BACKEND")
-            or os.environ.get("MOCK_SPARK_TEST_BACKEND")
+            os.environ.get("SPARKLESS_TEST_MODE")
+            or os.environ.get("SPARKLESS_TEST_MODE")
             or ""
         )
         .strip()

@@ -1,15 +1,12 @@
 """Regression test for #1406: date.make_date parity."""
 
-from tests.fixtures.spark_backend import BackendType, SparkBackend
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, create_session, get_imports
 
 
 def test_make_date_parity():
-    imports = get_spark_imports(BackendType.ROBIN)
+    imports = get_imports(Mode.SPARKLESS)
     F = imports.F
-    spark = SparkBackend.create_mock_spark_session(
-        "make_date_1406", backend_type="robin"
-    )
+    spark = create_session(app_name="make_date_1406", mode=Mode.SPARKLESS)
 
     df = spark.createDataFrame(
         [(2020, 1, 2), (2020, 2, 30), (None, 1, 2)],
@@ -26,3 +23,5 @@ def test_make_date_parity():
     assert vals[0].strftime("%Y-%m-%d") == "2020-01-02"
     assert vals[1] is None
     assert vals[2] is None
+
+    spark.stop()

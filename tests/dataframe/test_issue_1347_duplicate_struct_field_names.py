@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from tests.fixtures.spark_backend import BackendType, get_backend_type
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import Mode, get_mode, is_pyspark_mode, create_session
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 SparkSession = imports.SparkSession
 StructType = imports.StructType
 StructField = imports.StructField
@@ -22,7 +22,7 @@ StringType = imports.StringType
 
 def test_duplicate_field_names_sparkless_raises(spark):
     """Sparkless rejects StructType with duplicate field names (#1347)."""
-    if get_backend_type() == BackendType.PYSPARK:
+    if get_mode() == Mode.PYSPARK:
         pytest.skip("Only sparkless rejects duplicate field names; PySpark allows them")
     schema = StructType(
         [
@@ -41,7 +41,7 @@ def test_duplicate_field_names_sparkless_raises(spark):
 
 def test_duplicate_field_names_pyspark_allows(spark):
     """PySpark allows StructType with duplicate field names (#1347)."""
-    if get_backend_type() != BackendType.PYSPARK:
+    if get_mode() != Mode.PYSPARK:
         pytest.skip("PySpark backend only")
     schema = StructType(
         [

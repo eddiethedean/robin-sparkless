@@ -6,17 +6,17 @@ where column names differ (e.g. F.col("Key") == F.col("Name")).
 PySpark resolves column names by which DataFrame contains them.
 
 Run with PySpark first to establish baseline:
-  MOCK_SPARK_TEST_BACKEND=pyspark pytest tests/test_issue_421_join_column_names.py -v
+  SPARKLESS_TEST_MODE=pyspark pytest tests/test_issue_421_join_column_names.py -v
 
 Then run with Sparkless to verify parity:
-  MOCK_SPARK_TEST_BACKEND=mock pytest tests/test_issue_421_join_column_names.py -v
+  SPARKLESS_TEST_MODE=mock pytest tests/test_issue_421_join_column_names.py -v
 
-Uses get_spark_imports from fixture only.
+Uses get_imports from fixture only.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 F = _imports.F
 
 

@@ -4,8 +4,8 @@ PySpark parity tests for DataFrame filter operations.
 Tests validate that Sparkless filter operations behave identically to PySpark.
 """
 
-from tests.fixtures.parity_base import ParityTestBase
-from tests.fixtures.spark_imports import get_spark_imports
+from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import get_imports
 
 
 class TestFilterParity(ParityTestBase):
@@ -35,7 +35,7 @@ class TestFilterParity(ParityTestBase):
         Tests fix for issue #108: Combined ColumnOperation expressions with & operator
         should be properly translated, not treated as column names.
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(
@@ -59,7 +59,7 @@ class TestFilterParity(ParityTestBase):
         Tests fix for issue #109: Combined ColumnOperation expressions with | operator
         should be properly translated, not treated as column names.
         """
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         df = spark.createDataFrame(
@@ -88,7 +88,7 @@ class TestFilterParity(ParityTestBase):
         """
         from datetime import datetime
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         StructType = imports.StructType
         StructField = imports.StructField

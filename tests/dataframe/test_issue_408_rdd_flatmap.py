@@ -38,9 +38,9 @@ def test_rdd_flatmap_then_map(spark) -> None:
 def test_rdd_flatmap_empty_rdd(spark) -> None:
     """flatMap on empty DataFrame yields empty RDD."""
     # PySpark cannot infer schema from empty list; use schema explicitly.
-    from tests.fixtures.spark_imports import get_spark_imports
+    from sparkless.testing import get_imports
 
-    imports = get_spark_imports()
+    imports = get_imports()
     schema = imports.StructType([imports.StructField("line", imports.StringType())])
     df = spark.createDataFrame([], schema)
     rdd = df.rdd.flatMap(lambda row: row["line"].split())

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Convert test files from legacy harness (get_spark, get_functions, get_session, get_window_cls)
-to new harness (spark fixture + get_spark_imports). Run from repo root."""
+to new harness (spark fixture + get_imports). Run from repo root."""
 
 from __future__ import annotations
 
@@ -40,9 +40,9 @@ def convert(path: Path) -> bool:
     else:
         text = re.sub(r"from tests\.utils import [^\n]+\n", "", text, count=1)
 
-    # 2) Add get_spark_imports block after first import block if needed
-    if (needs_F or needs_Window) and "get_spark_imports" not in text:
-        block = "from tests.fixtures.spark_imports import get_spark_imports\n\n_imports = get_spark_imports()\nF = _imports.F\n"
+    # 2) Add get_imports block after first import block if needed
+    if (needs_F or needs_Window) and "get_imports" not in text:
+        block = "from sparkless.testing import get_imports\n\n_imports = get_imports()\nF = _imports.F\n"
         if needs_Window:
             block += "Window = _imports.Window\n"
         # Insert after first 'from tests.' or 'from __future__'

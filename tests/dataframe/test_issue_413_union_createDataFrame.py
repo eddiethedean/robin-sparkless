@@ -9,9 +9,9 @@ These tests verify that:
 - union() matches by position and succeeds when schemas are compatible by position
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 StructType = imports.StructType
 StructField = imports.StructField
 IntegerType = imports.IntegerType

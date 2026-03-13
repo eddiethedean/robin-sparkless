@@ -5,7 +5,7 @@ PySpark allows df.orderBy(["col1", "col2"]) - equivalent to orderBy(*["a", "b"])
 Sparkless must unpack a single list argument to multiple columns.
 
 Uses spark fixture - runs with both sparkless and PySpark
-(MOCK_SPARK_TEST_BACKEND=pyspark).
+(SPARKLESS_TEST_MODE=pyspark).
 """
 
 

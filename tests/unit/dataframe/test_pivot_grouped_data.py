@@ -1,13 +1,13 @@
 """Unit tests for PivotGroupedData aggregate methods (Issue #267).
 
-Uses get_spark_imports() so F and session match the backend (PySpark or Robin).
+Uses get_imports() so F and session match the backend (PySpark or Robin).
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-imports = get_spark_imports()
+imports = get_imports()
 F = imports.F
 
 

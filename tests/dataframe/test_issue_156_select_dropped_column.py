@@ -2,14 +2,14 @@
 Test for issue #156: select() uses attribute access for dropped columns, causing AttributeError.
 
 This test reproduces the bug where selecting a dropped column raises AttributeError
-instead of a proper "column not found" error. Uses get_spark_imports from fixture only.
+instead of a proper "column not found" error. Uses get_imports from fixture only.
 """
 
 import pytest
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 F = _imports.F
 

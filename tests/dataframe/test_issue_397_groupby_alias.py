@@ -5,7 +5,7 @@ PySpark accepts df.groupBy(F.col('Name').alias('Key')).agg(...).
 Sparkless previously raised SparkColumnNotFoundError: cannot resolve 'Key'.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestIssue397GroupByAlias:
@@ -13,7 +13,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_alias_exact_issue(self, spark):
         """Exact scenario from issue #397."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -33,7 +33,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_alias_with_show(self, spark):
         """groupBy alias + show() as in issue example."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -49,7 +49,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_multiple_cols_one_aliased(self, spark):
         """groupBy with mix of plain and aliased columns."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -67,7 +67,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_all_cols_aliased(self, spark):
         """groupBy with all columns aliased."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -87,7 +87,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_alias_avg_max_min(self, spark):
         """groupBy alias with multiple agg functions."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -107,7 +107,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_alias_count(self, spark):
         """groupBy alias with count(*)."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -127,7 +127,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_alias_with_nulls(self, spark):
         """groupBy alias when group column has nulls."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -145,7 +145,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_alias_select_after(self, spark):
         """Select after groupBy with alias."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -167,7 +167,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_alias_agg_alias_matches_issue_expected(self, spark):
         """groupBy alias + agg alias to match issue expected output."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [
@@ -189,7 +189,7 @@ class TestIssue397GroupByAlias:
 
     def test_groupby_list_syntax_with_alias(self, spark):
         """groupBy([col.alias(...)]) list syntax."""
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
         df = spark.createDataFrame(
             [

@@ -1,4 +1,4 @@
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 def test_groupby_agg_accepts_aggregate_function_objects(spark) -> None:
@@ -9,7 +9,7 @@ def test_groupby_agg_accepts_aggregate_function_objects(spark) -> None:
     This test ensures that passing AggregateFunction objects into agg() works and
     produces a sensible aggregated schema.
     """
-    imports = get_spark_imports()
+    imports = get_imports()
     F = imports.F
 
     try:

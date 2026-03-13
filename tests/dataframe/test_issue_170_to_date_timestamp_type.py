@@ -4,9 +4,9 @@ class TestIssue170ToDateTimestampType:
     def test_to_date_on_timestamp_type_basic(self, spark):
         """Test the basic reproduction case from issue #170."""
         from datetime import datetime
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         # Create test data
@@ -55,9 +55,9 @@ class TestIssue170ToDateTimestampType:
 
     def test_to_date_on_timestamp_type_with_drop(self, spark):
         """Test to_date() on TimestampType followed by drop()."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -85,9 +85,9 @@ class TestIssue170ToDateTimestampType:
 
     def test_to_date_on_timestamp_type_with_select(self, spark):
         """Test to_date() on TimestampType + select() chain."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [
@@ -112,9 +112,9 @@ class TestIssue170ToDateTimestampType:
 
     def test_to_date_on_timestamp_type_with_filter(self, spark):
         """Test to_date() on TimestampType + filter() chain."""
-        from tests.fixtures.spark_imports import get_spark_imports
+        from sparkless.testing import get_imports
 
-        imports = get_spark_imports()
+        imports = get_imports()
         F = imports.F
 
         data = [

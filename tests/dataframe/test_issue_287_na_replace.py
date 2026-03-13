@@ -7,9 +7,9 @@ Exception assertions use generic Exception (PySpark raises AnalysisException/Val
 
 import os
 import pytest
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
-_imports = get_spark_imports()
+_imports = get_imports()
 SparkSession = _imports.SparkSession
 
 
@@ -431,8 +431,8 @@ class TestIssue287NAReplace:
 
     @pytest.mark.skipif(
         (
-            os.environ.get("SPARKLESS_TEST_BACKEND")
-            or os.environ.get("MOCK_SPARK_TEST_BACKEND")
+            os.environ.get("SPARKLESS_TEST_MODE")
+            or os.environ.get("SPARKLESS_TEST_MODE")
             or ""
         )
         .strip()

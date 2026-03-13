@@ -4,7 +4,7 @@ PySpark parity tests for Issue #331: Join with array_contains() condition.
 These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
 class TestArrayContainsJoinParity:
@@ -12,7 +12,7 @@ class TestArrayContainsJoinParity:
 
     def test_array_contains_join_basic_parity(self):
         """Test basic array_contains join matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
 
@@ -49,7 +49,7 @@ class TestArrayContainsJoinParity:
 
     def test_array_contains_join_multiple_matches_parity(self):
         """Test array_contains join with multiple matches matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
 
@@ -85,7 +85,7 @@ class TestArrayContainsJoinParity:
 
     def test_array_contains_join_left_parity(self):
         """Test array_contains join with left join type matches PySpark."""
-        spark_imports = get_spark_imports()
+        spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
 

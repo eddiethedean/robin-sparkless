@@ -15,6 +15,7 @@
 **Python (Sparkless v4)**
 
 - **[Getting started (Python)](python_getting_started.md)** — Installation, quick start, core features, testing
+- **[Testing Guide](TESTING_GUIDE.md)** — Dual-mode testing with `sparkless.testing`
 - **[Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md)** — Why Sparkless v4, Sparkless 3 vs 4.x, API overview, backend
 - **[Migration (PySpark / Sparkless 3)](python_migration.md)** — Switching from PySpark or Sparkless 3.x
 - **[PySpark differences](PYSPARK_DIFFERENCES.md)** — Same reference applies to Python usage
@@ -42,6 +43,7 @@ Robin Sparkless provides a **PySpark-like API** in Rust so you can write familia
 **Python (Sparkless v4)** — mirrors [Sparkless](https://sparkless.readthedocs.io/) doc structure
 
 - **Getting started** — [Python getting started](python_getting_started.md) (installation, quick start, DataFrame/SQL, testing, lazy evaluation)
+- **Testing** — [Testing Guide](TESTING_GUIDE.md) (`sparkless.testing` module: dual-mode testing, fixtures, markers, DataFrame comparison)
 - **API / reference** — [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) (API overview), [PySpark differences](PYSPARK_DIFFERENCES.md)
 - **Guides** — [Migration from PySpark / Sparkless 3](python_migration.md)
 - **Additional** — [Parity status](PARITY_STATUS.md) (fixture coverage)

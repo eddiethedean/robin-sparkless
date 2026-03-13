@@ -8,12 +8,12 @@ where col.value was StringType. Must translate Column/ColumnOperation, not pl.li
 https://github.com/eddiethedean/sparkless/issues/436
 """
 
-from tests.fixtures.spark_imports import get_spark_imports
+from sparkless.testing import get_imports
 
 
-def test_concat_literal_cast_string_exact_issue_436(spark, spark_backend):
+def test_concat_literal_cast_string_exact_issue_436(spark, spark_mode):
     """Exact scenario from issue #436 - concat with lit + cast(StringType) + lit."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame(
@@ -37,9 +37,9 @@ def test_concat_literal_cast_string_exact_issue_436(spark, spark_backend):
     assert rows[1]["TextColumn"] == "Value Is: 789.01 Dollars"
 
 
-def test_concat_literal_col_cast_string(spark, spark_backend):
+def test_concat_literal_col_cast_string(spark, spark_mode):
     """concat with lit + col.cast(StringType) + lit."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame([{"n": 42}])
@@ -51,9 +51,9 @@ def test_concat_literal_col_cast_string(spark, spark_backend):
     assert rows[0]["s"] == "num: 42!"
 
 
-def test_concat_all_literals_still_works(spark, spark_backend):
+def test_concat_all_literals_still_works(spark, spark_mode):
     """concat with all literals - regression check."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
     df = spark.createDataFrame([{"x": 1}])
     result = df.select(F.concat(F.lit("a"), F.lit("b"), F.lit("c")).alias("s"))
     rows = result.collect()
@@ -61,9 +61,9 @@ def test_concat_all_literals_still_works(spark, spark_backend):
     assert rows[0]["s"] == "abc"
 
 
-def test_concat_all_columns_still_works(spark, spark_backend):
+def test_concat_all_columns_still_works(spark, spark_mode):
     """concat with all column refs - regression check."""
-    F = get_spark_imports(spark_backend).F
+    F = get_imports(spark_mode).F
     df = spark.createDataFrame([{"a": "x", "b": "y"}])
     result = df.select(F.concat(F.col("a"), F.col("b")).alias("s"))
     rows = result.collect()
@@ -71,9 +71,9 @@ def test_concat_all_columns_still_works(spark, spark_backend):
     assert rows[0]["s"] == "xy"
 
 
-def test_concat_expression_cast_string(spark, spark_backend):
+def test_concat_expression_cast_string(spark, spark_mode):
     """concat with expression (e.g. upper) cast to string."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame([{"name": "alice"}])
@@ -92,9 +92,9 @@ def test_concat_expression_cast_string(spark, spark_backend):
 # --- Robust edge-case tests ---
 
 
-def test_concat_cast_string_with_nulls(spark, spark_backend):
+def test_concat_cast_string_with_nulls(spark, spark_mode):
     """concat with cast(StringType) when column has nulls - null propagates."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame(
@@ -114,9 +114,9 @@ def test_concat_cast_string_with_nulls(spark, spark_backend):
     assert rows[2]["s"] == "val: 3!"
 
 
-def test_concat_multiple_cast_expressions(spark, spark_backend):
+def test_concat_multiple_cast_expressions(spark, spark_mode):
     """concat with multiple cast(StringType) expressions."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame([{"a": 1, "b": 2, "c": 3}])
@@ -134,9 +134,9 @@ def test_concat_multiple_cast_expressions(spark, spark_backend):
     assert rows[0]["s"] == "1-2-3"
 
 
-def test_concat_abs_cast_string(spark, spark_backend):
+def test_concat_abs_cast_string(spark, spark_mode):
     """concat with F.abs(col).cast(StringType)."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame([{"n": -42}])
@@ -146,9 +146,9 @@ def test_concat_abs_cast_string(spark, spark_backend):
     assert rows[0]["s"] == "abs: 42"
 
 
-def test_concat_length_cast_string(spark, spark_backend):
+def test_concat_length_cast_string(spark, spark_mode):
     """concat with F.length(col).cast(StringType)."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame([{"s": "hello"}])
@@ -160,9 +160,9 @@ def test_concat_length_cast_string(spark, spark_backend):
     assert rows[0]["t"] == "len: 5"
 
 
-def test_concat_filter_after(spark, spark_backend):
+def test_concat_filter_after(spark, spark_mode):
     """concat with cast, then filter on result."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame(
@@ -184,9 +184,9 @@ def test_concat_filter_after(spark, spark_backend):
     assert rows[0]["name"] == "Bob"
 
 
-def test_concat_float_cast_string(spark, spark_backend):
+def test_concat_float_cast_string(spark, spark_mode):
     """concat with float column cast to string."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame([{"f": 3.14159}])
@@ -198,9 +198,9 @@ def test_concat_float_cast_string(spark, spark_backend):
     assert "3.14" in rows[0]["s"] or "3.141" in rows[0]["s"]
 
 
-def test_concat_with_column_alias_cast(spark, spark_backend):
+def test_concat_with_column_alias_cast(spark, spark_mode):
     """concat with alias().cast(StringType) - ensures alias+cast in concat works."""
-    imports = get_spark_imports(spark_backend)
+    imports = get_imports(spark_mode)
     F = imports.F
     T = imports.StringType
     df = spark.createDataFrame([{"x": 1}])
