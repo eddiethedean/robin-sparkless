@@ -7020,9 +7020,7 @@ impl PyDataFrameNaFunctions {
                 return Ok(PyDataFrame::wrap(current));
             }
             // PySpark requires value for all non-dict cases
-            return Err(to_py_err(
-                "value is required when to_replace is not a dict",
-            ));
+            return Err(to_py_err("value is required when to_replace is not a dict"));
         }
 
         let value = value.unwrap();
