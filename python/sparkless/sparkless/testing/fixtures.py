@@ -121,6 +121,10 @@ def spark(request: pytest.FixtureRequest) -> Generator[Any, None, None]:
     automatically creates the appropriate session type based on the
     SPARKLESS_TEST_MODE environment variable.
 
+    Delta Lake support can be enabled for PySpark mode by:
+    - Using the @pytest.mark.delta marker on the test
+    - Setting SPARKLESS_ENABLE_DELTA=1 environment variable
+
     Yields:
         SparkSession: A SparkSession for the current test mode.
 
@@ -129,11 +133,28 @@ def spark(request: pytest.FixtureRequest) -> Generator[Any, None, None]:
             df = spark.createDataFrame([(1, "a"), (2, "b")], ["id", "val"])
             result = df.filter(df.id > 1).collect()
             assert len(result) == 1
+
+        @pytest.mark.delta
+        def test_delta_table(spark):
+            # This test will have Delta Lake enabled in PySpark mode
+            df = spark.createDataFrame([(1,)], ["id"])
+            df.write.format("delta").save("/tmp/delta_table")
     """
     mode = get_mode()
 
-    # Use shared session if enabled
-    if _use_shared_session():
+    # Check if Delta Lake should be enabled
+    enable_delta = False
+    if request.node.get_closest_marker("delta"):
+        enable_delta = True
+    elif os.environ.get("SPARKLESS_ENABLE_DELTA", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        enable_delta = True
+
+    # Use shared session if enabled (but not for delta tests)
+    if _use_shared_session() and not enable_delta:
         session = _get_shared_session(mode)
         yield _SharedSessionWrapper(session)
         return
@@ -144,7 +165,9 @@ def spark(request: pytest.FixtureRequest) -> Generator[Any, None, None]:
         test_name = f"test_{request.node.name[:50]}"
 
     try:
-        session = create_session(app_name=test_name, mode=mode)
+        session = create_session(
+            app_name=test_name, mode=mode, enable_delta=enable_delta
+        )
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
         if (
@@ -169,6 +192,10 @@ def isolated_session(request: pytest.FixtureRequest) -> Generator[Any, None, Non
     Unlike the `spark` fixture, this always creates a new session and
     never uses shared sessions, even when SPARKLESS_SHARED_SESSION is set.
 
+    Delta Lake support can be enabled for PySpark mode by:
+    - Using the @pytest.mark.delta marker on the test
+    - Setting SPARKLESS_ENABLE_DELTA=1 environment variable
+
     Yields:
         SparkSession: A fresh, isolated SparkSession.
 
@@ -180,8 +207,21 @@ def isolated_session(request: pytest.FixtureRequest) -> Generator[Any, None, Non
     mode = get_mode()
     session_name = f"test_isolated_{uuid.uuid4().hex[:8]}"
 
+    # Check if Delta Lake should be enabled
+    enable_delta = False
+    if request.node.get_closest_marker("delta"):
+        enable_delta = True
+    elif os.environ.get("SPARKLESS_ENABLE_DELTA", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        enable_delta = True
+
     try:
-        session = create_session(app_name=session_name, mode=mode)
+        session = create_session(
+            app_name=session_name, mode=mode, enable_delta=enable_delta
+        )
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
         if (

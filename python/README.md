@@ -240,11 +240,40 @@ pytest tests/ -v
 SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
 ```
 
+### Delta Lake Support (v4.4.1+)
+
+Enable Delta Lake for PySpark mode using the `@pytest.mark.delta` marker or environment variable:
+
+```python
+import pytest
+
+@pytest.mark.delta
+def test_delta_table(spark, spark_imports):
+    """This test has Delta Lake enabled in PySpark mode."""
+    F = spark_imports.F
+    df = spark.createDataFrame([{"id": 1, "value": 100}])
+    
+    # Delta operations work in PySpark mode
+    df.write.format("delta").mode("overwrite").save("/tmp/my_delta_table")
+    
+    result = spark.read.format("delta").load("/tmp/my_delta_table")
+    assert result.count() == 1
+```
+
+Or enable Delta Lake for all tests:
+
+```bash
+SPARKLESS_ENABLE_DELTA=1 SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
+```
+
 ### Features
 
 - **Fixtures:** `spark`, `spark_mode`, `spark_imports`, `isolated_session`, `table_prefix`
-- **Markers:** `@pytest.mark.sparkless_only`, `@pytest.mark.pyspark_only`
+- **Markers:** `@pytest.mark.sparkless_only`, `@pytest.mark.pyspark_only`, `@pytest.mark.delta`
 - **Comparison:** `assert_dataframes_equal()`, `compare_dataframes()`
+- **Environment Variables:**
+  - `SPARKLESS_TEST_MODE` — `sparkless` (default) or `pyspark`
+  - `SPARKLESS_ENABLE_DELTA` — Enable Delta Lake in PySpark mode (`1`, `true`, `yes`)
 
 See the full [Testing Guide](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/TESTING_GUIDE.md) for complete documentation.
 
