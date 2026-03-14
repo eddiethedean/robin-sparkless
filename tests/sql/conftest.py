@@ -171,7 +171,7 @@ def mysql_container() -> Generator[JdbcConnection, None, None]:
         pytest.skip("testcontainers[mysql] not installed")
 
     try:
-        import pymysql
+        import pymysql  # type: ignore[import-untyped]
     except ImportError:
         pytest.skip("pymysql not installed - run: pip install pymysql")
 
@@ -243,7 +243,7 @@ def mariadb_container() -> Generator[JdbcConnection, None, None]:
         pytest.skip("testcontainers[mysql] not installed")
 
     try:
-        import pymysql
+        import pymysql  # type: ignore[import-untyped]
     except ImportError:
         pytest.skip("pymysql not installed - run: pip install pymysql")
 
@@ -332,7 +332,7 @@ def mssql_container() -> Generator[JdbcConnection, None, None]:
             try:
                 conn = pymssql.connect(
                     server=host,
-                    port=port,
+                    port=str(port),
                     user="sa",
                     password=password,
                     database="master",

@@ -6,6 +6,8 @@ withColumn(name, split(...)) should add one column whose values are arrays (one 
 
 from __future__ import annotations
 
+from typing import Any
+
 from sparkless.testing import get_imports
 
 
@@ -14,7 +16,7 @@ SparkSession = _imports.SparkSession
 F = _imports.F
 
 
-def _spark() -> SparkSession:
+def _spark() -> Any:
     return SparkSession.builder.appName("issue_409").getOrCreate()
 
 

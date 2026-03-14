@@ -51,7 +51,7 @@ if not is_pyspark_mode():
         _rs is not None
         and getattr(_rs, "_configure_for_multiprocessing", None) is not None
     ):
-        _rs._configure_for_multiprocessing()
+        _rs._configure_for_multiprocessing()  # type: ignore[operator]
 
 
 # Set JAVA_HOME for PySpark if not already set

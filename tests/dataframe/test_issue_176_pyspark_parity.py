@@ -19,7 +19,7 @@ SparkSession = _imports.SparkSession
 F = _imports.F
 
 
-def _spark() -> SparkSession:
+def _spark() -> Any:
     return SparkSession.builder.appName("test_176").getOrCreate()
 
 

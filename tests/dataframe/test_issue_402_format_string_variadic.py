@@ -4,6 +4,7 @@ Tests for #402: format_string accepts variadic columns (PySpark parity).
 
 from __future__ import annotations
 
+from typing import Any
 
 from sparkless.testing import get_imports
 
@@ -13,7 +14,7 @@ SparkSession = _imports.SparkSession
 F = _imports.F
 
 
-def _spark() -> SparkSession:
+def _spark() -> Any:
     return SparkSession.builder.appName("issue_402").getOrCreate()
 
 

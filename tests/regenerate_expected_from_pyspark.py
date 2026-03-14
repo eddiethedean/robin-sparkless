@@ -333,18 +333,23 @@ def apply_operations(
                 df = df.withColumn(col_name, F.dense_rank().over(w))
             elif func == "lag":
                 vcol = value_column or (df.columns[0] if df.columns else None)
+                assert vcol is not None, "lag requires a value column"
                 df = df.withColumn(col_name, F.lag(F.col(vcol), n or 1).over(w))
             elif func == "lead":
                 vcol = value_column or (df.columns[0] if df.columns else None)
+                assert vcol is not None, "lead requires a value column"
                 df = df.withColumn(col_name, F.lead(F.col(vcol), n or 1).over(w))
             elif func == "first_value":
                 vcol = value_column or (df.columns[0] if df.columns else None)
+                assert vcol is not None, "first_value requires a value column"
                 df = df.withColumn(col_name, F.first(F.col(vcol)).over(w))
             elif func == "last_value":
                 vcol = value_column or (df.columns[0] if df.columns else None)
+                assert vcol is not None, "last_value requires a value column"
                 df = df.withColumn(col_name, F.last(F.col(vcol)).over(w))
             elif func == "nth_value":
                 vcol = value_column or (df.columns[0] if df.columns else None)
+                assert vcol is not None, "nth_value requires a value column"
                 idx = int(n or 1)
                 df = df.withColumn(col_name, F.nth_value(F.col(vcol), idx).over(w))
             elif func == "percent_rank":

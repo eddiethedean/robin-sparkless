@@ -375,20 +375,21 @@ def _row_to_dict(row: Any, columns: Sequence[str]) -> Dict[str, Any]:
         # Get all values from the row by position. For Row-like objects that iterate keys,
         # use _iter_values() if available; otherwise list(row) may yield keys not values.
         try:
+            seq_values: list[Any] | None
             if hasattr(row, "_iter_values") and callable(getattr(row, "_iter_values")):
-                row_values = list(row._iter_values())
+                seq_values = list(row._iter_values())
             else:
-                row_values = (
+                seq_values = (
                     list(row)
                     if hasattr(row, "__iter__") and not isinstance(row, dict)
                     else None
                 )
-            if row_values and len(row_values) >= len(columns):
+            if seq_values is not None and len(seq_values) >= len(columns):
                 # Use positional access for all columns (handles duplicates correctly)
                 result_dict = {
-                    col: row_values[idx]
+                    col: seq_values[idx]
                     for idx, col in enumerate(columns)
-                    if idx < len(row_values)
+                    if idx < len(seq_values)
                 }
                 # Normalize Row objects to dicts recursively
                 normalized = _normalize_row_to_dict(result_dict)

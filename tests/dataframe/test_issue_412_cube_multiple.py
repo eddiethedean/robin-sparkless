@@ -6,6 +6,8 @@ PySpark df.cube("dept", "year") and df.cube(*cols) accept multiple column names.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sparkless.testing import get_imports
 
 
@@ -14,7 +16,7 @@ SparkSession = _imports.SparkSession
 F = _imports.F
 
 
-def _spark() -> SparkSession:
+def _spark() -> Any:
     return SparkSession.builder.appName("issue_412").getOrCreate()
 
 
