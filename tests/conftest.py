@@ -232,7 +232,9 @@ def spark(request: pytest.FixtureRequest):
         test_name = f"test_{request.node.name[:50]}"
 
     try:
-        session = create_session(app_name=test_name, mode=mode, enable_delta=enable_delta)
+        session = create_session(
+            app_name=test_name, mode=mode, enable_delta=enable_delta
+        )
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
         if (

@@ -1091,6 +1091,17 @@ fn arg_lit_f64(args: &[Value], i: usize) -> Result<f64, PlanExprError> {
     lit_as_f64(v)
 }
 
+fn arg_lit_bool(args: &[Value], i: usize) -> Result<bool, PlanExprError> {
+    let v = args
+        .get(i)
+        .ok_or_else(|| PlanExprError(format!("fn requires boolean literal at index {i}")))?;
+    // Accept bare JSON bool or {"lit": bool}
+    if let Some(b) = v.as_bool() {
+        return Ok(b);
+    }
+    lit_as_bool(v)
+}
+
 /// Accept non-negative integer in either form: bare JSON number or {"lit": n} (issue #582).
 fn arg_lit_usize(args: &[Value], i: usize) -> Result<usize, PlanExprError> {
     let v = args
@@ -2555,14 +2566,24 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             Ok(array_contains(&arr, &val).into_expr())
         }
         "array_join" => {
-            require_args(name, args, 2)?;
+            require_args_min(name, args, 2)?;
             let c = expr_to_column(arg_expr(args, 0)?);
             let sep = arg_lit_str(args, 1)?;
-            Ok(array_join(&c, &sep).into_expr())
+            let null_replacement = if args.len() > 2 {
+                arg_lit_str(args, 2).ok()
+            } else {
+                None
+            };
+            Ok(array_join(&c, &sep, null_replacement.as_deref()).into_expr())
         }
         "array_sort" => {
-            require_args(name, args, 1)?;
-            Ok(array_sort(&expr_to_column(arg_expr(args, 0)?)).into_expr())
+            require_args_min(name, args, 1)?;
+            let asc = if args.len() > 1 {
+                arg_lit_bool(args, 1).unwrap_or(true)
+            } else {
+                true
+            };
+            Ok(array_sort(&expr_to_column(arg_expr(args, 0)?), asc).into_expr())
         }
         "array_distinct" => {
             require_args(name, args, 1)?;

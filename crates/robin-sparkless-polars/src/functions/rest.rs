@@ -2611,8 +2611,9 @@ pub fn array_contains(column: &Column, value: &Column) -> Column {
 }
 
 /// Join list of strings with separator (PySpark array_join).
-pub fn array_join(column: &Column, separator: &str) -> Column {
-    column.clone().array_join(separator)
+/// If null_replacement is Some, null elements are replaced with that string.
+pub fn array_join(column: &Column, separator: &str, null_replacement: Option<&str>) -> Column {
+    column.clone().array_join(separator, null_replacement)
 }
 
 /// Maximum element in list (PySpark array_max).
@@ -2630,9 +2631,10 @@ pub fn element_at(column: &Column, index: i64) -> Column {
     column.clone().element_at(index)
 }
 
-/// Sort list elements (PySpark array_sort).
-pub fn array_sort(column: &Column) -> Column {
-    column.clone().array_sort()
+/// Sort list elements (PySpark array_sort/sort_array).
+/// When asc=true (default), sorts ascending. When asc=false, sorts descending.
+pub fn array_sort(column: &Column, asc: bool) -> Column {
+    column.clone().array_sort(asc)
 }
 
 /// Distinct elements in list (PySpark array_distinct).

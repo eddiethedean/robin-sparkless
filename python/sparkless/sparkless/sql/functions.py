@@ -451,14 +451,18 @@ def array_distinct(col_or_name: ColumnOrName) -> _ColumnType:
     return out
 
 
-def array_sort(col_or_name: ColumnOrName) -> _ColumnType:
-    return _col_result(_native_fn("array_sort")(_as_col(col_or_name)))
+def array_sort(col_or_name: ColumnOrName, asc: bool = True) -> _ColumnType:
+    """Sort array elements. When asc=True (default), ascending. When asc=False, descending."""
+    return _col_result(_native_fn("array_sort")(_as_col(col_or_name), asc))
 
 
 def array_join(
     col_or_name: ColumnOrName, delimiter: str, null_replacement: Optional[str] = None
 ) -> _ColumnType:
-    return _col_result(_native_fn("array_join")(_as_col(col_or_name), delimiter))
+    """Join array elements with delimiter. If null_replacement is provided, null elements are replaced with it."""
+    return _col_result(
+        _native_fn("array_join")(_as_col(col_or_name), delimiter, null_replacement)
+    )
 
 
 def array_max(col_or_name: ColumnOrName) -> _ColumnType:
@@ -471,27 +475,19 @@ def array_min(col_or_name: ColumnOrName) -> _ColumnType:
 
 def array_position(
     col_or_name: ColumnOrName,
-    value: Optional[Union[ColumnOrName, int, float, bool, str]] = None,
+    value: Union[ColumnOrName, int, float, bool, str],
 ) -> _ColumnType:
     """1-based index of first occurrence of value in list, or 0 if not found. PySpark: F.array_position(col, value)."""
-    v = (
-        _as_col(value)
-        if not isinstance(value, (int, float, bool, str, type(None)))
-        else lit(value)
-    )
+    v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
     return _col_result(_native_fn("array_position")(_as_col(col_or_name), v))
 
 
 def array_remove(
     col_or_name: ColumnOrName,
-    value: Optional[Union[ColumnOrName, int, float, bool, str]] = None,
+    value: Union[ColumnOrName, int, float, bool, str],
 ) -> _ColumnType:
     """Remove all elements equal to value from the array. PySpark: F.array_remove(col, element)."""
-    v = (
-        _as_col(value)
-        if not isinstance(value, (int, float, bool, str, type(None)))
-        else lit(value)
-    )
+    v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
     return _col_result(_native.array_remove(_as_col(col_or_name), v))
 
 
@@ -509,7 +505,8 @@ def slice(col_or_name: ColumnOrName, start: int, length: int) -> _ColumnType:
 
 
 def sort_array(col_or_name: ColumnOrName, asc: bool = True) -> _ColumnType:
-    return _col_result(_native_fn("array_sort")(_as_col(col_or_name)))
+    """Sort array elements. When asc=True (default), ascending. When asc=False, descending."""
+    return _col_result(_native_fn("array_sort")(_as_col(col_or_name), asc))
 
 
 def array_union(col1: ColumnOrName, col2: ColumnOrName) -> _ColumnType:
@@ -1018,18 +1015,14 @@ __all__ = [
 ]
 
 
-def when(condition, value=None):
-    """PySpark-compatible when(). Accepts Column or str condition, optional value. Requires active SparkSession."""
+def when(condition, value):
+    """PySpark-compatible when(condition, value). Both arguments required. Requires active SparkSession."""
     _active_session()
     cond = _as_col(condition)
-    if value is not None:
-        val = (
-            _as_col(value)
-            if not isinstance(value, (int, float, bool, str))
-            else lit(value)
-        )
-        return _native_when(cond, val)
-    return _native_when(cond)
+    val = (
+        _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
+    )
+    return _native_when(cond, val)
 
 
 def concat(*columns):
@@ -1328,11 +1321,6 @@ def timestamp_seconds(column):
 def to_utc_timestamp(column, tz):
     """Interpret timestamp as in tz, convert to UTC (PySpark to_utc_timestamp)."""
     return _to_utc_timestamp(_as_col(column), tz)
-
-
-def approx_count_distinct(col, rsd=None):
-    """Approximate distinct count (PySpark approx_count_distinct); use in groupBy().agg()."""
-    return _approx_count_distinct(_as_col(col), rsd)
 
 
 def date_trunc(format, column):

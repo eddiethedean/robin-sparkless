@@ -2881,13 +2881,24 @@ impl Column {
     }
 
     /// Join list of strings with separator (PySpark array_join).
-    pub fn array_join(&self, separator: &str) -> Column {
+    /// If null_replacement is Some, null elements are replaced with that string.
+    /// If null_replacement is None, null elements are skipped.
+    pub fn array_join(&self, separator: &str, null_replacement: Option<&str>) -> Column {
         use polars::prelude::*;
         // PySpark array_join accepts arrays of any element type and stringifies elements.
         // Cast elements to String via list.eval before joining.
-        let elem_to_str = col("").cast(DataType::String);
+        let elem_to_str = if let Some(repl) = null_replacement {
+            // Replace nulls with the replacement string, then cast to string
+            col("").cast(DataType::String).fill_null(lit(repl))
+        } else {
+            col("").cast(DataType::String)
+        };
         let list_expr = self.expr().clone().list().eval(elem_to_str);
-        let joined = list_expr.list().join(lit(separator.to_string()), false);
+        // ignore_nulls=true skips null elements; false includes them (as empty or the replacement)
+        let ignore_nulls = null_replacement.is_none();
+        let joined = list_expr
+            .list()
+            .join(lit(separator.to_string()), ignore_nulls);
         Self::from_expr(joined, None)
     }
 
@@ -3001,12 +3012,14 @@ impl Column {
         Ok(Self::from_expr(expr, None))
     }
 
-    /// Sort list elements (PySpark array_sort). Ascending, nulls last.
-    pub fn array_sort(&self) -> Column {
+    /// Sort list elements (PySpark array_sort/sort_array).
+    /// When asc=true (default), sorts ascending with nulls last.
+    /// When asc=false, sorts descending with nulls first.
+    pub fn array_sort(&self, asc: bool) -> Column {
         use polars::prelude::SortOptions;
         let opts = SortOptions {
-            descending: false,
-            nulls_last: true,
+            descending: !asc,
+            nulls_last: asc, // PySpark: nulls last for asc, nulls first for desc
             ..Default::default()
         };
         Self::from_expr(self.expr().clone().list().sort(opts), None)

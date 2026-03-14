@@ -7640,11 +7640,10 @@ fn lower(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (column, start, length=None))]
-fn substring(column: &Bound<'_, PyAny>, start: i64, length: Option<i64>) -> PyResult<PyColumn> {
+fn substring(column: &Bound<'_, PyAny>, start: i64, length: i64) -> PyResult<PyColumn> {
     let c = coerce_to_column(column)?;
     Ok(PyColumn {
-        inner: robin_sparkless::functions::substring(&c, start, length),
+        inner: robin_sparkless::functions::substring(&c, start, Some(length)),
     })
 }
 
@@ -8655,9 +8654,10 @@ fn element_at(column: &PyColumn, index: i64) -> PyColumn {
 }
 
 #[pyfunction]
-fn array_sort(column: &PyColumn) -> PyColumn {
+#[pyo3(signature = (column, asc=true))]
+fn array_sort(column: &PyColumn, asc: bool) -> PyColumn {
     PyColumn {
-        inner: functions::array_sort(&column.inner),
+        inner: functions::array_sort(&column.inner, asc),
     }
 }
 
@@ -8670,10 +8670,10 @@ fn array_slice(column: &PyColumn, start: i64, length: Option<i64>) -> PyColumn {
 }
 
 #[pyfunction]
-#[pyo3(signature = (column, separator))]
-fn array_join(column: &PyColumn, separator: &str) -> PyColumn {
+#[pyo3(signature = (column, separator, null_replacement=None))]
+fn array_join(column: &PyColumn, separator: &str, null_replacement: Option<&str>) -> PyColumn {
     PyColumn {
-        inner: functions::array_join(&column.inner, separator),
+        inner: functions::array_join(&column.inner, separator, null_replacement),
     }
 }
 
