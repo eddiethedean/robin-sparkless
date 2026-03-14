@@ -2868,4 +2868,68 @@ mod tests {
             "#1105: filter on string column must return 1 row"
         );
     }
+
+    /// #1469: Window functions in filter/WHERE must be rejected (PySpark parity).
+    #[test]
+    fn filter_rejects_window_function_in_condition() {
+        use crate::column::Column;
+        use polars::prelude::{df, lit};
+
+        let pl = df!["id" => &[1i64, 2, 3], "value" => &[100i64, 200, 300]].unwrap();
+        let df = DataFrame::from_polars_with_options(pl, false);
+
+        // Create a window expression: row_number().over([]).eq(1)
+        let row_num = Column::row_number_over(&[], &["value".to_string()]).unwrap();
+        let condition = row_num.eq(lit(1i64)).into_expr();
+
+        let result = filter(&df, condition, false);
+        assert!(
+            result.is_err(),
+            "#1469: filter with window function must fail"
+        );
+        match result {
+            Err(e) => {
+                let err_msg = e.to_string();
+                assert!(
+                    err_msg.contains("window functions inside WHERE clause"),
+                    "#1469: error message must mention window functions in WHERE clause, got: {err_msg}"
+                );
+            }
+            Ok(_) => panic!("#1469: filter with window function should have failed"),
+        }
+    }
+
+    /// #1469: expr_contains_over detects Expr::Over in nested expressions.
+    #[test]
+    fn expr_contains_over_detects_nested_window() {
+        use polars::prelude::{col, lit};
+
+        // Simple Over expression
+        let over_expr = col("value").over(vec![lit(1i32)]);
+        assert!(
+            super::expr_contains_over(&over_expr),
+            "expr_contains_over must detect simple Over"
+        );
+
+        // Over inside BinaryExpr (e.g. row_number().over(w) == 1)
+        let binary_with_over = over_expr.clone().eq(lit(1i64));
+        assert!(
+            super::expr_contains_over(&binary_with_over),
+            "expr_contains_over must detect Over inside BinaryExpr"
+        );
+
+        // Over inside Alias
+        let aliased_over = over_expr.clone().alias("rn");
+        assert!(
+            super::expr_contains_over(&aliased_over),
+            "expr_contains_over must detect Over inside Alias"
+        );
+
+        // No Over - should return false
+        let simple_expr = col("value").gt(lit(10i64));
+        assert!(
+            !super::expr_contains_over(&simple_expr),
+            "expr_contains_over must return false for non-window expression"
+        );
+    }
 }
