@@ -131,6 +131,7 @@ class JdbcDataFrameWriterWrapper:
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._writer, name)
         if callable(attr):
+
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 result = attr(*args, **kwargs)
                 # If result is the writer (method chaining), wrap it
@@ -138,6 +139,7 @@ class JdbcDataFrameWriterWrapper:
                     self._writer = result
                     return self
                 return result
+
             return wrapper
         return attr
 

@@ -220,10 +220,9 @@ def _ensure_java_home() -> None:
     if "JAVA_HOME" in os.environ:
         # Verify existing JAVA_HOME has conf/security or lib/security
         java_home = os.environ["JAVA_HOME"]
-        if (
-            os.path.exists(os.path.join(java_home, "conf", "security"))
-            or os.path.exists(os.path.join(java_home, "lib", "security"))
-        ):
+        if os.path.exists(
+            os.path.join(java_home, "conf", "security")
+        ) or os.path.exists(os.path.join(java_home, "lib", "security")):
             return
         # Otherwise, try to auto-detect a valid JAVA_HOME
 
@@ -321,7 +320,9 @@ def _configure_jars(builder: Any) -> Any:
     # Try relative to this file first, then check common locations
     current_dir = os.path.dirname(os.path.abspath(__file__))
     possible_roots = [
-        os.path.join(current_dir, "..", "..", "..", "..", ".."),  # From testing/session.py
+        os.path.join(
+            current_dir, "..", "..", "..", "..", ".."
+        ),  # From testing/session.py
         os.getcwd(),
     ]
 

@@ -9,7 +9,7 @@ Issue: PySpark Parity Hunt - Areas Where Sparkless Was Too Lenient
 
 import pytest
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports, is_pyspark_mode
+from sparkless.testing import get_imports
 
 
 class TestArrayPositionRequiredValue(ParityTestBase):

@@ -453,7 +453,7 @@ def array_distinct(col_or_name: ColumnOrName) -> _ColumnType:
 
 def array_sort(col_or_name: ColumnOrName) -> _ColumnType:
     """Sort array elements in ascending order (PySpark array_sort).
-    
+
     Note: Use sort_array(col, asc=False) for descending order.
     """
     return _col_result(_native_fn("array_sort")(_as_col(col_or_name), True))
