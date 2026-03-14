@@ -54,6 +54,11 @@ if not is_pyspark_mode():
         _rs._configure_for_multiprocessing()  # type: ignore[operator]
 
 
+# Remove SPARK_HOME to use pyspark's bundled jars instead of local install
+# This ensures consistent behavior and proper Delta Lake jar loading
+if "SPARK_HOME" in os.environ:
+    del os.environ["SPARK_HOME"]
+
 # Set JAVA_HOME for PySpark if not already set
 if "JAVA_HOME" not in os.environ:
     java_home_candidates = [
@@ -200,12 +205,23 @@ def spark(request: pytest.FixtureRequest):
         elif marker_backend == "sparkless":
             mode = Mode.SPARKLESS
 
-    # Use shared session if enabled
-    if mode == Mode.SPARKLESS and _use_shared_session():
+    # Check if Delta Lake should be enabled (for PySpark mode)
+    enable_delta = False
+    if request.node.get_closest_marker("delta"):
+        enable_delta = True
+    elif os.environ.get("SPARKLESS_ENABLE_DELTA", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        enable_delta = True
+
+    # Use shared session if enabled (but not for delta tests)
+    if mode == Mode.SPARKLESS and _use_shared_session() and not enable_delta:
         session = request.getfixturevalue("_shared_sparkless_session")
         yield _SharedSessionWrapper(session)
         return
-    if mode == Mode.PYSPARK and _use_shared_session():
+    if mode == Mode.PYSPARK and _use_shared_session() and not enable_delta:
         session = request.getfixturevalue("_shared_pyspark_session")
         yield _SharedSessionWrapper(session)
         return
@@ -216,7 +232,7 @@ def spark(request: pytest.FixtureRequest):
         test_name = f"test_{request.node.name[:50]}"
 
     try:
-        session = create_session(app_name=test_name, mode=mode)
+        session = create_session(app_name=test_name, mode=mode, enable_delta=enable_delta)
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
         if (

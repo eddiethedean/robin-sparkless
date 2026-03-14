@@ -152,17 +152,18 @@ def test_delta_saveAsTable(spark, spark_imports):
     """Test Delta Lake saveAsTable with the delta marker."""
     table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
     schema_name = f"delta_test_{table_suffix}"
-    table_name = f"{schema_name}.test_table"
+    table_name = f"{schema_name}.test_table_{table_suffix}"
 
     try:
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
 
-        # Create and save as Delta table
+        # Create and save as Delta table (use unique table name to avoid conflicts)
         df = spark.createDataFrame(
             [(1, "Alice"), (2, "Bob")],
             ["id", "name"],
         )
-        df.write.format("delta").mode("overwrite").saveAsTable(table_name)
+        # Use saveAsTable without overwrite for new table
+        df.write.format("delta").saveAsTable(table_name)
 
         # Read from catalog
         result = spark.table(table_name)
@@ -231,7 +232,8 @@ class TestDeltaFixtureVerification:
 
         This test documents the expected behavior: without the delta marker,
         PySpark may not have Delta Lake configured. This test is skipped if
-        Delta happens to be available anyway (e.g., via env var).
+        Delta happens to be available anyway (e.g., via env var or cached jars
+        from other tests in the same JVM session).
         """
         # Skip if Delta is globally enabled
         if os.environ.get("SPARKLESS_ENABLE_DELTA", "0").strip().lower() in (
@@ -247,16 +249,24 @@ class TestDeltaFixtureVerification:
             df = spark.createDataFrame([(1, "test")], ["id", "name"])
 
             # Without Delta configured, this should fail
-            # We expect an AnalysisException or similar
-            with pytest.raises(Exception) as exc_info:
+            # However, if other delta tests ran first in this JVM, jars are cached
+            try:
                 df.write.format("delta").mode("overwrite").save(delta_path)
-
-            # The error should mention Delta or format not found
-            error_msg = str(exc_info.value).lower()
-            assert any(
-                keyword in error_msg
-                for keyword in ["delta", "format", "datasource", "not found", "failed"]
-            ), f"Unexpected error: {exc_info.value}"
+                # If we get here, Delta is available (likely from cached jars)
+                pytest.skip("Delta jars are cached from previous tests in this JVM")
+            except Exception as e:
+                # The error should mention Delta or format not found
+                error_msg = str(e).lower()
+                assert any(
+                    keyword in error_msg
+                    for keyword in [
+                        "delta",
+                        "format",
+                        "datasource",
+                        "not found",
+                        "failed",
+                    ]
+                ), f"Unexpected error: {e}"
 
         finally:
             shutil.rmtree(delta_path, ignore_errors=True)

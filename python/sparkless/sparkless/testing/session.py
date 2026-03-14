@@ -100,6 +100,11 @@ def _create_pyspark_session(
         ImportError: If PySpark is not available.
         RuntimeError: If session creation fails.
     """
+    # Remove SPARK_HOME to use pyspark's bundled jars instead of local install
+    # This ensures consistent behavior and proper Delta Lake jar loading
+    if "SPARK_HOME" in os.environ:
+        del os.environ["SPARK_HOME"]
+
     # Set Python executable for workers
     python_executable = sys.executable
     os.environ.setdefault("PYSPARK_PYTHON", python_executable)
@@ -257,6 +262,9 @@ def _stop_existing_pyspark_session(PySparkSession: Any) -> None:
 def _configure_delta(builder: Any) -> Any:
     """Configure Delta Lake for a PySpark session builder.
 
+    Uses delta-spark's configure_spark_with_delta_pip() function for jar
+    downloads, plus the required session extensions and catalog config.
+
     Args:
         builder: PySpark SparkSession.Builder instance.
 
@@ -264,24 +272,33 @@ def _configure_delta(builder: Any) -> Any:
         The builder with Delta Lake configuration applied.
     """
     try:
-        import importlib.metadata
+        from delta import configure_spark_with_delta_pip
 
-        try:
-            delta_version = importlib.metadata.version("delta_spark")
-        except Exception:
-            delta_version = "3.0.0"
-
-        delta_package = f"io.delta:delta-spark_2.12:{delta_version}"
-        builder = builder.config("spark.jars.packages", delta_package)
-        builder = builder.config(
-            "spark.sql.extensions",
-            "io.delta.sql.DeltaSparkSessionExtension",
-        )
-        builder = builder.config(
-            "spark.sql.catalog.spark_catalog",
-            "org.apache.spark.sql.delta.catalog.DeltaCatalog",
-        )
+        # configure_spark_with_delta_pip handles spark.jars.packages
+        builder = configure_spark_with_delta_pip(builder)
     except ImportError:
-        pass
+        # Fallback to manual jar configuration if delta package not available
+        try:
+            import importlib.metadata
+
+            try:
+                delta_version = importlib.metadata.version("delta_spark")
+            except Exception:
+                delta_version = "3.0.0"
+
+            delta_package = f"io.delta:delta-spark_2.12:{delta_version}"
+            builder = builder.config("spark.jars.packages", delta_package)
+        except ImportError:
+            pass
+
+    # Always add the required extensions and catalog (needed for Delta operations)
+    builder = builder.config(
+        "spark.sql.extensions",
+        "io.delta.sql.DeltaSparkSessionExtension",
+    )
+    builder = builder.config(
+        "spark.sql.catalog.spark_catalog",
+        "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+    )
 
     return builder
