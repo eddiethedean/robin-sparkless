@@ -2794,6 +2794,10 @@ impl Column {
     }
 
     /// Ntile: bucket 1..n by rank within partition (ceil(rank * n / count)). Window is applied; do not call .over() again.
+    /// PySpark parity (#1484): NULL values in the ORDER BY column are handled as follows:
+    /// - Ascending: NULLs come FIRST (fill with NEG_INFINITY so they rank lowest)
+    /// - Descending: NULLs come LAST (fill with NEG_INFINITY so they rank highest when descending)
+    /// ntile always returns an integer, even for rows where ORDER BY column is NULL.
     pub fn ntile(&self, n: u32, partition_by: &[&str], descending: bool) -> Column {
         use polars::prelude::*;
         let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
@@ -2805,12 +2809,17 @@ impl Column {
             method: RankMethod::Ordinal,
             descending,
         };
-        let rank_expr = self
+        // Fill nulls with NEG_INFINITY so they rank correctly:
+        // - Ascending: NEG_INFINITY is smallest, so nulls rank first
+        // - Descending: NEG_INFINITY is smallest, so it ranks last when sorted descending
+        let filled_expr = self
             .expr()
             .clone()
-            .rank(opts, None)
-            .over(partition_exprs.clone());
-        let count_expr = self.expr().clone().count().over(partition_exprs.clone());
+            .cast(DataType::Float64)
+            .fill_null(lit(f64::NEG_INFINITY));
+        let rank_expr = filled_expr.clone().rank(opts, None).over(partition_exprs.clone());
+        // Count ALL rows including nulls (use len() instead of count())
+        let count_expr = len().over(partition_exprs.clone());
         let n_expr = lit(n as f64);
         let rank_f = rank_expr.cast(DataType::Float64);
         let count_f = count_expr.cast(DataType::Float64);
