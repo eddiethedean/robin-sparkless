@@ -81,7 +81,11 @@ class TestWindowFunctionComparisonParity:
         reason="PySpark parity test - only run with SPARKLESS_TEST_MODE=pyspark",
     )
     def test_window_function_comparison_in_filter_parity(self):
-        """Test WindowFunction comparison in filter matches PySpark."""
+        """Test WindowFunction comparison in filter raises error (PySpark parity).
+
+        PySpark raises AnalysisException: "It is not allowed to use window
+        functions inside WHERE clause." Sparkless must match this behavior.
+        """
         spark = SparkSession.builder.appName("issue-336-parity").getOrCreate()
         try:
             df = spark.createDataFrame(
@@ -93,13 +97,15 @@ class TestWindowFunctionComparisonParity:
             )
 
             w = Window().partitionBy("Type").orderBy(F.col("Score").desc())
-            result = df.filter(F.row_number().over(w) == 1).select(
-                "Name", "Type", "Score"
-            )
-            rows = result.collect()
+            # PySpark raises AnalysisException for window functions in WHERE clause
+            with pytest.raises(Exception) as exc_info:
+                df.filter(F.row_number().over(w) == 1).select(
+                    "Name", "Type", "Score"
+                ).collect()
 
-            assert len(rows) == 1
-            assert rows[0]["Name"] == "Alice"
-            assert rows[0]["Score"] == 100
+            msg = str(exc_info.value).lower()
+            assert "window" in msg and "where" in msg, (
+                f"Expected error about window functions in WHERE clause, got: {exc_info.value}"
+            )
         finally:
             spark.stop()
