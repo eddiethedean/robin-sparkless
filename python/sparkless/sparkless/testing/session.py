@@ -146,6 +146,9 @@ def _create_pyspark_session(
         .config("spark.executor.memory", "1g")
     )
 
+    # Add JARs from project jars directory (SQLite JDBC, etc.)
+    builder = _configure_jars(builder)
+
     # Set Python executable in Spark config
     builder = builder.config("spark.executorEnv.PYSPARK_PYTHON", python_executable)
     builder = builder.config(
@@ -175,17 +178,57 @@ def _create_pyspark_session(
         session = builder.getOrCreate()
         # Verify session works
         session.createDataFrame([{"test": 1}]).collect()
-        return session
+        # Register JDBC drivers if JARs are loaded
+        _register_jdbc_drivers(session)
+        # Wrap session to auto-inject JDBC drivers based on URL
+        from .jdbc import wrap_session_for_jdbc
+
+        return wrap_session_for_jdbc(session)
     except Exception as e:
         raise RuntimeError(f"Failed to create PySpark session: {e}") from e
+
+
+def _register_jdbc_drivers(session: Any) -> None:
+    """Register JDBC drivers with Java's DriverManager.
+
+    This is needed because PySpark doesn't auto-register drivers from
+    spark.jars or spark.driver.extraClassPath.
+    """
+    try:
+        jvm = session._jvm
+        if jvm is None:
+            return
+
+        # List of JDBC driver classes to register
+        drivers = [
+            "org.sqlite.JDBC",  # SQLite
+        ]
+
+        for driver_class in drivers:
+            try:
+                jvm.Class.forName(driver_class)
+            except Exception:
+                # Driver not available, skip silently
+                pass
+    except Exception:
+        # JVM access failed, skip silently
+        pass
 
 
 def _ensure_java_home() -> None:
     """Ensure JAVA_HOME is set, attempting auto-detection if needed."""
     if "JAVA_HOME" in os.environ:
-        return
+        # Verify existing JAVA_HOME has conf/security or lib/security
+        java_home = os.environ["JAVA_HOME"]
+        if (
+            os.path.exists(os.path.join(java_home, "conf", "security"))
+            or os.path.exists(os.path.join(java_home, "lib", "security"))
+        ):
+            return
+        # Otherwise, try to auto-detect a valid JAVA_HOME
 
     # Try common Java installation paths (macOS Homebrew)
+    # For Homebrew, the actual JDK home is in libexec/openjdk.jdk/Contents/Home
     java_home_candidates = [
         "/opt/homebrew/opt/openjdk@11",
         "/opt/homebrew/opt/openjdk@17",
@@ -195,21 +238,21 @@ def _ensure_java_home() -> None:
     for candidate in java_home_candidates:
         java_bin_path = os.path.join(candidate, "bin", "java")
         if os.path.exists(java_bin_path):
-            try:
-                actual_java_path = os.path.realpath(java_bin_path)
-                actual_java_bin = os.path.dirname(actual_java_path)
-                actual_java_home = os.path.dirname(actual_java_bin)
-                if os.path.exists(actual_java_home) and os.path.exists(
-                    os.path.join(actual_java_home, "bin", "java")
-                ):
-                    os.environ["JAVA_HOME"] = actual_java_home
-                    java_bin = os.path.join(actual_java_home, "bin")
-                    if java_bin not in os.environ.get("PATH", ""):
-                        os.environ["PATH"] = f"{java_bin}:{os.environ.get('PATH', '')}"
-                    return
-            except Exception:
-                os.environ["JAVA_HOME"] = candidate
-                java_bin = os.path.join(candidate, "bin")
+            # Resolve symlink to get actual path
+            actual_java_path = os.path.realpath(java_bin_path)
+            actual_java_bin = os.path.dirname(actual_java_path)
+            actual_java_home = os.path.dirname(actual_java_bin)
+
+            # Verify this is a valid JAVA_HOME (has conf/security or lib/security)
+            if os.path.exists(os.path.join(actual_java_home, "conf", "security")):
+                os.environ["JAVA_HOME"] = actual_java_home
+                java_bin = os.path.join(actual_java_home, "bin")
+                if java_bin not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = f"{java_bin}:{os.environ.get('PATH', '')}"
+                return
+            elif os.path.exists(os.path.join(actual_java_home, "lib", "security")):
+                os.environ["JAVA_HOME"] = actual_java_home
+                java_bin = os.path.join(actual_java_home, "bin")
                 if java_bin not in os.environ.get("PATH", ""):
                     os.environ["PATH"] = f"{java_bin}:{os.environ.get('PATH', '')}"
                 return
@@ -229,8 +272,9 @@ def _ensure_java_home() -> None:
             java_path = os.path.realpath(java_path)
             java_bin = os.path.dirname(java_path)
             java_home = os.path.dirname(java_bin)
-            if os.path.exists(java_home) and os.path.exists(
-                os.path.join(java_home, "bin", "java")
+            if os.path.exists(java_home) and (
+                os.path.exists(os.path.join(java_home, "conf", "security"))
+                or os.path.exists(os.path.join(java_home, "lib", "security"))
             ):
                 os.environ["JAVA_HOME"] = java_home
     except Exception:
@@ -257,6 +301,43 @@ def _stop_existing_pyspark_session(PySparkSession: Any) -> None:
             time.sleep(0.1)
     except (AttributeError, Exception):
         pass
+
+
+def _configure_jars(builder: Any) -> Any:
+    """Configure additional JARs for PySpark session.
+
+    Looks for JAR files in the project's jars/ directory and adds them
+    to the Spark driver classpath for JDBC drivers, etc.
+
+    Args:
+        builder: PySpark SparkSession.Builder instance.
+
+    Returns:
+        The builder with JAR configuration applied.
+    """
+    import glob
+
+    # Find the project root (where the jars directory would be)
+    # Try relative to this file first, then check common locations
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    possible_roots = [
+        os.path.join(current_dir, "..", "..", "..", "..", ".."),  # From testing/session.py
+        os.getcwd(),
+    ]
+
+    jar_files = []
+    for root in possible_roots:
+        jars_dir = os.path.normpath(os.path.join(root, "jars"))
+        if os.path.isdir(jars_dir):
+            jar_files.extend(glob.glob(os.path.join(jars_dir, "*.jar")))
+            break
+
+    if jar_files:
+        jars_str = ",".join(jar_files)
+        builder = builder.config("spark.jars", jars_str)
+        builder = builder.config("spark.driver.extraClassPath", jars_str)
+
+    return builder
 
 
 def _configure_delta(builder: Any) -> Any:

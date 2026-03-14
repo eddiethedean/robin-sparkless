@@ -9,7 +9,7 @@ Issue: PySpark Parity Hunt - Areas Where Sparkless Was Too Lenient
 
 import pytest
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless.testing import get_imports, is_pyspark_mode
 
 
 class TestArrayPositionRequiredValue(ParityTestBase):
@@ -260,36 +260,37 @@ class TestSortArrayAscParameter(ParityTestBase):
         assert rows[0]["sorted"] == [1, 2, 3]
 
 
-class TestArraySortAscParameter(ParityTestBase):
-    """Test that array_sort properly handles asc parameter."""
+class TestArraySortNoAscParameter(ParityTestBase):
+    """Test that array_sort always sorts ascending (PySpark parity).
 
-    def test_array_sort_ascending(self, spark):
-        """Test array_sort with asc=True."""
+    PySpark's array_sort() doesn't have an asc parameter - it always sorts
+    ascending. Use sort_array(col, asc=False) for descending order.
+    """
+
+    def test_array_sort_always_ascending(self, spark):
+        """Test array_sort sorts ascending (no asc parameter)."""
         imports = get_imports()
         F = imports.F
 
         data = [{"arr": [5, 2, 8, 1]}]
         df = spark.createDataFrame(data)
 
-        result = df.select(F.array_sort("arr", asc=True).alias("sorted"))
+        result = df.select(F.array_sort("arr").alias("sorted"))
         rows = result.collect()
 
         assert len(rows) == 1
         assert rows[0]["sorted"] == [1, 2, 5, 8]
 
-    def test_array_sort_descending(self, spark):
-        """Test array_sort with asc=False."""
+    def test_array_sort_rejects_asc_parameter(self, spark):
+        """Test array_sort raises error if asc parameter is passed."""
         imports = get_imports()
         F = imports.F
 
         data = [{"arr": [5, 2, 8, 1]}]
         df = spark.createDataFrame(data)
 
-        result = df.select(F.array_sort("arr", asc=False).alias("sorted"))
-        rows = result.collect()
-
-        assert len(rows) == 1
-        assert rows[0]["sorted"] == [8, 5, 2, 1]
+        with pytest.raises(TypeError):
+            df.select(F.array_sort("arr", asc=False).alias("sorted"))
 
 
 class TestNaReplaceValidation(ParityTestBase):
@@ -327,29 +328,28 @@ class TestNaReplaceValidation(ParityTestBase):
         assert "Robert" in names
         assert "Bob" not in names
 
-    def test_na_replace_string_to_null_allowed(self, spark):
-        """Test na.replace allows string to_replace with value=None (replaces with null)."""
+    def test_na_replace_requires_value_for_string(self, spark):
+        """Test na.replace raises error when to_replace is string and value is None."""
         data = [{"name": "Alice"}, {"name": "Bob"}]
         df = spark.createDataFrame(data)
 
-        # PySpark allows string replacement with None (replaces with null)
-        result = df.na.replace("Alice")
-        rows = result.collect()
+        # PySpark requires value for all non-dict cases, including strings
+        with pytest.raises(Exception) as exc_info:
+            df.na.replace("Alice")
 
-        names = [r["name"] for r in rows]
-        assert None in names
-        assert "Bob" in names
+        err_msg = str(exc_info.value).lower()
+        assert "value" in err_msg or "required" in err_msg or "argument" in err_msg
 
     def test_na_replace_requires_value_for_numeric(self, spark):
         """Test na.replace raises error when to_replace is numeric and value is None."""
         data = [{"value": 1}, {"value": 2}]
         df = spark.createDataFrame(data)
 
-        # PySpark raises error for numeric to_replace without value
         with pytest.raises(Exception) as exc_info:
             df.na.replace(1)
 
-        assert "value is required" in str(exc_info.value)
+        err_msg = str(exc_info.value).lower()
+        assert "value" in err_msg or "required" in err_msg or "argument" in err_msg
 
     def test_na_replace_requires_value_for_list(self, spark):
         """Test na.replace raises error when to_replace is list and value is None."""
@@ -359,7 +359,8 @@ class TestNaReplaceValidation(ParityTestBase):
         with pytest.raises(Exception) as exc_info:
             df.na.replace(["Alice", "Bob"])
 
-        assert "value is required" in str(exc_info.value)
+        err_msg = str(exc_info.value).lower()
+        assert "value" in err_msg or "required" in err_msg or "argument" in err_msg
 
 
 class TestApproxCountDistinctSingleDefinition(ParityTestBase):

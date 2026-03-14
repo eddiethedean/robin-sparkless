@@ -11,6 +11,7 @@ import os
 
 import pytest
 
+from sparkless.testing import is_pyspark_mode
 from tests.sql.conftest import jdbc_available
 
 pytestmark = pytest.mark.skipif(
@@ -341,6 +342,10 @@ def test_jdbc_ignore_mode(spark) -> None:
             os.unlink(db_path)
 
 
+@pytest.mark.skipif(
+    is_pyspark_mode(),
+    reason="prepareQuery with temp views not supported in PySpark+SQLite JDBC",
+)
 def test_jdbc_prepare_query(spark) -> None:
     """prepareQuery option executes SQL before the main query."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -880,8 +885,10 @@ def test_jdbc_large_string_values(spark) -> None:
             os.unlink(db_path)
 
 
-def test_jdbc_groupby_after_read(spark) -> None:
+def test_jdbc_groupby_after_read(spark, spark_imports) -> None:
     """GroupBy operations work after JDBC read."""
+    F = spark_imports.F
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
 
@@ -900,8 +907,6 @@ def test_jdbc_groupby_after_read(spark) -> None:
 
         url = f"jdbc:sqlite:{db_path}"
         df = spark.read.jdbc(url=url, table="groupby_test", properties={})
-
-        from sparkless.sql import functions as F
 
         grouped = df.groupBy("category").agg(F.sum("amount").alias("total"))
         rows = grouped.collect()

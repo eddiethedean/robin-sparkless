@@ -7005,7 +7005,7 @@ impl PyDataFrameNaFunctions {
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
 
-        // value is None: dict -> apply each; only str to_replace can be replaced with null (PySpark: replace(1, None) raises)
+        // value is None: only allowed when to_replace is a dict (PySpark parity)
         if value.is_none() {
             if let Ok(dict) = to_replace.downcast::<PyDict>() {
                 let mut current = df_ref.inner.clone();
@@ -7019,30 +7019,10 @@ impl PyDataFrameNaFunctions {
                 }
                 return Ok(PyDataFrame::wrap(current));
             }
-            // PySpark: replace("a", None) works (replace with null); replace(1, None) or replace([1,2], None) raises
-            if to_replace.downcast::<PyList>().is_ok() {
-                return Err(to_py_err("value is required when to_replace is a list"));
-            }
-            if to_replace.extract::<i64>().is_ok()
-                || to_replace.extract::<f64>().is_ok()
-                || to_replace.extract::<bool>().is_ok()
-            {
-                return Err(to_py_err("value is required when to_replace is not a dict"));
-            }
-            let null_expr = robin_sparkless::functions::lit_null("string")
-                .map_err(to_py_err)?
-                .into_expr();
-            let old_expr = py_any_to_column(to_replace)?.into_expr();
-            return df_ref
-                .inner
-                .na()
-                .replace(
-                    old_expr,
-                    null_expr,
-                    subset_refs.as_ref().map(|v| v.to_vec()),
-                )
-                .map(PyDataFrame::wrap)
-                .map_err(to_py_err);
+            // PySpark requires value for all non-dict cases
+            return Err(to_py_err(
+                "value is required when to_replace is not a dict",
+            ));
         }
 
         let value = value.unwrap();
