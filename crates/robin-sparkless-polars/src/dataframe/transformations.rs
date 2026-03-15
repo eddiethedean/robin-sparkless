@@ -8,9 +8,11 @@ use crate::column::expect_col;
 use crate::functions::SortOrder;
 use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public};
 use crate::udfs;
+use crate::column::RangeWindowAgg;
 use polars::prelude::{
     DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
-    SchemaNamesAndDtypes, Selector, Series, UniqueKeepStrategy, col, len, lit, repeat,
+    SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions, UniqueKeepStrategy, col, len,
+    lit, repeat,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -602,6 +604,144 @@ pub fn filter(
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
+/// Compute RANGE BETWEEN window aggregate on a DataFrame already sorted by (partition_by, order_by).
+/// Returns a Series of the same length. start/end are in same units as order column (e.g. i64); unbounded = i64::MIN/i64::MAX.
+fn compute_range_window_series(
+    sorted_df: &polars::prelude::DataFrame,
+    partition_by: &[String],
+    order_by: &str,
+    value_col: &str,
+    start: i64,
+    end: i64,
+    agg: RangeWindowAgg,
+) -> Result<Series, PolarsError> {
+    use polars::prelude::*;
+    const UNBOUNDED_PRECEDING: i64 = i64::MIN;
+    const UNBOUNDED_FOLLOWING: i64 = i64::MAX;
+
+    let order_s = sorted_df
+        .column(order_by)?
+        .as_materialized_series()
+        .cast(&DataType::Float64)?;
+    let value_s = sorted_df.column(value_col)?.as_materialized_series();
+    let value_f64 = value_s.cast(&DataType::Float64)?;
+    let order_ca = order_s.f64()?;
+    let value_ca = value_f64.f64()?;
+
+    let n = sorted_df.height();
+    let mut result = Vec::with_capacity(n);
+    let mut idx = 0usize;
+
+    let part_series: Vec<Series> = if partition_by.is_empty() {
+        vec![]
+    } else {
+        partition_by
+            .iter()
+            .map(|name| {
+                sorted_df
+                    .column(name)
+                    .map(|c| c.as_materialized_series().clone())
+            })
+            .collect::<Result<Vec<_>, PolarsError>>()?
+    };
+
+    while idx < n {
+        let part_start = idx;
+        let part_end = if part_series.is_empty() {
+            n
+        } else {
+            let mut end = part_start + 1;
+            while end < n {
+                let different = part_series.iter().any(|s: &Series| {
+                    s.get(part_start).ok() != s.get(end).ok()
+                });
+                if different {
+                    break;
+                }
+                end += 1;
+            }
+            end
+        };
+
+        let part_len = part_end - part_start;
+        let order_slice: Vec<Option<f64>> = (part_start..part_end)
+            .map(|i| order_ca.get(i))
+            .collect();
+        let value_slice: Vec<Option<f64>> = (part_start..part_end)
+            .map(|i| value_ca.get(i))
+            .collect();
+
+        let start_f = start as f64;
+        let end_f = end as f64;
+
+        let mut prefix_sum: Vec<f64> = Vec::with_capacity(part_len + 1);
+        prefix_sum.push(0.0);
+        let mut prefix_count: Vec<usize> = Vec::with_capacity(part_len + 1);
+        prefix_count.push(0);
+        for (i, v) in value_slice.iter().enumerate() {
+            let prev_s = prefix_sum[i];
+            let prev_c = prefix_count[i];
+            match v {
+                Some(x) => {
+                    prefix_sum.push(prev_s + x);
+                    prefix_count.push(prev_c + 1);
+                }
+                None => {
+                    prefix_sum.push(prev_s);
+                    prefix_count.push(prev_c);
+                }
+            }
+        }
+
+        for i in 0..part_len {
+            let order_val = order_slice[i];
+            let (sum_val, count_val) = match order_val {
+                None => (None, None),
+                Some(v) => {
+                    let low = if start == UNBOUNDED_PRECEDING {
+                        0.0
+                    } else {
+                        v + start_f
+                    };
+                    let high = if end == UNBOUNDED_FOLLOWING {
+                        f64::INFINITY
+                    } else {
+                        v + end_f
+                    };
+                    let left = order_slice[..=i]
+                        .iter()
+                        .rposition(|x: &Option<f64>| x.map_or(false, |o| o >= low))
+                        .unwrap_or(0);
+                    let right = order_slice[i..]
+                        .iter()
+                        .position(|x: &Option<f64>| x.map_or(true, |o| o > high))
+                        .map(|p| i + p - 1)
+                        .unwrap_or(part_len - 1);
+                    let left = left.min(i);
+                    let right = right.max(i);
+                    let sum_r = prefix_sum[right + 1] - prefix_sum[left];
+                    let count_r = prefix_count[right + 1] - prefix_count[left];
+                    (Some(sum_r), Some(count_r))
+                }
+            };
+            let out: Option<f64> = match agg {
+                RangeWindowAgg::Sum => sum_val,
+                RangeWindowAgg::Count => count_val.map(|c| c as f64),
+                RangeWindowAgg::Mean => match (sum_val, count_val) {
+                    (Some(s), Some(c)) if c > 0 => Some(s / c as f64),
+                    _ => None,
+                },
+            };
+            result.push(out);
+        }
+
+        idx = part_end;
+    }
+
+    let ca = Float64Chunked::from_iter(result.into_iter());
+    Ok(Series::new(value_col.into(), ca))
+}
+
 /// Add or replace a column. Handles deferred rand/randn and Python UDF (UdfCall).
 pub fn with_column(
     df: &DataFrame,
@@ -635,6 +775,45 @@ pub fn with_column(
                 ));
             }
         }
+    }
+    // RANGE BETWEEN (value-based frame): evaluate eagerly (sort, range aggregate per partition, restore order).
+    if let Some(ref spec) = column.range_window_spec {
+        let partition_resolved: Vec<String> = spec
+            .partition_by
+            .iter()
+            .map(|s| df.resolve_column_name(s))
+            .collect::<Result<Vec<_>, _>>()?;
+        let order_resolved = df.resolve_column_name(&spec.order_by)?;
+        let value_resolved = df.resolve_column_name(&spec.value_col)?;
+        let pl_df = df.collect_inner()?;
+        let mut pl_df = pl_df.as_ref().clone();
+        let n = pl_df.height();
+        let rid: Vec<u32> = (0..n).map(|i| i as u32).collect();
+        let rid_series = Series::new("_range_rid".into(), rid);
+        pl_df.with_column(rid_series.into())?;
+        let sort_cols: Vec<&str> = partition_resolved
+            .iter()
+            .map(|s| s.as_str())
+            .chain([order_resolved.as_str()])
+            .collect();
+        let mut pl_df = pl_df.sort(sort_cols.as_slice(), SortMultipleOptions::default())?;
+        let mut range_series = compute_range_window_series(
+            &pl_df,
+            &partition_resolved,
+            &order_resolved,
+            &value_resolved,
+            spec.start,
+            spec.end,
+            spec.agg,
+        )?;
+        range_series.rename(column_name.into());
+        pl_df.with_column(range_series.into())?;
+        pl_df = pl_df.sort(&["_range_rid"], SortMultipleOptions::default())?;
+        pl_df = pl_df.drop("_range_rid")?;
+        return Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            case_sensitive,
+        ));
     }
     let mut expr = df.resolve_expr_column_names(column.expr().clone())?;
     expr = df.coerce_string_numeric_comparisons(expr)?;

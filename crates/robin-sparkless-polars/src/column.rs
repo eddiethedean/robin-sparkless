@@ -78,6 +78,25 @@ pub struct FirstLastValue {
     pub is_last: bool,
 }
 
+/// Value-based window frame (RANGE BETWEEN). Evaluated eagerly in with_column.
+#[derive(Debug, Clone)]
+pub struct RangeWindowSpec {
+    pub partition_by: Vec<String>,
+    /// Order column name (single column only for range frame).
+    pub order_by: String,
+    pub value_col: String,
+    pub start: i64,
+    pub end: i64,
+    pub agg: RangeWindowAgg,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RangeWindowAgg {
+    Sum,
+    Mean,
+    Count,
+}
+
 /// Column - represents a column in a DataFrame, used for building expressions
 /// Thin wrapper around Polars `Expr`. May carry a DeferredRandom for rand/randn so with_column can produce one value per row.
 /// May carry UdfCall for Python UDFs (eager execution at with_column).
@@ -100,6 +119,8 @@ pub struct Column {
     pub first_last_value: Option<FirstLastValue>,
     /// When Some, over_window uses cum_count for running count semantics (PySpark count().over(order); #1218).
     pub source_for_running_count: Option<String>,
+    /// When Some, with_column evaluates range window eagerly (RANGE BETWEEN; value-based frame).
+    pub range_window_spec: Option<RangeWindowSpec>,
 }
 
 /// True if the expression is or contains a count_distinct/n_unique aggregate (PySpark rejects distinct window functions).
@@ -125,6 +146,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -141,6 +163,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -162,6 +185,7 @@ impl Column {
                 is_last: true,
             }),
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -177,6 +201,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -196,6 +221,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -215,6 +241,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -285,6 +312,7 @@ impl Column {
             source_for_running_mean: self.source_for_running_mean.clone(),
             first_last_value: self.first_last_value.clone(),
             source_for_running_count: self.source_for_running_count.clone(),
+            range_window_spec: self.range_window_spec.clone(),
         }
     }
 
@@ -330,6 +358,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -345,6 +374,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -2586,6 +2616,37 @@ impl Column {
             return Ok(Self::from_expr(expr, None));
         }
 
+        // RANGE frame (value-based): evaluate eagerly in with_column via RangeWindowSpec.
+        if let Some((kind, start, end)) = frame {
+            if kind == "range"
+                && order_by_encoded.len() == 1
+                && has_rolling_source
+            {
+                let order_name = order_by_encoded[0].trim().strip_prefix('-').unwrap_or(order_by_encoded[0].trim()).to_string();
+                let partition_by: Vec<String> = partition_by.iter().map(|s| (*s).to_string()).collect();
+                let (value_col, agg) = if let Some(ref src) = self.source_for_running_mean {
+                    (src.clone(), RangeWindowAgg::Mean)
+                } else if let Some(ref src) = self.source_for_running {
+                    (src.clone(), RangeWindowAgg::Sum)
+                } else if let Some(ref src) = self.source_for_running_count {
+                    (src.clone(), RangeWindowAgg::Count)
+                } else {
+                    unreachable!("has_rolling_source")
+                };
+                let spec = RangeWindowSpec {
+                    partition_by,
+                    order_by: order_name,
+                    value_col,
+                    start,
+                    end,
+                    agg,
+                };
+                let mut c = Self::from_expr(lit(0i64).cast(DataType::Float64), Some(self.name.clone()));
+                c.range_window_spec = Some(spec);
+                return Ok(c);
+            }
+        }
+
         let base_expr = if use_running_aggregate {
                 if let Some(ref src) = self.source_for_running_mean {
                     // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
@@ -2796,6 +2857,7 @@ impl Column {
                 is_last: false,
             }),
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -2816,6 +2878,7 @@ impl Column {
                 is_last: true,
             }),
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 

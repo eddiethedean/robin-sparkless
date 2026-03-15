@@ -75,3 +75,22 @@ def test_rows_between_bounded_sliding_sum(spark) -> None:
     sum_vals = [r["sum_window"] for r in rows]
     # Sliding window of 3 rows: row0: 1+2=3, row1: 1+2+3=6, row2: 2+3+4=9, row3: 3+4=7
     assert sum_vals == [3.0, 6.0, 9.0, 7.0]
+
+
+def test_range_between_bounded_sum(spark) -> None:
+    """rangeBetween(0, 1) with sum() uses value-based window [current, current+1] (RANGE frame)."""
+    df = spark.createDataFrame(
+        [
+            {"grp": "A", "val": 1},
+            {"grp": "A", "val": 2},
+            {"grp": "A", "val": 3},
+            {"grp": "A", "val": 4},
+        ],
+        schema="grp string, val int",
+    )
+    w = Window.partitionBy("grp").orderBy("val").rangeBetween(0, 1)
+    result = df.withColumn("sum_range", F.sum("val").over(w))
+    rows = result.collect()
+    sum_vals = [r["sum_range"] for r in rows]
+    # Value range [val, val+1]: row0 1+2=3, row1 2+3=5, row2 3+4=7, row3 4=4
+    assert sum_vals == [3.0, 5.0, 7.0, 4.0]
