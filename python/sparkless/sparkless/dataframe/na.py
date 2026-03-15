@@ -36,4 +36,4 @@ class DataFrameNaFunctions:
         subset: Optional[List[str]] = None,
     ) -> DataFrame:
         """Replace values in columns. PySpark na.replace(to_replace, value, subset)."""
-        return self._df.replace(to_replace, value=value, subset=subset)
+        return self._df.replace(to_replace, value, subset=subset)

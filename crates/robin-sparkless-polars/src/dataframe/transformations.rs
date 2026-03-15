@@ -708,9 +708,10 @@ fn compute_range_window_series(
                     } else {
                         v + end_f
                     };
+                    // Leftmost index where order >= low (inclusive start of range).
                     let left = order_slice[..=i]
                         .iter()
-                        .rposition(|x: &Option<f64>| x.map_or(false, |o| o >= low))
+                        .position(|x: &Option<f64>| x.map_or(false, |o| o >= low))
                         .unwrap_or(0);
                     let right = order_slice[i..]
                         .iter()
