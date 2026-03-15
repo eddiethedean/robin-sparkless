@@ -1397,6 +1397,39 @@ impl CubeRollupData {
         self.agg(vec![len().cast(DataType::Int64).alias("count")])
     }
 
+    /// Sum of a column per grouping set (PySpark cube/rollup .sum(col)).
+    pub fn sum(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        self.agg(vec![col(column).sum().alias(format!("sum({column})"))])
+    }
+
+    /// Average of one or more columns per grouping set (PySpark cube/rollup .avg(...)).
+    pub fn avg(&self, columns: &[&str]) -> Result<DataFrame, PolarsError> {
+        if columns.is_empty() {
+            return Err(PolarsError::ComputeError(
+                "avg requires at least one column".into(),
+            ));
+        }
+        use polars::prelude::*;
+        let agg_exprs: Vec<Expr> = columns
+            .iter()
+            .map(|c| col(*c).mean().alias(format!("avg({c})")))
+            .collect();
+        self.agg(agg_exprs)
+    }
+
+    /// Minimum of a column per grouping set (PySpark cube/rollup .min(col)).
+    pub fn min(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        self.agg(vec![col(column).min().alias(format!("min({column})"))])
+    }
+
+    /// Maximum of a column per grouping set (PySpark cube/rollup .max(col)).
+    pub fn max(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        self.agg(vec![col(column).max().alias(format!("max({column})"))])
+    }
+
     /// Run aggregation on each grouping set and union results. Missing keys become null.
     /// Duplicate agg output names are disambiguated (issue #368).
     /// Column names in agg expressions are resolved case-insensitively when case_sensitive is false.
