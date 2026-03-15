@@ -3907,6 +3907,7 @@ fn unquote_simple_date_format(s: &str) -> String {
 
 /// Map PySpark/Java SimpleDateFormat style to chrono strftime. Public for to_char/date_format.
 /// Handles quoted literals (e.g. 'T' in "yyyy-MM-dd'T'HH:mm:ss") so they become literal in chrono (#273).
+/// Day of week: E/EE/EEE -> %a (abbreviated e.g. Fri), EEEE -> %A (full e.g. Friday) (#1479).
 pub(crate) fn pyspark_format_to_chrono(s: &str) -> String {
     let s = unquote_simple_date_format(s);
     s.replace("yyyy", "%Y")
@@ -3915,6 +3916,10 @@ pub(crate) fn pyspark_format_to_chrono(s: &str) -> String {
         .replace("HH", "%H")
         .replace("mm", "%M")
         .replace("ss", "%S")
+        .replace("EEEE", "%A")
+        .replace("EEE", "%a")
+        .replace("EE", "%a")
+        .replace("E", "%a")
 }
 
 /// unix_timestamp(column, format?) - parse string to seconds since epoch.
