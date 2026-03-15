@@ -9140,6 +9140,22 @@ fn date_trunc(format: &str, column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(name = "native_next_day")]
+fn native_next_day(column: &PyColumn, day_of_week: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::next_day(&column.inner, day_of_week),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_trunc")]
+fn native_trunc(column: &PyColumn, format: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::trunc(&column.inner, format),
+    }
+}
+
+#[pyfunction]
 #[pyo3(signature = (col, ignorenulls=false))]
 fn first(col: &PyColumn, ignorenulls: bool) -> PyColumn {
     PyColumn {
@@ -9159,6 +9175,23 @@ fn last(col: &PyColumn, ignorenulls: bool) -> PyColumn {
 fn translate(column: &PyColumn, from_str: &str, to_str: &str) -> PyColumn {
     PyColumn {
         inner: functions::translate(&column.inner, from_str, to_str),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_instr")]
+fn native_instr(column: &PyColumn, substr: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::instr(&column.inner, substr),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "native_locate")]
+#[pyo3(signature = (substr, column, pos=1))]
+fn native_locate(substr: &str, column: &PyColumn, pos: i64) -> PyColumn {
+    PyColumn {
+        inner: functions::locate(substr, &column.inner, pos),
     }
 }
 
@@ -9429,9 +9462,13 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Phase 4: missing functions (checklist)
     m.add_function(wrap_pyfunction!(approx_count_distinct, m)?)?;
     m.add_function(wrap_pyfunction!(date_trunc, m)?)?;
+    m.add_function(wrap_pyfunction!(native_next_day, m)?)?;
+    m.add_function(wrap_pyfunction!(native_trunc, m)?)?;
     m.add_function(wrap_pyfunction!(first, m)?)?;
     m.add_function(wrap_pyfunction!(last, m)?)?;
     m.add_function(wrap_pyfunction!(translate, m)?)?;
+    m.add_function(wrap_pyfunction!(native_instr, m)?)?;
+    m.add_function(wrap_pyfunction!(native_locate, m)?)?;
     m.add_function(wrap_pyfunction!(substring_index, m)?)?;
     m.add_function(wrap_pyfunction!(crc32, m)?)?;
     m.add_function(wrap_pyfunction!(xxhash64, m)?)?;
