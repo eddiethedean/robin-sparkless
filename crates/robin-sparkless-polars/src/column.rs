@@ -3062,12 +3062,21 @@ impl Column {
     }
 
     /// Slice list from start with optional length (PySpark slice). 1-based start.
+    /// Negative start counts from the end (-1 = last, -2 = second-to-last); then take length elements (#1477).
     pub fn array_slice(&self, start: i64, length: Option<i64>) -> Column {
         use polars::prelude::*;
-        let start_expr = lit((start - 1).max(0)); // 1-based to 0-based
+        let list_expr = self.expr().clone();
+        let len_expr = list_expr.clone().list().len().cast(DataType::Int64);
+        let start_expr = when(lit(start).lt(0))
+            .then(
+                when((len_expr.clone() + lit(start)).lt(0))
+                    .then(lit(0i64))
+                    .otherwise(len_expr + lit(start)),
+            )
+            .otherwise(lit((start - 1).max(0)));
         let length_expr = length.map(lit).unwrap_or_else(|| lit(i64::MAX));
         Self::from_expr(
-            self.expr().clone().list().slice(start_expr, length_expr),
+            list_expr.list().slice(start_expr, length_expr),
             None,
         )
     }
