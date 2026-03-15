@@ -260,6 +260,38 @@ class TestSortArrayAscParameter(ParityTestBase):
         assert rows[0]["sorted"] == [1, 2, 3]
 
 
+class TestSortArrayNullOrdering(ParityTestBase):
+    """Test sort_array null ordering matches PySpark (#1480): asc=nulls first, desc=nulls last."""
+
+    def test_sort_array_nulls_ascending(self, spark):
+        """Ascending: nulls come first."""
+        imports = get_imports()
+        F = imports.F
+
+        df = spark.createDataFrame(
+            [{"arr": [3, None, 1, None, 2]}],
+            schema="arr array<int>",
+        )
+        result = df.select(F.sort_array("arr", asc=True).alias("asc"))
+        rows = result.collect()
+        assert len(rows) == 1
+        assert rows[0]["asc"] == [None, None, 1, 2, 3]
+
+    def test_sort_array_nulls_descending(self, spark):
+        """Descending: nulls come last."""
+        imports = get_imports()
+        F = imports.F
+
+        df = spark.createDataFrame(
+            [{"arr": [3, None, 1, None, 2]}],
+            schema="arr array<int>",
+        )
+        result = df.select(F.sort_array("arr", asc=False).alias("desc"))
+        rows = result.collect()
+        assert len(rows) == 1
+        assert rows[0]["desc"] == [3, 2, 1, None, None]
+
+
 class TestArraySortNoAscParameter(ParityTestBase):
     """Test that array_sort always sorts ascending (PySpark parity).
 
