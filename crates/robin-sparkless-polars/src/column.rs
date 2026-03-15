@@ -1,6 +1,6 @@
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, SortOptions,
-    TimeUnit, WindowMapping, col, lit,
+    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, RollingOptionsFixedWindow,
+    SortOptions, TimeUnit, WindowMapping, col, lit,
 };
 use polars_plan::dsl::AggExpr;
 use std::ops::Neg;
@@ -2467,13 +2467,19 @@ impl Column {
     /// When `use_running_aggregate` is true and we have `source_for_running`, use cum_sum for running semantics.
     /// When `first_last_value` is Some and order is present, use order-sensitive first/last (PySpark #1145).
     /// When `is_full_partition_frame` is false and we have last_value (first_last_value.is_last), use current-row semantics (PySpark default frame).
+    /// When `frame` is `Some(("rows", start, end))` with finite start/end, use rolling window instead of cumulative (#1474).
     pub fn over_window(
         &self,
         partition_by: &[&str],
         order_by_encoded: &[String],
         use_running_aggregate: bool,
         is_full_partition_frame: bool,
+        frame: Option<(&str, i64, i64)>,
     ) -> Result<Column, PolarsError> {
+        // PySpark unbounded frame bounds (Long.MIN_VALUE / Long.MAX_VALUE)
+        const UNBOUNDED_PRECEDING: i64 = i64::MIN;
+        const UNBOUNDED_FOLLOWING: i64 = i64::MAX;
+
         // PySpark does not support countDistinct().over(); approx_count_distinct().over() is allowed (#1218).
         if expr_is_or_contains_n_unique(self.expr()) && self.name.starts_with("count_distinct(") {
             return Err(PolarsError::InvalidOperation(
@@ -2515,20 +2521,85 @@ impl Column {
             }
         }
 
-        let base_expr = if use_running_aggregate {
-            if let Some(ref src) = self.source_for_running_mean {
-                // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
-                let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
-                let count_expr = col(src).cum_count(false).cast(DataType::Float64);
-                sum_expr / count_expr
+        // Bounded ROWS frame: use rolling window instead of cumulative (#1474).
+        let has_rolling_source = self.source_for_running.is_some()
+            || self.source_for_running_mean.is_some()
+            || self.source_for_running_count.is_some();
+        let use_rolling = frame.map_or(false, |(kind, start, end)| {
+            kind == "rows"
+                && start != UNBOUNDED_PRECEDING
+                && end != UNBOUNDED_FOLLOWING
+                && use_running_aggregate
+                && has_rolling_source
+        });
+
+        if use_rolling {
+            let (_kind, start, end) = frame.expect("use_rolling implies frame");
+            let window_size = (end - start + 1) as usize;
+            let center = start < 0 && end > 0;
+            let rolling_opts = RollingOptionsFixedWindow {
+                window_size,
+                min_periods: 1,
+                center,
+                ..Default::default()
+            };
+            let mut order_exprs: Vec<Expr> = Vec::with_capacity(order_by_encoded.len());
+            let mut descending_multi: Vec<bool> = Vec::with_capacity(order_by_encoded.len());
+            for s in order_by_encoded.iter() {
+                let s = s.trim();
+                let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
+                    (stripped.trim(), true)
+                } else {
+                    (s, false)
+                };
+                order_exprs.push(col(name));
+                descending_multi.push(descending);
+            }
+            let default_opts = SortOptions {
+                descending: descending_multi.first().copied().unwrap_or(false),
+                nulls_last: descending_multi.first().copied().unwrap_or(false),
+                ..Default::default()
+            };
+            let over_opts = (
+                Some(partition_exprs.clone()),
+                Some((order_exprs, default_opts)),
+            );
+            let expr = if let Some(ref src) = self.source_for_running_mean {
+                col(src)
+                    .cast(DataType::Float64)
+                    .rolling_mean(rolling_opts.clone())
+                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
             } else if let Some(ref src) = self.source_for_running {
-                // Running sum in window order. Cast to Float64 so string columns work
-                // (PySpark parity, issue #393). Non-running sums still use native dtype.
-                col(src).cast(DataType::Float64).cum_sum(false)
+                col(src)
+                    .cast(DataType::Float64)
+                    .rolling_sum(rolling_opts.clone())
+                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
             } else if let Some(ref src) = self.source_for_running_count {
-                // Running count in window order (PySpark count().over(order); #1218).
-                col(src).cum_count(false).cast(DataType::Int64)
+                col(src)
+                    .is_not_null()
+                    .cast(DataType::Int64)
+                    .rolling_sum(rolling_opts)
+                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
             } else {
+                unreachable!("use_rolling requires has_rolling_source")
+            };
+            return Ok(Self::from_expr(expr, None));
+        }
+
+        let base_expr = if use_running_aggregate {
+                if let Some(ref src) = self.source_for_running_mean {
+                    // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
+                    let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
+                    let count_expr = col(src).cum_count(false).cast(DataType::Float64);
+                    sum_expr / count_expr
+                } else if let Some(ref src) = self.source_for_running {
+                    // Running sum in window order. Cast to Float64 so string columns work
+                    // (PySpark parity, issue #393). Non-running sums still use native dtype.
+                    col(src).cast(DataType::Float64).cum_sum(false)
+                } else if let Some(ref src) = self.source_for_running_count {
+                    // Running count in window order (PySpark count().over(order); #1218).
+                    col(src).cum_count(false).cast(DataType::Int64)
+                } else {
                 self.expr().clone()
             }
         } else {
@@ -2537,6 +2608,7 @@ impl Column {
             // (PySpark parity, issue #393).
             self.expr().clone()
         };
+
         let expr = if order_by_encoded.is_empty() {
             base_expr.over(partition_exprs)
         } else {
