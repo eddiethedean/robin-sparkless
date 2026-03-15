@@ -865,6 +865,22 @@ impl CubeRollupData {
         self.0.count().map(DataFrame)
     }
 
+    pub fn sum(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        self.0.sum(column).map(DataFrame)
+    }
+
+    pub fn avg(&self, columns: &[&str]) -> Result<DataFrame, PolarsError> {
+        self.0.avg(columns).map(DataFrame)
+    }
+
+    pub fn min(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        self.0.min(column).map(DataFrame)
+    }
+
+    pub fn max(&self, column: &str) -> Result<DataFrame, PolarsError> {
+        self.0.max(column).map(DataFrame)
+    }
+
     pub fn agg(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         self.0.agg(exprs).map(DataFrame)
     }

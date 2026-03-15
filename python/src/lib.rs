@@ -7132,6 +7132,54 @@ impl PyCubeRollupData {
         self.inner.count().map(PyDataFrame::wrap).map_err(to_py_err)
     }
 
+    fn sum(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let name = py_col_to_name(col_name)?;
+        self.inner
+            .sum(&name)
+            .map(PyDataFrame::wrap)
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(signature = (*cols))]
+    fn avg(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let mut names = Vec::new();
+        for item in cols.iter() {
+            names.extend(py_one_or_many_cols(&item)?);
+        }
+        if names.is_empty() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "avg requires at least one column",
+            ));
+        }
+        let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        self.inner
+            .avg(&refs)
+            .map(PyDataFrame::wrap)
+            .map_err(to_py_err)
+    }
+
+    /// PySpark cube/rollup().mean(*cols).
+    #[pyo3(signature = (*cols))]
+    fn mean(&self, cols: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        self.avg(cols)
+    }
+
+    fn min(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let name = py_col_to_name(col_name)?;
+        self.inner
+            .min(&name)
+            .map(PyDataFrame::wrap)
+            .map_err(to_py_err)
+    }
+
+    fn max(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
+        let name = py_col_to_name(col_name)?;
+        self.inner
+            .max(&name)
+            .map(PyDataFrame::wrap)
+            .map_err(to_py_err)
+    }
+
     #[pyo3(signature = (*exprs))]
     fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
         fn push_expr(
