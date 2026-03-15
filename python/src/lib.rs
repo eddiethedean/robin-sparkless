@@ -6377,38 +6377,70 @@ impl PyColumn {
     #[pyo3(signature = (*values))]
     fn isin(&self, values: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
         let mut expanded: Vec<Py<PyAny>> = Vec::new();
+        let mut has_none = false;
+        let py = values.py();
+
         for item in values.iter() {
             if let Ok(list) = item.downcast::<PyList>() {
                 for x in list.iter() {
-                    expanded.push(x.unbind());
+                    if x.is_none() {
+                        has_none = true;
+                    } else {
+                        expanded.push(x.unbind());
+                    }
                 }
+            } else if item.is_none() {
+                has_none = true;
             } else {
                 expanded.push(item.unbind());
             }
         }
+
+        // If no non-null values in list:
+        // - If None was present: all results are NULL (uncertain comparison)
+        // - If None was not present: all results are false (no match possible)
         if expanded.is_empty() {
             return Ok(PyColumn {
-                inner: robin_sparkless::functions::lit_bool(false),
+                inner: if has_none {
+                    robin_sparkless::functions::lit_null_untyped()
+                } else {
+                    robin_sparkless::functions::lit_bool(false)
+                },
             });
         }
-        let py = values.py();
+
+        // Build the basic isin result with non-null values
         let first = expanded[0].bind(py);
-        if first.extract::<i64>().is_ok() {
+        let base_result = if first.extract::<i64>().is_ok() {
             let vals: Vec<i64> = expanded
                 .iter()
                 .filter_map(|v| v.bind(py).extract::<i64>().ok())
                 .collect();
             if vals.len() == expanded.len() {
-                return Ok(PyColumn {
-                    inner: functions::isin_i64(&self.inner, &vals),
-                });
+                functions::isin_i64(&self.inner, &vals)
+            } else {
+                let vals: Vec<String> = expanded.iter().map(|v| v.bind(py).to_string()).collect();
+                let refs: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
+                functions::isin_str(&self.inner, &refs)
             }
-        }
-        let vals: Vec<String> = expanded.iter().map(|v| v.bind(py).to_string()).collect();
-        let refs: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
-        Ok(PyColumn {
-            inner: functions::isin_str(&self.inner, &refs),
-        })
+        } else {
+            let vals: Vec<String> = expanded.iter().map(|v| v.bind(py).to_string()).collect();
+            let refs: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
+            functions::isin_str(&self.inner, &refs)
+        };
+
+        // If None was in the list, non-matching rows should return NULL (uncertain)
+        // PySpark behavior: match -> true, no match but None in list -> NULL
+        let result = if has_none {
+            // when(base_result).then(true).otherwise(NULL)
+            functions::when(&base_result)
+                .then(&robin_sparkless::functions::lit_bool(true))
+                .otherwise(&robin_sparkless::functions::lit_null_untyped())
+        } else {
+            base_result
+        };
+
+        Ok(PyColumn { inner: result })
     }
 
     fn is_not_null(&self) -> PyColumn {
