@@ -289,22 +289,28 @@ fn covar_pop_expr_impl(e1: Expr, e2: Expr) -> Expr {
 }
 
 fn corr_expr_impl(e1: Expr, e2: Expr) -> Expr {
-    use polars::prelude::{len, lit, when};
+    use polars::prelude::{lit, when};
+    // PySpark excludes rows where either column is null (#1475). Use only pairs where both non-null.
     let c1 = e1.clone().cast(DataType::Float64);
     let c2 = e2.clone().cast(DataType::Float64);
-    let n = len().cast(DataType::Float64);
-    let n1 = (len() - lit(1)).cast(DataType::Float64);
-    let sum_ab = (c1.clone() * c2.clone()).sum();
-    let sum_a = e1.sum().cast(DataType::Float64);
-    let sum_b = e2.sum().cast(DataType::Float64);
-    let sum_a2 = (c1.clone() * c1).sum();
-    let sum_b2 = (c2.clone() * c2).sum();
+    let cond = e1.clone().is_not_null().and(e2.clone().is_not_null());
+    let n = e1
+        .clone()
+        .filter(cond.clone())
+        .count()
+        .cast(DataType::Float64);
+    let n1 = n.clone() - lit(1.0);
+    let sum_ab = (c1.clone() * c2.clone()).filter(cond.clone()).sum();
+    let sum_a = c1.clone().filter(cond.clone()).sum();
+    let sum_b = c2.clone().filter(cond.clone()).sum();
+    let sum_a2 = (c1.clone() * c1).filter(cond.clone()).sum();
+    let sum_b2 = (c2.clone() * c2).filter(cond).sum();
     let cov_samp = (sum_ab - sum_a.clone() * sum_b.clone() / n.clone()) / n1.clone();
     let var_a = (sum_a2 - sum_a.clone() * sum_a / n.clone()) / n1.clone();
     let var_b = (sum_b2 - sum_b.clone() * sum_b / n.clone()) / n1.clone();
     let std_a = var_a.sqrt();
     let std_b = var_b.sqrt();
-    when(len().gt(lit(1)))
+    when(n.gt(lit(1.0)))
         .then(cov_samp / (std_a * std_b))
         .otherwise(lit(f64::NAN))
 }
