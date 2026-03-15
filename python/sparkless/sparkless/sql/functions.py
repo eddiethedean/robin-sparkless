@@ -891,9 +891,10 @@ def isnotnull(col_or_name):
 def nvl(col_or_name, replacement):
     """Replace null with replacement. PySpark: F.nvl(col, replacement)."""
     c = _as_col(col_or_name)
+    # PySpark: string second arg is column name (value of that column), not literal (#1476).
     rep = (
         lit(replacement)
-        if isinstance(replacement, (int, float, bool, str, type(None)))
+        if isinstance(replacement, (int, float, bool, type(None)))
         else _as_col(replacement)
     )
     return coalesce(c, rep)
