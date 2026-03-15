@@ -3022,13 +3022,13 @@ impl Column {
     }
 
     /// Sort list elements (PySpark array_sort/sort_array).
-    /// When asc=true (default), sorts ascending with nulls last.
-    /// When asc=false, sorts descending with nulls first.
+    /// When asc=true (default), sorts ascending with nulls first.
+    /// When asc=false, sorts descending with nulls last.
     pub fn array_sort(&self, asc: bool) -> Column {
         use polars::prelude::SortOptions;
         let opts = SortOptions {
             descending: !asc,
-            nulls_last: asc, // PySpark: nulls last for asc, nulls first for desc
+            nulls_last: !asc, // PySpark: nulls first for asc, nulls last for desc
             ..Default::default()
         };
         Self::from_expr(self.expr().clone().list().sort(opts), None)

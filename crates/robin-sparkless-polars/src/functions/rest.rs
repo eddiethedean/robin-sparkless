@@ -2632,7 +2632,7 @@ pub fn element_at(column: &Column, index: i64) -> Column {
 }
 
 /// Sort list elements (PySpark array_sort/sort_array).
-/// When asc=true (default), sorts ascending. When asc=false, sorts descending.
+/// When asc=true (default), sorts ascending with nulls first. When asc=false, sorts descending with nulls last.
 pub fn array_sort(column: &Column, asc: bool) -> Column {
     column.clone().array_sort(asc)
 }
