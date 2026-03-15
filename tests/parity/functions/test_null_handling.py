@@ -56,6 +56,23 @@ class TestNullHandlingFunctionsParity(ParityTestBase):
         result = df.select(F.nvl(df.salary, F.lit(0)))
         self.assert_parity(result, expected)
 
+    def test_nvl_column_replacement(self, spark):
+        """nvl(col1, col2) uses value of col2 when col1 is null, not literal column name (#1476)."""
+        imports = get_imports()
+        F = imports.F
+
+        df = spark.createDataFrame(
+            [
+                {"a": None, "b": "default"},
+                {"a": "value", "b": "default"},
+            ]
+        )
+        result = df.select(F.nvl("a", "b").alias("result"))
+        rows = result.collect()
+        assert len(rows) == 2
+        assert rows[0]["result"] == "default"
+        assert rows[1]["result"] == "value"
+
     def test_nullif(self, spark):
         """Test nullif function matches PySpark behavior."""
         imports = get_imports()
