@@ -1,6 +1,6 @@
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, SortOptions,
-    TimeUnit, WindowMapping, col, lit,
+    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, RollingOptionsFixedWindow,
+    SortOptions, TimeUnit, WindowMapping, col, lit,
 };
 use polars_plan::dsl::AggExpr;
 use std::ops::Neg;
@@ -78,6 +78,25 @@ pub struct FirstLastValue {
     pub is_last: bool,
 }
 
+/// Value-based window frame (RANGE BETWEEN). Evaluated eagerly in with_column.
+#[derive(Debug, Clone)]
+pub struct RangeWindowSpec {
+    pub partition_by: Vec<String>,
+    /// Order column name (single column only for range frame).
+    pub order_by: String,
+    pub value_col: String,
+    pub start: i64,
+    pub end: i64,
+    pub agg: RangeWindowAgg,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RangeWindowAgg {
+    Sum,
+    Mean,
+    Count,
+}
+
 /// Column - represents a column in a DataFrame, used for building expressions
 /// Thin wrapper around Polars `Expr`. May carry a DeferredRandom for rand/randn so with_column can produce one value per row.
 /// May carry UdfCall for Python UDFs (eager execution at with_column).
@@ -100,6 +119,8 @@ pub struct Column {
     pub first_last_value: Option<FirstLastValue>,
     /// When Some, over_window uses cum_count for running count semantics (PySpark count().over(order); #1218).
     pub source_for_running_count: Option<String>,
+    /// When Some, with_column evaluates range window eagerly (RANGE BETWEEN; value-based frame).
+    pub range_window_spec: Option<RangeWindowSpec>,
 }
 
 /// True if the expression is or contains a count_distinct/n_unique aggregate (PySpark rejects distinct window functions).
@@ -125,6 +146,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -141,6 +163,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -162,6 +185,7 @@ impl Column {
                 is_last: true,
             }),
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -177,6 +201,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -196,6 +221,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -215,6 +241,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -285,6 +312,7 @@ impl Column {
             source_for_running_mean: self.source_for_running_mean.clone(),
             first_last_value: self.first_last_value.clone(),
             source_for_running_count: self.source_for_running_count.clone(),
+            range_window_spec: self.range_window_spec.clone(),
         }
     }
 
@@ -330,6 +358,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -345,6 +374,7 @@ impl Column {
             source_for_running_mean: None,
             first_last_value: None,
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -2467,13 +2497,19 @@ impl Column {
     /// When `use_running_aggregate` is true and we have `source_for_running`, use cum_sum for running semantics.
     /// When `first_last_value` is Some and order is present, use order-sensitive first/last (PySpark #1145).
     /// When `is_full_partition_frame` is false and we have last_value (first_last_value.is_last), use current-row semantics (PySpark default frame).
+    /// When `frame` is `Some(("rows", start, end))` with finite start/end, use rolling window instead of cumulative (#1474).
     pub fn over_window(
         &self,
         partition_by: &[&str],
         order_by_encoded: &[String],
         use_running_aggregate: bool,
         is_full_partition_frame: bool,
+        frame: Option<(&str, i64, i64)>,
     ) -> Result<Column, PolarsError> {
+        // PySpark unbounded frame bounds (Long.MIN_VALUE / Long.MAX_VALUE)
+        const UNBOUNDED_PRECEDING: i64 = i64::MIN;
+        const UNBOUNDED_FOLLOWING: i64 = i64::MAX;
+
         // PySpark does not support countDistinct().over(); approx_count_distinct().over() is allowed (#1218).
         if expr_is_or_contains_n_unique(self.expr()) && self.name.starts_with("count_distinct(") {
             return Err(PolarsError::InvalidOperation(
@@ -2515,20 +2551,116 @@ impl Column {
             }
         }
 
-        let base_expr = if use_running_aggregate {
-            if let Some(ref src) = self.source_for_running_mean {
-                // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
-                let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
-                let count_expr = col(src).cum_count(false).cast(DataType::Float64);
-                sum_expr / count_expr
+        // Bounded ROWS frame: use rolling window instead of cumulative (#1474).
+        let has_rolling_source = self.source_for_running.is_some()
+            || self.source_for_running_mean.is_some()
+            || self.source_for_running_count.is_some();
+        let use_rolling = frame.map_or(false, |(kind, start, end)| {
+            kind == "rows"
+                && start != UNBOUNDED_PRECEDING
+                && end != UNBOUNDED_FOLLOWING
+                && use_running_aggregate
+                && has_rolling_source
+        });
+
+        if use_rolling {
+            let (_kind, start, end) = frame.expect("use_rolling implies frame");
+            let window_size = (end - start + 1) as usize;
+            let center = start < 0 && end > 0;
+            let rolling_opts = RollingOptionsFixedWindow {
+                window_size,
+                min_periods: 1,
+                center,
+                ..Default::default()
+            };
+            let mut order_exprs: Vec<Expr> = Vec::with_capacity(order_by_encoded.len());
+            let mut descending_multi: Vec<bool> = Vec::with_capacity(order_by_encoded.len());
+            for s in order_by_encoded.iter() {
+                let s = s.trim();
+                let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
+                    (stripped.trim(), true)
+                } else {
+                    (s, false)
+                };
+                order_exprs.push(col(name));
+                descending_multi.push(descending);
+            }
+            let default_opts = SortOptions {
+                descending: descending_multi.first().copied().unwrap_or(false),
+                nulls_last: descending_multi.first().copied().unwrap_or(false),
+                ..Default::default()
+            };
+            let over_opts = (
+                Some(partition_exprs.clone()),
+                Some((order_exprs, default_opts)),
+            );
+            let expr = if let Some(ref src) = self.source_for_running_mean {
+                col(src)
+                    .cast(DataType::Float64)
+                    .rolling_mean(rolling_opts.clone())
+                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
             } else if let Some(ref src) = self.source_for_running {
-                // Running sum in window order. Cast to Float64 so string columns work
-                // (PySpark parity, issue #393). Non-running sums still use native dtype.
-                col(src).cast(DataType::Float64).cum_sum(false)
+                col(src)
+                    .cast(DataType::Float64)
+                    .rolling_sum(rolling_opts.clone())
+                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
             } else if let Some(ref src) = self.source_for_running_count {
-                // Running count in window order (PySpark count().over(order); #1218).
-                col(src).cum_count(false).cast(DataType::Int64)
+                col(src)
+                    .is_not_null()
+                    .cast(DataType::Int64)
+                    .rolling_sum(rolling_opts)
+                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
             } else {
+                unreachable!("use_rolling requires has_rolling_source")
+            };
+            return Ok(Self::from_expr(expr, None));
+        }
+
+        // RANGE frame (value-based): evaluate eagerly in with_column via RangeWindowSpec.
+        if let Some((kind, start, end)) = frame {
+            if kind == "range"
+                && order_by_encoded.len() == 1
+                && has_rolling_source
+            {
+                let order_name = order_by_encoded[0].trim().strip_prefix('-').unwrap_or(order_by_encoded[0].trim()).to_string();
+                let partition_by: Vec<String> = partition_by.iter().map(|s| (*s).to_string()).collect();
+                let (value_col, agg) = if let Some(ref src) = self.source_for_running_mean {
+                    (src.clone(), RangeWindowAgg::Mean)
+                } else if let Some(ref src) = self.source_for_running {
+                    (src.clone(), RangeWindowAgg::Sum)
+                } else if let Some(ref src) = self.source_for_running_count {
+                    (src.clone(), RangeWindowAgg::Count)
+                } else {
+                    unreachable!("has_rolling_source")
+                };
+                let spec = RangeWindowSpec {
+                    partition_by,
+                    order_by: order_name,
+                    value_col,
+                    start,
+                    end,
+                    agg,
+                };
+                let mut c = Self::from_expr(lit(0i64).cast(DataType::Float64), Some(self.name.clone()));
+                c.range_window_spec = Some(spec);
+                return Ok(c);
+            }
+        }
+
+        let base_expr = if use_running_aggregate {
+                if let Some(ref src) = self.source_for_running_mean {
+                    // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
+                    let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
+                    let count_expr = col(src).cum_count(false).cast(DataType::Float64);
+                    sum_expr / count_expr
+                } else if let Some(ref src) = self.source_for_running {
+                    // Running sum in window order. Cast to Float64 so string columns work
+                    // (PySpark parity, issue #393). Non-running sums still use native dtype.
+                    col(src).cast(DataType::Float64).cum_sum(false)
+                } else if let Some(ref src) = self.source_for_running_count {
+                    // Running count in window order (PySpark count().over(order); #1218).
+                    col(src).cum_count(false).cast(DataType::Int64)
+                } else {
                 self.expr().clone()
             }
         } else {
@@ -2537,6 +2669,7 @@ impl Column {
             // (PySpark parity, issue #393).
             self.expr().clone()
         };
+
         let expr = if order_by_encoded.is_empty() {
             base_expr.over(partition_exprs)
         } else {
@@ -2724,6 +2857,7 @@ impl Column {
                 is_last: false,
             }),
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
@@ -2744,6 +2878,7 @@ impl Column {
                 is_last: true,
             }),
             source_for_running_count: None,
+            range_window_spec: None,
         }
     }
 
