@@ -82,3 +82,33 @@ class TestDatetimeFunctionsParity(ParityTestBase):
         df = spark.createDataFrame(expected["input_data"])
         result = df.select(F.to_date(df.hire_date))
         self.assert_parity(result, expected)
+
+
+class TestDateFormatDayOfWeek(ParityTestBase):
+    """Test date_format day-of-week patterns E and EEEE (#1479)."""
+
+    def test_date_format_E_abbreviated(self, spark):
+        """E returns abbreviated day name (e.g. Fri), not literal 'E'."""
+        imports = get_imports()
+        F = imports.F
+
+        df = spark.createDataFrame([{"ts": "2024-03-15 10:30:45"}])
+        result = df.select(
+            F.date_format(F.to_timestamp("ts"), "E").alias("day_of_week")
+        )
+        rows = result.collect()
+        assert len(rows) == 1
+        assert rows[0]["day_of_week"] == "Fri"
+
+    def test_date_format_EEEE_full(self, spark):
+        """EEEE returns full day name (e.g. Friday)."""
+        imports = get_imports()
+        F = imports.F
+
+        df = spark.createDataFrame([{"ts": "2024-03-15 10:30:45"}])
+        result = df.select(
+            F.date_format(F.to_timestamp("ts"), "EEEE").alias("day_of_week")
+        )
+        rows = result.collect()
+        assert len(rows) == 1
+        assert rows[0]["day_of_week"] == "Friday"
