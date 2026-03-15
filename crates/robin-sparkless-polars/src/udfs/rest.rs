@@ -2248,7 +2248,8 @@ pub fn apply_weekday(column: Column) -> PolarsResult<Option<Column>> {
 }
 
 /// months_between(end, start, round_off) - returns fractional number of months.
-/// When round_off is true, rounds to 8 decimal places (PySpark default).
+/// PySpark formula (issue #1481): (year1-year2)*12 + (month1-month2) + (day1-day2)/31.
+/// Not total_days/31. When round_off is true, rounds to 8 decimal places (PySpark default).
 pub fn apply_months_between(
     columns: &mut [Column],
     round_off: bool,
@@ -2263,14 +2264,17 @@ pub fn apply_months_between(
     let start_series = std::mem::take(&mut columns[1]).take_materialized_series();
     let end_ca = date_series_to_days(&end_series)?;
     let start_ca = date_series_to_days(&start_series)?;
-    // PySpark: fractional months using 31 days per month; roundOff rounds to 8 decimal places.
     let out = end_ca
         .into_iter()
         .zip(&start_ca)
         .map(|(oe, os)| match (oe, os) {
             (Some(e), Some(s)) => {
-                let days = (e - s) as f64;
-                let months = days / 31.0;
+                let end_d = days_to_naive_date(e)?;
+                let start_d = days_to_naive_date(s)?;
+                let month_diff = (end_d.year() - start_d.year()) * 12
+                    + (end_d.month() as i32 - start_d.month() as i32);
+                let day_diff = end_d.day() as i32 - start_d.day() as i32;
+                let months = month_diff as f64 + (day_diff as f64 / 31.0);
                 Some(if round_off {
                     (months * 1e8).round() / 1e8
                 } else {
