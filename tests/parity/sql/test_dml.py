@@ -7,8 +7,8 @@ Tests validate that Sparkless SQL DML statements behave identically to PySpark.
 import pytest
 from pyspark.errors import AnalysisException, UnsupportedOperationException
 
+from sparkless.errors import SparklessError
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import is_pyspark_mode
 
 
 class TestSQLDMLParity(ParityTestBase):
@@ -74,22 +74,14 @@ class TestSQLDMLParity(ParityTestBase):
         spark.sql("DROP TABLE IF EXISTS insert_multi")
 
     def test_update_table(self, spark):
-        """Test UPDATE matches PySpark behavior.
-
-        Note: This is a sparkless-specific feature. PySpark does not support UPDATE TABLE.
-        """
-        if not is_pyspark_mode():
-            pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1507 – "
-                "sparkless UPDATE/DELETE parity gap; unskip once sparkless matches PySpark."
-            )
+        """Test UPDATE matches PySpark behavior (rejected for default catalog)."""
         # Create table
         data = [("Alice", 25), ("Bob", 30), ("Charlie", 35)]
         df = spark.createDataFrame(data, ["name", "age"])
         df.write.mode("overwrite").saveAsTable("update_test")
 
-        # PySpark currently does not support UPDATE TABLE for default catalog tables.
-        with pytest.raises(UnsupportedOperationException) as excinfo:
+        # PySpark and Sparkless reject UPDATE for default catalog tables (#1507).
+        with pytest.raises((UnsupportedOperationException, SparklessError)) as excinfo:
             spark.sql("UPDATE update_test SET age = 26 WHERE name = 'Alice'")
         assert "UPDATE TABLE is not supported temporarily" in str(excinfo.value)
 
@@ -97,21 +89,13 @@ class TestSQLDMLParity(ParityTestBase):
         spark.sql("DROP TABLE IF EXISTS update_test")
 
     def test_update_multiple_columns(self, spark):
-        """Test UPDATE multiple columns matches PySpark behavior.
-
-        Note: This is a sparkless-specific feature. PySpark does not support UPDATE TABLE.
-        """
-        if not is_pyspark_mode():
-            pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1507 – "
-                "sparkless UPDATE/DELETE parity gap; unskip once sparkless matches PySpark."
-            )
+        """Test UPDATE multiple columns matches PySpark behavior (rejected for default catalog)."""
         # Create table
         data = [("Alice", 25, "IT")]
         df = spark.createDataFrame(data, ["name", "age", "dept"])
         df.write.mode("overwrite").saveAsTable("update_multi")
 
-        with pytest.raises(UnsupportedOperationException) as excinfo:
+        with pytest.raises((UnsupportedOperationException, SparklessError)) as excinfo:
             spark.sql(
                 "UPDATE update_multi SET age = 26, dept = 'HR' WHERE name = 'Alice'"
             )
@@ -121,21 +105,13 @@ class TestSQLDMLParity(ParityTestBase):
         spark.sql("DROP TABLE IF EXISTS update_multi")
 
     def test_delete_from_table(self, spark):
-        """Test DELETE FROM matches PySpark behavior.
-
-        Note: This is a sparkless-specific feature. PySpark does not support DELETE FROM TABLE.
-        """
-        if not is_pyspark_mode():
-            pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1507 – "
-                "sparkless UPDATE/DELETE parity gap; unskip once sparkless matches PySpark."
-            )
+        """Test DELETE FROM matches PySpark behavior (rejected for default catalog)."""
         # Create table
         data = [("Alice", 25), ("Bob", 30), ("Charlie", 35)]
         df = spark.createDataFrame(data, ["name", "age"])
         df.write.mode("overwrite").saveAsTable("delete_test")
 
-        with pytest.raises(AnalysisException) as excinfo:
+        with pytest.raises((AnalysisException, SparklessError)) as excinfo:
             spark.sql("DELETE FROM delete_test WHERE age > 30")
         assert "UNSUPPORTED_FEATURE.TABLE_OPERATION" in str(excinfo.value)
 
@@ -143,21 +119,13 @@ class TestSQLDMLParity(ParityTestBase):
         spark.sql("DROP TABLE IF EXISTS delete_test")
 
     def test_delete_all_rows(self, spark):
-        """Test DELETE without WHERE matches PySpark behavior.
-
-        Note: This is a sparkless-specific feature. PySpark does not support DELETE FROM TABLE.
-        """
-        if not is_pyspark_mode():
-            pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1507 – "
-                "sparkless UPDATE/DELETE parity gap; unskip once sparkless matches PySpark."
-            )
+        """Test DELETE without WHERE matches PySpark behavior (rejected for default catalog)."""
         # Create table
         data = [("Alice", 25), ("Bob", 30)]
         df = spark.createDataFrame(data, ["name", "age"])
         df.write.mode("overwrite").saveAsTable("delete_all")
 
-        with pytest.raises(AnalysisException) as excinfo:
+        with pytest.raises((AnalysisException, SparklessError)) as excinfo:
             spark.sql("DELETE FROM delete_all")
         assert "UNSUPPORTED_FEATURE.TABLE_OPERATION" in str(excinfo.value)
 

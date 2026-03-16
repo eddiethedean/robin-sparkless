@@ -12,7 +12,7 @@ use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
-    AssignmentTarget, BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
+    BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
     ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
     TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
@@ -608,10 +608,10 @@ fn translate_set_expr(
     }
 }
 
-/// Translate UPDATE table SET col = expr [WHERE condition]. Modifies the table in the session catalog.
-/// For unit-test pattern (table name starts with t_test_) raise to match PySpark-without-Hive; otherwise allow (#1171).
+/// Translate UPDATE table SET col = expr [WHERE condition].
+/// PySpark parity (#1507): default catalog does not support UPDATE; reject with UnsupportedOperation-style message.
 fn translate_update(
-    session: &SparkSession,
+    _session: &SparkSession,
     update: &spark_sql_parser::ast::Update,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     if !update.table.joins.is_empty() {
@@ -619,50 +619,16 @@ fn translate_update(
             "SQL: UPDATE with JOIN is not supported. Use a single table.".into(),
         ));
     }
-    let table_name = table_name_from_factor(&update.table.relation)?;
-    if table_name.starts_with("t_test_") {
-        return Err(PolarsError::InvalidOperation(
-            "UPDATE TABLE is not supported (no Hive catalog).".into(),
-        ));
-    }
-    let mut df = session.table(&table_name)?;
-
-    let where_expr = match &update.selection {
-        Some(sel) => sql_expr_to_polars(sel, session, Some(&df), None, None)?,
-        None => lit(true),
-    };
-
-    for assign in &update.assignments {
-        let (col_name, value_expr) = match &assign.target {
-            AssignmentTarget::ColumnName(name) => {
-                let cn = table_name_from_object_name(name);
-                let value = sql_expr_to_polars(&assign.value, session, Some(&df), None, None)?;
-                (cn, value)
-            }
-            AssignmentTarget::Tuple(_) => {
-                return Err(PolarsError::InvalidOperation(
-                    "SQL: UPDATE with tuple assignment is not supported.".into(),
-                ));
-            }
-        };
-        let resolved = df.resolve_column_name(&col_name)?;
-        let new_expr = when(where_expr.clone())
-            .then(value_expr)
-            .otherwise(col(resolved.as_str()));
-        df = df.with_column_expr(&resolved, new_expr)?;
-    }
-
-    session.create_or_replace_temp_view(&table_name, df.clone());
-    session.register_table(&table_name, df);
-    Ok(DataFrame::from_polars_with_options(
-        PlDataFrame::empty(),
-        session.is_case_sensitive(),
+    // Reject UPDATE for default catalog tables to match PySpark (issue #1507).
+    Err(PolarsError::InvalidOperation(
+        "UPDATE TABLE is not supported temporarily".into(),
     ))
 }
 
-/// Translate DELETE FROM table [WHERE condition]. Removes matching rows from the table in the session catalog.
+/// Translate DELETE FROM table [WHERE condition].
+/// PySpark parity (#1507): default catalog does not support DELETE; reject with AnalysisException-style message.
 fn translate_delete(
-    session: &SparkSession,
+    _session: &SparkSession,
     delete: &spark_sql_parser::ast::Delete,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let tables = match &delete.from {
@@ -676,23 +642,9 @@ fn translate_delete(
             "SQL: DELETE with JOIN is not supported. Use a single table.".into(),
         ));
     }
-    let table_name = table_name_from_factor(&first.relation)?;
-    let df = session.table(&table_name)?;
-
-    let keep_condition = match &delete.selection {
-        Some(sel) => {
-            let pred = sql_expr_to_polars(sel, session, Some(&df), None, None)?;
-            pred.not()
-        }
-        None => lit(false),
-    };
-    let new_df = df.filter(keep_condition)?;
-
-    session.create_or_replace_temp_view(&table_name, new_df.clone());
-    session.register_table(&table_name, new_df);
-    Ok(DataFrame::from_polars_with_options(
-        PlDataFrame::empty(),
-        session.is_case_sensitive(),
+    // Reject DELETE for default catalog tables to match PySpark (issue #1507).
+    Err(PolarsError::InvalidOperation(
+        "[UNSUPPORTED_FEATURE.TABLE_OPERATION] DELETE is not supported for the table in the current catalog and namespace.".into(),
     ))
 }
 

@@ -522,8 +522,8 @@ mod tests {
         let lf = df
             .lazy()
             .select(&[
-                ac.alias("left"),
-                bc.alias("right"),
+                ac.clone().alias("left"),
+                bc.clone().alias("right"),
                 ac.clone().eq(bc.clone()).alias("eq_raw"),
                 ac.is_null().alias("left_null"),
                 bc.is_null().alias("right_null"),
@@ -537,7 +537,7 @@ mod tests {
         let right_null = out.column("right_null")?.bool()?;
 
         // First row: non-numeric \"abc\" -> left null, right 123; comparison should be treated as False.
-        assert!(left.is_null(0));
+        assert!(left.get(0).is_none());
         assert_eq!(right.get(0), Some(123));
         assert_eq!(eq_raw.get(0), Some(false));
         assert_eq!(left_null.get(0), Some(true));

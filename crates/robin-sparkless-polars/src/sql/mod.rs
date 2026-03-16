@@ -819,9 +819,9 @@ mod tests {
         assert_eq!(rows[2].get("label").and_then(|v| v.as_str()), Some("other"));
     }
 
-    /// PR-3/#730,#744: UPDATE and DELETE are supported; they modify the table in the session catalog.
+    /// PySpark parity (#1507): UPDATE and DELETE are rejected for default catalog tables.
     #[test]
-    fn test_sql_update_delete_supported() {
+    fn test_sql_update_delete_rejected_parity() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark
             .create_dataframe(
@@ -834,20 +834,27 @@ mod tests {
             .unwrap();
         spark.create_or_replace_temp_view("t", df);
 
-        // UPDATE: set v = 2 where name = 'a'
-        spark.sql("UPDATE t SET v = 2 WHERE name = 'a'").unwrap();
-        let result = spark.sql("SELECT id, v, name FROM t ORDER BY id").unwrap();
-        let rows = result.collect_as_json_rows().unwrap();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].get("v").and_then(|v| v.as_i64()), Some(2));
-        assert_eq!(rows[1].get("v").and_then(|v| v.as_i64()), Some(20));
+        // UPDATE: rejected with PySpark-matching message
+        let err = match spark.sql("UPDATE t SET v = 2 WHERE name = 'a'") {
+            Ok(_) => panic!("expected UPDATE to fail"),
+            Err(e) => e,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("UPDATE TABLE is not supported temporarily"),
+            "expected UPDATE rejection message, got: {msg}"
+        );
 
-        // DELETE: remove row where id = 1
-        spark.sql("DELETE FROM t WHERE id = 1").unwrap();
-        let result2 = spark.sql("SELECT id, v, name FROM t ORDER BY id").unwrap();
-        let rows2 = result2.collect_as_json_rows().unwrap();
-        assert_eq!(rows2.len(), 1);
-        assert_eq!(rows2[0].get("id").and_then(|v| v.as_i64()), Some(2));
+        // DELETE: rejected with UNSUPPORTED_FEATURE.TABLE_OPERATION
+        let err2 = match spark.sql("DELETE FROM t WHERE id = 1") {
+            Ok(_) => panic!("expected DELETE to fail"),
+            Err(e) => e,
+        };
+        let msg2 = err2.to_string();
+        assert!(
+            msg2.contains("UNSUPPORTED_FEATURE.TABLE_OPERATION"),
+            "expected DELETE rejection message, got: {msg2}"
+        );
     }
 
     /// PR-2/#743: JOIN ON with different column names (e.g. a.id = b.other_id).
