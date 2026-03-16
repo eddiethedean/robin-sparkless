@@ -1369,7 +1369,9 @@ def json_tuple(column, *keys):
     """
     if not keys:
         raise ValueError("json_tuple requires at least one key")
-    cols: list[_ColumnType] = []
+    from typing import List
+
+    cols: List[_ColumnType] = []
     for idx, key in enumerate(keys):
         # Use get_json_object to extract each key as a separate string column, then
         # alias to PySpark-style c0, c1, ... so df.select(F.json_tuple(...)) yields

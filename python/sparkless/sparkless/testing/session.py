@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from .mode import Mode, get_mode
 
+
 def _ensure_pyspark_submit_args_include_delta_packages() -> None:
     """Best-effort: ensure PySpark JVM can load Delta + dependencies.
 
@@ -407,13 +408,13 @@ def _configure_delta(builder: Any) -> Any:
     project_root = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     )
-    local_delta_jar = os.path.join(
-        project_root, "jars", "delta-spark_2.12-3.0.0.jar"
-    )
+    local_delta_jar = os.path.join(project_root, "jars", "delta-spark_2.12-3.0.0.jar")
 
     if os.path.exists(local_delta_jar):
         jars_str = local_delta_jar
-        existing_jars = builder._options.get("spark.jars") if hasattr(builder, "_options") else None  # type: ignore[attr-defined]
+        existing_jars = (
+            builder._options.get("spark.jars") if hasattr(builder, "_options") else None
+        )
         if existing_jars:
             jars_str = f"{existing_jars},{jars_str}"
         builder = builder.config("spark.jars", jars_str)

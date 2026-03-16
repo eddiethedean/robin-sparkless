@@ -12,7 +12,7 @@ import os
 import re
 import sys
 import uuid
-from typing import Any, Generator
+from typing import Any, Dict, Generator
 
 import pytest
 
@@ -51,7 +51,7 @@ class _SharedSessionWrapper:
 
 
 # Global shared sessions (one per mode)
-_shared_sessions: dict[Mode, Any] = {}
+_shared_sessions: Dict[Mode, Any] = {}
 
 
 def _use_shared_session() -> bool:

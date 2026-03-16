@@ -208,7 +208,7 @@ class CatalogShimWrapper:
 
     def createDatabase(self, name: str, ignoreIfExists: bool = False) -> None:
         """Create a database using SQL, matching sparkless helper semantics."""
-        spark = self._catalog._spark  # type: ignore[attr-defined]
+        spark = self._catalog._spark
         if ignoreIfExists:
             spark.sql(f"CREATE DATABASE IF NOT EXISTS `{name}`")
         else:
@@ -216,7 +216,7 @@ class CatalogShimWrapper:
 
     def dropDatabase(self, name: str, ignoreIfNotExists: bool = False) -> None:
         """Drop a database using SQL, matching sparkless helper semantics."""
-        spark = self._catalog._spark  # type: ignore[attr-defined]
+        spark = self._catalog._spark
         if ignoreIfNotExists:
             spark.sql(f"DROP DATABASE IF EXISTS `{name}`")
         else:
@@ -284,7 +284,10 @@ class JdbcDataFrameWrapper:
 
     def count(self) -> int:
         """Count rows."""
-        return self._df.count()
+        result = self._df.count()
+        # Both PySpark DataFrame.count() and sparkless DataFrame.count()
+        # return an int, but mypy sees this as Any via the untyped JVM bridge.
+        return int(result)
 
     @property
     def schema(self) -> Any:

@@ -60,6 +60,10 @@ exclude = ["tests/", ".*/tests/", "upstream_sparkless/"]
 module = ["pyspark.*", "pytest.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["pytest", "pytest.*", "_pytest", "_pytest.*"]
+follow_imports = "skip"
+
 
 [tool.pyright]
 pythonVersion = "3.8"

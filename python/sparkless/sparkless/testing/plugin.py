@@ -10,6 +10,8 @@ to their conftest.py.
 
 from __future__ import annotations
 
+from typing import List
+
 import pytest
 
 from .mode import Mode
@@ -52,7 +54,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 def pytest_collection_modifyitems(
     config: pytest.Config,
-    items: list[pytest.Item],
+    items: List[pytest.Item],
 ) -> None:
     """Skip tests based on mode markers.
 
