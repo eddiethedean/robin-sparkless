@@ -454,9 +454,9 @@ impl Column {
     }
 
     /// Null-safe equality (NULL <=> NULL returns True)
-    /// PySpark's eqNullSafe() method. Applies type coercion (e.g. string vs int) for PySpark parity (#266).
+    /// PySpark's eqNullSafe() method. Applies type coercion (e.g. string vs int) for PySpark parity (#266, #1471, #1500).
     pub fn eq_null_safe(&self, other: &Column) -> Column {
-        use crate::functions::{lit_bool, when};
+        use polars::prelude::{lit, when};
 
         let (left_c, right_c) = crate::type_coercion::coerce_for_pyspark_eq_null_safe(
             self.expr().clone(),
@@ -467,21 +467,16 @@ impl Column {
         let left_null = left_c.clone().is_null();
         let right_null = right_c.clone().is_null();
         let both_null = left_null.clone().and(right_null.clone());
-        let either_null = left_null.clone().or(right_null.clone());
-
-        // Standard equality (on coerced exprs)
+        let both_non_null = left_null.not().and(right_null.not());
         let eq_result = left_c.eq(right_c);
 
-        // If both are null, return True
-        // If either is null (but not both), return False
-        // Otherwise, return standard equality result
-        when(&Self::from_expr(both_null, None))
-            .then(&lit_bool(true))
-            .otherwise(
-                &when(&Self::from_expr(either_null, None))
-                    .then(&lit_bool(false))
-                    .otherwise(&Self::from_expr(eq_result, None)),
-            )
+        let expr = when(both_null)
+            .then(lit(true))
+            .when(both_non_null)
+            .then(eq_result)
+            .otherwise(lit(false));
+
+        Column::from_expr(expr, None)
     }
 
     /// Create a Column that is always a null boolean.
