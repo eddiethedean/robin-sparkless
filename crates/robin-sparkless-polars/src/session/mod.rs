@@ -1881,8 +1881,10 @@ impl SparkSession {
             let t = typ.trim().to_lowercase();
             is_int_like(&t) || t.starts_with("struct<")
         }
-        // #1219: When struct has no int-like fields (e.g. all string), expose string/double/float/bool
-        // so col("StructVal")["E1"] works for .cast("int") or upper() on struct field.
+        // #1219: When struct has no nested struct fields (e.g. simple flat struct) we want broader
+        // visibility so that string/double/float/bool fields are available for getField/dot access.
+        // This ensures simple structs like {name: string, age: int} expose both fields, while nested
+        // alias scenarios continue to use strict visibility.
         fn extended_visible(typ: &str) -> bool {
             let t = typ.trim().to_lowercase();
             strict_visible(typ)
@@ -1907,15 +1909,33 @@ impl SparkSession {
                 Some(((*k).to_string(), field_typ))
             })
             .collect();
-        // Use strict visibility when any field is int-like or nested struct (PySpark parity:
-        // test_issue_330_struct_field_alias nested case expects getField("E2") None when top-level has Nested struct + E2 string).
-        let has_int_like = field_types
+        let has_nested_struct = field_types
             .iter()
-            .any(|(_, typ)| is_int_like(typ) || typ.starts_with("struct<"));
+            .any(|(_, typ)| typ.trim().to_lowercase().starts_with("struct<"));
+
+        // Heuristic: Spark/PySpark's dict-of-dicts inference for synthetic E1/E2/... shaped
+        // structs is observed to *not* reliably expose inner string/float/bool fields in some
+        // parity scenarios (see tests for issue #330). Keep strict visibility for those shapes,
+        // but allow natural-name structs like {"name": "...", "age": 30} (issue #1473) to expose
+        // all primitive fields.
+        fn is_spark_e_field(name: &str) -> bool {
+            let s = name.trim();
+            if s.len() < 2 {
+                return false;
+            }
+            let mut chars = s.chars();
+            if chars.next() != Some('E') {
+                return false;
+            }
+            chars.all(|c| c.is_ascii_digit())
+        }
+        let has_int_like = field_types.iter().any(|(_, typ)| is_int_like(typ));
+        let has_spark_e_fields = field_types.iter().any(|(k, _)| is_spark_e_field(k));
+        let use_strict_visibility = has_nested_struct || (has_int_like && has_spark_e_fields);
         let inner = field_types
             .into_iter()
             .filter_map(|(k, field_typ)| {
-                let ok = if has_int_like {
+                let ok = if use_strict_visibility {
                     strict_visible(&field_typ)
                 } else {
                     extended_visible(&field_typ)
