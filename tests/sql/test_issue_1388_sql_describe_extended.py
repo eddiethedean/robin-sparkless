@@ -7,7 +7,6 @@ bigint/long/int type, and explain() returns None (plan printed to stdout).
 """
 
 
-
 def test_issue_1388_sql_describe_extended_schema_data_and_explain(spark) -> None:
     """sql.describe_extended: schema, data, and explain match PySpark (issue #1388)."""
     df = spark.createDataFrame([(1,)], ["x"])

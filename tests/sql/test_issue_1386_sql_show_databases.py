@@ -7,7 +7,6 @@ returns None (plan is printed to stdout).
 """
 
 
-
 def test_issue_1386_sql_show_databases_schema_data_and_explain(spark) -> None:
     """sql.show_databases: schema, data, and explain match PySpark (issue #1386)."""
     df = spark.sql("SHOW DATABASES")

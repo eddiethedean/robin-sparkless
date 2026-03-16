@@ -7,7 +7,6 @@ explain() returns None (plan printed to stdout).
 """
 
 
-
 def test_issue_1387_sql_show_tables_schema_data_and_explain(spark) -> None:
     """sql.show_tables: schema and explain match PySpark (issue #1387)."""
     df = spark.sql("SHOW TABLES")

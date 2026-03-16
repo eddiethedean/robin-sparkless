@@ -388,8 +388,10 @@ pub fn coerce_for_pyspark_eq_null_safe(
 
     let left_inferred = infer_type_from_expr(&left);
     let right_inferred = infer_type_from_expr(&right);
-    let left_non_numeric_str_lit = is_non_numeric_string_literal(&left);
-    let right_non_numeric_str_lit = is_non_numeric_string_literal(&right);
+    // Left in place for documentation / future parity tuning.
+    // Currently `is_non_numeric_string_literal` always returns false (see comment in helper).
+    let _left_non_numeric_str_lit = is_non_numeric_string_literal(&left);
+    let _right_non_numeric_str_lit = is_non_numeric_string_literal(&right);
 
     // Special-case: one side is a string literal and the other is a column/expression.
     // This covers patterns like col(\"val\").eqNullSafe(\"123\") or \"123\".eqNullSafe(col(\"val\")),
@@ -596,8 +598,8 @@ mod tests {
 
     #[test]
     fn eq_null_safe_int_column_vs_string_literal_coerces() -> Result<(), PolarsError> {
-        use polars::prelude::df;
         use crate::column::Column;
+        use polars::prelude::df;
 
         let df = df!(
             "val" => &[Some(123i64), Some(456i64), None],
@@ -610,8 +612,9 @@ mod tests {
         let (left_c, right_c) = coerce_for_pyspark_eq_null_safe(col_expr, lit_expr)?;
 
         // Rebuild the null-safe equality expression the same way Column::eq_null_safe does.
-        let left_col = Column::from_expr(left_c.clone(), None);
-        let right_col = Column::from_expr(right_c.clone(), None);
+        // Kept here to mirror Column::eq_null_safe structure; the expr rebuild below uses Expr directly.
+        let _left_col = Column::from_expr(left_c.clone(), None);
+        let _right_col = Column::from_expr(right_c.clone(), None);
 
         let left_null = left_c.clone().is_null();
         let right_null = right_c.clone().is_null();

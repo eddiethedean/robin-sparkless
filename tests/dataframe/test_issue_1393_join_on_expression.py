@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import pytest
 
-from sparkless.errors import SparklessError
 from pyspark.errors.exceptions.captured import AnalysisException
 from sparkless.testing import is_pyspark_mode
 

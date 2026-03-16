@@ -51,4 +51,3 @@ def test_struct_field_dot_notation_matches_getfield(spark) -> None:
     assert dot_names == ["Alice", "Bob"]
     assert getfield_names == ["Alice", "Bob"]
     assert dot_names == getfield_names
-

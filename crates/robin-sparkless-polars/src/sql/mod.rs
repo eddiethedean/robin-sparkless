@@ -662,7 +662,7 @@ mod tests {
         assert_eq!(rows[0].get("col_name").and_then(|v| v.as_str()), Some("id"));
         assert_eq!(
             rows[0].get("data_type").and_then(|v| v.as_str()),
-            Some("long")
+            Some("bigint")
         );
         assert_eq!(
             rows[1].get("col_name").and_then(|v| v.as_str()),
@@ -670,7 +670,7 @@ mod tests {
         );
         assert_eq!(
             rows[1].get("data_type").and_then(|v| v.as_str()),
-            Some("long")
+            Some("bigint")
         );
         assert_eq!(
             rows[2].get("col_name").and_then(|v| v.as_str()),
@@ -705,7 +705,7 @@ mod tests {
         );
         assert_eq!(
             rows[0].get("data_type").and_then(|v| v.as_str()),
-            Some("long")
+            Some("bigint")
         );
     }
 

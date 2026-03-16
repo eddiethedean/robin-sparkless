@@ -28,4 +28,3 @@ def test_count_lit_one_counts_all_rows(spark) -> None:
     result = df.agg(F.count(F.lit(1)).alias("count_all")).collect()
     assert len(result) == 1
     assert result[0]["count_all"] == 4
-

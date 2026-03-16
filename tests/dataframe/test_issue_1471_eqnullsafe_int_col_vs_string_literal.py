@@ -36,4 +36,3 @@ def test_eqnullsafe_int_column_vs_string_literal(spark) -> None:
     # |NULL|false|
     # +----+-----+
     assert [row["match"] for row in out] == [True, False, False]
-

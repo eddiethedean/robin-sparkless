@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 
 
-
 def test_issue_1385_errors_missing_column_message(spark, spark_imports) -> None:
     """Selecting a non-existent column raises an error (issue #1385)."""
     F = spark_imports.F
