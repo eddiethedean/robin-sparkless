@@ -18,7 +18,7 @@ from typing import Iterable
 import os
 import pytest
 
-from sparkless.testing import get_imports, is_pyspark_mode
+from sparkless.testing import get_imports
 
 
 imports = get_imports()
@@ -223,11 +223,6 @@ class TestIssue260EqNullSafe:
 
     def test_eqnullsafe_with_column_vs_literal(self) -> None:
         """Test eqNullSafe with column vs literal comparisons."""
-        if not is_pyspark_mode():
-            pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1500 – "
-                "sparkless eqNullSafe column-vs-literal parity gap; unskip once fixed."
-            )
         spark = SparkSession.builder.appName("EqNullSafeColumnLiteral").getOrCreate()
         try:
             df = spark.createDataFrame(
