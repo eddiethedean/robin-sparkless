@@ -135,11 +135,6 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This test uses sparkless-specific createDatabase API.
         """
-        if not is_pyspark_mode():
-            pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1506 – "
-                "sparkless Catalog.getTable signature/TypeError parity gap; unskip once fixed."
-            )
         with pytest.raises(TypeError):
             # PySpark's signature is getTable(tableName) only (db is separate).
             spark.catalog.getTable("get_db", "get_table")
