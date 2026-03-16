@@ -6238,6 +6238,25 @@ impl PyColumn {
     /// Null-safe equality (NULL <=> NULL returns True). PySpark eqNullSafe.
     /// Accepts Column or scalar (int, float, str, bool, None) so .eqNullSafe(lit(x)) or .eqNullSafe(x) work.
     fn eq_null_safe(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        // Special-case Python string scalars so that int-column vs string-literal
+        // (e.g. col("val").eqNullSafe("123")) behaves like PySpark: attempt to parse
+        // the string as a number and compare numerically when possible (#1471).
+        if let Ok(s) = other.extract::<String>() {
+            if let Ok(i) = s.parse::<i64>() {
+                let other_col = robin_sparkless::functions::lit_i64(i);
+                return Ok(PyColumn {
+                    inner: self.inner.eq_null_safe(&other_col),
+                });
+            }
+            if let Ok(f) = s.parse::<f64>() {
+                let other_col = robin_sparkless::functions::lit_f64(f);
+                return Ok(PyColumn {
+                    inner: self.inner.eq_null_safe(&other_col),
+                });
+            }
+            // Fall through: treat as string literal for non-numeric text ("test", etc.).
+        }
+
         let other_col = py_any_to_column(other)?;
         Ok(PyColumn {
             inner: self.inner.eq_null_safe(&other_col),
