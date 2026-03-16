@@ -15,6 +15,17 @@ fn concat_lazy_frames(lfs: Vec<LazyFrame>) -> Result<LazyFrame, PolarsError> {
     polars::prelude::concat(lfs, UnionArgs::default())
 }
 
+/// Concatenate LazyFrames with diagonal strategy so differing schemas align (missing columns as null).
+#[cfg(feature = "delta")]
+fn concat_lazy_frames_diagonal(lfs: Vec<LazyFrame>) -> Result<LazyFrame, PolarsError> {
+    if lfs.is_empty() {
+        return Err(PolarsError::ComputeError("read_delta: no files".into()));
+    }
+    let mut args = UnionArgs::default();
+    args.diagonal = true;
+    polars::prelude::concat(lfs, args)
+}
+
 /// Read a Delta table at the given path (latest version).
 /// Path can be a local path (e.g. `/tmp/table`) or a file URL (`file:///tmp/table`).
 #[cfg(feature = "delta")]
@@ -22,7 +33,30 @@ pub fn read_delta(path: impl AsRef<Path>, case_sensitive: bool) -> Result<DataFr
     read_delta_with_version(path, None, case_sensitive)
 }
 
+/// Recursively collect paths of all .parquet files under `dir`.
+#[cfg(feature = "delta")]
+fn collect_parquet_paths_under(dir: &Path) -> Result<Vec<std::path::PathBuf>, PolarsError> {
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(dir).map_err(|e| {
+        PolarsError::ComputeError(format!("read_delta fallback read_dir: {}", e).into())
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|e| {
+            PolarsError::ComputeError(format!("read_delta fallback read_dir entry: {}", e).into())
+        })?;
+        let p = entry.path();
+        if p.is_dir() {
+            out.extend(collect_parquet_paths_under(&p)?);
+        } else if p.extension().map_or(false, |e| e == "parquet") {
+            out.push(p);
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
 /// Read a Delta table at the given path, optionally at a specific version (time travel).
+/// If the path is not a Delta table (e.g. directory with parquet written by save()), falls back to scanning parquet files under the path.
 #[cfg(feature = "delta")]
 pub fn read_delta_with_version(
     path: impl AsRef<Path>,
@@ -33,57 +67,85 @@ pub fn read_delta_with_version(
     use tokio::runtime::Runtime;
 
     let path = path.as_ref();
-    let table_uri = path_to_table_uri(path)?;
 
-    let rt = Runtime::new().map_err(|e| {
-        PolarsError::ComputeError(format!("read_delta: failed to create runtime: {}", e).into())
-    })?;
-
-    let url = Url::parse(table_uri.as_str()).map_err(|e| {
-        PolarsError::ComputeError(format!("read_delta: invalid table URI: {}", e).into())
-    })?;
-    let table = rt.block_on(async {
-        let builder =
-            DeltaTableBuilder::from_url(url.clone()).map_err(|e: deltalake::DeltaTableError| {
-                PolarsError::ComputeError(format!("read_delta: {}", e).into())
-            })?;
-        let result = if let Some(v) = version {
-            builder.with_version(v).load().await
-        } else {
-            builder.load().await
-        };
-        result.map_err(|e: deltalake::DeltaTableError| {
-            PolarsError::ComputeError(format!("read_delta: {}", e).into())
-        })
-    })?;
-
-    let uris: Vec<String> = table
-        .get_file_uris()
-        .map_err(|e: deltalake::DeltaTableError| {
-            PolarsError::ComputeError(format!("read_delta: get_file_uris: {}", e).into())
-        })?
-        .collect();
-    if uris.is_empty() {
-        return Ok(DataFrame::from_polars_with_options(
-            polars::prelude::DataFrame::default(),
-            case_sensitive,
-        ));
-    }
-
-    let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
-    for uri in &uris {
-        let parquet_path = uri_to_parquet_path(uri)?;
-        let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
-            PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
+    let table_result = (|| {
+        let table_uri = path_to_table_uri(path)?;
+        let rt = Runtime::new().map_err(|e| {
+            PolarsError::ComputeError(format!("read_delta: failed to create runtime: {}", e).into())
         })?;
-        let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
-        lfs.push(lf);
+        let url = Url::parse(table_uri.as_str()).map_err(|e| {
+            PolarsError::ComputeError(format!("read_delta: invalid table URI: {}", e).into())
+        })?;
+        let table = rt.block_on(async {
+            let builder =
+                DeltaTableBuilder::from_url(url.clone()).map_err(|e: deltalake::DeltaTableError| {
+                    PolarsError::ComputeError(format!("read_delta: {}", e).into())
+                })?;
+            let result = if let Some(v) = version {
+                builder.with_version(v).load().await
+            } else {
+                builder.load().await
+            };
+            result.map_err(|e: deltalake::DeltaTableError| {
+                PolarsError::ComputeError(format!("read_delta: {}", e).into())
+            })
+        })?;
+        let uris: Vec<String> = table
+            .get_file_uris()
+            .map_err(|e: deltalake::DeltaTableError| {
+                PolarsError::ComputeError(format!("read_delta: get_file_uris: {}", e).into())
+            })?
+            .collect();
+        Ok::<_, PolarsError>(uris)
+    })();
+
+    match table_result {
+        Ok(uris) => {
+            if uris.is_empty() {
+                return Ok(DataFrame::from_polars_with_options(
+                    polars::prelude::DataFrame::default(),
+                    case_sensitive,
+                ));
+            }
+            let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
+            for uri in &uris {
+                let parquet_path = uri_to_parquet_path(uri)?;
+                let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
+                    PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
+                })?;
+                let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
+                lfs.push(lf);
+            }
+            let combined = concat_lazy_frames(lfs)?;
+            let pl_df = combined.collect()?;
+            Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive))
+        }
+        Err(e) => {
+            let err_msg = e.to_string();
+            let is_not_delta =
+                err_msg.contains("No files in log") || err_msg.contains("Not a Delta table");
+            if version.is_none() && is_not_delta && path.exists() && path.is_dir() {
+                let parquet_paths = collect_parquet_paths_under(path)?;
+                if parquet_paths.is_empty() {
+                    return Err(e);
+                }
+                let mut lfs: Vec<LazyFrame> = Vec::with_capacity(parquet_paths.len());
+                for p in &parquet_paths {
+                    let pl_path = PlRefPath::try_from_path(p).map_err(|e2| {
+                        PolarsError::ComputeError(
+                            format!("read_delta fallback scan_parquet path: {e2}").into(),
+                        )
+                    })?;
+                    let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
+                    lfs.push(lf);
+                }
+                let combined = concat_lazy_frames_diagonal(lfs)?;
+                let pl_df = combined.collect()?;
+                return Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive));
+            }
+            Err(e)
+        }
     }
-
-    let combined = concat_lazy_frames(lfs)?;
-
-    let pl_df = combined.collect()?;
-    Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive))
 }
 
 #[cfg(feature = "delta")]

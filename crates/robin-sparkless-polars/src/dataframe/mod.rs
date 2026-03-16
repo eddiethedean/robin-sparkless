@@ -2592,9 +2592,46 @@ impl<'a> DataFrameWriter<'a> {
             return self.save_partitioned(path, &to_write);
         }
 
+        // When path is an existing directory (e.g. Delta table root from mkdtemp), write part file inside it.
+        let ext = match self.format {
+            WriteFormat::Parquet => "parquet",
+            WriteFormat::Csv => "csv",
+            WriteFormat::Json => "json",
+        };
+        let out_path = if path.exists() && path.is_dir() {
+            let part_idx = if self.mode == WriteMode::Append {
+                let suffix = format!(".{ext}");
+                let max_n = std::fs::read_dir(path)
+                    .map(|rd| {
+                        rd.filter_map(Result::ok)
+                            .filter_map(|e| {
+                                e.file_name().to_str().and_then(|s| {
+                                    s.strip_prefix("part-")
+                                        .and_then(|t| t.strip_suffix(&suffix))
+                                        .and_then(|t| t.parse::<u32>().ok())
+                                })
+                            })
+                            .max()
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
+                max_n + 1
+            } else {
+                0
+            };
+            path.join(format!("part-{part_idx:05}.{ext}"))
+        } else {
+            path.to_path_buf()
+        };
+
         match self.format {
             WriteFormat::Parquet => {
-                let mut file = std::fs::File::create(path).map_err(|e| {
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        PolarsError::ComputeError(format!("write parquet create dir: {e}").into())
+                    })?;
+                }
+                let mut file = std::fs::File::create(&out_path).map_err(|e| {
                     PolarsError::ComputeError(format!("write parquet create: {e}").into())
                 })?;
                 let mut df_mut = to_write;
@@ -2613,7 +2650,12 @@ impl<'a> DataFrameWriter<'a> {
                     .get("sep")
                     .and_then(|s| s.bytes().next())
                     .unwrap_or(b',');
-                let mut file = std::fs::File::create(path).map_err(|e| {
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        PolarsError::ComputeError(format!("write csv create dir: {e}").into())
+                    })?;
+                }
+                let mut file = std::fs::File::create(&out_path).map_err(|e| {
                     PolarsError::ComputeError(format!("write csv create: {e}").into())
                 })?;
                 CsvWriter::new(&mut file)
@@ -2623,7 +2665,12 @@ impl<'a> DataFrameWriter<'a> {
                     .map_err(|e| PolarsError::ComputeError(format!("write csv: {e}").into()))?;
             }
             WriteFormat::Json => {
-                let mut file = std::fs::File::create(path).map_err(|e| {
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        PolarsError::ComputeError(format!("write json create dir: {e}").into())
+                    })?;
+                }
+                let mut file = std::fs::File::create(&out_path).map_err(|e| {
                     PolarsError::ComputeError(format!("write json create: {e}").into())
                 })?;
                 JsonWriter::new(&mut file)

@@ -5596,10 +5596,13 @@ impl PyDataFrameWriter {
         slf
     }
 
-    #[pyo3(name = "partitionBy")]
-    fn partition_by<'a>(mut slf: PyRefMut<'a, Self>, cols: Vec<String>) -> PyRefMut<'a, Self> {
-        slf.partition_by = cols;
-        slf
+    #[pyo3(name = "partitionBy", signature = (*cols))]
+    fn partition_by<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        cols: &Bound<'_, PyTuple>,
+    ) -> PyResult<PyRefMut<'a, Self>> {
+        slf.partition_by = py_tuple_or_single_to_vec_string(cols)?;
+        Ok(slf)
     }
 
     #[pyo3(name = "format")]
