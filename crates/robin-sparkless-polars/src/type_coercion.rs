@@ -420,7 +420,16 @@ pub fn coerce_for_pyspark_eq_null_safe(
         // Non-string literal vs unknown expression: treat unknown as the same type as the literal
         // so numeric literals drive numeric comparisons instead of forcing the unknown side to String.
         (Some(lt), None) => (lt.clone(), lt),
-        (None, Some(rt)) => (rt.clone(), rt),
+        (None, Some(rt)) => {
+            // Special-case: string column vs numeric literal (e.g. col(\"str_col\").eqNullSafe(lit(123))).
+            // Treat the column side as String and the literal side as its numeric dtype so
+            // string–numeric coercion (try_to_number on the string side) kicks in (#266).
+            if is_numeric(&rt) && matches!(left, Expr::Column(_)) {
+                (DataType::String, rt)
+            } else {
+                (rt.clone(), rt)
+            }
+        }
         (None, None) => (DataType::String, DataType::String),
     };
 
@@ -495,6 +504,52 @@ mod tests {
         // After coercion both sides should be comparable without error and all rows match.
         let out = df.lazy().filter(ac.eq(bc)).collect()?;
         assert_eq!(out.height(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn eqnullsafe_string_column_vs_int_literal_coerces_like_pyspark() -> Result<(), PolarsError> {
+        // string column vs int literal: non-numeric -> null on string side -> eqNullSafe = False;
+        // numeric string \"123\" -> 123 -> eqNullSafe = True (#266).
+        let df = df!(
+            "str_col" => &["abc", "123"]
+        )?;
+
+        let a = col("str_col");
+        let lit_123 = lit(123i64);
+        let (ac, bc) = coerce_for_pyspark_eq_null_safe(a.clone(), lit_123)?;
+
+        let lf = df
+            .lazy()
+            .select(&[
+                ac.alias("left"),
+                bc.alias("right"),
+                ac.clone().eq(bc.clone()).alias("eq_raw"),
+                ac.is_null().alias("left_null"),
+                bc.is_null().alias("right_null"),
+            ]);
+        let out = lf.collect()?;
+
+        let left = out.column("left")?.i64()?;
+        let right = out.column("right")?.i64()?;
+        let eq_raw = out.column("eq_raw")?.bool()?;
+        let left_null = out.column("left_null")?.bool()?;
+        let right_null = out.column("right_null")?.bool()?;
+
+        // First row: non-numeric \"abc\" -> left null, right 123; comparison should be treated as False.
+        assert!(left.is_null(0));
+        assert_eq!(right.get(0), Some(123));
+        assert_eq!(eq_raw.get(0), Some(false));
+        assert_eq!(left_null.get(0), Some(true));
+        assert_eq!(right_null.get(0), Some(false));
+
+        // Second row: \"123\" -> 123 on both sides; equality = True, non-null.
+        assert_eq!(left.get(1), Some(123));
+        assert_eq!(right.get(1), Some(123));
+        assert_eq!(eq_raw.get(1), Some(true));
+        assert_eq!(left_null.get(1), Some(false));
+        assert_eq!(right_null.get(1), Some(false));
+
         Ok(())
     }
 
