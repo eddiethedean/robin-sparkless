@@ -2475,17 +2475,6 @@ impl<'a> DataFrameWriter<'a> {
                 self.df.clone()
             }
             SaveMode::Overwrite => {
-                // Delta catalog tables do not support truncate-in-batch-mode for overwrite.
-                // For parity with PySpark, surface an error instead of silently truncating
-                // when overwrite is requested for a Delta saveAsTable.
-                if is_delta_format {
-                    return Err(PolarsError::InvalidOperation(
-                        format!(
-                            "Table '{name}' does not support truncate in batch mode for Delta overwrite; drop the table first or use append with mergeSchema."
-                        )
-                        .into(),
-                    ));
-                }
                 if let Some(ref p) = warehouse_path {
                     let _ = fs::remove_dir_all(p);
                     persist_to_warehouse(self.df, p)?;
