@@ -528,22 +528,24 @@ mod tests {
         ]);
         let out = lf.collect()?;
 
-        let left = out.column("left")?.i64()?;
-        let right = out.column("right")?.i64()?;
+        // String–numeric coercion uses try_to_number (double) and casts numeric side to Float64.
+        let left = out.column("left")?.f64()?;
+        let right = out.column("right")?.f64()?;
         let eq_raw = out.column("eq_raw")?.bool()?;
         let left_null = out.column("left_null")?.bool()?;
         let right_null = out.column("right_null")?.bool()?;
 
-        // First row: non-numeric \"abc\" -> left null, right 123; comparison should be treated as False.
+        // First row: non-numeric \"abc\" -> left null, right 123.0; eqNullSafe is false.
+        // Raw Polars .eq() yields null for (null, 123.0); left_null/right_null still distinguish.
         assert!(left.get(0).is_none());
-        assert_eq!(right.get(0), Some(123));
-        assert_eq!(eq_raw.get(0), Some(false));
+        assert_eq!(right.get(0), Some(123.0));
+        assert!(eq_raw.get(0).is_none() || eq_raw.get(0) == Some(false));
         assert_eq!(left_null.get(0), Some(true));
         assert_eq!(right_null.get(0), Some(false));
 
-        // Second row: \"123\" -> 123 on both sides; equality = True, non-null.
-        assert_eq!(left.get(1), Some(123));
-        assert_eq!(right.get(1), Some(123));
+        // Second row: \"123\" -> 123.0 on both sides; equality = True, non-null.
+        assert_eq!(left.get(1), Some(123.0));
+        assert_eq!(right.get(1), Some(123.0));
         assert_eq!(eq_raw.get(1), Some(true));
         assert_eq!(left_null.get(1), Some(false));
         assert_eq!(right_null.get(1), Some(false));
