@@ -5731,10 +5731,7 @@ impl PyDataFrameWriter {
         // saveAsTable can make format-aware decisions (e.g. Delta overwrite parity).
         let mut options: Vec<(String, String)> = self.options.clone();
         if let Some(fmt) = &self.writer_format {
-            options.push((
-                "sparkless.writer.format".to_string(),
-                fmt.to_string(),
-            ));
+            options.push(("sparkless.writer.format".to_string(), fmt.to_string()));
         }
         inner
             .inner

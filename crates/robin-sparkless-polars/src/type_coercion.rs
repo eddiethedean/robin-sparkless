@@ -519,15 +519,13 @@ mod tests {
         let lit_123 = lit(123i64);
         let (ac, bc) = coerce_for_pyspark_eq_null_safe(a.clone(), lit_123)?;
 
-        let lf = df
-            .lazy()
-            .select(&[
-                ac.clone().alias("left"),
-                bc.clone().alias("right"),
-                ac.clone().eq(bc.clone()).alias("eq_raw"),
-                ac.is_null().alias("left_null"),
-                bc.is_null().alias("right_null"),
-            ]);
+        let lf = df.lazy().select(&[
+            ac.clone().alias("left"),
+            bc.clone().alias("right"),
+            ac.clone().eq(bc.clone()).alias("eq_raw"),
+            ac.is_null().alias("left_null"),
+            bc.is_null().alias("right_null"),
+        ]);
         let out = lf.collect()?;
 
         let left = out.column("left")?.i64()?;

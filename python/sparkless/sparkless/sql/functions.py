@@ -1362,7 +1362,7 @@ def get_json_object(column, path):
     return _get_json_object(_as_col(column), path)
 
 
-def json_tuple(column, *keys):
+def json_tuple(column: ColumnOrName, *keys: str) -> Tuple[_ColumnType, ...]:
     """Extract keys from JSON as columns (PySpark json_tuple).
 
     Returns one string column per key, named c0, c1, ... in the order of keys.
@@ -1445,7 +1445,7 @@ def current_user():
     return lit(getpass.getuser())
 
 
-def create_map(*cols):
+def create_map(*cols: Any) -> _ColumnType:
     """Build a map column from alternating key/value expressions (PySpark create_map).
 
     With no args or create_map([]), returns a column of empty maps per row.
@@ -1704,7 +1704,9 @@ def _is_full_partition_frame(window):
     return start == Window.unboundedPreceding and end == Window.unboundedFollowing
 
 
-def _window_spec_to_partition_order(window, require_order=True):
+def _window_spec_to_partition_order(
+    window: Any, require_order: bool = True
+) -> Tuple[list[str], list[str], bool, bool, Optional[Any]]:
     """Extract partition_by and order_by from WindowSpec for window functions.
     If require_order=False, order_by can be empty (for partition-only aggregate windows).
     Accepts a list of column names as shorthand for partition-only window (e.g. .over(["dept"])).

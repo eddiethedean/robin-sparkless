@@ -1,8 +1,8 @@
 //! GroupBy and aggregation operations.
 
 use super::DataFrame;
-use crate::dataframe::resolve_column_with_schema as resolve_column_with_schema_df;
 use crate::column::Column;
+use crate::dataframe::resolve_column_with_schema as resolve_column_with_schema_df;
 use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy, NULL, NamedFrom, PlSmallStr,
     PolarsError, Schema, SchemaNamesAndDtypes, Series, col, len, lit, when,
@@ -111,7 +111,12 @@ impl GroupedData {
     /// Grouping output names (e.g. from groupBy(col("Name").alias("Key"))) are valid even when not in the input schema.
     fn resolve_column(&self, name: &str) -> Result<String, PolarsError> {
         let schema = self.lf.clone().collect_schema()?;
-        resolve_column_with_schema_df(name, &schema, self.case_sensitive, Some(&self.grouping_cols))
+        resolve_column_with_schema_df(
+            name,
+            &schema,
+            self.case_sensitive,
+            Some(&self.grouping_cols),
+        )
     }
 
     /// Same as resolve_column but uses a pre-collected schema to avoid repeated collect_schema() calls (performance).

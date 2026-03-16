@@ -12,10 +12,10 @@ use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
-    BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg,
-    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
-    ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
-    TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
+    BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg, FunctionArgExpr,
+    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause, ObjectType,
+    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
+    TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -946,6 +946,7 @@ fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> Stri
     }
 }
 
+#[allow(dead_code)]
 fn table_name_from_factor(factor: &TableFactor) -> Result<String, PolarsError> {
     match factor {
         TableFactor::Table { name, .. } => Ok(table_name_from_object_name(name)),

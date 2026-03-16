@@ -81,6 +81,8 @@ artifact/
 
 # Spark runtime outputs (should not be committed)
 spark-warehouse/
+derby.log
+metastore_db/
 
 # Build artifacts (native lib debug symbols, etc.)
 *.dSYM/

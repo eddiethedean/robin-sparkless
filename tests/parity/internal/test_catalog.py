@@ -5,7 +5,6 @@ Tests validate that Sparkless Catalog operations behave identically to PySpark.
 """
 
 import pytest
-from sparkless.testing import is_pyspark_mode
 from tests.tools.parity_base import ParityTestBase
 
 

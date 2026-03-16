@@ -268,7 +268,9 @@ class TestDeltaLakeSchemaEvolution:
                 from pyspark.errors.exceptions.captured import AnalysisException
 
                 with pytest.raises(AnalysisException) as excinfo:
-                    base_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
+                    base_df.write.format("delta").mode("overwrite").saveAsTable(
+                        table_name
+                    )
             else:
                 # Sparkless mirrors this by raising a SparklessError (AnalysisException alias)
                 # with a similar message. If the backend write path does not yet raise, we

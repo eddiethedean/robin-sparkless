@@ -43,9 +43,7 @@ def test_regexp_extract_all_raw_string_pattern_errors_in_both_modes(spark) -> No
     )
 
     with pytest.raises(Exception) as excinfo:
-        df.select(
-            F.regexp_extract_all(F.col("s"), r"\d+", 0).alias("m")
-        ).collect()
+        df.select(F.regexp_extract_all(F.col("s"), r"\d+", 0).alias("m")).collect()
 
     msg = str(excinfo.value)
     assert "UNRESOLVED_COLUMN" in msg

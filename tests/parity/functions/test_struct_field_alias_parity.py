@@ -5,7 +5,6 @@ These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
 from sparkless.testing import get_imports
-import pytest
 
 
 class TestStructFieldAliasParity:

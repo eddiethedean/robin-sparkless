@@ -2423,7 +2423,7 @@ impl<'a> DataFrameWriter<'a> {
         use std::fs;
         use std::path::Path;
 
-        let (merge_schema, is_delta_format) = options.map_or((false, false), |opts| {
+        let (merge_schema, _is_delta_format) = options.map_or((false, false), |opts| {
             let mut merge_schema = false;
             let mut is_delta = false;
             for (k, v) in opts {

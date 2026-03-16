@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from sparkless.testing import get_imports, is_pyspark_mode
+from sparkless.testing import get_imports
 from tests.utils import assert_rows_equal
 
 _imports = get_imports()

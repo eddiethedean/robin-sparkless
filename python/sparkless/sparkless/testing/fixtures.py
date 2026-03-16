@@ -206,7 +206,9 @@ def isolated_session(request: pytest.FixtureRequest) -> Generator[Any, None, Non
     ):
         enable_delta = True
 
-    session = create_session(app_name=session_name, mode=mode, enable_delta=enable_delta)
+    session = create_session(
+        app_name=session_name, mode=mode, enable_delta=enable_delta
+    )
 
     yield session
 
