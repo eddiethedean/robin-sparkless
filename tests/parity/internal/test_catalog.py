@@ -4,6 +4,9 @@ PySpark parity tests for Catalog operations.
 Tests validate that Sparkless Catalog operations behave identically to PySpark.
 """
 
+import pytest
+
+from sparkless.testing import is_pyspark_mode
 from tests.tools.parity_base import ParityTestBase
 
 
@@ -24,6 +27,13 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This is a sparkless-specific API. PySpark uses SQL CREATE DATABASE instead.
         """
+        if is_pyspark_mode():
+            # Real PySpark Catalog does not expose createDatabase; this helper is sparkless-only.
+            with pytest.raises(AttributeError):
+                # In pyspark mode the shim forwards to the underlying Catalog, which lacks _spark.
+                spark.catalog.createDatabase("test_catalog_db", ignoreIfExists=True)
+            return
+
         # Create database
         spark.catalog.createDatabase("test_catalog_db", ignoreIfExists=True)
 
@@ -40,6 +50,11 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This is a sparkless-specific API. PySpark uses SQL DROP DATABASE instead.
         """
+        if is_pyspark_mode():
+            with pytest.raises(AttributeError):
+                spark.catalog.createDatabase("test_drop_db", ignoreIfExists=True)
+            return
+
         # Create database
         spark.catalog.createDatabase("test_drop_db", ignoreIfExists=True)
 
@@ -56,6 +71,11 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This is a sparkless-specific API. PySpark uses SQL USE DATABASE instead.
         """
+        if is_pyspark_mode():
+            with pytest.raises(AttributeError):
+                spark.catalog.createDatabase("test_current_db2", ignoreIfExists=True)
+            return
+
         # Create database
         spark.catalog.createDatabase("test_current_db2", ignoreIfExists=True)
 
@@ -96,6 +116,11 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This test uses sparkless-specific createDatabase API.
         """
+        if is_pyspark_mode():
+            with pytest.raises(AttributeError):
+                spark.catalog.createDatabase("list_db", ignoreIfExists=True)
+            return
+
         # Create database
         spark.catalog.createDatabase("list_db", ignoreIfExists=True)
 
@@ -133,6 +158,11 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This test uses sparkless-specific createDatabase API.
         """
+        if is_pyspark_mode():
+            with pytest.raises(AttributeError):
+                spark.catalog.createDatabase("exists_db", ignoreIfExists=True)
+            return
+
         # Create database
         spark.catalog.createDatabase("exists_db", ignoreIfExists=True)
 
@@ -171,6 +201,11 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This test uses sparkless-specific createDatabase API.
         """
+        if is_pyspark_mode():
+            with pytest.raises(AttributeError):
+                spark.catalog.createDatabase("get_db", ignoreIfExists=True)
+            return
+
         # Create database
         spark.catalog.createDatabase("get_db", ignoreIfExists=True)
 

@@ -4,6 +4,10 @@ PySpark parity tests for SQL DDL operations.
 Tests validate that Sparkless SQL DDL statements behave identically to PySpark.
 """
 
+import pytest
+from pyspark.errors import AnalysisException
+
+from sparkless.testing import is_pyspark_mode
 from tests.tools.parity_base import ParityTestBase
 
 
@@ -79,15 +83,22 @@ class TestSQLDDLParity(ParityTestBase):
         df = spark.createDataFrame(data, ["name", "age", "dept"])
         df.write.mode("overwrite").saveAsTable("employees")
 
-        # Create table from SELECT
-        spark.sql(
-            "CREATE TABLE IF NOT EXISTS it_employees AS SELECT name, age FROM employees WHERE dept = 'IT'"
-        )
-
-        # Verify table exists and has correct data
-        assert spark.catalog.tableExists("it_employees")
-        result = spark.sql("SELECT * FROM it_employees")
-        assert result.count() == 2
+        if is_pyspark_mode():
+            # Without Hive catalog, PySpark rejects CTAS with a specific AnalysisException.
+            with pytest.raises(AnalysisException) as excinfo:
+                spark.sql(
+                    "CREATE TABLE IF NOT EXISTS it_employees AS SELECT name, age FROM employees WHERE dept = 'IT'"
+                )
+            msg = str(excinfo.value)
+            assert "NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT" in msg
+        else:
+            # Sparkless behavior: CTAS is supported.
+            spark.sql(
+                "CREATE TABLE IF NOT EXISTS it_employees AS SELECT name, age FROM employees WHERE dept = 'IT'"
+            )
+            assert spark.catalog.tableExists("it_employees")
+            result = spark.sql("SELECT * FROM it_employees")
+            assert result.count() == 2
 
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS employees")
