@@ -1349,20 +1349,18 @@ impl PyCatalog {
         Ok(session.inner.table_exists(&full))
     }
 
-    #[pyo3(name = "getTable", signature = (arg1, arg2=None))]
-    fn get_table(&self, py: Python<'_>, arg1: &str, arg2: Option<&str>) -> PyResult<Py<PyTable>> {
+    #[pyo3(name = "getTable", signature = (tableName))]
+    fn get_table(&self, py: Python<'_>, tableName: &str) -> PyResult<Py<PyTable>> {
         let session = self
             .session
             .bind(py)
             .downcast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        let (db, tbl) = if let Some(t) = arg2 {
-            (arg1.to_string(), t.to_string())
-        } else if let Some((db, tbl)) = arg1.split_once('.') {
+        let (db, tbl) = if let Some((db, tbl)) = tableName.split_once('.') {
             (db.to_string(), tbl.to_string())
         } else {
-            ("default".to_string(), arg1.to_string())
+            ("default".to_string(), tableName.to_string())
         };
         let full = format!("{db}.{tbl}");
         if !session.inner.table_exists(&full) && !session.inner.table_exists(&tbl) {
