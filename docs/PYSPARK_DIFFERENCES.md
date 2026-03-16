@@ -49,6 +49,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **Supported**: Read by path/version, overwrite, and append. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.2.
 - **read_delta(name_or_path)**: If the argument looks like a path (contains `/` or `\\`, or path exists), reads from Delta on disk. Otherwise treats it as a **table name** and returns the in-memory table (same resolution as `spark.table`: temp view first, then saved table). So you can `df.write_delta_table("t")` then `spark.read_delta("t")` without the delta feature.
 - **Unsupported (tracked in #152)**: Schema evolution (e.g. add columns, change types under Delta rules) and MERGE (upsert with whenMatchedUpdate/whenNotMatchedInsert). Implement when Delta usage requires them.
+ - **Overwrite + `saveAsTable` truncate-in-batch-mode (#1502)**: PySpark raises an `AnalysisException` when calling `df.write.format("delta").mode("overwrite").saveAsTable(...)` in scenarios where Delta does not support truncate-in-batch-mode; sparkless mirrors this by surfacing a `SparklessError` with a message containing `"does not support truncate in batch mode"` for the same pattern.
 
 ## Array
 

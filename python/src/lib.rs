@@ -5785,10 +5785,19 @@ impl PyDataFrameWriter {
             }
         };
         let save_mode = save_mode_from_str(mode.unwrap_or(self.mode.as_str()));
+        // Thread writer-level options (including format) through to the backend so
+        // saveAsTable can make format-aware decisions (e.g. Delta overwrite parity).
+        let mut options: Vec<(String, String)> = self.options.clone();
+        if let Some(fmt) = &self.writer_format {
+            options.push((
+                "sparkless.writer.format".to_string(),
+                fmt.to_string(),
+            ));
+        }
         inner
             .inner
             .write()
-            .save_as_table_with_options(&active, name, save_mode, &self.options)
+            .save_as_table_with_options(&active, name, save_mode, &options)
             .map_err(to_py_err)
     }
 
