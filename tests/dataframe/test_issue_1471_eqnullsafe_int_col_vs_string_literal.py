@@ -16,7 +16,7 @@ F = _imports.F
 
 
 def test_eqnullsafe_int_column_vs_string_literal(spark) -> None:
-    """eqNullSafe on int column vs string literal mirrors PySpark coercion."""
+    """eqNullSafe on int column vs string literal matches PySpark behavior."""
     df = spark.createDataFrame(
         [
             {"val": 123},

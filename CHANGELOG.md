@@ -212,6 +212,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#603 – unionByName type coercion** — `union_by_name` coerces left/right columns to a common type per column when types differ (e.g. Int64 vs String). Test: `union_by_name_coerces_different_column_types`. Fixes #603.
 - **#604 – join column resolution (case-insensitive key names)** — Join resolves keys on left and right to physical column names; aliases right key columns to left key names so result has one key name and `col("ID")`/`col("id")` both resolve. Test: `join_column_resolution_case_insensitive`. Fixes #604.
 
+### Fixed
+
+- **#1471 – eqNullSafe int column vs string literal (PySpark parity)** — `col("val").eqNullSafe("123")` where `val` is a numeric column now matches PySpark semantics in Sparkless. Numeric-looking string literals are coerced via `try_to_number` and compared numerically, and null rows are treated as non-matching (false) under null-safe equality. Covered by `tests/dataframe/test_issue_1471_eqnullsafe_int_col_vs_string_literal.py` and the Rust test `eq_null_safe_int_column_vs_string_literal_coerces` in `type_coercion.rs`. Fixes #1471.
+
 ## [0.11.7] - 2026-02-18
 
 ### Added

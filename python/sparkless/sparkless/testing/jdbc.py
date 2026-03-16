@@ -192,11 +192,47 @@ class JdbcDataFrameWriterWrapper:
             self._writer.save()
 
 
+class CatalogShimWrapper:
+    """Shim for PySpark Catalog to add sparkless-specific helpers.
+
+    PySpark's Catalog does not expose createDatabase/dropDatabase methods.
+    Sparkless adds these helpers, so we provide compatible behavior here by
+    delegating to SQL statements.
+    """
+
+    def __init__(self, catalog: Any):
+        self._catalog = catalog
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._catalog, name)
+
+    def createDatabase(self, name: str, ignoreIfExists: bool = False) -> None:
+        """Create a database using SQL, matching sparkless helper semantics."""
+        spark = self._catalog._spark  # type: ignore[attr-defined]
+        if ignoreIfExists:
+            spark.sql(f"CREATE DATABASE IF NOT EXISTS `{name}`")
+        else:
+            spark.sql(f"CREATE DATABASE `{name}`")
+
+    def dropDatabase(self, name: str, ignoreIfNotExists: bool = False) -> None:
+        """Drop a database using SQL, matching sparkless helper semantics."""
+        spark = self._catalog._spark  # type: ignore[attr-defined]
+        if ignoreIfNotExists:
+            spark.sql(f"DROP DATABASE IF EXISTS `{name}`")
+        else:
+            spark.sql(f"DROP DATABASE `{name}`")
+
+
 class JdbcSessionWrapper:
     """Wrapper for PySpark SparkSession that provides JDBC-aware readers/writers."""
 
     def __init__(self, session: Any):
         self._session = session
+
+    @property
+    def catalog(self) -> Any:
+        """Return a catalog wrapper with sparkless-compatible helpers."""
+        return CatalogShimWrapper(self._session.catalog)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._session, name)

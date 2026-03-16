@@ -391,6 +391,39 @@ pub fn coerce_for_pyspark_eq_null_safe(
     let left_non_numeric_str_lit = is_non_numeric_string_literal(&left);
     let right_non_numeric_str_lit = is_non_numeric_string_literal(&right);
 
+    // Special-case: one side is a string literal and the other is a column/expression.
+    // This covers patterns like col(\"val\").eqNullSafe(\"123\") or \"123\".eqNullSafe(col(\"val\")),
+    // where PySpark treats the string as a numeric candidate and the column as numeric.
+    //
+    // We don't always know the real column dtype at this stage, so we conservatively
+    // treat the non-literal side as Float64 and the literal side as String, then
+    // delegate to coerce_for_pyspark_comparison which routes string values through
+    // try_to_number. This mirrors the comparison coercion rules and avoids the
+    // \"cannot compare string with numeric type\" error.
+    match (&left, &right, &left_inferred, &right_inferred) {
+        // column vs string literal
+        (Expr::Column(_), Expr::Literal(_), None, Some(DataType::String)) => {
+            return coerce_for_pyspark_comparison(
+                left,
+                right,
+                &DataType::Float64,
+                &DataType::String,
+                &CompareOp::Eq,
+            );
+        }
+        // string literal vs column
+        (Expr::Literal(_), Expr::Column(_), Some(DataType::String), None) => {
+            return coerce_for_pyspark_comparison(
+                left,
+                right,
+                &DataType::String,
+                &DataType::Float64,
+                &CompareOp::Eq,
+            );
+        }
+        _ => {}
+    }
+
     // Derive comparison dtypes with a bit of asymmetry to mirror PySpark-style coercion:
     // - When only one side is a literal string and the other is a column/expr, treat the
     //   non-literal side as numeric (Float64) so string‑numeric coercion (try_to_number)
@@ -564,6 +597,7 @@ mod tests {
     #[test]
     fn eq_null_safe_int_column_vs_string_literal_coerces() -> Result<(), PolarsError> {
         use polars::prelude::df;
+        use crate::column::Column;
 
         let df = df!(
             "val" => &[Some(123i64), Some(456i64), None],
@@ -574,9 +608,29 @@ mod tests {
         let lit_expr = lit("123");
 
         let (left_c, right_c) = coerce_for_pyspark_eq_null_safe(col_expr, lit_expr)?;
-        let out = lf
-            .with_column(left_c.eq(right_c).alias("match"))
-            .collect()?;
+
+        // Rebuild the null-safe equality expression the same way Column::eq_null_safe does.
+        let left_col = Column::from_expr(left_c.clone(), None);
+        let right_col = Column::from_expr(right_c.clone(), None);
+
+        let left_null = left_c.clone().is_null();
+        let right_null = right_c.clone().is_null();
+        let both_null = left_null.clone().and(right_null.clone());
+        let either_null = left_null.clone().or(right_null.clone());
+
+        let eq_result = left_c.eq(right_c);
+
+        use crate::functions::{lit_bool, when};
+        let null_safe_expr = when(&Column::from_expr(both_null, None))
+            .then(&lit_bool(true))
+            .otherwise(
+                &when(&Column::from_expr(either_null, None))
+                    .then(&lit_bool(false))
+                    .otherwise(&Column::from_expr(eq_result, None)),
+            )
+            .into_expr();
+
+        let out = lf.with_column(null_safe_expr.alias("match")).collect()?;
 
         let matches = out.column("match")?.bool()?;
         let got: Vec<Option<bool>> = matches.into_iter().collect();

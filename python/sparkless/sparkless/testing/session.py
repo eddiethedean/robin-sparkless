@@ -353,25 +353,40 @@ def _configure_delta(builder: Any) -> Any:
     Returns:
         The builder with Delta Lake configuration applied.
     """
-    try:
-        from delta import configure_spark_with_delta_pip
+    # Prefer a locally cached jar if available to avoid network reliance.
+    project_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    local_delta_jar = os.path.join(
+        project_root, "jars", "delta-spark_2.12-3.0.0.jar"
+    )
 
-        # configure_spark_with_delta_pip handles spark.jars.packages
-        builder = configure_spark_with_delta_pip(builder)
-    except ImportError:
-        # Fallback to manual jar configuration if delta package not available
+    if os.path.exists(local_delta_jar):
+        jars_str = local_delta_jar
+        existing_jars = builder._options.get("spark.jars") if hasattr(builder, "_options") else None  # type: ignore[attr-defined]
+        if existing_jars:
+            jars_str = f"{existing_jars},{jars_str}"
+        builder = builder.config("spark.jars", jars_str)
+        builder = builder.config("spark.driver.extraClassPath", jars_str)
+    else:
+        # Fall back to delta-spark's helper or Maven coordinates.
         try:
-            import importlib.metadata
+            from delta import configure_spark_with_delta_pip
 
-            try:
-                delta_version = importlib.metadata.version("delta_spark")
-            except Exception:
-                delta_version = "3.0.0"
-
-            delta_package = f"io.delta:delta-spark_2.12:{delta_version}"
-            builder = builder.config("spark.jars.packages", delta_package)
+            builder = configure_spark_with_delta_pip(builder)
         except ImportError:
-            pass
+            try:
+                import importlib.metadata
+
+                try:
+                    delta_version = importlib.metadata.version("delta_spark")
+                except Exception:
+                    delta_version = "3.0.0"
+
+                delta_package = f"io.delta:delta-spark_2.12:{delta_version}"
+                builder = builder.config("spark.jars.packages", delta_package)
+            except ImportError:
+                pass
 
     # Always add the required extensions and catalog (needed for Delta operations)
     builder = builder.config(
