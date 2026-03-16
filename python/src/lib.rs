@@ -2625,6 +2625,41 @@ fn py_tuple_or_single_to_vec_string(tup: &Bound<'_, PyTuple>) -> PyResult<Vec<St
     Ok(out)
 }
 
+/// Parse orderBy(..., ascending=...) into a vec of bools (one per column).
+/// PySpark: ascending can be None (all True), a single bool, or a list of bools.
+fn parse_order_by_ascending(
+    ascending: Option<&Bound<'_, PyAny>>,
+    n: usize,
+) -> PyResult<Vec<bool>> {
+    let mut asc = match ascending {
+        None => return Ok(vec![true; n]),
+        Some(any) => {
+            if let Ok(b) = any.extract::<bool>() {
+                vec![b; n]
+            } else if let Ok(list) = any.downcast::<PyList>() {
+                let mut v: Vec<bool> = Vec::with_capacity(list.len());
+                for item in list.iter() {
+                    v.push(item.extract::<bool>()?);
+                }
+                while v.len() < n {
+                    v.push(true);
+                }
+                v.truncate(n);
+                v
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "orderBy() ascending must be a bool or a list of bools",
+                ));
+            }
+        }
+    };
+    while asc.len() < n {
+        asc.push(true);
+    }
+    asc.truncate(n);
+    Ok(asc)
+}
+
 /// Normalize column spec to Vec<String>: "x" | col("x") | ["x","y"] | (col("a"),) -> Vec<String>
 /// Resolve a single column spec to a column name (str or Column -> name). Used by GroupedData.avg/sum/min/max.
 fn py_col_to_name(any: &Bound<'_, PyAny>) -> PyResult<String> {
@@ -4557,14 +4592,6 @@ impl PyDataFrame {
         cols: &Bound<'_, PyTuple>,
         ascending: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
-        // PySpark parity: orderBy() does not accept an "ascending" keyword argument.
-        // Use col("x").asc() or col("x").desc() instead.
-        if ascending.is_some() {
-            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "orderBy() got an unexpected keyword argument 'ascending'",
-            ));
-        }
-
         // Flatten: single item may be a list of columns.
         // IMPORTANT: We intentionally do NOT flatten tuples here.
         // In PySpark, a bare tuple passed to sort/orderBy (e.g. df.sort(("a", "b")))
@@ -4586,8 +4613,8 @@ impl PyDataFrame {
             }
         }
 
-        // Default: ascending for all (PySpark: bare column names sort ascending).
-        let asc_vec: Vec<bool> = vec![true; flat.len()];
+        // PySpark parity: ascending can be None (all True), a single bool, or a list of bools.
+        let asc_vec = parse_order_by_ascending(ascending, flat.len())?;
 
         // Try to build sort orders from Column/SortOrder/string (for order_by_exprs).
         let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(flat.len());
