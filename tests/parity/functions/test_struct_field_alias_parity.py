@@ -5,6 +5,7 @@ These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
 from sparkless.testing import get_imports
+import pytest
 
 
 class TestStructFieldAliasParity:
@@ -49,19 +50,15 @@ class TestStructFieldAliasParity:
                 ]
             )
 
-            result = df.select(
-                F.col("StructValue.E1").alias("E1-Extract"),
-                F.col("StructValue.E2").alias("E2-Extract"),
+            # Missing struct fields should raise (PySpark: AnalysisException; Sparkless: SparklessError).
+            with pytest.raises(Exception) as excinfo:
+                df.select(
+                    F.col("StructValue.E1").alias("E1-Extract"),
+                    F.col("StructValue.E2").alias("E2-Extract"),
+                ).collect()
+            assert "Struct field 'E2' not found" in str(excinfo.value) or "No such struct field" in str(
+                excinfo.value
             )
-            rows = result.collect()
-
-            assert len(rows) == 2
-            assert rows[0]["E1-Extract"] == 1
-            # Note: PySpark has a known issue where selecting multiple struct fields
-            # from the same struct column with aliases can return None for some fields
-            # This test verifies Sparkless matches PySpark behavior (even if it's a PySpark bug)
-            # The E2 value may be None in PySpark, so we just verify E1 works correctly
-            assert rows[1]["E1-Extract"] == 2
         finally:
             spark.stop()
 
@@ -80,19 +77,14 @@ class TestStructFieldAliasParity:
                 ]
             )
 
-            result = df.select(
-                "Name",
-                F.col("StructValue.E1").alias("E1-Extract"),
-                F.col("StructValue.E2").alias("E2-Extract"),
+            with pytest.raises(Exception) as excinfo:
+                df.select(
+                    "Name",
+                    F.col("StructValue.E1").alias("E1-Extract"),
+                    F.col("StructValue.E2").alias("E2-Extract"),
+                ).collect()
+            assert "Struct field 'E2' not found" in str(excinfo.value) or "No such struct field" in str(
+                excinfo.value
             )
-            rows = result.collect()
-
-            assert len(rows) == 2
-            assert rows[0]["Name"] == "Alice"
-            assert rows[0]["E1-Extract"] == 1
-            # Note: PySpark has a known issue where selecting multiple struct fields
-            # from the same struct column with aliases can return None for some fields
-            # This test verifies Sparkless matches PySpark behavior (even if it's a PySpark bug)
-            # The E2 value may be None in PySpark, so we just verify Name and E1 work correctly
         finally:
             spark.stop()

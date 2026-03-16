@@ -304,7 +304,11 @@ impl DataFrame {
                     // Try struct field path first (first part is a column name).
                     match df.resolve_column_name(first) {
                         Ok(resolved) => {
+                            // Resolve the first struct field using resolve_struct_field_name so we
+                            // honor struct-specific case-insensitive lookup. Subsequent nested
+                            // fields use resolve_struct_field_from_type.
                             let mut expr = col(PlSmallStr::from(resolved.as_str()));
+                            let mut context_name = resolved.to_string();
                             let mut current_dtype =
                                 df.get_column_dtype(resolved.as_str()).ok_or_else(|| {
                                     PolarsError::ColumnNotFound(
@@ -312,24 +316,50 @@ impl DataFrame {
                                             .into(),
                                     )
                                 })?;
-                            let mut context_name = resolved.to_string();
-                            for field in rest {
-                                let (resolved_field, field_dtype) = match df
-                                    .resolve_struct_field_from_type(
+
+                            for (i, field) in rest.iter().enumerate() {
+                                // For the first field after the column, use resolve_struct_field_name
+                                // so col("StructValue.E1") works when struct has "e1" (issue #1473).
+                                let (resolved_field, field_dtype) = if i == 0 {
+                                    let resolved_field_name = df
+                                        .resolve_struct_field_name(&context_name, field)
+                                        .map_err(|_| {
+                                            // #1150: Inferred struct may omit fields (e.g. E2); return null for missing field.
+                                            PolarsError::ColumnNotFound(
+                                                format!(
+                                                    "cannot resolve: Struct field '{}' not found",
+                                                    field
+                                                )
+                                                .into(),
+                                            )
+                                        })?;
+                                    // Use current_dtype via resolve_struct_field_from_type to keep
+                                    // error messages and type resolution consistent.
+                                    let (_, field_dtype) = df.resolve_struct_field_from_type(
+                                        &current_dtype,
+                                        &resolved_field_name,
+                                        &context_name,
+                                    )?;
+                                    (resolved_field_name, field_dtype)
+                                } else {
+                                    match df.resolve_struct_field_from_type(
                                         &current_dtype,
                                         field,
                                         &context_name,
                                     ) {
-                                    Ok(t) => t,
-                                    Err(_) => {
-                                        // #1150: Inferred struct may omit fields (e.g. E2); return null for missing field.
-                                        return Ok(lit(NULL).alias(PlSmallStr::from(name_str)));
+                                        Ok(t) => t,
+                                        Err(_) => {
+                                            // #1150: Inferred struct may omit fields (e.g. E2); return null for missing field.
+                                            return Ok(lit(NULL).alias(PlSmallStr::from(name_str)));
+                                        }
                                     }
                                 };
+
                                 expr = expr.struct_().field_by_name(&resolved_field);
                                 context_name = format!("{}.{}", context_name, resolved_field);
                                 current_dtype = field_dtype;
                             }
+
                             return Ok(expr.alias(PlSmallStr::from(name_str)));
                         }
                         Err(_) => {
