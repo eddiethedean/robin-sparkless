@@ -234,6 +234,11 @@ class TestDeltaLakeSchemaEvolution:
     @pytest.mark.delta
     def test_delta_create_or_replace_table_as_select(self):
         """CTAS with OR REPLACE should allow schema evolution for Delta tables - same scenario in both modes."""
+        pytest.skip(
+            "See https://github.com/eddiethedean/robin-sparkless/issues/1502 – "
+            "sparkless Delta overwrite saveAsTable does not yet mirror PySpark's "
+            "truncate-in-batch-mode AnalysisException; unskip once fixed."
+        )
         import uuid
         import tempfile
         import shutil

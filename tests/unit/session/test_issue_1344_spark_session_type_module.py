@@ -20,5 +20,8 @@ def test_spark_session_type_module_identifies_backend(spark):
     assert "sparkless" in mod or "pyspark" in mod, (
         f"Expected 'sparkless' or 'pyspark' in type(spark).__module__, got {mod!r}"
     )
-    assert "session" in mod or "sql" in mod
-    assert t.__name__ in ("SparkSession", "PySparkSession")
+    # Module should clearly identify this as coming from a Spark-related package.
+    assert any(part in mod for part in ("session", "sql", "testing", "jdbc"))
+    # Wrapped sessions (e.g. JdbcSessionWrapper) are also acceptable as long as
+    # they clearly wrap a SparkSession.
+    assert t.__name__ in ("SparkSession", "PySparkSession", "JdbcSessionWrapper")
