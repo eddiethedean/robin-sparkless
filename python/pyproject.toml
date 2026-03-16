@@ -49,6 +49,7 @@ build-backend = "maturin"
 module-name = "sparkless._native"
 python-source = "sparkless"
 manifest-path = "Cargo.toml"
+features = ["sql"]
 
 [tool.mypy]
 python_version = "3.9"
