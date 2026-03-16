@@ -361,18 +361,15 @@ impl DataFrame {
                                 // For the first field after the column, use resolve_struct_field_name
                                 // so col("StructValue.E1") works when struct has "e1" (issue #1473).
                                 let (resolved_field, field_dtype) = if i == 0 {
-                                    let resolved_field_name = df
+                                    // #1511: PySpark returns null for struct fields missing from inferred schema (e.g. E2).
+                                    let resolved_field_name = match df
                                         .resolve_struct_field_name(&context_name, field)
-                                        .map_err(|_| {
-                                            // #1150: Inferred struct may omit fields (e.g. E2); return null for missing field.
-                                            PolarsError::ColumnNotFound(
-                                                format!(
-                                                    "cannot resolve: Struct field '{}' not found",
-                                                    field
-                                                )
-                                                .into(),
-                                            )
-                                        })?;
+                                    {
+                                        Ok(n) => n,
+                                        Err(_) => {
+                                            return Ok(lit(NULL).alias(PlSmallStr::from(name_str)));
+                                        }
+                                    };
                                     // Use current_dtype via resolve_struct_field_from_type to keep
                                     // error messages and type resolution consistent.
                                     let (_, field_dtype) = df.resolve_struct_field_from_type(
