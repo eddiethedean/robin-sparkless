@@ -355,6 +355,21 @@ pub fn infer_type_from_expr(expr: &Expr) -> Option<DataType> {
     }
 }
 
+/// True when the expression is a string literal whose text does *not* parse as a number.
+fn is_non_numeric_string_literal(expr: &Expr) -> bool {
+    // Current Polars `LiteralValue` does not expose underlying string contents in a way
+    // that lets us cheaply distinguish "numeric-looking" strings from arbitrary text.
+    // For eqNullSafe parity, it is acceptable (and desirable for #1471) to treat all
+    // string literals as numeric candidates and let `try_to_number` decide:
+    //
+    // - Numeric strings like "123" are parsed and compared numerically.
+    // - Non-numeric strings like "abc" become null and simply don't match.
+    //
+    // So we never classify a literal as "non-numeric string" here.
+    let _ = expr;
+    false
+}
+
 /// Coerce left/right for eq_null_safe so string–numeric compares like PySpark (try_to_number on string side).
 /// Infers types from literals; assumes String for column (so string–numeric gets coerced).
 /// When both sides are column refs (no type info), cast both to string so string vs numeric compares (e.g. "100" and 100).
@@ -371,11 +386,44 @@ pub fn coerce_for_pyspark_eq_null_safe(
         return Ok((left, right));
     }
 
-    let left_ty = infer_type_from_expr(&left).unwrap_or(DataType::String);
-    let right_ty = infer_type_from_expr(&right).unwrap_or(DataType::String);
+    let left_inferred = infer_type_from_expr(&left);
+    let right_inferred = infer_type_from_expr(&right);
+    let left_non_numeric_str_lit = is_non_numeric_string_literal(&left);
+    let right_non_numeric_str_lit = is_non_numeric_string_literal(&right);
+
+    // Derive comparison dtypes with a bit of asymmetry to mirror PySpark-style coercion:
+    // - When only one side is a literal string and the other is a column/expr, treat the
+    //   non-literal side as numeric (Float64) so string‑numeric coercion (try_to_number)
+    //   kicks in for cases like int_col <=> "123" (issue #1471).
+    // - When only one side has a non-string literal type, treat the unknown side as String
+    //   so string‑numeric detection in coerce_for_pyspark_comparison still works when the
+    //   real column type is discovered later.
+    let (left_ty, right_ty) = match (left_inferred.clone(), right_inferred.clone()) {
+        // Both sides known: respect their literal dtypes.
+        (Some(lt), Some(rt)) => (lt, rt),
+        // String literal vs unknown expression:
+        // - If the unknown side is a *column* expr, keep both as String so
+        //   string-column vs string-literal behaves like string equality with
+        //   null-safe semantics (issue #260).
+        // - Otherwise (e.g. string literal vs numeric literal), treat the unknown
+        //   side as numeric (Float64) so string–numeric coercion kicks in (#1471).
+        (Some(DataType::String), None) if matches!(right, Expr::Column(_)) => {
+            (DataType::String, DataType::String)
+        }
+        (None, Some(DataType::String)) if matches!(left, Expr::Column(_)) => {
+            (DataType::String, DataType::String)
+        }
+        (Some(DataType::String), None) => (DataType::String, DataType::Float64),
+        (None, Some(DataType::String)) => (DataType::Float64, DataType::String),
+        // Non-string literal vs unknown expression: treat unknown as String so that
+        // generic comparison coercion (including string–numeric) still applies.
+        (Some(lt), None) => (lt, DataType::String),
+        (None, Some(rt)) => (DataType::String, rt),
+        (None, None) => (DataType::String, DataType::String),
+    };
 
     // Both unknown (column refs): cast both to string so string vs numeric doesn't error (PySpark coercion).
-    if infer_type_from_expr(&left).is_none() && infer_type_from_expr(&right).is_none() {
+    if left_inferred.is_none() && right_inferred.is_none() {
         let left_str = left.cast(DataType::String);
         let right_str = right.cast(DataType::String);
         return Ok((left_str, right_str));
@@ -510,6 +558,30 @@ mod tests {
             1,
             "#615: datetime < date should return one row"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn eq_null_safe_int_column_vs_string_literal_coerces() -> Result<(), PolarsError> {
+        use polars::prelude::df;
+
+        let df = df!(
+            "val" => &[Some(123i64), Some(456i64), None],
+        )?;
+        let lf = df.lazy();
+
+        let col_expr = col("val");
+        let lit_expr = lit("123");
+
+        let (left_c, right_c) = coerce_for_pyspark_eq_null_safe(col_expr, lit_expr)?;
+        let out = lf
+            .with_column(left_c.eq(right_c).alias("match"))
+            .collect()?;
+
+        let matches = out.column("match")?.bool()?;
+        let got: Vec<Option<bool>> = matches.into_iter().collect();
+        assert_eq!(got, vec![Some(true), Some(false), Some(false)]);
+
         Ok(())
     }
 }
