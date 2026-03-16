@@ -5,10 +5,19 @@ Tests validate that Sparkless SQL DML statements behave identically to PySpark.
 """
 
 import pytest
-from pyspark.errors import AnalysisException, UnsupportedOperationException
+
+try:
+    from pyspark.errors import AnalysisException, UnsupportedOperationException
+except ImportError:
+    AnalysisException = None  # type: ignore[misc, assignment]
+    UnsupportedOperationException = None  # type: ignore[misc, assignment]
 
 from sparkless.errors import SparklessError
 from tests.tools.parity_base import ParityTestBase
+
+# Exception types for pytest.raises; when PySpark is not installed only SparklessError is used.
+_RAISE_ANALYSIS = (AnalysisException, SparklessError) if AnalysisException is not None else (SparklessError,)
+_RAISE_UNSUPPORTED = (UnsupportedOperationException, SparklessError) if UnsupportedOperationException is not None else (SparklessError,)
 
 
 class TestSQLDMLParity(ParityTestBase):
@@ -81,7 +90,7 @@ class TestSQLDMLParity(ParityTestBase):
         df.write.mode("overwrite").saveAsTable("update_test")
 
         # PySpark and Sparkless reject UPDATE for default catalog tables (#1507).
-        with pytest.raises((UnsupportedOperationException, SparklessError)) as excinfo:
+        with pytest.raises(_RAISE_UNSUPPORTED) as excinfo:
             spark.sql("UPDATE update_test SET age = 26 WHERE name = 'Alice'")
         assert "UPDATE TABLE is not supported temporarily" in str(excinfo.value)
 
@@ -95,7 +104,7 @@ class TestSQLDMLParity(ParityTestBase):
         df = spark.createDataFrame(data, ["name", "age", "dept"])
         df.write.mode("overwrite").saveAsTable("update_multi")
 
-        with pytest.raises((UnsupportedOperationException, SparklessError)) as excinfo:
+        with pytest.raises(_RAISE_UNSUPPORTED) as excinfo:
             spark.sql(
                 "UPDATE update_multi SET age = 26, dept = 'HR' WHERE name = 'Alice'"
             )
@@ -111,7 +120,7 @@ class TestSQLDMLParity(ParityTestBase):
         df = spark.createDataFrame(data, ["name", "age"])
         df.write.mode("overwrite").saveAsTable("delete_test")
 
-        with pytest.raises((AnalysisException, SparklessError)) as excinfo:
+        with pytest.raises(_RAISE_ANALYSIS) as excinfo:
             spark.sql("DELETE FROM delete_test WHERE age > 30")
         assert "UNSUPPORTED_FEATURE.TABLE_OPERATION" in str(excinfo.value)
 
@@ -125,7 +134,7 @@ class TestSQLDMLParity(ParityTestBase):
         df = spark.createDataFrame(data, ["name", "age"])
         df.write.mode("overwrite").saveAsTable("delete_all")
 
-        with pytest.raises((AnalysisException, SparklessError)) as excinfo:
+        with pytest.raises(_RAISE_ANALYSIS) as excinfo:
             spark.sql("DELETE FROM delete_all")
         assert "UNSUPPORTED_FEATURE.TABLE_OPERATION" in str(excinfo.value)
 

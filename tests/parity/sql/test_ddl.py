@@ -5,7 +5,11 @@ Tests validate that Sparkless SQL DDL statements behave identically to PySpark.
 """
 
 import pytest
-from pyspark.errors import AnalysisException
+
+try:
+    from pyspark.errors import AnalysisException
+except ImportError:
+    AnalysisException = None  # type: ignore[misc, assignment]
 
 from sparkless.errors import SparklessError
 from tests.tools.parity_base import ParityTestBase
@@ -118,8 +122,9 @@ class TestSQLDDLParity(ParityTestBase):
         df = spark.createDataFrame(data, ["name", "age", "dept"])
         df.write.mode("overwrite").saveAsTable("ctas_no_hive_src")
 
+        _raise = (AnalysisException, SparklessError) if AnalysisException is not None else (SparklessError,)
         try:
-            with pytest.raises((AnalysisException, SparklessError)) as excinfo:
+            with pytest.raises(_raise) as excinfo:
                 spark.sql(
                     "CREATE TABLE ctas_no_hive_dst AS SELECT name, age FROM ctas_no_hive_src"
                 )
