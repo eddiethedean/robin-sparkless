@@ -68,9 +68,9 @@ def test_regexp_extract_all_select_varargs_pyspark_parity(spark) -> None:
     )
 
 
-def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity(spark) -> (
-    None
-):
+def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity(
+    spark,
+) -> None:
     """select('s', expr.alias('m')) - same scenario in both modes."""
     data = [
         {"s": "a1b22c"},

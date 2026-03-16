@@ -6,7 +6,6 @@ schema struct<namespace:string>, at least the default namespace, and explain()
 returns None (plan is printed to stdout).
 """
 
-import pytest
 
 
 def test_issue_1386_sql_show_databases_schema_data_and_explain(spark) -> None:

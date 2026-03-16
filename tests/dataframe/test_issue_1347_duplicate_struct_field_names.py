@@ -7,7 +7,6 @@ Sparkless raises; PySpark may succeed. See docs/PYSPARK_DIFFERENCES.md.
 
 from __future__ import annotations
 
-import pytest
 
 from sparkless.testing import get_imports
 

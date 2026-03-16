@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
 
 from sparkless.testing import get_imports
 

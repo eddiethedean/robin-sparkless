@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from sparkless.testing import get_imports
 
 
 def test_issue_1385_errors_missing_column_message(spark, spark_imports) -> None:
@@ -21,4 +20,9 @@ def test_issue_1385_errors_missing_column_message(spark, spark_imports) -> None:
         _ = df.select(F.col("nope").alias("y")).collect()
 
     msg = str(excinfo.value).lower()
-    assert "nope" in msg or "not found" in msg or "cannot resolve" in msg or "unresolved" in msg
+    assert (
+        "nope" in msg
+        or "not found" in msg
+        or "cannot resolve" in msg
+        or "unresolved" in msg
+    )

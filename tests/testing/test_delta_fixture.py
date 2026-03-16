@@ -4,7 +4,6 @@ These tests verify that the @pytest.mark.delta marker and SPARKLESS_ENABLE_DELTA
 environment variable correctly enable Delta Lake support in PySpark mode.
 """
 
-import os
 import shutil
 import tempfile
 import uuid

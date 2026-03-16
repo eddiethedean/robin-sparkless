@@ -6,7 +6,6 @@ struct<col_name:string,data_type:string,comment:string>, column x with
 bigint/long/int type, and explain() returns None (plan printed to stdout).
 """
 
-import pytest
 
 
 def test_issue_1388_sql_describe_extended_schema_data_and_explain(spark) -> None:

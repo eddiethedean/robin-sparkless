@@ -14,7 +14,6 @@ These tests verify that:
 
 from datetime import date
 
-import pytest
 
 from sparkless.testing import get_imports
 

@@ -2627,10 +2627,7 @@ fn py_tuple_or_single_to_vec_string(tup: &Bound<'_, PyTuple>) -> PyResult<Vec<St
 
 /// Parse orderBy(..., ascending=...) into a vec of bools (one per column).
 /// PySpark: ascending can be None (all True), a single bool, or a list of bools.
-fn parse_order_by_ascending(
-    ascending: Option<&Bound<'_, PyAny>>,
-    n: usize,
-) -> PyResult<Vec<bool>> {
+fn parse_order_by_ascending(ascending: Option<&Bound<'_, PyAny>>, n: usize) -> PyResult<Vec<bool>> {
     let mut asc = match ascending {
         None => return Ok(vec![true; n]),
         Some(any) => {

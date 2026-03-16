@@ -4,7 +4,6 @@ PySpark parity tests for SQL DDL operations.
 Tests validate that Sparkless SQL DDL statements behave identically to PySpark.
 """
 
-import pytest
 from tests.tools.parity_base import ParityTestBase
 
 

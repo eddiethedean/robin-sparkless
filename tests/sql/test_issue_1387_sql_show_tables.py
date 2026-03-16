@@ -6,7 +6,6 @@ schema struct<namespace:string,tableName:string,isTemporary:boolean>, and
 explain() returns None (plan printed to stdout).
 """
 
-import pytest
 
 
 def test_issue_1387_sql_show_tables_schema_data_and_explain(spark) -> None:

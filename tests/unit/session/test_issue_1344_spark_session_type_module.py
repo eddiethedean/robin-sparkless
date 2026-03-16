@@ -6,7 +6,6 @@ Code that detects engine via type(spark).__module__ should see "sparkless" for s
 
 from __future__ import annotations
 
-import pytest
 
 from sparkless.testing import get_imports
 

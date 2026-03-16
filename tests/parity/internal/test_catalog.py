@@ -4,7 +4,6 @@ PySpark parity tests for Catalog operations.
 Tests validate that Sparkless Catalog operations behave identically to PySpark.
 """
 
-import pytest
 from tests.tools.parity_base import ParityTestBase
 
 

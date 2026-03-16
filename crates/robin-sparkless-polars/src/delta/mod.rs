@@ -21,8 +21,10 @@ fn concat_lazy_frames_diagonal(lfs: Vec<LazyFrame>) -> Result<LazyFrame, PolarsE
     if lfs.is_empty() {
         return Err(PolarsError::ComputeError("read_delta: no files".into()));
     }
-    let mut args = UnionArgs::default();
-    args.diagonal = true;
+    let args = UnionArgs {
+        diagonal: true,
+        ..UnionArgs::default()
+    };
     polars::prelude::concat(lfs, args)
 }
 
@@ -47,7 +49,7 @@ fn collect_parquet_paths_under(dir: &Path) -> Result<Vec<std::path::PathBuf>, Po
         let p = entry.path();
         if p.is_dir() {
             out.extend(collect_parquet_paths_under(&p)?);
-        } else if p.extension().map_or(false, |e| e == "parquet") {
+        } else if p.extension().is_some_and(|e| e == "parquet") {
             out.push(p);
         }
     }
@@ -77,10 +79,11 @@ pub fn read_delta_with_version(
             PolarsError::ComputeError(format!("read_delta: invalid table URI: {}", e).into())
         })?;
         let table = rt.block_on(async {
-            let builder =
-                DeltaTableBuilder::from_url(url.clone()).map_err(|e: deltalake::DeltaTableError| {
+            let builder = DeltaTableBuilder::from_url(url.clone()).map_err(
+                |e: deltalake::DeltaTableError| {
                     PolarsError::ComputeError(format!("read_delta: {}", e).into())
-                })?;
+                },
+            )?;
             let result = if let Some(v) = version {
                 builder.with_version(v).load().await
             } else {
