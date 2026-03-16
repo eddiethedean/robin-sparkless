@@ -7773,10 +7773,23 @@ fn coerce_to_column(v: &Bound<'_, PyAny>) -> PyResult<Column> {
     ))
 }
 
-/// Extract pattern string from PyAny: str or a Column that is a string literal (e.g. F.lit(r"\\d+")). #1264
+/// Create a PySpark-like UNRESOLVED_COLUMN error for regexp_extract_all when the pattern
+/// is passed as a plain string instead of a literal Column (e.g. F.lit(r"\\d+")).
+/// This mirrors PySpark's behavior where such patterns are interpreted as unresolved
+/// column/function parameter names in select(...) projections (#1501).
+fn unresolved_column_error_for_pattern(pattern: &str) -> PyErr {
+    PyErr::new::<pyo3::exceptions::PyException, _>(format!(
+        "AnalysisException: [UNRESOLVED_COLUMN.WITH_SUGGESTION] A column or function parameter with name `{}` cannot be resolved.",
+        pattern
+    ))
+}
+
+/// Extract pattern string from PyAny: a Column that is a string literal (e.g. F.lit(r"\\d+")). #1264, #1501
+/// Passing a raw Python string for the pattern now mirrors PySpark's UNRESOLVED_COLUMN behavior
+/// for regexp_extract_all in select(...) by raising an AnalysisException-style error.
 fn pattern_str_from_pyany(pattern: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = pattern.extract::<String>() {
-        return Ok(s);
+        return Err(unresolved_column_error_for_pattern(&s));
     }
     if let Ok(py_col) = pattern.downcast::<PyColumn>() {
         let col = py_col.borrow().inner.clone();

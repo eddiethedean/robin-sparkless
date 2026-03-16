@@ -164,19 +164,7 @@ def spark(request: pytest.FixtureRequest) -> Generator[Any, None, None]:
     if hasattr(request, "node") and hasattr(request.node, "name"):
         test_name = f"test_{request.node.name[:50]}"
 
-    try:
-        session = create_session(
-            app_name=test_name, mode=mode, enable_delta=enable_delta
-        )
-    except (ImportError, RuntimeError) as e:
-        error_msg = str(e)
-        if (
-            "PySpark is not available" in error_msg
-            or "pyspark" in error_msg.lower()
-            or "Java" in error_msg
-        ):
-            pytest.skip(f"PySpark session creation failed: {e}")
-        raise
+    session = create_session(app_name=test_name, mode=mode, enable_delta=enable_delta)
 
     yield session
 
@@ -218,19 +206,7 @@ def isolated_session(request: pytest.FixtureRequest) -> Generator[Any, None, Non
     ):
         enable_delta = True
 
-    try:
-        session = create_session(
-            app_name=session_name, mode=mode, enable_delta=enable_delta
-        )
-    except (ImportError, RuntimeError) as e:
-        error_msg = str(e)
-        if (
-            "PySpark is not available" in error_msg
-            or "pyspark" in error_msg.lower()
-            or "Java" in error_msg
-        ):
-            pytest.skip(f"PySpark session creation failed: {e}")
-        raise
+    session = create_session(app_name=session_name, mode=mode, enable_delta=enable_delta)
 
     yield session
 

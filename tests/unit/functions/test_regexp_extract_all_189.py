@@ -1,3 +1,5 @@
+import pytest
+
 from sparkless.testing import get_imports
 
 _imports = get_imports()
@@ -28,3 +30,23 @@ def test_regexp_extract_all_basic_groups(spark):
     assert out1[0]["g"] == ["1", "22", "333"]
     assert out1[1]["g"] == []
     assert out1[2]["g"] is None
+
+
+def test_regexp_extract_all_raw_string_pattern_errors_in_both_modes(spark) -> None:
+    """Raw string pattern should raise UNRESOLVED_COLUMN-style error in both modes (#1501)."""
+    df = spark.createDataFrame(
+        [
+            {"s": "a1 b22 c333"},
+            {"s": "no-digits"},
+            {"s": None},
+        ]
+    )
+
+    with pytest.raises(Exception) as excinfo:
+        df.select(
+            F.regexp_extract_all(F.col("s"), r"\d+", 0).alias("m")
+        ).collect()
+
+    msg = str(excinfo.value)
+    assert "UNRESOLVED_COLUMN" in msg
+    assert "`\\d+` cannot be resolved" in msg
