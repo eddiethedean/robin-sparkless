@@ -82,4 +82,6 @@ def test_issue_1394_struct_getfield_alias_schema_and_explain(
 
     # UI / explain parity: explain() prints to stdout; returns None in PySpark/sparkless.
     explain_str = out.explain(True)
-    assert explain_str is None or (isinstance(explain_str, str) and explain_str.strip() != "")
+    assert explain_str is None or (
+        isinstance(explain_str, str) and explain_str.strip() != ""
+    )

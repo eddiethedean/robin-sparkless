@@ -23,11 +23,13 @@ class TestCollectSet:
 
     def test_collect_set_integer_unique(self, spark):
         """Test collect_set() returns unique integers."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 3},
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": 2},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 3},
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": 2},
+            ]
+        )
         result = df.groupBy("grp").agg(F.collect_set("val").alias("set"))
         rows = result.collect()
 
@@ -37,11 +39,13 @@ class TestCollectSet:
 
     def test_collect_set_string_unique(self, spark):
         """Test collect_set() returns unique strings."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": "cherry"},
-            {"grp": "A", "val": "apple"},
-            {"grp": "A", "val": "banana"},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": "cherry"},
+                {"grp": "A", "val": "apple"},
+                {"grp": "A", "val": "banana"},
+            ]
+        )
         result = df.groupBy("grp").agg(F.collect_set("val").alias("set"))
         rows = result.collect()
 
@@ -51,13 +55,15 @@ class TestCollectSet:
 
     def test_collect_set_removes_duplicates(self, spark):
         """Test collect_set() removes duplicates and returns unique values."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 5},
-            {"grp": "A", "val": 2},
-            {"grp": "A", "val": 5},
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": 2},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 5},
+                {"grp": "A", "val": 2},
+                {"grp": "A", "val": 5},
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": 2},
+            ]
+        )
         result = df.groupBy("grp").agg(F.collect_set("val").alias("set"))
         rows = result.collect()
 
@@ -67,14 +73,16 @@ class TestCollectSet:
 
     def test_collect_set_multiple_groups(self, spark):
         """Test collect_set() returns unique values for multiple groups."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 3},
-            {"grp": "A", "val": 1},
-            {"grp": "B", "val": 20},
-            {"grp": "B", "val": 10},
-            {"grp": "A", "val": 2},
-            {"grp": "B", "val": 30},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 3},
+                {"grp": "A", "val": 1},
+                {"grp": "B", "val": 20},
+                {"grp": "B", "val": 10},
+                {"grp": "A", "val": 2},
+                {"grp": "B", "val": 30},
+            ]
+        )
         result = df.groupBy("grp").agg(F.collect_set("val").alias("set"))
         rows = result.collect()
 
@@ -89,11 +97,13 @@ class TestCollectSet:
 
     def test_collect_set_float_unique(self, spark):
         """Test collect_set() returns unique floats."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 3.14},
-            {"grp": "A", "val": 1.41},
-            {"grp": "A", "val": 2.71},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 3.14},
+                {"grp": "A", "val": 1.41},
+                {"grp": "A", "val": 2.71},
+            ]
+        )
         result = df.groupBy("grp").agg(F.collect_set("val").alias("set"))
         rows = result.collect()
 
@@ -102,9 +112,11 @@ class TestCollectSet:
 
     def test_collect_set_single_value(self, spark):
         """Test collect_set() with single value per group."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 42},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 42},
+            ]
+        )
         result = df.groupBy("grp").agg(F.collect_set("val").alias("set"))
         rows = result.collect()
 
@@ -113,13 +125,15 @@ class TestCollectSet:
 
     def test_collect_set_negative_numbers(self, spark):
         """Test collect_set() with negative numbers."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 5},
-            {"grp": "A", "val": -3},
-            {"grp": "A", "val": 0},
-            {"grp": "A", "val": -10},
-            {"grp": "A", "val": 2},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 5},
+                {"grp": "A", "val": -3},
+                {"grp": "A", "val": 0},
+                {"grp": "A", "val": -10},
+                {"grp": "A", "val": 2},
+            ]
+        )
         result = df.groupBy("grp").agg(F.collect_set("val").alias("set"))
         rows = result.collect()
 
@@ -128,11 +142,13 @@ class TestCollectSet:
 
     def test_collect_set_with_col_function(self, spark):
         """Test collect_set() with F.col() reference."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 3},
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": 2},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 3},
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": 2},
+            ]
+        )
         result = df.groupBy("grp").agg(F.collect_set(F.col("val")).alias("set"))
         rows = result.collect()
 
@@ -141,10 +157,12 @@ class TestCollectSet:
 
     def test_collect_set_empty_after_filter(self, spark):
         """Test collect_set() behavior with empty groups after filter."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": 2},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": 2},
+            ]
+        )
         filtered = df.filter(F.col("val") > 100)
         result = filtered.groupBy("grp").agg(F.collect_set("val").alias("set"))
         rows = result.collect()
@@ -153,12 +171,14 @@ class TestCollectSet:
 
     def test_collect_set_without_groupby(self, spark):
         """Test collect_set() without groupBy (global aggregation)."""
-        df = spark.createDataFrame([
-            {"val": 3},
-            {"val": 1},
-            {"val": 2},
-            {"val": 1},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"val": 3},
+                {"val": 1},
+                {"val": 2},
+                {"val": 1},
+            ]
+        )
         result = df.agg(F.collect_set("val").alias("set"))
         rows = result.collect()
 
@@ -167,11 +187,13 @@ class TestCollectSet:
 
     def test_collect_set_combined_with_other_aggs(self, spark):
         """Test collect_set() combined with other aggregation functions."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 3},
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": 2},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 3},
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": 2},
+            ]
+        )
         result = df.groupBy("grp").agg(
             F.collect_set("val").alias("set"),
             F.sum("val").alias("total"),
@@ -186,12 +208,14 @@ class TestCollectSet:
 
     def test_collect_set_vs_collect_list(self, spark):
         """Test collect_set() returns unique vs collect_list() preserves duplicates."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 3},
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": 3},
-            {"grp": "A", "val": 2},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 3},
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": 3},
+                {"grp": "A", "val": 2},
+            ]
+        )
         result = df.groupBy("grp").agg(
             F.collect_set("val").alias("unique_set"),
             F.collect_list("val").alias("all_list"),

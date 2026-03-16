@@ -31,4 +31,6 @@ class TestCorrNullsParity(ParityTestBase):
         assert len(rows) == 1
         corr_val = rows[0]["correlation"]
         assert corr_val is not None
-        assert abs(corr_val - 1.0) < 1e-5, f"Expected ~1.0 (perfect line), got {corr_val}"
+        assert abs(corr_val - 1.0) < 1e-5, (
+            f"Expected ~1.0 (perfect line), got {corr_val}"
+        )

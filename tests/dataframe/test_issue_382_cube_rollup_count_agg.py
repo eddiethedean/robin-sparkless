@@ -87,7 +87,11 @@ def test_rollup_avg_min_max(spark) -> None:
         [{"a": 1, "val": 10}, {"a": 1, "val": 20}, {"a": 2, "val": 30}],
         schema=["a", "val"],
     )
-    for method, col_name in [("avg", "avg(val)"), ("min", "min(val)"), ("max", "max(val)")]:
+    for method, col_name in [
+        ("avg", "avg(val)"),
+        ("min", "min(val)"),
+        ("max", "max(val)"),
+    ]:
         out = getattr(df.rollup("a"), method)("val")
         rows = out.collect()
         assert len(rows) >= 1, f"rollup().{method}() should return rows"

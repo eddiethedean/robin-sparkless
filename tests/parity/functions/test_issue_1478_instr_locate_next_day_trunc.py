@@ -6,7 +6,6 @@ they raise AttributeError. This test verifies they run without error and produce
 sensible results.
 """
 
-import pytest
 from tests.tools.parity_base import ParityTestBase
 from sparkless.testing import get_imports
 

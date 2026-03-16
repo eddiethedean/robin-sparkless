@@ -45,4 +45,6 @@ def test_issue_1391_session_conf_app_name_schema_and_explain(spark) -> None:
 
     # UI / explain parity: explain() prints to stdout; returns None in PySpark/sparkless.
     explain_str = df.explain(True)
-    assert explain_str is None or (isinstance(explain_str, str) and explain_str.strip() != "")
+    assert explain_str is None or (
+        isinstance(explain_str, str) and explain_str.strip() != ""
+    )

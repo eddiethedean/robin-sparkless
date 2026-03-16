@@ -21,12 +21,15 @@ class TestNtileNulls:
 
     def test_ntile_nulls_ascending(self, spark):
         """Test ntile() with NULL in ascending order - NULL should come first (#1484)."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": None},
-            {"grp": "A", "val": 2},
-            {"grp": "A", "val": 3},
-        ], schema="grp string, val int")
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": None},
+                {"grp": "A", "val": 2},
+                {"grp": "A", "val": 3},
+            ],
+            schema="grp string, val int",
+        )
 
         w = Window.partitionBy("grp").orderBy("val")
         result = df.withColumn("ntile", F.ntile(2).over(w))
@@ -35,11 +38,13 @@ class TestNtileNulls:
         # PySpark behavior: NULL comes first in ascending order
         # 4 rows, ntile(2): first 2 get bucket 1, last 2 get bucket 2
         assert len(rows) == 4
-        
+
         # NULL row should be first and have ntile=1 (not NULL!)
         null_row = next((r for r in rows if r["val"] is None), None)
         assert null_row is not None
-        assert null_row["ntile"] == 1, f"NULL row should have ntile=1, got {null_row['ntile']}"
+        assert null_row["ntile"] == 1, (
+            f"NULL row should have ntile=1, got {null_row['ntile']}"
+        )
 
         # Row with val=1 should have ntile=1 (second row in ascending)
         row_1 = next((r for r in rows if r["val"] == 1), None)
@@ -55,12 +60,15 @@ class TestNtileNulls:
 
     def test_ntile_nulls_descending(self, spark):
         """Test ntile() with NULL in descending order - NULL should come last (#1484)."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": None},
-            {"grp": "A", "val": 2},
-            {"grp": "A", "val": 3},
-        ], schema="grp string, val int")
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": None},
+                {"grp": "A", "val": 2},
+                {"grp": "A", "val": 3},
+            ],
+            schema="grp string, val int",
+        )
 
         w = Window.partitionBy("grp").orderBy(F.col("val").desc())
         result = df.withColumn("ntile", F.ntile(2).over(w))
@@ -85,16 +93,21 @@ class TestNtileNulls:
         # NULL row should be last and have ntile=2 (not NULL!)
         null_row = next((r for r in rows if r["val"] is None), None)
         assert null_row is not None
-        assert null_row["ntile"] == 2, f"NULL row should have ntile=2, got {null_row['ntile']}"
+        assert null_row["ntile"] == 2, (
+            f"NULL row should have ntile=2, got {null_row['ntile']}"
+        )
 
     def test_ntile_all_nulls(self, spark):
         """Test ntile() when all ORDER BY values are NULL."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": None},
-            {"grp": "A", "val": None},
-            {"grp": "A", "val": None},
-            {"grp": "A", "val": None},
-        ], schema="grp string, val int")
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": None},
+                {"grp": "A", "val": None},
+                {"grp": "A", "val": None},
+                {"grp": "A", "val": None},
+            ],
+            schema="grp string, val int",
+        )
 
         w = Window.partitionBy("grp").orderBy("val")
         result = df.withColumn("ntile", F.ntile(2).over(w))
@@ -104,16 +117,20 @@ class TestNtileNulls:
         # All rows should have integer ntile values (1 or 2), not NULL
         ntile_values = [r["ntile"] for r in rows]
         assert all(v is not None for v in ntile_values), "ntile should never be NULL"
-        assert set(ntile_values) == {1, 2}, f"Expected ntile values 1 and 2, got {set(ntile_values)}"
+        assert set(ntile_values) == {1, 2}, (
+            f"Expected ntile values 1 and 2, got {set(ntile_values)}"
+        )
 
     def test_ntile_no_nulls(self, spark):
         """Test ntile() without NULL values still works correctly."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": 2},
-            {"grp": "A", "val": 3},
-            {"grp": "A", "val": 4},
-        ])
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": 2},
+                {"grp": "A", "val": 3},
+                {"grp": "A", "val": 4},
+            ]
+        )
 
         w = Window.partitionBy("grp").orderBy("val")
         result = df.withColumn("ntile", F.ntile(2).over(w))
@@ -127,13 +144,16 @@ class TestNtileNulls:
 
     def test_ntile_multiple_groups_with_nulls(self, spark):
         """Test ntile() with NULL values across multiple groups."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": None},
-            {"grp": "A", "val": 2},
-            {"grp": "B", "val": None},
-            {"grp": "B", "val": 10},
-        ], schema="grp string, val int")
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": None},
+                {"grp": "A", "val": 2},
+                {"grp": "B", "val": None},
+                {"grp": "B", "val": 10},
+            ],
+            schema="grp string, val int",
+        )
 
         w = Window.partitionBy("grp").orderBy("val")
         result = df.withColumn("ntile", F.ntile(2).over(w))
@@ -155,9 +175,12 @@ class TestNtileNulls:
 
     def test_ntile_single_null_row(self, spark):
         """Test ntile() with a single NULL row."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": None},
-        ], schema="grp string, val int")
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": None},
+            ],
+            schema="grp string, val int",
+        )
 
         w = Window.partitionBy("grp").orderBy("val")
         result = df.withColumn("ntile", F.ntile(2).over(w))
@@ -168,14 +191,17 @@ class TestNtileNulls:
 
     def test_ntile_ntile3_with_nulls(self, spark):
         """Test ntile(3) with NULL values."""
-        df = spark.createDataFrame([
-            {"grp": "A", "val": None},
-            {"grp": "A", "val": 1},
-            {"grp": "A", "val": 2},
-            {"grp": "A", "val": 3},
-            {"grp": "A", "val": 4},
-            {"grp": "A", "val": 5},
-        ], schema="grp string, val int")
+        df = spark.createDataFrame(
+            [
+                {"grp": "A", "val": None},
+                {"grp": "A", "val": 1},
+                {"grp": "A", "val": 2},
+                {"grp": "A", "val": 3},
+                {"grp": "A", "val": 4},
+                {"grp": "A", "val": 5},
+            ],
+            schema="grp string, val int",
+        )
 
         w = Window.partitionBy("grp").orderBy("val")
         result = df.withColumn("ntile", F.ntile(3).over(w))
@@ -184,7 +210,7 @@ class TestNtileNulls:
         # 6 rows, ntile(3): [1,1], [2,2], [3,3]
         # Order: NULL, 1, 2, 3, 4, 5
         assert len(rows) == 6
-        
+
         # NULL comes first
         null_row = next((r for r in rows if r["val"] is None), None)
         assert null_row["ntile"] == 1

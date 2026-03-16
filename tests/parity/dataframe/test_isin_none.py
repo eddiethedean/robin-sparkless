@@ -25,7 +25,9 @@ class TestIsinNone:
     def test_isin_with_none_in_list(self, spark):
         """Test isin() with None in list - exact reproduction from issue #1483."""
         df = spark.createDataFrame([{"val": 1}, {"val": None}, {"val": 3}])
-        result = df.select(F.col("val"), F.col("val").isin([1, 2, None]).alias("in_list"))
+        result = df.select(
+            F.col("val"), F.col("val").isin([1, 2, None]).alias("in_list")
+        )
         rows = result.collect()
 
         assert len(rows) == 3
@@ -80,7 +82,9 @@ class TestIsinNone:
     def test_isin_with_none_and_match(self, spark):
         """Test isin() where value matches a non-null value."""
         df = spark.createDataFrame([{"val": 1}, {"val": 2}, {"val": 3}])
-        result = df.select(F.col("val"), F.col("val").isin([1, 2, None]).alias("in_list"))
+        result = df.select(
+            F.col("val"), F.col("val").isin([1, 2, None]).alias("in_list")
+        )
         rows = result.collect()
 
         assert len(rows) == 3
@@ -109,7 +113,9 @@ class TestIsinNone:
     def test_isin_with_none_strings(self, spark):
         """Test isin() with None in string list."""
         df = spark.createDataFrame([{"val": "a"}, {"val": None}, {"val": "c"}])
-        result = df.select(F.col("val"), F.col("val").isin(["a", "b", None]).alias("in_list"))
+        result = df.select(
+            F.col("val"), F.col("val").isin(["a", "b", None]).alias("in_list")
+        )
         rows = result.collect()
 
         assert len(rows) == 3

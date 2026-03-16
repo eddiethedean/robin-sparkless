@@ -573,9 +573,7 @@ class TestIssue327OrderByAscending:
             )
 
             # Multiple orderBy calls - last one should win
-            result = df.orderBy(F.col("Value").asc()).orderBy(
-                F.col("Value").desc()
-            )
+            result = df.orderBy(F.col("Value").asc()).orderBy(F.col("Value").desc())
             rows = result.collect()
 
             assert len(rows) == 3
