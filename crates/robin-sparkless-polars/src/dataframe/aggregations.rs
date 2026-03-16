@@ -1,6 +1,7 @@
 //! GroupBy and aggregation operations.
 
 use super::DataFrame;
+use crate::dataframe::resolve_column_with_schema as resolve_column_with_schema_df;
 use crate::column::Column;
 use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Expr, LazyFrame, LazyGroupBy, NULL, NamedFrom, PlSmallStr,
@@ -110,7 +111,7 @@ impl GroupedData {
     /// Grouping output names (e.g. from groupBy(col("Name").alias("Key"))) are valid even when not in the input schema.
     fn resolve_column(&self, name: &str) -> Result<String, PolarsError> {
         let schema = self.lf.clone().collect_schema()?;
-        self.resolve_column_with_schema(name, &schema)
+        resolve_column_with_schema_df(name, &schema, self.case_sensitive, Some(&self.grouping_cols))
     }
 
     /// Same as resolve_column but uses a pre-collected schema to avoid repeated collect_schema() calls (performance).
@@ -119,43 +120,7 @@ impl GroupedData {
         name: &str,
         schema: &Schema,
     ) -> Result<String, PolarsError> {
-        // Grouping columns by output name (e.g. "Key" after alias) are valid for agg/sort (issue #397).
-        if self.case_sensitive {
-            if self.grouping_cols.iter().any(|g| g == name) {
-                return Ok(name.to_string());
-            }
-        } else {
-            let name_lower = name.to_lowercase();
-            for g in &self.grouping_cols {
-                if g.to_lowercase() == name_lower {
-                    return Ok(g.clone());
-                }
-            }
-        }
-        let names: Vec<String> = schema
-            .iter_names_and_dtypes()
-            .map(|(n, _)| n.to_string())
-            .collect();
-        if self.case_sensitive {
-            if names.iter().any(|n| n == name) {
-                return Ok(name.to_string());
-            }
-        } else {
-            let name_lower = name.to_lowercase();
-            for n in &names {
-                if n.to_lowercase() == name_lower {
-                    return Ok(n.clone());
-                }
-            }
-        }
-        let available = names.join(", ");
-        Err(PolarsError::ColumnNotFound(
-            format!(
-                "cannot resolve: column '{}' not found in grouped DataFrame. Available: [{}].",
-                name, available
-            )
-            .into(),
-        ))
+        resolve_column_with_schema_df(name, schema, self.case_sensitive, Some(&self.grouping_cols))
     }
 
     /// Resolve column names in an expression against the grouped schema (case-sensitive or -insensitive).
