@@ -26,12 +26,6 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This is a sparkless-specific API. PySpark uses SQL CREATE DATABASE instead.
         """
-        if not is_pyspark_mode():
-            pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1505 – "
-                "sparkless exposes catalog.createDatabase/dropDatabase but PySpark does not; "
-                "unskip once sparkless matches PySpark API surface."
-            )
         # Real PySpark Catalog does not expose createDatabase; this helper is sparkless-only.
         with pytest.raises(AttributeError):
             spark.catalog.createDatabase("test_catalog_db", ignoreIfExists=True)
@@ -41,12 +35,6 @@ class TestCatalogParity(ParityTestBase):
 
         Note: This is a sparkless-specific API. PySpark uses SQL DROP DATABASE instead.
         """
-        if not is_pyspark_mode():
-            pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1505 – "
-                "sparkless exposes catalog.createDatabase/dropDatabase but PySpark does not; "
-                "unskip once sparkless matches PySpark API surface."
-            )
         with pytest.raises(AttributeError):
             spark.catalog.dropDatabase("test_drop_db", ignoreIfNotExists=True)
 

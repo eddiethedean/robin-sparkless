@@ -1292,62 +1292,6 @@ impl PyCatalog {
         Ok(out)
     }
 
-    #[pyo3(name = "createDatabase", signature = (name, ignoreIfExists=true))]
-    fn create_database(
-        &self,
-        py: Python<'_>,
-        name: &Bound<'_, PyAny>,
-        ignoreIfExists: bool,
-    ) -> PyResult<()> {
-        let name: String = name
-            .extract()
-            .map_err(|_| to_py_err("database name must be a string"))?;
-        if name.is_empty() {
-            return Err(to_py_err("database name cannot be empty"));
-        }
-        let session = self
-            .session
-            .bind(py)
-            .downcast::<PySparkSession>()
-            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
-            .borrow();
-        if session.inner.database_exists(&name) {
-            if ignoreIfExists {
-                return Ok(());
-            }
-            return Err(to_py_err(format!("Database '{name}' already exists")));
-        }
-        session.inner.register_database(&name);
-        Ok(())
-    }
-
-    #[pyo3(name = "dropDatabase", signature = (name, ignoreIfNotExists=true))]
-    fn drop_database(
-        &self,
-        py: Python<'_>,
-        name: &Bound<'_, PyAny>,
-        ignoreIfNotExists: bool,
-    ) -> PyResult<()> {
-        let name: String = name
-            .extract()
-            .map_err(|_| to_py_err("database name must be a string"))?;
-        if name.is_empty() {
-            return Err(to_py_err("database name cannot be empty"));
-        }
-        let session = self
-            .session
-            .bind(py)
-            .downcast::<PySparkSession>()
-            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
-            .borrow();
-        let existed = session.inner.database_exists(&name);
-        if !existed && !ignoreIfNotExists {
-            return Err(to_py_err(format!("Database '{name}' does not exist")));
-        }
-        session.inner.drop_database(&name);
-        Ok(())
-    }
-
     #[pyo3(name = "setCurrentDatabase")]
     fn set_current_database(&self, py: Python<'_>, name: &str) -> PyResult<()> {
         let session = self
