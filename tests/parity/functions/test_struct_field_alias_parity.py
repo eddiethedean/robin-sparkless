@@ -66,12 +66,7 @@ class TestStructFieldAliasParity:
             spark.stop()
 
     def test_struct_field_with_alias_and_other_columns_parity(self):
-        """Test struct field with alias combined with other columns matches PySpark."""
-        if not is_pyspark_mode():
-            pytest.skip(
-                "sparkless parity gap: struct field alias with other columns "
-                "(see issue #1512; unskip when fixed)"
-            )
+        """Test struct field with alias combined with other columns matches PySpark (#1512)."""
         spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
