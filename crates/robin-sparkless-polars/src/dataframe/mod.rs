@@ -37,6 +37,46 @@ use std::sync::Arc;
 /// Default for `spark.sql.caseSensitive` (PySpark default is false = case-insensitive).
 const DEFAULT_CASE_SENSITIVE: bool = false;
 
+/// Resolve a column or dotted struct path against a schema.
+/// Resolution order:
+/// 1. If a column with the full name exists (respecting case sensitivity), return it.
+/// 2. If the name contains dots, treat the first component as the base column and the rest
+///    as struct field names, building a struct.field_by_name(...) chain.
+/// 3. Otherwise, return a ColumnNotFound error listing available columns.
+pub fn resolve_column_with_schema(
+    name: &str,
+    schema: &Schema,
+    case_sensitive: bool,
+    extra_valid_names: Option<&[String]>,
+) -> Result<String, PolarsError> {
+    let mut candidates: Vec<String> = schema
+        .iter_names_and_dtypes()
+        .map(|(n, _)| n.to_string())
+        .collect();
+    if let Some(extra) = extra_valid_names {
+        candidates.extend_from_slice(extra);
+    }
+    if case_sensitive {
+        if candidates.iter().any(|n| n == name) {
+            return Ok(name.to_string());
+        }
+    } else {
+        let name_lower = name.to_lowercase();
+        for n in &candidates {
+            if n.to_lowercase() == name_lower {
+                return Ok(n.clone());
+            }
+        }
+    }
+    let available = candidates.join(", ");
+    Err(PolarsError::ColumnNotFound(
+        format!(
+            "cannot resolve: column '{name}' not found in DataFrame. Available: [{available}]."
+        )
+        .into(),
+    ))
+}
+
 /// Map Polars DataType to PySpark type name for schema alignment (#790, #734).
 fn pyspark_type_name(dtype: &DataType) -> String {
     use polars::datatypes::DataType as PlDataType;
