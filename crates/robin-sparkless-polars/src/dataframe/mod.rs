@@ -2386,10 +2386,19 @@ impl<'a> DataFrameWriter<'a> {
         use std::fs;
         use std::path::Path;
 
-        let merge_schema = options.is_some_and(|opts| {
-            opts.iter().any(|(k, v)| {
-                k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true")
-            })
+        let (merge_schema, is_delta_format) = options.map_or((false, false), |opts| {
+            let mut merge_schema = false;
+            let mut is_delta = false;
+            for (k, v) in opts {
+                if k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true") {
+                    merge_schema = true;
+                } else if k.eq_ignore_ascii_case("sparkless.writer.format")
+                    && v.eq_ignore_ascii_case("delta")
+                {
+                    is_delta = true;
+                }
+            }
+            (merge_schema, is_delta)
         });
 
         let warehouse_path = session.warehouse_dir().map(|w| Path::new(w).join(name));
@@ -2426,6 +2435,17 @@ impl<'a> DataFrameWriter<'a> {
                 self.df.clone()
             }
             SaveMode::Overwrite => {
+                // Delta catalog tables do not support truncate-in-batch-mode for overwrite.
+                // For parity with PySpark, surface an error instead of silently truncating
+                // when overwrite is requested for a Delta saveAsTable.
+                if is_delta_format {
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "Table '{name}' does not support truncate in batch mode for Delta overwrite; drop the table first or use append with mergeSchema."
+                        )
+                        .into(),
+                    ));
+                }
                 if let Some(ref p) = warehouse_path {
                     let _ = fs::remove_dir_all(p);
                     persist_to_warehouse(self.df, p)?;
