@@ -8,7 +8,9 @@ from __future__ import annotations
 
 def _builder(spark, app_name: str):
     """Return a SparkSession builder for the current backend."""
-    spark_cls = type(spark)
+    # Unwrap if session is a wrapper (e.g. JdbcSessionWrapper) so we get the real SparkSession class
+    session = getattr(spark, "_session", spark)
+    spark_cls = type(session)
     builder = spark_cls.builder
     builder = getattr(builder, "__call__", lambda: builder)()
     if hasattr(builder, "appName"):

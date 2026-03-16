@@ -335,9 +335,12 @@ _native_dataframe_select = _DataFrame.select
 def _dataframe_sort(self, *cols, ascending=None):
     """PySpark-compatible DataFrame.sort wrapper.
 
+    PySpark does not accept an 'ascending' keyword argument; use col("x").asc() or .desc().
     PySpark treats a bare tuple of columns passed to sort/orderBy as invalid and raises
     PySparkTypeError[NOT_COLUMN_OR_STR]. Lists (including df.columns) are accepted.
     """
+    if ascending is not None:
+        raise TypeError("sort() got an unexpected keyword argument 'ascending'")
     if len(cols) == 1 and isinstance(cols[0], tuple):
         # Match PySpark error text used in tests (Issue #1189).
         raise TypeError(

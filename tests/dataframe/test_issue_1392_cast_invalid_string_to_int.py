@@ -46,7 +46,6 @@ def test_issue_1392_cast_invalid_string_to_int_schema_and_explain(
     assert field["metadata"] == {}
     assert field["type"] == "integer"
 
-    # UI / explain parity: explain() should emit a non-empty description.
+    # UI / explain parity: explain() prints to stdout; returns None in PySpark/sparkless.
     explain_str = out.explain(True)
-    assert isinstance(explain_str, str)
-    assert explain_str.strip() != ""
+    assert explain_str is None or (isinstance(explain_str, str) and explain_str.strip() != "")

@@ -393,7 +393,7 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
     match dt {
         CoreDataType::String => "string".to_string(),
         CoreDataType::Integer => "int".to_string(),
-        CoreDataType::Long => "long".to_string(),
+        CoreDataType::Long => "bigint".to_string(), // PySpark parity: simpleString uses "bigint"
         CoreDataType::Double => "double".to_string(),
         CoreDataType::Boolean => "boolean".to_string(),
         CoreDataType::Date => "date".to_string(),

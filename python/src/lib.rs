@@ -4557,6 +4557,14 @@ impl PyDataFrame {
         cols: &Bound<'_, PyTuple>,
         ascending: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
+        // PySpark parity: orderBy() does not accept an "ascending" keyword argument.
+        // Use col("x").asc() or col("x").desc() instead.
+        if ascending.is_some() {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "orderBy() got an unexpected keyword argument 'ascending'",
+            ));
+        }
+
         // Flatten: single item may be a list of columns.
         // IMPORTANT: We intentionally do NOT flatten tuples here.
         // In PySpark, a bare tuple passed to sort/orderBy (e.g. df.sort(("a", "b")))
@@ -4578,26 +4586,8 @@ impl PyDataFrame {
             }
         }
 
-        // Ascending per column (needed for Column path so we apply it to sort orders).
-        let asc_vec: Vec<bool> = match ascending {
-            None => vec![true; flat.len()],
-            Some(v) if v.extract::<bool>().is_ok() => vec![v.extract::<bool>()?; flat.len()],
-            Some(v) if v.downcast::<PyList>().is_ok() => v
-                .downcast::<PyList>()?
-                .iter()
-                .map(|x| x.extract::<bool>())
-                .collect::<PyResult<Vec<bool>>>()?,
-            Some(v) if v.downcast::<PyTuple>().is_ok() => v
-                .downcast::<PyTuple>()?
-                .iter()
-                .map(|x| x.extract::<bool>())
-                .collect::<PyResult<Vec<bool>>>()?,
-            Some(_) => {
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "ascending must be a bool or list/tuple[bool]",
-                ))
-            }
-        };
+        // Default: ascending for all (PySpark: bare column names sort ascending).
+        let asc_vec: Vec<bool> = vec![true; flat.len()];
 
         // Try to build sort orders from Column/SortOrder/string (for order_by_exprs).
         let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(flat.len());
@@ -5238,15 +5228,13 @@ impl PyDataFrame {
         self.describe()
     }
 
-    /// PySpark: explain() and explain(extended=True) (mode= accepted for parity; #1152).
+    /// PySpark: explain() prints to stdout and returns None (PySpark parity).
     #[pyo3(signature = (extended=None))]
-    fn explain(&self, extended: Option<bool>) -> PyResult<String> {
+    fn explain(&self, extended: Option<bool>) -> PyResult<Option<String>> {
         let _ = extended; // accepted for API parity; not yet used
         let plan = self.inner.explain();
-        // PySpark prints explain() output to stdout; return the string for tests
-        // while also printing for UI parity (capturable via redirect_stdout).
         println!("{}", plan);
-        Ok(plan)
+        Ok(None) // PySpark parity: explain() returns None
     }
 
     fn print_schema(&self) -> PyResult<String> {
@@ -6880,23 +6868,35 @@ impl PyColumn {
         let extract = funcs.getattr("_window_spec_to_partition_order")?;
         let result = extract.call1((window, false))?;
         let tuple = result.downcast::<PyTuple>()?;
+        let len = tuple.len();
+        if len < 4 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "_window_spec_to_partition_order expected at least 4 elements, got {}",
+                len
+            )));
+        }
         let partition_by: Vec<String> = tuple.get_item(0)?.extract()?;
         let order_by: Vec<String> = tuple.get_item(1)?.extract()?;
         let use_running_aggregate: bool = tuple.get_item(2)?.extract()?;
         let is_full_partition_frame: bool = tuple.get_item(3)?.extract()?;
-        let frame_any = tuple.get_item(4)?;
-        let frame: Option<(String, i64, i64)> = if frame_any.is_none() {
-            None
+        // 5th element (frame) only present when len >= 5 (current contract); older returns had 4 elements.
+        let frame: Option<(String, i64, i64)> = if len >= 5 {
+            let frame_any = tuple.get_item(4)?;
+            if frame_any.is_none() {
+                None
+            } else {
+                let ft = frame_any.downcast::<PyTuple>()?;
+                let kind: String = ft.get_item(0)?.extract()?;
+                let start: i64 = ft.get_item(1)?.extract()?;
+                let end: i64 = ft.get_item(2)?.extract()?;
+                Some((kind, start, end))
+            }
         } else {
-            let ft = frame_any.downcast::<PyTuple>()?;
-            let kind: String = ft.get_item(0)?.extract()?;
-            let start: i64 = ft.get_item(1)?.extract()?;
-            let end: i64 = ft.get_item(2)?.extract()?;
-            Some((kind, start, end))
+            None
         };
         let partition_strs: Vec<&str> = partition_by.iter().map(String::as_str).collect();
         let frame_ref: Option<(&str, i64, i64)> =
-            frame.as_ref().map(|(k, s, e)| (k.as_str(), *s, *e));
+            frame.as_ref().map(|(k, s, e): &(String, i64, i64)| (k.as_str(), *s, *e));
         self.inner
             .over_window(
                 &partition_strs[..],

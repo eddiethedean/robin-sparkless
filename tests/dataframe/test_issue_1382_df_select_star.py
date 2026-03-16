@@ -22,14 +22,13 @@ def test_issue_1382_select_star_schema_and_explain(spark) -> None:
     # select("*") should not raise and should preserve all columns.
     result = df.select("*")
 
-    # Schema simpleString should match the existing struct<long> representation.
+    # Schema simpleString: PySpark uses "bigint" for long type.
     schema_str = result.schema.simpleString()
-    assert schema_str == "struct<a:long,b:long,c:long>"
+    assert schema_str == "struct<a:bigint,b:bigint,c:bigint>"
 
-    # explain() should produce a non-empty plan string (no blank UI).
+    # explain() prints to stdout; returns None in PySpark/sparkless.
     plan = result.explain()
-    assert isinstance(plan, str)
-    assert plan.strip() != ""
+    assert plan is None or (isinstance(plan, str) and plan.strip() != "")
 
     # show() should also work without raising for completeness.
     result.show()

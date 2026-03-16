@@ -177,8 +177,20 @@ def isolated_session(request: pytest.FixtureRequest):
     mode = get_mode()
     session_name = f"test_isolated_{uuid.uuid4().hex[:8]}"
 
+    enable_delta = False
+    if request.node.get_closest_marker("delta"):
+        enable_delta = True
+    elif os.environ.get("SPARKLESS_ENABLE_DELTA", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        enable_delta = True
+
     try:
-        session = create_session(app_name=session_name, mode=mode)
+        session = create_session(
+            app_name=session_name, mode=mode, enable_delta=enable_delta
+        )
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
         if "pyspark" in error_msg.lower() or "Java" in error_msg:

@@ -36,13 +36,14 @@ def test_orderby_with_single_column_list(spark):
     assert result[2]["a"] == 3
 
 
-def test_orderby_desc_with_list(spark):
-    """df.orderBy(["a", "b"], ascending=False) should work."""
+def test_orderby_desc_with_list(spark, spark_imports):
+    """df.orderBy(col("a").desc(), col("b").desc()) should work (PySpark parity)."""
+    F = spark_imports.F
     df = spark.createDataFrame(
         [(1, 2, 3), (1, 1, 4), (2, 0, 5)],
         ["a", "b", "c"],
     )
-    result = df.orderBy(["a", "b"], ascending=False).collect()
+    result = df.orderBy(F.col("a").desc(), F.col("b").desc()).collect()
     assert len(result) == 3
     # Descending: (2,0), (1,2), (1,1)
     assert result[0]["a"] == 2 and result[0]["b"] == 0

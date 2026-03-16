@@ -1,7 +1,7 @@
 """
-Unit tests for Issue #327: orderBy() missing ascending parameter.
+Unit tests for Issue #327: orderBy() with .asc()/.desc() (PySpark parity).
 
-Tests the orderBy() method with ascending parameter support.
+PySpark does not support orderBy(..., ascending=...). Use col("x").asc() or .desc().
 """
 
 from sparkless.testing import get_imports
@@ -26,7 +26,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("StringValue", ascending=True)
+            result = df.orderBy(F.col("StringValue").asc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -48,7 +48,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("StringValue", ascending=False)
+            result = df.orderBy(F.col("StringValue").desc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -92,7 +92,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("Value", ascending=True)
+            result = df.orderBy(F.col("Value").asc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -114,7 +114,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("Value", ascending=False)
+            result = df.orderBy(F.col("Value").desc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -136,7 +136,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("Category", "Value", ascending=True)
+            result = df.orderBy(F.col("Category").asc(), F.col("Value").asc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -162,7 +162,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("Category", "Value", ascending=False)
+            result = df.orderBy(F.col("Category").desc(), F.col("Value").desc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -188,7 +188,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy(F.col("Value"), ascending=False)
+            result = df.orderBy(F.col("Value").desc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -210,7 +210,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.sort("StringValue", ascending=False)
+            result = df.sort(F.col("StringValue").desc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -271,7 +271,7 @@ class TestIssue327OrderByAscending:
         try:
             df = spark.createDataFrame([], schema="Name string, Value int")
 
-            result = df.orderBy("Value", ascending=True)
+            result = df.orderBy(F.col("Value").asc())
             rows = result.collect()
 
             assert len(rows) == 0
@@ -284,8 +284,8 @@ class TestIssue327OrderByAscending:
         try:
             df = spark.createDataFrame([{"Name": "Alice", "Value": 10}])
 
-            result_asc = df.orderBy("Value", ascending=True)
-            result_desc = df.orderBy("Value", ascending=False)
+            result_asc = df.orderBy(F.col("Value").asc())
+            result_desc = df.orderBy(F.col("Value").desc())
             rows_asc = result_asc.collect()
             rows_desc = result_desc.collect()
 
@@ -320,7 +320,7 @@ class TestIssue327OrderByAscending:
                 schema,
             )
 
-            result = df.orderBy("Value", ascending=True)
+            result = df.orderBy(F.col("Value").asc())
             rows = result.collect()
 
             assert len(rows) == 3
@@ -373,7 +373,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result_asc = df.orderBy("Value", ascending=True)
+            result_asc = df.orderBy(F.col("Value").asc())
             rows_asc = result_asc.collect()
 
             assert len(rows_asc) == 4
@@ -382,7 +382,7 @@ class TestIssue327OrderByAscending:
             assert rows_asc[2]["Value"] == 0
             assert rows_asc[3]["Value"] == 5
 
-            result_desc = df.orderBy("Value", ascending=False)
+            result_desc = df.orderBy(F.col("Value").desc())
             rows_desc = result_desc.collect()
 
             assert len(rows_desc) == 4
@@ -406,7 +406,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result_asc = df.orderBy("Value", ascending=True)
+            result_asc = df.orderBy(F.col("Value").asc())
             rows_asc = result_asc.collect()
 
             assert len(rows_asc) == 4
@@ -430,7 +430,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result_asc = df.orderBy("Active", ascending=True)
+            result_asc = df.orderBy(F.col("Active").asc())
             rows_asc = result_asc.collect()
 
             assert len(rows_asc) == 4
@@ -440,7 +440,7 @@ class TestIssue327OrderByAscending:
             assert rows_asc[2]["Active"] is True
             assert rows_asc[3]["Active"] is True
 
-            result_desc = df.orderBy("Active", ascending=False)
+            result_desc = df.orderBy(F.col("Active").desc())
             rows_desc = result_desc.collect()
 
             assert len(rows_desc) == 4
@@ -465,7 +465,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result_asc = df.orderBy("Value", ascending=True)
+            result_asc = df.orderBy(F.col("Value").asc())
             rows_asc = result_asc.collect()
 
             assert len(rows_asc) == 4
@@ -494,7 +494,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result_asc = df.orderBy("Value", ascending=True)
+            result_asc = df.orderBy(F.col("Value").asc())
             rows_asc = result_asc.collect()
 
             assert len(rows_asc) == 4
@@ -522,7 +522,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result_asc = df.orderBy("Value", ascending=True)
+            result_asc = df.orderBy(F.col("Value").asc())
             rows_asc = result_asc.collect()
 
             assert len(rows_asc) == 3
@@ -547,7 +547,7 @@ class TestIssue327OrderByAscending:
             # Chain filter, orderBy, and select
             result = (
                 df.filter(F.col("Category") == "A")
-                .orderBy("Value", ascending=False)
+                .orderBy(F.col("Value").desc())
                 .select("Name", "Value")
             )
             rows = result.collect()
@@ -573,8 +573,8 @@ class TestIssue327OrderByAscending:
             )
 
             # Multiple orderBy calls - last one should win
-            result = df.orderBy("Value", ascending=True).orderBy(
-                "Value", ascending=False
+            result = df.orderBy(F.col("Value").asc()).orderBy(
+                F.col("Value").desc()
             )
             rows = result.collect()
 
@@ -599,7 +599,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("Value", ascending=False).limit(2)
+            result = df.orderBy(F.col("Value").desc()).limit(2)
             rows = result.collect()
 
             assert len(rows) == 2
@@ -621,8 +621,8 @@ class TestIssue327OrderByAscending:
             )
 
             # Try different case variations
-            result1 = df.orderBy("value", ascending=True)
-            result2 = df.orderBy("VALUE", ascending=True)
+            result1 = df.orderBy(F.col("value").asc())
+            result2 = df.orderBy(F.col("VALUE").asc())
             rows1 = result1.collect()
             rows2 = result2.collect()
 
@@ -647,7 +647,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("A", "B", "C", ascending=True)
+            result = df.orderBy(F.col("A").asc(), F.col("B").asc(), F.col("C").asc())
             rows = result.collect()
 
             assert len(rows) == 4
@@ -672,7 +672,7 @@ class TestIssue327OrderByAscending:
                 ]
             )
 
-            result = df.orderBy("Value", ascending=True)
+            result = df.orderBy(F.col("Value").asc())
             rows = result.collect()
 
             assert len(rows) == 4

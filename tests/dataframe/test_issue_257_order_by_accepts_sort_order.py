@@ -42,10 +42,10 @@ def test_order_by_list_of_sort_orders(spark) -> None:
 
 
 def test_order_by_column_names_unchanged(spark) -> None:
-    """df.order_by([\"col1\", \"col2\"]) and order_by(list, ascending) still work."""
+    """df.orderBy([\"x\"]) and orderBy(col(\"x\").desc()) work (PySpark parity)."""
     data = [{"x": 3}, {"x": 1}, {"x": 2}]
     df = spark.createDataFrame(data, ["x"])
     out = df.orderBy(["x"]).collect()
     assert [r["x"] for r in out] == [1, 2, 3]
-    out_desc = df.orderBy(["x"], ascending=False).collect()
+    out_desc = df.orderBy(F.col("x").desc()).collect()
     assert [r["x"] for r in out_desc] == [3, 2, 1]

@@ -1,4 +1,7 @@
-"""Tests for #378: orderBy/sort ascending parameter accept bool (PySpark parity)."""
+"""Tests for #378: orderBy/sort with .asc()/.desc() (PySpark parity).
+
+PySpark does not support orderBy(..., ascending=...). Use col("x").asc() or col("x").desc().
+"""
 
 from __future__ import annotations
 
@@ -9,17 +12,17 @@ F = _imports.F
 
 
 def test_order_by_single_column_ascending_false(spark) -> None:
-    """orderBy(col("a"), ascending=False) sorts descending."""
+    """orderBy(col("a").desc()) sorts descending."""
     df = spark.createDataFrame([(3,), (1,), (2,)], ["a"])
-    out = df.orderBy(F.col("a"), ascending=False)
+    out = df.orderBy(F.col("a").desc())
     rows = out.collect()
     assert [r["a"] for r in rows] == [3, 2, 1]
 
 
 def test_order_by_column_list_ascending_single_bool(spark) -> None:
-    """orderBy(col("a"), col("b"), ascending=False) sorts both descending."""
+    """orderBy(col("a").desc(), col("b").desc()) sorts both descending."""
     df = spark.createDataFrame([(1, 10), (2, 20), (1, 30)], ["a", "b"])
-    out = df.orderBy(F.col("a"), F.col("b"), ascending=False)
+    out = df.orderBy(F.col("a").desc(), F.col("b").desc())
     rows = out.collect()
     # Both desc: (2,20), (1,30), (1,10)
     assert [r["a"] for r in rows] == [2, 1, 1]
@@ -27,17 +30,17 @@ def test_order_by_column_list_ascending_single_bool(spark) -> None:
 
 
 def test_order_by_column_names_ascending_single_bool(spark) -> None:
-    """orderBy(["a", "b"], ascending=False) sorts both descending."""
+    """orderBy(col("a").desc(), col("b").desc()) with column expressions."""
     df = spark.createDataFrame([(1, 10), (2, 20)], ["a", "b"])
-    out = df.orderBy(["a", "b"], ascending=False)
+    out = df.orderBy(F.col("a").desc(), F.col("b").desc())
     rows = out.collect()
     assert [r["a"] for r in rows] == [2, 1]
 
 
 def test_order_by_ascending_list_of_bool(spark) -> None:
-    """orderBy(["a", "b"], ascending=[True, False]) first asc, second desc."""
+    """orderBy(col("a").asc(), col("b").desc()) first asc, second desc."""
     df = spark.createDataFrame([(1, 30), (1, 10), (2, 20)], ["a", "b"])
-    out = df.orderBy(["a", "b"], ascending=[True, False])
+    out = df.orderBy(F.col("a").asc(), F.col("b").desc())
     rows = out.collect()
     # a asc, b desc within a: (1,30), (1,10), (2,20)
     assert [r["a"] for r in rows] == [1, 1, 2]

@@ -40,7 +40,6 @@ def test_issue_1390_split_limit_schema_and_explain(spark, spark_imports) -> None
     assert field_type["elementType"] == "string"
     assert field_type["containsNull"] is False
 
-    # UI / explain parity: explain() should emit a non-empty description (return value).
+    # UI / explain parity: explain() prints to stdout; returns None in PySpark/sparkless.
     explain_str = out.explain(True)
-    assert isinstance(explain_str, str)
-    assert explain_str.strip() != ""
+    assert explain_str is None or (isinstance(explain_str, str) and explain_str.strip() != "")

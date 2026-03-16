@@ -90,7 +90,7 @@ class IntegerType(DataType):
 
 class LongType(DataType):
     def simpleString(self) -> str:
-        return "long"
+        return "bigint"  # PySpark parity: simpleString uses "bigint" not "long"
 
     def __eq__(self, other: object) -> bool:
         """Treat LongType and IntegerType as equivalent in comparisons (see IntegerType.__eq__)."""
