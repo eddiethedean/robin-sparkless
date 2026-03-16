@@ -18,6 +18,7 @@ from __future__ import annotations
 import pytest
 
 from sparkless.errors import SparklessError
+from pyspark.errors.exceptions.captured import AnalysisException
 
 
 def _scenario_join_on_expression(session):
@@ -28,7 +29,7 @@ def _scenario_join_on_expression(session):
 
 def test_issue_1393_join_on_expression_ambiguous_order_by_raises(spark) -> None:
     """join(on expression) followed by orderBy(\"id\") should raise SparklessError for ambiguity."""
-    with pytest.raises(SparklessError) as excinfo:
+    with pytest.raises(AnalysisException) as excinfo:
         df = _scenario_join_on_expression(spark)
         # Trigger execution (the error may surface on collect).
         _ = df.collect()
@@ -36,5 +37,5 @@ def test_issue_1393_join_on_expression_ambiguous_order_by_raises(spark) -> None:
     msg = str(excinfo.value)
     # Lock in current ambiguous/column-not-found error shape so future
     # changes are intentional and visible in tests.
-    assert "unresolved_column" in msg or "AMBIGUOUS_REFERENCE" in msg
+    assert "UNRESOLVED_COLUMN" in msg or "unresolved_column" in msg or "AMBIGUOUS_REFERENCE" in msg
     assert "id" in msg

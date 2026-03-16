@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from typing import List
 
-from sparkless.sql import SparkSession
-from sparkless.sql import functions as F
+from sparkless.testing import get_imports
 
 
-def _create_person_df(spark: SparkSession):
+def _create_person_df(spark):
     return spark.createDataFrame(
         [
             {"person": {"name": "Alice", "age": 30}},
@@ -26,7 +25,7 @@ def _collect_names(result_df) -> List[str]:
     return [row["name"] for row in rows]
 
 
-def test_struct_field_dot_notation_matches_getfield(spark: SparkSession) -> None:
+def test_struct_field_dot_notation_matches_getfield(spark) -> None:
     """F.col("person.name") and F.col("person").getField("name") return same values."""
     import pytest
 
@@ -37,6 +36,8 @@ def test_struct_field_dot_notation_matches_getfield(spark: SparkSession) -> None
             "See https://github.com/eddiethedean/robin-sparkless/issues/1504 – "
             "sparkless struct dot access parity gap; unskip once sparkless matches PySpark."
         )
+
+    F = get_imports().F
     df = _create_person_df(spark)
 
     # Dot-notation access (issue #1473 scenario)

@@ -13,6 +13,51 @@ from typing import Any, Optional
 
 from .mode import Mode, get_mode
 
+def _ensure_pyspark_submit_args_include_delta_packages() -> None:
+    """Best-effort: ensure PySpark JVM can load Delta + dependencies.
+
+    Delta requires `delta-storage` in addition to `delta-spark`. Using Spark's
+    `--packages io.delta:delta-spark_2.12:<version>` ensures dependencies are
+    resolved and available at JVM startup.
+    """
+    try:
+        python_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+        local_delta_jar = os.path.join(
+            python_root, "jars", "delta-spark_2.12-3.0.0.jar"
+        )
+        if not os.path.exists(local_delta_jar):
+            return
+
+        submit_args = os.environ.get("PYSPARK_SUBMIT_ARGS", "").strip()
+        packages_flag = "--packages"
+        delta_pkg = "io.delta:delta-spark_2.12:3.0.0"
+        if delta_pkg in submit_args:
+            return
+
+        # Ensure we end with pyspark-shell per PySpark expectations.
+        if submit_args.endswith("pyspark-shell"):
+            submit_args = submit_args[: -len("pyspark-shell")].strip()
+
+        pieces = [p for p in submit_args.split() if p]
+        # Append delta package (and keep any existing packages if present).
+        if packages_flag in pieces:
+            i = pieces.index(packages_flag)
+            if i + 1 < len(pieces) and delta_pkg not in pieces[i + 1]:
+                pieces[i + 1] = f"{pieces[i + 1]},{delta_pkg}"
+        else:
+            pieces.extend([packages_flag, delta_pkg])
+        pieces.append("pyspark-shell")
+        os.environ["PYSPARK_SUBMIT_ARGS"] = " ".join(pieces)
+    except Exception:
+        # Best-effort only.
+        return
+
+
+# Apply early, before any pyspark import starts the JVM.
+_ensure_pyspark_submit_args_include_delta_packages()
+
 
 def create_session(
     app_name: str = "test",
@@ -113,6 +158,9 @@ def _create_pyspark_session(
 
     # Try to set JAVA_HOME if not already set
     _ensure_java_home()
+
+    # Best-effort: ensure Delta dependencies are present at JVM startup.
+    _ensure_pyspark_submit_args_include_delta_packages()
 
     try:
         from pyspark.sql import SparkSession as PySparkSession
@@ -354,6 +402,8 @@ def _configure_delta(builder: Any) -> Any:
         The builder with Delta Lake configuration applied.
     """
     # Prefer a locally cached jar if available to avoid network reliance.
+    # This file lives at: python/sparkless/sparkless/testing/session.py
+    # The local jars directory is: python/jars/
     project_root = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     )
