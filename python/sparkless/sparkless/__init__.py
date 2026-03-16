@@ -20,7 +20,7 @@ from typing import Dict, List, Sequence, Tuple, Union, cast as _cast
 
 from sparkless._native import PyColumn as _ColumnType
 
-__version__ = "4.2.0"
+__version__ = "4.5.0"
 
 
 _mod = __import__(

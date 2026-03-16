@@ -1,6 +1,6 @@
 [package]
 name = "robin-sparkless-core"
-version = "4.4.0"
+version = "4.5.0"
 edition = "2024"
 description = "Shared types, config, and error for robin-sparkless (no Polars)."
 license = "MIT"
