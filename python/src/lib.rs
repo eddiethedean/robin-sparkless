@@ -7953,6 +7953,24 @@ fn when(
 
 #[pyfunction]
 fn count(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    // Special-case count(lit(1)) / count(lit(constant)) so it behaves like
+    // PySpark's count(lit(1)) and counts all rows, not just the literal.
+    // When the argument is a literal PyColumn, route it through count("*")
+    // semantics (len()) instead of counting non-null values.
+    if let Ok(py_col) = col.downcast::<PyColumn>() {
+        let inner = py_col.borrow().inner.clone();
+        if let Some(json_str) = inner.literal_as_json_string() {
+            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                if json_val.is_number() || json_val.is_boolean() {
+                    let star_col = robin_sparkless::functions::col("*");
+                    return Ok(PyColumn {
+                        inner: functions::count(&star_col),
+                    });
+                }
+            }
+        }
+    }
+
     let c = coerce_to_column(col)?;
     Ok(PyColumn {
         inner: functions::count(&c),
