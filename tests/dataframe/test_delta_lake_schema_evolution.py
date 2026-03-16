@@ -11,7 +11,7 @@ due to differences in table management and schema evolution behavior.
 
 import pytest
 
-from sparkless.testing import create_session, get_imports
+from sparkless.testing import create_session, get_imports, is_pyspark_mode
 
 _imports = get_imports()
 F = _imports.F
@@ -234,11 +234,11 @@ class TestDeltaLakeSchemaEvolution:
     @pytest.mark.delta
     def test_delta_create_or_replace_table_as_select(self):
         """CTAS with OR REPLACE should allow schema evolution for Delta tables - same scenario in both modes."""
-        pytest.skip(
-            "See https://github.com/eddiethedean/robin-sparkless/issues/1502 – "
-            "sparkless Delta overwrite saveAsTable does not yet mirror PySpark's "
-            "truncate-in-batch-mode AnalysisException; unskip once fixed."
-        )
+        if not is_pyspark_mode():
+            pytest.skip(
+                "See https://github.com/eddiethedean/robin-sparkless/issues/1502 – "
+                "sparkless Delta overwrite saveAsTable parity gap; unskip once fixed."
+            )
         import uuid
         import tempfile
         import shutil
@@ -267,42 +267,14 @@ class TestDeltaLakeSchemaEvolution:
                 ["user_id", "name", "value"],
             )
 
-            # In PySpark (with enable_delta=True), this path raises an
-            # AnalysisException about truncate-in-batch-mode. In sparkless
-            # mode, Delta tables are supported and this succeeds.
-            try:
-                from pyspark.errors.exceptions.captured import AnalysisException  # type: ignore[import-error]
+            # PySpark behavior: overwrite+delta+saveAsTable fails with an AnalysisException
+            # about truncate-in-batch-mode for this scenario.
+            from pyspark.errors.exceptions.captured import AnalysisException
 
-                with pytest.raises(AnalysisException) as excinfo:
-                    base_df.write.format("delta").mode("overwrite").saveAsTable(
-                        table_name
-                    )
-                msg = str(excinfo.value)
-                assert "does not support truncate in batch mode" in msg
-            except ImportError:
-                # No PySpark on path ⇒ running in sparkless mode; assert success.
+            with pytest.raises(AnalysisException) as excinfo:
                 base_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
-
-                spark.sql(
-                    f"""
-                    CREATE OR REPLACE TABLE {table_name}
-                    USING delta AS
-                    SELECT user_id, name, value, '2025-01-01' AS processed_at
-                    FROM {table_name}
-                    """
-                )
-
-                result = spark.table(table_name)
-                assert set(result.columns) == {
-                    "user_id",
-                    "name",
-                    "value",
-                    "processed_at",
-                }
-                rows = {r["user_id"]: r for r in result.collect()}
-                assert rows["u1"]["processed_at"] == "2025-01-01"
-                assert rows["u2"]["processed_at"] == "2025-01-01"
-                assert result.count() == 2
+            msg = str(excinfo.value)
+            assert "does not support truncate in batch mode" in msg
 
             try:
                 spark.sql(f"DROP TABLE IF EXISTS {table_name}")

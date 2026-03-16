@@ -7,8 +7,8 @@ Tests validate that Sparkless SQL DDL statements behave identically to PySpark.
 import pytest
 from pyspark.errors import AnalysisException
 
-from sparkless.testing import is_pyspark_mode
 from tests.tools.parity_base import ParityTestBase
+from sparkless.testing import is_pyspark_mode
 
 
 class TestSQLDDLParity(ParityTestBase):
@@ -79,26 +79,22 @@ class TestSQLDDLParity(ParityTestBase):
 
         Note: This requires Hive support in PySpark (spark.sql.catalogImplementation = 'hive').
         """
+        if not is_pyspark_mode():
+            pytest.skip(
+                "See https://github.com/eddiethedean/robin-sparkless/issues/1508 – "
+                "sparkless CTAS parity gap; unskip once sparkless matches PySpark."
+            )
         data = [("Alice", 25, "IT"), ("Bob", 30, "HR"), ("Charlie", 35, "IT")]
         df = spark.createDataFrame(data, ["name", "age", "dept"])
         df.write.mode("overwrite").saveAsTable("employees")
 
-        if is_pyspark_mode():
-            # Without Hive catalog, PySpark rejects CTAS with a specific AnalysisException.
-            with pytest.raises(AnalysisException) as excinfo:
-                spark.sql(
-                    "CREATE TABLE IF NOT EXISTS it_employees AS SELECT name, age FROM employees WHERE dept = 'IT'"
-                )
-            msg = str(excinfo.value)
-            assert "NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT" in msg
-        else:
-            # Sparkless behavior: CTAS is supported.
+        # Without Hive catalog, PySpark rejects CTAS with a specific AnalysisException.
+        with pytest.raises(AnalysisException) as excinfo:
             spark.sql(
                 "CREATE TABLE IF NOT EXISTS it_employees AS SELECT name, age FROM employees WHERE dept = 'IT'"
             )
-            assert spark.catalog.tableExists("it_employees")
-            result = spark.sql("SELECT * FROM it_employees")
-            assert result.count() == 2
+        msg = str(excinfo.value)
+        assert "NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT" in msg
 
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS employees")

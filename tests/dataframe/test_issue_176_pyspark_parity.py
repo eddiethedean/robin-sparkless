@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless.testing import get_imports, is_pyspark_mode
 from tests.utils import assert_rows_equal
 
 _imports = get_imports()
@@ -40,11 +40,11 @@ EXPECTED_SELECT_EXPR_AND_COLUMN: list[dict[str, Any]] = [
 
 def test_regexp_extract_all_select_expression_pyspark_parity(spark) -> None:
     """select(regexp_extract_all(...).alias('m')) - same scenario in both modes."""
-    pytest.skip(
-        "See https://github.com/eddiethedean/robin-sparkless/issues/1501 – "
-        "regexp_extract_all + select parity gap between sparkless and PySpark; "
-        "unskip once sparkless matches PySpark's UNRESOLVED_COLUMN behavior."
-    )
+    if not is_pyspark_mode():
+        pytest.skip(
+            "See https://github.com/eddiethedean/robin-sparkless/issues/1501 – "
+            "sparkless regexp_extract_all select parity gap; unskip once fixed."
+        )
     data = [
         {"s": "a1 b22 c333"},
         {"s": "no-digits"},
@@ -62,11 +62,11 @@ def test_regexp_extract_all_select_expression_pyspark_parity(spark) -> None:
 
 def test_regexp_extract_all_select_varargs_pyspark_parity(spark) -> None:
     """select(expr) with single expression as vararg - same scenario in both modes."""
-    pytest.skip(
-        "See https://github.com/eddiethedean/robin-sparkless/issues/1501 – "
-        "regexp_extract_all + select parity gap between sparkless and PySpark; "
-        "unskip once sparkless matches PySpark's UNRESOLVED_COLUMN behavior."
-    )
+    if not is_pyspark_mode():
+        pytest.skip(
+            "See https://github.com/eddiethedean/robin-sparkless/issues/1501 – "
+            "sparkless regexp_extract_all select parity gap; unskip once fixed."
+        )
     data = [
         {"s": "a1 b22 c333"},
         {"s": "no-digits"},
@@ -86,11 +86,11 @@ def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity(
     spark,
 ) -> None:
     """select('s', expr.alias('m')) - same scenario in both modes."""
-    pytest.skip(
-        "See https://github.com/eddiethedean/robin-sparkless/issues/1501 – "
-        "regexp_extract_all + select parity gap between sparkless and PySpark; "
-        "unskip once sparkless matches PySpark's UNRESOLVED_COLUMN behavior."
-    )
+    if not is_pyspark_mode():
+        pytest.skip(
+            "See https://github.com/eddiethedean/robin-sparkless/issues/1501 – "
+            "sparkless regexp_extract_all select parity gap; unskip once fixed."
+        )
     data = [
         {"s": "a1b22c"},
         {"s": "x99y"},
@@ -108,11 +108,11 @@ def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity(
 
 def test_regexp_extract_all_empty_string_and_null_pyspark_parity(spark) -> None:
     """regexp_extract_all with empty string and null - same scenario in both modes."""
-    pytest.skip(
-        "See https://github.com/eddiethedean/robin-sparkless/issues/1501 – "
-        "regexp_extract_all + select parity gap between sparkless and PySpark; "
-        "unskip once sparkless matches PySpark's UNRESOLVED_COLUMN behavior."
-    )
+    if not is_pyspark_mode():
+        pytest.skip(
+            "See https://github.com/eddiethedean/robin-sparkless/issues/1501 – "
+            "sparkless regexp_extract_all select parity gap; unskip once fixed."
+        )
     data = [
         {"s": ""},
         {"s": None},

@@ -50,15 +50,18 @@ class TestStructFieldAliasParity:
                 ]
             )
 
-            # Missing struct fields should raise (PySpark: AnalysisException; Sparkless: SparklessError).
-            with pytest.raises(Exception) as excinfo:
-                df.select(
-                    F.col("StructValue.E1").alias("E1-Extract"),
-                    F.col("StructValue.E2").alias("E2-Extract"),
-                ).collect()
-            assert "Struct field 'E2' not found" in str(excinfo.value) or "No such struct field" in str(
-                excinfo.value
+            result = df.select(
+                F.col("StructValue.E1").alias("E1-Extract"),
+                F.col("StructValue.E2").alias("E2-Extract"),
             )
+            rows = result.collect()
+
+            assert len(rows) == 2
+            assert rows[0]["E1-Extract"] == 1
+            # PySpark behavior (dict-inferred struct): E2 is not present in schema => null.
+            assert rows[0]["E2-Extract"] is None
+            assert rows[1]["E1-Extract"] == 2
+            assert rows[1]["E2-Extract"] is None
         finally:
             spark.stop()
 
@@ -77,14 +80,19 @@ class TestStructFieldAliasParity:
                 ]
             )
 
-            with pytest.raises(Exception) as excinfo:
-                df.select(
-                    "Name",
-                    F.col("StructValue.E1").alias("E1-Extract"),
-                    F.col("StructValue.E2").alias("E2-Extract"),
-                ).collect()
-            assert "Struct field 'E2' not found" in str(excinfo.value) or "No such struct field" in str(
-                excinfo.value
+            result = df.select(
+                "Name",
+                F.col("StructValue.E1").alias("E1-Extract"),
+                F.col("StructValue.E2").alias("E2-Extract"),
             )
+            rows = result.collect()
+
+            assert len(rows) == 2
+            assert rows[0]["Name"] == "Alice"
+            assert rows[0]["E1-Extract"] == 1
+            assert rows[0]["E2-Extract"] is None
+            assert rows[1]["Name"] == "Bob"
+            assert rows[1]["E1-Extract"] == 2
+            assert rows[1]["E2-Extract"] is None
         finally:
             spark.stop()
