@@ -64,6 +64,7 @@ def create_session(
     app_name: str = "test",
     mode: Optional[Mode] = None,
     enable_delta: bool = False,
+    enable_hive: bool = False,
     **config: Any,
 ) -> Any:
     """Create a SparkSession for the given mode.
@@ -76,6 +77,8 @@ def create_session(
         mode: The test mode. If None, uses get_mode() to determine
             the current mode from the environment.
         enable_delta: Whether to enable Delta Lake support (PySpark only).
+        enable_hive: Whether to enable Hive support (PySpark only). Enables
+            CREATE TABLE AS SELECT and other Hive catalog features.
         **config: Additional Spark configuration key-value pairs.
 
     Returns:
@@ -95,7 +98,9 @@ def create_session(
         mode = get_mode()
 
     if mode == Mode.PYSPARK:
-        return _create_pyspark_session(app_name, enable_delta=enable_delta, **config)
+        return _create_pyspark_session(
+            app_name, enable_delta=enable_delta, enable_hive=enable_hive, **config
+        )
     else:
         return _create_sparkless_session(app_name, **config)
 
@@ -124,6 +129,7 @@ def _create_sparkless_session(app_name: str = "test", **config: Any) -> Any:
 def _create_pyspark_session(
     app_name: str = "test",
     enable_delta: bool = False,
+    enable_hive: bool = False,
     **config: Any,
 ) -> Any:
     """Create a PySpark SparkSession.
@@ -133,10 +139,12 @@ def _create_pyspark_session(
     - Python executable configuration for workers
     - Unique warehouse directories for test isolation
     - Delta Lake support (optional)
+    - Hive support (optional); enables CTAS and Hive catalog features
 
     Args:
         app_name: Application name for the session.
         enable_delta: Whether to enable Delta Lake support.
+        enable_hive: Whether to enable Hive support (enableHiveSupport()).
         **config: Additional Spark configuration key-value pairs.
 
     Returns:
@@ -217,6 +225,10 @@ def _create_pyspark_session(
     # Enable Delta Lake if requested
     if enable_delta:
         builder = _configure_delta(builder)
+
+    # Enable Hive support if requested (CTAS, Hive catalog, etc.)
+    if enable_hive:
+        builder = builder.enableHiveSupport()
 
     # Apply additional config
     for key, value in config.items():

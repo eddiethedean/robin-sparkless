@@ -7,6 +7,7 @@ Tests validate that Sparkless SQL DDL statements behave identically to PySpark.
 import pytest
 from pyspark.errors import AnalysisException
 
+from sparkless.errors import SparklessError
 from tests.tools.parity_base import ParityTestBase
 from sparkless.testing import is_pyspark_mode
 
@@ -74,10 +75,12 @@ class TestSQLDDLParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS test_users")
 
+    @pytest.mark.hive
     def test_create_table_with_select(self, spark):
         """Test CREATE TABLE AS SELECT matches PySpark behavior.
 
-        Note: This requires Hive support in PySpark (spark.sql.catalogImplementation = 'hive').
+        Runs in PySpark with Hive support enabled (@pytest.mark.hive) so CTAS succeeds.
+        Sparkless does not support CTAS yet (see issue #1508); skipped in sparkless mode.
         """
         if not is_pyspark_mode():
             pytest.skip(
@@ -88,17 +91,43 @@ class TestSQLDDLParity(ParityTestBase):
         df = spark.createDataFrame(data, ["name", "age", "dept"])
         df.write.mode("overwrite").saveAsTable("employees")
 
-        # Without Hive catalog, PySpark rejects CTAS with a specific AnalysisException.
-        with pytest.raises(AnalysisException) as excinfo:
-            spark.sql(
-                "CREATE TABLE IF NOT EXISTS it_employees AS SELECT name, age FROM employees WHERE dept = 'IT'"
-            )
-        msg = str(excinfo.value)
-        assert "NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT" in msg
+        # With Hive support (enabled via @pytest.mark.hive), CTAS succeeds.
+        spark.sql(
+            "CREATE TABLE IF NOT EXISTS it_employees AS SELECT name, age FROM employees WHERE dept = 'IT'"
+        )
+
+        # Verify table exists and has expected data
+        assert spark.catalog.tableExists("it_employees")
+        result = spark.sql("SELECT * FROM it_employees ORDER BY name")
+        rows = result.collect()
+        assert len(rows) == 2
+        assert rows[0]["name"] == "Alice" and rows[0]["age"] == 25
+        assert rows[1]["name"] == "Charlie" and rows[1]["age"] == 35
 
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS employees")
         spark.sql("DROP TABLE IF EXISTS it_employees")
+
+    def test_create_table_with_select_fails_without_hive(self, spark):
+        """Test that CREATE TABLE AS SELECT fails when Hive support is not enabled.
+
+        Uses the default session (no @pytest.mark.hive). PySpark and Sparkless both
+        raise with NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT in the message.
+        """
+        data = [("a", 1, "X"), ("b", 2, "Y")]
+        df = spark.createDataFrame(data, ["name", "age", "dept"])
+        df.write.mode("overwrite").saveAsTable("ctas_no_hive_src")
+
+        try:
+            with pytest.raises((AnalysisException, SparklessError)) as excinfo:
+                spark.sql(
+                    "CREATE TABLE ctas_no_hive_dst AS SELECT name, age FROM ctas_no_hive_src"
+                )
+            msg = str(excinfo.value)
+            assert "NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT" in msg
+        finally:
+            spark.sql("DROP TABLE IF EXISTS ctas_no_hive_src")
+            spark.sql("DROP TABLE IF EXISTS ctas_no_hive_dst")
 
     def test_drop_table(self, spark):
         """Test DROP TABLE matches PySpark behavior."""

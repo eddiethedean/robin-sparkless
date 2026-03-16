@@ -137,19 +137,11 @@ pub fn translate(
                 ));
             }
 
-            // CREATE TABLE AS SELECT: run query and register result. For unit-test pattern (table
-            // name starts with t_test_) raise to match PySpark-without-Hive; otherwise allow for parity tests (#1171).
-            if let Some(ref q) = create_table.query {
-                if table_name.starts_with("t_test_") {
-                    return Err(PolarsError::InvalidOperation(
-                        "CREATE TABLE AS SELECT is not supported (no Hive catalog). Use INSERT INTO ... SELECT or createOrReplaceTempView.".into(),
-                    ));
-                }
-                let df = translate_query(session, q)?;
-                session.register_table(&table_name, df);
-                return Ok(DataFrame::from_polars_with_options(
-                    PlDataFrame::empty(),
-                    session.is_case_sensitive(),
+            // CREATE TABLE AS SELECT: reject to match PySpark without Hive (default catalog).
+            // PySpark raises AnalysisException with NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT.
+            if create_table.query.is_some() {
+                return Err(PolarsError::InvalidOperation(
+                    "[NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT] CREATE TABLE AS SELECT is not supported in the current catalog and namespace. Use INSERT INTO ... SELECT or createOrReplaceTempView instead.".into(),
                 ));
             }
 

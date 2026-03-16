@@ -228,12 +228,20 @@ def spark(request: pytest.FixtureRequest):
     ):
         enable_delta = True
 
-    # Use shared session if enabled (but not for delta tests)
+    # Check if Hive support should be enabled (PySpark only; for CTAS etc.)
+    enable_hive = bool(request.node.get_closest_marker("hive"))
+
+    # Use shared session if enabled (but not for delta or hive tests)
     if mode == Mode.SPARKLESS and _use_shared_session() and not enable_delta:
         session = request.getfixturevalue("_shared_sparkless_session")
         yield _SharedSessionWrapper(session)
         return
-    if mode == Mode.PYSPARK and _use_shared_session() and not enable_delta:
+    if (
+        mode == Mode.PYSPARK
+        and _use_shared_session()
+        and not enable_delta
+        and not enable_hive
+    ):
         session = request.getfixturevalue("_shared_pyspark_session")
         yield _SharedSessionWrapper(session)
         return
@@ -245,7 +253,10 @@ def spark(request: pytest.FixtureRequest):
 
     try:
         session = create_session(
-            app_name=test_name, mode=mode, enable_delta=enable_delta
+            app_name=test_name,
+            mode=mode,
+            enable_delta=enable_delta,
+            enable_hive=enable_hive if mode == Mode.PYSPARK else False,
         )
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
@@ -304,6 +315,10 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "pyspark_only: mark test to run only in PySpark mode",
+    )
+    config.addinivalue_line(
+        "markers",
+        "hive: mark test as requiring Hive support (PySpark: enableHiveSupport)",
     )
     config.addinivalue_line(
         "markers",
