@@ -4,15 +4,15 @@
 //! sample, random_split, first, head, take, tail, is_empty, to_df.
 
 use super::DataFrame;
+use crate::column::RangeWindowAgg;
 use crate::column::expect_col;
 use crate::functions::SortOrder;
 use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public};
 use crate::udfs;
-use crate::column::RangeWindowAgg;
 use polars::prelude::{
     DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
-    SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions, UniqueKeepStrategy, col, len,
-    lit, repeat,
+    SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions, UniqueKeepStrategy, col, len, lit,
+    repeat,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -652,9 +652,9 @@ fn compute_range_window_series(
         } else {
             let mut end = part_start + 1;
             while end < n {
-                let different = part_series.iter().any(|s: &Series| {
-                    s.get(part_start).ok() != s.get(end).ok()
-                });
+                let different = part_series
+                    .iter()
+                    .any(|s: &Series| s.get(part_start).ok() != s.get(end).ok());
                 if different {
                     break;
                 }
@@ -664,12 +664,10 @@ fn compute_range_window_series(
         };
 
         let part_len = part_end - part_start;
-        let order_slice: Vec<Option<f64>> = (part_start..part_end)
-            .map(|i| order_ca.get(i))
-            .collect();
-        let value_slice: Vec<Option<f64>> = (part_start..part_end)
-            .map(|i| value_ca.get(i))
-            .collect();
+        let order_slice: Vec<Option<f64>> =
+            (part_start..part_end).map(|i| order_ca.get(i)).collect();
+        let value_slice: Vec<Option<f64>> =
+            (part_start..part_end).map(|i| value_ca.get(i)).collect();
 
         let start_f = start as f64;
         let end_f = end as f64;
@@ -711,11 +709,11 @@ fn compute_range_window_series(
                     // Leftmost index where order >= low (inclusive start of range).
                     let left = order_slice[..=i]
                         .iter()
-                        .position(|x: &Option<f64>| x.map_or(false, |o| o >= low))
+                        .position(|x: &Option<f64>| x.is_some_and(|o| o >= low))
                         .unwrap_or(0);
                     let right = order_slice[i..]
                         .iter()
-                        .position(|x: &Option<f64>| x.map_or(true, |o| o > high))
+                        .position(|x: &Option<f64>| x.is_none_or(|o| o > high))
                         .map(|p| i + p - 1)
                         .unwrap_or(part_len - 1);
                     let left = left.min(i);
@@ -739,7 +737,7 @@ fn compute_range_window_series(
         idx = part_end;
     }
 
-    let ca = Float64Chunked::from_iter(result.into_iter());
+    let ca = Float64Chunked::from_iter(result);
     Ok(Series::new(value_col.into(), ca))
 }
 
@@ -809,7 +807,7 @@ pub fn with_column(
         )?;
         range_series.rename(column_name.into());
         pl_df.with_column(range_series.into())?;
-        pl_df = pl_df.sort(&["_range_rid"], SortMultipleOptions::default())?;
+        pl_df = pl_df.sort(["_range_rid"], SortMultipleOptions::default())?;
         pl_df = pl_df.drop("_range_rid")?;
         return Ok(super::DataFrame::from_polars_with_options(
             pl_df,

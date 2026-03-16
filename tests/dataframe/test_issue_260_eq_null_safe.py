@@ -19,7 +19,6 @@ import os
 import pytest
 
 from sparkless.testing import get_imports
-from sparkless.testing import Mode, get_mode
 
 
 imports = get_imports()
@@ -33,12 +32,6 @@ LongType = imports.LongType
 DoubleType = imports.DoubleType
 DateType = imports.DateType
 TimestampType = imports.TimestampType
-
-
-def _is_pyspark_mode() -> bool:
-    """Check if running in PySpark backend mode."""
-    backend = get_mode()
-    return backend == Mode.PYSPARK
 
 
 class TestIssue260EqNullSafe:
@@ -569,24 +562,17 @@ class TestIssue260EqNullSafe:
 class TestIssue260EqNullSafeParity:
     """Optional PySpark parity tests for eqNullSafe semantics."""
 
-    def test_eqnullsafe_parity_with_pyspark(self) -> None:
-        """Run the issue #260 example against real PySpark when available."""
-        if not _is_pyspark_mode():
-            pytest.skip("PySpark parity test - run with SPARKLESS_TEST_MODE=pyspark")
+    def test_eqnullsafe_parity_with_pyspark(self, spark) -> None:
+        """Same scenario in both modes: eqNullSafe semantics (issue #260)."""
+        df = spark.createDataFrame(
+            [
+                {"Name": "Alice", "Id": "123", "ManagerId": None},
+                {"Name": "Bob", "Id": "456", "ManagerId": "456"},
+                {"Name": "Charlie", "Id": None, "ManagerId": None},
+            ]
+        )
 
-        spark = SparkSession.builder.appName("EqNullSafeParity").getOrCreate()
-        try:
-            df = spark.createDataFrame(
-                [
-                    {"Name": "Alice", "Id": "123", "ManagerId": None},
-                    {"Name": "Bob", "Id": "456", "ManagerId": "456"},
-                    {"Name": "Charlie", "Id": None, "ManagerId": None},
-                ]
-            )
-
-            result = df.where(F.col("Id").eqNullSafe(F.col("ManagerId"))).collect()
-            assert len(result) == 2
-            names: Iterable[str] = {row["Name"] for row in result}
-            assert names == {"Bob", "Charlie"}
-        finally:
-            spark.stop()
+        result = df.where(F.col("Id").eqNullSafe(F.col("ManagerId"))).collect()
+        assert len(result) == 2
+        names: Iterable[str] = {row["Name"] for row in result}
+        assert names == {"Bob", "Charlie"}

@@ -6,13 +6,6 @@ Tests validate that Sparkless window operations behave identically to PySpark.
 
 from tests.tools.parity_base import ParityTestBase
 from sparkless.testing import get_imports
-from sparkless.testing import Mode, get_mode
-
-
-def _is_pyspark_mode() -> bool:
-    """Check if running in PySpark mode."""
-    backend = get_mode()
-    return backend == Mode.PYSPARK
 
 
 class TestWindowOperationsParity(ParityTestBase):

@@ -445,12 +445,14 @@ pub(crate) fn translate_describe_table_optional_col(
             vec![
                 JsonValue::String(f.name.clone()),
                 JsonValue::String(core_data_type_to_str(&f.data_type)),
+                JsonValue::String(String::new()), // comment (PySpark parity)
             ]
         })
         .collect();
     let out_schema = vec![
         ("col_name".to_string(), "string".to_string()),
         ("data_type".to_string(), "string".to_string()),
+        ("comment".to_string(), "string".to_string()),
     ];
     session.create_dataframe_from_rows(rows, out_schema, false, false)
 }
@@ -474,6 +476,7 @@ pub(crate) fn translate_describe_table_extended(
             vec![
                 JsonValue::String(f.name.clone()),
                 JsonValue::String(core_data_type_to_str(&f.data_type)),
+                JsonValue::String(String::new()), // comment (PySpark parity)
             ]
         })
         .collect();
@@ -481,15 +484,17 @@ pub(crate) fn translate_describe_table_extended(
     rows.push(vec![
         JsonValue::String("".to_string()),
         JsonValue::String("".to_string()),
+        JsonValue::String("".to_string()),
     ]);
     let out_schema = vec![
         ("col_name".to_string(), "string".to_string()),
         ("data_type".to_string(), "string".to_string()),
+        ("comment".to_string(), "string".to_string()),
     ];
     session.create_dataframe_from_rows(rows, out_schema, false, false)
 }
 
-/// SHOW DATABASES: return a DataFrame with databaseName column (PySpark parity for #1046).
+/// SHOW DATABASES: return a DataFrame with namespace column (PySpark parity: schema struct<namespace:string>).
 pub(crate) fn translate_show_databases(
     session: &SparkSession,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
@@ -498,11 +503,11 @@ pub(crate) fn translate_show_databases(
         .into_iter()
         .map(|n| vec![JsonValue::String(n)])
         .collect();
-    let schema = vec![("databaseName".to_string(), "string".to_string())];
+    let schema = vec![("namespace".to_string(), "string".to_string())];
     session.create_dataframe_from_rows(rows, schema, false, false)
 }
 
-/// SHOW TABLES [IN db] / [FROM db]: return a DataFrame with database, tableName, isTemporary columns.
+/// SHOW TABLES [IN db] / [FROM db]: return a DataFrame with namespace, tableName, isTemporary columns (PySpark parity).
 pub(crate) fn translate_show_tables(
     session: &SparkSession,
     db: Option<&str>,
@@ -544,7 +549,7 @@ pub(crate) fn translate_show_tables(
     }
 
     let schema = vec![
-        ("database".to_string(), "string".to_string()),
+        ("namespace".to_string(), "string".to_string()),
         ("tableName".to_string(), "string".to_string()),
         ("isTemporary".to_string(), "boolean".to_string()),
     ];

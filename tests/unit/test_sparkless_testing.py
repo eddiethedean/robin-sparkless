@@ -1080,12 +1080,11 @@ class TestPublicAPI:
 # =============================================================================
 
 
-@pytest.mark.sparkless_only
 class TestSparklessOnlyMarker:
-    """Tests that should only run in sparkless mode."""
+    """Tests that run in both modes with the same scenario and logic."""
 
     def test_sparkless_specific(self, spark):
-        """This test only runs in sparkless mode."""
+        """Same scenario in sparkless and PySpark: createDataFrame and count."""
         df = spark.createDataFrame([(1,)], ["id"])
         assert df.count() == 1
 

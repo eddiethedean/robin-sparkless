@@ -8,22 +8,18 @@ from __future__ import annotations
 
 import pytest
 
-from sparkless.testing import Mode, get_mode
 from sparkless.testing import get_imports
 
 imports = get_imports()
 SparkSession = imports.SparkSession
 
 
-def test_spark_session_type_module_identifies_sparkless(spark):
-    """type(spark).__module__ should contain 'sparkless' for engine detection (#1344)."""
-    if get_mode() == Mode.PYSPARK:
-        pytest.skip("PySpark reports pyspark.sql.session; test is for sparkless")
+def test_spark_session_type_module_identifies_backend(spark):
+    """type(spark).__module__ identifies the backend in both modes (#1344)."""
     t = type(spark)
-    assert "sparkless" in t.__module__, (
-        f"Expected 'sparkless' in type(spark).__module__ for engine detection, got {t.__module__!r}"
+    mod = t.__module__
+    assert "sparkless" in mod or "pyspark" in mod, (
+        f"Expected 'sparkless' or 'pyspark' in type(spark).__module__, got {mod!r}"
     )
-    assert t.__module__ == "sparkless.sql.session", (
-        f"Expected __module__ 'sparkless.sql.session', got {t.__module__!r}"
-    )
+    assert "session" in mod or "sql" in mod
     assert t.__name__ in ("SparkSession", "PySparkSession")

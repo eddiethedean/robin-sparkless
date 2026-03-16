@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-from sparkless.testing import Mode, get_mode
 from sparkless.testing import get_imports
 
 imports = get_imports()
@@ -22,9 +21,7 @@ except ImportError:
 
 
 def test_createDataFrame_invalid_data_raises_pyspark_like_error(spark):
-    """createDataFrame(non-list, schema) raises; SparklessError+CANNOT_ACCEPT_OBJECT (#1346) or TypeError."""
-    if get_mode() == Mode.PYSPARK:
-        pytest.skip("Test for sparkless error shape; PySpark has its own message")
+    """createDataFrame(non-list, schema) raises in both modes (#1346)."""
     with pytest.raises((SparklessError, RuntimeError, TypeError)) as exc_info:
         spark.createDataFrame("invalid_data", "id INT")
     msg = str(exc_info.value)

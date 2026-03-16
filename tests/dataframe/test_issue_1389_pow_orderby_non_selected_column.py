@@ -1,15 +1,6 @@
 """Regression test for issue #1389: column.pow_operator parity.
 
-PySpark scenario (from the issue body):
-
-    def scenario_pow_operator(session):
-        if _backend_is_pyspark(session):
-            from pyspark.sql import functions as F  # type: ignore
-        else:
-            from sparkless.sql import functions as F  # type: ignore
-
-        df = session.createDataFrame([(3,), (5,)], ["x"])
-        return df.select((F.col("x") ** F.lit(2)).alias("sq")).orderBy("x")
+Same scenario in both modes via spark + spark_imports: pow and orderBy non-selected column.
 
 Sparkless previously raised an unresolved_column error when ordering by "x"
 after selecting only the derived "sq" column. This test locks in the

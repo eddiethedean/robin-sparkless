@@ -6,13 +6,6 @@ Tests validate that Sparkless SQL DDL statements behave identically to PySpark.
 
 import pytest
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import Mode, get_mode
-
-
-def _is_pyspark_mode() -> bool:
-    """Check if running in PySpark mode."""
-    backend = get_mode()
-    return backend == Mode.PYSPARK
 
 
 class TestSQLDDLParity(ParityTestBase):
@@ -78,10 +71,6 @@ class TestSQLDDLParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS test_users")
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="CREATE TABLE AS SELECT requires Hive support in PySpark, which is not enabled by default",
-    )
     def test_create_table_with_select(self, spark):
         """Test CREATE TABLE AS SELECT matches PySpark behavior.
 

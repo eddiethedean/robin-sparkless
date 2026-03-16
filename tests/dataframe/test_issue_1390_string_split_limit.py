@@ -1,17 +1,8 @@
 """Regression test for issue #1390: string.split_limit parity.
 
-PySpark scenario (from the issue body):
+Same scenario in both modes via spark + spark_imports: split with limit.
 
-    def scenario_split_limit(session):
-        if _backend_is_pyspark(session):
-            from pyspark.sql import functions as F  # type: ignore
-        else:
-            from sparkless.sql import functions as F  # type: ignore
-
-        df = session.createDataFrame([("a,b,c,d",)], ["s"])
-        return df.select(F.split(F.col("s"), ",", 2).alias("arr"))
-
-This test locks in Sparkless behavior for:
+This test locks in behavior for:
 - Schema JSON (`schema.jsonValue()`): ArrayType elementType and containsNull flag
 - UI / explain: `DataFrame.explain()` should produce a non-empty description
 """

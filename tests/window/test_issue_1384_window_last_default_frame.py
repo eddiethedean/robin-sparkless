@@ -1,23 +1,9 @@
 """
 Regression test for issue #1384: window.last_default_frame parity.
 
-PySpark scenario (from the issue):
+Same scenario in both modes via spark + spark_imports: last() over window, default frame.
 
-    def scenario_window_last_default_frame(session):
-        if _backend_is_pyspark(session):
-            from pyspark.sql import functions as F  # type: ignore
-            from pyspark.sql.window import Window  # type: ignore
-        else:
-            from sparkless.sql import functions as F  # type: ignore
-            from sparkless.window import Window  # type: ignore
-
-        df = session.createDataFrame(
-            [(1, 100, "a"), (2, 90, "a"), (3, 80, "b")], ["id", "salary", "dept"]
-        )
-        win = Window.partitionBy("dept").orderBy("id")
-        return df.withColumn("last_sal", F.last("salary").over(win)).orderBy("id")
-
-This test exercises the same scenario against sparkless, ensuring that:
+This test ensures that:
 
 - The windowed last() expression with the default frame does not raise.
 - The resulting schema's simpleString() matches the expected struct form.

@@ -26,7 +26,6 @@ def _scenario_join_on_expression(session):
     return df1.join(df2, on=df1["id"] == df2["id"], how="inner").orderBy("id")
 
 
-@pytest.mark.sparkless_only
 def test_issue_1393_join_on_expression_ambiguous_order_by_raises(spark) -> None:
     """join(on expression) followed by orderBy(\"id\") should raise SparklessError for ambiguity."""
     with pytest.raises(SparklessError) as excinfo:

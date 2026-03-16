@@ -6895,8 +6895,9 @@ impl PyColumn {
             None
         };
         let partition_strs: Vec<&str> = partition_by.iter().map(String::as_str).collect();
-        let frame_ref: Option<(&str, i64, i64)> =
-            frame.as_ref().map(|(k, s, e): &(String, i64, i64)| (k.as_str(), *s, *e));
+        let frame_ref: Option<(&str, i64, i64)> = frame
+            .as_ref()
+            .map(|(k, s, e): &(String, i64, i64)| (k.as_str(), *s, *e));
         self.inner
             .over_window(
                 &partition_strs[..],

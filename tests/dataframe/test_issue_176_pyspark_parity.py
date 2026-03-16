@@ -7,20 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from sparkless.testing import get_imports
 from tests.utils import assert_rows_equal
-from sparkless.testing import Mode, get_mode
-
 
 _imports = get_imports()
-SparkSession = _imports.SparkSession
 F = _imports.F
-
-
-def _spark() -> Any:
-    return SparkSession.builder.appName("test_176").getOrCreate()
 
 
 # Expected outputs (from prior PySpark 3.5 run)
@@ -45,13 +36,8 @@ EXPECTED_SELECT_EXPR_AND_COLUMN: list[dict[str, Any]] = [
 ]
 
 
-def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
-    """select(regexp_extract_all(...).alias('m')) matches PySpark."""
-    # regexp_extract_all is a sparkless extension; skip when running against
-    # a real PySpark backend.
-    if get_mode() == Mode.PYSPARK:
-        pytest.skip("regexp_extract_all is not available in PySpark backend")
-    spark = _spark()
+def test_regexp_extract_all_select_expression_pyspark_parity(spark) -> None:
+    """select(regexp_extract_all(...).alias('m')) - same scenario in both modes."""
     data = [
         {"s": "a1 b22 c333"},
         {"s": "no-digits"},
@@ -66,11 +52,8 @@ def test_regexp_extract_all_select_expression_pyspark_parity() -> None:
     )
 
 
-def test_regexp_extract_all_select_varargs_pyspark_parity() -> None:
-    """select(expr) with single expression as vararg matches PySpark."""
-    if get_mode() == Mode.PYSPARK:
-        pytest.skip("regexp_extract_all is not available in PySpark backend")
-    spark = _spark()
+def test_regexp_extract_all_select_varargs_pyspark_parity(spark) -> None:
+    """select(expr) with single expression as vararg - same scenario in both modes."""
     data = [
         {"s": "a1 b22 c333"},
         {"s": "no-digits"},
@@ -85,13 +68,10 @@ def test_regexp_extract_all_select_varargs_pyspark_parity() -> None:
     )
 
 
-def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity() -> (
+def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity(spark) -> (
     None
 ):
-    """select('s', expr.alias('m')) - column name + expression matches PySpark."""
-    if get_mode() == Mode.PYSPARK:
-        pytest.skip("regexp_extract_all is not available in PySpark backend")
-    spark = _spark()
+    """select('s', expr.alias('m')) - same scenario in both modes."""
     data = [
         {"s": "a1b22c"},
         {"s": "x99y"},
@@ -104,11 +84,8 @@ def test_regexp_extract_all_select_mixed_columns_and_expression_pyspark_parity()
     assert_rows_equal(actual, EXPECTED_REGEXP_EXTRACT_ALL_MIXED, order_matters=True)
 
 
-def test_regexp_extract_all_empty_string_and_null_pyspark_parity() -> None:
-    """regexp_extract_all with empty string returns [], null returns None."""
-    if get_mode() == Mode.PYSPARK:
-        pytest.skip("regexp_extract_all is not available in PySpark backend")
-    spark = _spark()
+def test_regexp_extract_all_empty_string_and_null_pyspark_parity(spark) -> None:
+    """regexp_extract_all with empty string and null - same scenario in both modes."""
     data = [
         {"s": ""},
         {"s": None},
@@ -123,9 +100,8 @@ def test_regexp_extract_all_empty_string_and_null_pyspark_parity() -> None:
     )
 
 
-def test_select_expression_and_column_name_pyspark_parity() -> None:
-    """select('a', try_add(col('a'), col('b')).alias('sum_ab')) matches PySpark."""
-    spark = _spark()
+def test_select_expression_and_column_name_pyspark_parity(spark) -> None:
+    """select('a', try_add(col('a'), col('b')).alias('sum_ab')) - same scenario in both modes."""
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
     schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)
@@ -137,10 +113,8 @@ def test_select_expression_and_column_name_pyspark_parity() -> None:
     assert_rows_equal(actual, EXPECTED_SELECT_EXPR_AND_COLUMN, order_matters=True)
 
 
-def test_select_list_of_column_names_still_works() -> None:
-    """select(['a','b']) continues to work (backward compatibility)."""
-
-    spark = _spark()
+def test_select_list_of_column_names_still_works(spark) -> None:
+    """select(['a','b']) continues to work (backward compatibility) - same scenario in both modes."""
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
     schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)
@@ -149,10 +123,8 @@ def test_select_list_of_column_names_still_works() -> None:
     assert [r.asDict() for r in rows] == [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
 
 
-def test_select_varargs_column_names_still_works() -> None:
-    """select('a', 'b') continues to work (backward compatibility)."""
-
-    spark = _spark()
+def test_select_varargs_column_names_still_works(spark) -> None:
+    """select('a', 'b') continues to work (backward compatibility) - same scenario in both modes."""
     data = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
     schema = ["a", "b"]
     df = spark.createDataFrame(data, schema)

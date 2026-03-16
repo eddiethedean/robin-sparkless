@@ -1,6 +1,6 @@
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions, RollingOptionsFixedWindow,
-    SortOptions, TimeUnit, WindowMapping, col, lit,
+    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions,
+    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, col, lit,
 };
 use polars_plan::dsl::AggExpr;
 use std::ops::Neg;
@@ -2555,7 +2555,7 @@ impl Column {
         let has_rolling_source = self.source_for_running.is_some()
             || self.source_for_running_mean.is_some()
             || self.source_for_running_count.is_some();
-        let use_rolling = frame.map_or(false, |(kind, start, end)| {
+        let use_rolling = frame.is_some_and(|(kind, start, end)| {
             kind == "rows"
                 && start != UNBOUNDED_PRECEDING
                 && end != UNBOUNDED_FOLLOWING
@@ -2618,12 +2618,14 @@ impl Column {
 
         // RANGE frame (value-based): evaluate eagerly in with_column via RangeWindowSpec.
         if let Some((kind, start, end)) = frame {
-            if kind == "range"
-                && order_by_encoded.len() == 1
-                && has_rolling_source
-            {
-                let order_name = order_by_encoded[0].trim().strip_prefix('-').unwrap_or(order_by_encoded[0].trim()).to_string();
-                let partition_by: Vec<String> = partition_by.iter().map(|s| (*s).to_string()).collect();
+            if kind == "range" && order_by_encoded.len() == 1 && has_rolling_source {
+                let order_name = order_by_encoded[0]
+                    .trim()
+                    .strip_prefix('-')
+                    .unwrap_or(order_by_encoded[0].trim())
+                    .to_string();
+                let partition_by: Vec<String> =
+                    partition_by.iter().map(|s| (*s).to_string()).collect();
                 let (value_col, agg) = if let Some(ref src) = self.source_for_running_mean {
                     (src.clone(), RangeWindowAgg::Mean)
                 } else if let Some(ref src) = self.source_for_running {
@@ -2641,26 +2643,27 @@ impl Column {
                     end,
                     agg,
                 };
-                let mut c = Self::from_expr(lit(0i64).cast(DataType::Float64), Some(self.name.clone()));
+                let mut c =
+                    Self::from_expr(lit(0i64).cast(DataType::Float64), Some(self.name.clone()));
                 c.range_window_spec = Some(spec);
                 return Ok(c);
             }
         }
 
         let base_expr = if use_running_aggregate {
-                if let Some(ref src) = self.source_for_running_mean {
-                    // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
-                    let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
-                    let count_expr = col(src).cum_count(false).cast(DataType::Float64);
-                    sum_expr / count_expr
-                } else if let Some(ref src) = self.source_for_running {
-                    // Running sum in window order. Cast to Float64 so string columns work
-                    // (PySpark parity, issue #393). Non-running sums still use native dtype.
-                    col(src).cast(DataType::Float64).cum_sum(false)
-                } else if let Some(ref src) = self.source_for_running_count {
-                    // Running count in window order (PySpark count().over(order); #1218).
-                    col(src).cum_count(false).cast(DataType::Int64)
-                } else {
+            if let Some(ref src) = self.source_for_running_mean {
+                // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
+                let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
+                let count_expr = col(src).cum_count(false).cast(DataType::Float64);
+                sum_expr / count_expr
+            } else if let Some(ref src) = self.source_for_running {
+                // Running sum in window order. Cast to Float64 so string columns work
+                // (PySpark parity, issue #393). Non-running sums still use native dtype.
+                col(src).cast(DataType::Float64).cum_sum(false)
+            } else if let Some(ref src) = self.source_for_running_count {
+                // Running count in window order (PySpark count().over(order); #1218).
+                col(src).cum_count(false).cast(DataType::Int64)
+            } else {
                 self.expr().clone()
             }
         } else {
@@ -2932,7 +2935,7 @@ impl Column {
     /// PySpark parity (#1484): NULL values in the ORDER BY column are handled as follows:
     /// - Ascending: NULLs come FIRST (fill with NEG_INFINITY so they rank lowest)
     /// - Descending: NULLs come LAST (fill with NEG_INFINITY so they rank highest when descending)
-    /// ntile always returns an integer, even for rows where ORDER BY column is NULL.
+    ///   ntile always returns an integer, even for rows where ORDER BY column is NULL.
     pub fn ntile(&self, n: u32, partition_by: &[&str], descending: bool) -> Column {
         use polars::prelude::*;
         let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
@@ -2952,7 +2955,10 @@ impl Column {
             .clone()
             .cast(DataType::Float64)
             .fill_null(lit(f64::NEG_INFINITY));
-        let rank_expr = filled_expr.clone().rank(opts, None).over(partition_exprs.clone());
+        let rank_expr = filled_expr
+            .clone()
+            .rank(opts, None)
+            .over(partition_exprs.clone());
         // Count ALL rows including nulls (use len() instead of count())
         let count_expr = len().over(partition_exprs.clone());
         let n_expr = lit(n as f64);
@@ -3210,10 +3216,7 @@ impl Column {
             )
             .otherwise(lit((start - 1).max(0)));
         let length_expr = length.map(lit).unwrap_or_else(|| lit(i64::MAX));
-        Self::from_expr(
-            list_expr.list().slice(start_expr, length_expr),
-            None,
-        )
+        Self::from_expr(list_expr.list().slice(start_expr, length_expr), None)
     }
 
     /// Explode list into one row per element (PySpark explode).

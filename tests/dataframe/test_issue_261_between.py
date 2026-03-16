@@ -17,7 +17,6 @@ from datetime import date
 import pytest
 
 from sparkless.testing import get_imports
-from sparkless.testing import Mode, get_mode
 
 
 imports = get_imports()
@@ -31,12 +30,6 @@ LongType = imports.LongType
 DoubleType = imports.DoubleType
 DateType = imports.DateType
 TimestampType = imports.TimestampType
-
-
-def _is_pyspark_mode() -> bool:
-    """Check if running in PySpark backend mode."""
-    backend = get_mode()
-    return backend == Mode.PYSPARK
 
 
 class TestIssue261Between:
@@ -356,10 +349,6 @@ class TestIssue261Between:
         finally:
             spark.stop()
 
-    @pytest.mark.skipif(  # type: ignore[misc,untyped-decorator]
-        not _is_pyspark_mode(),
-        reason="PySpark parity test - only run with PySpark backend",
-    )
     def test_between_pyspark_parity(self) -> None:
         """Parity test: verify between behavior matches PySpark."""
         spark = SparkSession.builder.appName("TestBetweenParity").getOrCreate()

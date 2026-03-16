@@ -26,33 +26,6 @@ class TestUnifiedInfrastructure:
         assert df.count() == 1
         assert df.columns == ["id", "name"]
 
-    @pytest.mark.sparkless_only
-    def test_sparkless_only(self, spark):
-        """Test that only runs with sparkless backend."""
-        df = spark.createDataFrame([{"id": 1}])
-        assert df.count() == 1
-
-    @pytest.mark.pyspark_only
-    def test_pyspark_only(self, spark):
-        """Test that only runs with PySpark.
-
-        This test will be skipped if not running in PySpark mode.
-        """
-        df = spark.createDataFrame([{"id": 1}])
-        assert df.count() == 1
-
-    @pytest.mark.backend("sparkless")
-    def test_with_backend_marker_sparkless(self, spark):
-        """Test using @pytest.mark.backend marker for sparkless."""
-        df = spark.createDataFrame([{"id": 1}])
-        assert df.count() == 1
-
-    @pytest.mark.backend("pyspark")
-    def test_with_backend_marker_pyspark(self, spark):
-        """Test using @pytest.mark.backend marker for pyspark."""
-        df = spark.createDataFrame([{"id": 1}])
-        assert df.count() == 1
-
     def test_with_mode_info(self, spark, spark_mode):
         """Test that can access mode information."""
         df = spark.createDataFrame([{"id": 1}])

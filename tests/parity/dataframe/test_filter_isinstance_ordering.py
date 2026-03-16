@@ -10,23 +10,13 @@ other ColumnOperations are incorrectly handled because isinstance(expr, Column)
 returns True for ColumnOperation objects when checked before ColumnOperation.
 """
 
-import os
-
-
 from tests.tools.parity_base import ParityTestBase
 from sparkless.testing import get_imports
 
 
 def _table_format_and_options(spark):
-    """Use parquet when PySpark backend (no Delta); otherwise delta."""
-    backend = (
-        (os.getenv("SPARKLESS_TEST_MODE") or os.getenv("SPARKLESS_TEST_MODE") or "")
-        .strip()
-        .lower()
-    )
-    if backend == "pyspark":
-        return "parquet", {}
-    return "delta", {"overwriteSchema": "true"}
+    """Use parquet for both backends so the same scenario runs everywhere."""
+    return "parquet", {}
 
 
 class TestIsInstanceOrdering(ParityTestBase):

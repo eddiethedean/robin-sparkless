@@ -6,13 +6,6 @@ Tests validate that Sparkless Catalog operations behave identically to PySpark.
 
 import pytest
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import Mode, get_mode
-
-
-def _is_pyspark_mode() -> bool:
-    """Check if running in PySpark mode."""
-    backend = get_mode()
-    return backend == Mode.PYSPARK
 
 
 class TestCatalogParity(ParityTestBase):
@@ -27,10 +20,6 @@ class TestCatalogParity(ParityTestBase):
         db_names = [db.name for db in databases]
         assert "default" in db_names
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="createDatabase is a sparkless-specific Catalog API - PySpark uses SQL CREATE DATABASE",
-    )
     def test_create_database_catalog(self, spark):
         """Test createDatabase via catalog matches PySpark behavior.
 
@@ -47,10 +36,6 @@ class TestCatalogParity(ParityTestBase):
         # Cleanup
         spark.catalog.dropDatabase("test_catalog_db", ignoreIfNotExists=True)
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="createDatabase is a sparkless-specific Catalog API - PySpark uses SQL CREATE DATABASE",
-    )
     def test_drop_database_catalog(self, spark):
         """Test dropDatabase via catalog matches PySpark behavior.
 
@@ -67,10 +52,6 @@ class TestCatalogParity(ParityTestBase):
         db_names = [db.name for db in databases]
         assert "test_drop_db" not in db_names
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="createDatabase is a sparkless-specific Catalog API - PySpark uses SQL CREATE DATABASE",
-    )
     def test_set_current_database(self, spark):
         """Test setCurrentDatabase matches PySpark behavior.
 
@@ -111,10 +92,6 @@ class TestCatalogParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS list_tables_test")
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="createDatabase is a sparkless-specific Catalog API - PySpark uses SQL CREATE DATABASE",
-    )
     def test_list_tables_in_database(self, spark):
         """Test listTables with database parameter matches PySpark behavior.
 
@@ -152,10 +129,6 @@ class TestCatalogParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS exists_test")
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="createDatabase is a sparkless-specific Catalog API - PySpark uses SQL CREATE DATABASE",
-    )
     def test_table_exists_in_database(self, spark):
         """Test tableExists with database parameter matches PySpark behavior.
 
@@ -194,10 +167,6 @@ class TestCatalogParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS get_table_test")
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="createDatabase is a sparkless-specific Catalog API - PySpark uses SQL CREATE DATABASE",
-    )
     def test_get_table_in_database(self, spark):
         """Test getTable with database parameter matches PySpark behavior.
 

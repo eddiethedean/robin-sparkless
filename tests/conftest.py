@@ -315,21 +315,11 @@ def pytest_collection_modifyitems(
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
-    """Skip tests based on mode markers."""
-    mode = get_mode()
+    """Apply backend marker so tests run with requested backend; no skip by mode.
 
-    skip_sparkless = pytest.mark.skip(
-        reason="Test marked sparkless_only, running in PySpark mode"
-    )
-    skip_pyspark = pytest.mark.skip(
-        reason="Test marked pyspark_only, running in sparkless mode"
-    )
-
-    for item in items:
-        if mode == Mode.PYSPARK and "sparkless_only" in item.keywords:
-            item.add_marker(skip_sparkless)
-        elif mode == Mode.SPARKLESS and "pyspark_only" in item.keywords:
-            item.add_marker(skip_pyspark)
+    All tests run in both sparkless and pyspark mode by default. Tests must not
+    branch on backend; use the same scenario and logic for each (spark + spark_imports).
+    """
 
 
 def pytest_report_header(config: pytest.Config) -> list[str]:

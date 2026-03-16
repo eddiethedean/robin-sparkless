@@ -1,18 +1,8 @@
 """Regression test for issue #1392: cast.invalid_string_to_int parity.
 
-PySpark scenario (from the issue body):
+Same scenario in both modes via spark + spark_imports: invalid string -> int cast.
 
-    def scenario_cast_invalid_string(session):
-        \"\"\"Invalid string -> int cast; compare error vs null semantics.\"\"\"
-        if _backend_is_pyspark(session):
-            from pyspark.sql import functions as F  # type: ignore
-        else:
-            from sparkless.sql import functions as F  # type: ignore
-
-        df = session.createDataFrame([(\"nope\",)], [\"s\"])
-        return df.select(F.col(\"s\").cast(\"int\").alias(\"i\"))
-
-This test locks in Sparkless behavior for:
+This test locks in behavior for:
 - Semantics: invalid string -> int cast yields null (no error), like PySpark.
 - Schema JSON (`schema.jsonValue()`): struct with integer field type.
 - UI / explain: `DataFrame.explain()` returns a non-empty description.

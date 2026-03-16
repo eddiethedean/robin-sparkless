@@ -1,15 +1,8 @@
 """Regression test for issue #1394: struct.getfield_alias parity.
 
-Scenario from the issue:
+Same scenario in both modes via spark + spark_imports: struct getField/alias.
 
-    def scenario_struct_getfield_alias(session):
-        if _backend_is_pyspark(session):
-            from pyspark.sql import functions as F  # type: ignore
-            from pyspark.sql.types import StructType, StructField, StringType, IntegerType  # type: ignore
-        else:
-            from sparkless.sql import functions as F  # type: ignore
-            from sparkless.sql.types import StructType, StructField, StringType, IntegerType  # type: ignore
-
+Scenario (schema and expression):
         schema = StructType(
             [
                 StructField(

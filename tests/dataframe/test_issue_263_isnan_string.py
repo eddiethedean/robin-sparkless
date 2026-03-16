@@ -12,13 +12,7 @@ import math
 
 import pytest
 
-from sparkless.testing import Mode, get_mode
 from sparkless.testing import get_imports
-
-
-def _is_pyspark_mode() -> bool:
-    return bool(get_mode() == Mode.PYSPARK)
-
 
 imports = get_imports()
 F = imports.F
@@ -126,10 +120,6 @@ class TestIssue263IsnanString:
         # None is not NaN
         assert buckets[3] == "ok"
 
-    @pytest.mark.skipif(
-        not _is_pyspark_mode(),
-        reason="PySpark parity test - only run with PySpark backend",
-    )
     def test_isnan_string_column_pyspark_parity(self, spark):
         df = spark.createDataFrame(
             [

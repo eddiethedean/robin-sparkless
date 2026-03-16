@@ -12,7 +12,6 @@ import uuid
 import pytest
 
 
-@pytest.mark.pyspark_only
 @pytest.mark.delta
 class TestDeltaFixtureWithMarker:
     """Tests that use @pytest.mark.delta to enable Delta Lake."""
@@ -146,7 +145,6 @@ class TestDeltaFixtureWithMarker:
             shutil.rmtree(delta_path, ignore_errors=True)
 
 
-@pytest.mark.pyspark_only
 @pytest.mark.delta
 def test_delta_saveAsTable(spark, spark_imports):
     """Test Delta Lake saveAsTable with the delta marker."""
@@ -177,7 +175,6 @@ def test_delta_saveAsTable(spark, spark_imports):
             pass
 
 
-@pytest.mark.pyspark_only
 @pytest.mark.delta
 def test_delta_sql_operations(spark, spark_imports):
     """Test Delta Lake SQL operations with the delta marker."""
@@ -205,7 +202,6 @@ def test_delta_sql_operations(spark, spark_imports):
         shutil.rmtree(delta_path, ignore_errors=True)
 
 
-@pytest.mark.pyspark_only
 @pytest.mark.delta
 def test_isolated_session_with_delta(isolated_session, spark_imports):
     """Test that isolated_session also supports Delta Lake with the marker."""
@@ -223,7 +219,6 @@ def test_isolated_session_with_delta(isolated_session, spark_imports):
         shutil.rmtree(delta_path, ignore_errors=True)
 
 
-@pytest.mark.pyspark_only
 class TestDeltaFixtureVerification:
     """Tests that verify Delta Lake fixture behavior."""
 

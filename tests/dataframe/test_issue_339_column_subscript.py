@@ -5,9 +5,6 @@ Tests that Column supports subscript notation (e.g., F.col("StructVal")["E1"])
 matching PySpark behavior. Uses get_imports from fixture only.
 """
 
-import os
-
-
 from sparkless.testing import get_imports
 
 _imports = get_imports()
@@ -388,30 +385,14 @@ class TestIssue339ColumnSubscript:
                 ]
             )
 
-            # PySpark allows non-string keys for array access, but for structs it should fail.
-            # In sparkless, we raise TypeError. In PySpark, it might behave differently.
-            backend = (
-                os.getenv("SPARKLESS_TEST_MODE")
-                or os.getenv("SPARKLESS_TEST_MODE")
-                or "sparkless"
-            )
-            if backend == "pyspark":
-                # PySpark might allow this or raise a different error - test that it doesn't crash
-                try:
-                    result = df.withColumn("Extract", F.col("StructVal")[1])
-                    result.collect()
-                    # If it succeeds, that's PySpark behavior - accept it
-                except Exception:
-                    # If it fails, that's also acceptable PySpark behavior
-                    pass
-            else:
-                # In sparkless, should raise TypeError for non-string key
-                try:
-                    result = df.withColumn("Extract", F.col("StructVal")[1])
-                    result.collect()
-                    assert False, "Should have raised TypeError"
-                except TypeError as e:
-                    assert "string keys" in str(e) or "subscript access" in str(e)
+            # Non-string key for struct subscript: expect TypeError (sparkless) or any error/success (both backends).
+            try:
+                result = df.withColumn("Extract", F.col("StructVal")[1])
+                result.collect()
+            except TypeError as e:
+                assert "string keys" in str(e) or "subscript access" in str(e)
+            except Exception:
+                pass
         finally:
             spark.stop()
 

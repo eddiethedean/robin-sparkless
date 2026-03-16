@@ -11,8 +11,7 @@ due to differences in table management and schema evolution behavior.
 
 import pytest
 
-from sparkless.testing import Mode, get_mode, create_session
-from sparkless.testing import get_imports
+from sparkless.testing import create_session, get_imports
 
 _imports = get_imports()
 F = _imports.F
@@ -24,14 +23,6 @@ TimestampType = _imports.TimestampType
 DateType = _imports.DateType
 BooleanType = _imports.BooleanType
 StructField = _imports.StructField
-
-_backend = get_mode()
-
-
-def _is_sparkless_mode() -> bool:
-    """Check if running in sparkless mode."""
-    backend = get_mode()
-    return backend == Mode.SPARKLESS
 
 
 @pytest.mark.xdist_group(name="delta_serial")
@@ -242,12 +233,7 @@ class TestDeltaLakeSchemaEvolution:
 
     @pytest.mark.delta
     def test_delta_create_or_replace_table_as_select(self):
-        """CTAS with OR REPLACE should allow schema evolution for Delta tables."""
-        if _backend != Mode.SPARKLESS:
-            pytest.skip(
-                "Delta CTAS replacement is only validated in sparkless mock mode"
-            )
-
+        """CTAS with OR REPLACE should allow schema evolution for Delta tables - same scenario in both modes."""
         import uuid
         import tempfile
         import shutil
@@ -490,21 +476,16 @@ class TestDeltaLakeSchemaEvolution:
         """Test mergeSchema with append mode for all table types."""
         import uuid
 
-        # When PySpark session has no Delta, skip (mergeSchema with append requires Delta)
-        if _backend == Mode.PYSPARK:
-            try:
-                spark.conf.get("spark.sql.catalog.spark_catalog")
-            except Exception:
-                pass
-            try:
-                spark.createDataFrame([(1,)]).write.format("delta").mode(
-                    "overwrite"
-                ).saveAsTable("_delta_probe")
-                spark.sql("DROP TABLE IF EXISTS _delta_probe")
-            except Exception:
-                pytest.skip(
-                    "Delta not available in this PySpark session; mergeSchema test requires Delta"
-                )
+        # Skip if Delta is not available (same check in both modes)
+        try:
+            spark.createDataFrame([(1,)]).write.format("delta").mode(
+                "overwrite"
+            ).saveAsTable("_delta_probe")
+            spark.sql("DROP TABLE IF EXISTS _delta_probe")
+        except Exception:
+            pytest.skip(
+                "Delta not available in this session; mergeSchema test requires Delta"
+            )
 
         table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
         schema_name = f"test_schema_{table_suffix}"
@@ -549,17 +530,16 @@ class TestDeltaLakeSchemaEvolution:
         """Test mergeSchema handles bidirectional merging."""
         import uuid
 
-        # When PySpark session has no Delta, skip (mergeSchema requires Delta)
-        if _backend == Mode.PYSPARK:
-            try:
-                spark.createDataFrame([(1,)]).write.format("delta").mode(
-                    "overwrite"
-                ).saveAsTable("_delta_probe")
-                spark.sql("DROP TABLE IF EXISTS _delta_probe")
-            except Exception:
-                pytest.skip(
-                    "Delta not available in this PySpark session; mergeSchema test requires Delta"
-                )
+        # Skip if Delta is not available (same check in both modes)
+        try:
+            spark.createDataFrame([(1,)]).write.format("delta").mode(
+                "overwrite"
+            ).saveAsTable("_delta_probe")
+            spark.sql("DROP TABLE IF EXISTS _delta_probe")
+        except Exception:
+            pytest.skip(
+                "Delta not available in this session; mergeSchema test requires Delta"
+            )
 
         table_suffix = str(uuid.uuid4()).replace("-", "_")[:8]
         schema_name = f"test_schema_{table_suffix}"

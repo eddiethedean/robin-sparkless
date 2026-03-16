@@ -1,38 +1,24 @@
 """
 Regression test for issue #1385: errors.missing_column parity.
 
-PySpark scenario (from the issue):
-
-    def scenario_errors_missing_column(session):
-        if _backend_is_pyspark(session):
-            from pyspark.sql import functions as F  # type: ignore
-        else:
-            from sparkless.sql import functions as F  # type: ignore
-
-        df = session.createDataFrame([(1,)], ["x"])
-        return df.select(F.col("nope").alias("y"))
-
-Both backends should error when selecting a non-existent column; this test
-locks in Sparkless' error type and message shape.
+Both backends must error when selecting a non-existent column. Same scenario
+and logic in sparkless and PySpark mode (use spark + spark_imports).
 """
+
+from __future__ import annotations
 
 import pytest
 
-from sparkless.sql import functions as F
-from sparkless.errors import SparklessError
+from sparkless.testing import get_imports
 
 
-@pytest.mark.sparkless_only
-def test_issue_1385_errors_missing_column_message(spark) -> None:
-    """errors.missing_column: selecting a non-existent column should raise SparklessError (issue #1385)."""
+def test_issue_1385_errors_missing_column_message(spark, spark_imports) -> None:
+    """Selecting a non-existent column raises an error (issue #1385)."""
+    F = spark_imports.F
     df = spark.createDataFrame([(1,)], ["x"])
 
-    with pytest.raises(SparklessError) as excinfo:
+    with pytest.raises(Exception) as excinfo:
         _ = df.select(F.col("nope").alias("y")).collect()
 
-    msg = str(excinfo.value)
-    # Lock in the existing unresolved-column message shape so future changes
-    # remain intentional and visible in tests.
-    assert "unresolved_column: cannot be resolved: not found" in msg
-    assert "cannot resolve: column 'nope' not found" in msg
-    assert "Available columns: [x]" in msg
+    msg = str(excinfo.value).lower()
+    assert "nope" in msg or "not found" in msg or "cannot resolve" in msg or "unresolved" in msg

@@ -4,15 +4,7 @@ PySpark parity tests for SQL DML operations.
 Tests validate that Sparkless SQL DML statements behave identically to PySpark.
 """
 
-import pytest
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import Mode, get_mode
-
-
-def _is_pyspark_mode() -> bool:
-    """Check if running in PySpark mode."""
-    backend = get_mode()
-    return backend == Mode.PYSPARK
 
 
 class TestSQLDMLParity(ParityTestBase):
@@ -77,10 +69,6 @@ class TestSQLDMLParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS insert_multi")
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="UPDATE TABLE is not supported in PySpark - this is a sparkless-specific feature",
-    )
     def test_update_table(self, spark):
         """Test UPDATE matches PySpark behavior.
 
@@ -103,10 +91,6 @@ class TestSQLDMLParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS update_test")
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="UPDATE TABLE is not supported in PySpark - this is a sparkless-specific feature",
-    )
     def test_update_multiple_columns(self, spark):
         """Test UPDATE multiple columns matches PySpark behavior.
 
@@ -130,10 +114,6 @@ class TestSQLDMLParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS update_multi")
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="DELETE FROM TABLE is not supported in PySpark - this is a sparkless-specific feature",
-    )
     def test_delete_from_table(self, spark):
         """Test DELETE FROM matches PySpark behavior.
 
@@ -157,10 +137,6 @@ class TestSQLDMLParity(ParityTestBase):
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS delete_test")
 
-    @pytest.mark.skipif(
-        _is_pyspark_mode(),
-        reason="DELETE FROM TABLE is not supported in PySpark - this is a sparkless-specific feature",
-    )
     def test_delete_all_rows(self, spark):
         """Test DELETE without WHERE matches PySpark behavior.
 
