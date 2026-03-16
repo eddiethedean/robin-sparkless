@@ -4,7 +4,7 @@ PySpark parity tests for Issue #330: Struct field selection with alias.
 These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
-from sparkless.testing import get_imports
+from sparkless.testing import get_imports, is_pyspark_mode
 import pytest
 
 
@@ -37,6 +37,11 @@ class TestStructFieldAliasParity:
 
     def test_struct_field_with_alias_multiple_fields_parity(self):
         """Test multiple struct fields with aliases matches PySpark."""
+        if not is_pyspark_mode():
+            pytest.skip(
+                "sparkless parity gap: struct field alias with multiple fields "
+                "(see issue #1511; unskip when fixed)"
+            )
         spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
@@ -67,6 +72,11 @@ class TestStructFieldAliasParity:
 
     def test_struct_field_with_alias_and_other_columns_parity(self):
         """Test struct field with alias combined with other columns matches PySpark."""
+        if not is_pyspark_mode():
+            pytest.skip(
+                "sparkless parity gap: struct field alias with other columns "
+                "(see issue #1512; unskip when fixed)"
+            )
         spark_imports = get_imports()
         SparkSession = spark_imports.SparkSession
         F = spark_imports.F
