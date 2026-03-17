@@ -64,6 +64,11 @@ ignore_missing_imports = true
 module = ["pytest", "pytest.*", "_pytest", "_pytest.*"]
 follow_imports = "skip"
 
+# Optional at runtime (delta-spark); release job runs mypy without installing it.
+[[tool.mypy.overrides]]
+module = ["delta", "delta.*"]
+ignore_missing_imports = true
+
 
 [tool.pyright]
 pythonVersion = "3.8"
