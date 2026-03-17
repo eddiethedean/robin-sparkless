@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.5.2] - 2026-03-17
+
+### Fixed
+
+- **Parity tests** — Removed backend-conditional assertions/imports in tests, added a collection-time guard to prevent mode-based branching from hiding parity regressions, and tightened comparison helpers so mismatches surface.
+- **Delta overwrite parity** — `df.write.format("delta").mode("overwrite").saveAsTable(...)` now mirrors PySpark by raising an analysis-style error for the truncate-in-batch-mode scenario; related tests were made backend-agnostic.
+- **Security** — Updated `Cargo.lock` to pull in `lz4_flex 0.12.1` to address `RUSTSEC-2026-0041`.
+- **Packaging metadata** — Made the PyPI README source explicit for `sparkless` via `python/pyproject.toml`.
+
 ## [4.5.0] - 2026-03-16
 
 ### Fixed
