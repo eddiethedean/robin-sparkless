@@ -142,8 +142,12 @@ def compare_dataframes(
 
         # Compare data content if requested
         if check_data and mock_row_count > 0:
-            # Get expected columns for proper sorting
-            expected_columns = list(expected_data[0].keys()) if expected_data else []
+            # Get expected columns from first dict row (avoid IndexError/AttributeError)
+            first_expected_dict = next(
+                (r for r in expected_data if isinstance(r, dict)),
+                None,
+            )
+            expected_columns = list(first_expected_dict.keys()) if first_expected_dict else []
 
             # Sort rows for consistent comparison
             # Use correct columns for each dataset
@@ -171,12 +175,11 @@ def compare_dataframes(
             if has_duplicate_columns or has_duplicate_expected:
                 # Use position-based comparison for duplicate columns
                 columns_to_compare = []
-            elif len(mock_columns) > len(expected_data[0] if expected_data else []):
+            elif len(mock_columns) > len(expected_columns):
                 # Filter to only columns that exist in both
+                expected_keys = set(expected_columns)
                 columns_to_compare = [
-                    col
-                    for col in mock_columns
-                    if col in (expected_data[0].keys() if expected_data else [])
+                    col for col in mock_columns if col in expected_keys
                 ]
             elif (
                 len(mock_columns) == len(expected_columns)

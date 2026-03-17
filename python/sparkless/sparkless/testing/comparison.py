@@ -110,7 +110,12 @@ def compare_dataframes(
     try:
         actual_columns = actual.columns
         if isinstance(expected, dict):
-            expected_columns = list(expected_data[0].keys()) if expected_data else []
+            # Use first row that is a dict for column names; avoid IndexError/AttributeError
+            first_dict = next(
+                (r for r in expected_data if isinstance(r, dict)),
+                None,
+            )
+            expected_columns = list(first_dict.keys()) if first_dict else []
         else:
             expected_columns = expected.columns
 
