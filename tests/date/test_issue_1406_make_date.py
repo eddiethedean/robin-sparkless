@@ -1,12 +1,8 @@
 """Regression test for #1406: date.make_date parity."""
 
-from sparkless.testing import Mode, create_session, get_imports
 
-
-def test_make_date_parity():
-    imports = get_imports(Mode.SPARKLESS)
-    F = imports.F
-    spark = create_session(app_name="make_date_1406", mode=Mode.SPARKLESS)
+def test_make_date_parity(spark, spark_imports):
+    F = spark_imports.F
 
     df = spark.createDataFrame(
         [(2020, 1, 2), (2020, 2, 30), (None, 1, 2)],
@@ -23,5 +19,3 @@ def test_make_date_parity():
     assert vals[0].strftime("%Y-%m-%d") == "2020-01-02"
     assert vals[1] is None
     assert vals[2] is None
-
-    spark.stop()

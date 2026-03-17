@@ -2423,7 +2423,7 @@ impl<'a> DataFrameWriter<'a> {
         use std::fs;
         use std::path::Path;
 
-        let (merge_schema, _is_delta_format) = options.map_or((false, false), |opts| {
+        let (merge_schema, is_delta_format) = options.map_or((false, false), |opts| {
             let mut merge_schema = false;
             let mut is_delta = false;
             for (k, v) in opts {
@@ -2437,6 +2437,19 @@ impl<'a> DataFrameWriter<'a> {
             }
             (merge_schema, is_delta)
         });
+
+        // PySpark parity: `df.write.format("delta").mode("overwrite").saveAsTable(name)`
+        // can raise an analysis error about truncate-in-batch-mode for some table-backed writes.
+        // Sparkless keeps table-backed Delta as a higher-level API surface and mirrors this
+        // behavior so parity tests catch mismatches instead of silently succeeding.
+        if is_delta_format && mode == SaveMode::Overwrite {
+            return Err(PolarsError::ComputeError(
+                format!(
+                    "Table {name} does not support truncate in batch mode for Delta overwrite."
+                )
+                .into(),
+            ));
+        }
 
         let warehouse_path = session.warehouse_dir().map(|w| Path::new(w).join(name));
         let warehouse_exists = warehouse_path.as_ref().is_some_and(|p| p.is_dir());

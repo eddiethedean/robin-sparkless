@@ -1,12 +1,8 @@
 """Regression test for #1407: array_size / size parity on null and empty arrays."""
 
-from sparkless.testing import Mode, create_session, get_imports
 
-
-def test_array_size_parity():
-    imports = get_imports(Mode.SPARKLESS)
-    F = imports.F
-    spark = create_session(app_name="array_size_1407", mode=Mode.SPARKLESS)
+def test_array_size_parity(spark, spark_imports):
+    F = spark_imports.F
 
     df = spark.createDataFrame(
         [(["a", "b"],), ([],), (None,)],
@@ -18,5 +14,3 @@ def test_array_size_parity():
 
     # Current Sparkless behavior (and PySpark for size(null)): 2, 0, None.
     assert vals == [2, 0, None]
-
-    spark.stop()

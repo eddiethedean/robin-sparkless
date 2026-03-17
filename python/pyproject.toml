@@ -1,6 +1,6 @@
 [project]
 name = "sparkless"
-version = "4.5.1"
+version = "4.5.2"
 description = "PySpark-like DataFrame API in Python—no JVM. Uses robin-sparkless (Rust/Polars) as the execution engine."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = { text = "MIT" }

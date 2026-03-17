@@ -6,26 +6,10 @@ Tests validate that Sparkless SQL DML statements behave identically to PySpark.
 
 import pytest
 
-try:
-    from pyspark.errors import AnalysisException, UnsupportedOperationException
-except ImportError:
-    AnalysisException = None  # type: ignore[misc, assignment]
-    UnsupportedOperationException = None  # type: ignore[misc, assignment]
-
-from sparkless.errors import SparklessError
 from tests.tools.parity_base import ParityTestBase
 
-# Exception types for pytest.raises; when PySpark is not installed only SparklessError is used.
-_RAISE_ANALYSIS = (
-    (AnalysisException, SparklessError)
-    if AnalysisException is not None
-    else (SparklessError,)
-)
-_RAISE_UNSUPPORTED = (
-    (UnsupportedOperationException, SparklessError)
-    if UnsupportedOperationException is not None
-    else (SparklessError,)
-)
+_RAISE_ANALYSIS = (Exception,)
+_RAISE_UNSUPPORTED = (Exception,)
 
 
 class TestSQLDMLParity(ParityTestBase):

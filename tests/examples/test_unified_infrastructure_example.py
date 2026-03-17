@@ -5,11 +5,7 @@ This module shows how to write tests that work with both sparkless and PySpark.
 Set SPARKLESS_TEST_MODE=pyspark to run tests with PySpark backend.
 """
 
-from sparkless.testing import (
-    Mode,
-    get_imports,
-    assert_dataframes_equal,
-)
+from sparkless.testing import assert_dataframes_equal, get_imports
 
 
 class TestUnifiedInfrastructure:
@@ -30,9 +26,8 @@ class TestUnifiedInfrastructure:
         df = spark.createDataFrame([{"id": 1}])
         assert df.count() == 1
 
-        # spark_mode fixture provides the current Mode
-        assert spark_mode in [Mode.SPARKLESS, Mode.PYSPARK]
-        assert spark_mode.value in ["sparkless", "pyspark"]
+        # spark_mode fixture provides the current mode
+        assert spark_mode.value in ("sparkless", "pyspark")
 
 
 class TestUnifiedImports:

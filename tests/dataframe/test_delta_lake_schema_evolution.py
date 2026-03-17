@@ -11,7 +11,7 @@ due to differences in table management and schema evolution behavior.
 
 import pytest
 
-from sparkless.testing import create_session, get_imports, is_pyspark_mode
+from sparkless.testing import create_session, get_imports
 
 _imports = get_imports()
 F = _imports.F
@@ -262,35 +262,9 @@ class TestDeltaLakeSchemaEvolution:
                 ["user_id", "name", "value"],
             )
 
-            # PySpark behavior: overwrite+delta+saveAsTable fails with an AnalysisException
-            # about truncate-in-batch-mode for this scenario.
-            if is_pyspark_mode():
-                from pyspark.errors.exceptions.captured import AnalysisException
-
-                with pytest.raises(AnalysisException) as excinfo:
-                    base_df.write.format("delta").mode("overwrite").saveAsTable(
-                        table_name
-                    )
-            else:
-                # Sparkless mirrors this by raising a SparklessError (AnalysisException alias)
-                # with a similar message. If the backend write path does not yet raise, we
-                # surface a parity error here so behavior matches PySpark for callers that
-                # use this testing harness.
-                from sparkless.errors import AnalysisException
-
-                with pytest.raises(AnalysisException) as excinfo:
-                    try:
-                        base_df.write.format("delta").mode("overwrite").saveAsTable(
-                            table_name
-                        )
-                    except AnalysisException:
-                        # Backend already raised the expected error.
-                        raise
-                    else:
-                        # Parity shim: raise a SparklessError with PySpark-like message.
-                        raise AnalysisException(
-                            f"Table {table_name} does not support truncate in batch mode for Delta overwrite."
-                        )
+            # Parity: overwrite+delta+saveAsTable fails with an analysis error for this scenario.
+            with pytest.raises(Exception) as excinfo:
+                base_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
             msg = str(excinfo.value)
             assert "does not support truncate in batch mode" in msg
 

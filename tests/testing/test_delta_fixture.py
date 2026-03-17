@@ -159,8 +159,9 @@ def test_delta_saveAsTable(spark, spark_imports):
             [(1, "Alice"), (2, "Bob")],
             ["id", "name"],
         )
-        # Use saveAsTable without overwrite for new table
-        df.write.format("delta").saveAsTable(table_name)
+        # Use saveAsTable with explicit errorIfExists (new table) to avoid any
+        # overwrite/truncate semantics differences.
+        df.write.format("delta").mode("error").saveAsTable(table_name)
 
         # Read from catalog
         result = spark.table(table_name)

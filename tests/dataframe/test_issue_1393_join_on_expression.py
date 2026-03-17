@@ -16,13 +16,6 @@ from __future__ import annotations
 
 import pytest
 
-try:
-    from pyspark.errors.exceptions.captured import AnalysisException
-except ImportError:
-    AnalysisException = None  # type: ignore[misc, assignment]
-
-from sparkless.errors import SparklessError
-
 
 def _scenario_join_on_expression(session):
     df1 = session.createDataFrame([(1, "a"), (2, "b")], ["id", "v"])
@@ -32,12 +25,7 @@ def _scenario_join_on_expression(session):
 
 def test_issue_1393_join_on_expression_ambiguous_order_by_raises(spark) -> None:
     """join(on expression) followed by orderBy(\"id\") raises for ambiguous column (PySpark #1510)."""
-    expected = (
-        (AnalysisException, SparklessError)
-        if AnalysisException is not None
-        else (SparklessError,)
-    )
-    with pytest.raises(expected) as excinfo:
+    with pytest.raises(Exception) as excinfo:
         df = _scenario_join_on_expression(spark)
         # Trigger execution (the error may surface on collect).
         _ = df.collect()

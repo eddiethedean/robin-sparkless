@@ -9,7 +9,6 @@ when _alias_names was explicitly None (posexplode without alias), causing len(No
 https://github.com/eddiethedean/sparkless/issues/429
 """
 
-from sparkless.testing import Mode
 from sparkless.testing import get_imports
 
 
@@ -107,11 +106,10 @@ def test_posexplode_without_alias_single_element(spark, spark_mode):
     df = spark.createDataFrame([{"id": 1, "arr": [42]}])
     result = df.select("id", F_backend.posexplode("arr"))
     rows = result.collect()
-    assert len(rows) >= 1
+    assert len(rows) == 1
     assert "pos" in result.columns and "col" in result.columns
-    if spark_mode == Mode.PYSPARK and len(rows) == 1:
-        assert rows[0]["pos"] == 0
-        assert rows[0]["col"] == 42
+    assert rows[0]["pos"] == 0
+    assert rows[0]["col"] == 42
 
 
 def test_posexplode_without_alias_mixed_columns(spark, spark_mode):
