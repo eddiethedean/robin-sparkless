@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.5.0] - 2026-03-16
+
+### Fixed
+
+- **eqNullSafe string vs int** — Type-coercion test `eqnullsafe_string_column_vs_int_literal_coerces_like_pyspark` now expects Float64 (try_to_number + cast) and allows Polars null for `(null, value)` equality comparison, fixing CI Rust test failure.
+- **Python tests without PySpark** — Test suite runs without installing PySpark: optional imports in `test_issue_1393_join_on_expression.py`, `tests/parity/sql/test_dml.py`, and `tests/parity/sql/test_ddl.py` so CI and local runs pass with `pytest tests -m "not delta and not integration"`.
+- **DataFrame comparison** — `compare_dataframes` and parity comparison utils no longer assume the first expected row is a dict; expected columns are derived from the first dict row, avoiding `IndexError`/`AttributeError` when expected data is empty or has non-dict rows.
+
 ## [4.3.0] - 2026-03-12
 
 ### Added

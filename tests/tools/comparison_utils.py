@@ -147,7 +147,9 @@ def compare_dataframes(
                 (r for r in expected_data if isinstance(r, dict)),
                 None,
             )
-            expected_columns = list(first_expected_dict.keys()) if first_expected_dict else []
+            expected_columns = (
+                list(first_expected_dict.keys()) if first_expected_dict else []
+            )
 
             # Sort rows for consistent comparison
             # Use correct columns for each dataset

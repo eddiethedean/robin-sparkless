@@ -122,7 +122,11 @@ class TestSQLDDLParity(ParityTestBase):
         df = spark.createDataFrame(data, ["name", "age", "dept"])
         df.write.mode("overwrite").saveAsTable("ctas_no_hive_src")
 
-        _raise = (AnalysisException, SparklessError) if AnalysisException is not None else (SparklessError,)
+        _raise = (
+            (AnalysisException, SparklessError)
+            if AnalysisException is not None
+            else (SparklessError,)
+        )
         try:
             with pytest.raises(_raise) as excinfo:
                 spark.sql(

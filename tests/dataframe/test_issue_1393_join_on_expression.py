@@ -32,7 +32,11 @@ def _scenario_join_on_expression(session):
 
 def test_issue_1393_join_on_expression_ambiguous_order_by_raises(spark) -> None:
     """join(on expression) followed by orderBy(\"id\") raises for ambiguous column (PySpark #1510)."""
-    expected = (AnalysisException, SparklessError) if AnalysisException is not None else (SparklessError,)
+    expected = (
+        (AnalysisException, SparklessError)
+        if AnalysisException is not None
+        else (SparklessError,)
+    )
     with pytest.raises(expected) as excinfo:
         df = _scenario_join_on_expression(spark)
         # Trigger execution (the error may surface on collect).
