@@ -1,322 +1,237 @@
 # Sparkless
 
-**Test PySpark code at lightning speed—no JVM required**
+**PySpark-compatible DataFrames in Python—no JVM, no cluster.**  
+Drop-in replacement for local development and testing. Same API, 10–100× faster feedback.
 
-Python 3.8+ · PySpark 3.2–3.5 compatible · License: MIT
-
-**Current major release:** v4
-
-_No JVM · PySpark-like API · Rust/Polars engine · Fast local tests_
+- **Python 3.8+** · **PySpark 3.2–3.5 compatible** · MIT
 
 ---
 
-## Sparkless v3 vs v4
-
-| Version   | Backend              | Where it lives |
-| --------- | -------------------- | -------------- |
-| **Sparkless v3** | [Polars](https://pola.rs/) **Python** package | [github.com/eddiethedean/sparkless](https://github.com/eddiethedean/sparkless) — pure Python, `pip install sparkless` |
-| **Sparkless v4** | **Rust** crate ([robin-sparkless](https://github.com/eddiethedean/robin-sparkless)) using Polars in Rust | This repo — Python API + native extension; `pip install ./python` |
-
-**v4** keeps the same PySpark-like API but swaps the execution engine from Polars (Python) to **robin-sparkless** (Rust). You get a single native extension that talks to the Rust engine—no Polars Python dependency at runtime, and the same `from sparkless.sql import SparkSession` usage.
-
----
-
-## Why Sparkless?
-
-**Tired of waiting for Spark to initialize in every test?**
-
-This package (Sparkless v4) provides a PySpark-like API that runs **without the JVM**, using the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust crate as the execution engine. Use the same patterns as PySpark—just swap the import.
+## In 30 seconds
 
 ```python
-# Before (PySpark)
-from pyspark.sql import SparkSession
+# Swap the import—everything else stays the same.
+from sparkless.sql import SparkSession, functions as F
 
-# After (Sparkless)
-from sparkless.sql import SparkSession
+spark = SparkSession.builder.app_name("demo").get_or_create()
+df = spark.createDataFrame([{"x": 1}, {"x": 2}])
+df.filter(F.col("x") > 1).show()
 ```
-
-### Key Benefits
-
-| Feature                  | Description                                                |
-| ------------------------ | ---------------------------------------------------------- |
-| **No JVM**               | Pure Python + native extension; no Java required           |
-| **PySpark-like API**     | `SparkSession`, `DataFrame`, `Column`, `functions as F`     |
-| **Fast**                 | Polars-backed execution; no cluster or 30s startup          |
-| **Same code**             | Write tests and pipelines that work with PySpark or here   |
-| **Optional SQL**         | `spark.sql()`, temp views, `createOrReplaceTempView`       |
-| **Delta & IO**           | Read/write Parquet, CSV, JSON, Delta when enabled          |
-
-### Perfect For
-
-- **Unit testing** — Fast, isolated runs without Spark infrastructure
-- **CI/CD** — Reliable tests without JVM or resource leaks
-- **Local development** — Prototype and iterate without a cluster
-- **Learning** — PySpark-style API without setup complexity
-
----
-
-## Installation
-
-### From PyPI (recommended)
-
-Install the published `sparkless` package:
 
 ```bash
 pip install "sparkless>=4,<5"
 ```
 
-This installs the Python API and the prebuilt native extension wheels (when available for your platform).
-
-### From this repo (developing against robin-sparkless)
-
-From the repo root (after cloning [robin-sparkless](https://github.com/eddiethedean/robin-sparkless)):
-
-```bash
-pip install ./python
-```
-
-Or from this directory:
-
-```bash
-pip install .
-```
-
-For development (editable install with the native extension):
-
-```bash
-maturin develop
-```
+No Java, no Spark install, no 30-second session startup. Ideal for unit tests and CI.
 
 ---
 
-## Quick Start
+## Why Sparkless?
 
-### Basic Usage
+| If you… | Sparkless gives you… |
+|--------|------------------------|
+| **Test PySpark code** | Same `SparkSession` / `DataFrame` / `Column` API; tests run in seconds without a JVM |
+| **Run in CI** | No Java, no Spark distribution, no flaky cluster; just `pip install` and `pytest` |
+| **Develop locally** | Fast iteration with Parquet, CSV, JSON, Delta, SQL, temp views—no cluster needed |
+| **Need real PySpark sometimes** | Use `sparkless.testing`: one test suite, run with `sparkless` or `SPARKLESS_TEST_MODE=pyspark` |
+
+**v4** uses the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust engine (Polars under the hood). No Polars Python dependency at runtime—just a small native extension.
+
+---
+
+## Installation
+
+**From PyPI (recommended)**
+
+```bash
+pip install "sparkless>=4,<5"
+```
+
+Prebuilt wheels are provided for common platforms (Linux, macOS, Windows).  
+For **development** from the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) repo:
+
+```bash
+# From repo root
+pip install ./python
+
+# Or editable install (rebuilds native code on changes)
+cd python && maturin develop
+```
+
+**Optional extras**
+
+| Extra | Use case |
+|-------|----------|
+| `pip install "sparkless[dev]"` | pytest, pandas, hypothesis, pytest-xdist |
+| `pip install "sparkless[jdbc]"` | JDBC integration tests (testcontainers, drivers) |
+| `pip install "sparkless[pyspark]"` | Run tests against real PySpark (`SPARKLESS_TEST_MODE=pyspark`) |
+
+---
+
+## Quick start
+
+### Basic usage
 
 ```python
 from sparkless.sql import SparkSession, functions as F
 
-# Create session
 spark = SparkSession.builder.app_name("MyApp").get_or_create()
-
-# Your PySpark-style code
 data = [{"name": "Alice", "age": 25}, {"name": "Bob", "age": 30}]
 df = spark.createDataFrame(data)
 
-# Filter and select
-result = df.filter(F.col("age") > 25).select("name").collect()
-print(result)  # [Row(name='Bob')]
+df.filter(F.col("age") > 25).select("name").show()
+# +----+
+# |name|
+# +----+
+# | Bob|
+# +----+
 
-# Show the DataFrame
-df.show()
+result = df.filter(F.col("age") > 25).select("name").collect()
+# [Row(name='Bob')]
 ```
 
-### Testing Example
+### In tests (pytest)
 
 ```python
 import pytest
 from sparkless.sql import SparkSession, functions as F
 
-def test_data_pipeline():
-    """Test PySpark logic without a Spark cluster."""
-    spark = SparkSession.builder.app_name("TestApp").get_or_create()
-
-    data = [{"score": 95}, {"score": 87}, {"score": 92}]
-    df = spark.createDataFrame(data)
-
-    high_scores = df.filter(F.col("score") > 90)
-
-    assert high_scores.count() == 2
-    assert high_scores.agg(F.avg("score")).collect()[0][0] == 93.5
-
+def test_high_scores():
+    spark = SparkSession.builder.app_name("test").get_or_create()
+    df = spark.createDataFrame([{"score": 95}, {"score": 87}, {"score": 92}])
+    high = df.filter(F.col("score") > 90)
+    assert high.count() == 2
+    assert high.agg(F.avg("score")).collect()[0][0] == 93.5
     spark.stop()
 ```
 
----
-
-## Core Features
-
-### PySpark-Compatible API
-
-| Area           | What’s included                                                                 |
-| -------------- | ------------------------------------------------------------------------------- |
-| **SparkSession** | `builder`, `config`, `createDataFrame`, `create_dataframe`, `table`, `sql`, `range`, `read_csv`, `read_parquet`, `read_json`, `read_delta`, temp/global temp views, `catalog`, `stop` |
-| **DataFrame**  | `filter`, `select`, `with_column` / `withColumn`, `show`, `collect`, `count`, `group_by`, `order_by`, `limit`, `drop`, `distinct`, `join`, `union`, `union_all`, `write`, `create_or_replace_temp_view`, `columns` |
-| **Column**     | `alias`, `gt`, `ge`, `lt`, `le`, `eq`, `is_null`, `is_not_null`, `asc`, `desc`, `upper`, `lower`, `substr`, `length`, `trim`, `cast`; and `col("x") > 1`, `col("x") == 2` |
-| **GroupedData** | `count`, `sum`, `avg`, `min`, `max`, `agg`, `pivot`                            |
-| **Reader/Writer** | `option`, `options`, `format`, `load`, `parquet`, `csv`, `json`, `table`, `delta`, `jdbc`; `mode`, `partition_by`, `save`, `save_as_table` |
-| **JDBC** | Read/write external databases: `spark.read.jdbc(url, table, properties)`, `df.write.jdbc(...)`. Supports PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2. PySpark-compatible options: `sessionInitStatement`, `queryTimeout`, `batchsize`, `truncate`, all save modes |
-| **Functions**  | `col`, `lit`, `when`/`then`/`otherwise`, `upper`, `lower`, `substring`, `trim`, `cast`, `count`, `sum`, `avg`, `min`, `max`, and many more in `sparkless.sql.functions` |
-
-Full parity status and known differences from PySpark are documented in the main repo: [PYSPARK_DIFFERENCES.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md) and [PARITY_STATUS.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PARITY_STATUS.md).
-
-### SQL Support
+### SQL and temp views
 
 ```python
 df = spark.createDataFrame([{"name": "Alice", "salary": 50000}, {"name": "Bob", "salary": 60000}])
 df.createOrReplaceTempView("employees")
 
-result = spark.sql("SELECT name, salary FROM employees WHERE salary > 50000")
-result.show()
+spark.sql("SELECT name, salary FROM employees WHERE salary > 50000").show()
 ```
 
-### JDBC / Database Support
-
-Read from and write to external databases using PySpark-compatible JDBC API:
+### JDBC (PostgreSQL, SQLite, MySQL, etc.)
 
 ```python
-# Read from PostgreSQL
+# Read
 url = "jdbc:postgresql://localhost:5432/mydb"
-props = {"user": "admin", "password": "secret"}
-df = spark.read.jdbc(url=url, table="users", properties=props)
+df = spark.read.jdbc(url=url, table="users", properties={"user": "u", "password": "p"})
 
-# Or use the format API with options
-df = (spark.read
-    .format("jdbc")
-    .option("url", url)
-    .option("dbtable", "users")
-    .option("sessionInitStatement", "SET timezone='UTC'")
-    .options(props)
-    .load("."))
-
-# Write back with batching
-df.write.jdbc(
-    url=url,
-    table="users_backup",
-    properties={"batchsize": "5000", **props},
-    mode="overwrite"
-)
-
-# SQLite (file-based, no server required)
-df = spark.read.jdbc(url="jdbc:sqlite:/path/to/db.sqlite", table="my_table", properties={})
+# Write
+df.write.jdbc(url=url, table="users_backup", properties={"user": "u", "password": "p"}, mode="overwrite")
 ```
 
-Supported databases: PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2.
-
-### Lazy Evaluation
-
-Transformations are queued; execution happens on actions (`collect()`, `count()`, `show()`), matching PySpark’s model.
+Supported: PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2. Same options as PySpark (`sessionInitStatement`, `batchsize`, `truncate`, etc.).
 
 ---
 
-## Backend (v4)
+## API at a glance
 
-Sparkless v4 is the **Python face** of the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust crate. The Python package wraps a native extension (`sparkless._native`) built from the **sparkless-native** crate, which calls into **robin-sparkless** (Polars in Rust). There is no JVM and no Polars Python dependency—execution is entirely in the Rust engine.
+| Area | Supported |
+|------|-----------|
+| **SparkSession** | `builder`, `createDataFrame`, `table`, `sql`, `range`, `read_csv` / `read_parquet` / `read_json` / `read_delta`, temp/global temp views, `catalog`, `stop` |
+| **DataFrame** | `filter`, `select`, `withColumn`, `show`, `collect`, `count`, `groupBy`, `orderBy`, `limit`, `drop`, `distinct`, `join`, `union`, `unionByName`, `write`, `createOrReplaceTempView` |
+| **Column / functions** | `col`, `lit`, `when`/`then`/`otherwise`, comparison/aggregation/string/window functions; `F.col("x") > 1`, `F.upper("name")`, etc. |
+| **GroupedData** | `count`, `sum`, `avg`, `min`, `max`, `agg`, `pivot` |
+| **Read/Write** | Parquet, CSV, JSON, Delta; `saveAsTable`; JDBC with standard options |
+
+Detailed parity and differences: [PYSPARK_DIFFERENCES.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md), [PARITY_STATUS.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PARITY_STATUS.md).
 
 ---
 
-## Testing with sparkless.testing (new in v4.4)
+## Dual-mode testing (sparkless + PySpark)
 
-The `sparkless.testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
+Use **sparkless.testing** to run the same tests with the sparkless backend (fast) or real PySpark (parity check).
 
-### Quick Setup
+**1. Register the plugin** (e.g. in `conftest.py`):
 
 ```python
-# conftest.py
 pytest_plugins = ["sparkless.testing"]
 ```
 
-### Write Tests
+**2. Write tests** using the `spark` and optional `spark_imports` fixtures:
 
 ```python
 def test_filter(spark):
     df = spark.createDataFrame([{"id": 1}, {"id": 2}])
     assert df.filter(df.id > 1).count() == 1
 
-def test_with_functions(spark, spark_imports):
+def test_upper(spark, spark_imports):
     F = spark_imports.F
     df = spark.createDataFrame([{"name": "alice"}])
-    result = df.select(F.upper("name")).collect()
-    assert result[0][0] == "ALICE"
+    assert df.select(F.upper("name")).collect()[0][0] == "ALICE"
 ```
 
-### Run Tests
+**3. Run**
 
 ```bash
-# Fast local tests (sparkless backend)
+# Default: sparkless backend (no JVM)
 pytest tests/ -v
 
-# Validate against PySpark
+# Parallel
+pytest tests/ -n 12 -v
+
+# Against real PySpark (requires Java + pip install pyspark)
 SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
 ```
 
-### Delta Lake Support (v4.4.1+)
+**Fixtures:** `spark`, `spark_mode`, `spark_imports`, `isolated_session`, `table_prefix`  
+**Markers:** `@pytest.mark.sparkless_only`, `@pytest.mark.pyspark_only`, `@pytest.mark.delta`  
+**Helpers:** `assert_dataframes_equal()`, `compare_dataframes()`
 
-Enable Delta Lake for PySpark mode using the `@pytest.mark.delta` marker or environment variable:
+Full details: [TESTING_GUIDE.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/TESTING_GUIDE.md).
 
-```python
-import pytest
+---
 
-@pytest.mark.delta
-def test_delta_table(spark, spark_imports):
-    """This test has Delta Lake enabled in PySpark mode."""
-    F = spark_imports.F
-    df = spark.createDataFrame([{"id": 1, "value": 100}])
-    
-    # Delta operations work in PySpark mode
-    df.write.format("delta").mode("overwrite").save("/tmp/my_delta_table")
-    
-    result = spark.read.format("delta").load("/tmp/my_delta_table")
-    assert result.count() == 1
-```
+## Requirements
 
-Or enable Delta Lake for all tests:
-
-```bash
-SPARKLESS_ENABLE_DELTA=1 SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
-```
-
-### Features
-
-- **Fixtures:** `spark`, `spark_mode`, `spark_imports`, `isolated_session`, `table_prefix`
-- **Markers:** `@pytest.mark.sparkless_only`, `@pytest.mark.pyspark_only`, `@pytest.mark.delta`
-- **Comparison:** `assert_dataframes_equal()`, `compare_dataframes()`
-- **Environment Variables:**
-  - `SPARKLESS_TEST_MODE` — `sparkless` (default) or `pyspark`
-  - `SPARKLESS_ENABLE_DELTA` — Enable Delta Lake in PySpark mode (`1`, `true`, `yes`)
-
-See the full [Testing Guide](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/TESTING_GUIDE.md) for complete documentation.
+- **Python 3.8+**
+- **Sparkless mode:** No Java or Spark required.
+- **PySpark mode** (optional): Java and `pip install pyspark` for `SPARKLESS_TEST_MODE=pyspark`.
 
 ---
 
 ## Development
 
 ```bash
-# Editable install with native extension
-maturin develop
-
-# Run tests (from repo root)
-pytest tests -v
-
-# With PySpark backend (requires Java + pyspark)
-SPARKLESS_TEST_MODE=pyspark pytest tests -v
+cd python
+maturin develop          # Editable install
+pytest tests -v          # From repo root: run tests (sparkless backend)
+SPARKLESS_TEST_MODE=pyspark pytest tests -v   # With PySpark
 ```
 
-Optional dev dependencies:
-
-```bash
-pip install -e "./python[dev]"
-```
-
-Packaging: `maturin build` in the `python/` directory produces wheels. See the main repo [README](https://github.com/eddiethedean/robin-sparkless) and [docs](https://github.com/eddiethedean/robin-sparkless/tree/main/docs) for Rust development, UDFs, and embedding.
+Package wheels: `maturin build` in `python/`.  
+Rust engine, UDFs, embedding: see the main [README](https://github.com/eddiethedean/robin-sparkless) and [docs](https://github.com/eddiethedean/robin-sparkless/tree/main/docs).
 
 ---
 
-## Known Limitations
+## Limitations
 
-- **UDFs:** Python callable UDFs are not yet exposed; use built-in functions and expressions. Rust UDFs can be registered in the engine (see [UDF_GUIDE.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/UDF_GUIDE.md)).
-- **Compatibility:** Some PySpark APIs or behaviors may differ; see [PYSPARK_DIFFERENCES.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md).
+- **UDFs:** Use built-in functions and expressions; Python UDFs are not exposed. Rust UDFs are supported in the engine ([UDF_GUIDE](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/UDF_GUIDE.md)).
+- **Compatibility:** Some APIs or behaviors differ from PySpark; see [PYSPARK_DIFFERENCES.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md).
 
 ---
 
-## License
+## Version history: v3 vs v4
 
-MIT — see [LICENSE](https://github.com/eddiethedean/robin-sparkless/blob/main/LICENSE) in the main repository.
+| | Sparkless v3 | Sparkless v4 (this package) |
+|--|--------------|-----------------------------|
+| **Backend** | Polars (Python) | robin-sparkless (Rust + Polars) |
+| **Repo** | [sparkless](https://github.com/eddiethedean/sparkless) | [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) |
+| **Install** | `pip install sparkless` | `pip install "sparkless>=4,<5"` or `pip install ./python` |
+| **Runtime** | Polars Python | Native extension only; no Polars Python |
+
+Same `from sparkless.sql import SparkSession` in both. v4 is the current major release.
 
 ---
 
 ## Links
 
-- **Repository (this package):** [github.com/eddiethedean/robin-sparkless](https://github.com/eddiethedean/robin-sparkless) — Rust engine + Python bindings
-- **Sparkless v3 (Polars Python backend):** [github.com/eddiethedean/sparkless](https://github.com/eddiethedean/sparkless)
-- **Documentation:** [robin-sparkless.readthedocs.io](https://robin-sparkless.readthedocs.io/)
+- **This repo:** [github.com/eddiethedean/robin-sparkless](https://github.com/eddiethedean/robin-sparkless) — Rust engine + Python package
+- **Docs:** [robin-sparkless.readthedocs.io](https://robin-sparkless.readthedocs.io/)
+- **Sparkless v3:** [github.com/eddiethedean/sparkless](https://github.com/eddiethedean/sparkless)  
+- **License:** MIT ([LICENSE](https://github.com/eddiethedean/robin-sparkless/blob/main/LICENSE) in main repo)
