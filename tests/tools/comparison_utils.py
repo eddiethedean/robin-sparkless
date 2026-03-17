@@ -666,23 +666,6 @@ def _compare_values(
                 # For large values or large differences, use a more relaxed tolerance
                 effective_tolerance = max(tolerance, 1e-4)
 
-            # Special handling for tan function near π/2 (large values with precision differences)
-            # DuckDB and PySpark may have slightly different implementations
-            if abs(expected_num) > 1000 and "tan" in context.lower():
-                # For tan values > 1000, allow up to 1% relative difference
-                relative_diff = abs(mock_num - expected_num) / abs(expected_num)
-                if relative_diff < 0.01:
-                    return True, ""
-
-            # Special handling for months_between function - calculation differences
-            # DuckDB AGE() and PySpark calculation differ slightly
-            if (
-                "months_between" in context.lower()
-                and abs(mock_num - expected_num) < 0.5
-            ):
-                # Allow up to 0.5 month difference for months_between
-                return True, ""
-
             if math.isclose(
                 mock_num,
                 expected_num,

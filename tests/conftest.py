@@ -15,6 +15,7 @@ import re
 import sys
 import tempfile
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -335,6 +336,66 @@ def pytest_collection_modifyitems(
     All tests run in both sparkless and pyspark mode by default. Tests must not
     branch on backend; use the same scenario and logic for each (spark + spark_imports).
     """
+    # Enforce: no backend-conditional logic or backend-only imports in test modules.
+    # If a behavior differs, we want the test to fail in sparkless mode (parity signal),
+    # not to branch and hide the discrepancy.
+    allowlist = {
+        Path(__file__).resolve(),
+        (Path(__file__).resolve().parent / "sql" / "conftest.py").resolve(),
+        (Path(__file__).resolve().parent / "unit" / "test_sparkless_testing.py").resolve(),
+    }
+
+    # Collect unique test file paths from collected items.
+    test_files: set[Path] = set()
+    for item in items:
+        p = Path(str(getattr(item, "fspath", ""))).resolve()
+        if p.name.startswith("test_") and p.suffix == ".py":
+            test_files.add(p)
+
+    # Patterns we explicitly forbid in tests (not in harness/utility modules).
+    forbidden_exprs = [
+        # Backend branching on spark_mode / Mode
+        re.compile(r"\bif\s+spark_mode\b"),
+        re.compile(r"\bspark_mode\s*=="),
+        re.compile(r"\bspark_mode\s*!="),
+        re.compile(r"\bMode\.(PYSPARK|SPARKLESS)\b"),
+        # Backend-only markers
+        re.compile(r"@pytest\.mark\.(pyspark_only|sparkless_only)\b"),
+    ]
+    forbidden_import_pyspark = re.compile(r"^\s*(from|import)\s+pyspark\b")
+    forbidden_import_sparkless = re.compile(r"^\s*(from|import)\s+sparkless\b")
+
+    violations: list[str] = []
+    for path in sorted(test_files):
+        if path in allowlist:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            # If we can't read a test file, don't block collection; let pytest report it.
+            continue
+
+        # Check forbidden expressions anywhere in file.
+        for rx in forbidden_exprs:
+            if rx.search(text):
+                violations.append(f"{path}: forbidden pattern `{rx.pattern}`")
+
+        # Check imports line-by-line for better precision/allowlisting.
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if forbidden_import_pyspark.search(line):
+                violations.append(f"{path}:{lineno}: forbidden import `{line.strip()}`")
+
+            # Disallow importing sparkless directly in tests. Allow sparkless.testing (harness).
+            if forbidden_import_sparkless.search(line) and "sparkless.testing" not in line:
+                violations.append(f"{path}:{lineno}: forbidden import `{line.strip()}`")
+
+    if violations:
+        msg = (
+            "Backend-branching/import violations found in tests. "
+            "Tests must be backend-agnostic and assert PySpark behavior with identical logic.\n\n"
+            + "\n".join(sorted(set(violations)))
+        )
+        raise pytest.UsageError(msg)
 
 
 def pytest_report_header(config: pytest.Config) -> list[str]:

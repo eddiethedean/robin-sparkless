@@ -14,7 +14,6 @@ https://github.com/eddiethedean/sparkless/issues/441
 
 import pytest
 
-from sparkless.testing import Mode
 from sparkless.testing import get_imports
 
 
@@ -64,31 +63,6 @@ def test_map_column_subscript_in_select(spark, spark_mode):
     rows = result.collect()
 
     assert rows[0]["val"] == 10
-
-
-def test_map_column_subscript_exact_issue_441_with_int_keys_pyspark(spark, spark_mode):
-    """Exact issue #441 scenario: createDataFrame with int-keyed map (PySpark only).
-
-    Polars createDataFrame may not support int keys in map columns.
-    """
-    if spark_mode != Mode.PYSPARK:
-        pytest.skip("Int-keyed map in createDataFrame only tested with PySpark")
-
-    F = get_imports(spark_mode).F
-
-    df = spark.createDataFrame(
-        [
-            {"Name": "Alice", "Value": 1, "MapValue": {1: "Small", 2: "Medium"}},
-            {"Name": "Bob", "Value": 2, "MapValue": {2: "Medium", 3: "Large"}},
-        ]
-    )
-    df = df.withColumn("Size", F.col("MapValue")[F.col("Value")])
-    rows = df.collect()
-
-    assert rows[0]["Name"] == "Alice"
-    assert rows[0]["Size"] == "Small"
-    assert rows[1]["Name"] == "Bob"
-    assert rows[1]["Size"] == "Medium"
 
 
 def test_map_column_subscript_then_filter(spark, spark_mode):

@@ -15,7 +15,6 @@ https://github.com/eddiethedean/sparkless/issues/448
 import pytest
 
 from sparkless.testing import get_imports
-from sparkless.testing import Mode
 
 
 def _row_val(row, key):
@@ -132,29 +131,6 @@ def test_drop_duplicates_empty_list_column_explicit_schema(spark, spark_mode):
     assert names == {"Alice", "Bob"}
     for r in rows:
         assert list(_row_val(r, "Value")) == []
-
-
-# --- Mock-only: PySpark does not support dropDuplicates on MAP columns ---
-
-
-def test_drop_duplicates_with_dict_column_mock_only(spark, spark_mode):
-    """dropDuplicates with struct/map-like dict column. Mock only - PySpark raises
-    UNSUPPORTED_FEATURE.SET_OPERATION_ON_MAP_TYPE for MAP columns."""
-    if spark_mode == Mode.PYSPARK:
-        pytest.skip("PySpark does not support dropDuplicates on MAP type columns")
-    df = spark.createDataFrame(
-        [
-            {"id": 1, "meta": {"a": 1, "b": 2}},
-            {"id": 1, "meta": {"a": 1, "b": 2}},
-            {"id": 2, "meta": {"a": 1, "b": 2}},
-        ]
-    )
-    result = df.dropDuplicates()
-    rows = result.collect()
-
-    assert len(rows) == 2
-    ids = {_row_val(r, "id") for r in rows}
-    assert ids == {1, 2}
 
 
 # --- Additional robust tests (PySpark-compatible) ---

@@ -78,18 +78,13 @@ def test_posexplode_alias_chained_filter_orderby(spark, spark_mode):
     )
     rows = result.collect()
     assert "pos" in result.columns and "val" in result.columns
-    if spark_mode == Mode.PYSPARK:
-        assert len(rows) == 4  # pos 1,2 for A and pos 1,2 for B
-        assert [(r["name"], r["pos"], r["val"]) for r in rows] == [
-            ("A", 1, 2),
-            ("A", 2, 3),
-            ("B", 1, 5),
-            ("B", 2, 6),
-        ]
-    else:
-        assert len(rows) >= 1
-        for r in rows:
-            assert r["pos"] is not None and r["val"] is not None
+    assert len(rows) == 4  # pos 1,2 for A and pos 1,2 for B
+    assert [(r["name"], r["pos"], r["val"]) for r in rows] == [
+        ("A", 1, 2),
+        ("A", 2, 3),
+        ("B", 1, 5),
+        ("B", 2, 6),
+    ]
 
 
 def test_posexplode_alias_empty_array(spark, spark_mode):
@@ -103,16 +98,12 @@ def test_posexplode_alias_empty_array(spark, spark_mode):
     )
     result = df.select("id", F_backend.posexplode("arr").alias("pos", "val"))
     rows = result.collect()
-    if spark_mode == Mode.PYSPARK:
-        assert len(rows) == 2  # empty array yields 0 rows; id=2 yields 2 rows
-        by_id = {r["id"]: [] for r in rows}
-        for r in rows:
-            by_id[r["id"]].append((r["pos"], r["val"]))
-        assert 2 in by_id
-        assert by_id[2] == [(0, 10), (1, 20)]
-    else:
-        assert len(rows) >= 1
-        assert "pos" in result.columns and "val" in result.columns
+    assert len(rows) == 2  # empty array yields 0 rows; id=2 yields 2 rows
+    by_id = {r["id"]: [] for r in rows}
+    for r in rows:
+        by_id[r["id"]].append((r["pos"], r["val"]))
+    assert set(by_id.keys()) == {2}
+    assert by_id[2] == [(0, 10), (1, 20)]
 
 
 def test_posexplode_alias_single_element(spark, spark_mode):
@@ -121,7 +112,7 @@ def test_posexplode_alias_single_element(spark, spark_mode):
     df = spark.createDataFrame([{"id": 1, "arr": [99]}])
     result = df.select("id", F_backend.posexplode("arr").alias("pos", "val"))
     rows = result.collect()
-    assert len(rows) >= 1
+    assert len(rows) == 1
     assert rows[0]["pos"] == 0 and rows[0]["val"] == 99
     assert rows[0]["pos"] is not None and rows[0]["val"] is not None
 
@@ -133,11 +124,10 @@ def test_posexplode_alias_mixed_columns(spark, spark_mode):
     result = df.select("a", F_backend.posexplode("arr").alias("pos", "val"), "b")
     rows = result.collect()
     assert result.columns == ["a", "pos", "val", "b"]
-    if spark_mode == Mode.PYSPARK:
-        assert len(rows) == 2
-        assert rows[0]["a"] == "x" and rows[0]["b"] == 10
-        assert rows[0]["pos"] == 0 and rows[0]["val"] == 1
-        assert rows[1]["pos"] == 1 and rows[1]["val"] == 2
+    assert len(rows) == 2
+    assert rows[0]["a"] == "x" and rows[0]["b"] == 10
+    assert rows[0]["pos"] == 0 and rows[0]["val"] == 1
+    assert rows[1]["pos"] == 1 and rows[1]["val"] == 2
 
 
 def test_posexplode_outer_alias_returns_exploded_rows(spark, spark_mode):
@@ -150,13 +140,12 @@ def test_posexplode_outer_alias_returns_exploded_rows(spark, spark_mode):
     result = df.select("id", F_backend.posexplode_outer("arr").alias("pos", "val"))
     rows = result.collect()
     assert "pos" in result.columns and "val" in result.columns
-    if spark_mode == Mode.PYSPARK:
-        assert len(rows) >= 3  # 2 from id=1, 1 from id=2 (null)
-        by_id = {}
-        for r in rows:
-            by_id.setdefault(r["id"], []).append((r["pos"], r["val"]))
-        assert (0, 10) in by_id[1] and (1, 20) in by_id[1]
-        assert 2 in by_id
+    assert len(rows) == 3  # 2 from id=1, 1 from id=2 (null)
+    by_id: dict[int, list[tuple[object, object]]] = {}
+    for r in rows:
+        by_id.setdefault(r["id"], []).append((r["pos"], r["val"]))
+    assert by_id[1] == [(0, 10), (1, 20)]
+    assert by_id[2] == [(None, None)]
 
 
 def test_posexplode_alias_string_array(spark, spark_mode):
