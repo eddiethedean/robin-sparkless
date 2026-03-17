@@ -12,8 +12,6 @@ Tests are written PySpark-first: run with PySpark, then mock:
 https://github.com/eddiethedean/sparkless/issues/448
 """
 
-import pytest
-
 from sparkless.testing import get_imports
 
 

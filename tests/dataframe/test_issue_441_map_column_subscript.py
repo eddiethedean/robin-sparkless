@@ -12,8 +12,6 @@ Run in PySpark mode first, then mock mode:
 https://github.com/eddiethedean/sparkless/issues/441
 """
 
-import pytest
-
 from sparkless.testing import get_imports
 
 

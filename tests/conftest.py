@@ -342,7 +342,9 @@ def pytest_collection_modifyitems(
     allowlist = {
         Path(__file__).resolve(),
         (Path(__file__).resolve().parent / "sql" / "conftest.py").resolve(),
-        (Path(__file__).resolve().parent / "unit" / "test_sparkless_testing.py").resolve(),
+        (
+            Path(__file__).resolve().parent / "unit" / "test_sparkless_testing.py"
+        ).resolve(),
     }
 
     # Collect unique test file paths from collected items.
@@ -386,7 +388,10 @@ def pytest_collection_modifyitems(
                 violations.append(f"{path}:{lineno}: forbidden import `{line.strip()}`")
 
             # Disallow importing sparkless directly in tests. Allow sparkless.testing (harness).
-            if forbidden_import_sparkless.search(line) and "sparkless.testing" not in line:
+            if (
+                forbidden_import_sparkless.search(line)
+                and "sparkless.testing" not in line
+            ):
                 violations.append(f"{path}:{lineno}: forbidden import `{line.strip()}`")
 
     if violations:
