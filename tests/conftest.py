@@ -16,6 +16,7 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -252,12 +253,21 @@ def spark(request: pytest.FixtureRequest):
     if hasattr(request, "node") and hasattr(request.node, "name"):
         test_name = f"test_{request.node.name[:50]}"
 
+    # For Delta-marked tests, provide an explicit warehouse directory so sparkless
+    # has a stable disk location for table-backed Delta operations like saveAsTable.
+    warehouse_dir = None
+    extra_config = {}
+    if enable_delta and mode == Mode.SPARKLESS:
+        warehouse_dir = tempfile.mkdtemp(prefix="sparkless_warehouse_")
+        extra_config["spark.sql.warehouse.dir"] = warehouse_dir
+
     try:
         session = create_session(
             app_name=test_name,
             mode=mode,
             enable_delta=enable_delta,
             enable_hive=enable_hive if mode == Mode.PYSPARK else False,
+            **extra_config,
         )
     except (ImportError, RuntimeError) as e:
         error_msg = str(e)
@@ -277,6 +287,8 @@ def spark(request: pytest.FixtureRequest):
     with contextlib.suppress(BaseException):
         session.stop()
     gc.collect()
+    if warehouse_dir is not None:
+        shutil.rmtree(warehouse_dir, ignore_errors=True)
 
 
 @pytest.fixture

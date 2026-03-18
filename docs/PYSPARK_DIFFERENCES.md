@@ -49,7 +49,7 @@ This document lists **intentional or known divergences** from PySpark semantics 
 - **Supported**: Read by path/version, overwrite, and append. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.2.
 - **read_delta(name_or_path)**: If the argument looks like a path (contains `/` or `\\`, or path exists), reads from Delta on disk. Otherwise treats it as a **table name** and returns the in-memory table (same resolution as `spark.table`: temp view first, then saved table). So you can `df.write_delta_table("t")` then `spark.read_delta("t")` without the delta feature.
 - **Unsupported (tracked in #152)**: Schema evolution (e.g. add columns, change types under Delta rules) and MERGE (upsert with whenMatchedUpdate/whenNotMatchedInsert). Implement when Delta usage requires them.
- - **Overwrite + `saveAsTable` truncate-in-batch-mode (#1502)**: PySpark raises an `AnalysisException` when calling `df.write.format("delta").mode("overwrite").saveAsTable(...)` in scenarios where Delta does not support truncate-in-batch-mode; sparkless mirrors this by surfacing a `SparklessError` with a message containing `"does not support truncate in batch mode"` for the same pattern.
+- **Overwrite + `saveAsTable` truncate-in-batch-mode (#1502, #1522)**: Some Spark+Delta setups raise an analysis error for `df.write.format("delta").mode("overwrite").saveAsTable(existing_table)` (table does not support truncate in batch mode). In this repo’s current PySpark test environment (Spark + `delta-spark`), overwrite-to-table succeeds; sparkless implements overwrite by **writing a Delta table under the warehouse path and re-registering the table**, so it matches the “succeeds” behavior and fixes #1522.
 
 ## Array
 

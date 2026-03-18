@@ -2438,21 +2438,75 @@ impl<'a> DataFrameWriter<'a> {
             (merge_schema, is_delta)
         });
 
-        // PySpark parity: `df.write.format("delta").mode("overwrite").saveAsTable(name)`
-        // can raise an analysis error about truncate-in-batch-mode for some table-backed writes.
-        // Sparkless keeps table-backed Delta as a higher-level API surface and mirrors this
-        // behavior so parity tests catch mismatches instead of silently succeeding.
-        if is_delta_format && mode == SaveMode::Overwrite {
-            return Err(PolarsError::ComputeError(
-                format!(
-                    "Table {name} does not support truncate in batch mode for Delta overwrite."
-                )
-                .into(),
-            ));
+        // Warehouse paths (disk-backed saveAsTable). For schema-qualified names, allow both:
+        // - "{warehouse}/{schema.table}" (single dir)
+        // - "{warehouse}/{schema}/{table}" (schema as subdir)
+        let warehouse_paths: Vec<std::path::PathBuf> = session
+            .warehouse_dir()
+            .map(|w| {
+                let wh = Path::new(w);
+                let mut out = Vec::with_capacity(2);
+                out.push(wh.join(name));
+                if name.contains('.') {
+                    out.push(wh.join(name.replace('.', std::path::MAIN_SEPARATOR_STR)));
+                }
+                out
+            })
+            .unwrap_or_default();
+        let warehouse_exists = warehouse_paths.iter().any(|p| p.is_dir());
+
+        // Delta saveAsTable is warehouse-backed. Implement overwrite/append by writing a Delta
+        // table under {warehouse}/{name} and registering the loaded result in the session.
+        if is_delta_format {
+            #[cfg(feature = "delta")]
+            {
+                let target = warehouse_paths.first().ok_or_else(|| {
+                    PolarsError::InvalidOperation(
+                        "saveAsTable(format=delta) requires spark.sql.warehouse.dir to be set."
+                            .into(),
+                    )
+                })?;
+
+                match mode {
+                    SaveMode::Ignore if session.saved_table_exists(name) || warehouse_exists => {
+                        return Ok(());
+                    }
+                    SaveMode::ErrorIfExists
+                        if session.saved_table_exists(name) || warehouse_exists =>
+                    {
+                        return Err(PolarsError::InvalidOperation(
+                            format!(
+                                "Table or view '{name}' already exists. SaveMode is ErrorIfExists."
+                            )
+                            .into(),
+                        ));
+                    }
+                    SaveMode::Append => {
+                        let pl_df = self.df.collect_inner()?.as_ref().clone();
+                        crate::delta::write_delta(&pl_df, target, false, merge_schema)?;
+                        let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
+                        session.register_table(name, loaded);
+                        return Ok(());
+                    }
+                    SaveMode::Overwrite | SaveMode::Ignore | SaveMode::ErrorIfExists => {
+                        let pl_df = self.df.collect_inner()?.as_ref().clone();
+                        crate::delta::write_delta(&pl_df, target, true, false)?;
+                        let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
+                        session.register_table(name, loaded);
+                        return Ok(());
+                    }
+                }
+            }
+            #[cfg(not(feature = "delta"))]
+            {
+                let _ = (warehouse_paths, warehouse_exists, merge_schema);
+                return Err(PolarsError::InvalidOperation(
+                    "saveAsTable(format=delta) requires the delta feature to be enabled.".into(),
+                ));
+            }
         }
 
-        let warehouse_path = session.warehouse_dir().map(|w| Path::new(w).join(name));
-        let warehouse_exists = warehouse_path.as_ref().is_some_and(|p| p.is_dir());
+        let warehouse_path = warehouse_paths.first().cloned();
 
         fn persist_to_warehouse(
             df: &crate::dataframe::DataFrame,
@@ -2494,30 +2548,43 @@ impl<'a> DataFrameWriter<'a> {
             SaveMode::Append => {
                 let existing_pl = if let Some(existing) = session.get_saved_table(name) {
                     existing.collect_inner()?.as_ref().clone()
-                } else if let (Some(ref p), true) = (warehouse_path.as_ref(), warehouse_exists) {
-                    // Read from warehouse (data.parquet convention)
-                    let data_file = p.join("data.parquet");
-                    let read_path = if data_file.is_file() {
-                        data_file.as_path()
-                    } else {
-                        p.as_ref()
-                    };
-                    let pl_path =
-                        polars::prelude::PlRefPath::try_from_path(read_path).map_err(|e| {
+                } else if warehouse_exists {
+                    // Read from warehouse (data.parquet convention). For schema-qualified names,
+                    // look in both "{warehouse}/{schema.table}" and "{warehouse}/{schema}/{table}".
+                    let mut loaded: Option<polars::prelude::DataFrame> = None;
+                    for p in &warehouse_paths {
+                        if !p.is_dir() {
+                            continue;
+                        }
+                        let data_file = p.join("data.parquet");
+                        let read_path = if data_file.is_file() {
+                            data_file.as_path()
+                        } else {
+                            p.as_path()
+                        };
+                        let pl_path = polars::prelude::PlRefPath::try_from_path(read_path)
+                            .map_err(|e| {
+                                PolarsError::ComputeError(
+                                    format!("saveAsTable append: path: {e}").into(),
+                                )
+                            })?;
+                        let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())
+                            .map_err(|e| {
+                                PolarsError::ComputeError(
+                                    format!("saveAsTable append: read warehouse: {e}").into(),
+                                )
+                            })?;
+                        loaded = Some(lf.collect().map_err(|e| {
                             PolarsError::ComputeError(
-                                format!("saveAsTable append: path: {e}").into(),
+                                format!("saveAsTable append: collect: {e}").into(),
                             )
-                        })?;
-                    let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default()).map_err(
-                        |e| {
-                            PolarsError::ComputeError(
-                                format!("saveAsTable append: read warehouse: {e}").into(),
-                            )
-                        },
-                    )?;
-                    lf.collect().map_err(|e| {
+                        })?);
+                        break;
+                    }
+                    loaded.ok_or_else(|| {
                         PolarsError::ComputeError(
-                            format!("saveAsTable append: collect: {e}").into(),
+                            format!("saveAsTable append: warehouse table '{name}' not found")
+                                .into(),
                         )
                     })?
                 } else {

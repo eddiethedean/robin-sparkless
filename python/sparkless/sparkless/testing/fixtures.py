@@ -10,7 +10,9 @@ import contextlib
 import gc
 import os
 import re
+import shutil
 import sys
+import tempfile
 import uuid
 from typing import Any, Dict, Generator
 
@@ -164,13 +166,25 @@ def spark(request: pytest.FixtureRequest) -> Generator[Any, None, None]:
     if hasattr(request, "node") and hasattr(request.node, "name"):
         test_name = f"test_{request.node.name[:50]}"
 
-    session = create_session(app_name=test_name, mode=mode, enable_delta=enable_delta)
+    # For Delta tests, always provide an explicit warehouse dir so table-backed operations like
+    # saveAsTable(format="delta") have a stable location in both modes.
+    warehouse_dir = None
+    extra_config: Dict[str, Any] = {}
+    if enable_delta:
+        warehouse_dir = tempfile.mkdtemp(prefix="sparkless_warehouse_")
+        extra_config["spark.sql.warehouse.dir"] = warehouse_dir
+
+    session = create_session(
+        app_name=test_name, mode=mode, enable_delta=enable_delta, **extra_config
+    )
 
     yield session
 
     with contextlib.suppress(BaseException):
         session.stop()
     gc.collect()
+    if warehouse_dir is not None:
+        shutil.rmtree(warehouse_dir, ignore_errors=True)
 
 
 @pytest.fixture
