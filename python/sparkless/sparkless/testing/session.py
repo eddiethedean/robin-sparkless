@@ -22,15 +22,6 @@ def _ensure_pyspark_submit_args_include_delta_packages() -> None:
     resolved and available at JVM startup.
     """
     try:
-        python_root = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
-        local_delta_jar = os.path.join(
-            python_root, "jars", "delta-spark_2.12-3.0.0.jar"
-        )
-        if not os.path.exists(local_delta_jar):
-            return
-
         submit_args = os.environ.get("PYSPARK_SUBMIT_ARGS", "").strip()
         packages_flag = "--packages"
         delta_pkg = "io.delta:delta-spark_2.12:3.0.0"
@@ -437,7 +428,7 @@ def _configure_delta(builder: Any) -> Any:
             from delta import configure_spark_with_delta_pip
 
             builder = configure_spark_with_delta_pip(builder)
-        except ImportError:
+        except Exception:
             try:
                 import importlib.metadata
 

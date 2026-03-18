@@ -8,6 +8,9 @@ import pytest
 
 from tests.tools.parity_base import ParityTestBase
 from sparkless.testing import is_pyspark_mode
+import uuid
+from pathlib import Path
+from urllib.parse import unquote
 
 
 class TestSQLDDLParity(ParityTestBase):
@@ -85,26 +88,44 @@ class TestSQLDDLParity(ParityTestBase):
                 "See https://github.com/eddiethedean/robin-sparkless/issues/1508 – "
                 "sparkless CTAS parity gap; unskip once sparkless matches PySpark."
             )
+        suffix = uuid.uuid4().hex[:8]
+        employees = f"employees_{suffix}"
+        it_employees = f"it_employees_{suffix}"
+
+        # Some Spark+Hive configs error on saveAsTable(overwrite) if the managed-table location
+        # already exists on disk (even when the metastore entry does not). Clean up best-effort.
+        try:
+            wh = spark.conf.get("spark.sql.warehouse.dir", "")
+            if isinstance(wh, str) and wh.startswith("file:"):
+                wh_path = Path(unquote(wh.removeprefix("file:"))).expanduser()
+                target = wh_path / employees
+                if target.exists():
+                    import shutil
+
+                    shutil.rmtree(target, ignore_errors=True)
+        except Exception:
+            pass
+
         data = [("Alice", 25, "IT"), ("Bob", 30, "HR"), ("Charlie", 35, "IT")]
         df = spark.createDataFrame(data, ["name", "age", "dept"])
-        df.write.mode("overwrite").saveAsTable("employees")
+        df.write.mode("overwrite").saveAsTable(employees)
 
         # With Hive support (enabled via @pytest.mark.hive), CTAS succeeds.
         spark.sql(
-            "CREATE TABLE IF NOT EXISTS it_employees AS SELECT name, age FROM employees WHERE dept = 'IT'"
+            f"CREATE TABLE IF NOT EXISTS {it_employees} AS SELECT name, age FROM {employees} WHERE dept = 'IT'"
         )
 
         # Verify table exists and has expected data
-        assert spark.catalog.tableExists("it_employees")
-        result = spark.sql("SELECT * FROM it_employees ORDER BY name")
+        assert spark.catalog.tableExists(it_employees)
+        result = spark.sql(f"SELECT * FROM {it_employees} ORDER BY name")
         rows = result.collect()
         assert len(rows) == 2
         assert rows[0]["name"] == "Alice" and rows[0]["age"] == 25
         assert rows[1]["name"] == "Charlie" and rows[1]["age"] == 35
 
         # Cleanup
-        spark.sql("DROP TABLE IF EXISTS employees")
-        spark.sql("DROP TABLE IF EXISTS it_employees")
+        spark.sql(f"DROP TABLE IF EXISTS {employees}")
+        spark.sql(f"DROP TABLE IF EXISTS {it_employees}")
 
     def test_create_table_with_select_fails_without_hive(self, spark):
         """Test that CREATE TABLE AS SELECT fails when Hive support is not enabled.

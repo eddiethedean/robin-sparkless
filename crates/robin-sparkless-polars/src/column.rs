@@ -2996,10 +2996,14 @@ impl Column {
     /// Number of elements in list (PySpark size / array_size). Returns Int32.
     pub fn array_size(&self) -> Column {
         use polars::prelude::*;
-        Self::from_expr(
-            self.expr().clone().list().len().cast(DataType::Int32),
-            Some("size".to_string()),
-        )
+        // PySpark behavior: size(null) returns -1 (not null).
+        // (Observed in PySpark 3.5.x; parity tests rely on this.)
+        let len_expr = self.expr().clone().list().len().cast(DataType::Int32);
+        let expr = when(self.expr().clone().is_null())
+            .then(lit(-1i32))
+            .otherwise(len_expr)
+            .cast(DataType::Int32);
+        Self::from_expr(expr, Some("size".to_string()))
     }
 
     /// Cardinality: number of elements in array/list (PySpark cardinality). Alias for array_size.

@@ -232,6 +232,7 @@ class TestDeltaLakeSchemaEvolution:
             pass
 
     @pytest.mark.delta
+    @pytest.mark.xdist_group(name="delta_serial")
     def test_delta_create_or_replace_table_as_select(self):
         """Delta saveAsTable overwrite parity: first create succeeds, overwrite existing can fail."""
         import uuid
