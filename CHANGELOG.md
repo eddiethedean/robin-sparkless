@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.5.3] - 2026-03-18
+
+### Fixed
+
+- **Delta overwrite parity** — `df.write.format("delta").mode("overwrite").saveAsTable(...)` now mirrors PySpark overwrite semantics by implementing overwrite as a warehouse-backed Delta write and re-registering the table (fixes #1522).
+- **Delta test stability** — Delta-marked tests now ensure a temporary `spark.sql.warehouse.dir` so table-backed `saveAsTable(format="delta")` works consistently across backends.
+
 ## [4.5.2] - 2026-03-17
 
 ### Fixed
