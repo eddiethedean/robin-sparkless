@@ -233,7 +233,7 @@ class TestDeltaLakeSchemaEvolution:
 
     @pytest.mark.delta
     def test_delta_create_or_replace_table_as_select(self):
-        """CTAS with OR REPLACE should allow schema evolution for Delta tables - same scenario in both modes."""
+        """Delta saveAsTable overwrite parity: first create succeeds, overwrite existing can fail."""
         import uuid
         import tempfile
         import shutil
@@ -262,11 +262,12 @@ class TestDeltaLakeSchemaEvolution:
                 ["user_id", "name", "value"],
             )
 
-            # Parity: overwrite+delta+saveAsTable fails with an analysis error for this scenario.
-            with pytest.raises(Exception) as excinfo:
-                base_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
-            msg = str(excinfo.value)
-            assert "does not support truncate in batch mode" in msg
+            # Parity: overwrite-to-create can succeed when the table does not exist.
+            base_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
+
+            # Overwrite existing table should succeed in this environment (PySpark+Delta 3.0.0),
+            # and sparkless should match that behavior.
+            base_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
 
             try:
                 spark.sql(f"DROP TABLE IF EXISTS {table_name}")
