@@ -2471,7 +2471,9 @@ impl<'a> DataFrameWriter<'a> {
                     SaveMode::Ignore if session.saved_table_exists(name) || warehouse_exists => {
                         return Ok(());
                     }
-                    SaveMode::ErrorIfExists if session.saved_table_exists(name) || warehouse_exists => {
+                    SaveMode::ErrorIfExists
+                        if session.saved_table_exists(name) || warehouse_exists =>
+                    {
                         return Err(PolarsError::InvalidOperation(
                             format!(
                                 "Table or view '{name}' already exists. SaveMode is ErrorIfExists."
@@ -2482,16 +2484,14 @@ impl<'a> DataFrameWriter<'a> {
                     SaveMode::Append => {
                         let pl_df = self.df.collect_inner()?.as_ref().clone();
                         crate::delta::write_delta(&pl_df, target, false, merge_schema)?;
-                        let loaded =
-                            crate::delta::read_delta(target, session.is_case_sensitive())?;
+                        let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
                         session.register_table(name, loaded);
                         return Ok(());
                     }
                     SaveMode::Overwrite | SaveMode::Ignore | SaveMode::ErrorIfExists => {
                         let pl_df = self.df.collect_inner()?.as_ref().clone();
                         crate::delta::write_delta(&pl_df, target, true, false)?;
-                        let loaded =
-                            crate::delta::read_delta(target, session.is_case_sensitive())?;
+                        let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
                         session.register_table(name, loaded);
                         return Ok(());
                     }
@@ -2562,8 +2562,8 @@ impl<'a> DataFrameWriter<'a> {
                         } else {
                             p.as_path()
                         };
-                        let pl_path =
-                            polars::prelude::PlRefPath::try_from_path(read_path).map_err(|e| {
+                        let pl_path = polars::prelude::PlRefPath::try_from_path(read_path)
+                            .map_err(|e| {
                                 PolarsError::ComputeError(
                                     format!("saveAsTable append: path: {e}").into(),
                                 )
@@ -2583,7 +2583,8 @@ impl<'a> DataFrameWriter<'a> {
                     }
                     loaded.ok_or_else(|| {
                         PolarsError::ComputeError(
-                            format!("saveAsTable append: warehouse table '{name}' not found").into(),
+                            format!("saveAsTable append: warehouse table '{name}' not found")
+                                .into(),
                         )
                     })?
                 } else {
