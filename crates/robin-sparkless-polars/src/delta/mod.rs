@@ -381,10 +381,6 @@ pub fn write_delta(
 
     let path = path.as_ref();
 
-    if df.height() == 0 {
-        return Ok(());
-    }
-
     // Create target directory before resolving URI so deltalake sees an existing path.
     if overwrite {
         if path.exists() {
