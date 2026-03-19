@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.5.4] - 2026-03-19
+
+### Fixed
+
+- **Delta empty table bootstrap** — `df.write.format("delta").mode("overwrite").saveAsTable(...)` now initializes a valid Delta table even when the input DataFrame is empty, so subsequent appends/readbacks work as expected (fixes #1524).
+
 ## [4.5.3] - 2026-03-18
 
 ### Fixed
