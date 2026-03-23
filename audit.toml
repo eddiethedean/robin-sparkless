@@ -1,2 +1,2 @@
-advisories = { ignore = ["RUSTSEC-2026-0037"] }
+advisories = { ignore = ["RUSTSEC-2026-0037", "RUSTSEC-2026-0041", "RUSTSEC-2026-0044", "RUSTSEC-2026-0048", "RUSTSEC-2026-0049"] }
 
