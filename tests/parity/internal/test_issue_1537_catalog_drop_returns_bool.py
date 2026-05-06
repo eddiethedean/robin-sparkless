@@ -12,7 +12,9 @@ def test_issue_1537_catalog_drop_temp_view_returns_bool(spark, spark_imports) ->
     assert spark.catalog.dropTempView("tmp_v") is False
 
 
-def test_issue_1537_catalog_drop_global_temp_view_returns_bool(spark, spark_imports) -> None:
+def test_issue_1537_catalog_drop_global_temp_view_returns_bool(
+    spark, spark_imports
+) -> None:
     _ = spark_imports
     df = spark.createDataFrame([(1,)], "v INT")
 
@@ -32,4 +34,3 @@ def test_issue_1537_catalog_drop_table_returns_bool(spark, spark_imports) -> Non
     df.write.saveAsTable("tbl_v")
     assert spark.catalog.dropTable("tbl_v") is True
     assert spark.catalog.dropTable("tbl_v") is False
-
