@@ -6,11 +6,15 @@ aliases for a single base exception type exposed by the native extension
 (e.g. in some tooling contexts), they fall back to `RuntimeError`.
 """
 
+# mypy: disable-error-code=no-redef
+
 from typing import Type
 
 try:
     # Native exception provided by the Rust extension.
-    from sparkless._native import SparklessError as SparklessError
+    from sparkless._native import SparklessError as _SparklessError
+
+    SparklessError = _SparklessError
 except ImportError:  # pragma: no cover - exercised implicitly in type-checking tools
     # Fallback used in environments without the native extension.
     SparklessError: Type[BaseException] = RuntimeError

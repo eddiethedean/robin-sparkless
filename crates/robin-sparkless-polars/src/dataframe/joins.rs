@@ -155,6 +155,21 @@ pub fn join(
     how: JoinType,
     options: JoinOptions,
 ) -> Result<DataFrame, PolarsError> {
+    fn unique_right_alias(base: &str, existing: &mut HashSet<String>) -> String {
+        let mut candidate = format!("{base}_right");
+        if existing.insert(candidate.clone()) {
+            return candidate;
+        }
+        let mut i = 1usize;
+        loop {
+            candidate = format!("{base}_right_{i}");
+            if existing.insert(candidate.clone()) {
+                return candidate;
+            }
+            i += 1;
+        }
+    }
+
     let JoinOptions {
         case_sensitive,
         coalesce_same_name_keys,
@@ -395,6 +410,43 @@ pub fn join(
     }
 
     let on_set: std::collections::HashSet<String> = left_key_names.iter().cloned().collect();
+    // Polars uses a single suffix for all overlapping column names in a join. In chained joins,
+    // a previous join may already have produced e.g. `B_right`, so a subsequent join that also
+    // needs to suffix `B` would attempt to create `B_right` again and fail with:
+    // "duplicate: column with name 'B_right' already exists" (issue #1534).
+    //
+    // Pick a suffix that will not collide with any existing left column names for all overlapping
+    // right-side columns in this join.
+    let join_suffix: String = {
+        let left_names: Vec<String> = left.columns()?.into_iter().collect();
+        let right_names: Vec<String> = right.columns()?.into_iter().collect();
+        let left_set: HashSet<String> = left_names.iter().cloned().collect();
+        let overlaps: Vec<&String> = right_names
+            .iter()
+            .filter(|n| left_set.contains(*n))
+            .filter(|n| !on_set.contains(n.as_str()))
+            .collect();
+        if overlaps.is_empty() {
+            "_right".to_string()
+        } else {
+            let mut i = 0usize;
+            loop {
+                let suffix = if i == 0 {
+                    "_right".to_string()
+                } else {
+                    format!("_right_{i}")
+                };
+                let collides = overlaps.iter().any(|name| {
+                    let candidate = format!("{name}{suffix}");
+                    left_set.contains(&candidate)
+                });
+                if !collides {
+                    break suffix;
+                }
+                i += 1;
+            }
+        }
+    };
     let polars_how: PlJoinType = match how {
         JoinType::Inner => PlJoinType::Inner,
         JoinType::Left => PlJoinType::Left,
@@ -459,6 +511,7 @@ pub fn join(
     let mut joined = JoinBuilder::new(left_lf)
         .with(right_lf)
         .how(polars_how)
+        .suffix(join_suffix.as_str())
         .left_on(&left_on_exprs)
         .right_on(&right_on_exprs)
         .coalesce(coalesce)
@@ -565,6 +618,7 @@ pub fn join(
             let left_struct = left.schema().ok();
             let right_struct = right.schema().ok();
             let mut exprs: Vec<Expr> = Vec::new();
+            let mut used_names: HashSet<String> = HashSet::new();
             for left_name in &left_names {
                 let matches: Vec<&String> = result_names_vec
                     .iter()
@@ -598,7 +652,9 @@ pub fn join(
                     Some(dt) => e.cast(dt),
                     None => e,
                 };
-                exprs.push(e.alias(left_name.as_str()));
+                let alias = left_name.as_str();
+                used_names.insert(alias.to_string());
+                exprs.push(e.alias(alias));
             }
             let mut right_non_key_pos = 0_usize;
             for right_name in &right_names {
@@ -621,7 +677,7 @@ pub fn join(
                                     .map(|f| data_type_to_polars_type(&f.data_type))
                             })
                             .or_else(|| right.get_column_dtype(right_name.as_str()));
-                        let alias_name = format!("{}_right", right_name);
+                        let alias_name = unique_right_alias(right_name.as_str(), &mut used_names);
                         let e = nth(result_idx as i64).as_expr();
                         let e = match dtype {
                             Some(dt) => e.cast(dt),
@@ -648,6 +704,7 @@ pub fn join(
                     Some(dt) => col(right_name.as_str()).cast(dt),
                     None => col(right_name.as_str()),
                 };
+                used_names.insert(right_name.clone());
                 exprs.push(e.alias(right_name.as_str()));
                 right_non_key_pos += 1;
             }
@@ -767,20 +824,25 @@ pub fn join(
         let result_schema = joined.collect_schema()?;
         let result_names: std::collections::HashSet<String> =
             result_schema.iter_names().map(|s| s.to_string()).collect();
+        let mut used: HashSet<String> = HashSet::new();
         let mut order: Vec<String> = Vec::new();
         for k in &left_key_names {
             order.push(k.clone());
+            used.insert(k.clone());
         }
         for n in &left_names {
             if !on_set.contains(n) {
                 order.push(n.clone());
+                used.insert(n.clone());
             }
         }
         for n in &right_names {
             let use_name = if left_names.iter().any(|l| l == n) {
-                format!("{n}_right")
-            } else {
+                unique_right_alias(n.as_str(), &mut used)
+            } else if used.insert(n.clone()) {
                 n.clone()
+            } else {
+                unique_right_alias(n.as_str(), &mut used)
             };
             if result_names.contains(&use_name) {
                 order.push(use_name);

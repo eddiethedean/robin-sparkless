@@ -15,6 +15,13 @@ ignore = [
     "RUSTSEC-2026-0044",
     "RUSTSEC-2026-0048",
     "RUSTSEC-2026-0049",
+    # rustls-webpki advisories pulled in via optional JDBC MSSQL (`tiberius` -> `tokio-rustls` -> `rustls`).
+    # Remove once that dependency chain upgrades to rustls-webpki >=0.103.13.
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    # rand unsound advisory (transitive; remove once dependencies upgrade).
+    "RUSTSEC-2026-0097",
 ]
 # Don't warn when ignored advisories aren't in the graph (e.g. when delta feature is off)
 unused-ignored-advisory = "allow"

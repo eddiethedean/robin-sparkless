@@ -362,7 +362,7 @@ class Row(tuple):
 
     # Note: `Row` supports name-based indexing (row["a"]) in addition to tuple indexing.
     # Keep the signature un-annotated so static checkers don't enforce tuple's overloads here.
-    def __getitem__(self, item):  # type: ignore[no-untyped-def]
+    def __getitem__(self, item):
         # PySpark parity: Row supports both positional and name-based indexing.
         if isinstance(item, str):
             # Sentinel Row from Row({..}) has no field metadata; accessing by name should raise
