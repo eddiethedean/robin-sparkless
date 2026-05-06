@@ -1305,10 +1305,22 @@ pub fn drop(
     columns: Vec<&str>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let resolved: Vec<String> = columns
-        .iter()
-        .map(|c| df.resolve_column_name(c))
-        .collect::<Result<Vec<_>, _>>()?;
+    // PySpark behavior: dropping a non-existent column is a no-op (idempotent).
+    // Keep unresolved_column errors for truly ambiguous references.
+    let mut resolved: Vec<String> = Vec::with_capacity(columns.len());
+    for c in &columns {
+        match df.resolve_column_name(c) {
+            Ok(name) => resolved.push(name),
+            Err(PolarsError::ColumnNotFound(msg)) => {
+                // If the reference is ambiguous, keep failing (PySpark parity).
+                if msg.contains("AMBIGUOUS_REFERENCE") {
+                    return Err(PolarsError::ColumnNotFound(msg));
+                }
+                // Otherwise, ignore missing columns (idempotent drop).
+            }
+            Err(e) => return Err(e),
+        }
+    }
     let all_names = df.columns()?;
     let to_keep: Vec<Expr> = all_names
         .iter()
