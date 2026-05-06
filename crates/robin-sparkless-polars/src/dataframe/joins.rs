@@ -839,12 +839,10 @@ pub fn join(
         for n in &right_names {
             let use_name = if left_names.iter().any(|l| l == n) {
                 unique_right_alias(n.as_str(), &mut used)
+            } else if used.insert(n.clone()) {
+                n.clone()
             } else {
-                if used.insert(n.clone()) {
-                    n.clone()
-                } else {
-                    unique_right_alias(n.as_str(), &mut used)
-                }
+                unique_right_alias(n.as_str(), &mut used)
             };
             if result_names.contains(&use_name) {
                 order.push(use_name);
