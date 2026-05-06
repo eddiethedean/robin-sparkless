@@ -1,2 +1,13 @@
-advisories = { ignore = ["RUSTSEC-2026-0037", "RUSTSEC-2026-0041", "RUSTSEC-2026-0044", "RUSTSEC-2026-0048", "RUSTSEC-2026-0049"] }
+advisories = { ignore = [
+  "RUSTSEC-2026-0037",
+  "RUSTSEC-2026-0041",
+  "RUSTSEC-2026-0044",
+  "RUSTSEC-2026-0048",
+  "RUSTSEC-2026-0049",
+  # rustls-webpki advisories pulled in via optional JDBC MSSQL (`tiberius` -> `tokio-rustls` -> `rustls`).
+  # See CI failure on PR #1535; can be removed once that dependency chain upgrades to rustls-webpki >=0.103.13.
+  "RUSTSEC-2026-0098",
+  "RUSTSEC-2026-0099",
+  "RUSTSEC-2026-0104",
+] }
 

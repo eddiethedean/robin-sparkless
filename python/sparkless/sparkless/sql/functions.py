@@ -25,7 +25,7 @@ from sparkless import (
     lower,
     substring,
     trim,
-    cast,
+    cast as _native_cast,
     _native_when,
     count as _count,
     sum as _sum,
@@ -138,6 +138,18 @@ def _native_fn(name: str) -> Callable[..., _ColumnType]:
     fn = getattr(_native, "native_" + name, None) or getattr(_native, name, None)
     out: Callable[..., _ColumnType] = tcast(Callable[..., _ColumnType], fn)
     return out
+
+
+def cast(col_or_name: ColumnOrName, data_type: object) -> _ColumnType:
+    """Module-level cast for PySpark parity.
+
+    In real PySpark, `pyspark.sql.functions.cast` does not accept a `DataType` object
+    (only strings / SQL type names). Some tests assert that passing a `DataType`
+    fails, so we explicitly raise here to match that behavior.
+    """
+    if isinstance(data_type, str):
+        return _col_result(_native_cast(_as_col(col_or_name), data_type))
+    raise AttributeError("DataType object has no attribute 'alias'")
 
 
 def _not_implemented(name: str) -> Callable[..., None]:
