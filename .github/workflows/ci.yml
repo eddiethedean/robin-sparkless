@@ -204,6 +204,9 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip maturin
+          # Work around rare rustup component install conflict where `cargo-fmt`
+          # already exists but is not owned by the toolchain (observed in CI).
+          rm -f ~/.cargo/bin/cargo-fmt
           cd python && ../.venv/bin/maturin develop
           ../.venv/bin/python -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('ci').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
       - name: Install pytest and run tests (fast subset)
