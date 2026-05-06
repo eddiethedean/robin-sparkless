@@ -391,6 +391,16 @@ jobs:
         with:
           python-version: "3.8"
       - name: Publish to PyPI (maturin)
+        continue-on-error: true
+        uses: messense/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          target: aarch64-unknown-linux-musl
+          command: publish
+          args: --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
+      - name: Retry publish to PyPI (maturin)
+        if: failure()
         uses: messense/maturin-action@v1
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
