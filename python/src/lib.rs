@@ -947,8 +947,8 @@ impl PySparkSession {
             .create_or_replace_global_temp_view(name, df.inner.clone());
     }
 
-    fn drop_temp_view(&self, name: &str) {
-        self.inner.drop_temp_view(name);
+    fn drop_temp_view(&self, name: &str) -> bool {
+        self.inner.drop_temp_view(name)
     }
 
     fn table(&self, name: &str) -> PyResult<PyDataFrame> {
@@ -1265,15 +1265,36 @@ impl PyCatalog {
     }
 
     #[pyo3(name = "dropTempView")]
-    fn drop_temp_view(&self, py: Python<'_>, name: &str) -> PyResult<()> {
+    fn drop_temp_view(&self, py: Python<'_>, name: &str) -> PyResult<bool> {
         let session = self
             .session
             .bind(py)
             .downcast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        session.inner.drop_temp_view(name);
-        Ok(())
+        Ok(session.inner.drop_temp_view(name))
+    }
+
+    #[pyo3(name = "dropGlobalTempView")]
+    fn drop_global_temp_view(&self, py: Python<'_>, name: &str) -> PyResult<bool> {
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
+        Ok(session.inner.drop_global_temp_view(name))
+    }
+
+    #[pyo3(name = "dropTable")]
+    fn drop_table(&self, py: Python<'_>, name: &str) -> PyResult<bool> {
+        let session = self
+            .session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
+            .borrow();
+        Ok(session.inner.drop_table(name))
     }
 
     #[pyo3(name = "listDatabases")]
@@ -3750,7 +3771,7 @@ impl PyDataFrame {
                     }
                 }
             }
-            session_ref.borrow().inner.drop_temp_view("__selectexpr_t");
+            let _ = session_ref.borrow().inner.drop_temp_view("__selectexpr_t");
             resolved
         } else {
             raw.into_iter()
@@ -3980,6 +4001,7 @@ impl PyDataFrame {
                 .borrow()
                 .inner
                 .drop_temp_view("__withcol_expr_t");
+            // Ignore boolean return; cleanup best-effort.
             let col = Column::from_expr(expr, None);
             let df = slf.inner.with_column(name, &col).map_err(|e| {
                 let msg = e.to_string();
@@ -5037,6 +5059,22 @@ impl PyDataFrame {
             .borrow()
             .inner
             .create_or_replace_temp_view(name, self.inner.clone());
+        Ok(())
+    }
+
+    #[pyo3(name = "createOrReplaceGlobalTempView")]
+    fn create_or_replace_global_temp_view_camel(&self, py: Python<'_>, name: &str) -> PyResult<()> {
+        let session = THREAD_ACTIVE_SESSIONS
+            .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+            .ok_or_else(|| to_py_err("No active SparkSession for createOrReplaceGlobalTempView"))?;
+        let session_ref = session
+            .bind(py)
+            .downcast::<PySparkSession>()
+            .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?;
+        session_ref
+            .borrow()
+            .inner
+            .create_or_replace_global_temp_view(name, self.inner.clone());
         Ok(())
     }
 

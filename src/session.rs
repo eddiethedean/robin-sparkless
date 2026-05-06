@@ -84,7 +84,7 @@ impl SparkSession {
         self.0.create_or_replace_global_temp_view(name, df.0)
     }
 
-    pub fn drop_temp_view(&self, name: &str) {
+    pub fn drop_temp_view(&self, name: &str) -> bool {
         self.0.drop_temp_view(name)
     }
 

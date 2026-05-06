@@ -1249,17 +1249,16 @@ impl SparkSession {
     }
 
     /// Drop a temporary view by name (PySpark: catalog.dropTempView).
-    /// No error if the view does not exist.
-    /// If the catalog lock is poisoned, the operation is best-effort and a message is emitted to stderr.
-    pub fn drop_temp_view(&self, name: &str) {
+    /// Returns true if a view was removed; false if not present.
+    /// If the catalog lock is poisoned, returns false and a message is emitted to stderr.
+    pub fn drop_temp_view(&self, name: &str) -> bool {
         match self.catalog.lock() {
-            Ok(mut m) => {
-                m.remove(name);
-            }
+            Ok(mut m) => m.remove(name).is_some(),
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: catalog lock poisoned, drop_temp_view may have failed"
                 );
+                false
             }
         }
     }

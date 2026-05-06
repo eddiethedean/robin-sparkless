@@ -213,7 +213,7 @@ pub fn translate(
                         session.drop_global_temp_view(suffix);
                     }
                 }
-                session.drop_temp_view(&name);
+                let _ = session.drop_temp_view(&name);
                 session.drop_table(&name);
             }
             Ok(DataFrame::from_polars_with_options(
@@ -256,7 +256,7 @@ pub fn translate(
                         session.drop_global_temp_view(suffix);
                     }
                 }
-                session.drop_temp_view(&name);
+                let _ = session.drop_temp_view(&name);
                 session.drop_table(&name);
             }
             Ok(DataFrame::from_polars_with_options(
