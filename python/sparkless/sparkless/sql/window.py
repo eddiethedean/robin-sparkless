@@ -12,7 +12,7 @@ in the same way as with PySpark.
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple
 
 
 class _SortKey:
@@ -21,8 +21,9 @@ class _SortKey:
         self.ascending = ascending
 
 
-# Partition/order spec: sequence of column names or _SortKey. Column (from sparkless) accepted at runtime.
-PartitionOrOrderSpec = Sequence[Union[str, _SortKey]]
+# Partition/order spec is intentionally permissive: we accept strings, Columns, sort keys,
+# and nested lists/tuples of those (matching PySpark call sites).
+PartitionOrOrderSpec = Sequence[object]
 
 
 def _partition_names(cols: PartitionOrOrderSpec) -> List[str]:
@@ -78,13 +79,13 @@ class WindowSpec:
         self._order_by = list(order_by or [])
         self._frame = frame
 
-    def partitionBy(self, *cols: Union[str, _SortKey]) -> WindowSpec:
+    def partitionBy(self, *cols: object) -> WindowSpec:
         names = _partition_names(cols)
         return WindowSpec(
             partition_by=names, order_by=self._order_by, frame=self._frame
         )
 
-    def orderBy(self, *cols: Union[str, _SortKey]) -> WindowSpec:
+    def orderBy(self, *cols: object) -> WindowSpec:
         keys = _normalize_sort_keys(cols)
         return WindowSpec(
             partition_by=self._partition_by, order_by=keys, frame=self._frame
@@ -112,11 +113,11 @@ class Window:
     unboundedFollowing: int = 2**63 - 1
 
     @staticmethod
-    def partitionBy(*cols: Union[str, _SortKey]) -> WindowSpec:
+    def partitionBy(*cols: object) -> WindowSpec:
         return WindowSpec().partitionBy(*cols)
 
     @staticmethod
-    def orderBy(*cols: Union[str, _SortKey]) -> WindowSpec:
+    def orderBy(*cols: object) -> WindowSpec:
         return WindowSpec().orderBy(*cols)
 
     @staticmethod

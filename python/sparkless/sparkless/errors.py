@@ -13,7 +13,7 @@ try:
     from sparkless._native import SparklessError as SparklessError
 except ImportError:  # pragma: no cover - exercised implicitly in type-checking tools
     # Fallback used in environments without the native extension.
-    SparklessError = RuntimeError  # type: ignore[misc,assignment]
+    SparklessError: Type[BaseException] = RuntimeError
 
 
 AnalysisException: Type[BaseException] = SparklessError

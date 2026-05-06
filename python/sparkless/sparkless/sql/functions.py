@@ -25,7 +25,7 @@ from sparkless import (
     lower,
     substring,
     trim,
-    cast,
+    cast as _native_cast,
     _native_when,
     count as _count,
     sum as _sum,
@@ -90,7 +90,8 @@ from sparkless import (
 )
 from sparkless.errors import PySparkValueError
 from sparkless import DataFrame
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple, Union
+from typing import cast as tcast
 
 if TYPE_CHECKING:
     # Window spec used by window expressions (partitionBy/orderBy/rowsBetween/rangeBetween).
@@ -102,7 +103,7 @@ ColumnOrName = Union[_ColumnType, str]
 
 def _col_result(x: Any) -> _ColumnType:
     """Cast native/column call result to _ColumnType for mypy no-any-return."""
-    out: _ColumnType = cast(_ColumnType, x)
+    out: _ColumnType = tcast(_ColumnType, x)
     return out
 
 
@@ -117,22 +118,38 @@ def _ensure_udf_executor_registered() -> None:
     """Register the Python UDF executor with the native module once (for with_column UDF handling)."""
     from sparkless import _native
 
-    if getattr(_ensure_udf_executor_registered, "_registered", False):
+    global _UDF_EXECUTOR_REGISTERED
+    if _UDF_EXECUTOR_REGISTERED:
         return
     _native.set_python_udf_executor(_python_udf_executor)
-    _ensure_udf_executor_registered._registered = True  # type: ignore[attr-defined]
+    _UDF_EXECUTOR_REGISTERED = True
+
+
+_UDF_EXECUTOR_REGISTERED = False
 
 
 def _as_col(c: ColumnOrName) -> _ColumnType:
-    result: _ColumnType = cast(_ColumnType, col(c) if isinstance(c, str) else c)
+    result: _ColumnType = tcast(_ColumnType, col(c) if isinstance(c, str) else c)
     return result
 
 
 def _native_fn(name: str) -> Callable[..., _ColumnType]:
     """Get function from _native: try native_<name> first (e.g. native_floor), then <name> (e.g. floor)."""
     fn = getattr(_native, "native_" + name, None) or getattr(_native, name, None)
-    out: Callable[..., _ColumnType] = cast(Callable[..., _ColumnType], fn)
+    out: Callable[..., _ColumnType] = tcast(Callable[..., _ColumnType], fn)
     return out
+
+
+def cast(col_or_name: ColumnOrName, data_type: object) -> _ColumnType:
+    """Module-level cast for PySpark parity.
+
+    In real PySpark, `pyspark.sql.functions.cast` does not accept a `DataType` object
+    (only strings / SQL type names). Some tests assert that passing a `DataType`
+    fails, so we explicitly raise here to match that behavior.
+    """
+    if isinstance(data_type, str):
+        return _col_result(_native_cast(_as_col(col_or_name), data_type))
+    raise AttributeError("DataType object has no attribute 'alias'")
 
 
 def _not_implemented(name: str) -> Callable[..., None]:
@@ -730,7 +747,7 @@ def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons
     if udf_name not in _PYTHON_UDF_REGISTRY:
         raise PySparkValueError(f"Unknown UDF name: {udf_name}")
     func, return_type = _PYTHON_UDF_REGISTRY[udf_name]
-    rt = cast("T.DataType", return_type)
+    rt = tcast("T.DataType", return_type)
     session = _active_session()
     rows = df.collect()
     if not rows:
@@ -1376,7 +1393,7 @@ def json_tuple(column: ColumnOrName, *keys: str) -> Tuple[_ColumnType, ...]:
         # Use get_json_object to extract each key as a separate string column, then
         # alias to PySpark-style c0, c1, ... so df.select(F.json_tuple(...)) yields
         # the expected unnamed columns.
-        c = cast(_ColumnType, get_json_object(column, f"$.{key}"))
+        c = tcast(_ColumnType, get_json_object(column, f"$.{key}"))
         cols.append(c.alias(f"c{idx}"))
     # df.select() flattens tuples/lists of Columns, so returning a tuple here
     # produces multiple top-level columns matching PySpark's json_tuple behavior.
@@ -1463,7 +1480,7 @@ def create_map(*cols: Any) -> _ColumnType:
         raise ValueError(
             "create_map requires an even number of arguments (key-value pairs)"
         )
-    key_values = [_as_col(cast(ColumnOrName, c)) for c in expanded]
+    key_values = [_as_col(tcast(ColumnOrName, c)) for c in expanded]
     return _native.create_map(key_values)
 
 

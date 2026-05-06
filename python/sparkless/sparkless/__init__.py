@@ -501,7 +501,7 @@ def create_map(*cols: object) -> _ColumnType:
     """Top-level create_map for robin_sparkless tests."""
     from sparkless.sql import functions as f
 
-    return _cast(_ColumnType, f.create_map(*cols))
+    return f.create_map(*cols)
 
 
 class _SQLModule:

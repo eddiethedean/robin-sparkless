@@ -1,10 +1,10 @@
-from typing import Type
+AnalysisException: type[BaseException]
+IllegalArgumentException: type[BaseException]
+PySparkRuntimeError: type[BaseException]
+PySparkTypeError: type[BaseException]
+PySparkValueError: type[BaseException]
 
-AnalysisException: Type[BaseException]
-IllegalArgumentException: Type[BaseException]
-PySparkRuntimeError: Type[BaseException]
-PySparkTypeError: Type[BaseException]
-PySparkValueError: Type[BaseException]
+SparklessError: type[BaseException]
 
 try:
     from sparkless.errors import (
@@ -22,9 +22,11 @@ try:
     PySparkValueError = _PSVE
 except ImportError:
     try:
-        from sparkless._native import SparklessError
+        from sparkless._native import SparklessError as _SparklessError
+
+        SparklessError = _SparklessError
     except ImportError:
-        SparklessError = RuntimeError  # type: ignore[assignment,misc]
+        SparklessError = RuntimeError
     AnalysisException = SparklessError
     IllegalArgumentException = SparklessError
     PySparkRuntimeError = SparklessError
