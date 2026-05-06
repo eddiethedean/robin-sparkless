@@ -360,7 +360,9 @@ class Row(tuple):
         # Iterate underlying tuple values regardless of Row.__iter__ override.
         return super().__iter__()
 
-    def __getitem__(self, item: Union[int, str, slice]) -> RowGetItemReturn:  # type: ignore[override]
+    # Note: `Row` supports name-based indexing (row["a"]) in addition to tuple indexing.
+    # Keep the signature un-annotated so static checkers don't enforce tuple's overloads here.
+    def __getitem__(self, item):  # type: ignore[no-untyped-def]
         # PySpark parity: Row supports both positional and name-based indexing.
         if isinstance(item, str):
             # Sentinel Row from Row({..}) has no field metadata; accessing by name should raise
@@ -469,11 +471,11 @@ class Row(tuple):
             return self.asDict() == dict(other)
         return super().__eq__(other)
 
-    def _order_key(self, v: RowValue) -> Tuple[int, Union[str, Tuple[str, str]]]:
-        """Normalize value for ordering so mixed types (str vs int) never raise TypeError."""
+    def _order_key(self, v: RowValue) -> Tuple[int, str]:
+        """Normalize value for ordering so mixed types never raise TypeError."""
         if v is None:
             return (0, "")
-        return (1, (type(v).__name__, repr(v)))
+        return (1, f"{type(v).__name__}:{repr(v)}")
 
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Row) or len(self) != len(other):

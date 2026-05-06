@@ -15,6 +15,8 @@ UDF class directly.
 from __future__ import annotations
 
 import sys
+from types import ModuleType
+from typing import Any
 
 import sparkless.sql.functions as _f
 
@@ -53,7 +55,7 @@ class UserDefinedFunction:
         return self._wrapped(*cols)
 
 
-_udf_mod = __import__("types").ModuleType("sparkless.functions.udf")
+_udf_mod: Any = ModuleType("sparkless.functions.udf")
 _udf_mod.__package__ = "sparkless.functions"
-_udf_mod.UserDefinedFunction = UserDefinedFunction
+setattr(_udf_mod, "UserDefinedFunction", UserDefinedFunction)
 sys.modules["sparkless.functions.udf"] = _udf_mod
