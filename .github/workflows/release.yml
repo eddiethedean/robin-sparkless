@@ -244,7 +244,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          toolchain: 1.93.1
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -257,6 +257,10 @@ jobs:
             ${{ runner.os }}-cargo-py-build-
       - name: Install maturin
         run: pip install maturin
+      - name: Work around rustup proxy conflicts (maturin)
+        run: |
+          rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
+          rm -f ~/.rustup/toolchains/*/bin/cargo-fmt ~/.rustup/toolchains/*/bin/rustfmt
       - name: Build wheel (abi3, Python 3.8+)
         run: cd python && maturin build --release -i 3.8
       - name: Upload wheel artifact
