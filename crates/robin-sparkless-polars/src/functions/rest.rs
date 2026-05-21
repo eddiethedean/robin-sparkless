@@ -2349,9 +2349,7 @@ fn expr_for_concat_ws_part(expr: Expr, separator: &str) -> Expr {
     use polars::prelude::*;
     let sep = separator.to_string();
     expr.map(
-        move |col| {
-            crate::column::expect_col(concat_ws_input_column_to_string(col, &sep))
-        },
+        move |col| crate::column::expect_col(concat_ws_input_column_to_string(col, &sep)),
         |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
     )
 }
