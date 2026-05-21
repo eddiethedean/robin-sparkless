@@ -224,6 +224,13 @@ class StructType(DataType):
     def __init__(self, fields: Optional[List[StructField]] = None) -> None:
         self.fields = list(fields or [])
 
+    def __iter__(self) -> Iterator[StructField]:
+        """PySpark parity (#1548): iterate StructField entries like the internal fields list."""
+        return iter(self.fields)
+
+    def __len__(self) -> int:
+        return len(self.fields)
+
     def fieldNames(self) -> List[str]:
         """PySpark parity: returns all field names in a list."""
         return [f.name for f in self.fields]
