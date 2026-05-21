@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.7.0] - 2026-05-21
+
+### Changed
+
+- **Release metadata** — Version bump to 4.7.0 across the Rust crates and the Python package.
+
 ## [4.6.0] - 2026-05-06
 
 ### Changed
