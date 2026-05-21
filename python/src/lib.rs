@@ -2322,6 +2322,17 @@ fn python_data_and_schema(
     Ok((rows, schema, schema_was_inferred, mixed_row_kinds))
 }
 
+/// PySpark parity (#711, #270): tuple/list row length must match explicit schema field count.
+fn validate_tuple_list_row_length(row_idx: usize, got: usize, expected: usize) -> PyResult<()> {
+    if got != expected {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "createDataFrame: LENGTH_SHOULD_BE_THE_SAME. length should be the same. Expected {} fields, got {} (row index {}).",
+            expected, got, row_idx
+        )));
+    }
+    Ok(())
+}
+
 fn python_row_to_json(
     py: Python<'_>,
     item: &Bound<'_, PyAny>,
@@ -2334,6 +2345,7 @@ fn python_row_to_json(
     if let Some(order) = column_order {
         // Tuple/list rows map by position to schema columns (PySpark parity; #1544).
         if let Ok(tup) = item.downcast::<pyo3::types::PyTuple>() {
+            validate_tuple_list_row_length(row_idx, tup.len(), order.len())?;
             let mut values = Vec::with_capacity(order.len());
             for (i, _) in order.iter().enumerate() {
                 let v = tup
@@ -2346,6 +2358,7 @@ fn python_row_to_json(
             return Ok(values);
         }
         if let Ok(seq) = item.downcast::<PyList>() {
+            validate_tuple_list_row_length(row_idx, seq.len(), order.len())?;
             let mut values = Vec::with_capacity(order.len());
             for (i, _) in order.iter().enumerate() {
                 let v = seq
