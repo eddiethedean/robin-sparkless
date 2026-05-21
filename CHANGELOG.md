@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.7.0] - 2026-05-21
 
+### Fixed
+
+- **#1541 – Double-quoted string literals in filter expressions** — `df.filter('status == "Y"')` now treats `"Y"` as a string literal (PySpark parity); previously parsed as a column reference.
+
 ### Changed
 
 - **Release metadata** — Version bump to 4.7.0 across the Rust crates and the Python package.

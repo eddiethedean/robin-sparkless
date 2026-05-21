@@ -20,7 +20,7 @@
 use sqlparser::ast::{
     Expr as SqlExpr, Ident, ObjectName, Query, Select, SelectItem, SetExpr, Statement,
 };
-use sqlparser::dialect::GenericDialect;
+use sqlparser::dialect::{GenericDialect, MySqlDialect};
 use sqlparser::parser::Parser;
 use thiserror::Error;
 
@@ -63,8 +63,14 @@ pub enum SparkStatement {
 }
 
 fn parse_one_statement_raw(query: &str) -> Result<Statement, ParseError> {
-    let dialect = GenericDialect {};
-    let stmts = Parser::parse_sql(&dialect, query).map_err(|e| {
+    parse_one_statement_with_dialect(query, &GenericDialect {})
+}
+
+fn parse_one_statement_with_dialect(
+    query: &str,
+    dialect: &dyn sqlparser::dialect::Dialect,
+) -> Result<Statement, ParseError> {
+    let stmts = Parser::parse_sql(dialect, query).map_err(|e| {
         ParseError(format!(
             "SQL parse error: {}. Hint: supported statements include SELECT, CREATE TABLE/VIEW/FUNCTION/SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA.",
             e
@@ -405,7 +411,9 @@ pub fn parse_select_expr(expr_str: &str) -> Result<(SqlExpr, Option<Ident>), Par
     // Parse by embedding into a query; keep the hack local to this crate.
     const TMP_TABLE: &str = "__spark_sql_parser_expr_t";
     let query = format!("SELECT {e} FROM {TMP_TABLE}");
-    let stmt = parse_one_statement_raw(&query)?;
+    // PySpark filter/expr strings accept double-quoted string literals (issue #1541).
+    // GenericDialect treats `"` as delimited identifiers; MySQL treats them as literals.
+    let stmt = parse_one_statement_with_dialect(&query, &MySqlDialect {})?;
     let query_ast: &Query = match &stmt {
         Statement::Query(q) => q.as_ref(),
         other => {
@@ -1053,6 +1061,22 @@ mod tests {
     fn parse_select_expr_literal_string() {
         let (e, _) = parse_select_expr("'hello'").unwrap();
         assert!(matches!(e, SqlExpr::Value(_)));
+    }
+
+    #[test]
+    fn parse_select_expr_double_quoted_string_literal() {
+        // PySpark accepts "Y" as a string literal in filter strings (issue #1541).
+        let (e, _) = parse_select_expr(r#"status == "Y""#).unwrap();
+        match e {
+            SqlExpr::BinaryOp { right, .. } => match right.as_ref() {
+                SqlExpr::Value(sqlparser::ast::ValueWithSpan {
+                    value: sqlparser::ast::Value::DoubleQuotedString(s),
+                    ..
+                }) => assert_eq!(s, "Y"),
+                other => panic!("expected double-quoted string literal, got {other:?}"),
+            },
+            other => panic!("expected binary op, got {other:?}"),
+        }
     }
 
     #[test]
