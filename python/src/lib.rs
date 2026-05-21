@@ -6217,15 +6217,17 @@ impl PyColumn {
 
     fn __or__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let rhs = py_any_to_column(other)?;
+        // PySpark: col | col in filters is logical OR (e.g. (col("a") == 1) | (col("b") == 2)).
+        // Use or_() not bit_or() so filter coercion walks comparison sub-expressions (#1545).
         Ok(PyColumn {
-            inner: self.inner.bit_or(&rhs),
+            inner: self.inner.or_(&rhs),
         })
     }
 
     fn __ror__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
         let lhs = py_any_to_column(other)?;
         Ok(PyColumn {
-            inner: lhs.bit_or(&self.inner),
+            inner: lhs.or_(&self.inner),
         })
     }
 

@@ -852,6 +852,27 @@ impl DataFrame {
                                 right: Arc::new(new_r),
                             });
                         }
+                        // #988 / #1545: numeric column vs string literal in nested comparisons (e.g. under Or).
+                        if is_numeric_public(&col_dtype) {
+                            let (left_ty, right_ty) = if left_is_col {
+                                (col_dtype.clone(), DataType::String)
+                            } else {
+                                (DataType::String, col_dtype.clone())
+                            };
+                            let (new_l, new_r) = coerce_for_pyspark_comparison(
+                                (*left).clone(),
+                                (*right).clone(),
+                                &left_ty,
+                                &right_ty,
+                                &op,
+                            )
+                            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+                            return Ok(Expr::BinaryExpr {
+                                left: Arc::new(new_l),
+                                op,
+                                right: Arc::new(new_r),
+                            });
+                        }
                     }
                     return Ok(Expr::BinaryExpr { left, op, right });
                 } else {
@@ -3513,6 +3534,28 @@ mod tests {
         assert_eq!(out.count().unwrap(), 1);
         let rows = out.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("value").and_then(|v| v.as_i64()), Some(100));
+    }
+
+    /// #1545: logical Or of numeric-column == string-literal comparisons (filter coercion).
+    #[test]
+    fn coerce_numeric_column_eq_string_literal_under_or() {
+        use polars::prelude::Operator;
+        use std::sync::Arc;
+
+        let s = Series::new("A".into(), &[123i32, 456i32]);
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        let left = col("A").eq(lit("123"));
+        let right = col("A").eq(lit("123"));
+        let expr = Expr::BinaryExpr {
+            left: Arc::new(left),
+            op: Operator::Or,
+            right: Arc::new(right),
+        };
+        let out = df.filter(expr).unwrap();
+        assert_eq!(out.count().unwrap(), 1);
+        let rows = out.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("A").and_then(|v| v.as_i64()), Some(123));
     }
 
     /// #646: filter with string predicate (contains) must receive Boolean; cast ensures parity.

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#1545 – String literal coercion under logical OR in filter** — `(col("A") == "123") | (col("A") == "123")` on an integer column no longer raises `cannot compare string with numeric type (i32)`; Column `|` uses logical `or_()` (like `&` uses `and_()`) so comparison coercion applies to each operand.
+
 - **#1544 – DDL schema `decimal(p,s)` parsing** — `createDataFrame(..., schema="A decimal(38,0), B string")` preserves decimal types instead of treating them as string and failing schema inference.
 
 - **#1543 – concat_ws on list and string columns** — `concat_ws(sep, col)` no longer casts list columns directly to string; list elements are joined with `sep`, and string columns pass through unchanged.
