@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-(none yet)
+- **#1542 – createDataFrame with tuple or iterable of dict rows** — `createDataFrame(({"a": 1}, {"a": 2}))` and generator inputs now work like PySpark; previously raised `[CANNOT_ACCEPT_OBJECT_IN_TYPE]` for tuples.
 
 ## [4.7.0] - 2026-05-21
 

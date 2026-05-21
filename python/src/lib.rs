@@ -7,7 +7,7 @@
 
 use pyo3::create_exception;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
+use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
 use robin_sparkless::dataframe::{
     expr_contains_only_join_key_equalities, try_extract_join_eq_columns_all, JoinType,
     PivotedGroupedData, SaveMode, WriteFormat, WriteMode,
@@ -978,7 +978,7 @@ impl PySparkSession {
     }
 
     /// createDataFrame(data, schema=None, verify_schema=True, sampling_ratio=None).
-    /// data: list of dicts, list of tuples, or pandas.DataFrame.
+    /// data: list/tuple of dicts, list/tuple of row tuples, iterable of rows, or pandas.DataFrame.
     /// schema: optional list of (name, type_str) or list of column names (types inferred).
     /// verify_schema: when True, validate row values against schema types (PySpark parity).
     /// sampling_ratio: accepted for API parity; ignored for list/dict data.
@@ -1775,7 +1775,37 @@ fn normalize_create_dataframe_input<'py>(
     }
 
     // 3. Pandas DataFrame: to_dict("records"); preserve column order (#1151).
-    maybe_convert_pandas_to_list(py, data)
+    let (data, from_pandas, pandas_columns) = maybe_convert_pandas_to_list(py, data)?;
+    let data = coerce_create_dataframe_rows_to_list(py, &data)?;
+    Ok((data, from_pandas, pandas_columns))
+}
+
+/// Convert tuple or other row iterable to `list` for createDataFrame (PySpark parity; #1542).
+fn coerce_create_dataframe_rows_to_list<'py>(
+    py: Python<'py>,
+    data: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    if data.downcast::<PyList>().is_ok() {
+        return Ok(data.clone());
+    }
+    if let Ok(tup) = data.downcast::<PyTuple>() {
+        let out = PyList::empty_bound(py);
+        for item in tup.iter() {
+            out.append(item)?;
+        }
+        return Ok(out.into_any());
+    }
+    // Generators and other iterables of rows; exclude str/bytes (iterable of chars).
+    if !data.is_instance_of::<PyString>() && !data.is_instance_of::<PyBytes>() {
+        if let Ok(iter) = data.iter() {
+            let out = PyList::empty_bound(py);
+            for item in iter {
+                out.append(item?)?;
+            }
+            return Ok(out.into_any());
+        }
+    }
+    Ok(data.clone())
 }
 
 /// If data is a pandas DataFrame, convert to list of dicts via to_dict("records").
