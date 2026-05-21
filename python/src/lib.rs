@@ -1970,9 +1970,7 @@ fn python_data_and_schema(
                 keys_py.append(k.as_str())?;
             }
             // Tuple/list rows cannot be dict()-normalized; batch dict helpers only apply to dict rows (#1544).
-            let all_dict_rows = list
-                .iter()
-                .all(|item| item.downcast::<PyDict>().is_ok());
+            let all_dict_rows = list.iter().all(|item| item.downcast::<PyDict>().is_ok());
             // Normalize to list of plain dicts so d.get(k) finds keys regardless of key type (#357, #1267).
             let data_for_batch: Bound<'_, PyList> = if all_dict_rows {
                 (|| {
