@@ -1479,21 +1479,27 @@ impl PyStorage {
 /// Map PySpark type name to our schema type string.
 /// Pass through array<...>, map<...>, struct<...> so createDataFrame preserves List/Map/Struct columns.
 fn simple_string_to_type(s: &str) -> String {
-    let lower = s.to_lowercase();
+    let trimmed = s.trim();
+    let lower = trimmed.to_lowercase();
+    // Pass through decimal(p,s) so explicit DDL schema is not re-inferred as all-string (#1544).
+    if lower.starts_with("decimal(") && lower.contains(')') {
+        return trimmed.to_string();
+    }
     match lower.as_str() {
         "string" | "str" => "string".to_string(),
         "int" | "integer" | "int32" => "int".to_string(),
         "bigint" | "long" | "int64" => "long".to_string(),
         "double" | "float64" => "double".to_string(),
         "float" | "float32" => "float".to_string(),
+        "decimal" => "decimal".to_string(),
         "boolean" | "bool" => "boolean".to_string(),
         "date" => "date".to_string(),
         "timestamp" => "timestamp".to_string(),
         "binary" => "binary".to_string(),
         "list" | "array" => lower,
-        _ if lower.starts_with("array<") && lower.ends_with('>') => s.to_string(),
-        _ if lower.starts_with("map<") && lower.ends_with('>') => s.to_string(),
-        _ if lower.starts_with("struct<") && lower.ends_with('>') => s.to_string(),
+        _ if lower.starts_with("array<") && lower.ends_with('>') => trimmed.to_string(),
+        _ if lower.starts_with("map<") && lower.ends_with('>') => trimmed.to_string(),
+        _ if lower.starts_with("struct<") && lower.ends_with('>') => trimmed.to_string(),
         _ => "string".to_string(),
     }
 }
@@ -1503,14 +1509,14 @@ fn parse_ddl_schema_string(ddl: &str) -> Vec<(String, String)> {
     fn split_top_level_commas(s: &str) -> Vec<String> {
         let mut parts: Vec<String> = Vec::new();
         let mut buf = String::new();
-        let mut depth: i32 = 0; // struct<...>, array<...>, map<...>
+        let mut depth: i32 = 0; // struct<...>, decimal(p,s), array<...>
         for ch in s.chars() {
             match ch {
-                '<' => {
+                '(' | '<' => {
                     depth += 1;
                     buf.push(ch);
                 }
-                '>' => {
+                ')' | '>' => {
                     depth = (depth - 1).max(0);
                     buf.push(ch);
                 }
@@ -1535,8 +1541,8 @@ fn parse_ddl_schema_string(ddl: &str) -> Vec<(String, String)> {
         let mut depth: i32 = 0;
         for (i, ch) in s.char_indices() {
             match ch {
-                '<' => depth += 1,
-                '>' => depth = (depth - 1).max(0),
+                '(' | '<' => depth += 1,
+                ')' | '>' => depth = (depth - 1).max(0),
                 _ => {}
             }
             if depth == 0 && ch == target {
@@ -1550,8 +1556,8 @@ fn parse_ddl_schema_string(ddl: &str) -> Vec<(String, String)> {
         let mut depth: i32 = 0;
         for (i, ch) in s.char_indices().rev() {
             match ch {
-                '>' => depth += 1,
-                '<' => depth = (depth - 1).max(0),
+                ')' | '>' => depth += 1,
+                '(' | '<' => depth = (depth - 1).max(0),
                 _ => {}
             }
             if depth == 0 && ch == ' ' {
@@ -1963,18 +1969,25 @@ fn python_data_and_schema(
             for k in keys {
                 keys_py.append(k.as_str())?;
             }
+            // Tuple/list rows cannot be dict()-normalized; batch dict helpers only apply to dict rows (#1544).
+            let all_dict_rows = list.iter().all(|item| item.downcast::<PyDict>().is_ok());
             // Normalize to list of plain dicts so d.get(k) finds keys regardless of key type (#357, #1267).
-            let data_for_batch: Bound<'_, PyList> = (|| {
-                let out = PyList::empty_bound(py);
-                let builtins = py.import_bound("builtins").ok()?;
-                let dict_fn = builtins.getattr("dict").ok()?;
-                for item in list.iter() {
-                    let normalized = dict_fn.call1((item,)).ok()?;
-                    out.append(normalized).ok()?;
-                }
-                Some(out)
-            })()
-            .unwrap_or_else(|| list.clone());
+            let data_for_batch: Bound<'_, PyList> = if all_dict_rows {
+                (|| {
+                    let out = PyList::empty_bound(py);
+                    let builtins = py.import_bound("builtins").ok()?;
+                    let dict_fn = builtins.getattr("dict").ok()?;
+                    for item in list.iter() {
+                        let normalized = dict_fn.call1((item,)).ok()?;
+                        out.append(normalized).ok()?;
+                    }
+                    Some(out)
+                })()
+                .unwrap_or_else(|| list.clone())
+            } else {
+                list.clone()
+            };
+            let batch_dict_rows = all_dict_rows;
             // Prefer dict_rows_to_column_order from Python (load _cdf_helpers then get from sys.modules); then eval.
             let try_helper = || -> PyResult<Option<Bound<'_, PyList>>> {
                 let _ = py.import_bound("sparkless._cdf_helpers").ok(); // ensure loaded
@@ -2010,30 +2023,32 @@ fn python_data_and_schema(
                     .ok()?;
                 result.downcast_into::<PyList>().ok()
             });
-            if let Some(rows_py) = rows_py {
-                if rows_py.len() == list.len() {
-                    let mut parsed = Vec::with_capacity(rows_py.len());
-                    for row_py in rows_py.iter() {
-                        if let Ok(row_list) = row_py.downcast::<PyList>() {
-                            let mut row = Vec::with_capacity(row_list.len());
-                            for v in row_list.iter() {
-                                row.push(py_any_to_json(py, &v)?);
+            if batch_dict_rows {
+                if let Some(rows_py) = rows_py {
+                    if rows_py.len() == list.len() {
+                        let mut parsed = Vec::with_capacity(rows_py.len());
+                        for row_py in rows_py.iter() {
+                            if let Ok(row_list) = row_py.downcast::<PyList>() {
+                                let mut row = Vec::with_capacity(row_list.len());
+                                for v in row_list.iter() {
+                                    row.push(py_any_to_json(py, &v)?);
+                                }
+                                parsed.push(row);
+                            } else {
+                                break;
                             }
-                            parsed.push(row);
-                        } else {
-                            break;
                         }
-                    }
-                    // Only use batch result if first column is present (avoid wrong lookup from eval/helper).
-                    if parsed.len() == list.len()
-                        && parsed
-                            .first()
-                            .and_then(|r| r.first())
-                            .map(|v| !matches!(v, JsonValue::Null))
-                            .unwrap_or(false)
-                    {
-                        rows.extend(parsed);
-                        row_kind = Some("dict");
+                        // Only use batch result if first column is present (avoid wrong lookup from eval/helper).
+                        if parsed.len() == list.len()
+                            && parsed
+                                .first()
+                                .and_then(|r| r.first())
+                                .map(|v| !matches!(v, JsonValue::Null))
+                                .unwrap_or(false)
+                        {
+                            rows.extend(parsed);
+                            row_kind = Some("dict");
+                        }
                     }
                 }
             }
@@ -2317,6 +2332,31 @@ fn python_row_to_json(
 ) -> PyResult<Vec<JsonValue>> {
     // When column_order is given: use Python items() so key/value come from Python (#1267).
     if let Some(order) = column_order {
+        // Tuple/list rows map by position to schema columns (PySpark parity; #1544).
+        if let Ok(tup) = item.downcast::<pyo3::types::PyTuple>() {
+            let mut values = Vec::with_capacity(order.len());
+            for (i, _) in order.iter().enumerate() {
+                let v = tup
+                    .get_item(i)
+                    .ok()
+                    .and_then(|pv| py_any_to_json(py, &pv).ok())
+                    .unwrap_or(JsonValue::Null);
+                values.push(v);
+            }
+            return Ok(values);
+        }
+        if let Ok(seq) = item.downcast::<PyList>() {
+            let mut values = Vec::with_capacity(order.len());
+            for (i, _) in order.iter().enumerate() {
+                let v = seq
+                    .get_item(i)
+                    .ok()
+                    .and_then(|pv| py_any_to_json(py, &pv).ok())
+                    .unwrap_or(JsonValue::Null);
+                values.push(v);
+            }
+            return Ok(values);
+        }
         if let Ok(items_view) = item.call_method0("items") {
             if let Ok(list_fn) = py.import_bound("builtins").and_then(|b| b.getattr("list")) {
                 let list_result = list_fn.call1((items_view,));
@@ -2482,6 +2522,17 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
     if let Ok(f) = v.extract::<f64>() {
         if let Some(n) = serde_json::Number::from_f64(f) {
             return Ok(JsonValue::Number(n));
+        }
+    }
+    // decimal.Decimal -> number for createDataFrame tuple/list rows (#1544).
+    if let Ok(dec_mod) = _py.import_bound("decimal") {
+        if let Ok(dec_type) = dec_mod.getattr("Decimal") {
+            if v.is_instance(&dec_type)? {
+                let f: f64 = v.call_method0("__float__")?.extract()?;
+                if let Some(n) = serde_json::Number::from_f64(f) {
+                    return Ok(JsonValue::Number(n));
+                }
+            }
         }
     }
     if let Ok(bytes) = v.downcast::<PyBytes>() {
