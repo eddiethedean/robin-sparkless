@@ -1137,7 +1137,11 @@ fn sql_expr_to_polars(
         SqlExpr::Value(ValueWithSpan { value: Value::Number(s, _), .. }) => {
             parse_sql_number_expr(s)
         }
-        SqlExpr::Value(ValueWithSpan { value: Value::SingleQuotedString(s), .. }) => Ok(lit(s.as_str())),
+        SqlExpr::Value(ValueWithSpan { value: Value::SingleQuotedString(s), .. })
+        | SqlExpr::Value(ValueWithSpan {
+            value: Value::DoubleQuotedString(s),
+            ..
+        }) => Ok(lit(s.as_str())),
         SqlExpr::Value(ValueWithSpan { value: Value::Boolean(b), .. }) => Ok(lit(*b)),
         SqlExpr::Value(ValueWithSpan { value: Value::Null, .. }) => Ok(lit(polars::prelude::NULL)),
         SqlExpr::BinaryOp { left, op, right } => {
@@ -1226,7 +1230,7 @@ fn sql_expr_to_polars(
             let pattern_str = sql_expr_to_string_literal(pattern.as_ref())?;
             let col_col = crate::column::Column::from_expr(col_expr, None);
             let escape: Option<char> = escape_char.as_ref().and_then(|v| match v {
-                Value::SingleQuotedString(s) => s.chars().next(),
+                Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => s.chars().next(),
                 _ => None,
             });
             let like_expr = col_col.like(&pattern_str, escape).into_expr();
@@ -1413,7 +1417,7 @@ fn sql_expr_to_qualified_col_name(
 fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
     match expr {
         SqlExpr::Value(ValueWithSpan {
-            value: Value::SingleQuotedString(s),
+            value: Value::SingleQuotedString(s) | Value::DoubleQuotedString(s),
             ..
         }) => Ok(s.clone()),
         _ => Err(PolarsError::InvalidOperation(
