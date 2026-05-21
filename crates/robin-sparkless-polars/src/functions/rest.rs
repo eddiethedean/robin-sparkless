@@ -2343,7 +2343,59 @@ pub fn concat(columns: &[&Column]) -> Column {
     crate::column::Column::from_expr(concat_str(&exprs, "", false), None)
 }
 
+/// Convert one concat_ws argument to Utf8: scalar columns are cast to string; list columns
+/// have elements stringified and joined with `separator` (PySpark parity; #1543).
+fn expr_for_concat_ws_part(expr: Expr, separator: &str) -> Expr {
+    use polars::prelude::*;
+    let sep = separator.to_string();
+    expr.map(
+        move |col| {
+            crate::column::expect_col(concat_ws_input_column_to_string(col, &sep))
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+    )
+}
+
+fn concat_ws_input_column_to_string(
+    col: polars::prelude::Column,
+    separator: &str,
+) -> PolarsResult<Option<polars::prelude::Column>> {
+    let out = concat_ws_input_series_to_string(col.take_materialized_series(), separator)?;
+    Ok(Some(out.into_column()))
+}
+
+fn concat_ws_input_series_to_string(s: Series, separator: &str) -> PolarsResult<Series> {
+    use polars::chunked_array::builder::StringChunkedBuilder;
+    use polars::prelude::*;
+    if !matches!(s.dtype(), DataType::List(_)) {
+        return s.cast(&DataType::String);
+    }
+    let list = s.list()?;
+    let mut builder = StringChunkedBuilder::new(s.name().clone(), list.len());
+    for opt_inner in list.into_iter() {
+        let joined = match opt_inner {
+            None => None,
+            Some(inner) => {
+                let inner = inner.cast(&DataType::String)?;
+                let ca = inner.str()?;
+                let mut parts = Vec::new();
+                for v in ca.into_iter().flatten() {
+                    parts.push(v);
+                }
+                if parts.is_empty() {
+                    None
+                } else {
+                    Some(parts.join(separator))
+                }
+            }
+        };
+        builder.append_option(joined.as_deref());
+    }
+    Ok(builder.finish().into_series())
+}
+
 /// Concatenate columns as strings with separator (PySpark concat_ws). Numeric columns cast to string (#852).
+/// List/array columns are element-joined with `separator` first; string columns pass through (#1543).
 /// **Panics** if `columns` is empty.
 pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
     use polars::prelude::*;
@@ -2352,7 +2404,7 @@ pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
     }
     let exprs: Vec<Expr> = columns
         .iter()
-        .map(|c| c.expr().clone().cast(DataType::String))
+        .map(|c| expr_for_concat_ws_part(c.expr().clone(), separator))
         .collect();
     // PySpark semantics: concat_ws ignores nulls across all arguments, and returns
     // null only when all inputs are null. Polars' concat_str with ignore_nulls=true

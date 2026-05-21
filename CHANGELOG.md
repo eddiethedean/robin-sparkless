@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#1543 – concat_ws on list and string columns** — `concat_ws(sep, col)` no longer casts list columns directly to string; list elements are joined with `sep`, and string columns pass through unchanged.
+
 - **#1542 – createDataFrame with tuple or iterable of dict rows** — `createDataFrame(({"a": 1}, {"a": 2}))` and generator inputs now work like PySpark; previously raised `[CANNOT_ACCEPT_OBJECT_IN_TYPE]` for tuples.
 
 ## [4.7.0] - 2026-05-21
