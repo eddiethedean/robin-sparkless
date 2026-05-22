@@ -67,7 +67,11 @@ pub fn normalize_unresolved_column_message(msg: &str) -> String {
         return format!("unresolved_column: {msg}");
     }
     if lower.contains("cannot resolve") {
-        return msg.replace("cannot resolve", "cannot be resolved");
+        let msg = msg.replace("cannot resolve", "cannot be resolved");
+        if lower.contains("unresolved_column") {
+            return msg;
+        }
+        return format!("unresolved_column: {msg}");
     }
     if msg.contains("unable to find column")
         || (msg.contains("not found") && lower.contains("column"))
