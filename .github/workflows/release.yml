@@ -245,6 +245,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.1
+          components: clippy, rustfmt
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -260,8 +261,8 @@ jobs:
       - name: Work around rustup proxy conflicts (maturin)
         run: |
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
-          rm -f ~/.rustup/toolchains/*/bin/cargo-fmt ~/.rustup/toolchains/*/bin/rustfmt
-          rm -rf ~/.rustup/toolchains/*/share/doc/rustfmt
+          rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
+          rustup component add rustfmt clippy --toolchain 1.93.1
       - name: Build wheel (abi3, Python 3.8+)
         run: cd python && maturin build --release -i 3.8
       - name: Upload wheel artifact
