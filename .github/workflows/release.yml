@@ -261,6 +261,7 @@ jobs:
         run: |
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
           rm -f ~/.rustup/toolchains/*/bin/cargo-fmt ~/.rustup/toolchains/*/bin/rustfmt
+          rm -rf ~/.rustup/toolchains/*/share/doc/rustfmt
       - name: Build wheel (abi3, Python 3.8+)
         run: cd python && maturin build --release -i 3.8
       - name: Upload wheel artifact
