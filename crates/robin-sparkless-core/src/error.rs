@@ -61,7 +61,10 @@ impl EngineError {
 pub fn normalize_unresolved_column_message(msg: &str) -> String {
     let lower = msg.to_lowercase();
     if lower.contains("cannot be resolved") {
-        return msg.to_string();
+        if lower.contains("unresolved_column") {
+            return msg.to_string();
+        }
+        return format!("unresolved_column: {msg}");
     }
     if lower.contains("cannot resolve") {
         return msg.replace("cannot resolve", "cannot be resolved");

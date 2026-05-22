@@ -4642,7 +4642,7 @@ impl PyDataFrame {
                 let py = cols.py();
                 if e.is_instance_of::<SparklessError>(py) {
                     let msg = format!("{e}");
-                    if msg.contains("unresolved_column: cannot be resolved") {
+                    if msg.contains("cannot be resolved") {
                         return Ok(PyDataFrame::wrap(self.inner.clone()));
                     }
                 }
@@ -9565,14 +9565,16 @@ fn substring_index(column: &PyColumn, delimiter: &str, count: i64) -> PyColumn {
 }
 
 #[pyfunction]
-fn crc32(column: &PyColumn) -> PyColumn {
+#[pyo3(name = "native_crc32")]
+fn native_crc32(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::crc32(&column.inner),
     }
 }
 
 #[pyfunction]
-fn xxhash64(column: &PyColumn) -> PyColumn {
+#[pyo3(name = "native_xxhash64")]
+fn native_xxhash64(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::xxhash64(&column.inner),
     }
@@ -9842,8 +9844,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(native_instr, m)?)?;
     m.add_function(wrap_pyfunction!(native_locate, m)?)?;
     m.add_function(wrap_pyfunction!(substring_index, m)?)?;
-    m.add_function(wrap_pyfunction!(crc32, m)?)?;
-    m.add_function(wrap_pyfunction!(xxhash64, m)?)?;
+    m.add_function(wrap_pyfunction!(native_crc32, m)?)?;
+    m.add_function(wrap_pyfunction!(native_xxhash64, m)?)?;
     m.add_function(wrap_pyfunction!(get_json_object, m)?)?;
     m.add_function(wrap_pyfunction!(json_tuple, m)?)?;
     m.add_function(wrap_pyfunction!(size, m)?)?;

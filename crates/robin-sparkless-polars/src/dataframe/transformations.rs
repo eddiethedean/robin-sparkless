@@ -462,7 +462,10 @@ fn struct_field_select_info(e: &Expr) -> Option<(String, Option<String>)> {
     match e {
         Expr::Alias(inner, alias_name) => {
             let (path, _) = struct_field_select_info(inner)?;
-            Some((path, Some(alias_name.to_string())))
+            let alias = alias_name.to_string();
+            // col("Struct.e1") auto-aliases to the dotted path; PySpark still names output "e1".
+            let user_alias = if alias == path { None } else { Some(alias) };
+            Some((path, user_alias))
         }
         Expr::Column(n) if n.as_str().contains('.') => Some((n.to_string(), None)),
         _ => None,
