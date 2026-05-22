@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+(none yet)
+
+## [4.7.0] - 2026-05-21
+
+### Added
+
+- **Python functions wired to Rust** — PyO3 bindings and `sparkless.sql.functions` implementations for `overlay`, `from_json`, `to_json`, `factorial`, `cbrt`, `hypot`, `map_from_arrays`, `encode`, `decode`, and `char` (previously raised `NotImplementedError` while the engine already supported them).
+
+- **Plan interpreter: cube and rollup** — JSON logical plans can use `cube` and `rollup` ops (with `group_by`/`columns` and `aggs`), delegating to the existing DataFrame grouping-set implementation.
+
+### Fixed
+
 - **#1548 – StructType iteration** — `StructType` implements `__iter__` and `__len__` delegating to `.fields`, so `list(df.schema)` and `for f in df.schema` work like PySpark.
 
 - **#1545 – String literal coercion under logical OR in filter** — `(col("A") == "123") | (col("A") == "123")` on an integer column no longer raises `cannot compare string with numeric type (i32)`; Column `|` uses logical `or_()` (like `&` uses `and_()`) so comparison coercion applies to each operand. Tuple/list rows with an explicit schema again raise `LENGTH_SHOULD_BE_THE_SAME` when row length does not match field count (#270).
@@ -23,15 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **#1542 – createDataFrame with tuple or iterable of dict rows** — `createDataFrame(({"a": 1}, {"a": 2}))` and generator inputs now work like PySpark; previously raised `[CANNOT_ACCEPT_OBJECT_IN_TYPE]` for tuples.
 
-## [4.7.0] - 2026-05-21
-
-### Fixed
-
 - **#1541 – Double-quoted string literals in filter expressions** — `df.filter('status == "Y"')` now treats `"Y"` as a string literal (PySpark parity); previously parsed as a column reference.
+
+- **Struct field select with custom alias** — `col("Struct.e1").alias("out")` and similar selects resolve struct fields and honor the output alias (not only dotted alias names).
+
+- **Mixed row shapes in createDataFrame** — Inconsistent dict vs list/tuple rows without an explicit schema now fail on `collect`, `show`, `count`, `len`, and `toPandas` (not only `count`).
+
+- **Column-not-found error wording** — Rust and Python paths use consistent PySpark-style **"cannot be resolved"** messages; `EngineError` prefixes no longer leak into Python exceptions.
+
+- **ExprIr unsupported calls** — Unimplemented `ExprIr::Call` names return a clear user-facing error instead of an internal error.
 
 ### Changed
 
-- **Release metadata** — Version bump to 4.7.0 across the Rust crates and the Python package.
+- **Release metadata** — Version 4.7.0 across the Rust crates and the Python `sparkless` package.
 
 ## [4.6.0] - 2026-05-06
 

@@ -9,18 +9,21 @@ use polars::error::PolarsError;
 pub use robin_sparkless_core::EngineError;
 
 /// Map PolarsError to core EngineError for trait boundaries (core trait methods return core::EngineError).
-/// Column-not-found messages are normalized to include "cannot resolve" for PySpark parity (issue #1058).
+/// Column-not-found messages are normalized to PySpark-style "cannot be resolved" wording.
 pub fn polars_to_core_error(e: PolarsError) -> robin_sparkless_core::EngineError {
     use robin_sparkless_core::EngineError as Core;
+    use robin_sparkless_core::normalize_unresolved_column_message;
     let msg = e.to_string();
     match &e {
         PolarsError::ColumnNotFound(_) => {
-            let normalized = if msg.to_lowercase().contains("cannot resolve") {
+            let base = if msg.to_lowercase().contains("cannot be resolved")
+                || msg.to_lowercase().contains("cannot resolve")
+            {
                 msg
             } else {
-                format!("cannot resolve: {msg}")
+                format!("cannot be resolved: {msg}")
             };
-            Core::NotFound(normalized)
+            Core::NotFound(normalize_unresolved_column_message(&base))
         }
         PolarsError::InvalidOperation(_) => Core::User(msg),
         PolarsError::ComputeError(_) => {
@@ -62,23 +65,24 @@ mod tests {
     }
 
     #[test]
-    fn polars_column_not_found_adds_cannot_resolve() {
+    fn polars_column_not_found_adds_cannot_be_resolved() {
         let e = PolarsError::ColumnNotFound("x".into());
         let core = polars_to_core_error(e);
-        assert!(
-            matches!(core, robin_sparkless_core::EngineError::NotFound(s) if s.contains("cannot resolve"))
-        );
+        assert!(matches!(
+            core,
+            robin_sparkless_core::EngineError::NotFound(s) if s.contains("cannot be resolved")
+        ));
     }
 
     #[test]
-    fn polars_column_not_found_preserves_existing_cannot_resolve() {
-        let e = PolarsError::ColumnNotFound("cannot resolve: col y".into());
+    fn polars_column_not_found_preserves_existing_cannot_be_resolved() {
+        let e = PolarsError::ColumnNotFound("cannot be resolved: col y".into());
         let core = polars_to_core_error(e);
         match &core {
             robin_sparkless_core::EngineError::NotFound(s) => {
                 assert!(
-                    s.contains("cannot resolve"),
-                    "expected 'cannot resolve' in {s:?}"
+                    s.contains("cannot be resolved"),
+                    "expected 'cannot be resolved' in {s:?}"
                 );
             }
             _ => panic!("expected NotFound, got {core:?}"),

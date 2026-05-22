@@ -179,8 +179,8 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
         return Ok(expr);
     }
 
-    Err(EngineError::Internal(format!(
-        "ExprIr::Call '{name}' not yet implemented in expr_ir_to_expr"
+    Err(EngineError::User(format!(
+        "ExprIr::Call '{name}' is not supported in the engine-agnostic expression API; use the Polars Column API or logical plan interpreter"
     )))
 }
 

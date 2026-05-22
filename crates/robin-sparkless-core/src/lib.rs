@@ -12,7 +12,7 @@ pub use engine::{
     CollectedRows, DataFrameBackend, DataFrameReaderBackend, GroupedDataBackend, JoinType,
     PlanExecutor, SparkSessionBackend,
 };
-pub use error::EngineError;
+pub use error::{EngineError, normalize_unresolved_column_message};
 pub use expr::{
     ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
     between, bool_and, call, col, collect_list, collect_set, count, count_distinct, count_if, eq,

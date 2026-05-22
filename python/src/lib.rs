@@ -14,9 +14,10 @@ use robin_sparkless::dataframe::{
 };
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
-    Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData, SelectItem,
-    SparkSession, SparkSessionBuilder, StructField,
+    schema_from_json, Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData,
+    SelectItem, SparkSession, SparkSessionBuilder, StructField, StructType, StructTypePolarsExt,
 };
+use robin_sparkless_core::{normalize_unresolved_column_message, DataType as CoreDataType};
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
 use std::env;
@@ -30,9 +31,25 @@ thread_local! {
 }
 
 /// Convert EngineError or PolarsError to Python exception (SparklessError or TypeError for known validation errors).
-/// Column-not-found messages are normalized to include "cannot resolve" for PySpark parity (issue #1058).
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
-    let msg = e.to_string();
+    to_py_err_msg(&e.to_string())
+}
+
+fn to_py_err_msg(msg: &str) -> PyErr {
+    let mut msg = msg.to_string();
+    for prefix in [
+        "user error: ",
+        "internal error: ",
+        "io error: ",
+        "sql error: ",
+        "not found: ",
+    ] {
+        if let Some(rest) = msg.strip_prefix(prefix) {
+            msg = rest.to_string();
+            break;
+        }
+    }
+    let msg = normalize_unresolved_column_message(&msg);
     if msg.contains("to_date requires StringType, TimestampType, or DateType input") {
         return pyo3::exceptions::PyTypeError::new_err(msg);
     }
@@ -54,20 +71,6 @@ fn to_py_err(e: impl std::fmt::Display) -> PyErr {
             "Struct field subscript access requires string keys, not int",
         );
     }
-    // Ensure column-not-found errors contain "cannot be resolved" and "unresolved_column" (PySpark parity; issue #158).
-    let msg = if !msg.to_lowercase().contains("cannot be resolved")
-        && (msg.contains("unable to find column")
-            || (msg.contains("not found") && msg.to_lowercase().contains("column"))
-            || msg.contains("valid columns"))
-    {
-        format!("unresolved_column: cannot be resolved: {msg}")
-    } else if !msg.to_lowercase().contains("cannot be resolved")
-        && msg.to_lowercase().contains("cannot resolve")
-    {
-        msg.replace("cannot resolve", "cannot be resolved")
-    } else {
-        msg
-    };
     SparklessError::new_err(msg)
 }
 
@@ -3554,6 +3557,15 @@ impl PyDataFrame {
             mixed_row_shape_error_on_collect: false,
         }
     }
+
+    fn check_mixed_row_shape(&self) -> PyResult<()> {
+        if self.mixed_row_shape_error_on_collect {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "createDataFrame: all rows must be the same shape (dict rows or list/tuple rows)",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[pymethods]
@@ -4163,6 +4175,7 @@ impl PyDataFrame {
     fn show(&self, n: usize, truncate: bool) -> PyResult<()> {
         // truncate: PySpark parity (e.g. show(truncate=False)); display layer may use it later
         let _ = truncate;
+        self.check_mixed_row_shape()?;
         self.inner.show(Some(n)).map_err(to_py_err)
     }
 
@@ -4254,6 +4267,7 @@ impl PyDataFrame {
     /// String-typed columns are best-effort coerced to int/float/bool when the value looks like
     /// one (e.g. coalesce() results or mixed-type array elements stringified by the engine).
     fn collect(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        self.check_mixed_row_shape()?;
         // Build a PySpark-like Row with schema attached. Use schema from collected result so
         // get_json_object etc. are string (PySpark parity #1146).
         let (output_names, rows, schema) = self
@@ -4365,16 +4379,13 @@ impl PyDataFrame {
     }
 
     fn count(&self) -> PyResult<usize> {
-        if self.mixed_row_shape_error_on_collect {
-            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "createDataFrame: all rows must be the same shape (dict rows or list/tuple rows)",
-            ));
-        }
+        self.check_mixed_row_shape()?;
         self.inner.count().map_err(to_py_err)
     }
 
     /// PySpark parity: len(df) returns row count.
     fn __len__(&self) -> PyResult<usize> {
+        self.check_mixed_row_shape()?;
         self.inner.count().map_err(to_py_err)
     }
 
@@ -5564,6 +5575,7 @@ impl PyDataFrame {
 
     #[pyo3(name = "toPandas")]
     fn to_pandas(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.check_mixed_row_shape()?;
         let pd = PyModule::import_bound(py, "pandas")?;
         let rows = self.inner.collect_as_json_rows().map_err(to_py_err)?;
         let cols = self.inner.columns().map_err(to_py_err)?;
@@ -9207,6 +9219,130 @@ fn native_array_except(a: &PyColumn, b: &PyColumn) -> PyColumn {
     }
 }
 
+/// Map simple type string (from DDL) to core DataType for from_json schema.
+fn py_type_str_to_core_data_type(s: &str) -> CoreDataType {
+    match simple_string_to_type(s).as_str() {
+        "long" => CoreDataType::Long,
+        "int" => CoreDataType::Integer,
+        "double" => CoreDataType::Double,
+        "float" => CoreDataType::Double,
+        "boolean" => CoreDataType::Boolean,
+        "date" => CoreDataType::Date,
+        "timestamp" => CoreDataType::Timestamp,
+        "binary" => CoreDataType::Binary,
+        _ => CoreDataType::String,
+    }
+}
+
+/// Parse DDL schema string into Polars struct dtype for from_json.
+fn ddl_schema_str_to_polars_dtype(ddl: &str) -> PyResult<polars::prelude::DataType> {
+    use polars::prelude::{DataType as PlDataType, Field};
+    let trimmed = ddl.trim();
+    if trimmed.is_empty() {
+        return Ok(PlDataType::String);
+    }
+    if trimmed.starts_with('{') {
+        let st = schema_from_json(trimmed).map_err(to_py_err)?;
+        let schema = st.to_polars_schema();
+        let fields: Vec<Field> = schema
+            .iter()
+            .map(|(name, dtype)| Field::new(name.clone(), dtype.clone()))
+            .collect();
+        return Ok(PlDataType::Struct(fields));
+    }
+    let pairs = parse_ddl_schema_string(trimmed);
+    if pairs.is_empty() {
+        return Ok(PlDataType::String);
+    }
+    let fields: Vec<StructField> = pairs
+        .into_iter()
+        .map(|(name, typ)| StructField::new(name, py_type_str_to_core_data_type(&typ), true))
+        .collect();
+    let st = StructType::new(fields);
+    let schema = st.to_polars_schema();
+    let pl_fields: Vec<Field> = schema
+        .iter()
+        .map(|(name, dtype)| Field::new(name.clone(), dtype.clone()))
+        .collect();
+    Ok(PlDataType::Struct(pl_fields))
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, replace, pos, length=-1))]
+fn overlay(column: &PyColumn, replace: &str, pos: i64, length: i64) -> PyColumn {
+    PyColumn {
+        inner: functions::overlay(&column.inner, replace, pos, length),
+    }
+}
+
+#[pyfunction]
+fn factorial(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::factorial(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn cbrt(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::cbrt(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn hypot(x: &PyColumn, y: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::hypot(&x.inner, &y.inner),
+    }
+}
+
+#[pyfunction]
+fn map_from_arrays(keys: &PyColumn, values: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::map_from_arrays(&keys.inner, &values.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, charset="UTF-8"))]
+fn encode(column: &PyColumn, charset: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::encode(&column.inner, charset),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, charset="UTF-8"))]
+fn decode(column: &PyColumn, charset: &str) -> PyColumn {
+    PyColumn {
+        inner: functions::decode(&column.inner, charset),
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "char")]
+fn spark_char(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::char(&column.inner),
+    }
+}
+
+#[pyfunction]
+fn to_json(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::to_json(&column.inner),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, schema=None))]
+fn from_json(column: &PyColumn, schema: Option<&str>) -> PyResult<PyColumn> {
+    let pl_dtype = schema.map(ddl_schema_str_to_polars_dtype).transpose()?;
+    Ok(PyColumn {
+        inner: functions::from_json(&column.inner, pl_dtype),
+    })
+}
+
 #[pyfunction]
 fn levenshtein(column: &PyColumn, other: &PyColumn) -> PyColumn {
     PyColumn {
@@ -9665,6 +9801,16 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(minute, m)?)?;
     m.add_function(wrap_pyfunction!(soundex, m)?)?;
     m.add_function(wrap_pyfunction!(repeat, m)?)?;
+    m.add_function(wrap_pyfunction!(overlay, m)?)?;
+    m.add_function(wrap_pyfunction!(factorial, m)?)?;
+    m.add_function(wrap_pyfunction!(cbrt, m)?)?;
+    m.add_function(wrap_pyfunction!(hypot, m)?)?;
+    m.add_function(wrap_pyfunction!(map_from_arrays, m)?)?;
+    m.add_function(wrap_pyfunction!(encode, m)?)?;
+    m.add_function(wrap_pyfunction!(decode, m)?)?;
+    m.add_function(wrap_pyfunction!(spark_char, m)?)?;
+    m.add_function(wrap_pyfunction!(to_json, m)?)?;
+    m.add_function(wrap_pyfunction!(from_json, m)?)?;
     m.add_function(wrap_pyfunction!(levenshtein, m)?)?;
     m.add_function(wrap_pyfunction!(native_lpad, m)?)?;
     m.add_function(wrap_pyfunction!(native_rpad, m)?)?;

@@ -457,6 +457,18 @@ fn struct_field_safe_alias(dotted_name: &str) -> String {
     format!("__sf_{}", dotted_name.replace('.', "_"))
 }
 
+/// Detect struct field access via dotted column name, optionally wrapped in `.alias(user_name)`.
+fn struct_field_select_info(e: &Expr) -> Option<(String, Option<String>)> {
+    match e {
+        Expr::Alias(inner, alias_name) => {
+            let (path, _) = struct_field_select_info(inner)?;
+            Some((path, Some(alias_name.to_string())))
+        }
+        Expr::Column(n) if n.as_str().contains('.') => Some((n.to_string(), None)),
+        _ => None,
+    }
+}
+
 /// Select using a mix of column names and expressions. Preserves case_sensitive on result.
 pub fn select_items(
     df: &DataFrame,
@@ -508,29 +520,18 @@ pub fn select_items(
                 }
             }
             SelectItem::Expr(e) => {
-                let name_for_alias = if let polars::prelude::Expr::Column(n) = &e {
-                    let s = n.as_str();
-                    if s.contains('.') {
-                        Some(s.to_string())
-                    } else {
-                        None
-                    }
-                } else if let polars::prelude::Expr::Alias(_, n) = &e {
-                    let s = n.as_str();
-                    if s.contains('.') {
-                        Some(s.to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                let resolved = df.resolve_expr_column_names(e)?;
+                let struct_info = struct_field_select_info(&e);
+                let resolved = df.resolve_expr_column_names(e.clone())?;
                 let coerced = df.coerce_string_numeric_comparisons(resolved)?;
-                if let Some(name) = name_for_alias {
-                    let safe = struct_field_safe_alias(&name);
-                    let last_segment = name.split('.').next_back().unwrap_or(&name).to_string();
-                    rename_after.push((safe.clone(), last_segment));
+                if let Some((dotted_path, user_alias)) = struct_info {
+                    let safe = struct_field_safe_alias(&dotted_path);
+                    let default_name = dotted_path
+                        .split('.')
+                        .next_back()
+                        .unwrap_or(&dotted_path)
+                        .to_string();
+                    let out_name = user_alias.unwrap_or(default_name);
+                    rename_after.push((safe.clone(), out_name));
                     exprs.push(coerced.alias(safe));
                 } else {
                     exprs.push(coerced);
@@ -545,10 +546,6 @@ pub fn select_items(
     Ok(result)
 }
 
-/// Filter rows using a Polars expression. Preserves case_sensitive on result.
-/// Column names in the condition are resolved per df's case sensitivity (PySpark parity).
-/// #646: Coerce predicate to Boolean so Polars never receives a non-Boolean filter (e.g. string-involving predicates).
-/// Uses expr_coerce_to_boolean so string columns cast via "true"/"false"/"1"/"0" (PySpark parity).
 /// Filter rows using a Polars expression. Preserves case_sensitive on result.
 /// Column names in the condition are resolved per df's case sensitivity (PySpark parity).
 /// #646: Coerce predicate to Boolean so Polars never receives a non-Boolean filter (e.g. string-involving predicates).

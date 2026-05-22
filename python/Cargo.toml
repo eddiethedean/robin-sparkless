@@ -18,6 +18,8 @@ sqlite = ["robin-sparkless/sqlite"]
 
 [dependencies]
 robin-sparkless = { path = "..", features = ["sql"] }
+robin-sparkless-core = { path = "../crates/robin-sparkless-core" }
+polars = { version = "0.53", default-features = false, features = ["dtype-struct"] }
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py38", "generate-import-lib"] }
 serde_json = "1.0"
 base64 = "0.22"

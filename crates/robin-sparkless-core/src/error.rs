@@ -43,6 +43,38 @@ impl fmt::Display for EngineError {
 
 impl std::error::Error for EngineError {}
 
+impl EngineError {
+    /// User-facing message without variant prefixes (for FFI / Python bindings).
+    pub fn user_message(&self) -> &str {
+        match self {
+            EngineError::User(s)
+            | EngineError::Internal(s)
+            | EngineError::Io(s)
+            | EngineError::Sql(s)
+            | EngineError::NotFound(s)
+            | EngineError::Other(s) => s.as_str(),
+        }
+    }
+}
+
+/// Normalize column-not-found text to PySpark-style "cannot be resolved" wording.
+pub fn normalize_unresolved_column_message(msg: &str) -> String {
+    let lower = msg.to_lowercase();
+    if lower.contains("cannot be resolved") {
+        return msg.to_string();
+    }
+    if lower.contains("cannot resolve") {
+        return msg.replace("cannot resolve", "cannot be resolved");
+    }
+    if msg.contains("unable to find column")
+        || (msg.contains("not found") && lower.contains("column"))
+        || msg.contains("valid columns")
+    {
+        return format!("unresolved_column: cannot be resolved: {msg}");
+    }
+    msg.to_string()
+}
+
 impl From<serde_json::Error> for EngineError {
     fn from(e: serde_json::Error) -> Self {
         EngineError::Internal(e.to_string())

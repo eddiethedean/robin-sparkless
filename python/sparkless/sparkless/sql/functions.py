@@ -78,15 +78,11 @@ from sparkless import (
     to_utc_timestamp as _to_utc_timestamp,
     approx_count_distinct as _approx_count_distinct,
     date_trunc as _date_trunc,
-    first as _first_agg,
     translate as _translate,
     substring_index as _substring_index,
-    crc32 as _crc32,
-    xxhash64 as _xxhash64,
     get_json_object as _get_json_object,
     size as _size,
     array_contains as _array_contains,
-    explode as _explode,
 )
 from sparkless.errors import PySparkValueError
 from sparkless import DataFrame
@@ -390,6 +386,7 @@ struct = _ni("struct")
 
 
 def explode(col_or_name: ColumnOrName) -> _ColumnType:
+    """Explode array into one row per element (PySpark explode)."""
     return _col_result(_native_fn("explode")(_as_col(col_or_name)))
 
 
@@ -430,6 +427,7 @@ def mean(col_or_name: ColumnOrName) -> _ColumnType:
 
 
 def first(col_or_name: ColumnOrName, ignorenulls: bool = False) -> _ColumnType:
+    """First value in group (PySpark first); use in groupBy().agg(). Default ignorenulls=False."""
     return _col_result(_native_fn("first")(_as_col(col_or_name), ignorenulls))
 
 
@@ -549,7 +547,6 @@ def map_values(col_or_name):
     return _native.native_map_values(_as_col(col_or_name))
 
 
-map_from_arrays = _ni("map_from_arrays")
 sumDistinct = _ni("sumDistinct")
 
 
@@ -653,30 +650,71 @@ def regexp_extract(col_or_name, pattern, idx=0):
     return _native.native_regexp_extract(_as_col(col_or_name), pattern, idx)
 
 
-overlay = _ni("overlay")
+def overlay(col_or_name, replace, pos, length=-1):
+    """Replace substring at 1-based position (PySpark overlay)."""
+    return _col_result(
+        _native.overlay(_as_col(col_or_name), str(replace), int(pos), int(length))
+    )
 
-# --- Window functions (stubs) ---
-dense_rank = _ni("dense_rank")
-rank = _ni("rank")
-# percent_rank defined below as real implementation returning _PercentRankExpr()
-# cume_dist defined below as real implementation returning _CumeDistExpr()
-ntile = _ni("ntile")
-lag = _ni("lag")
-lead = _ni("lead")
-window = _ni("window")
 
-# --- JSON functions (stubs) ---
-from_json = _ni("from_json")
-to_json = _ni("to_json")
+def map_from_arrays(keys, values):
+    """Build map from two array columns (PySpark map_from_arrays)."""
+    return _col_result(_native.map_from_arrays(_as_col(keys), _as_col(values)))
+
+
+def from_json(col_or_name, schema=None, options=None):
+    """Parse JSON string column into struct (PySpark from_json). schema: DDL string or StructType."""
+    _ = options  # accepted for API parity
+    schema_str: Optional[str] = None
+    if schema is not None:
+        if isinstance(schema, str):
+            schema_str = schema
+        elif hasattr(schema, "json"):
+            schema_str = str(schema.json())
+        elif hasattr(schema, "simpleString"):
+            schema_str = str(schema.simpleString())
+        else:
+            raise TypeError("from_json schema must be str or StructType-like")
+    return _col_result(_native.from_json(_as_col(col_or_name), schema_str))
+
+
+def to_json(col_or_name):
+    """Serialize struct column to JSON string (PySpark to_json)."""
+    return _col_result(_native.to_json(_as_col(col_or_name)))
+
+
 schema_of_json = _ni("schema_of_json")
-get_json_object = _ni("get_json_object")
-json_tuple = _ni("json_tuple")
-decode = _ni("decode")
-encode = _ni("encode")
-char = _ni("char")
-factorial = _ni("factorial")
-cbrt = _ni("cbrt")
-hypot = _ni("hypot")
+
+
+def decode(col_or_name, charset="UTF-8"):
+    """Decode binary hex string to text (PySpark decode)."""
+    return _col_result(_native.decode(_as_col(col_or_name), charset))
+
+
+def encode(col_or_name, charset="UTF-8"):
+    """Encode string to hex binary (PySpark encode)."""
+    return _col_result(_native.encode(_as_col(col_or_name), charset))
+
+
+def char(col_or_name):
+    """Int code point to single-character string (PySpark char)."""
+    return _col_result(_native.char(_as_col(col_or_name)))
+
+
+def factorial(col_or_name):
+    return _col_result(_native.factorial(_as_col(col_or_name)))
+
+
+def cbrt(col_or_name):
+    return _col_result(_native.cbrt(_as_col(col_or_name)))
+
+
+def hypot(x, y):
+    return _col_result(_native.hypot(_as_col(x), _as_col(y)))
+
+
+# --- Window functions (stubs removed; real implementations below) ---
+window = _ni("window")
 
 
 # --- Date/time functions (native-backed) ---
@@ -1349,11 +1387,6 @@ def date_trunc(format, column):
     return _date_trunc(format, _as_col(column))
 
 
-def first(col, ignorenulls=False):
-    """First value in group (PySpark first); use in groupBy().agg(). Default ignorenulls=False."""
-    return _first_agg(_as_col(col), ignorenulls)
-
-
 def translate(column, from_str, to_str):
     """Character-by-character translation (PySpark translate)."""
     return _translate(_as_col(column), from_str, to_str)
@@ -1362,16 +1395,6 @@ def translate(column, from_str, to_str):
 def substring_index(column, delimiter, count):
     """Substring before/after nth delimiter (PySpark substring_index). count > 0: before nth from left; count < 0: after nth from right."""
     return _substring_index(_as_col(column), delimiter, count)
-
-
-def crc32(column):
-    """CRC32 checksum of string bytes (PySpark crc32)."""
-    return _crc32(_as_col(column))
-
-
-def xxhash64(column):
-    """XXH64 hash of string (PySpark xxhash64)."""
-    return _xxhash64(_as_col(column))
 
 
 def get_json_object(column, path):
@@ -1423,11 +1446,6 @@ def array_contains(column, value):
 def arrays_overlap(col1, col2):
     """True if two array columns have any element in common (PySpark arrays_overlap)."""
     return _native.arrays_overlap(_as_col(col1), _as_col(col2))
-
-
-def explode(column):
-    """Explode array into one row per element (PySpark explode)."""
-    return _explode(_as_col(column))
 
 
 # lit is imported from sparkless (native polymorphic implementation)

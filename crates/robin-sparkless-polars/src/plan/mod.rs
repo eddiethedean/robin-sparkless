@@ -339,10 +339,7 @@ fn apply_op(
                     if let Some(obj) = v.as_object() {
                         if let Some(expr_val) = obj.get("expr") {
                             // Column-like expression: {name: "<alias>", expr: <expr>}
-                            let name = obj
-                                .get("name")
-                                .and_then(Value::as_str)
-                                .unwrap_or("_c"); // default alias if Sparkless omits
+                            let name = obj.get("name").and_then(Value::as_str).unwrap_or("_c"); // default alias if Sparkless omits
                             let expr = expr_from_value(expr_val).map_err(PlanError::Expr)?;
                             let resolved = df
                                 .resolve_expr_column_names(expr)
@@ -492,9 +489,7 @@ fn apply_op(
                 })?;
             let names: Vec<String> = columns
                 .iter()
-                .filter_map(|v| {
-                    v.as_str().map(String::from).or_else(|| expr_to_col_name(v))
-                })
+                .filter_map(|v| v.as_str().map(String::from).or_else(|| expr_to_col_name(v)))
                 .map(|s| df.resolve_column_name(s.as_str()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(PlanError::Session)?;
@@ -520,7 +515,9 @@ fn apply_op(
                 .get("name")
                 .or_else(|| payload.get("alias"))
                 .and_then(Value::as_str)
-                .ok_or_else(|| PlanError::InvalidPlan("withColumn must have 'name' or 'alias'".into()))?;
+                .ok_or_else(|| {
+                    PlanError::InvalidPlan("withColumn must have 'name' or 'alias'".into())
+                })?;
             let expr_val = payload
                 .get("expr")
                 .ok_or_else(|| PlanError::InvalidPlan("withColumn must have 'expr'".into()))?;
@@ -589,12 +586,8 @@ fn apply_op(
         "union" => handle_union_op(session, df, payload),
         "unionByName" => handle_union_by_name_op(session, df, payload),
         "crossJoin" | "cross_join" => handle_cross_join_op(session, df, payload),
-        "rollup" => Err(PlanError::UnsupportedOp(
-            "Plan op 'rollup' is not yet supported. Use groupBy for now. See docs for supported operations.".into(),
-        )),
-        "cube" => Err(PlanError::UnsupportedOp(
-            "Plan op 'cube' is not yet supported. Use groupBy for now. See docs for supported operations.".into(),
-        )),
+        "rollup" => handle_cube_rollup_op(df, payload, false),
+        "cube" => handle_cube_rollup_op(df, payload, true),
         _ => Err(PlanError::UnsupportedOp(format!(
             "Plan op '{op_name}' is not supported. See docs for supported operations (e.g. select, filter, groupBy, join, orderBy, limit)."
         ))),
@@ -700,6 +693,61 @@ fn handle_union_by_name_op(
         .map_err(PlanError::Session)
 }
 
+/// Cube or rollup: parse grouping columns and aggs, delegate to DataFrame::cube/rollup.
+fn handle_cube_rollup_op(
+    df: DataFrame,
+    payload: Value,
+    is_cube: bool,
+) -> Result<DataFrame, PlanError> {
+    let group_by = payload
+        .get("group_by")
+        .or_else(|| payload.get("columns"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            PlanError::InvalidPlan("cube/rollup must have 'group_by' or 'columns' array".into())
+        })?;
+    let cols: Vec<String> = group_by
+        .iter()
+        .filter_map(|v| {
+            v.as_str()
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    v.get("col")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string())
+                        .or_else(|| v.get("name").and_then(Value::as_str).map(|s| s.to_string()))
+                })
+                .or_else(|| {
+                    v.get("expr")
+                        .and_then(|e| expr_from_value(e).ok())
+                        .and_then(|expr| {
+                            polars_plan::utils::expr_output_name(&expr)
+                                .ok()
+                                .map(|s| s.as_str().to_string())
+                        })
+                })
+        })
+        .map(|s| df.resolve_column_name(s.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(PlanError::Session)?;
+    let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
+    let cube_rollup = if is_cube {
+        df.cube(refs).map_err(PlanError::Session)?
+    } else {
+        df.rollup(refs).map_err(PlanError::Session)?
+    };
+    let aggs = payload
+        .get("aggs")
+        .or_else(|| payload.get("aggregations"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            PlanError::InvalidPlan("cube/rollup must include 'aggs' or 'aggregations' array".into())
+        })?;
+    let agg_exprs = parse_aggs(aggs, &df)?;
+    let disambiguated = disambiguate_agg_output_names(agg_exprs);
+    cube_rollup.agg(disambiguated).map_err(PlanError::Session)
+}
+
 fn handle_cross_join_op(
     session: &SparkSession,
     df: DataFrame,
@@ -750,10 +798,8 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
             .ok_or_else(|| PlanError::InvalidPlan("agg must have 'agg' or 'func' string".into()))?;
 
         if agg == "python_grouped_udf" {
-            // Grouped Python UDF aggregations are not expressible as pure Expr; the plan
-            // interpreter currently supports only Rust/built-in aggregations at this level.
             return Err(PlanError::InvalidPlan(
-                "python_grouped_udf aggregations are not yet supported in execute_plan; use built-in aggregations in plans for now".into(),
+                "python_grouped_udf aggregations are not supported in execute_plan; use built-in aggregations or apply grouped Python UDFs via the Python DataFrame API".into(),
             ));
         }
 
