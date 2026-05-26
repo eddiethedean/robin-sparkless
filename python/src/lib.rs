@@ -4267,11 +4267,46 @@ impl PyDataFrame {
     }
 
     #[pyo3(name = "__getitem__")]
-    fn get_item(&self, name: &str) -> PyResult<PyColumn> {
-        self.inner
-            .column(name)
-            .map(|c| PyColumn { inner: c })
-            .map_err(to_py_err)
+    fn get_item(&self, py: Python<'_>, key: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+        // PySpark: df["col"] -> Column; df[["a","b"]] -> DataFrame selecting those columns.
+        // Sparkless parity: accept list/tuple of str for projection.
+        if let Ok(name) = key.extract::<String>() {
+            let col = self
+                .inner
+                .column(&name)
+                .map(|c| PyColumn { inner: c })
+                .map_err(to_py_err)?;
+            return Ok(col.into_py(py));
+        }
+        if let Ok(list) = key.downcast::<PyList>() {
+            let mut names: Vec<String> = Vec::with_capacity(list.len());
+            for item in list.iter() {
+                names.push(item.extract::<String>()?);
+            }
+            let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+            let df = self
+                .inner
+                .select(refs)
+                .map(PyDataFrame::wrap)
+                .map_err(to_py_err)?;
+            return Ok(df.into_py(py));
+        }
+        if let Ok(tup) = key.downcast::<PyTuple>() {
+            let mut names: Vec<String> = Vec::with_capacity(tup.len());
+            for item in tup.iter() {
+                names.push(item.extract::<String>()?);
+            }
+            let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+            let df = self
+                .inner
+                .select(refs)
+                .map(PyDataFrame::wrap)
+                .map_err(to_py_err)?;
+            return Ok(df.into_py(py));
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "__getitem__ expects a column name (str) or list/tuple of column names",
+        ))
     }
 
     fn __getattr__(&self, name: &str) -> PyResult<PyColumn> {
