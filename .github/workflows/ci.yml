@@ -175,8 +175,12 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+      # Skip doctests here: linking merged doctests with sql+delta can OOM on
+      # ubuntu-latest (ld bus error). Examples are exercised under --features sql.
       - name: Run Rust tests (delta)
-        run: cargo test --workspace --features sql,delta
+        run: cargo test --workspace --features sql,delta --lib --tests
+        env:
+          CARGO_BUILD_JOBS: 1
 
   python:
     name: Python (sparkless)
