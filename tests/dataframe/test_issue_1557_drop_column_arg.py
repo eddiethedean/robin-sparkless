@@ -34,6 +34,8 @@ def test_drop_string_still_drops_column() -> None:
 
 def test_drop_list_of_columns_mixed() -> None:
     spark = SparkSession.builder.appName("issue_1557_list").get_or_create()
-    df = spark.createDataFrame([("1", "Alice", "x", "y")], ["A", "name", "extra", "tail"])
+    df = spark.createDataFrame(
+        [("1", "Alice", "x", "y")], ["A", "name", "extra", "tail"]
+    )
     out = df.drop(["extra", F.col("tail")])
     assert out.columns == ["A", "name"]
