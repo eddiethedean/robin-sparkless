@@ -2862,7 +2862,9 @@ fn py_join_on_to_vec(on: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
 /// PySpark allows `join(other, [cond1, cond2, ...])` where each condition is a boolean Column.
 /// Combine them with AND. Returns `Some(expr)` when any element is a complex expression (name
 /// `"<expr>"`). Returns `None` for column-name lists (all strings) or simple same-name keys.
-fn try_combine_join_condition_list(on: &Bound<'_, PyAny>) -> PyResult<Option<robin_sparkless::Expr>> {
+fn try_combine_join_condition_list(
+    on: &Bound<'_, PyAny>,
+) -> PyResult<Option<robin_sparkless::Expr>> {
     use robin_sparkless::Expr as RsExpr;
 
     let items: Vec<Bound<'_, PyAny>> = if let Ok(list) = on.downcast::<PyList>() {
