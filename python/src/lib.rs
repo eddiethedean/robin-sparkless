@@ -3842,10 +3842,8 @@ impl PyDataFrame {
             names: &mut Vec<Box<str>>,
             _py: Python<'_>,
         ) -> PyResult<()> {
-            if let Ok(py_col) = item.downcast::<PyColumn>() {
-                out.push(ItemOrExprStr::Resolved(Tmp::Expr(
-                    py_col.borrow().inner.clone().into_expr(),
-                )));
+            if let Some(col) = py_any_to_dataframe_column(item)? {
+                out.push(ItemOrExprStr::Resolved(Tmp::Expr(col.into_expr())));
                 return Ok(());
             }
             if let Ok(py_expr_str) = item.downcast::<PyExprStr>() {
@@ -3885,7 +3883,9 @@ impl PyDataFrame {
                 let mut all_strings = true;
                 let mut has_column_like = false;
                 for sub in tup.iter() {
-                    if sub.downcast::<PyColumn>().is_ok() || sub.downcast::<PyExprStr>().is_ok() {
+                    if py_any_to_dataframe_column(&sub).ok().flatten().is_some()
+                        || sub.downcast::<PyExprStr>().is_ok()
+                    {
                         has_column_like = true;
                         break;
                     }
@@ -4060,15 +4060,13 @@ impl PyDataFrame {
         name: &str,
         col_any: &Bound<'_, PyAny>,
     ) -> PyResult<PyDataFrame> {
-        // Case 1: regular Column (including Python UDF columns)
-        if let Ok(py_col) = col_any.downcast::<PyColumn>() {
-            let col = py_col.borrow();
-            if let Some((udf_name, mut arg_names, literal_jsons)) =
-                col.inner.udf_call_info_with_literals()
+        // Case 1: Column or chained when/then (PyThenBuilder) without explicit .otherwise()
+        if let Some(col) = py_any_to_dataframe_column(col_any)? {
+            if let Some((udf_name, mut arg_names, literal_jsons)) = col.udf_call_info_with_literals()
             {
                 // Materialize expression args (e.g. F.col('x')*2) as temp columns so the executor can read them from the row.
                 let mut df_for_udf = slf.inner.clone();
-                if let Some((_, args)) = col.inner.udf_call_with_args() {
+                if let Some((_, args)) = col.udf_call_with_args() {
                     for (i, arg) in args.iter().enumerate() {
                         if literal_jsons.get(i).and_then(|o| o.as_ref()).is_some() {
                             continue;
@@ -4120,7 +4118,7 @@ impl PyDataFrame {
                     return Ok(result_df);
                 }
             }
-            let df = slf.inner.with_column(name, &col.inner).map_err(|e| {
+            let df = slf.inner.with_column(name, &col).map_err(|e| {
                 let msg = e.to_string();
                 if msg.contains("to_timestamp requires StringType") {
                     PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg)
@@ -8032,6 +8030,14 @@ struct PyThenBuilder {
 
 #[pymethods]
 impl PyThenBuilder {
+    /// PySpark: chained when expressions support .alias() before or without .otherwise().
+    fn alias(&mut self, name: &str) -> PyResult<PyColumn> {
+        let col = py_then_builder_to_column(self)?;
+        Ok(PyColumn {
+            inner: col.alias(name),
+        })
+    }
+
     #[pyo3(signature = (condition, value=None))]
     fn when(
         &mut self,
@@ -8093,6 +8099,32 @@ impl PyChainedWhenBuilder {
             inner: Some(cwb.then(&col)),
         })
     }
+}
+
+/// PySpark allows chained `when().when()` without an explicit `.otherwise()`; unmatched rows are null.
+fn py_then_builder_to_column(tb: &mut PyThenBuilder) -> PyResult<Column> {
+    let builder = tb.inner.take().ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("when expression already finalized")
+    })?;
+    Ok(builder.otherwise(&robin_sparkless::functions::lit_null_untyped()))
+}
+
+/// Resolve a withColumn/select expression: Column, finalized chained-when, or incomplete when builders.
+fn py_any_to_dataframe_column(col_any: &Bound<'_, PyAny>) -> PyResult<Option<Column>> {
+    if let Ok(py_col) = col_any.downcast::<PyColumn>() {
+        return Ok(Some(py_col.borrow().inner.clone()));
+    }
+    if let Ok(py_tb) = col_any.downcast::<PyThenBuilder>() {
+        return Ok(Some(py_then_builder_to_column(&mut py_tb.borrow_mut())?));
+    }
+    if col_any.downcast::<PyChainedWhenBuilder>().is_ok()
+        || col_any.downcast::<PyWhenBuilder>().is_ok()
+    {
+        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "incomplete when(): call .then(value) before using this expression",
+        ));
+    }
+    Ok(None)
 }
 
 #[pyfunction]
