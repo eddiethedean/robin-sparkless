@@ -15,6 +15,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.8.0] - 2026-05-26
+
+### Added
+
+- **Python `hash` / `typeof`** — Wire `F.hash()` and `F.typeof()` to the Rust engine (previously raised `NotImplementedError`).
+
+- **Plan join on expression** — Logical-plan `join` payloads can use expression objects in `on` (e.g. `array_contains`); key-only equalities still use key-based join.
+
+### Fixed
+
+- **#1554 – Join on list of boolean conditions** — `join(on=[left.a == right.a, left.b >= right.b, ...])` ANDs the conditions and uses the expression join path instead of treating `"<expr>"` as column names (fixes `unresolved_column: column '<expr>' not found`).
+
+### Changed
+
+- **Parity testing** — `make test-parity-phases` runs `pytest tests/parity/` (legacy Rust `tests/parity.rs` harness removed). Maintainer gate and optional CI `workflow_dispatch` full-suite job documented in `docs/TESTING_GUIDE.md`.
+
+- **Release metadata** — Version 4.8.0 across the Rust crates and the Python `sparkless` package.
+
 ## [4.7.1] - 2026-05-26
 
 ### Fixed
@@ -27,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Release metadata** — Version 4.7.1 across the Rust crates and the Python `sparkless` package.
+- **Release metadata** — Version 4.7.1 across the Rust crates and the Python `sparkless` package (superseded by 4.8.0; not published).
 
 ## [4.7.0] - 2026-05-21
 
