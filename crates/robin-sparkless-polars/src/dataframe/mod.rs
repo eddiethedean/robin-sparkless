@@ -14,8 +14,8 @@ pub use joins::{
 pub use stats::DataFrameStat;
 pub(crate) use transformations::literal_value_to_serde_value;
 pub use transformations::{
-    DataFrameNa, SelectItem, filter, order_by, order_by_exprs, select, select_items,
-    select_with_exprs, with_column,
+    DataFrameNa, DropColumnSpec, SelectItem, filter, order_by, order_by_exprs, select,
+    select_items, select_with_exprs, with_column,
 };
 
 use crate::column::Column;
@@ -1810,6 +1810,14 @@ impl DataFrame {
     /// Drop one or more columns.
     pub fn drop(&self, columns: Vec<&str>) -> Result<DataFrame, PolarsError> {
         transformations::drop(self, columns, self.case_sensitive)
+    }
+
+    /// Drop columns from string names and/or Column references (PySpark `drop(col)` parity).
+    pub fn drop_specs(
+        &self,
+        specs: Vec<transformations::DropColumnSpec>,
+    ) -> Result<DataFrame, PolarsError> {
+        transformations::drop_specs(self, specs, self.case_sensitive)
     }
 
     /// Drop rows with nulls. PySpark na.drop(subset, how, thresh).

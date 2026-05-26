@@ -370,6 +370,13 @@ impl DataFrame {
         self.0.drop(columns).map(DataFrame)
     }
 
+    pub fn drop_specs(
+        &self,
+        specs: Vec<robin_sparkless_polars::dataframe::DropColumnSpec>,
+    ) -> Result<DataFrame, PolarsError> {
+        self.0.drop_specs(specs).map(DataFrame)
+    }
+
     pub fn dropna(
         &self,
         subset: Option<Vec<&str>>,
