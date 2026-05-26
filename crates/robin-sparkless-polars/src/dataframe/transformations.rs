@@ -1299,26 +1299,90 @@ pub fn distinct(
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
-/// Drop one or more columns.
+/// One column to drop: a string name or a Column reference (PySpark `drop(col)`).
+#[derive(Debug, Clone)]
+pub struct DropColumnSpec {
+    pub name: String,
+    /// True when the caller passed a Column (e.g. `joined.drop(right.A)`), not a bare string.
+    pub from_column_ref: bool,
+}
+
+/// Resolve which physical column to drop for a drop target (PySpark parity #1557).
+fn resolve_drop_target(
+    df: &DataFrame,
+    spec: &DropColumnSpec,
+) -> Result<Option<String>, PolarsError> {
+    let name = spec.name.as_str();
+    if spec.from_column_ref {
+        let right_suffixed = format!("{name}_right");
+        if let Ok(resolved) = df.resolve_column_name(&right_suffixed) {
+            return Ok(Some(resolved));
+        }
+        // Coalesced join key: one physical column, ambiguous logical refs — drop(right.key) is a no-op.
+        if let Some(ref ambig) = df.ambiguous_columns {
+            let is_ambiguous_key = if df.case_sensitive {
+                ambig.contains(name)
+            } else {
+                let name_lower = name.to_lowercase();
+                ambig.iter().any(|a| a.to_lowercase() == name_lower)
+            };
+            if is_ambiguous_key {
+                let all_names = df.columns()?;
+                let matches: Vec<&String> = if df.case_sensitive {
+                    all_names.iter().filter(|n| n.as_str() == name).collect()
+                } else {
+                    let name_lower = name.to_lowercase();
+                    all_names
+                        .iter()
+                        .filter(|n| n.to_lowercase() == name_lower)
+                        .collect()
+                };
+                if matches.len() == 1 {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+    match df.resolve_column_name(name) {
+        Ok(resolved) => Ok(Some(resolved)),
+        Err(PolarsError::ColumnNotFound(msg)) => {
+            if msg.contains("AMBIGUOUS_REFERENCE") {
+                return Err(PolarsError::ColumnNotFound(msg));
+            }
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Drop one or more columns (string names only).
 pub fn drop(
     df: &DataFrame,
     columns: Vec<&str>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
+    let specs: Vec<DropColumnSpec> = columns
+        .into_iter()
+        .map(|c| DropColumnSpec {
+            name: c.to_string(),
+            from_column_ref: false,
+        })
+        .collect();
+    drop_specs(df, specs, case_sensitive)
+}
+
+/// Drop columns from string names and/or Column references (#1557).
+pub fn drop_specs(
+    df: &DataFrame,
+    specs: Vec<DropColumnSpec>,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
     // PySpark behavior: dropping a non-existent column is a no-op (idempotent).
     // Keep unresolved_column errors for truly ambiguous references.
-    let mut resolved: Vec<String> = Vec::with_capacity(columns.len());
-    for c in &columns {
-        match df.resolve_column_name(c) {
-            Ok(name) => resolved.push(name),
-            Err(PolarsError::ColumnNotFound(msg)) => {
-                // If the reference is ambiguous, keep failing (PySpark parity).
-                if msg.contains("AMBIGUOUS_REFERENCE") {
-                    return Err(PolarsError::ColumnNotFound(msg));
-                }
-                // Otherwise, ignore missing columns (idempotent drop).
-            }
-            Err(e) => return Err(e),
+    let mut resolved: Vec<String> = Vec::with_capacity(specs.len());
+    for spec in &specs {
+        if let Some(name) = resolve_drop_target(df, spec)? {
+            resolved.push(name);
         }
     }
     let all_names = df.columns()?;
@@ -2460,8 +2524,8 @@ pub fn intersect_all(
 #[cfg(test)]
 mod tests {
     use super::{
-        SelectItem, distinct, drop, dropna, filter, first, head, limit, offset, order_by,
-        select_items, union, union_by_name, with_column,
+        DropColumnSpec, SelectItem, distinct, drop, drop_specs, dropna, filter, first, head, limit,
+        offset, order_by, select_items, union, union_by_name, with_column,
     };
     use crate::column::Column;
     use crate::functions;
@@ -2915,6 +2979,31 @@ mod tests {
         let cols = out.columns().unwrap();
         assert!(!cols.contains(&"v".to_string()));
         assert_eq!(out.count().unwrap(), 3);
+    }
+
+    /// #1557: drop(Column) on coalesced join key is a no-op; drop("name") still drops.
+    #[test]
+    fn drop_column_ref_coalesced_join_key_is_noop() {
+        let df = test_df();
+        let mut ambig = std::collections::HashSet::new();
+        ambig.insert("n".to_string());
+        let df = super::super::DataFrame::from_lazy_with_options_and_ambiguous(
+            df.lazy_frame().clone(),
+            false,
+            Some(ambig),
+        );
+        let out = drop_specs(
+            &df,
+            vec![DropColumnSpec {
+                name: "n".to_string(),
+                from_column_ref: true,
+            }],
+            false,
+        )
+        .unwrap();
+        assert_eq!(out.columns().unwrap(), df.columns().unwrap());
+        let out2 = drop(&df, vec!["v"], false).unwrap();
+        assert!(!out2.columns().unwrap().contains(&"v".to_string()));
     }
 
     /// #681: union (same column order) with Int64 vs String in same position coerces to common type.

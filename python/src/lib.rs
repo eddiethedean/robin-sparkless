@@ -2653,6 +2653,62 @@ fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
     "string".to_string()
 }
 
+/// PySpark drop(*cols): str or Column (or list/tuple of those).
+fn py_tuple_or_single_to_drop_specs(
+    tup: &Bound<'_, PyTuple>,
+) -> PyResult<Vec<robin_sparkless::DropColumnSpec>> {
+    use robin_sparkless::DropColumnSpec;
+
+    fn push_item(item: &Bound<'_, PyAny>, out: &mut Vec<DropColumnSpec>) -> PyResult<()> {
+        if let Ok(py_col) = item.downcast::<PyColumn>() {
+            out.push(DropColumnSpec {
+                name: py_col.borrow().inner.name().to_string(),
+                from_column_ref: true,
+            });
+            return Ok(());
+        }
+        if let Ok(s) = item.extract::<String>() {
+            out.push(DropColumnSpec {
+                name: s,
+                from_column_ref: false,
+            });
+            return Ok(());
+        }
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "drop() expects column names as str or Column",
+        ))
+    }
+
+    if tup.len() == 0 {
+        return Ok(Vec::new());
+    }
+    if tup.len() == 1 {
+        let item = tup.get_item(0)?;
+        if let Ok(list) = item.downcast::<PyList>() {
+            let mut out = Vec::with_capacity(list.len());
+            for x in list.iter() {
+                push_item(&x, &mut out)?;
+            }
+            return Ok(out);
+        }
+        if let Ok(inner_tup) = item.downcast::<PyTuple>() {
+            let mut out = Vec::with_capacity(inner_tup.len());
+            for x in inner_tup.iter() {
+                push_item(&x, &mut out)?;
+            }
+            return Ok(out);
+        }
+        let mut out = Vec::new();
+        push_item(&item, &mut out)?;
+        return Ok(out);
+    }
+    let mut out = Vec::with_capacity(tup.len());
+    for item in tup.iter() {
+        push_item(&item, &mut out)?;
+    }
+    Ok(out)
+}
+
 /// PySpark drop(*cols): single str or list of str -> Vec<String>
 fn py_tuple_or_single_to_vec_string(tup: &Bound<'_, PyTuple>) -> PyResult<Vec<String>> {
     if tup.len() == 0 {
@@ -4865,10 +4921,9 @@ impl PyDataFrame {
 
     #[pyo3(signature = (*columns))]
     fn drop(&self, columns: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        let col_names = py_tuple_or_single_to_vec_string(columns)?;
-        let refs: Vec<&str> = col_names.iter().map(|s| s.as_str()).collect();
+        let specs = py_tuple_or_single_to_drop_specs(columns)?;
         self.inner
-            .drop(refs)
+            .drop_specs(specs)
             .map(PyDataFrame::wrap)
             .map_err(to_py_err)
     }
