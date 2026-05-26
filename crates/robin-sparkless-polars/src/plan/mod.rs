@@ -13,15 +13,15 @@ use crate::functions::{
     SortOrder, asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last,
 };
 use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
-use polars::prelude::Expr;
-use std::collections::HashSet;
 use crate::session::{SparkSession, set_thread_udf_session};
 pub use expr::PlanExprError;
 pub use logical::LogicalPlan;
+use polars::prelude::Expr;
 use polars::prelude::PolarsError;
 use robin_sparkless_core::engine::{DataFrameBackend, PlanExecutor as CorePlanExecutor};
 use robin_sparkless_core::error::EngineError;
 use serde_json::Value;
+use std::collections::HashSet;
 
 /// Execute a logical plan: build initial DataFrame from (data, schema), then apply each op in sequence.
 ///
@@ -253,9 +253,7 @@ fn join_on_needs_expression(on: &Value) -> bool {
     }
     if let Some(arr) = on.as_array() {
         return arr.iter().any(|v| {
-            !(v.as_str().is_some()
-                || expr_to_col_name(v).is_some()
-                || is_simple_eq_same_col(v))
+            !(v.as_str().is_some() || expr_to_col_name(v).is_some() || is_simple_eq_same_col(v))
         });
     }
     false
@@ -1126,7 +1124,10 @@ mod tests {
         })];
         let df = execute_plan(&session, data, schema, &plan).expect("expression join");
         let out = df.collect_inner().expect("collect");
-        assert!(out.height() >= 1, "array_contains join should match at least one row");
+        assert!(
+            out.height() >= 1,
+            "array_contains join should match at least one row"
+        );
     }
 
     /// Legacy string expression in "on" still returns a clear error (use JSON expr objects).
