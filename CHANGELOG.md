@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **#1554 – Join on list of boolean conditions** — `join(on=[left.a == right.a, left.b >= right.b, ...])` ANDs the conditions and uses the expression join path instead of treating `"<expr>"` as column names (fixes `unresolved_column: column '<expr>' not found`).
 
+- **Plan join on expression** — Logical-plan `join` payloads can use expression objects in `on` (e.g. `array_contains`); key-only equalities still use key-based join.
+
+- **Python `hash` / `typeof`** — Wire `F.hash()` and `F.typeof()` to the Rust engine (previously raised `NotImplementedError`).
+
 ### Changed
 
 - **Release metadata** — Version 4.7.1 across the Rust crates and the Python `sparkless` package.

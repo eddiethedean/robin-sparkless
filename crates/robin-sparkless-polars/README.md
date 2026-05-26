@@ -26,7 +26,7 @@ Most users depend on the main crate, which pulls in this crate and re-exports th
 
 ```toml
 [dependencies]
-robin-sparkless = { version = "0.15", features = ["sql"] }
+robin-sparkless = { version = "4", features = ["sql"] }
 ```
 
 If you need to depend on the Polars backend directly (e.g. for a custom build or integration):

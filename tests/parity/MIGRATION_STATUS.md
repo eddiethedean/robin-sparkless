@@ -26,7 +26,7 @@ To unified structure:
 - ✅ **test_set_operations.py** - Union, unionAll, intersect, except (4 tests)
 - ✅ **test_window.py** - Window functions: row_number, rank, dense_rank, sum, lag, lead, cume_dist, first_value, last_value, percent_rank, ntile (12 tests)
 - ✅ **test_aggregations.py** - Sum, avg, count, max, min, multiple aggregations, nulls (9 tests)
-- ✅ **test_groupby.py** - GroupBy operations (2 tests - currently blocked by bugs)
+- ✅ **test_groupby.py** - GroupBy operations
 
 **Total**: ~45 dataframe tests migrated
 
@@ -143,15 +143,14 @@ See `tests/BUG_LOG.md` for detailed bug information.
 ### Infrastructure Files
 1. `tests/fixtures/parity_base.py` - Base class for all parity tests
 2. `tests/PARITY_TESTING_GUIDE.md` - Comprehensive testing guide
-3. `tests/BUG_LOG.md` - Bug tracking
-4. `tests/parity/MIGRATION_STATUS.md` - This file
+3. `tests/parity/MIGRATION_STATUS.md` - This file
 5. `tests/parity/README.md` - Quick reference for parity tests
 
 ## Next Steps
 
 1. Continue migrating extended function tests
-2. Fix blocking bugs (BUG-001, BUG-002)
-3. Verify all migrated tests pass
+2. Verify all migrated tests pass (`make test-parity-phases`)
+3. Run full `pytest tests -n 10` before release (see `docs/TESTING_GUIDE.md` § Maintainer gate)
 4. Generate missing expected outputs
 5. Begin cleanup of old test directories
 

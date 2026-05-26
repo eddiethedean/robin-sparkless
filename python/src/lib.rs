@@ -9647,6 +9647,35 @@ fn native_xxhash64(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+#[pyo3(name = "native_hash", signature = (*columns))]
+fn native_hash(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len());
+    for item in columns.iter() {
+        let py_col = item.downcast::<PyColumn>().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("hash expects Column expressions")
+        })?;
+        cols.push(py_col.borrow().inner.clone());
+    }
+    if cols.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "hash requires at least one column",
+        ));
+    }
+    let refs: Vec<&Column> = cols.iter().collect();
+    Ok(PyColumn {
+        inner: functions::hash(&refs),
+    })
+}
+
+#[pyfunction]
+#[pyo3(name = "native_typeof")]
+fn native_typeof(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::typeof_(&column.inner),
+    }
+}
+
+#[pyfunction]
 fn get_json_object(column: &PyColumn, path: &str) -> PyColumn {
     PyColumn {
         inner: functions::get_json_object(&column.inner, path),
@@ -9912,6 +9941,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(substring_index, m)?)?;
     m.add_function(wrap_pyfunction!(native_crc32, m)?)?;
     m.add_function(wrap_pyfunction!(native_xxhash64, m)?)?;
+    m.add_function(wrap_pyfunction!(native_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(native_typeof, m)?)?;
     m.add_function(wrap_pyfunction!(get_json_object, m)?)?;
     m.add_function(wrap_pyfunction!(json_tuple, m)?)?;
     m.add_function(wrap_pyfunction!(size, m)?)?;

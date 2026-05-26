@@ -5,11 +5,16 @@
 mod expr;
 mod logical;
 
+use crate::dataframe::joins::{
+    expr_contains_only_join_key_equalities, try_extract_join_eq_columns_all,
+};
 use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names};
 use crate::functions::{
     SortOrder, asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last,
 };
 use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
+use polars::prelude::Expr;
+use std::collections::HashSet;
 use crate::session::{SparkSession, set_thread_udf_session};
 pub use expr::PlanExprError;
 pub use logical::LogicalPlan;
@@ -206,6 +211,76 @@ fn expr_to_col_name(v: &Value) -> Option<String> {
         .or_else(|| obj.get("column"))
         .and_then(Value::as_str)
         .map(|s| s.to_string())
+}
+
+/// Join condition: column-name keys or a full expression tree (array_contains, compound AND, etc.).
+enum JoinOnSpec {
+    Keys(Vec<String>),
+    Condition(Expr),
+}
+
+fn is_simple_eq_same_col(v: &Value) -> bool {
+    let Some(obj) = v.as_object() else {
+        return false;
+    };
+    let op = obj
+        .get("op")
+        .or_else(|| obj.get("operator"))
+        .and_then(Value::as_str);
+    if !op.map(|o| o == "eq" || o == "==").unwrap_or(false) {
+        return false;
+    }
+    matches!(
+        (
+            obj.get("left").and_then(expr_to_col_name),
+            obj.get("right").and_then(expr_to_col_name),
+        ),
+        (Some(l), Some(r)) if l == r
+    )
+}
+
+fn join_on_needs_expression(on: &Value) -> bool {
+    if let Some(obj) = on.as_object() {
+        if obj.get("fn").is_some() {
+            return true;
+        }
+        if obj.get("col").or_else(|| obj.get("column")).is_some() && obj.len() <= 2 {
+            return false;
+        }
+        if obj.get("op").is_some() && !is_simple_eq_same_col(on) {
+            return true;
+        }
+    }
+    if let Some(arr) = on.as_array() {
+        return arr.iter().any(|v| {
+            !(v.as_str().is_some()
+                || expr_to_col_name(v).is_some()
+                || is_simple_eq_same_col(v))
+        });
+    }
+    false
+}
+
+fn parse_join_on_spec(on: &Value, df: &DataFrame) -> Result<JoinOnSpec, PlanError> {
+    if join_on_needs_expression(on) {
+        let expr = if let Some(arr) = on.as_array() {
+            let mut combined: Option<Expr> = None;
+            for v in arr {
+                let e = expr_from_value(v).map_err(|e| PlanError::InvalidPlan(e.to_string()))?;
+                combined = Some(match combined {
+                    None => e,
+                    Some(prev) => prev.and(e),
+                });
+            }
+            combined.ok_or_else(|| {
+                PlanError::InvalidPlan("join 'on' expression array is empty".into())
+            })?
+        } else {
+            expr_from_value(on).map_err(|e| PlanError::InvalidPlan(e.to_string()))?
+        };
+        return Ok(JoinOnSpec::Condition(expr));
+    }
+    parse_join_on(on, df).map(JoinOnSpec::Keys)
 }
 
 /// Parse join "on" into list of column names. Accepts:
@@ -621,23 +696,6 @@ fn handle_join_op(
         .create_dataframe_from_rows(rows, schema_vec, false, false)
         .map_err(PlanError::Session)?;
 
-    let on_keys_left = parse_join_on(on, &df)?;
-    // Align right join key column names to left's (e.g. left "Dept_Id" vs right "dept_id" -> rename right to "Dept_Id") (#552).
-    let on_keys_right = parse_join_on(on, &other_df)?;
-    for (i, left_name) in on_keys_left.iter().enumerate() {
-        if let Some(right_name) = on_keys_right.get(i) {
-            if left_name != right_name {
-                other_df = other_df
-                    .with_column_renamed(right_name, left_name)
-                    .map_err(PlanError::Session)?;
-            }
-        }
-    }
-    // After renaming, left and right join key names align; treat this like an equality-based
-    // join on the same key columns so that outer join key semantics match PySpark and the
-    // parity fixtures (e.g. case_outer_join in gen_pyspark_cases.py).
-    let left_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
-    let right_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
     let join_type = match how {
         "left" => JoinType::Left,
         "right" => JoinType::Right,
@@ -646,8 +704,94 @@ fn handle_join_op(
         "left_anti" | "leftanti" | "anti" => JoinType::LeftAnti,
         _ => JoinType::Inner,
     };
-    df.join_with_keys(&other_df, left_refs, right_refs, join_type, false)
-        .map_err(PlanError::Session)
+
+    match parse_join_on_spec(on, &df)? {
+        JoinOnSpec::Keys(on_keys_left) => {
+            let on_keys_right = parse_join_on(on, &other_df)?;
+            for (i, left_name) in on_keys_left.iter().enumerate() {
+                if let Some(right_name) = on_keys_right.get(i) {
+                    if left_name != right_name {
+                        other_df = other_df
+                            .with_column_renamed(right_name, left_name)
+                            .map_err(PlanError::Session)?;
+                    }
+                }
+            }
+            let left_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
+            let right_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
+            df.join_with_keys(&other_df, left_refs, right_refs, join_type, false)
+                .map_err(PlanError::Session)
+        }
+        JoinOnSpec::Condition(expr) => {
+            execute_plan_join_on_expression(df, other_df, expr, join_type)
+        }
+    }
+}
+
+/// Join using a boolean expression (e.g. array_contains). Uses key-based join when the
+/// expression is only column equalities; otherwise cross join + filter.
+fn execute_plan_join_on_expression(
+    df: DataFrame,
+    other_df: DataFrame,
+    expr: Expr,
+    join_type: JoinType,
+) -> Result<DataFrame, PlanError> {
+    let left_df = df.clone();
+    let pairs = try_extract_join_eq_columns_all(&expr);
+    if !pairs.is_empty() {
+        let left_cols: HashSet<String> = left_df
+            .columns()
+            .map_err(PlanError::Session)?
+            .into_iter()
+            .collect();
+        let right_cols: HashSet<String> = other_df
+            .columns()
+            .map_err(PlanError::Session)?
+            .into_iter()
+            .collect();
+        let mut left_refs: Vec<String> = Vec::with_capacity(pairs.len());
+        let mut right_refs: Vec<String> = Vec::with_capacity(pairs.len());
+        for (key_a, key_b) in &pairs {
+            let left_key = left_cols
+                .iter()
+                .find(|c| c.as_str() == key_a.as_str() || c.eq_ignore_ascii_case(key_a))
+                .cloned();
+            let right_key = right_cols
+                .iter()
+                .find(|c| c.as_str() == key_b.as_str() || c.eq_ignore_ascii_case(key_b))
+                .cloned();
+            if let (Some(lk), Some(rk)) = (left_key, right_key) {
+                left_refs.push(lk);
+                right_refs.push(rk);
+            }
+        }
+        if left_refs.len() == pairs.len() {
+            let only_key_equalities = expr_contains_only_join_key_equalities(&expr);
+            let left_refs_str: Vec<&str> = left_refs.iter().map(|s| s.as_str()).collect();
+            let right_refs_str: Vec<&str> = right_refs.iter().map(|s| s.as_str()).collect();
+            let mut joined = left_df
+                .join_with_keys(
+                    &other_df,
+                    left_refs_str.clone(),
+                    right_refs_str,
+                    join_type,
+                    only_key_equalities,
+                )
+                .map_err(PlanError::Session)?;
+            if !only_key_equalities {
+                let filter_expr = joined
+                    .resolve_expr_column_names(expr)
+                    .map_err(PlanError::Session)?;
+                joined = joined.filter(filter_expr).map_err(PlanError::Session)?;
+            }
+            return Ok(joined);
+        }
+    }
+    let crossed = df.cross_join(&other_df).map_err(PlanError::Session)?;
+    let filter_expr = crossed
+        .resolve_expr_column_names(expr)
+        .map_err(PlanError::Session)?;
+    crossed.filter(filter_expr).map_err(PlanError::Session)
 }
 
 fn handle_union_op(
@@ -951,11 +1095,45 @@ mod tests {
         assert_eq!(out.get_column_names(), &["a", "b"]);
     }
 
-    /// #704, #698: Join with expression in "on" (e.g. array_contains) returns clear error.
+    /// Join with expression object in "on" (e.g. array_contains) uses cross join + filter.
     #[test]
-    fn test_join_on_expression_returns_clear_error() {
+    fn test_join_on_expression_object() {
         let session = crate::session::SparkSession::builder()
             .app_name("plan_join_on_expr")
+            .get_or_create();
+        let data = vec![
+            vec![json!(1), json!(json!(["a", "b"]))],
+            vec![json!(2), json!(json!(["c"]))],
+        ];
+        let schema = vec![
+            ("id".to_string(), "bigint".to_string()),
+            ("tags".to_string(), "array<string>".to_string()),
+        ];
+        let plan = vec![json!({
+            "op": "join",
+            "payload": {
+                "on": {
+                    "fn": "array_contains",
+                    "args": [
+                        {"col": "tags"},
+                        {"col": "tag"}
+                    ]
+                },
+                "how": "inner",
+                "other_data": [["a"], ["y"]],
+                "other_schema": [{"name": "tag", "type": "string"}]
+            }
+        })];
+        let df = execute_plan(&session, data, schema, &plan).expect("expression join");
+        let out = df.collect_inner().expect("collect");
+        assert!(out.height() >= 1, "array_contains join should match at least one row");
+    }
+
+    /// Legacy string expression in "on" still returns a clear error (use JSON expr objects).
+    #[test]
+    fn test_join_on_expression_string_rejected() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_join_on_expr_str")
             .get_or_create();
         let data = vec![vec![json!(1), json!("a")]];
         let schema = vec![
@@ -971,15 +1149,13 @@ mod tests {
                 "other_schema": [{"name": "id", "type": "bigint"}, {"name": "x", "type": "string"}]
             }
         })];
-        let result = execute_plan(&session, data, schema, &plan);
-        let err = match result {
-            Ok(_) => panic!("join on expression should fail"),
-            Err(e) => e,
+        let msg = match execute_plan(&session, data, schema, &plan) {
+            Ok(_) => panic!("string expression join should fail"),
+            Err(e) => e.to_string(),
         };
-        let msg = err.to_string();
         assert!(
             msg.contains("join on expression") || msg.contains("use column names only"),
-            "error should explain join-on expression not supported: {}",
+            "error should explain string expression join: {}",
             msg
         );
     }

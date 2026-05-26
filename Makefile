@@ -110,33 +110,16 @@ outdated:
 deny:
 	cargo deny check advisories bans sources
 
-# Run parity fixtures for a specific phase (A–G). See docs/PARITY_STATUS.md.
-test-parity-phase-a:
-	PARITY_PHASE=a cargo test pyspark_parity_fixtures
-
-test-parity-phase-b:
-	PARITY_PHASE=b cargo test pyspark_parity_fixtures
-
-test-parity-phase-c:
-	PARITY_PHASE=c cargo test pyspark_parity_fixtures
-
-test-parity-phase-d:
-	PARITY_PHASE=d cargo test pyspark_parity_fixtures
-
-test-parity-phase-e:
-	PARITY_PHASE=e cargo test pyspark_parity_fixtures
-
-test-parity-phase-f:
-	PARITY_PHASE=f cargo test pyspark_parity_fixtures
-
-test-parity-phase-g:
-	PARITY_PHASE=g cargo test pyspark_parity_fixtures
-
+# Parity tests (Python). JSON fixtures under tests/fixtures/ are exercised via pytest;
+# the legacy Rust harness (tests/parity.rs) was removed in favor of this suite.
 test-parity-phases:
-	cargo test --workspace --all-features pyspark_parity_fixtures
+	@if [ -x .venv/bin/python ]; then PY=.venv/bin/python; else PY=python3; fi; \
+	$$PY -m pytest tests/parity/ -v
 
-# Convert Sparkless fixtures (when SPARKLESS_EXPECTED_OUTPUTS is set), regenerate
-# expected results from PySpark, then run Rust parity tests.
+test-parity-phase-a test-parity-phase-b test-parity-phase-c test-parity-phase-d \
+test-parity-phase-e test-parity-phase-f test-parity-phase-g: test-parity-phases
+
+# Convert Sparkless fixtures (when SPARKLESS_EXPECTED_OUTPUTS is set), then run parity pytest.
 sparkless-parity:
 	@if [ -z "$$SPARKLESS_EXPECTED_OUTPUTS" ]; then \
 	  echo "SPARKLESS_EXPECTED_OUTPUTS is not set; see docs/CONVERTER_STATUS.md"; \
@@ -144,7 +127,7 @@ sparkless-parity:
 	fi
 	python tests/convert_sparkless_fixtures.py --batch "$$SPARKLESS_EXPECTED_OUTPUTS" tests/fixtures --output-subdir converted --dedupe
 	python tests/regenerate_expected_from_pyspark.py tests/fixtures/converted
-	cargo test pyspark_parity_fixtures
+	$(MAKE) test-parity-phases
 
 # Python package (sparkless 4.0.0)
 build-python:

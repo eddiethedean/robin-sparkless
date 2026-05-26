@@ -324,7 +324,14 @@ monotonically_increasing_id = _ni("monotonically_increasing_id")
 input_file_name = _ni("input_file_name")
 spark_partition_id = _ni("spark_partition_id")
 broadcast = _ni("broadcast")
-hash = _ni("hash")
+
+
+def hash(*cols: ColumnOrName) -> _ColumnType:
+    """Hash expression (PySpark hash). Murmur3 32-bit over one or more columns."""
+    if not cols:
+        raise ValueError("hash requires at least one column")
+    py_cols = [_as_col(c) for c in cols]
+    return _col_result(_native.native_hash(*py_cols))
 
 
 # --- Hash / encoding functions (native-backed) ---
@@ -772,7 +779,9 @@ def make_date(year, month, day):
     return _col_result(fn(_as_col(year), _as_col(month), _as_col(day)))
 
 
-typeof = _ni("typeof")
+def typeof(col_or_name: ColumnOrName) -> _ColumnType:
+    """Return the data type of a column as a string (PySpark typeof)."""
+    return _col_result(_native.native_typeof(_as_col(col_or_name)))
 
 
 def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons=None):

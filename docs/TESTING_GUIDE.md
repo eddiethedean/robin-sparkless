@@ -45,6 +45,20 @@ SPARKLESS_TEST_MODE=pyspark pytest tests/
 
 ---
 
+## Maintainer gate (full suite)
+
+CI runs a **fast subset** by default (`pytest tests -m "not delta and not integration"`). Before merging substantial engine or Python binding changes, run the full suite locally:
+
+```bash
+cd python && maturin develop --release
+pytest tests -n 10 -v --tb=short
+make test-parity-phases
+```
+
+Optional: trigger the **Full Python tests** workflow in GitHub Actions (`workflow_dispatch`) for the same command on CI runners.
+
+---
+
 ## Environment Variable
 
 The test backend is controlled by the `SPARKLESS_TEST_MODE` environment variable:
