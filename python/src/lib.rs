@@ -2859,6 +2859,64 @@ fn py_join_on_to_vec(on: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     ))
 }
 
+/// PySpark allows `join(other, [cond1, cond2, ...])` where each condition is a boolean Column.
+/// Combine them with AND. Returns `Some(expr)` when any element is a complex expression (name
+/// `"<expr>"`). Returns `None` for column-name lists (all strings) or simple same-name keys.
+fn try_combine_join_condition_list(on: &Bound<'_, PyAny>) -> PyResult<Option<robin_sparkless::Expr>> {
+    use robin_sparkless::Expr as RsExpr;
+
+    let items: Vec<Bound<'_, PyAny>> = if let Ok(list) = on.downcast::<PyList>() {
+        list.iter().collect()
+    } else if let Ok(tup) = on.downcast::<PyTuple>() {
+        tup.iter().collect()
+    } else {
+        return Ok(None);
+    };
+
+    if items.is_empty() {
+        return Ok(None);
+    }
+
+    let mut condition_exprs: Vec<RsExpr> = Vec::new();
+    let mut saw_string = false;
+
+    for item in items {
+        if item.extract::<String>().is_ok() {
+            saw_string = true;
+            continue;
+        }
+        if let Ok(c) = item.downcast::<PyColumn>() {
+            let col = c.borrow();
+            if col.inner.name() == "<expr>" {
+                condition_exprs.push(col.inner.clone().into_expr());
+            }
+        } else {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "join(on=...) list elements must be str or Column",
+            ));
+        }
+    }
+
+    if saw_string {
+        if !condition_exprs.is_empty() {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "join(on=...) cannot mix str column names and Column expressions",
+            ));
+        }
+        return Ok(None);
+    }
+
+    if condition_exprs.is_empty() {
+        return Ok(None);
+    }
+
+    let mut combined = condition_exprs.remove(0);
+    for e in condition_exprs {
+        combined = combined.and(e);
+    }
+    Ok(Some(combined))
+}
+
 #[pyclass]
 struct PyDataFrameReader {
     session: Py<PyAny>,
@@ -4892,8 +4950,13 @@ impl PyDataFrame {
                 }
             }
             // Complex expression (e.g. left.dept_id == right.dept_id): try key-based join first (#1049, #1148).
-            if let Ok(condition) = on_arg.downcast::<PyColumn>() {
-                let expr = condition.borrow().inner.clone().into_expr();
+            // PySpark also accepts a list of boolean conditions ANDed together (#1554).
+            let join_condition_expr = if let Ok(condition) = on_arg.downcast::<PyColumn>() {
+                Some(condition.borrow().inner.clone().into_expr())
+            } else {
+                try_combine_join_condition_list(on_arg)?
+            };
+            if let Some(expr) = join_condition_expr {
                 let pairs = try_extract_join_eq_columns_all(&expr);
                 if !pairs.is_empty() {
                     let left_cols: std::collections::HashSet<String> = self
@@ -5055,6 +5118,7 @@ impl PyDataFrame {
                 }
                 return Ok(PyDataFrame::wrap(filtered));
             }
+            // Column-name list/tuple (no complex expressions): join on those keys.
             let on_vec = py_join_on_to_vec(on_arg)?;
             let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
             self.inner
