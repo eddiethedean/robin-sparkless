@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (none yet)
 
+## [4.7.1] - 2026-05-26
+
+### Fixed
+
+- **#1554 – Join on list of boolean conditions** — `join(on=[left.a == right.a, left.b >= right.b, ...])` ANDs the conditions and uses the expression join path instead of treating `"<expr>"` as column names (fixes `unresolved_column: column '<expr>' not found`).
+
+### Changed
+
+- **Release metadata** — Version 4.7.1 across the Rust crates and the Python `sparkless` package.
+
 ## [4.7.0] - 2026-05-21
 
 ### Added
