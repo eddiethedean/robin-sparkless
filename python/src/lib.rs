@@ -4062,7 +4062,8 @@ impl PyDataFrame {
     ) -> PyResult<PyDataFrame> {
         // Case 1: Column or chained when/then (PyThenBuilder) without explicit .otherwise()
         if let Some(col) = py_any_to_dataframe_column(col_any)? {
-            if let Some((udf_name, mut arg_names, literal_jsons)) = col.udf_call_info_with_literals()
+            if let Some((udf_name, mut arg_names, literal_jsons)) =
+                col.udf_call_info_with_literals()
             {
                 // Materialize expression args (e.g. F.col('x')*2) as temp columns so the executor can read them from the row.
                 let mut df_for_udf = slf.inner.clone();
