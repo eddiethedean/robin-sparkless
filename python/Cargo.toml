@@ -4,6 +4,8 @@ version = "4.8.0"
 edition = "2021"
 description = "Native extension for sparkless Python package (robin-sparkless backend)."
 readme = "README.md"
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
 
 [features]
 default = ["delta"]
