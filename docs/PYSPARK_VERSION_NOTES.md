@@ -46,3 +46,7 @@ These are **API/behavior differences**; PySpark (including 4.1.1) does not add t
 ## Summary
 
 Most of the “missing” behavior in PySpark mode is due to **tests targeting Sparkless-only APIs or semantics**, not an older PySpark. Aligning tests with PySpark means using `.agg(F.collect_list(...))` (and similar) for pivot, same-type `array()` only, and backend-agnostic type attribute names; upgrading PySpark alone will not fix those.
+
+## PySpark 4 roadmap
+
+For a full plan to reach **PySpark 4.x parity** while keeping **PySpark 3.2–3.5** backwards compatibility, see [PYSPARK_4_PARITY_PLAN.md](PYSPARK_4_PARITY_PLAN.md).

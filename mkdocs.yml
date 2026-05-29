@@ -59,6 +59,7 @@ nav:
     - Releasing: RELEASING.md
   - Reference:
     - PySpark differences: PYSPARK_DIFFERENCES.md
+    - PySpark 4 parity plan: PYSPARK_4_PARITY_PLAN.md
     - Parity status: PARITY_STATUS.md
     - Robin-Sparkless missing: ROBIN_SPARKLESS_MISSING.md
   - Sparkless integration:

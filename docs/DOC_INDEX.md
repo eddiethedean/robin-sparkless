@@ -13,6 +13,7 @@ Documentation for the Python package mirrors the [Sparkless](https://sparkless.r
 | [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) | Why Sparkless v4, Sparkless 3 vs 4.x, installation, API overview, backend, known limitations |
 | [Migration (PySpark / Sparkless 3)](python_migration.md) | Switching from PySpark or Sparkless 3.x; Sparkless 3 vs 4.x table |
 | [PySpark differences](PYSPARK_DIFFERENCES.md) | Known divergences and caveats (applies to both Rust and Python usage) |
+| [PySpark 4 parity plan](PYSPARK_4_PARITY_PLAN.md) | Roadmap for PySpark 4 parity while keeping PySpark 3.2–3.5 compatibility |
 
 ## Rust and general
 
