@@ -77,22 +77,22 @@ pub fn expr_ir_to_expr(ir: &ExprIr) -> Result<Expr, EngineError> {
         ExprIr::Add(a, b) => {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
-            Ok(l + r)
+            Ok(crate::ansi::add_expr(l, r))
         }
         ExprIr::Sub(a, b) => {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
-            Ok(l - r)
+            Ok(crate::ansi::sub_expr(l, r))
         }
         ExprIr::Mul(a, b) => {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
-            Ok(l * r)
+            Ok(crate::ansi::mul_expr(l, r))
         }
         ExprIr::Div(a, b) => {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
-            Ok(l / r)
+            Ok(crate::ansi::div_expr(l, r))
         }
 
         ExprIr::Between { left, lower, upper } => {
@@ -221,7 +221,7 @@ fn agg_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineE
         ("mode", [a]) => {
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
-            Some(col.mode().into_expr())
+            Some(col.mode(false).into_expr())
         }
         ("kurtosis", [a]) => Some(
             expr_ir_to_expr(a)?

@@ -1,0 +1,4 @@
+# PySpark 4.x oracle dependencies (Java 17 required).
+# Use with SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=4.0
+pyspark>=4.0,<4.2
+delta-spark>=4.0,<5

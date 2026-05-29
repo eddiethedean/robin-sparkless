@@ -73,6 +73,17 @@ See also: [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md), [ROBIN_SPARKLESS_MIS
 
 ---
 
+## VARIANT (PySpark 4 semi-structured)
+
+| APIs | Status | Rationale |
+|------|--------|-----------|
+| `VariantType`, `parse_json()`, `cast(..., "variant")` | **Implemented** | JSON string storage; `collect()` deserializes to dict/list when schema uses `VariantType`. |
+| `variant_get`, `schema_of_variant`, pipe syntax, collations, UDF `VariantVal` | Not implemented | No Polars native VARIANT; requires JVM semi-structured engine. |
+
+**Workaround:** Use `parse_json` + Python after `collect()` for nested access; use `from_json` when a fixed struct schema is known.
+
+---
+
 ## Catalog DDL
 
 | APIs | Status | Rationale |

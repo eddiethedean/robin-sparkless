@@ -4,6 +4,28 @@ This document lists **intentional or known divergences** from PySpark semantics 
 
 **Unimplemented API surface:** For a full list of functions and methods present in Sparkless 3.28.0 but not yet implemented in robin-sparkless, see [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md). That list is **scoped to PySpark parity**: all listed items are standard PySpark APIs (or direct Sparkless equivalents); see [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md) for the canonical “missing vs PySpark” list with PySpark references.
 
+## Compatibility profiles (3.5 vs 4.0)
+
+Sparkless 4.9.0+ supports **opt-in PySpark 4 semantics** via `sparkless.pyspark.compat`:
+
+| Area | `compat=3.5` (default) | `compat=4.0` (opt-in) |
+|------|------------------------|------------------------|
+| ANSI (`spark.sql.ansi.enabled`) | off — null on overflow/div0/invalid cast | on — throw on overflow/div0/invalid cast |
+| Map key normalization | disabled (`-0.0` keys preserved) | enabled (`-0.0` → `0.0`) |
+| Map/array schema inference | first non-null pair/element | merge all non-null pairs/elements |
+
+Individual keys can override profile defaults. See [PYSPARK_COMPAT_PROFILES.md](PYSPARK_COMPAT_PROFILES.md).
+
+**Not yet profile-aware:** Full VARIANT semi-structured SQL (`variant_get`, pipe syntax, collations). JDBC Oracle/DB2 write paths use partial v4 mappings.
+
+**DayTimeInterval collect:** When schema uses `DayTimeIntervalType`, `compat=4.0` returns `datetime.timedelta` unless `PYSPARK_YM_INTERVAL_LEGACY=1` or `compat=3.5` (raw microseconds int).
+
+**YearMonthInterval collect:** When schema uses `YearMonthIntervalType`, `compat=4.0` returns `YearMonthInterval` objects unless `PYSPARK_YM_INTERVAL_LEGACY=1` or `compat=3.5`.
+
+**VARIANT (PySpark 4):** `VariantType`, `parse_json()`, and `cast(..., "variant")` are supported; VARIANT columns are stored as canonical JSON strings internally and deserialize to Python dict/list on `collect()` when the cached schema uses `VariantType`. Full JVM VARIANT binary encoding and semi-structured SQL operators are not implemented — see [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md).
+
+**JDBC 4.0 type matrix:** When `sparkless.pyspark.compat=4.0`, JDBC read/write uses PySpark 4 mappings per database unless legacy restore flags are set (`spark.sql.legacy.postgres.datetimeMapping.enabled`, `spark.sql.legacy.mysql.datetimeMapping.enabled`, etc.). See [PYSPARK_COMPAT_PROFILES.md](PYSPARK_COMPAT_PROFILES.md).
+
 ## Array and list collect
 
 - **Collect**: List/array columns are serialized as JSON arrays in collect/to_json_rows (#846, #845). If Sparkless sees a string like `"['a', 'b']"` instead of `["a","b"]`, the source may be sending a stringified list; use JSON array in create_dataframe_from_rows or plan input.

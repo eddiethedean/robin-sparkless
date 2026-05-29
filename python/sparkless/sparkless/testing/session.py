@@ -14,19 +14,83 @@ from typing import Any, Optional
 from .mode import Mode, get_mode
 
 
+def _get_pyspark_major_version() -> Optional[int]:
+    """Return installed PySpark major version without importing pyspark."""
+    try:
+        import importlib.metadata
+
+        version = importlib.metadata.version("pyspark")
+        return int(version.split(".", 1)[0])
+    except Exception:
+        return None
+
+
+def _get_delta_spark_version() -> Optional[str]:
+    try:
+        import importlib.metadata
+
+        return importlib.metadata.version("delta-spark")
+    except Exception:
+        return None
+
+
+def _delta_maven_package() -> Optional[str]:
+    """Maven coordinates for delta-spark matching the installed PySpark version."""
+    delta_version = _get_delta_spark_version()
+    if delta_version is None:
+        return None
+    pyspark_major = _get_pyspark_major_version()
+    scala_suffix = "2.13" if pyspark_major is not None and pyspark_major >= 4 else "2.12"
+    return f"io.delta:delta-spark_{scala_suffix}:{delta_version}"
+
+
+def _strip_delta_packages_from_submit_args(submit_args: str) -> str:
+    """Remove stale io.delta:delta-spark_* entries from --packages values."""
+    if not submit_args:
+        return submit_args
+    pieces = submit_args.split()
+    packages_flag = "--packages"
+    if packages_flag not in pieces:
+        return submit_args
+    i = pieces.index(packages_flag)
+    if i + 1 >= len(pieces):
+        return submit_args
+    kept = [
+        pkg
+        for pkg in pieces[i + 1].split(",")
+        if pkg and not pkg.startswith("io.delta:delta-spark_")
+    ]
+    if kept:
+        pieces[i + 1] = ",".join(kept)
+    else:
+        del pieces[i + 1]
+        del pieces[i]
+    return " ".join(pieces)
+
+
 def _ensure_pyspark_submit_args_include_delta_packages() -> None:
     """Best-effort: ensure PySpark JVM can load Delta + dependencies.
 
     Delta requires `delta-storage` in addition to `delta-spark`. Using Spark's
-    `--packages io.delta:delta-spark_2.12:<version>` ensures dependencies are
-    resolved and available at JVM startup.
+    `--packages io.delta:delta-spark_<scala>:<version>` ensures dependencies are
+    resolved and available at JVM startup. PySpark 4.x needs Scala 2.13 artifacts;
+    PySpark 3.5.x uses Scala 2.12.
     """
     try:
+        delta_pkg = _delta_maven_package()
+        if delta_pkg is None:
+            return
+
         submit_args = os.environ.get("PYSPARK_SUBMIT_ARGS", "").strip()
-        packages_flag = "--packages"
-        delta_pkg = "io.delta:delta-spark_2.12:3.0.0"
         if delta_pkg in submit_args:
             return
+
+        submit_args = _strip_delta_packages_from_submit_args(submit_args)
+        if delta_pkg in submit_args:
+            os.environ["PYSPARK_SUBMIT_ARGS"] = submit_args
+            return
+
+        packages_flag = "--packages"
 
         # Ensure we end with pyspark-shell per PySpark expectations.
         if submit_args.endswith("pyspark-shell"):
@@ -385,6 +449,16 @@ def _configure_jars(builder: Any) -> Any:
             jar_files.extend(glob.glob(os.path.join(jars_dir, "*.jar")))
             break
 
+    # Local delta jars target Spark 3.x / Scala 2.12; exclude them for PySpark 4+.
+    pyspark_major = _get_pyspark_major_version()
+    if pyspark_major is not None and pyspark_major >= 4:
+        jar_files = [
+            j
+            for j in jar_files
+            if "delta-spark" not in os.path.basename(j)
+            and "delta-storage" not in os.path.basename(j)
+        ]
+
     if jar_files:
         jars_str = ",".join(jar_files)
         builder = builder.config("spark.jars", jars_str)
@@ -405,42 +479,43 @@ def _configure_delta(builder: Any) -> Any:
     Returns:
         The builder with Delta Lake configuration applied.
     """
-    # Prefer a locally cached jar if available to avoid network reliance.
-    # This file lives at: python/sparkless/sparkless/testing/session.py
-    # The local jars directory is: python/jars/
-    project_root = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    )
-    local_delta_jar = os.path.join(project_root, "jars", "delta-spark_2.12-3.0.0.jar")
+    pyspark_major = _get_pyspark_major_version()
+    use_local_delta_jar = pyspark_major is None or pyspark_major < 4
 
-    if os.path.exists(local_delta_jar):
-        jars_str = local_delta_jar
-        existing_jars = (
-            builder._options.get("spark.jars") if hasattr(builder, "_options") else None
+    # Prefer a locally cached jar for Spark 3.x to avoid network reliance.
+    # PySpark 4.x needs delta-spark_2.13 from pip/Maven, not the cached 2.12 jar.
+    if use_local_delta_jar:
+        project_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         )
-        if existing_jars:
-            jars_str = f"{existing_jars},{jars_str}"
-        builder = builder.config("spark.jars", jars_str)
-        builder = builder.config("spark.driver.extraClassPath", jars_str)
-    else:
-        # Fall back to delta-spark's helper or Maven coordinates.
+        local_delta_jar = os.path.join(
+            project_root, "jars", "delta-spark_2.12-3.0.0.jar"
+        )
+
+        if os.path.exists(local_delta_jar):
+            jars_str = local_delta_jar
+            existing_jars = (
+                builder._options.get("spark.jars")
+                if hasattr(builder, "_options")
+                else None
+            )
+            if existing_jars:
+                jars_str = f"{existing_jars},{jars_str}"
+            builder = builder.config("spark.jars", jars_str)
+            builder = builder.config("spark.driver.extraClassPath", jars_str)
+            use_local_delta_jar = True
+        else:
+            use_local_delta_jar = False
+
+    if not use_local_delta_jar:
         try:
             from delta import configure_spark_with_delta_pip
 
             builder = configure_spark_with_delta_pip(builder)
         except Exception:
-            try:
-                import importlib.metadata
-
-                try:
-                    delta_version = importlib.metadata.version("delta_spark")
-                except Exception:
-                    delta_version = "3.0.0"
-
-                delta_package = f"io.delta:delta-spark_2.12:{delta_version}"
+            delta_package = _delta_maven_package()
+            if delta_package is not None:
                 builder = builder.config("spark.jars.packages", delta_package)
-            except ImportError:
-                pass
 
     # Always add the required extensions and catalog (needed for Delta operations)
     builder = builder.config(

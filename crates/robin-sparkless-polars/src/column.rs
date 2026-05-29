@@ -1736,7 +1736,13 @@ impl Column {
     pub fn divide_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pyspark_divide(cols)),
+            |cols| {
+                if crate::udf_context::get_thread_ansi_enabled() {
+                    expect_col(crate::udfs::apply_ansi_divide(cols))
+                } else {
+                    expect_col(crate::udfs::apply_pyspark_divide(cols))
+                }
+            },
             &args,
             |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
         );
@@ -1756,22 +1762,34 @@ impl Column {
 
     /// Multiply by another column or literal (PySpark multiply). Broadcasts scalars.
     pub fn multiply(&self, other: &Column) -> Column {
-        Self::from_expr(self.expr().clone() * other.expr().clone(), None)
+        Self::from_expr(
+            crate::ansi::mul_expr(self.expr().clone(), other.expr().clone()),
+            None,
+        )
     }
 
     /// Add another column or literal (PySpark +). Broadcasts scalars.
     pub fn add(&self, other: &Column) -> Column {
-        Self::from_expr(self.expr().clone() + other.expr().clone(), None)
+        Self::from_expr(
+            crate::ansi::add_expr(self.expr().clone(), other.expr().clone()),
+            None,
+        )
     }
 
     /// Subtract another column or literal (PySpark -). Broadcasts scalars.
     pub fn subtract(&self, other: &Column) -> Column {
-        Self::from_expr(self.expr().clone() - other.expr().clone(), None)
+        Self::from_expr(
+            crate::ansi::sub_expr(self.expr().clone(), other.expr().clone()),
+            None,
+        )
     }
 
     /// Divide by another column or literal (PySpark /). Broadcasts scalars.
     pub fn divide(&self, other: &Column) -> Column {
-        Self::from_expr(self.expr().clone() / other.expr().clone(), None)
+        Self::from_expr(
+            crate::ansi::div_expr(self.expr().clone(), other.expr().clone()),
+            None,
+        )
     }
 
     /// Modulo (PySpark %). Broadcasts scalars.
@@ -3187,15 +3205,18 @@ impl Column {
     }
 
     /// Mode aggregation - most frequent value (PySpark mode).
-    /// Uses value_counts sorted by count descending, then first.
-    pub fn mode(&self) -> Column {
-        // value_counts(sort=true, parallel=false, name="count", normalize=false)
-        // puts highest count first; first() gives the mode
-        // Struct has "count" and value field; field 0 is typically the value
-        let vc = self
-            .expr()
-            .clone()
-            .value_counts(true, false, "count", false);
+    /// When `deterministic` is true (PySpark 4.0+), ties break on lowest value.
+    pub fn mode(&self, deterministic: bool) -> Column {
+        let base = self.expr().clone();
+        let sorted = if deterministic {
+            base.sort(SortOptions {
+                descending: false,
+                ..Default::default()
+            })
+        } else {
+            base
+        };
+        let vc = sorted.value_counts(true, false, "count", false);
         let first_struct = vc.first();
         let val_expr = first_struct.struct_().field_by_index(0);
         Self::from_expr(val_expr, Some("mode".to_string()))
@@ -3766,6 +3787,15 @@ impl Column {
         let dtype = schema.unwrap_or(DataType::String);
         let out = self.expr().clone().str().json_decode(dtype);
         Self::from_expr(out, None)
+    }
+
+    /// Parse string column as VARIANT (PySpark 4 parse_json). Validates JSON; stored as string.
+    pub fn parse_json_variant(&self) -> Column {
+        let expr = self.expr().clone().map(
+            |s| expect_col(crate::udfs::apply_parse_json_variant(s)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+        );
+        Self::from_expr(expr, None)
     }
 
     /// Serialize struct column to JSON string (PySpark to_json). Uses Polars struct().json_encode.

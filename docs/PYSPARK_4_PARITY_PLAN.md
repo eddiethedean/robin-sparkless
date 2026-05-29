@@ -410,7 +410,7 @@ Continue [FULL_PARITY_ROADMAP.md](FULL_PARITY_ROADMAP.md) remaining items:
 
 ### 4D — Tier C default (major release only)
 
-- [ ] **Sparkless 5.x** (or agreed major): default `sparkless.pyspark.compat=4.0`.
+- [ ] **Sparkless 5.0.0** (see §9.1): default `sparkless.pyspark.compat=4.0`; update PyPI bound to `sparkless>=5,<6`.
 - [ ] Migration guide: enable `compat=3.5` for one release cycle with deprecation warning.
 - [ ] Changelog breaking section.
 
@@ -447,6 +447,31 @@ Continue [FULL_PARITY_ROADMAP.md](FULL_PARITY_ROADMAP.md) remaining items:
 | Remove 3.x-only API | **Major** | Only after deprecation |
 
 **Sparkless package version (4.x)** can continue shipping **Tier A defaults** until Phase **4D**.
+
+### 9.1 Practical version sequence
+
+Align crate (`robin-sparkless`, `robin-sparkless-core`, `robin-sparkless-polars`) and Python (`sparkless`) versions on the same number. PyPI constraint today: `pip install "sparkless>=4,<5"`; update to `>=5,<6` only when **5.0.0** ships.
+
+| Version | When | Default compat | PyPI / notes |
+|---------|------|----------------|--------------|
+| **4.8.0** (current) | Baseline before plan execution | Tier A (3.5-like) | `sparkless>=4,<5` |
+| **4.9.0** | Plan **implemented**: opt-in PySpark 4 (`compat=4.0`), ANSI/maps/JDBC/PyArrow, parity oracles; **defaults unchanged** | Tier A | Still `>=4,<5`; market as “PySpark 4 ready (opt-in)” |
+| **4.9.x** | Patches: parity fixes, docs, non-breaking API additions | Tier A | Patch releases only |
+| **4.10.0+** (optional) | Further minors if needed before default flip (large API tranches) | Tier A | Minor only while Tier A remains default |
+| **5.0.0** | Phase **4D**: default `sparkless.pyspark.compat=4.0`; migration guide; `compat=3.5` retained ≥ 12 months with deprecation warning | Tier C | `sparkless>=5,<6`; **major** = behavioral cutover, not “plan checklist done” |
+
+```text
+4.8.0 (today) → 4.9.0   plan complete, opt-in PySpark 4
+              → 4.9.x   patches
+              → 4.10+   optional extra minors (still Tier A default)
+              → 5.0.0   default compat=4.0 (+ deprecation period for 3.5 default)
+```
+
+**Rules of thumb:**
+
+- Finishing the plan (phases P0–4C) → ship **4.9.0**, not **5.0.0**, unless you also flip defaults in the same release.
+- **5.0.0** is for the **behavioral** cutover (Tier C), which also helps disambiguate **Sparkless v5** (product) from **Apache PySpark 4** (compatibility target).
+- Bump **robin-sparkless** workspace crates and **sparkless** Python package in lockstep on each release ([RELEASING.md](RELEASING.md)).
 
 ---
 

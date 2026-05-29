@@ -115,5 +115,8 @@
     "filter_boolean_column",
     "semi_join",
     "anti_join"
+  ],
+  "phase_h_ansi": [
+    "try_divide"
   ]
 }

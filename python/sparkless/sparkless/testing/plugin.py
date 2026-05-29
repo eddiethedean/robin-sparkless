@@ -50,6 +50,14 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "integration: mark test as integration test (may require external setup)",
     )
+    config.addinivalue_line(
+        "markers",
+        "pyspark4_only: mark test requiring PySpark 4.x semantics (compat=4.0)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "pyspark3_only: mark test requiring PySpark 3.x semantics (compat=3.5)",
+    )
 
 
 def pytest_collection_modifyitems(
@@ -62,8 +70,10 @@ def pytest_collection_modifyitems(
     Tests marked with @pytest.mark.pyspark_only are skipped in sparkless mode.
     """
     from .mode import get_mode
+    from .compat import get_compat_profile
 
     mode = get_mode()
+    compat = get_compat_profile()
 
     skip_sparkless = pytest.mark.skip(
         reason="Test marked sparkless_only, running in PySpark mode"
@@ -71,20 +81,35 @@ def pytest_collection_modifyitems(
     skip_pyspark = pytest.mark.skip(
         reason="Test marked pyspark_only, running in sparkless mode"
     )
+    skip_pyspark4 = pytest.mark.skip(
+        reason=f"Test marked pyspark4_only, compat profile is {compat}"
+    )
+    skip_pyspark3 = pytest.mark.skip(
+        reason=f"Test marked pyspark3_only, compat profile is {compat}"
+    )
 
     for item in items:
         if mode == Mode.PYSPARK and "sparkless_only" in item.keywords:
             item.add_marker(skip_sparkless)
         elif mode == Mode.SPARKLESS and "pyspark_only" in item.keywords:
             item.add_marker(skip_pyspark)
+        if compat != "4.0" and "pyspark4_only" in item.keywords:
+            item.add_marker(skip_pyspark4)
+        if compat != "3.5" and "pyspark3_only" in item.keywords:
+            item.add_marker(skip_pyspark3)
 
 
 def pytest_report_header(config: pytest.Config) -> list[str]:
     """Add sparkless testing info to pytest header."""
     from .mode import get_mode
+    from .compat import get_compat_profile
 
     mode = get_mode()
-    return [f"sparkless.testing mode: {mode.value}"]
+    compat = get_compat_profile()
+    return [
+        f"sparkless.testing mode: {mode.value}",
+        f"sparkless.testing compat: {compat}",
+    ]
 
 
 # Re-export fixtures so they're registered when this module is loaded as a plugin

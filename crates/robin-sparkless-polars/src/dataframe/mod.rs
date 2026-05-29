@@ -3506,8 +3506,20 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
         AnyValue::Date(days) => date_days_to_json(*days),
         AnyValue::Datetime(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
         AnyValue::DatetimeOwned(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
+        AnyValue::Duration(val, unit) => {
+            JsonValue::Number(serde_json::Number::from(duration_to_micros(*val, unit)))
+        }
         _ => JsonValue::Null,
     })
+}
+
+fn duration_to_micros(val: i64, unit: &polars::datatypes::TimeUnit) -> i64 {
+    use polars::datatypes::TimeUnit;
+    match unit {
+        TimeUnit::Nanoseconds => val / 1_000,
+        TimeUnit::Microseconds => val,
+        TimeUnit::Milliseconds => val * 1_000,
+    }
 }
 
 /// Broadcast hint - no-op that returns the same DataFrame (PySpark broadcast).

@@ -109,6 +109,7 @@ pub(crate) fn write_jdbc_postgres(
                     polars::prelude::AnyValue::Boolean(b) => Box::new(Some(b)),
                     polars::prelude::AnyValue::Int64(i) => Box::new(Some(i)),
                     polars::prelude::AnyValue::Int32(i) => Box::new(Some(i)),
+                    polars::prelude::AnyValue::Int16(i) => Box::new(Some(i)),
                     polars::prelude::AnyValue::Float64(f) => Box::new(Some(f)),
                     polars::prelude::AnyValue::Float32(f) => Box::new(Some(f as f64)),
                     polars::prelude::AnyValue::String(s) => Box::new(Some(s.to_string())),
@@ -192,12 +193,15 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
         return Ok(PlDataFrame::empty());
     }
 
+    let cfg = crate::udf_context::get_thread_runtime_config();
+    let use_v4_datetime = robin_sparkless_core::postgres_v4_datetime_mapping(&cfg);
+
     let columns = rows[0].columns();
     let mut series_vec: Vec<Series> = Vec::with_capacity(columns.len());
     for (idx, col) in columns.iter().enumerate() {
         let name = col.name().to_string();
         let ty = col.type_();
-        let s = build_series_for_column(&name, idx, ty, &rows)?;
+        let s = build_series_for_column(&name, idx, ty, &rows, use_v4_datetime)?;
         series_vec.push(s);
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
@@ -210,6 +214,7 @@ fn build_series_for_column(
     index: usize,
     ty: &PgType,
     rows: &[postgres::Row],
+    use_v4_datetime: bool,
 ) -> Result<Series, EngineError> {
     use EngineError::*;
 
@@ -285,23 +290,34 @@ fn build_series_for_column(
             Ok(Series::new(name.into(), vals))
         }
         PgType::TIMESTAMP | PgType::TIMESTAMPTZ => {
-            let mut vals: Vec<Option<chrono::NaiveDateTime>> = Vec::with_capacity(rows.len());
-            for row in rows {
-                let s: Option<String> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: timestamp column '{name}': {e}")))?;
-                let v = s.and_then(|s| {
-                    chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.f")
-                        .ok()
-                        .or_else(|| {
-                            chrono::DateTime::parse_from_rfc3339(&s)
-                                .ok()
-                                .map(|dt| dt.naive_local())
-                        })
-                });
-                vals.push(v);
+            if use_v4_datetime && *ty == PgType::TIMESTAMPTZ {
+                let mut vals: Vec<Option<String>> = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let s: Option<String> = row.try_get(index).map_err(|e| {
+                        Other(format!("JDBC read: timestamptz column '{name}': {e}"))
+                    })?;
+                    vals.push(s);
+                }
+                Ok(Series::new(name.into(), vals))
+            } else {
+                let mut vals: Vec<Option<chrono::NaiveDateTime>> = Vec::with_capacity(rows.len());
+                for row in rows {
+                    let s: Option<String> = row
+                        .try_get(index)
+                        .map_err(|e| Other(format!("JDBC read: timestamp column '{name}': {e}")))?;
+                    let v = s.and_then(|s| {
+                        chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.f")
+                            .ok()
+                            .or_else(|| {
+                                chrono::DateTime::parse_from_rfc3339(&s)
+                                    .ok()
+                                    .map(|dt| dt.naive_local())
+                            })
+                    });
+                    vals.push(v);
+                }
+                Ok(Series::new(name.into(), vals))
             }
-            Ok(Series::new(name.into(), vals))
         }
         PgType::DATE => {
             let mut vals: Vec<Option<chrono::NaiveDate>> = Vec::with_capacity(rows.len());

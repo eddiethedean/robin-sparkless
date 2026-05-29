@@ -49,4 +49,12 @@ Most of the “missing” behavior in PySpark mode is due to **tests targeting S
 
 ## PySpark 4 roadmap
 
-For a full plan to reach **PySpark 4.x parity** while keeping **PySpark 3.2–3.5** backwards compatibility, see [PYSPARK_4_PARITY_PLAN.md](PYSPARK_4_PARITY_PLAN.md).
+Sparkless **4.9.0** implements the opt-in PySpark 4 profile (`compat=4.0`). See [PYSPARK_COMPAT_PROFILES.md](PYSPARK_COMPAT_PROFILES.md) and [PYSPARK_4_PARITY_PLAN.md](PYSPARK_4_PARITY_PLAN.md).
+
+### Dual-oracle setup (4.9.0+)
+
+- **Sparkless backend (default CI):** `SPARKLESS_TEST_MODE=sparkless` (or unset), `SPARKLESS_PYSPARK_COMPAT=3.5` (default).
+- **PySpark 3.5 oracle:** `tests/requirements-pyspark.txt`, `SPARKLESS_TEST_MODE=pyspark`.
+- **PySpark 4.1 oracle (nightly):** `tests/requirements-pyspark4.txt`, Java 17, Python 3.10+, `SPARKLESS_TEST_MODE=pyspark`, `SPARKLESS_PYSPARK_COMPAT=4.0`.
+
+Run profile-specific tests with `@pytest.mark.pyspark4_only` or `@pytest.mark.pyspark3_only`.

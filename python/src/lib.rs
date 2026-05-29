@@ -30,6 +30,234 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
+/// When true, collect() returns raw integers for YearMonthIntervalType columns (PySpark 3.x).
+fn ym_interval_legacy_collect() -> bool {
+    if env::var("PYSPARK_YM_INTERVAL_LEGACY")
+        .ok()
+        .is_some_and(|v| v.trim() == "1")
+    {
+        return true;
+    }
+    robin_sparkless::get_thread_runtime_config().pyspark_compat
+        == robin_sparkless_core::PysparkCompat::V3_5
+}
+
+fn ym_interval_column_names_from_schema(
+    py: Python<'_>,
+    schema_obj: &Bound<'_, PyAny>,
+) -> PyResult<std::collections::HashSet<String>> {
+    let mut out = std::collections::HashSet::new();
+    let types_mod = PyModule::import_bound(py, "sparkless.sql.types")?;
+    let ym_type = types_mod.getattr("YearMonthIntervalType")?;
+    let fields = schema_obj.getattr("fields")?;
+    let fields_list = fields.downcast::<PyList>()?;
+    for f in fields_list.iter() {
+        let dt = f.getattr("dataType")?;
+        if dt.is_instance(&ym_type)? {
+            let fname: String = f.getattr("name")?.extract()?;
+            out.insert(fname);
+        }
+    }
+    Ok(out)
+}
+
+fn json_months_value(v: &JsonValue) -> Option<i64> {
+    match v {
+        JsonValue::Number(n) => n.as_i64(),
+        JsonValue::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// When true, collect() returns raw integers for interval columns (PySpark 3.x legacy).
+fn interval_legacy_collect() -> bool {
+    ym_interval_legacy_collect()
+}
+
+fn dt_interval_column_names_from_schema(
+    py: Python<'_>,
+    schema_obj: &Bound<'_, PyAny>,
+) -> PyResult<std::collections::HashSet<String>> {
+    let mut out = std::collections::HashSet::new();
+    let types_mod = PyModule::import_bound(py, "sparkless.sql.types")?;
+    let dt_type = types_mod.getattr("DayTimeIntervalType")?;
+    let fields = schema_obj.getattr("fields")?;
+    let fields_list = fields.downcast::<PyList>()?;
+    for f in fields_list.iter() {
+        let dt = f.getattr("dataType")?;
+        if dt.is_instance(&dt_type)? {
+            let fname: String = f.getattr("name")?.extract()?;
+            out.insert(fname);
+        }
+    }
+    Ok(out)
+}
+
+fn variant_column_names_from_schema(
+    py: Python<'_>,
+    schema_obj: &Bound<'_, PyAny>,
+) -> PyResult<std::collections::HashSet<String>> {
+    let mut out = std::collections::HashSet::new();
+    let types_mod = PyModule::import_bound(py, "sparkless.sql.types")?;
+    let variant_type = types_mod.getattr("VariantType")?;
+    let fields = schema_obj.getattr("fields")?;
+    let fields_list = fields.downcast::<PyList>()?;
+    for f in fields_list.iter() {
+        let dt = f.getattr("dataType")?;
+        if dt.is_instance(&variant_type)? {
+            let fname: String = f.getattr("name")?.extract()?;
+            out.insert(fname);
+        }
+    }
+    Ok(out)
+}
+
+fn json_micros_value(v: &JsonValue) -> Option<i64> {
+    json_months_value(v)
+}
+
+fn json_variant_to_py(py: Python<'_>, v: &JsonValue) -> PyResult<PyObject> {
+    match v {
+        JsonValue::Null => Ok(py.None().into_py(py)),
+        JsonValue::Bool(b) => Ok(b.into_py(py)),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(i.into_py(py))
+            } else if let Some(u) = n.as_u64() {
+                Ok(u.into_py(py))
+            } else if let Some(f) = n.as_f64() {
+                Ok(f.into_py(py))
+            } else {
+                Ok(py.None().into_py(py))
+            }
+        }
+        JsonValue::String(s) => Ok(s.clone().into_py(py)),
+        JsonValue::Array(arr) => {
+            let list = PyList::empty_bound(py);
+            for item in arr {
+                list.append(json_variant_to_py(py, item)?)?;
+            }
+            Ok(list.into_py(py))
+        }
+        JsonValue::Object(obj) => {
+            let dict = PyDict::new_bound(py);
+            for (k, val) in obj {
+                dict.set_item(k, json_variant_to_py(py, val)?)?;
+            }
+            Ok(dict.into_py(py))
+        }
+    }
+}
+
+fn collect_cell_py(
+    py: Python<'_>,
+    name: &str,
+    v: &JsonValue,
+    ym_interval_cols: &std::collections::HashSet<String>,
+    dt_interval_cols: &std::collections::HashSet<String>,
+    variant_cols: &std::collections::HashSet<String>,
+    interval_legacy: bool,
+    ym_interval_cls: Option<&Bound<'_, PyAny>>,
+    timedelta_cls: &Bound<'_, PyAny>,
+    dtype_by_name: &std::collections::HashMap<String, DataType>,
+    output_names: &[String],
+    datetime_cls: &Bound<'_, PyAny>,
+    date_cls: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    if !interval_legacy
+        && ym_interval_cols.contains(name)
+        && ym_interval_cls.is_some()
+    {
+        return match json_months_value(v) {
+            Some(m) => Ok(ym_interval_cls
+                .unwrap()
+                .call1((m,))?
+                .into_py(py)),
+            None if matches!(v, JsonValue::Null) => Ok(py.None().into_py(py)),
+            _ => json_value_to_py_with_schema(
+                py,
+                v,
+                dtype_by_name.get(name),
+                datetime_cls,
+                date_cls,
+                Some(name),
+                Some(output_names),
+            ),
+        };
+    }
+    if interval_legacy && ym_interval_cols.contains(name) {
+        return match json_months_value(v) {
+            Some(m) => Ok(m.into_py(py)),
+            None if matches!(v, JsonValue::Null) => Ok(py.None().into_py(py)),
+            _ => json_value_to_py_with_schema(
+                py,
+                v,
+                dtype_by_name.get(name),
+                datetime_cls,
+                date_cls,
+                Some(name),
+                Some(output_names),
+            ),
+        };
+    }
+    if !interval_legacy && dt_interval_cols.contains(name) {
+        return match json_micros_value(v) {
+            Some(m) => {
+                let kwargs = PyDict::new_bound(py);
+                kwargs.set_item("microseconds", m)?;
+                Ok(timedelta_cls.call((), Some(&kwargs))?.into_py(py))
+            }
+            None if matches!(v, JsonValue::Null) => Ok(py.None().into_py(py)),
+            _ => json_value_to_py_with_schema(
+                py,
+                v,
+                dtype_by_name.get(name),
+                datetime_cls,
+                date_cls,
+                Some(name),
+                Some(output_names),
+            ),
+        };
+    }
+    if interval_legacy && dt_interval_cols.contains(name) {
+        return match json_micros_value(v) {
+            Some(m) => Ok(m.into_py(py)),
+            None if matches!(v, JsonValue::Null) => Ok(py.None().into_py(py)),
+            _ => json_value_to_py_with_schema(
+                py,
+                v,
+                dtype_by_name.get(name),
+                datetime_cls,
+                date_cls,
+                Some(name),
+                Some(output_names),
+            ),
+        };
+    }
+    if variant_cols.contains(name) {
+        return match v {
+            JsonValue::String(s) => {
+                if let Ok(parsed) = serde_json::from_str::<JsonValue>(s) {
+                    json_variant_to_py(py, &parsed)
+                } else {
+                    Ok(s.clone().into_py(py))
+                }
+            }
+            JsonValue::Null => Ok(py.None().into_py(py)),
+            other => json_variant_to_py(py, other),
+        };
+    }
+    json_value_to_py_with_schema(
+        py,
+        v,
+        dtype_by_name.get(name),
+        datetime_cls,
+        date_cls,
+        Some(name),
+        Some(output_names),
+    )
+}
+
 /// Convert EngineError or PolarsError to Python exception (SparklessError or TypeError for known validation errors).
 fn to_py_err(e: impl std::fmt::Display) -> PyErr {
     to_py_err_msg(&e.to_string())
@@ -62,6 +290,17 @@ fn to_py_err_msg(msg: &str) -> PyErr {
     // create_dataframe_from_rows with verify_schema: type mismatch -> TypeError (PySpark parity)
     if (msg.contains("Row ") || msg.contains("row ")) && msg.contains("expected type") {
         return pyo3::exceptions::PyTypeError::new_err(msg);
+    }
+    // ANSI / PySpark 4: arithmetic overflow and divide-by-zero
+    if msg.contains("[ARITHMETIC_OVERFLOW]")
+        || msg.contains("[DIVIDE_BY_ZERO]")
+        || msg.contains("divide by zero")
+        || msg.contains("Division by zero")
+    {
+        return pyo3::exceptions::PyArithmeticError::new_err(msg);
+    }
+    if msg.contains("conversion from `str`") && msg.contains("failed in column") {
+        return pyo3::exceptions::PyValueError::new_err(msg);
     }
     // Int subscript on struct column: PySpark/issue #339 expects TypeError (string keys for struct field access).
     if (msg.contains("expected List") || msg.contains("list operation"))
@@ -629,7 +868,7 @@ impl PySparkSessionBuilder {
                     if sess_guard.builder_config_compatible(&slf.inner) {
                         // Ensure thread UDF context is set when returning existing singleton
                         // This fixes test isolation issues where context was cleared but singleton reused
-                        robin_sparkless::set_thread_udf_context_with_tz(
+                        robin_sparkless::set_thread_udf_context_full(
                             std::sync::Arc::new(sess_guard.inner.udf_registry().clone()),
                             sess_guard.inner.is_case_sensitive(),
                             sess_guard
@@ -637,6 +876,7 @@ impl PySparkSessionBuilder {
                                 .get_config()
                                 .get("spark.sql.session.timeZone")
                                 .cloned(),
+                            sess_guard.inner.runtime_config().clone(),
                         );
                         // Reset builder to avoid config pollution between tests
                         slf.inner = SparkSessionBuilder::new();
@@ -2235,13 +2475,18 @@ fn python_data_and_schema(
                 .unwrap_or_default()
         };
         let mut out: Vec<(String, String)> = Vec::with_capacity(names.len());
+        let cfg = robin_sparkless::get_thread_runtime_config();
         for name in &names {
             let mut dtype = "string".to_string();
             for item in list.iter() {
                 if let Ok(dict) = item.downcast::<PyDict>() {
                     if let Ok(Some(v)) = dict.get_item(name) {
-                        dtype = infer_type_from_py_value(&v);
-                        break;
+                        if cfg.infer_map_type_from_first_pair {
+                            dtype = infer_type_from_py_value(&v);
+                            break;
+                        } else {
+                            dtype = merge_spark_type_names(&dtype, &infer_type_from_py_value(&v));
+                        }
                     }
                 }
             }
@@ -2619,7 +2864,65 @@ fn infer_schema_from_first_row(
     Some(out)
 }
 
+fn merge_spark_type_names(a: &str, b: &str) -> String {
+    let a = a.trim().to_ascii_lowercase();
+    let b = b.trim().to_ascii_lowercase();
+    if a == b {
+        return a;
+    }
+    if a == "string" || b == "string" {
+        return "string".to_string();
+    }
+    if (a == "long" || a == "bigint" || a == "int") && (b == "double" || b == "float") {
+        return "double".to_string();
+    }
+    if (b == "long" || b == "bigint" || b == "int") && (a == "double" || a == "float") {
+        return "double".to_string();
+    }
+    if (a == "long" || a == "bigint" || a == "int")
+        && (b == "long" || b == "bigint" || b == "int")
+    {
+        return "long".to_string();
+    }
+    "string".to_string()
+}
+
+fn infer_array_type_from_py_sequence(seq: &Bound<'_, PyAny>, first_element_only: bool) -> String {
+    if let Ok(list) = seq.downcast::<PyList>() {
+        if first_element_only {
+            if list.len() > 0 {
+                if let Ok(first) = list.get_item(0) {
+                    return format!("array<{}>", infer_type_from_py_value(&first));
+                }
+            }
+            return "array<string>".to_string();
+        }
+        let mut elem = "string".to_string();
+        for item in list.iter() {
+            elem = merge_spark_type_names(&elem, &infer_type_from_py_value(&item));
+        }
+        return format!("array<{elem}>");
+    }
+    if let Ok(tup) = seq.downcast::<PyTuple>() {
+        if first_element_only {
+            if tup.len() > 0 {
+                if let Ok(first) = tup.get_item(0) {
+                    return format!("array<{}>", infer_type_from_py_value(&first));
+                }
+            }
+            return "array<string>".to_string();
+        }
+        let mut elem = "string".to_string();
+        for item in tup.iter() {
+            elem = merge_spark_type_names(&elem, &infer_type_from_py_value(&item));
+        }
+        return format!("array<{elem}>");
+    }
+    "array<string>".to_string()
+}
+
 fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
+    let cfg = robin_sparkless::get_thread_runtime_config();
     if v.is_none() {
         return "string".to_string();
     }
@@ -2632,10 +2935,12 @@ fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
     if v.extract::<f64>().is_ok() {
         return "double".to_string();
     }
-    // Treat Python list/tuple as array so createDataFrame infers List dtype
-    // for columns backed by sequence values (PySpark parity for array columns).
-    if v.downcast::<PyList>().is_ok() || v.downcast::<PyTuple>().is_ok() {
-        return "array".to_string();
+    // Nested dicts in createDataFrame rows infer as struct (Rust/json path), not map.
+    if let Ok(list) = v.downcast::<PyList>() {
+        return infer_array_type_from_py_sequence(list, cfg.infer_array_type_from_first_element);
+    }
+    if let Ok(tup) = v.downcast::<PyTuple>() {
+        return infer_array_type_from_py_sequence(tup, cfg.infer_array_type_from_first_element);
     }
     if v.downcast::<PyBytes>().is_ok() {
         return "binary".to_string();
@@ -4496,9 +4801,37 @@ impl PyDataFrame {
         }
         let py_schema = struct_type_cls.call1((py_fields,))?.into_py(py);
 
+        let ym_interval_cols: std::collections::HashSet<String> = self
+            .schema_cache
+            .as_ref()
+            .and_then(|cached| {
+                ym_interval_column_names_from_schema(py, cached.bind(py))
+                    .ok()
+            })
+            .unwrap_or_default();
+        let dt_interval_cols: std::collections::HashSet<String> = self
+            .schema_cache
+            .as_ref()
+            .and_then(|cached| {
+                dt_interval_column_names_from_schema(py, cached.bind(py))
+                    .ok()
+            })
+            .unwrap_or_default();
+        let variant_cols: std::collections::HashSet<String> = self
+            .schema_cache
+            .as_ref()
+            .and_then(|cached| {
+                variant_column_names_from_schema(py, cached.bind(py))
+                    .ok()
+            })
+            .unwrap_or_default();
+        let interval_legacy = interval_legacy_collect();
+        let ym_interval_cls = types_mod.getattr("YearMonthInterval").ok();
+
         let datetime_mod = PyModule::import_bound(py, "datetime")?;
         let datetime_cls = datetime_mod.getattr("datetime")?;
         let date_cls = datetime_mod.getattr("date")?;
+        let timedelta_cls = datetime_mod.getattr("timedelta")?;
 
         // output_names and rows already obtained above with schema.
         let mut out = Vec::with_capacity(rows.len());
@@ -4506,14 +4839,20 @@ impl PyDataFrame {
             let kwargs = PyDict::new_bound(py);
             for name in &output_names {
                 let v = row.get(name).unwrap_or(&JsonValue::Null);
-                let py_v = json_value_to_py_with_schema(
+                let py_v = collect_cell_py(
                     py,
+                    name,
                     v,
-                    dtype_by_name.get(name),
+                    &ym_interval_cols,
+                    &dt_interval_cols,
+                    &variant_cols,
+                    interval_legacy,
+                    ym_interval_cls.as_ref(),
+                    &timedelta_cls,
+                    &dtype_by_name,
+                    &output_names,
                     &datetime_cls,
                     &date_cls,
-                    Some(name.as_str()),
-                    Some(&output_names),
                 )?;
                 kwargs.set_item(name, py_v)?;
             }
@@ -4974,14 +5313,27 @@ impl PyDataFrame {
             .map_err(to_py_err)
     }
 
-    #[pyo3(name = "dropDuplicates", signature = (subset=None))]
-    fn drop_duplicates(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
-        self.distinct(subset)
+    #[pyo3(name = "dropDuplicates", signature = (subset=None, *cols))]
+    fn drop_duplicates(
+        &self,
+        subset: Option<Vec<String>>,
+        cols: Vec<String>,
+    ) -> PyResult<PyDataFrame> {
+        let names = if !cols.is_empty() {
+            Some(cols)
+        } else {
+            subset
+        };
+        self.distinct(names)
     }
 
-    #[pyo3(name = "drop_duplicates", signature = (subset=None))]
-    fn drop_duplicates_snake(&self, subset: Option<Vec<String>>) -> PyResult<PyDataFrame> {
-        self.distinct(subset)
+    #[pyo3(name = "drop_duplicates", signature = (subset=None, *cols))]
+    fn drop_duplicates_snake(
+        &self,
+        subset: Option<Vec<String>>,
+        cols: Vec<String>,
+    ) -> PyResult<PyDataFrame> {
+        self.drop_duplicates(subset, cols)
     }
 
     #[pyo3(signature = (other, on=None, how="inner", left_on=None, right_on=None))]
@@ -9533,6 +9885,13 @@ fn from_json(column: &PyColumn, schema: Option<&str>) -> PyResult<PyColumn> {
 }
 
 #[pyfunction]
+fn parse_json(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::parse_json(&column.inner),
+    }
+}
+
+#[pyfunction]
 fn levenshtein(column: &PyColumn, other: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::levenshtein(&column.inner, &other.inner),
@@ -9680,6 +10039,14 @@ fn to_utc_timestamp(column: &PyColumn, tz: &str) -> PyColumn {
 fn approx_count_distinct(col: &PyColumn, rsd: Option<f64>) -> PyColumn {
     PyColumn {
         inner: functions::approx_count_distinct(&col.inner, rsd),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, deterministic=false))]
+fn mode(col: &PyColumn, deterministic: bool) -> PyColumn {
+    PyColumn {
+        inner: functions::mode(&col.inner, deterministic),
     }
 }
 
@@ -10031,6 +10398,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(spark_char, m)?)?;
     m.add_function(wrap_pyfunction!(to_json, m)?)?;
     m.add_function(wrap_pyfunction!(from_json, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_json, m)?)?;
     m.add_function(wrap_pyfunction!(levenshtein, m)?)?;
     m.add_function(wrap_pyfunction!(native_lpad, m)?)?;
     m.add_function(wrap_pyfunction!(native_rpad, m)?)?;
@@ -10053,6 +10421,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_utc_timestamp, m)?)?;
     // Phase 4: missing functions (checklist)
     m.add_function(wrap_pyfunction!(approx_count_distinct, m)?)?;
+    m.add_function(wrap_pyfunction!(mode, m)?)?;
     m.add_function(wrap_pyfunction!(date_trunc, m)?)?;
     m.add_function(wrap_pyfunction!(native_next_day, m)?)?;
     m.add_function(wrap_pyfunction!(native_trunc, m)?)?;

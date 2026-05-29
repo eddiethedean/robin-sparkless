@@ -45,7 +45,7 @@ class CompatibilityTester:
             ("3.3.4", "11"),  # Latest 3.3.x
             ("3.4.3", "11"),  # Latest 3.4.x
             ("3.5.1", "17"),  # Latest 3.5.x (requires Java 17)
-            # ("4.0.0", "17"), # PySpark 4.0 if available (commented out for now)
+            ("4.1.0", "17"),  # PySpark 4.1.x (requires Java 17, Python 3.10+)
         ]
 
     def get_python_versions(self) -> List[str]:

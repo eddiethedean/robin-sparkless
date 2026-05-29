@@ -1,6 +1,6 @@
 [project]
 name = "sparkless"
-version = "4.8.0"
+version = "4.9.0"
 description = "PySpark-like DataFrame API in Python—no JVM. Uses robin-sparkless (Rust/Polars) as the execution engine."
 readme = "README.md"
 license = { text = "MIT" }
@@ -40,6 +40,19 @@ jdbc = [
 ]
 # Run Python tests with real PySpark (SPARKLESS_TEST_BACKEND=pyspark or MOCK_SPARK_TEST_BACKEND=pyspark); requires Java.
 pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
+# PySpark 4.x oracle (Java 17, Python 3.10+)
+pyspark4 = ["pyspark>=4.0,<4.2", "delta-spark>=4.0,<5"]
+
+[tool.pytest.ini_options]
+markers = [
+    "sparkless_only: run only in sparkless backend mode",
+    "pyspark_only: run only in PySpark backend mode",
+    "pyspark4_only: requires PySpark 4.x compat profile (compat=4.0)",
+    "pyspark3_only: requires PySpark 3.x compat profile (compat=3.5)",
+    "delta: requires Delta Lake",
+    "integration: integration test",
+    "performance: performance benchmark",
+]
 
 [build-system]
 requires = ["maturin>=1.4,<2"]

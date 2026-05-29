@@ -58,6 +58,13 @@ from .mode import (
     set_mode,
 )
 
+from .compat import (
+    ENV_COMPAT,
+    DEFAULT_COMPAT,
+    get_compat_profile,
+    apply_compat_to_session,
+)
+
 # Session creation
 from .session import create_session
 
@@ -89,6 +96,11 @@ __all__ = [
     "is_pyspark_mode",
     "is_sparkless_mode",
     "set_mode",
+    # Compat profile
+    "ENV_COMPAT",
+    "DEFAULT_COMPAT",
+    "get_compat_profile",
+    "apply_compat_to_session",
     # Session
     "create_session",
     # Imports

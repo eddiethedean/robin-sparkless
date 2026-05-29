@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use robin_sparkless_core::SparklessConfig;
+use robin_sparkless_core::{SparklessConfig, SessionRuntimeConfig};
 
 use super::{SparkSession, set_thread_udf_session};
 
@@ -54,6 +54,11 @@ impl SparkSessionBuilder {
         // Batch 8 / #789: spark.conf().get("spark.app.name") should return the app name.
         if let Some(name) = &self.app_name {
             config.insert("spark.app.name".to_string(), name.clone());
+        }
+        if !config.contains_key("sparkless.pyspark.compat")
+            && let Some(compat) = SessionRuntimeConfig::compat_from_env()
+        {
+            SessionRuntimeConfig::set_compat_profile(&mut config, compat);
         }
         let session = SparkSession::new(self.app_name, self.master, config);
         set_thread_udf_session(session.clone());

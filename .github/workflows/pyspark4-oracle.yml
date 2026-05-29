@@ -1,0 +1,69 @@
+# Nightly PySpark 4.1 oracle — parity tests against real PySpark 4.x with compat=4.0.
+name: PySpark 4 Oracle
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  pyspark4-oracle:
+    name: PySpark 4.1 parity oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build sparkless and install PySpark 4
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip maturin
+          cd python && ../.venv/bin/maturin develop
+          .venv/bin/pip install -r tests/requirements-pyspark4.txt pytest pytest-xdist pytest-timeout
+        working-directory: ${{ github.workspace }}
+
+      - name: Run parity tests (PySpark 4 oracle)
+        env:
+          SPARKLESS_TEST_MODE: pyspark
+          SPARKLESS_PYSPARK_COMPAT: "4.0"
+        run: |
+          .venv/bin/python -m pytest tests/parity/ -v --tb=short -x
+        working-directory: ${{ github.workspace }}
+
+      - name: Run ANSI issue tests (sparkless compat=4.0)
+        env:
+          SPARKLESS_TEST_MODE: sparkless
+          SPARKLESS_PYSPARK_COMPAT: "4.0"
+        run: |
+          .venv/bin/python -m pytest tests/dataframe/test_pyspark4_ansi.py -v --tb=short
+        working-directory: ${{ github.workspace }}

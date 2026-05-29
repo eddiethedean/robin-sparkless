@@ -357,6 +357,27 @@ def pytest_collection_modifyitems(
         (
             Path(__file__).resolve().parent / "unit" / "test_sparkless_testing.py"
         ).resolve(),
+        (
+            Path(__file__).resolve().parent / "unit" / "test_pyspark_compat_profile.py"
+        ).resolve(),
+        (
+            Path(__file__).resolve().parent / "dataframe" / "test_pyspark4_ansi.py"
+        ).resolve(),
+        (
+            Path(__file__).resolve().parent / "unit" / "test_map_key_normalization.py"
+        ).resolve(),
+        (
+            Path(__file__).resolve().parent / "unit" / "test_ym_interval_collect.py"
+        ).resolve(),
+        (
+            Path(__file__).resolve().parent / "unit" / "test_dt_interval_collect.py"
+        ).resolve(),
+        (
+            Path(__file__).resolve().parent / "unit" / "test_variant_parse_json.py"
+        ).resolve(),
+        (
+            Path(__file__).resolve().parent / "unit" / "test_jdbc_v4_runtime_config.py"
+        ).resolve(),
     }
 
     # Collect unique test file paths from collected items.

@@ -7,6 +7,32 @@ use regex::Regex;
 use std::borrow::Cow;
 use std::ops::Not;
 
+/// Normalize float map keys (-0.0 -> 0.0) per PySpark 4.0 when enabled.
+pub fn normalize_map_key_series(s: Series) -> PolarsResult<Series> {
+    if crate::udf_context::get_thread_runtime_config().disable_map_key_normalization {
+        return Ok(s);
+    }
+    match s.dtype() {
+        DataType::Float64 => {
+            let ca = s.f64().map_err(|e| compute_err("normalize_map_key", e))?;
+            let out: Float64Chunked = ca
+                .into_iter()
+                .map(|v| v.map(|x| if x == -0.0 { 0.0 } else { x }))
+                .collect();
+            Ok(out.into_series())
+        }
+        DataType::Float32 => {
+            let ca = s.f32().map_err(|e| compute_err("normalize_map_key", e))?;
+            let out: Float32Chunked = ca
+                .into_iter()
+                .map(|v| v.map(|x| if x == -0.0f32 { 0.0f32 } else { x }))
+                .collect();
+            Ok(out.into_series())
+        }
+        _ => Ok(s),
+    }
+}
+
 /// Split string by regex pattern with at most `limit` parts (PySpark split uses regex).
 /// When limit <= 0, splits without limit. Empty delimiter: literal split (existing behavior).
 fn split_str_by_regex_limit(s: &str, re: &Regex, limit: usize) -> Vec<String> {
@@ -1078,6 +1104,7 @@ pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
                 let k_s = st
                     .field_by_name("key")
                     .map_err(|e| compute_err("map_concat key", e))?;
+                let k_s = normalize_map_key_series(k_s)?;
                 let v_s = st
                     .field_by_name("value")
                     .map_err(|e| compute_err("map_concat value", e))?;
@@ -1166,6 +1193,28 @@ fn parse_json_object_str(s: &str) -> Option<serde_json::Map<String, serde_json::
         return parse_json_object_str(inner);
     }
     None
+}
+
+/// Validate and normalize JSON for VARIANT / parse_json (PySpark 4). Invalid JSON -> null.
+pub fn apply_parse_json_variant(column: Column) -> PolarsResult<Option<Column>> {
+    use polars::prelude::*;
+    let name = column.field().into_owned().name;
+    let ca = column.str()?;
+    let results: Vec<Option<String>> = ca
+        .into_iter()
+        .map(|opt| {
+            opt.and_then(|s| {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                let v: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+                serde_json::to_string(&v).ok()
+            })
+        })
+        .collect();
+    let out = StringChunked::from_iter_options(name.as_str().into(), results.into_iter());
+    Ok(Some(Column::new(name, out.into_series())))
 }
 
 /// Convert JSON value to Option<String> for get() result (null -> None, string -> Some, else to_string).
@@ -3236,7 +3285,7 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
                 let mut row_structs: Vec<Series> = Vec::new();
                 for (opt_ke, opt_ve) in k_list.amortized_iter().zip(v_list.amortized_iter()) {
                     if let (Some(ke), Some(ve)) = (opt_ke, opt_ve) {
-                        let ke_s = ke.deep_clone();
+                        let ke_s = normalize_map_key_series(ke.deep_clone())?;
                         let ve_s = ve.deep_clone();
                         let len = ke_s.len();
                         let fields: [&Series; 2] = [&ke_s, &ve_s];
@@ -3879,6 +3928,93 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
         }
     };
     Ok(Some(Column::new(name, out)))
+}
+
+/// ANSI divide: error if any divisor is zero (spark.sql.ansi.enabled=true).
+pub fn apply_ansi_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "ansi_divide needs two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (ca_a, ca_b) = binary_series_f64(&a_s, &b_s, "ansi_divide")?;
+    for ob in ca_b.iter().flatten() {
+        if ob == 0.0 {
+            return Err(PolarsError::ComputeError(
+                "[DIVIDE_BY_ZERO] division by zero. Use 'try_divide' to tolerate divide-by-zero and return NULL instead. If necessary set spark.sql.ansi.enabled to \"false\" to bypass this error.".into(),
+            ));
+        }
+    }
+    let out = Float64Chunked::from_iter_options(
+        name.as_str().into(),
+        ca_a.into_iter()
+            .zip(&ca_b)
+            .map(|(oa, ob)| oa.zip(ob).map(|(a, b)| a / b)),
+    )
+    .into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+fn ansi_checked_i64_op(
+    columns: &mut [Column],
+    op_name: &str,
+    err_msg: &str,
+    f: impl Fn(i64, i64) -> Option<i64>,
+) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(format!("{op_name} needs two columns").into()));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, op_name)?;
+    let mut values = Vec::with_capacity(ca_a.len());
+    for (oa, ob) in ca_a.into_iter().zip(ca_b.into_iter()) {
+        match (oa, ob) {
+            (Some(a), Some(b)) => match f(a, b) {
+                Some(v) => values.push(Some(v)),
+                None => {
+                    return Err(PolarsError::ComputeError(err_msg.to_string().into()));
+                }
+            },
+            _ => values.push(None),
+        }
+    }
+    let out = Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series();
+    Ok(Some(Column::new(name, out)))
+}
+
+/// ANSI add: error on integer overflow.
+pub fn apply_ansi_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    ansi_checked_i64_op(
+        columns,
+        "ansi_add",
+        "[ARITHMETIC_OVERFLOW] integer overflow. Use 'try_add' to tolerate overflow and return NULL instead. If necessary set spark.sql.ansi.enabled to \"false\" to bypass this error.",
+        |a, b| a.checked_add(b),
+    )
+}
+
+/// ANSI subtract: error on integer overflow.
+pub fn apply_ansi_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    ansi_checked_i64_op(
+        columns,
+        "ansi_subtract",
+        "[ARITHMETIC_OVERFLOW] integer overflow. Use 'try_subtract' to tolerate overflow and return NULL instead. If necessary set spark.sql.ansi.enabled to \"false\" to bypass this error.",
+        |a, b| a.checked_sub(b),
+    )
+}
+
+/// ANSI multiply: error on integer overflow.
+pub fn apply_ansi_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    ansi_checked_i64_op(
+        columns,
+        "ansi_multiply",
+        "[ARITHMETIC_OVERFLOW] integer overflow. Use 'try_multiply' to tolerate overflow and return NULL instead. If necessary set spark.sql.ansi.enabled to \"false\" to bypass this error.",
+        |a, b| a.checked_mul(b),
+    )
 }
 
 /// Strip PySpark/Java SimpleDateFormat quoted literals: 'T' -> T, '' -> '. So chrono gets unquoted pattern.
@@ -6111,5 +6247,26 @@ mod tests_parse_timestamp {
         let t = micros.unwrap();
         let hour = (t / 1_000_000 / 3600) % 24;
         assert_eq!(hour, 4, "hour should be 4 for {s:?}");
+    }
+
+    #[test]
+    fn normalize_map_key_negative_zero_4_0() {
+        use crate::udf_context::{clear_thread_udf_context, set_thread_udf_context_full};
+        use crate::udf_registry::UdfRegistry;
+        use polars::prelude::{NamedFrom, Series};
+        use robin_sparkless_core::{PysparkCompat, SessionRuntimeConfig};
+        use std::sync::Arc;
+
+        clear_thread_udf_context();
+        set_thread_udf_context_full(
+            Arc::new(UdfRegistry::default()),
+            false,
+            None,
+            SessionRuntimeConfig::for_compat(PysparkCompat::V4_0),
+        );
+        let s = Series::new("k".into(), vec![-0.0f64]);
+        let out = super::normalize_map_key_series(s).unwrap();
+        assert_eq!(out.f64().unwrap().get(0), Some(0.0));
+        clear_thread_udf_context();
     }
 }

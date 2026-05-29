@@ -18,6 +18,7 @@ pub fn parse_type_name(name: &str) -> Result<DataType, String> {
     }
     Ok(match s.as_str() {
         "int" | "integer" => DataType::Int32,
+        "short" | "smallint" => DataType::Int16,
         "long" | "bigint" => DataType::Int64,
         "float" => DataType::Float32,
         "double" => DataType::Float64,
@@ -28,6 +29,7 @@ pub fn parse_type_name(name: &str) -> Result<DataType, String> {
         "timestamp" | "datetime" | "timestamp_ntz" => {
             DataType::Datetime(TimeUnit::Microseconds, None)
         }
+        "variant" => DataType::String, // stored as canonical JSON string
         _ => return Err(format!("unknown type name: {name}")),
     })
 }

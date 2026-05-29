@@ -1,7 +1,7 @@
 //! Root-owned Session API; delegates to robin-sparkless-polars for execution.
 
 use crate::EngineError;
-use robin_sparkless_core::SparklessConfig;
+use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 use robin_sparkless_polars::{
     DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError,
     SparkSession as PolarsSparkSession, SparkSessionBuilder as PolarsSparkSessionBuilder,
@@ -182,6 +182,10 @@ impl SparkSession {
 
     pub fn set_config(&mut self, key: impl Into<String>, value: impl Into<String>) {
         self.0.set_config(key, value);
+    }
+
+    pub fn runtime_config(&self) -> &SessionRuntimeConfig {
+        self.0.runtime_config()
     }
 
     pub fn is_case_sensitive(&self) -> bool {

@@ -246,8 +246,8 @@ pub fn percentile_approx(col: &Column, percentage: f64, accuracy: Option<i32>) -
 }
 
 /// Mode aggregation - most frequent value. PySpark mode.
-pub fn mode(col: &Column) -> Column {
-    col.clone().mode()
+pub fn mode(col: &Column, deterministic: bool) -> Column {
+    col.clone().mode(deterministic)
 }
 
 /// Count distinct aggregation (PySpark countDistinct). Output name PySpark-style count_distinct(column_name).
@@ -1436,13 +1436,20 @@ pub fn expr_coerce_to_boolean(expr: Expr) -> Expr {
 }
 
 fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, String> {
+    if type_name.trim().eq_ignore_ascii_case("variant") {
+        return Ok(column.clone().parse_json_variant());
+    }
     let dtype = parse_type_name(type_name)?;
     let base_name = column.name().to_string();
+    // ANSI cast: invalid conversions throw (PySpark 4.0); non-ANSI returns null (3.5).
+    let ansi_strict = strict && crate::udf_context::get_thread_ansi_enabled();
 
     if dtype == DataType::Boolean {
         let out_name = base_name.clone();
         let expr = column.expr().clone().map(
-            move |col| crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, strict)),
+            move |col| {
+                crate::column::expect_col(crate::udfs::apply_string_to_boolean(col, ansi_strict))
+            },
             move |_schema, _field| Ok(Field::new(out_name.clone().into(), DataType::Boolean)),
         );
         // PySpark: col("x").cast("boolean") and alias("y").cast(...) keep output column name.
@@ -1450,7 +1457,9 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
     }
     if dtype == DataType::Date {
         let expr = column.expr().clone().map(
-            move |col| crate::column::expect_col(crate::udfs::apply_string_to_date(col, strict)),
+            move |col| {
+                crate::column::expect_col(crate::udfs::apply_string_to_date(col, ansi_strict))
+            },
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
         );
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
@@ -1459,7 +1468,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         use polars::datatypes::TimeUnit;
         let expr = column.expr().clone().map(
             move |col| {
-                crate::column::expect_col(crate::udfs::apply_string_to_datetime(col, strict))
+                crate::column::expect_col(crate::udfs::apply_string_to_datetime(col, ansi_strict))
             },
             |_schema, field| {
                 Ok(Field::new(
@@ -1470,7 +1479,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         );
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
-    if dtype == DataType::Int32 || dtype == DataType::Int64 {
+    if dtype == DataType::Int32 || dtype == DataType::Int64 || dtype == DataType::Int16 {
         // Use strict_cast when expr is not a plain column (e.g. aggregate) so we get a Cast node
         // and PySpark-style column name "CAST(sum(value) AS INT)" in groupby agg (issue #1255).
         // Do not add an inner alias here so that user .alias("TotalScore") becomes the single
@@ -1486,7 +1495,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
             move |col| {
                 crate::column::expect_col(crate::udfs::apply_string_to_int(
                     col,
-                    false, // always null on invalid for int/long (Spark semantics)
+                    ansi_strict,
                     target.clone(),
                 ))
             },
@@ -1499,14 +1508,15 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         let expr = column.expr().clone().map(
             move |col| {
                 crate::column::expect_col(crate::udfs::apply_string_to_double(
-                    col, false, // null on invalid for string->double (Spark semantics)
+                    col,
+                    ansi_strict,
                 ))
             },
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
-    let expr = if strict {
+    let expr = if ansi_strict {
         column.expr().clone().strict_cast(dtype)
     } else {
         column.expr().clone().cast(dtype)
@@ -2834,6 +2844,17 @@ pub fn posexplode(column: &Column) -> (Column, Column) {
     column.clone().posexplode()
 }
 
+/// Normalize map keys per PySpark 4.0 (-0.0 -> 0.0) when map key normalization is enabled.
+fn normalize_map_key_expr(key: Expr) -> Expr {
+    if crate::udf_context::get_thread_runtime_config().disable_map_key_normalization {
+        return key;
+    }
+    use polars::prelude::{lit, when};
+    when(key.clone().eq(lit(-0.0f64)))
+        .then(lit(0.0f64))
+        .otherwise(key)
+}
+
 /// Build a map column from alternating key/value expressions (PySpark create_map).
 /// Returns List(Struct{key, value}) using Polars as_struct and concat_list.
 /// With no args (or empty slice), returns a column of empty maps per row (PySpark parity #275).
@@ -2861,7 +2882,7 @@ pub fn create_map(key_values: &[&Column]) -> Result<Column, PolarsError> {
     let mut struct_exprs: Vec<Expr> = Vec::new();
     for i in (0..key_values.len()).step_by(2) {
         if i + 1 < key_values.len() {
-            let k = key_values[i].expr().clone().alias("key");
+            let k = normalize_map_key_expr(key_values[i].expr().clone()).alias("key");
             let v = key_values[i + 1].expr().clone().alias("value");
             struct_exprs.push(as_struct(vec![k, v]));
         }
@@ -3056,6 +3077,11 @@ pub fn schema_of_json(_column: &Column) -> Column {
         lit("STRUCT<>".to_string()),
         Some("schema_of_json".to_string()),
     )
+}
+
+/// Parse string column as JSON into VARIANT (PySpark 4 parse_json). Stored as validated JSON string.
+pub fn parse_json(column: &Column) -> Column {
+    column.clone().parse_json_variant()
 }
 
 /// Parse string column as JSON into struct (PySpark from_json).

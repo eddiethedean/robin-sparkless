@@ -10,16 +10,20 @@ use tiberius::{AuthMethod, Client, ColumnType, Config, Query, QueryItem};
 
 #[derive(Debug, Clone, Copy)]
 enum ColKind {
+    I16,
     I64,
     F64,
+    F32,
     Bool,
     Str,
 }
 
 #[derive(Debug, Clone)]
 enum Cell {
+    I16(Option<i16>),
     I64(Option<i64>),
     F64(Option<f64>),
+    F32(Option<f32>),
     Bool(Option<bool>),
     Str(Option<String>),
 }
@@ -102,7 +106,19 @@ fn with_runtime<T>(
         .block_on(fut)
 }
 
-fn kind_from_column_type(ty: ColumnType) -> ColKind {
+fn kind_from_column_type(ty: ColumnType, use_v4: bool) -> ColKind {
+    if use_v4 {
+        return match ty {
+            ColumnType::Bit => ColKind::Bool,
+            ColumnType::Int1 => ColKind::I16,
+            ColumnType::Int2 => ColKind::I16,
+            ColumnType::Int4 | ColumnType::Int8 | ColumnType::Intn => ColKind::I64,
+            ColumnType::Float4 => ColKind::F32,
+            ColumnType::Float8 | ColumnType::Floatn => ColKind::F64,
+            ColumnType::DatetimeOffset => ColKind::Str,
+            _ => ColKind::Str,
+        };
+    }
     match ty {
         ColumnType::Bit => ColKind::Bool,
         ColumnType::Int1
@@ -172,9 +188,11 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         })?;
 
         let column_names: Vec<String> = columns.iter().map(|c| c.name().to_string()).collect();
+        let cfg = crate::udf_context::get_thread_runtime_config();
+        let use_v4 = robin_sparkless_core::mssql_v4_type_mapping(&cfg);
         let column_kinds: Vec<ColKind> = columns
             .iter()
-            .map(|c| kind_from_column_type(c.column_type()))
+            .map(|c| kind_from_column_type(c.column_type(), use_v4))
             .collect();
         let ncols = column_names.len();
 
@@ -188,8 +206,10 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
             if let QueryItem::Row(row) = item {
                 for c in 0..ncols {
                     let cell = match column_kinds[c] {
+                        ColKind::I16 => Cell::I16(row.get::<i16, _>(c)),
                         ColKind::I64 => Cell::I64(row.get::<i64, _>(c)),
                         ColKind::F64 => Cell::F64(row.get::<f64, _>(c)),
+                        ColKind::F32 => Cell::F32(row.get::<f32, _>(c)),
                         ColKind::Bool => Cell::Bool(row.get::<bool, _>(c)),
                         ColKind::Str => {
                             let s: Option<&str> = row.get(c);
@@ -222,8 +242,10 @@ fn cells_to_series(name: &str, cells: &[Cell]) -> Series {
             .iter()
             .map(|c| match c {
                 Cell::Str(s) => s.clone(),
+                Cell::I16(i) => i.map(|v| v.to_string()),
                 Cell::I64(i) => i.map(|v| v.to_string()),
                 Cell::F64(f) => f.map(|v| v.to_string()),
+                Cell::F32(f) => f.map(|v| v.to_string()),
                 Cell::Bool(b) => b.map(|v| if v { "true" } else { "false" }.to_string()),
             })
             .collect();
@@ -234,9 +256,24 @@ fn cells_to_series(name: &str, cells: &[Cell]) -> Series {
             .iter()
             .map(|c| match c {
                 Cell::F64(f) => *f,
+                Cell::F32(f) => f.map(f64::from),
+                Cell::I16(i) => i.map(i64::from).map(|v| v as f64),
                 Cell::I64(i) => i.map(|v| v as f64),
                 Cell::Bool(b) => b.map(|v| if v { 1.0 } else { 0.0 }),
                 Cell::Str(_) => None,
+            })
+            .collect();
+        return Series::new(name.into(), vals);
+    }
+    if cells.iter().any(|c| matches!(c, Cell::F32(_))) {
+        let vals: Vec<Option<f32>> = cells
+            .iter()
+            .map(|c| match c {
+                Cell::F32(f) => *f,
+                Cell::F64(f) => f.map(|v| v as f32),
+                Cell::I16(i) => i.map(|v| v as f32),
+                Cell::I64(i) => i.map(|v| v as f32),
+                _ => None,
             })
             .collect();
         return Series::new(name.into(), vals);
@@ -246,6 +283,17 @@ fn cells_to_series(name: &str, cells: &[Cell]) -> Series {
             .iter()
             .map(|c| match c {
                 Cell::Bool(b) => *b,
+                _ => None,
+            })
+            .collect();
+        return Series::new(name.into(), vals);
+    }
+    if cells.iter().any(|c| matches!(c, Cell::I16(_))) {
+        let vals: Vec<Option<i16>> = cells
+            .iter()
+            .map(|c| match c {
+                Cell::I16(i) => *i,
+                Cell::I64(i) => i.and_then(|v| i16::try_from(v).ok()),
                 _ => None,
             })
             .collect();

@@ -74,6 +74,61 @@ class IntervalType(DataType):
         return "interval"
 
 
+class YearMonthIntervalType(DataType):
+    """PySpark 4 year-month interval type (collect shape differs from 3.x)."""
+
+    def __init__(self, start_field: str = "year", end_field: str = "month"):
+        self.start_field = start_field
+        self.end_field = end_field
+
+    def simpleString(self) -> str:
+        return "interval year to month"
+
+
+class DayTimeIntervalType(DataType):
+    """PySpark 4 day-time interval type."""
+
+    def __init__(
+        self,
+        start_field: str = "day",
+        end_field: str = "second",
+    ):
+        self.start_field = start_field
+        self.end_field = end_field
+
+    def simpleString(self) -> str:
+        return "interval day to second"
+
+
+class VariantType(DataType):
+    """PySpark 4 semi-structured VARIANT type (stored as JSON string in Sparkless)."""
+
+    def simpleString(self) -> str:
+        return "variant"
+
+
+class ShortType(DataType):
+    """PySpark ShortType (16-bit integer)."""
+
+    def simpleString(self) -> str:
+        return "smallint"
+
+
+class YearMonthInterval:
+    """Collected year-month interval value (PySpark 4.0 shape)."""
+
+    __slots__ = ("months",)
+
+    def __init__(self, months: int = 0):
+        self.months = months
+
+    def __repr__(self) -> str:
+        return f"YearMonthInterval(months={self.months})"
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, YearMonthInterval) and self.months == other.months
+
+
 class IntegerType(DataType):
     def simpleString(self) -> str:
         return "int"
@@ -552,6 +607,11 @@ __all__ = [
     "CharType",
     "VarcharType",
     "IntervalType",
+    "YearMonthIntervalType",
+    "DayTimeIntervalType",
+    "VariantType",
+    "ShortType",
+    "YearMonthInterval",
     "IntegerType",
     "LongType",
     "DoubleType",

@@ -14,7 +14,7 @@ use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
-use robin_sparkless_core::{SparklessConfig, date_utils};
+use robin_sparkless_core::{SparklessConfig, SessionRuntimeConfig, PysparkCompat, date_utils};
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -1044,12 +1044,7 @@ thread_local! {
 
 /// Set the thread-local session for UDF resolution (call_udf). Used by get_or_create.
 pub(crate) fn set_thread_udf_session(session: SparkSession) {
-    let session_tz = session.config.get("spark.sql.session.timeZone").cloned();
-    crate::set_thread_udf_context_with_tz(
-        Arc::new(session.udf_registry.clone()),
-        session.is_case_sensitive(),
-        session_tz,
-    );
+    session.sync_thread_context();
     THREAD_UDF_SESSION.with(|cell| *cell.borrow_mut() = Some(session));
 }
 
@@ -1090,6 +1085,8 @@ pub struct SparkSession {
     app_name: Option<String>,
     master: Option<String>,
     config: HashMap<String, String>,
+    /// Derived execution semantics (ANSI, map inference, compat profile).
+    runtime_config: SessionRuntimeConfig,
     /// Temporary views: name -> DataFrame. Session-scoped; cleared when session is dropped.
     pub(crate) catalog: TempViewCatalog,
     /// Saved tables (saveAsTable): name -> DataFrame. Session-scoped; separate namespace from temp views.
@@ -1110,10 +1107,18 @@ impl SparkSession {
         master: Option<String>,
         config: HashMap<String, String>,
     ) -> Self {
+        let mut config = config;
+        if !config.contains_key("sparkless.pyspark.compat")
+            && let Some(compat) = SessionRuntimeConfig::compat_from_env()
+        {
+            SessionRuntimeConfig::set_compat_profile(&mut config, compat);
+        }
+        let runtime_config = SessionRuntimeConfig::from_session_map(&config);
         SparkSession {
             app_name,
             master,
             config,
+            runtime_config,
             catalog: Arc::new(Mutex::new(HashMap::new())),
             tables: Arc::new(Mutex::new(HashMap::new())),
             databases: Arc::new(Mutex::new(HashSet::new())),
@@ -1136,6 +1141,7 @@ impl SparkSession {
             app_name: self.app_name.clone(),
             master: self.master.clone(),
             config: self.config.clone(),
+            runtime_config: self.runtime_config.clone(),
             catalog: Arc::new(Mutex::new(HashMap::new())),
             tables: Arc::new(Mutex::new(HashMap::new())),
             databases: Arc::new(Mutex::new(HashSet::new())),
@@ -1692,10 +1698,35 @@ impl SparkSession {
     pub fn set_config(&mut self, key: impl Into<String>, value: impl Into<String>) {
         let key = key.into();
         let value = value.into();
+        if key == "sparkless.pyspark.compat" {
+            if let Some(compat) = PysparkCompat::parse(&value) {
+                SessionRuntimeConfig::set_compat_profile(&mut self.config, compat);
+                self.runtime_config = SessionRuntimeConfig::from_session_map(&self.config);
+                self.sync_thread_context();
+                return;
+            }
+        }
+        self.config.insert(key.clone(), value.clone());
         if key == "spark.sql.session.timeZone" {
             crate::update_thread_session_time_zone(Some(value.clone()));
         }
-        self.config.insert(key, value);
+        self.runtime_config = SessionRuntimeConfig::from_session_map(&self.config);
+        self.sync_thread_context();
+    }
+
+    /// Current runtime semantics (ANSI, map inference, compat profile).
+    pub fn runtime_config(&self) -> &SessionRuntimeConfig {
+        &self.runtime_config
+    }
+
+    fn sync_thread_context(&self) {
+        let session_tz = self.config.get("spark.sql.session.timeZone").cloned();
+        crate::set_thread_udf_context_full(
+            Arc::new(self.udf_registry.clone()),
+            self.is_case_sensitive(),
+            session_tz,
+            self.runtime_config.clone(),
+        );
     }
 
     /// Whether column names are case-sensitive (PySpark: spark.sql.caseSensitive).
@@ -3004,6 +3035,7 @@ impl SparkSession {
             app_name: self.app_name.clone(),
             master: self.master.clone(),
             config: self.config.clone(),
+            runtime_config: self.runtime_config.clone(),
             catalog: self.catalog.clone(),
             tables: self.tables.clone(),
             databases: self.databases.clone(),

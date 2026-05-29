@@ -20,6 +20,7 @@ pub mod type_coercion;
 pub mod udf_context;
 pub mod udf_registry;
 pub mod udfs;
+pub mod ansi;
 
 #[cfg(feature = "delta")]
 pub mod delta;
@@ -64,7 +65,9 @@ pub use type_coercion::{
     CompareOp, coerce_for_pyspark_comparison, coerce_for_pyspark_eq_null_safe, find_common_type,
 };
 pub use udf_context::{
-    clear_thread_udf_context, get_thread_session_time_zone, get_thread_udf_context,
-    set_thread_udf_context, set_thread_udf_context_with_tz, update_thread_session_time_zone,
+    clear_thread_udf_context, get_thread_ansi_enabled, get_thread_runtime_config,
+    get_thread_session_time_zone, get_thread_udf_context, set_thread_udf_context,
+    set_thread_udf_context_full, set_thread_udf_context_with_tz, update_thread_runtime_config,
+    update_thread_session_time_zone,
 };
 pub use udf_registry::{RustUdf, UdfRegistry};

@@ -139,8 +139,16 @@ pub(crate) fn write_jdbc_mysql(
                     polars::prelude::AnyValue::Boolean(b) => Value::Int(if b { 1 } else { 0 }),
                     polars::prelude::AnyValue::Int64(i) => Value::Int(i),
                     polars::prelude::AnyValue::Int32(i) => Value::Int(i as i64),
-                    polars::prelude::AnyValue::Float64(f) => Value::Double(f),
-                    polars::prelude::AnyValue::Float32(f) => Value::Double(f as f64),
+                    polars::prelude::AnyValue::Int16(i) => Value::Int(i as i64),
+                    polars::prelude::AnyValue::Float64(f) => {
+                        let cfg = crate::udf_context::get_thread_runtime_config();
+                        if robin_sparkless_core::mysql_v4_type_mapping(&cfg) {
+                            Value::Float(f as f32)
+                        } else {
+                            Value::Double(f)
+                        }
+                    }
+                    polars::prelude::AnyValue::Float32(f) => Value::Float(f),
                     polars::prelude::AnyValue::String(s) => Value::Bytes(s.as_bytes().to_vec()),
                     polars::prelude::AnyValue::StringOwned(ref s) => {
                         Value::Bytes(s.as_bytes().to_vec())
@@ -227,18 +235,109 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         return Ok(PlDataFrame::empty());
     }
 
+    let cfg = crate::udf_context::get_thread_runtime_config();
+    let use_v4 = robin_sparkless_core::mysql_v4_type_mapping(&cfg);
+    let column_types: Vec<mysql::consts::ColumnType> = result
+        .columns()
+        .as_ref()
+        .iter()
+        .map(|c| c.column_type())
+        .collect();
+
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
-    for (name, col_data) in column_names.iter().zip(columns_data.iter()) {
-        series_vec.push(mysql_values_to_series(name, col_data)?);
+    for ((name, col_data), col_type) in column_names
+        .iter()
+        .zip(columns_data.iter())
+        .zip(column_types.iter())
+    {
+        series_vec.push(mysql_values_to_series(name, col_data, *col_type, use_v4)?);
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
         .map_err(|e| EngineError::Internal(format!("JDBC read (MySQL): build DataFrame: {e}")))
 }
 
-fn mysql_values_to_series(name: &str, values: &[Option<Value>]) -> Result<Series, EngineError> {
+fn mysql_values_to_series(
+    name: &str,
+    values: &[Option<Value>],
+    col_type: mysql::consts::ColumnType,
+    use_v4: bool,
+) -> Result<Series, EngineError> {
+    use mysql::consts::ColumnType;
+
     if values.is_empty() {
         return Ok(Series::new(name.into(), Vec::<Option<i64>>::new()));
+    }
+
+    if use_v4 {
+        if col_type == ColumnType::MYSQL_TYPE_SHORT {
+            let vals: Vec<Option<i16>> = values
+                .iter()
+                .map(|v| match v {
+                    None | Some(Value::NULL) => None,
+                    Some(Value::Int(i)) => i16::try_from(*i).ok(),
+                    Some(Value::UInt(u)) => i16::try_from(*u).ok(),
+                    _ => None,
+                })
+                .collect();
+            return Ok(Series::new(name.into(), vals));
+        }
+        if col_type == ColumnType::MYSQL_TYPE_FLOAT {
+            let vals: Vec<Option<f32>> = values
+                .iter()
+                .map(|v| match v {
+                    None | Some(Value::NULL) => None,
+                    Some(Value::Float(f)) => Some(*f),
+                    Some(Value::Double(f)) => Some(*f as f32),
+                    Some(Value::Int(i)) => Some(*i as f32),
+                    Some(Value::UInt(u)) => Some(*u as f32),
+                    _ => None,
+                })
+                .collect();
+            return Ok(Series::new(name.into(), vals));
+        }
+        if col_type == ColumnType::MYSQL_TYPE_BIT {
+            let vals: Vec<Option<Vec<u8>>> = values
+                .iter()
+                .map(|v| match v {
+                    None | Some(Value::NULL) => None,
+                    Some(Value::Bytes(b)) => Some(b.clone()),
+                    Some(Value::Int(i)) => Some(vec![*i as u8]),
+                    _ => None,
+                })
+                .collect();
+            return Ok(Series::new(name.into(), vals));
+        }
+        if col_type == ColumnType::MYSQL_TYPE_TIMESTAMP
+            || col_type == ColumnType::MYSQL_TYPE_DATETIME
+        {
+            let mut vals: Vec<Option<chrono::NaiveDateTime>> = Vec::with_capacity(values.len());
+            for v in values {
+                let parsed = match v {
+                    None | Some(Value::NULL) => None,
+                    Some(Value::Date(y, m, d, hh, mm, ss, micros)) => {
+                        chrono::NaiveDate::from_ymd_opt(*y as i32, *m as u32, *d as u32).and_then(
+                            |date| {
+                                date.and_hms_micro_opt(
+                                    *hh as u32,
+                                    *mm as u32,
+                                    *ss as u32,
+                                    *micros,
+                                )
+                            },
+                        )
+                    }
+                    Some(Value::Bytes(b)) => {
+                        let s = String::from_utf8_lossy(b);
+                        chrono::NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M:%S%.f")
+                            .ok()
+                    }
+                    _ => None,
+                };
+                vals.push(parsed);
+            }
+            return Ok(Series::new(name.into(), vals));
+        }
     }
 
     let mut has_int = false;

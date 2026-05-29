@@ -21,6 +21,34 @@ This page helps you switch to **Sparkless v4** (Rust backend) from **PySpark** o
 
 No code changes are required for typical tests and pipelines; the main difference is the execution engine (Rust instead of Polars Python).
 
+## Targeting PySpark 4 (opt-in, 4.9.0+)
+
+Sparkless **4.9.0** ships PySpark 4 semantics as an **opt-in profile**. The default remains PySpark 3.5-like (`compat=3.5`, ANSI off).
+
+```python
+from sparkless.sql import SparkSession
+
+spark = SparkSession.builder.app_name("app").get_or_create()
+spark.conf.set("sparkless.pyspark.compat", "4.0")  # enables ANSI + 4.0 map/collect rules
+```
+
+Or set the environment variable before session creation:
+
+```bash
+export SPARKLESS_PYSPARK_COMPAT=4.0
+```
+
+See [PYSPARK_COMPAT_PROFILES.md](PYSPARK_COMPAT_PROFILES.md) for bundled config keys and [PYSPARK_4_PARITY_PLAN.md](PYSPARK_4_PARITY_PLAN.md) for the full roadmap.
+
+### Dual-oracle testing (PySpark 3.5 + 4.1)
+
+| Oracle | Requirements | Env |
+|--------|--------------|-----|
+| PySpark 3.5 (default CI) | `tests/requirements-pyspark.txt` | `SPARKLESS_TEST_MODE=pyspark` |
+| PySpark 4.1 (nightly) | `tests/requirements-pyspark4.txt`, Java 17, Python 3.10+ | `SPARKLESS_TEST_MODE=pyspark` + `SPARKLESS_PYSPARK_COMPAT=4.0` |
+
+Use `@pytest.mark.pyspark4_only` / `pyspark3_only` for profile-specific tests. The `spark` fixture applies `sparkless.pyspark.compat` automatically when running against the sparkless backend.
+
 ## PySpark → Sparkless v4
 
 ### Quick swap

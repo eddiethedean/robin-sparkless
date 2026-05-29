@@ -7,13 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+(none yet)
+
+## [4.9.0] - 2026-05-29
+
 ### Added
 
-(none yet)
+- **PySpark 4 compatibility profiles (opt-in)** — `sparkless.pyspark.compat` (`3.5` default, `4.0` opt-in) bundles ANSI, map key normalization, and map/array schema inference flags. See [PYSPARK_COMPAT_PROFILES.md](docs/PYSPARK_COMPAT_PROFILES.md).
 
-### Fixed
+- **ANSI semantics (`spark.sql.ansi.enabled`)** — Integer overflow, divide-by-zero, and invalid casts throw when ANSI is on (PySpark 4.0 profile); null-on-failure when off (3.5 default).
 
-(none yet)
+- **PySpark 4 testing infrastructure** — `SPARKLESS_PYSPARK_COMPAT`, `@pytest.mark.pyspark4_only` / `pyspark3_only`, `tests/requirements-pyspark4.txt`, nightly PySpark 4.1 oracle workflow.
+
+- **API gaps** — `dropDuplicates(*cols)` var-args, `mode(deterministic=)`, PyArrow Table in `createDataFrame` (via `to_pylist()`), map key `-0.0` normalization in `create_map`.
+
+### Changed
+
+- **Default remains Tier A (PySpark 3.5-like)** — Existing parity fixtures and tests pass unchanged unless `compat=4.0` is set.
 
 ## [4.8.0] - 2026-05-26
 

@@ -139,7 +139,8 @@ pub fn to_engine_error(e: PolarsError) -> EngineError {
 
 // Re-export thread UDF context functions for test isolation fix
 pub use robin_sparkless_polars::{
-    clear_thread_udf_context, set_thread_udf_context, set_thread_udf_context_with_tz,
+    clear_thread_udf_context, get_thread_runtime_config, set_thread_udf_context,
+    set_thread_udf_context_full, set_thread_udf_context_with_tz,
 };
 
 #[cfg(feature = "sql")]

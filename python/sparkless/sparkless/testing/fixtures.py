@@ -19,6 +19,7 @@ from typing import Any, Dict, Generator
 import pytest
 
 from .mode import Mode, get_mode, is_pyspark_mode
+from .compat import apply_compat_to_session, get_compat_profile
 from .imports import SparkImports, get_imports
 from .session import create_session
 
@@ -178,6 +179,9 @@ def spark(request: pytest.FixtureRequest) -> Generator[Any, None, None]:
         app_name=test_name, mode=mode, enable_delta=enable_delta, **extra_config
     )
 
+    if mode == Mode.SPARKLESS:
+        apply_compat_to_session(session, get_compat_profile())
+
     yield session
 
     with contextlib.suppress(BaseException):
@@ -223,6 +227,9 @@ def isolated_session(request: pytest.FixtureRequest) -> Generator[Any, None, Non
     session = create_session(
         app_name=session_name, mode=mode, enable_delta=enable_delta
     )
+
+    if mode == Mode.SPARKLESS:
+        apply_compat_to_session(session, get_compat_profile())
 
     yield session
 

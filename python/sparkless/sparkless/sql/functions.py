@@ -685,6 +685,11 @@ def from_json(col_or_name, schema=None, options=None):
     return _col_result(_native.from_json(_as_col(col_or_name), schema_str))
 
 
+def parse_json(col_or_name):
+    """Parse JSON string column into VARIANT (PySpark 4 parse_json)."""
+    return _col_result(_native.parse_json(_as_col(col_or_name)))
+
+
 def to_json(col_or_name):
     """Serialize struct column to JSON string (PySpark to_json)."""
     return _col_result(_native.to_json(_as_col(col_or_name)))

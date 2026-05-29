@@ -1,5 +1,14 @@
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "sparkless_only: run only in sparkless backend mode",
+    "pyspark_only: run only in PySpark backend mode",
+    "pyspark4_only: requires PySpark 4.x compat profile (compat=4.0)",
+    "pyspark3_only: requires PySpark 3.x compat profile (compat=3.5)",
+    "delta: requires Delta Lake",
+    "integration: integration test",
+    "performance: performance benchmark",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests often import get_spark_imports() first so the right backend is loaded, then other imports.
