@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use robin_sparkless_core::{SparklessConfig, SessionRuntimeConfig};
+use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 
 use super::{SparkSession, set_thread_udf_session};
 

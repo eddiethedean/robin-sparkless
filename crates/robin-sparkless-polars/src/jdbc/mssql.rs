@@ -115,7 +115,6 @@ fn kind_from_column_type(ty: ColumnType, use_v4: bool) -> ColKind {
             ColumnType::Int4 | ColumnType::Int8 | ColumnType::Intn => ColKind::I64,
             ColumnType::Float4 => ColKind::F32,
             ColumnType::Float8 | ColumnType::Floatn => ColKind::F64,
-            ColumnType::DatetimeOffset => ColKind::Str,
             _ => ColKind::Str,
         };
     }

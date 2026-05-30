@@ -121,6 +121,10 @@ pub struct DataFrame {
     /// Column names that are ambiguous after a join (same name on both sides). Selecting them
     /// unqualified raises AMBIGUOUS_REFERENCE (PySpark parity #374 / #1230).
     pub(crate) ambiguous_columns: Option<HashSet<String>>,
+    /// Lazy frame before the most recent select (PySpark: orderBy can reference dropped columns).
+    pub(crate) pre_select_lf: Option<LazyFrame>,
+    /// Projection exprs from the most recent select (re-applied after sort on pre_select_lf).
+    pub(crate) post_select_exprs: Option<Vec<Expr>>,
 }
 
 /// Spec for groupBy: either a column name (str) or a Column expression (e.g. col("a").alias("x")).
@@ -141,6 +145,8 @@ impl DataFrame {
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
             ambiguous_columns: None,
+            pre_select_lf: None,
+            post_select_exprs: None,
         }
     }
 
@@ -153,6 +159,8 @@ impl DataFrame {
             case_sensitive,
             alias: None,
             ambiguous_columns: None,
+            pre_select_lf: None,
+            post_select_exprs: None,
         }
     }
 
@@ -165,6 +173,8 @@ impl DataFrame {
             case_sensitive,
             alias: None,
             ambiguous_columns: None,
+            pre_select_lf: None,
+            post_select_exprs: None,
         }
     }
 
@@ -175,6 +185,8 @@ impl DataFrame {
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
             ambiguous_columns: None,
+            pre_select_lf: None,
+            post_select_exprs: None,
         }
     }
 
@@ -185,6 +197,41 @@ impl DataFrame {
             case_sensitive,
             alias: None,
             ambiguous_columns: None,
+            pre_select_lf: None,
+            post_select_exprs: None,
+        }
+    }
+
+    pub(crate) fn from_lazy_after_select(
+        lf: LazyFrame,
+        case_sensitive: bool,
+        pre_select_lf: LazyFrame,
+        post_select_exprs: Vec<Expr>,
+    ) -> Self {
+        DataFrame {
+            inner: DataFrameInner::Lazy(lf),
+            case_sensitive,
+            alias: None,
+            ambiguous_columns: None,
+            pre_select_lf: Some(pre_select_lf),
+            post_select_exprs: Some(post_select_exprs),
+        }
+    }
+
+    /// Eager DataFrame after select; retains pre-select lazy frame for orderBy on non-selected columns (#1389).
+    pub(crate) fn from_eager_after_select(
+        pl_df: polars::prelude::DataFrame,
+        case_sensitive: bool,
+        pre_select_lf: LazyFrame,
+        post_select_exprs: Vec<Expr>,
+    ) -> Self {
+        DataFrame {
+            inner: DataFrameInner::Eager(pl_df.into()),
+            case_sensitive,
+            alias: None,
+            ambiguous_columns: None,
+            pre_select_lf: Some(pre_select_lf),
+            post_select_exprs: Some(post_select_exprs),
         }
     }
 
@@ -200,6 +247,8 @@ impl DataFrame {
             case_sensitive,
             alias: None,
             ambiguous_columns,
+            pre_select_lf: None,
+            post_select_exprs: None,
         }
     }
 
@@ -211,6 +260,8 @@ impl DataFrame {
             case_sensitive: false,
             alias: self.alias,
             ambiguous_columns: self.ambiguous_columns,
+            pre_select_lf: self.pre_select_lf.clone(),
+            post_select_exprs: self.post_select_exprs.clone(),
         }
     }
 
@@ -221,6 +272,8 @@ impl DataFrame {
             case_sensitive: DEFAULT_CASE_SENSITIVE,
             alias: None,
             ambiguous_columns: None,
+            pre_select_lf: None,
+            post_select_exprs: None,
         }
     }
 
@@ -254,6 +307,8 @@ impl DataFrame {
             case_sensitive: self.case_sensitive,
             alias: Some(name.to_string()),
             ambiguous_columns: self.ambiguous_columns.clone(),
+            pre_select_lf: self.pre_select_lf.clone(),
+            post_select_exprs: self.post_select_exprs.clone(),
         }
     }
 
@@ -1770,12 +1825,7 @@ impl DataFrame {
         column_names: Vec<&str>,
         ascending: Vec<bool>,
     ) -> Result<DataFrame, PolarsError> {
-        let resolved: Vec<String> = column_names
-            .iter()
-            .map(|c| self.resolve_column_name(c))
-            .collect::<Result<Vec<_>, _>>()?;
-        let refs: Vec<&str> = resolved.iter().map(|s| s.as_str()).collect();
-        transformations::order_by(self, refs, ascending, self.case_sensitive)
+        transformations::order_by(self, column_names, ascending, self.case_sensitive)
     }
 
     /// Order by sort expressions (asc/desc with nulls_first/last).
@@ -2165,15 +2215,17 @@ impl DataFrame {
         transformations::melt(self, ids, values, self.case_sensitive)
     }
 
-    /// Pivot (wide format). PySpark pivot. Stub: not yet implemented; use crosstab for two-column count.
+    /// Pivot (wide format). PySpark: use `groupBy(...).pivot(col)` for pivot-table aggregation.
     pub fn pivot(
         &self,
-        _pivot_col: &str,
+        pivot_col: &str,
         _values: Option<Vec<&str>>,
     ) -> Result<DataFrame, PolarsError> {
         Err(PolarsError::InvalidOperation(
-            "pivot is not yet implemented; use crosstab(col1, col2) for two-column cross-tabulation."
-                .into(),
+            format!(
+                "DataFrame.pivot({pivot_col}) is not supported; use groupBy(...).pivot({pivot_col:?}) for pivot-table aggregation, or crosstab(col1, col2) for two-column counts."
+            )
+            .into(),
         ))
     }
 
@@ -3025,6 +3077,8 @@ impl Clone for DataFrame {
             case_sensitive: self.case_sensitive,
             alias: self.alias.clone(),
             ambiguous_columns: self.ambiguous_columns.clone(),
+            pre_select_lf: self.pre_select_lf.clone(),
+            post_select_exprs: self.post_select_exprs.clone(),
         }
     }
 }
@@ -3682,7 +3736,7 @@ mod tests {
         };
         let msg = err.to_string();
         assert!(
-            msg.contains("pivot is not yet implemented") && msg.contains("crosstab"),
+            msg.contains("groupBy(...).pivot") && msg.contains("crosstab"),
             "pivot stub should mention crosstab: {}",
             msg
         );

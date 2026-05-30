@@ -40,7 +40,9 @@ def _delta_maven_package() -> Optional[str]:
     if delta_version is None:
         return None
     pyspark_major = _get_pyspark_major_version()
-    scala_suffix = "2.13" if pyspark_major is not None and pyspark_major >= 4 else "2.12"
+    scala_suffix = (
+        "2.13" if pyspark_major is not None and pyspark_major >= 4 else "2.12"
+    )
     return f"io.delta:delta-spark_{scala_suffix}:{delta_version}"
 
 

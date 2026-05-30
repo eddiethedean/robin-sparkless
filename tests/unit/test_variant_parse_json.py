@@ -13,7 +13,7 @@ pytest_plugins = ["sparkless.testing"]
 def test_parse_json_returns_dict_on_collect(spark):
     spark.conf.set("sparkless.pyspark.compat", "4.0")
     df = spark.createDataFrame([('{"a": 1, "b": "x"}',)], ["raw"])
-    out = df.select(
+    df.select(
         F.parse_json("raw").alias("v"),
     )
     # Without explicit VariantType schema, collect returns JSON string; with schema:

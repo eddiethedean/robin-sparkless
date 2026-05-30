@@ -3,7 +3,7 @@
 //! replace, cross_join, describe, subtract, intersect,
 //! sample, random_split, first, head, take, tail, is_empty, to_df.
 
-use super::DataFrame;
+use super::{DataFrame, resolve_column_with_schema};
 use crate::column::RangeWindowAgg;
 use crate::column::expect_col;
 use crate::functions::SortOrder;
@@ -256,7 +256,7 @@ pub fn select_with_exprs(
         Option<PlSmallStr>,
         polars::prelude::ExplodeOptions,
     );
-    let mut explode_target: Option<ExplodeTarget> = None;
+    let mut explode_targets: Vec<ExplodeTarget> = Vec::new();
     let exprs: Vec<Expr> = exprs
         .into_iter()
         .enumerate()
@@ -306,18 +306,25 @@ pub fn select_with_exprs(
                     };
                     if let (Some(input), options) = (explode_input, options) {
                         if let Expr::Column(col_name) = input.as_ref() {
-                            if explode_target.is_none() {
-                                let alias_name = if col_name.as_str() != name.as_str() {
-                                    Some(name.clone())
-                                } else {
-                                    None
-                                };
-                                explode_target = Some((col_name.clone(), alias_name, options));
+                            let alias_name = if col_name.as_str() != name.as_str() {
+                                Some(name.clone())
+                            } else {
+                                None
+                            };
+                            let out_col = alias_name.clone().unwrap_or_else(|| col_name.clone());
+                            let already = explode_targets.iter().any(|(c, a, o)| {
+                                c.as_str() == col_name.as_str()
+                                    && a.as_ref().map(|x| x.as_str())
+                                        == alias_name.as_ref().map(|x| x.as_str())
+                                    && *o == options
+                            });
+                            if !already {
+                                explode_targets.push((
+                                    col_name.clone(),
+                                    alias_name.clone(),
+                                    options,
+                                ));
                             }
-                            let out_col = explode_target
-                                .as_ref()
-                                .and_then(|(_, a, _)| a.clone())
-                                .unwrap_or_else(|| col_name.clone());
                             Expr::Alias(Arc::new(Expr::Column(out_col)), name)
                         } else {
                             Expr::Alias(inner, name)
@@ -328,12 +335,13 @@ pub fn select_with_exprs(
                 }
                 Expr::Explode { input, options } => {
                     if let Expr::Column(col_name) = input.as_ref() {
-                        if explode_target.is_none() {
-                            explode_target = Some((col_name.clone(), None, options));
+                        let already = explode_targets.iter().any(|(c, a, o)| {
+                            c.as_str() == col_name.as_str() && a.is_none() && *o == options
+                        });
+                        if !already {
+                            explode_targets.push((col_name.clone(), None, options));
                         }
-                        let (_, alias_name, _) = explode_target.as_ref().unwrap();
-                        let out_col = alias_name.clone().unwrap_or_else(|| col_name.clone());
-                        Expr::Column(out_col)
+                        Expr::Column(col_name.clone())
                     } else {
                         Expr::Explode { input, options }
                     }
@@ -369,13 +377,10 @@ pub fn select_with_exprs(
     // When every expression references no column from the frame, Polars select yields 1 row.
     // Cross-join with a single key column to get N rows (PySpark parity).
     let mut lf = df.lazy_frame();
-    let had_explode = explode_target.is_some() || posexplode_target.is_some();
+    let had_explode = !explode_targets.is_empty() || posexplode_target.is_some();
 
-    // If we saw an explode expression on a single column, apply frame-level explode first so
-    // non-exploded columns are replicated correctly (PySpark explode parity).
-    // When alias != source (e.g. select(Name, Value, explode(Value).alias("ExplodedValue"))),
-    // add a copy column then explode it so the original list column is preserved.
-    if let Some((explode_col, alias_name, options)) = explode_target {
+    // Apply each explode column in select order (PySpark zips when multiple explodes in one select).
+    for (explode_col, alias_name, options) in explode_targets {
         if let Some(alias) = &alias_name {
             lf = lf.with_column(col(explode_col.as_str()).alias(alias.as_str()));
             let selector = Selector::ByName {
@@ -432,13 +437,22 @@ pub fn select_with_exprs(
     // schema order that matches columns (#1267). List-of-dicts createDataFrame first column
     // null is fixed in Python binding (python_row_to_json).
     if df.is_eager() {
+        let pre = df.lazy_frame();
         let pl_df = lf.collect()?;
-        Ok(super::DataFrame::from_eager_with_options(
+        Ok(super::DataFrame::from_eager_after_select(
             pl_df,
             case_sensitive,
+            pre,
+            exprs.clone(),
         ))
     } else {
-        Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))
+        let pre = df.lazy_frame();
+        Ok(super::DataFrame::from_lazy_after_select(
+            lf,
+            case_sensitive,
+            pre,
+            exprs.clone(),
+        ))
     }
 }
 
@@ -950,16 +964,41 @@ pub fn order_by(
         asc.push(true);
     }
     asc.truncate(column_names.len());
-    // Before resolving column names, enforce ambiguous-column semantics for
-    // unqualified user-facing orderBy references, just like select/select_items
-    // do via check_ambiguous_unqualified (#1393).
     for name in &column_names {
         df.check_ambiguous_unqualified(name)?;
     }
-    let resolved: Vec<String> = column_names
+    let resolved: Result<Vec<String>, PolarsError> = column_names
         .iter()
         .map(|c| df.resolve_column_name(c))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect();
+    if let (Err(_), Some(pre), Some(post)) = (&resolved, &df.pre_select_lf, &df.post_select_exprs) {
+        let pre_schema = pre.clone().collect_schema()?;
+        let mut pre_resolved: Vec<String> = Vec::with_capacity(column_names.len());
+        let mut all_in_pre = true;
+        for name in &column_names {
+            match resolve_column_with_schema(name, pre_schema.as_ref(), case_sensitive, None) {
+                Ok(r) => pre_resolved.push(r),
+                Err(_) => {
+                    all_in_pre = false;
+                    break;
+                }
+            }
+        }
+        if all_in_pre {
+            let sort_exprs: Vec<Expr> = pre_resolved.iter().map(|s| col(s.as_str())).collect();
+            let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
+            let nulls_last: Vec<bool> = vec![true; column_names.len()];
+            let sorted = pre.clone().sort_by_exprs(
+                sort_exprs,
+                SortMultipleOptions::new()
+                    .with_order_descending_multi(descending)
+                    .with_nulls_last_multi(nulls_last),
+            );
+            let lf = sorted.select(post.as_slice());
+            return Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive));
+        }
+    }
+    let resolved = resolved?;
     let exprs: Vec<Expr> = resolved.iter().map(|s| col(s.as_str())).collect();
     let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
     // PySpark default: nulls last for both ASC and DESC (issue #1052 / #327 test expectation).

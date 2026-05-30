@@ -1243,8 +1243,9 @@ class TestPluginEdgeCases:
 
         headers = pytest_report_header(MockConfig())
         assert isinstance(headers, list)
-        assert len(headers) == 1
+        assert len(headers) == 2
         assert "sparkless.testing mode:" in headers[0]
+        assert "sparkless.testing compat:" in headers[1]
 
     def test_plugin_env_var_name(self):
         """Plugin uses correct ENV_VAR_NAME."""

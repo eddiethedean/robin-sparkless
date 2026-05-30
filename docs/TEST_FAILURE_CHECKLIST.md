@@ -1,13 +1,27 @@
 # Test Failure Checklist
 
-**Last run:** `pytest tests -n 10` (after `maturin develop --release`)  
-**Result:** 656 failed, 2150 passed, 25 skipped (2831 total)
+**Last run:** `pytest tests -n 12` (May 2026, after `maturin develop`)  
+**Result:** **3115 passed, 64 skipped, 0 failed** (3179 collected)
 
-This checklist tracks fixes needed to reduce test failures. Items are grouped by category and ordered by estimated impact.
+This checklist tracked fixes needed during the parity migration. The main suite is green; items below are **historical** unless a new failure appears.
 
 ---
 
-## Latest run failure buckets (by error type)
+## Current status (May 2026)
+
+| Metric | Count |
+|--------|------:|
+| Passed | 3115 |
+| Skipped (expected) | 64 |
+| Failed | 0 |
+
+Recent fixes: array schema inference (empty + typed arrays → `array<long>`), `orderBy` on columns not in select projection (#1389), multi-explode in `select()`, Python `F.*` JVM stubs wired, Rust `infer_list_element_type` / `infer_schema_from_json_rows` type merge.
+
+---
+
+## Archived failure buckets (historical — Feb 2026 run)
+
+The table below reflects an older run (`656 failed`). Kept for reference only.
 
 | Bucket | Approx. count | Example error / cause |
 |--------|----------------|------------------------|

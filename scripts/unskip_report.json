@@ -354,6 +354,14 @@
       []
     ]
   ],
-  "passed_count": 2678,
-  "failed_count": 116
+  "passed_count": 3115,
+  "failed_count": 0,
+  "_meta": {
+    "regenerated_at": "2026-05-29",
+    "pytest_command": "pytest tests -n 12",
+    "passed": 3115,
+    "skipped": 64,
+    "failed": 0,
+    "note": "Full suite green. issues_some_failed below is a historical unskip-campaign backlog; re-run scripts/unskip_issue_tests.py to refresh."
+  }
 }

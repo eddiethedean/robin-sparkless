@@ -55,7 +55,23 @@ pytest tests -n 10 -v --tb=short
 make test-parity-phases
 ```
 
-Optional: trigger the **Full Python tests** workflow in GitHub Actions (`workflow_dispatch`) for the same command on CI runners.
+Optional: trigger the **Full Python tests** or **PySpark smoke** workflow in GitHub Actions (`workflow_dispatch`) for release-build verification on CI runners.
+
+---
+
+## Expected skips
+
+As of May 2026, `pytest tests -n 12` reports **64 skipped** tests. These are intentional, not suite failures:
+
+| Category | Examples | Reason |
+|----------|----------|--------|
+| **Delta / integration** | `-m delta`, `-m integration` | Not in default CI subset; run `python-delta` job or `SPARKLESS_ENABLE_DELTA=1 pytest -m delta -n 0` |
+| **JDBC / Docker** | `tests/sql/test_jdbc_sqlite.py` | Requires Docker JDBC fixture |
+| **PySpark-only / pyspark4_only** | Some parity window tests | Oracle or JVM-only behavior |
+| **Known binding gaps** | `test_issue_419_single_column_schema.py` | Single-column schema as bare type ([#419](https://github.com/eddiethedean/robin-sparkless/issues/419)) |
+| **Deferred / env** | SQL feature flags, regex lookaround | Documented in test `skip` reason |
+
+CI default: `pytest tests -m "not delta and not integration" -n 4` after `maturin develop --release`.
 
 ---
 

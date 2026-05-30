@@ -23,8 +23,8 @@ pub use expr::{
     stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance, when,
 };
 pub use jdbc_mapping::{
-    db2_v4_type_mapping, jdbc_v4_type_mappings, mssql_v4_type_mapping,
-    mysql_v4_type_mapping, oracle_v4_timestamp_mapping, postgres_v4_datetime_mapping,
+    db2_v4_type_mapping, jdbc_v4_type_mappings, mssql_v4_type_mapping, mysql_v4_type_mapping,
+    oracle_v4_timestamp_mapping, postgres_v4_datetime_mapping,
 };
 pub use runtime_config::{PysparkCompat, SessionRuntimeConfig};
 pub use schema::{DataType, StructField, StructType};

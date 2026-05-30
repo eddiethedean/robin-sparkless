@@ -142,7 +142,10 @@ impl SessionRuntimeConfig {
             "sparkless.pyspark.compat".to_string(),
             self.pyspark_compat.as_config_str().to_string(),
         );
-        map.insert("spark.sql.ansi.enabled".to_string(), bool_str(self.ansi_enabled));
+        map.insert(
+            "spark.sql.ansi.enabled".to_string(),
+            bool_str(self.ansi_enabled),
+        );
         map.insert(
             "spark.sql.legacy.disableMapKeyNormalization".to_string(),
             bool_str(self.disable_map_key_normalization),

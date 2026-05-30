@@ -219,6 +219,12 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         .map(|c| c.name_str().to_string())
         .collect();
     let ncols = column_names.len();
+    let column_types: Vec<mysql::consts::ColumnType> = result
+        .columns()
+        .as_ref()
+        .iter()
+        .map(|c| c.column_type())
+        .collect();
 
     let mut columns_data: Vec<Vec<Option<Value>>> = (0..ncols).map(|_| Vec::new()).collect();
 
@@ -237,12 +243,6 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
 
     let cfg = crate::udf_context::get_thread_runtime_config();
     let use_v4 = robin_sparkless_core::mysql_v4_type_mapping(&cfg);
-    let column_types: Vec<mysql::consts::ColumnType> = result
-        .columns()
-        .as_ref()
-        .iter()
-        .map(|c| c.column_type())
-        .collect();
 
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
     for ((name, col_data), col_type) in column_names
@@ -318,19 +318,13 @@ fn mysql_values_to_series(
                     Some(Value::Date(y, m, d, hh, mm, ss, micros)) => {
                         chrono::NaiveDate::from_ymd_opt(*y as i32, *m as u32, *d as u32).and_then(
                             |date| {
-                                date.and_hms_micro_opt(
-                                    *hh as u32,
-                                    *mm as u32,
-                                    *ss as u32,
-                                    *micros,
-                                )
+                                date.and_hms_micro_opt(*hh as u32, *mm as u32, *ss as u32, *micros)
                             },
                         )
                     }
                     Some(Value::Bytes(b)) => {
                         let s = String::from_utf8_lossy(b);
-                        chrono::NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M:%S%.f")
-                            .ok()
+                        chrono::NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%d %H:%M:%S%.f").ok()
                     }
                     _ => None,
                 };

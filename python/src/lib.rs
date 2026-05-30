@@ -149,6 +149,7 @@ fn json_variant_to_py(py: Python<'_>, v: &JsonValue) -> PyResult<PyObject> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_cell_py(
     py: Python<'_>,
     name: &str,
@@ -164,26 +165,22 @@ fn collect_cell_py(
     datetime_cls: &Bound<'_, PyAny>,
     date_cls: &Bound<'_, PyAny>,
 ) -> PyResult<PyObject> {
-    if !interval_legacy
-        && ym_interval_cols.contains(name)
-        && ym_interval_cls.is_some()
-    {
-        return match json_months_value(v) {
-            Some(m) => Ok(ym_interval_cls
-                .unwrap()
-                .call1((m,))?
-                .into_py(py)),
-            None if matches!(v, JsonValue::Null) => Ok(py.None().into_py(py)),
-            _ => json_value_to_py_with_schema(
-                py,
-                v,
-                dtype_by_name.get(name),
-                datetime_cls,
-                date_cls,
-                Some(name),
-                Some(output_names),
-            ),
-        };
+    if !interval_legacy && ym_interval_cols.contains(name) {
+        if let Some(ym_cls) = ym_interval_cls {
+            return match json_months_value(v) {
+                Some(m) => Ok(ym_cls.call1((m,))?.into_py(py)),
+                None if matches!(v, JsonValue::Null) => Ok(py.None().into_py(py)),
+                _ => json_value_to_py_with_schema(
+                    py,
+                    v,
+                    dtype_by_name.get(name),
+                    datetime_cls,
+                    date_cls,
+                    Some(name),
+                    Some(output_names),
+                ),
+            };
+        }
     }
     if interval_legacy && ym_interval_cols.contains(name) {
         return match json_months_value(v) {
@@ -1954,7 +1951,14 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
         JsonValue::String(_) => "string".to_string(),
         // Treat JSON arrays as array type so list columns (e.g. scores, tags) are inferred
         // as List/Array instead of String when creating DataFrames from Python data.
-        JsonValue::Array(_) => "array".to_string(),
+        JsonValue::Array(arr) => {
+            if arr.is_empty() {
+                "array".to_string()
+            } else {
+                let elem = merge_inferred_types(arr.iter().map(infer_type_from_json_value));
+                format_array_type_name(&elem)
+            }
+        }
         JsonValue::Object(_) => "string".to_string(),
     }
 }
@@ -2522,13 +2526,16 @@ fn python_data_and_schema(
                 let better = rows
                     .iter()
                     .filter_map(|r| r.get(i))
-                    .find(|v| !matches!(v, JsonValue::Null))
-                    .map(infer_type_from_json_value);
-                // Only refine columns that were originally inferred as string-like; keep
-                // explicit non-string types such as binary/boolean/numeric unchanged.
+                    .filter(|v| !matches!(v, JsonValue::Null))
+                    .map(infer_type_from_json_value)
+                    .reduce(|acc, t| merge_spark_type_names(&acc, &t));
+                // Refine string-like and untyped array/list columns by merging types across all rows.
+                let is_untyped_container =
+                    typ.eq_ignore_ascii_case("array") || typ.eq_ignore_ascii_case("list");
                 let final_typ = if typ.eq_ignore_ascii_case("string")
                     || typ.eq_ignore_ascii_case("str")
                     || typ.eq_ignore_ascii_case("varchar")
+                    || is_untyped_container
                 {
                     better.unwrap_or_else(|| typ.clone())
                 } else {
@@ -2864,11 +2871,57 @@ fn infer_schema_from_first_row(
     Some(out)
 }
 
+/// Element type inside `array<...>`, or empty string for untyped `array` / `list`.
+fn parse_array_element_type_name(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower == "array" || lower == "list" {
+        return Some(String::new());
+    }
+    if lower.starts_with("array<") && lower.ends_with('>') {
+        return Some(trimmed[6..trimmed.len() - 1].trim().to_string());
+    }
+    None
+}
+
+fn format_array_type_name(elem: &str) -> String {
+    if elem.trim().is_empty() {
+        "array".to_string()
+    } else {
+        format!("array<{}>", elem.trim())
+    }
+}
+
 fn merge_spark_type_names(a: &str, b: &str) -> String {
     let a = a.trim().to_ascii_lowercase();
     let b = b.trim().to_ascii_lowercase();
     if a == b {
         return a;
+    }
+    if let (Some(ea), Some(eb)) = (
+        parse_array_element_type_name(&a),
+        parse_array_element_type_name(&b),
+    ) {
+        if ea.is_empty() && !eb.is_empty() {
+            return format_array_type_name(&eb);
+        }
+        if eb.is_empty() && !ea.is_empty() {
+            return format_array_type_name(&ea);
+        }
+        if ea.is_empty() && eb.is_empty() {
+            return "array".to_string();
+        }
+        return format_array_type_name(&merge_spark_type_names(&ea, &eb));
+    }
+    if let Some(eb) = parse_array_element_type_name(&b) {
+        if a == "string" {
+            return format_array_type_name(&eb);
+        }
+    }
+    if let Some(ea) = parse_array_element_type_name(&a) {
+        if b == "string" {
+            return format_array_type_name(&ea);
+        }
     }
     if a == "string" || b == "string" {
         return "string".to_string();
@@ -2879,12 +2932,26 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
     if (b == "long" || b == "bigint" || b == "int") && (a == "double" || a == "float") {
         return "double".to_string();
     }
-    if (a == "long" || a == "bigint" || a == "int")
-        && (b == "long" || b == "bigint" || b == "int")
+    if (a == "long" || a == "bigint" || a == "int") && (b == "long" || b == "bigint" || b == "int")
     {
         return "long".to_string();
     }
     "string".to_string()
+}
+
+fn merge_inferred_types<I>(types: I) -> String
+where
+    I: IntoIterator<Item = String>,
+{
+    types.into_iter().fold(String::new(), |acc, t| {
+        if acc.is_empty() {
+            t
+        } else if t.is_empty() {
+            acc
+        } else {
+            merge_spark_type_names(&acc, &t)
+        }
+    })
 }
 
 fn infer_array_type_from_py_sequence(seq: &Bound<'_, PyAny>, first_element_only: bool) -> String {
@@ -2895,13 +2962,11 @@ fn infer_array_type_from_py_sequence(seq: &Bound<'_, PyAny>, first_element_only:
                     return format!("array<{}>", infer_type_from_py_value(&first));
                 }
             }
-            return "array<string>".to_string();
+            // Empty arrays are untyped; merge with non-empty rows to infer element type.
+            return "array".to_string();
         }
-        let mut elem = "string".to_string();
-        for item in list.iter() {
-            elem = merge_spark_type_names(&elem, &infer_type_from_py_value(&item));
-        }
-        return format!("array<{elem}>");
+        let elem = merge_inferred_types(list.iter().map(|item| infer_type_from_py_value(&item)));
+        return format_array_type_name(&elem);
     }
     if let Ok(tup) = seq.downcast::<PyTuple>() {
         if first_element_only {
@@ -2910,15 +2975,12 @@ fn infer_array_type_from_py_sequence(seq: &Bound<'_, PyAny>, first_element_only:
                     return format!("array<{}>", infer_type_from_py_value(&first));
                 }
             }
-            return "array<string>".to_string();
+            return "array".to_string();
         }
-        let mut elem = "string".to_string();
-        for item in tup.iter() {
-            elem = merge_spark_type_names(&elem, &infer_type_from_py_value(&item));
-        }
-        return format!("array<{elem}>");
+        let elem = merge_inferred_types(tup.iter().map(|item| infer_type_from_py_value(&item)));
+        return format_array_type_name(&elem);
     }
-    "array<string>".to_string()
+    "array".to_string()
 }
 
 fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
@@ -4804,26 +4866,17 @@ impl PyDataFrame {
         let ym_interval_cols: std::collections::HashSet<String> = self
             .schema_cache
             .as_ref()
-            .and_then(|cached| {
-                ym_interval_column_names_from_schema(py, cached.bind(py))
-                    .ok()
-            })
+            .and_then(|cached| ym_interval_column_names_from_schema(py, cached.bind(py)).ok())
             .unwrap_or_default();
         let dt_interval_cols: std::collections::HashSet<String> = self
             .schema_cache
             .as_ref()
-            .and_then(|cached| {
-                dt_interval_column_names_from_schema(py, cached.bind(py))
-                    .ok()
-            })
+            .and_then(|cached| dt_interval_column_names_from_schema(py, cached.bind(py)).ok())
             .unwrap_or_default();
         let variant_cols: std::collections::HashSet<String> = self
             .schema_cache
             .as_ref()
-            .and_then(|cached| {
-                variant_column_names_from_schema(py, cached.bind(py))
-                    .ok()
-            })
+            .and_then(|cached| variant_column_names_from_schema(py, cached.bind(py)).ok())
             .unwrap_or_default();
         let interval_legacy = interval_legacy_collect();
         let ym_interval_cls = types_mod.getattr("YearMonthInterval").ok();
@@ -5117,27 +5170,7 @@ impl PyDataFrame {
     ) -> PyResult<PyDataFrame> {
         // Core implementation is split out so we can optionally apply
         // PySpark-parity fallbacks when column resolution fails.
-        let result = self.do_order_by_impl(cols, ascending);
-
-        match result {
-            Ok(df) => Ok(df),
-            Err(e) => {
-                // #1389: Parity gap for column.pow_operator where PySpark
-                // succeeds but Sparkless previously raised an unresolved_column
-                // error when ordering by a column name that is not present in
-                // the projected schema. When we hit that specific error shape,
-                // return the original DataFrame without applying additional
-                // ordering rather than raising.
-                let py = cols.py();
-                if e.is_instance_of::<SparklessError>(py) {
-                    let msg = format!("{e}");
-                    if msg.contains("cannot be resolved") {
-                        return Ok(PyDataFrame::wrap(self.inner.clone()));
-                    }
-                }
-                Err(e)
-            }
-        }
+        self.do_order_by_impl(cols, ascending)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -5319,11 +5352,7 @@ impl PyDataFrame {
         subset: Option<Vec<String>>,
         cols: Vec<String>,
     ) -> PyResult<PyDataFrame> {
-        let names = if !cols.is_empty() {
-            Some(cols)
-        } else {
-            subset
-        };
+        let names = if !cols.is_empty() { Some(cols) } else { subset };
         self.distinct(names)
     }
 
@@ -5489,20 +5518,38 @@ impl PyDataFrame {
                             use robin_sparkless::functions;
                             match join_type {
                                 JoinType::Left => {
-                                    if let Some(left_key) = left_keys.first() {
-                                        let cond = functions::col(left_key.as_str()).is_not_null();
-                                        joined =
-                                            joined.filter(cond.into_expr()).map_err(to_py_err)?;
+                                    let cond = left_keys.iter().fold(
+                                        None::<robin_sparkless::Expr>,
+                                        |acc, k| {
+                                            let c = functions::col(k.as_str())
+                                                .is_not_null()
+                                                .into_expr();
+                                            Some(match acc {
+                                                None => c,
+                                                Some(prev) => prev.and(c),
+                                            })
+                                        },
+                                    );
+                                    if let Some(cond) = cond {
+                                        joined = joined.filter(cond).map_err(to_py_err)?;
                                     }
                                 }
                                 JoinType::Right => {
-                                    if let Some(right_key) = right_keys.first() {
-                                        let right_col_name =
-                                            format!("{}_right", right_key.as_str());
-                                        let cond =
-                                            functions::col(right_col_name.as_str()).is_not_null();
-                                        joined =
-                                            joined.filter(cond.into_expr()).map_err(to_py_err)?;
+                                    let cond = right_keys.iter().fold(
+                                        None::<robin_sparkless::Expr>,
+                                        |acc, k| {
+                                            let right_col_name = format!("{}_right", k.as_str());
+                                            let c = functions::col(right_col_name.as_str())
+                                                .is_not_null()
+                                                .into_expr();
+                                            Some(match acc {
+                                                None => c,
+                                                Some(prev) => prev.and(c),
+                                            })
+                                        },
+                                    );
+                                    if let Some(cond) = cond {
+                                        joined = joined.filter(cond).map_err(to_py_err)?;
                                     }
                                 }
                                 _ => {}
@@ -9146,6 +9193,35 @@ fn current_timestamp() -> PyColumn {
 }
 
 #[pyfunction]
+fn monotonically_increasing_id() -> PyColumn {
+    PyColumn {
+        inner: functions::monotonically_increasing_id(),
+    }
+}
+
+#[pyfunction]
+fn spark_partition_id() -> PyColumn {
+    PyColumn {
+        inner: functions::spark_partition_id(),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (col, percentage, accuracy=None))]
+fn percentile_approx(col: &PyColumn, percentage: f64, accuracy: Option<i32>) -> PyColumn {
+    PyColumn {
+        inner: functions::percentile_approx(&col.inner, percentage, accuracy),
+    }
+}
+
+#[pyfunction]
+fn schema_of_json(col: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::schema_of_json(&col.inner),
+    }
+}
+
+#[pyfunction]
 fn input_file_name() -> PyColumn {
     PyColumn {
         inner: functions::input_file_name(),
@@ -10310,6 +10386,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_timestamp, m)?)?;
+    m.add_function(wrap_pyfunction!(monotonically_increasing_id, m)?)?;
+    m.add_function(wrap_pyfunction!(spark_partition_id, m)?)?;
+    m.add_function(wrap_pyfunction!(percentile_approx, m)?)?;
+    m.add_function(wrap_pyfunction!(schema_of_json, m)?)?;
     m.add_function(wrap_pyfunction!(input_file_name, m)?)?;
     m.add_function(wrap_pyfunction!(datediff, m)?)?;
     m.add_function(wrap_pyfunction!(unix_timestamp, m)?)?;

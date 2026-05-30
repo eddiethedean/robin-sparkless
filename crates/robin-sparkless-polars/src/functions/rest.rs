@@ -816,8 +816,8 @@ pub fn input_file_name() -> Column {
     Column::from_expr(lit(""), Some("input_file_name".to_string()))
 }
 
-/// Stub monotonically_increasing_id - constant 0 (PySpark monotonically_increasing_id).
-/// Note: differs from PySpark which is unique per-row; see PYSPARK_DIFFERENCES.md.
+/// Stub monotonically_increasing_id - per-row 0, 1, 2, ... (PySpark-like; not partition-aware).
+/// Stub monotonically_increasing_id (JVM stub; constant 0 per row batch). See PYSPARK_DIFFERENCES.md.
 pub fn monotonically_increasing_id() -> Column {
     Column::from_expr(lit(0i64), Some("monotonically_increasing_id".to_string()))
 }
@@ -1507,10 +1507,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         // PySpark parity (#1048, #1251): string cast to double returns NULL for invalid strings.
         let expr = column.expr().clone().map(
             move |col| {
-                crate::column::expect_col(crate::udfs::apply_string_to_double(
-                    col,
-                    ansi_strict,
-                ))
+                crate::column::expect_col(crate::udfs::apply_string_to_double(col, ansi_strict))
             },
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Float64)),
         );

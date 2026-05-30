@@ -68,6 +68,10 @@ _mod = __import__(
         "current_date",
         "current_timestamp",
         "input_file_name",
+        "monotonically_increasing_id",
+        "spark_partition_id",
+        "percentile_approx",
+        "schema_of_json",
         "datediff",
         "unix_timestamp",
         "from_unixtime",
@@ -266,6 +270,10 @@ to_date = _mod.to_date
 current_date = _mod.current_date
 current_timestamp = _mod.current_timestamp
 input_file_name = _mod.input_file_name
+monotonically_increasing_id = _mod.monotonically_increasing_id
+spark_partition_id = _mod.spark_partition_id
+percentile_approx = _mod.percentile_approx
+schema_of_json = _mod.schema_of_json
 datediff = _mod.datediff
 unix_timestamp = _mod.unix_timestamp
 from_unixtime = _mod.from_unixtime

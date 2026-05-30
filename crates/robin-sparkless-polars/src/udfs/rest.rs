@@ -3965,7 +3965,9 @@ fn ansi_checked_i64_op(
     f: impl Fn(i64, i64) -> Option<i64>,
 ) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
-        return Err(PolarsError::ComputeError(format!("{op_name} needs two columns").into()));
+        return Err(PolarsError::ComputeError(
+            format!("{op_name} needs two columns").into(),
+        ));
     }
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
@@ -3983,7 +3985,8 @@ fn ansi_checked_i64_op(
             _ => values.push(None),
         }
     }
-    let out = Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series();
+    let out =
+        Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series();
     Ok(Some(Column::new(name, out)))
 }
 

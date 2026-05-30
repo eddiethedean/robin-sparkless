@@ -214,7 +214,7 @@ jobs:
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
           rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
           rustup component add rustfmt clippy --toolchain 1.93.1
-          cd python && ../.venv/bin/maturin develop
+          cd python && ../.venv/bin/maturin develop --release
           ../.venv/bin/python -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('ci').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
       - name: Install pytest and run tests (fast subset)
         run: |
@@ -222,6 +222,72 @@ jobs:
           .venv/bin/python -m pytest tests -m "not delta and not integration" -n 4 -v --tb=short
         timeout-minutes: 15
         # Job fails if pytest exits non-zero (no continue-on-error)
+
+  python-delta:
+    name: Python delta tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Build and run delta-marked pytest (serial)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip maturin pytest pytest-timeout
+          cd python && ../.venv/bin/maturin develop --release
+          cd ..
+          SPARKLESS_ENABLE_DELTA=1 .venv/bin/python -m pytest tests -m delta -n 0 -v --tb=short
+
+  pyspark-smoke:
+    name: PySpark smoke (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Build sparkless
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip maturin pytest
+          cd python && ../.venv/bin/maturin develop --release
+      - name: Install PySpark and run smoke tests
+        run: |
+          .venv/bin/pip install pyspark pytest-timeout
+          SPARKLESS_TEST_MODE=pyspark .venv/bin/python -m pytest \
+            tests/unit/test_sparkless_testing.py \
+            tests/dataframe/test_issue_1389_pow_orderby_non_selected_column.py \
+            tests/unit/test_create_dataframe_array_schema_inference.py \
+            -v --tb=short
 
   python-full:
     name: Python full suite (manual)

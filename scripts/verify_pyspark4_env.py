@@ -13,14 +13,23 @@ def main() -> int:
 
     # Env hygiene (matches tests/conftest.py + session.py)
     if "SPARK_HOME" in os.environ:
-        errors.append(f"SPARK_HOME is set ({os.environ['SPARK_HOME']}); unset for bundled PySpark jars")
+        errors.append(
+            f"SPARK_HOME is set ({os.environ['SPARK_HOME']}); unset for bundled PySpark jars"
+        )
     java_home = os.environ.get("JAVA_HOME", "")
     if not java_home:
         errors.append("JAVA_HOME is not set (need Java 17 for PySpark 4)")
     elif not os.path.isdir(java_home):
         errors.append(f"JAVA_HOME does not exist: {java_home}")
 
-    for pkg in ("pyspark", "delta-spark", "pytest", "pytest_xdist", "pandas", "pyarrow"):
+    for pkg in (
+        "pyspark",
+        "delta-spark",
+        "pytest",
+        "pytest_xdist",
+        "pandas",
+        "pyarrow",
+    ):
         try:
             name = pkg.replace("_", "-")
             ver = importlib.metadata.version(name)
@@ -30,7 +39,6 @@ def main() -> int:
 
     try:
         import sparkless  # noqa: F401
-        from sparkless.sql import SparkSession
 
         print("OK  sparkless import")
     except Exception as e:

@@ -43,6 +43,10 @@ from sparkless import (
     current_date as _current_date,
     current_timestamp as _current_timestamp,
     input_file_name as _input_file_name,
+    monotonically_increasing_id as _monotonically_increasing_id,
+    spark_partition_id as _spark_partition_id,
+    percentile_approx as _percentile_approx,
+    schema_of_json as _schema_of_json,
     datediff as _datediff,
     unix_timestamp as _unix_timestamp,
     from_unixtime as _from_unixtime,
@@ -320,10 +324,6 @@ def isnan(c: ColumnOrName) -> _ColumnType:
 
 
 # isnull defined above (before __all__)
-monotonically_increasing_id = _ni("monotonically_increasing_id")
-input_file_name = _ni("input_file_name")
-spark_partition_id = _ni("spark_partition_id")
-broadcast = _ni("broadcast")
 
 
 def hash(*cols: ColumnOrName) -> _ColumnType:
@@ -601,7 +601,12 @@ def corr(col1, col2):
     return _col_result(_native_fn("corr")(_as_col(col1), _as_col(col2)))
 
 
-percentile_approx = _ni("percentile_approx")
+def broadcast(df):
+    """Broadcast hint for DataFrame joins (PySpark parity). No-op on DataFrame."""
+    return df
+
+
+percentile_approx = _percentile_approx
 
 
 # --- String functions (native-backed) ---
@@ -695,7 +700,7 @@ def to_json(col_or_name):
     return _col_result(_native.to_json(_as_col(col_or_name)))
 
 
-schema_of_json = _ni("schema_of_json")
+schema_of_json = _schema_of_json
 
 
 def decode(col_or_name, charset="UTF-8"):
@@ -1237,6 +1242,14 @@ def current_timestamp():
 
 def input_file_name():
     return _input_file_name()
+
+
+def monotonically_increasing_id():
+    return _monotonically_increasing_id()
+
+
+def spark_partition_id():
+    return _spark_partition_id()
 
 
 def unix_timestamp(column=None, fmt=None):

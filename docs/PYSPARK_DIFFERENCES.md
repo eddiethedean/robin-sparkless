@@ -37,6 +37,7 @@ Individual keys can override profile defaults. See [PYSPARK_COMPAT_PROFILES.md](
 ## Ordering (orderBy)
 
 - **Default null ordering (#838)**: Robin follows Spark SQL default: ASC nulls first, DESC nulls last. Tests that expect nulls last for ascending sort should use `asc_nulls_last()` / `order_by_exprs([asc_nulls_last(&col("x"))])` or, when using the plan interpreter, pass `"nulls_last": [true]` in the orderBy payload.
+- **Sort column not in select (#1389)**: After `select(expr).alias("sq")`, `orderBy("x")` resolves `"x"` against the pre-select frame (PySpark parity); unresolved columns raise `AnalysisException`-style errors instead of silently no-oping.
 
 ## Window functions
 
@@ -57,7 +58,7 @@ Individual keys can override profile defaults. See [PYSPARK_COMPAT_PROFILES.md](
 
 ## Join
 
-- **Join on expression (#704, #698)**: Join with an expression (e.g. `df1.a == df2.b`) is not supported; use column names in the join key list. Conditions involving `array_contains` or other functions in the join key are not supported and may report "Column 'array_contains(...)' not found".
+- **Join on expression (#704, #698)**: The **plan interpreter** does not support expression joins; use column names in the join key list. The **Python binding** may fall back to `crossJoin` + `filter` for some non-equi or expression-shaped joins (including some `array_contains` patterns); unsupported shapes should error rather than silently wrong results. Prefer explicit equi-join keys when possible.
 
 ## SQL (optional `sql` feature)
 

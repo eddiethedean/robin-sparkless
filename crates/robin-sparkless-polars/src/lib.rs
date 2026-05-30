@@ -16,11 +16,11 @@ pub(crate) mod schema_conv;
 pub mod session;
 pub mod traits;
 
+pub mod ansi;
 pub mod type_coercion;
 pub mod udf_context;
 pub mod udf_registry;
 pub mod udfs;
-pub mod ansi;
 
 #[cfg(feature = "delta")]
 pub mod delta;

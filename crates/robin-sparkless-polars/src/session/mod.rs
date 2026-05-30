@@ -14,7 +14,7 @@ use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
-use robin_sparkless_core::{SparklessConfig, SessionRuntimeConfig, PysparkCompat, date_utils};
+use robin_sparkless_core::{PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils};
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -283,50 +283,146 @@ fn json_value_to_array(v: &JsonValue) -> Option<Vec<JsonValue>> {
     }
 }
 
-/// Infer list element type from first non-null array in the column (for schema "list" / "array").
+/// Merge inferred Spark type name strings (PySpark createDataFrame parity).
+fn merge_spark_type_names(a: &str, b: &str) -> String {
+    let a = a.trim().to_ascii_lowercase();
+    let b = b.trim().to_ascii_lowercase();
+    if a == b {
+        return a;
+    }
+    if let (Some(ea), Some(eb)) = (
+        parse_array_element_type_name(&a),
+        parse_array_element_type_name(&b),
+    ) {
+        if ea.is_empty() && !eb.is_empty() {
+            return format_array_type_name(&eb);
+        }
+        if eb.is_empty() && !ea.is_empty() {
+            return format_array_type_name(&ea);
+        }
+        if ea.is_empty() && eb.is_empty() {
+            return "array".to_string();
+        }
+        return format_array_type_name(&merge_spark_type_names(&ea, &eb));
+    }
+    if let Some(eb) = parse_array_element_type_name(&b) {
+        if a == "string" {
+            return format_array_type_name(&eb);
+        }
+    }
+    if let Some(ea) = parse_array_element_type_name(&a) {
+        if b == "string" {
+            return format_array_type_name(&ea);
+        }
+    }
+    if a == "string" || b == "string" {
+        return "string".to_string();
+    }
+    if (a == "long" || a == "bigint" || a == "int") && (b == "double" || b == "float") {
+        return "double".to_string();
+    }
+    if (b == "long" || b == "bigint" || b == "int") && (a == "double" || a == "float") {
+        return "double".to_string();
+    }
+    if (a == "long" || a == "bigint" || a == "int") && (b == "long" || b == "bigint" || b == "int")
+    {
+        return "long".to_string();
+    }
+    "string".to_string()
+}
+
+fn parse_array_element_type_name(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower == "array" || lower == "list" {
+        return Some(String::new());
+    }
+    if lower.starts_with("array<") && lower.ends_with('>') {
+        return Some(trimmed[6..trimmed.len() - 1].trim().to_string());
+    }
+    None
+}
+
+fn format_array_type_name(elem: &str) -> String {
+    if elem.trim().is_empty() {
+        "array".to_string()
+    } else {
+        format!("array<{}>", elem.trim())
+    }
+}
+
+fn merge_inferred_types<I>(types: I) -> String
+where
+    I: IntoIterator<Item = String>,
+{
+    types.into_iter().fold(String::new(), |acc, t| {
+        if acc.is_empty() {
+            t
+        } else if t.is_empty() {
+            acc
+        } else {
+            merge_spark_type_names(&acc, &t)
+        }
+    })
+}
+
+fn infer_array_type_from_json_array(arr: &[JsonValue]) -> String {
+    if arr.is_empty() {
+        return "array".to_string();
+    }
+    let elem = merge_inferred_types(
+        arr.iter()
+            .filter_map(SparkSession::infer_dtype_from_json_value),
+    );
+    format_array_type_name(&elem)
+}
+
+fn json_element_type_to_polars(elem_type: &str) -> DataType {
+    match elem_type.trim().to_ascii_lowercase().as_str() {
+        "boolean" | "bool" => DataType::Boolean,
+        "bigint" | "long" | "int" => DataType::Int64,
+        "double" | "float" => DataType::Float64,
+        _ => DataType::String,
+    }
+}
+
+/// Infer list element type by merging across all non-empty arrays in the column.
 /// #976: When first element is itself an array (nested array), infer inner type and return ("array<inner>", List(inner_dtype)).
 fn infer_list_element_type(rows: &[Vec<JsonValue>], col_idx: usize) -> Option<(String, DataType)> {
+    let mut merged_elem_type = String::new();
     for row in rows {
         let v = row.get(col_idx)?;
         let arr = json_value_to_array(v)?;
-        let first = arr.first()?;
-        return Some(match first {
-            JsonValue::String(_) => ("string".to_string(), DataType::String),
-            JsonValue::Number(n) => {
-                if n.as_i64().is_some() {
-                    ("bigint".to_string(), DataType::Int64)
-                } else {
-                    ("double".to_string(), DataType::Float64)
-                }
+        if arr.is_empty() {
+            if merged_elem_type.is_empty() {
+                merged_elem_type = "array".to_string();
             }
-            JsonValue::Bool(_) => ("boolean".to_string(), DataType::Boolean),
-            JsonValue::Null => continue,
-            _ if json_value_to_array(first).is_some() => {
-                // Nested array: infer inner element type from first inner element.
-                let inner_arr = json_value_to_array(first).unwrap();
-                let inner_first = match inner_arr.first() {
-                    Some(f) => f,
-                    None => continue,
-                };
-                let (inner_type, inner_dtype) = match inner_first {
-                    JsonValue::Number(n) => {
-                        if n.as_i64().is_some() {
-                            ("bigint".to_string(), DataType::Int64)
-                        } else {
-                            ("double".to_string(), DataType::Float64)
-                        }
-                    }
-                    JsonValue::String(_) => ("string".to_string(), DataType::String),
-                    JsonValue::Bool(_) => ("boolean".to_string(), DataType::Boolean),
-                    _ => ("string".to_string(), DataType::String),
-                };
-                (
-                    format!("array<{inner_type}>"),
-                    DataType::List(Box::new(inner_dtype)),
-                )
+            continue;
+        }
+        let row_type = infer_array_type_from_json_array(&arr);
+        merged_elem_type = if merged_elem_type.is_empty() {
+            row_type
+        } else {
+            merge_spark_type_names(&merged_elem_type, &row_type)
+        };
+    }
+    if merged_elem_type.is_empty() {
+        return None;
+    }
+    if merged_elem_type == "array" {
+        return Some(("bigint".to_string(), DataType::Int64));
+    }
+    if let Some(elem) = parse_array_element_type_name(&merged_elem_type) {
+        if elem.to_lowercase().starts_with("array<") {
+            if let Some(inner) = json_type_str_to_polars(&elem) {
+                return Some((format!("array<{elem}>"), DataType::List(Box::new(inner))));
             }
-            _ => ("string".to_string(), DataType::String),
-        });
+        }
+        // First tuple element is the scalar element type for json_value_to_series_single, not array<...>.
+        return Some((
+            elem.clone(),
+            DataType::List(Box::new(json_element_type_to_polars(&elem))),
+        ));
     }
     None
 }
@@ -1823,7 +1919,7 @@ impl SparkSession {
             JsonValue::Bool(_) => Some("boolean".to_string()),
             JsonValue::Number(n) => {
                 if n.is_i64() {
-                    Some("bigint".to_string())
+                    Some("long".to_string())
                 } else {
                     Some("double".to_string())
                 }
@@ -1835,7 +1931,7 @@ impl SparkSession {
                 // date/timestamp from date-like strings; user can pass explicit schema if needed.
                 Some("string".to_string())
             }
-            JsonValue::Array(_) => Some("array".to_string()),
+            JsonValue::Array(arr) => Some(infer_array_type_from_json_array(arr)),
             JsonValue::Object(_) => None, // struct type is inferred in infer_schema_from_json_rows from object keys
         }
     }
@@ -2000,28 +2096,41 @@ impl SparkSession {
             .map(|n| (n.clone(), "string".to_string()))
             .collect();
         for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {
-            let mut first_non_string: Option<String> = None;
-            let mut has_string = false;
+            if let Some(ty) = Self::infer_struct_dtype_from_json_rows(rows, col_idx) {
+                for row in rows {
+                    if row
+                        .get(col_idx)
+                        .is_some_and(|v| matches!(v, JsonValue::Object(_)))
+                    {
+                        *dtype_str = ty.clone();
+                        break;
+                    }
+                }
+                continue;
+            }
+            let mut has_plain_string = false;
+            let mut merged = String::new();
             for row in rows {
                 let v = row.get(col_idx).unwrap_or(&JsonValue::Null);
-                if let JsonValue::Object(_) = v {
-                    if let Some(ty) = Self::infer_struct_dtype_from_json_rows(rows, col_idx) {
-                        *dtype_str = ty;
-                    }
+                if matches!(v, JsonValue::Null) {
+                    continue;
+                }
+                if let JsonValue::String(_) = v {
+                    has_plain_string = true;
                     break;
                 }
                 if let Some(dtype) = Self::infer_dtype_from_json_value(v) {
-                    if dtype == "string" {
-                        has_string = true;
-                        break;
-                    }
-                    first_non_string.get_or_insert(dtype);
+                    merged = if merged.is_empty() {
+                        dtype
+                    } else {
+                        merge_spark_type_names(&merged, &dtype)
+                    };
                 }
             }
-            if has_string {
+            if has_plain_string {
                 *dtype_str = "string".to_string();
-            } else if let Some(d) = first_non_string {
-                *dtype_str = d;
+            } else if !merged.is_empty() {
+                *dtype_str = merged;
             }
         }
         schema

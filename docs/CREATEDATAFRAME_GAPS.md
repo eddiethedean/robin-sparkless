@@ -8,7 +8,7 @@ Comparison of **robin-sparkless** `createDataFrame(data, schema=None, sampling_r
 
 | Feature | PySpark | Robin-sparkless |
 |--------|---------|------------------|
-| `data` | RDD, list, pandas.DataFrame, numpy.ndarray, pyarrow.Table | ✅ list (dicts or list/tuple rows) only |
+| `data` | RDD, list, pandas.DataFrame, numpy.ndarray, pyarrow.Table | ✅ list (dicts or list/tuple rows), **pandas**, **numpy**, **pyarrow** (via `normalize_create_dataframe_input` in `python/src/lib.rs`); ✅ RDD via collect-to-list |
 | `schema=None` | ✅ | ✅ |
 | `samplingRatio=None` | ✅ (used for RDD inference) | ✅ accepted, ignored for list data |
 | `verifySchema=True` | ✅ (validates each row) | ✅ accepted; validation is best-effort when building |
@@ -25,12 +25,12 @@ No missing parameters; optional args are present.
 | **List of list/tuple** | ✅ | ✅ |
 | **List of Row** | ✅ (schema inferred from Row) | ⚠️ May work if Row is sequence-like (extracts as list); not explicitly supported. Dict-like Row (e.g. `row["name"]`) is not tried. |
 | **List of namedtuple** | ✅ | ⚠️ May work if extracts as list/tuple. |
-| **RDD** | ✅ | ❌ N/A (no RDD in robin-sparkless). |
-| **pandas.DataFrame** | ✅ | ❌ Not accepted. User must convert: `df.to_dict("records")` or `list(df.itertuples(index=False))` then pass to createDataFrame. |
-| **numpy.ndarray** | ✅ | ❌ Not accepted. Convert to list of rows or list of dicts first. |
-| **pyarrow.Table** | ✅ (since 4.0) | ❌ Not accepted. |
+| **RDD** | ✅ | ✅ (collects to list of dicts; no distributed RDD API) |
+| **pandas.DataFrame** | ✅ | ✅ (`to_dict("records")` / column-order path in binding) |
+| **numpy.ndarray** | ✅ | ✅ (`tolist()` with 1D/2D handling) |
+| **pyarrow.Table** | ✅ (since 4.0) | ✅ (`to_pylist()`) |
 
-**Summary:** The main functional gaps are **pandas.DataFrame**, **numpy.ndarray**, and **pyarrow.Table**. **Row** / **namedtuple** may work when they extract as sequences; explicit support would improve parity.
+**Summary:** Remaining gaps are **distributed RDD**, explicit **Row** / **namedtuple** dict-like access, and **single-column schema as a bare type** ([#419](https://github.com/eddiethedean/robin-sparkless/issues/419)).
 
 ---
 
