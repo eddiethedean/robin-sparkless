@@ -253,7 +253,7 @@ jobs:
           .venv/bin/pip install --upgrade pip maturin pytest pytest-timeout
           cd python && ../.venv/bin/maturin develop --release
           cd ..
-          SPARKLESS_ENABLE_DELTA=1 .venv/bin/python -m pytest tests -m delta -n 0 -v --tb=short
+          SPARKLESS_ENABLE_DELTA=1 .venv/bin/python -m pytest tests -m delta -v --tb=short
 
   pyspark-smoke:
     name: PySpark smoke (manual)
