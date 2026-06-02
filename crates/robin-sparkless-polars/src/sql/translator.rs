@@ -1322,6 +1322,11 @@ fn sql_function_to_expr(
         .and_then(|p| p.as_ident())
         .map(|i| i.value.as_str())
         .unwrap_or("");
+
+    if func_name.eq_ignore_ascii_case("TO_DATE") {
+        return sql_to_date_from_function(func, session, df);
+    }
+
     let args = sql_function_args_to_columns(func, session, df)?;
 
     let case_sensitive = session.is_case_sensitive();
@@ -1421,9 +1426,53 @@ fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
             ..
         }) => Ok(s.clone()),
         _ => Err(PolarsError::InvalidOperation(
-            format!("SQL: LIKE pattern must be a string literal, got {:?}", expr).into(),
+            format!("SQL: expected a string literal, got {:?}", expr).into(),
         )),
     }
+}
+
+fn sql_function_unnamed_expr<'a>(
+    args: &'a [FunctionArg],
+    index: usize,
+) -> Result<&'a SqlExpr, PolarsError> {
+    let arg = args.get(index).ok_or_else(|| {
+        PolarsError::InvalidOperation(
+            format!("SQL: function expected argument at index {index}").into(),
+        )
+    })?;
+    match arg {
+        FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => Ok(expr),
+        _ => Err(PolarsError::InvalidOperation(
+            "SQL: only positional function arguments supported.".into(),
+        )),
+    }
+}
+
+/// PySpark `to_date(column[, format])` in SQL (issue #1562).
+fn sql_to_date_from_function(
+    func: &Function,
+    session: &SparkSession,
+    df: Option<&DataFrame>,
+) -> Result<Expr, PolarsError> {
+    let args = function_args_slice(&func.args);
+    if args.is_empty() || args.len() > 2 {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: to_date(column[, format]) expects 1 or 2 arguments.".into(),
+        ));
+    }
+    let col_expr = sql_function_unnamed_expr(args, 0)?;
+    let e = sql_expr_to_polars(col_expr, session, df, None, None)?;
+    let col = Column::from_expr(e, None);
+    let format = if args.len() == 2 {
+        Some(sql_expr_to_string_literal(sql_function_unnamed_expr(
+            args, 1,
+        )?)?)
+    } else {
+        None
+    };
+    let result = functions::to_date(&col, format.as_deref())
+        .map_err(|s| PolarsError::InvalidOperation(s.into()))?;
+    Ok(result.expr().clone())
 }
 
 /// Projection item: either a plain Expr (built-in, Rust UDF, identifier) or Python UDF Column.
@@ -1652,9 +1701,15 @@ fn projection_function_to_item(
         .and_then(|p| p.as_ident())
         .map(|i| i.value.as_str())
         .unwrap_or("");
-    let args = sql_function_args_to_columns(func, session, df)?;
     let case_sensitive = session.is_case_sensitive();
     let alias = sql_function_alias(func);
+
+    if func_name.eq_ignore_ascii_case("TO_DATE") {
+        let e = sql_to_date_from_function(func, session, df)?;
+        return Ok(ProjItem::Expr(e.alias(&alias), alias));
+    }
+
+    let args = sql_function_args_to_columns(func, session, df)?;
 
     // Built-ins
     if let Some(col) = args.first() {

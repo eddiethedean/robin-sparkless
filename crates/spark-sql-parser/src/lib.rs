@@ -8,7 +8,8 @@
 //!
 //! Any statement that [sqlparser] parses as a `Query` (e.g. `SELECT`, `WITH ... SELECT`)
 //! is accepted. Clause support is determined by [sqlparser] and the dialect in use
-//! (this crate uses [GenericDialect](sqlparser::dialect::GenericDialect)).
+//! (this crate uses [MySqlDialect](sqlparser::dialect::MySqlDialect) so double-quoted
+//! strings are string literals, matching PySpark/Spark SQL — see issue #1541, #1562).
 //!
 //! ## Known gaps
 //!
@@ -63,7 +64,9 @@ pub enum SparkStatement {
 }
 
 fn parse_one_statement_raw(query: &str) -> Result<Statement, ParseError> {
-    parse_one_statement_with_dialect(query, &GenericDialect {})
+    // PySpark/Spark SQL treat double-quoted tokens as string literals in SQL (issues #1541, #1562).
+    // GenericDialect treats `"` as delimited identifiers; MySQL dialect treats them as literals.
+    parse_one_statement_with_dialect(query, &MySqlDialect {})
 }
 
 fn parse_one_statement_with_dialect(
@@ -489,7 +492,10 @@ pub fn parse_sql(query: &str) -> Result<Statement, ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlparser::ast::{ObjectType, Statement};
+    use sqlparser::ast::{
+        FunctionArg, FunctionArgExpr, FunctionArguments, ObjectType, Statement, Value,
+        ValueWithSpan,
+    };
 
     /// Assert that `sql` parses to the given statement variant.
     fn assert_parses_to<F>(sql: &str, check: F)
@@ -1226,6 +1232,45 @@ mod tests {
                 assert!(matches!(stmt.as_ref(), Statement::CreateTable(_)));
             }
             other => panic!("expected Sqlparser(CreateTable), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spark_parse_spark_sql_to_date_double_quoted_format_literal() {
+        // Issue #1562: PySpark treats double-quoted format as string literal in spark.sql().
+        let sql = r#"SELECT to_date(B, "yyyy/MM/dd HH:mm:ss") AS parsed_date FROM t"#;
+        let s = parse_spark_sql(sql).unwrap();
+        let stmt = match s {
+            SparkStatement::Sqlparser(stmt) => stmt,
+            other => panic!("expected Sqlparser, got {other:?}"),
+        };
+        let query = match stmt.as_ref() {
+            Statement::Query(q) => q,
+            other => panic!("expected Query, got {other:?}"),
+        };
+        let select = match query.body.as_ref() {
+            SetExpr::Select(s) => s,
+            other => panic!("expected Select, got {other:?}"),
+        };
+        let item = select.projection.first().expect("one select item");
+        let func = match item {
+            SelectItem::ExprWithAlias {
+                expr: SqlExpr::Function(f),
+                ..
+            } => f,
+            other => panic!("expected aliased function, got {other:?}"),
+        };
+        let args = match &func.args {
+            FunctionArguments::List(list) => &list.args,
+            other => panic!("expected arg list, got {other:?}"),
+        };
+        assert_eq!(args.len(), 2);
+        match &args[1] {
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(SqlExpr::Value(ValueWithSpan {
+                value: Value::DoubleQuotedString(fmt),
+                ..
+            }))) => assert_eq!(fmt, "yyyy/MM/dd HH:mm:ss"),
+            other => panic!("expected double-quoted format literal, got {other:?}"),
         }
     }
 }
