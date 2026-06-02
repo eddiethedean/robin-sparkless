@@ -2210,7 +2210,7 @@ fn python_data_and_schema(
         pandas_column_order.map(|s| s.to_vec()).or_else(|| {
             schema_res
                 .as_ref()
-                .and_then(|s| Some(s.iter().map(|(n, _)| n.clone()).collect()))
+                .map(|s| s.iter().map(|(n, _)| n.clone()).collect())
         });
     if column_order.is_none() && !list.is_empty() {
         use std::collections::BTreeSet;
