@@ -14,7 +14,7 @@ LongType = _imports.LongType
 @pytest.fixture
 def spark():
     imports = get_imports()
-    s = imports.SparkSession.builder.appName("array_schema_inference").get_or_create()
+    s = imports.SparkSession.builder.appName("array_schema_inference").getOrCreate()
     yield s
     s.stop()
 

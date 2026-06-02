@@ -2208,9 +2208,15 @@ fn python_data_and_schema(
     // - For "names only" schema or no schema, use union-of-keys alphabetical (PySpark dict+names parity, issue #164/#1179).
     let mut column_order: Option<Vec<String>> =
         pandas_column_order.map(|s| s.to_vec()).or_else(|| {
-            schema_res
-                .as_ref()
-                .map(|s| s.iter().map(|(n, _)| n.clone()).collect())
+            if schema_names_only {
+                // Names-only schema keeps alphabetical dict key order for row values while
+                // schema field names follow the user list (PySpark parity, issue #164/#1179).
+                None
+            } else {
+                schema_res
+                    .as_ref()
+                    .map(|s| s.iter().map(|(n, _)| n.clone()).collect())
+            }
         });
     if column_order.is_none() && !list.is_empty() {
         use std::collections::BTreeSet;
