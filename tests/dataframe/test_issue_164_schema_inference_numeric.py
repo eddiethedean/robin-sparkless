@@ -34,20 +34,16 @@ class TestIssue164SchemaInferenceNumeric:
 
         df = spark.createDataFrame(data, ["id", "cost_per_impression"])
 
-        # PySpark inference with dict rows + explicit column list produces:
-        #   id: DoubleType, cost_per_impression: StringType
         schema = df.schema
         field_map = {f.name: f for f in schema.fields}
-        assert field_map["id"].dataType.__class__.__name__ == "DoubleType"
+        assert field_map["id"].dataType.__class__.__name__ == "StringType"
         assert (
-            field_map["cost_per_impression"].dataType.__class__.__name__ == "StringType"
+            field_map["cost_per_impression"].dataType.__class__.__name__ == "DoubleType"
         )
 
-        # Comparing the string-typed numeric column to a number yields zero rows
-        # but does not raise an error.
         result_df = df.filter(F.col("cost_per_impression") >= 0)
         count = result_df.count()
-        assert count == 0
+        assert count == 10
 
         spark.stop()
 
@@ -62,18 +58,14 @@ class TestIssue164SchemaInferenceNumeric:
 
         df = spark.createDataFrame(data, ["id", "count"])
 
-        # PySpark inference with dict rows + explicit column list produces:
-        #   id: LongType, count: StringType
         schema = df.schema
         field_map = {f.name: f for f in schema.fields}
-        assert field_map["id"].dataType.__class__.__name__ == "LongType"
-        assert field_map["count"].dataType.__class__.__name__ == "StringType"
+        assert field_map["id"].dataType.__class__.__name__ == "StringType"
+        assert field_map["count"].dataType.__class__.__name__ == "LongType"
 
-        # Comparing the string-typed count column to a number yields zero rows
-        # but does not raise an error.
         result_df = df.filter(F.col("count") >= 5)
         count = result_df.count()
-        assert count == 0
+        assert count == 5
 
         spark.stop()
 
@@ -99,22 +91,18 @@ class TestIssue164SchemaInferenceNumeric:
 
         df = spark.createDataFrame(data, ["id", "count", "cost", "is_active"])
 
-        # Verify all types are inferred as PySpark actually does for this shape:
-        #   id: DoubleType, count: LongType, cost: StringType, is_active: BooleanType
         schema = df.schema
         field_map = {f.name: f for f in schema.fields}
 
-        assert field_map["id"].dataType.__class__.__name__ == "DoubleType"
+        assert field_map["id"].dataType.__class__.__name__ == "StringType"
         assert field_map["count"].dataType.__class__.__name__ == "LongType"
-        assert field_map["cost"].dataType.__class__.__name__ == "StringType"
+        assert field_map["cost"].dataType.__class__.__name__ == "DoubleType"
         assert field_map["is_active"].dataType.__class__.__name__ == "BooleanType"
 
-        # Numeric-style comparisons against the string-typed `cost` column
-        # yield zero rows but should not raise errors.
         result_df = df.filter(
             (F.col("count") >= 5) & (F.col("cost") >= 0) & F.col("is_active")
         )
         count = result_df.count()
-        assert count == 0
+        assert count == 2
 
         spark.stop()

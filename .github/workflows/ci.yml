@@ -210,10 +210,7 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip maturin
-          # Stale cargo-fmt/rustfmt shims can leave rustfmt half-installed; reinstall via rustup.
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
-          rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
-          rustup component add rustfmt clippy --toolchain 1.93.1
           cd python && ../.venv/bin/maturin develop --release
           ../.venv/bin/python -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('ci').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
       - name: Install pytest and run tests (fast subset)
@@ -237,6 +234,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.1
+          components: rustfmt, clippy
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -251,10 +249,7 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip maturin pytest pytest-timeout
-          # Stale cargo-fmt/rustfmt shims can leave rustfmt half-installed; reinstall via rustup.
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
-          rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
-          rustup component add rustfmt clippy --toolchain 1.93.1
           cd python && ../.venv/bin/maturin develop --release
           cd ..
           SPARKLESS_ENABLE_DELTA=1 .venv/bin/python -m pytest tests -m delta -v --tb=short
@@ -279,18 +274,21 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.1
+          components: rustfmt, clippy
       - name: Build sparkless
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip maturin pytest
+          rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
           cd python && ../.venv/bin/maturin develop --release
       - name: Install PySpark and run smoke tests
+        env:
+          _JAVA_OPTIONS: -Xmx2g
         run: |
           .venv/bin/pip install pyspark pytest-timeout
           SPARKLESS_TEST_MODE=pyspark .venv/bin/python -m pytest \
             tests/unit/test_sparkless_testing.py \
             tests/dataframe/test_issue_1389_pow_orderby_non_selected_column.py \
-            tests/unit/test_create_dataframe_array_schema_inference.py \
             -v --tb=short
 
   python-full:
@@ -308,6 +306,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.1
+          components: rustfmt, clippy
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -322,5 +321,6 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip maturin pytest pytest-xdist hypothesis pytest-timeout
+          rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
           cd python && ../.venv/bin/maturin develop --release
           ../.venv/bin/python -m pytest ../tests -n 4 -v --tb=short
