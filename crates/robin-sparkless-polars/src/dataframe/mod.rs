@@ -1731,7 +1731,10 @@ impl DataFrame {
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         let resolved: Vec<Expr> = aggregations
             .into_iter()
-            .map(|e| self.resolve_expr_column_names(e))
+            .map(|e| {
+                let resolved = self.resolve_expr_column_names(e)?;
+                self.coerce_string_numeric_comparisons(resolved)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let disambiguated = disambiguate_agg_output_names(resolved);
         let pl_df = self.lazy_frame().select(disambiguated).collect()?;

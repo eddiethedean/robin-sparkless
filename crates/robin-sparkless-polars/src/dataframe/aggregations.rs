@@ -805,9 +805,13 @@ impl GroupedData {
     /// Column names in expressions are resolved case-insensitively when spark.sql.caseSensitive is false.
     pub fn agg(&self, aggregations: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         let schema = self.lf.clone().collect_schema()?;
+        let df = super::DataFrame::from_lazy_with_options(self.lf.clone(), self.case_sensitive);
         let resolved: Vec<Expr> = aggregations
             .into_iter()
-            .map(|e| self.resolve_expr_column_names_with_schema(e, &schema))
+            .map(|e| {
+                let resolved = self.resolve_expr_column_names_with_schema(e, &schema)?;
+                df.coerce_string_numeric_comparisons(resolved)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let disambiguated = disambiguate_agg_output_names(resolved);
         use polars::prelude::*;
