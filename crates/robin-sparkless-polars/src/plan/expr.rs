@@ -1420,7 +1420,9 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let exprs: Result<Vec<Expr>, _> = args.iter().map(expr_from_value).collect();
             let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
             let refs: Vec<&Column> = cols.iter().collect();
-            Ok(concat(&refs).into_expr())
+            Ok(concat(&refs)
+                .map_err(|e| PlanExprError(e.to_string()))?
+                .into_expr())
         }
         "concat_ws" => {
             require_args_min(name, args, 2)?;
@@ -1428,7 +1430,9 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let exprs: Result<Vec<Expr>, _> = args.iter().skip(1).map(expr_from_value).collect();
             let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
             let refs: Vec<&Column> = cols.iter().collect();
-            Ok(concat_ws(&sep, &refs).into_expr())
+            Ok(concat_ws(&sep, &refs)
+                .map_err(|e| PlanExprError(e.to_string()))?
+                .into_expr())
         }
         "initcap" => {
             require_args(name, args, 1)?;
@@ -1701,7 +1705,9 @@ fn expr_from_fn(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> {
             let exprs: Result<Vec<Expr>, _> = args.iter().skip(1).map(expr_from_value).collect();
             let cols: Vec<Column> = exprs?.into_iter().map(expr_to_column).collect();
             let refs: Vec<&Column> = cols.iter().collect();
-            Ok(format_string(&format_str, &refs).into_expr())
+            Ok(format_string(&format_str, &refs)
+                .map_err(|e| PlanExprError(e.to_string()))?
+                .into_expr())
         }
         "lcase" => {
             require_args(name, args, 1)?;
@@ -2112,7 +2118,9 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
                     "width_bucket: num_bucket must be positive".into(),
                 ));
             }
-            Ok(width_bucket(&val, min_val, max_val, num_bucket).into_expr())
+            Ok(width_bucket(&val, min_val, max_val, num_bucket)
+                .map_err(|e| PlanExprError(e.to_string()))?
+                .into_expr())
         }
         "equal_null" => {
             require_args(name, args, 2)?;
@@ -2750,7 +2758,9 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
                 .map(|i| arg_expr(args, i).map(expr_to_column))
                 .collect::<Result<Vec<_>, _>>()?;
             let refs: Vec<&crate::Column> = cols.iter().collect();
-            Ok(crate::functions::struct_(&refs).into_expr())
+            Ok(crate::functions::struct_(&refs)
+                .map_err(|e| PlanExprError(e.to_string()))?
+                .into_expr())
         }
         "named_struct" => {
             // named_struct("name1", col1, "name2", col2, ...) (issue #527)
@@ -2768,7 +2778,9 @@ fn expr_from_fn_rest(name: &str, args: &[Value]) -> Result<Expr, PlanExprError> 
             }
             let refs: Vec<(&str, &crate::Column)> =
                 names.iter().map(|s| s.as_str()).zip(cols.iter()).collect();
-            Ok(crate::functions::named_struct(&refs).into_expr())
+            Ok(crate::functions::named_struct(&refs)
+                .map_err(|e| PlanExprError(e.to_string()))?
+                .into_expr())
         }
         "with_field" | "withField" => {
             // withField(struct_col, field_name, value) - PySpark struct field add/replace (issue #541)

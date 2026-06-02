@@ -2,17 +2,13 @@
 
 This document tracks the progress of migrating all tests to the unified PySpark parity testing structure.
 
-**Last Updated**: 2025-01-15
+**Last Updated**: 2026-06-02
 
 ## Overview
 
-All tests are being migrated from:
-- `tests/unit/` - Unit tests (65+ files)
-- `tests/compatibility/` - Compatibility tests (27 files)
-- `tests/api_parity/` - API parity tests (7 files)
+Legacy directories `tests/compatibility/` and `tests/api_parity/` were removed. Active parity tests live under `tests/parity/`. Issue-numbered regression tests remain in `tests/dataframe/` and `tests/unit/`.
 
-To unified structure:
-- `tests/parity/` - All PySpark parity tests organized by feature
+BUG-001 and BUG-002 (GroupedData.count / aggregate return types) are **fixed** — see `tests/BUG_LOG.md`.
 
 ## Migration Progress
 

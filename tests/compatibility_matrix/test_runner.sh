@@ -53,12 +53,12 @@ else
 fi
 echo ""
 
-# Test 5: Basic compatibility
-echo "[5/5] Testing PySpark compatibility..."
-if python -m pytest tests/compatibility/test_basic_compatibility.py -v --tb=short; then
-    echo "✓ Compatibility tests passed"
+# Test 5: Parity smoke (replaces removed tests/compatibility/)
+echo "[5/5] Testing parity smoke..."
+if python -m pytest tests/parity/sql/test_advanced.py::TestSQLAdvancedParity::test_sql_with_union -v --tb=short; then
+    echo "✓ Parity smoke passed"
 else
-    echo "✗ Compatibility tests failed"
+    echo "✗ Parity smoke failed"
     exit 1
 fi
 echo ""

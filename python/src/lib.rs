@@ -1232,6 +1232,37 @@ impl PySparkSession {
         sampling_ratio: Option<f64>,
     ) -> PyResult<PyDataFrame> {
         let _ = sampling_ratio; // no-op for list/dict data; PySpark uses for CSV inference
+                                // #419: createDataFrame([1,2,3], "bigint") — single dtype schema with scalar list.
+        if let Some(schema_obj) = schema {
+            if let Some(pairs) = parse_schema_from_py(py, schema_obj)? {
+                if pairs.len() == 1 && pairs[0].0 == "value" {
+                    if let Ok(list) = data.downcast::<PyList>() {
+                        let all_scalars = list.iter().all(|item| {
+                            item.downcast::<PyDict>().is_err()
+                                && item.downcast::<PyList>().is_err()
+                                && item.downcast::<PyTuple>().is_err()
+                        });
+                        if all_scalars && !list.is_empty() {
+                            let mut values = Vec::with_capacity(list.len());
+                            for item in list.iter() {
+                                values.push(py_any_to_json(py, &item)?);
+                            }
+                            let df = self
+                                .inner
+                                .create_dataframe_from_single_column(values, &pairs[0].1)
+                                .map_err(to_py_err)?;
+                            return Ok(PyDataFrame {
+                                inner: df,
+                                schema_cache: schema.and_then(|s| {
+                                    s.getattr("fields").ok().map(|_| s.clone().unbind())
+                                }),
+                                mixed_row_shape_error_on_collect: false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         let (data, from_pandas, pandas_column_order) =
             normalize_create_dataframe_input(py, data, schema)?;
         let schema_cache =
@@ -2177,14 +2208,9 @@ fn python_data_and_schema(
     // - For "names only" schema or no schema, use union-of-keys alphabetical (PySpark dict+names parity, issue #164/#1179).
     let mut column_order: Option<Vec<String>> =
         pandas_column_order.map(|s| s.to_vec()).or_else(|| {
-            schema_res.as_ref().and_then(|s| {
-                if schema_names_only {
-                    // Names-only list: do not force schema order here; let dict keys drive order.
-                    None
-                } else {
-                    Some(s.iter().map(|(n, _)| n.clone()).collect())
-                }
-            })
+            schema_res
+                .as_ref()
+                .and_then(|s| Some(s.iter().map(|(n, _)| n.clone()).collect()))
         });
     if column_order.is_none() && !list.is_empty() {
         use std::collections::BTreeSet;
@@ -2549,30 +2575,6 @@ fn python_data_and_schema(
     // #1274: Do not force later columns to String for names-only dict rows. Use inferred types
     // for all columns so collect() returns numeric when data is numeric (PySpark-aligned semantics:
     // when schema says String, Row returns string; infer numeric so schema is not String).
-
-    // Special-case fix for test_missing_bindings_parity/_spark_and_df:
-    // When schema is names-only ["s", "n", "t"] and rows are dicts with keys
-    // {"s", "n", "t"}, we want:
-    //   s: StringType, n: DoubleType, t: StringType
-    // while our generic union-of-keys inference may swap names/types.
-    if schema_names_only && matches!(row_kind, Some("dict")) && schema.len() == 3 {
-        // Detect the specific swapped schema shape produced for _spark_and_df:
-        // [('s', DoubleType), ('n', StringType), ('t', StringType)].
-        let is_swapped_snt = schema[0].0 == "s"
-            && schema[1].0 == "n"
-            && schema[2].0 == "t"
-            && schema[0].1.eq_ignore_ascii_case("double")
-            && schema[1].1.eq_ignore_ascii_case("string")
-            && schema[2].1.eq_ignore_ascii_case("string");
-        if is_swapped_snt {
-            // Rewrite so that s is StringType, n is DoubleType, t remains StringType.
-            schema = vec![
-                ("s".to_string(), "string".to_string()),
-                ("n".to_string(), "double".to_string()),
-                ("t".to_string(), "string".to_string()),
-            ];
-        }
-    }
 
     Ok((rows, schema, schema_was_inferred, mixed_row_kinds))
 }
@@ -5389,7 +5391,11 @@ impl PyDataFrame {
             "outer" | "full" | "full_outer" => JoinType::Outer,
             "semi" | "left_semi" | "leftsemi" => JoinType::LeftSemi,
             "anti" | "left_anti" | "leftanti" => JoinType::LeftAnti,
-            _ => JoinType::Inner,
+            other => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Unsupported join type: {other}. Supported: inner, left, right, outer, semi, anti, cross."
+                )));
+            }
         };
         let use_left_right = left_on.is_some() && right_on.is_some();
         if use_left_right {
@@ -8742,7 +8748,7 @@ fn concat(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     }
     let refs: Vec<&Column> = owned.iter().collect();
     Ok(PyColumn {
-        inner: functions::concat(&refs),
+        inner: functions::concat(&refs).map_err(to_py_err)?,
     })
 }
 
@@ -9038,7 +9044,7 @@ fn coalesce(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     }
     let refs: Vec<&Column> = cols.iter().collect();
     Ok(PyColumn {
-        inner: functions::coalesce(&refs),
+        inner: functions::coalesce(&refs).map_err(to_py_err)?,
     })
 }
 
@@ -9090,7 +9096,7 @@ fn format_string(format: &str, columns: &Bound<'_, PyTuple>) -> PyResult<PyColum
     }
     let refs: Vec<&Column> = cols.iter().collect();
     Ok(PyColumn {
-        inner: functions::format_string(format, &refs),
+        inner: functions::format_string(format, &refs).map_err(to_py_err)?,
     })
 }
 
@@ -10005,7 +10011,7 @@ fn concat_ws(separator: &str, columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn
     }
     let refs: Vec<&Column> = cols.iter().collect();
     Ok(PyColumn {
-        inner: functions::concat_ws(separator, &refs),
+        inner: functions::concat_ws(separator, &refs).map_err(to_py_err)?,
     })
 }
 
@@ -10306,7 +10312,7 @@ fn struct_(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     }
     let refs: Vec<&Column> = cols.iter().collect();
     Ok(PyColumn {
-        inner: functions::struct_(&refs),
+        inner: functions::struct_(&refs).map_err(to_py_err)?,
     })
 }
 

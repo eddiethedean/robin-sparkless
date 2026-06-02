@@ -186,11 +186,15 @@ Export or implement in `sparkless.sql.functions`:
 
 ## Validation / DID NOT RAISE
 
-Tests expecting errors that are not raised:
+Audited June 2026 — main suite green; these tests now pass or were renamed:
 
-- [ ] `test_datetime_functions_require_session` — expect RuntimeError
-- [ ] `test_to_date_requires_string` — expect TypeError
-- [ ] `test_mixed_int_float_raises_error` — expect TypeError
+- [x] `test_mixed_int_float_raises_error` — raises TypeError (tests/unit/dataframe/test_inferschema_parity.py)
+- [x] `test_to_date_requires_string_or_date` — renamed from `test_to_date_requires_string` (tests/dataframe/test_type_strictness.py)
+- [x] `test_column_case_variations` — groupBy().agg(F.count("*").alias("count")) passes (June 2026)
+
+Still open / low priority:
+
+- [ ] `test_datetime_functions_require_session` — expect RuntimeError (test may not exist in tree)
 - [ ] `test_create_dataframe_with_all_null_column` — expect ValueError
 - [ ] `test_create_dataframe_type_promotion_int_to_float` — expect TypeError
 - [ ] `test_tuple_data_empty_schema` — expect SparklessError

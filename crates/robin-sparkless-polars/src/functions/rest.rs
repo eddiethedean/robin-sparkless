@@ -1,7 +1,4 @@
 //! Remaining expression builders: agg, when, string, bit, datetime, struct/map/array, cast, hash, misc.
-//!
-//! Some builders (e.g. `format_string`, `concat`, `coalesce`, `struct_`, `named_struct`) **panic** if given
-//! an empty column list; this is intentional programmer-error handling. Use non-empty slices at call sites.
 use super::types::parse_type_name;
 use crate::column::Column;
 use polars::prelude::*;
@@ -537,16 +534,13 @@ impl WhenBuilder {
         ThenBuilder::new(when_then)
     }
 
-    /// Specify the value when condition is false
+    /// Specify the value when condition is false.
     /// Note: In PySpark, when(cond).otherwise(val) requires a .then() first.
-    /// For this implementation, we require .then() to be called explicitly.
-    /// This method will panic if used directly - use when(cond).then(val1).otherwise(val2) instead.
-    pub fn otherwise(self, _value: &Column) -> Column {
-        // This should not be called directly - when().otherwise() without .then() is not supported
-        // Users should use when(cond).then(val1).otherwise(val2)
-        panic!(
+    pub fn otherwise(self, _value: &Column) -> Result<Column, PolarsError> {
+        Err(PolarsError::InvalidOperation(
             "when().otherwise() requires .then() to be called first. Use when(cond).then(val1).otherwise(val2)"
-        );
+                .into(),
+        ))
     }
 }
 
@@ -1011,11 +1005,13 @@ pub fn find_in_set(str_column: &Column, set_column: &Column) -> Column {
     str_column.clone().find_in_set(set_column)
 }
 
-/// Printf-style format (PySpark format_string). Supports %s, %d, %i, %f, %g, %%. **Panics** if `columns` is empty.
-pub fn format_string(format: &str, columns: &[&Column]) -> Column {
+/// Printf-style format (PySpark format_string). Supports %s, %d, %i, %f, %g, %%.
+pub fn format_string(format: &str, columns: &[&Column]) -> Result<Column, PolarsError> {
     use polars::prelude::*;
     if columns.is_empty() {
-        panic!("format_string needs at least one column");
+        return Err(PolarsError::InvalidOperation(
+            "format_string needs at least one column".into(),
+        ));
     }
     let format_owned = format.to_string();
     let args: Vec<Expr> = columns.iter().skip(1).map(|c| c.expr().clone()).collect();
@@ -1026,11 +1022,11 @@ pub fn format_string(format: &str, columns: &[&Column]) -> Column {
         &args,
         |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::String)),
     );
-    crate::column::Column::from_expr(expr, None)
+    Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Alias for format_string (PySpark printf).
-pub fn printf(format: &str, columns: &[&Column]) -> Column {
+pub fn printf(format: &str, columns: &[&Column]) -> Result<Column, PolarsError> {
     format_string(format, columns)
 }
 
@@ -1779,12 +1775,16 @@ pub fn try_element_at(column: &Column, index: i64) -> Column {
 }
 
 /// Assign value to histogram bucket (PySpark width_bucket). Returns 0 if v < min_val, num_bucket+1 if v >= max_val.
-pub fn width_bucket(value: &Column, min_val: f64, max_val: f64, num_bucket: i64) -> Column {
+pub fn width_bucket(
+    value: &Column,
+    min_val: f64,
+    max_val: f64,
+    num_bucket: i64,
+) -> Result<Column, PolarsError> {
     if num_bucket <= 0 {
-        panic!(
-            "width_bucket: num_bucket must be positive, got {}",
-            num_bucket
-        );
+        return Err(PolarsError::InvalidOperation(
+            format!("width_bucket: num_bucket must be positive, got {num_bucket}").into(),
+        ));
     }
     use polars::prelude::*;
     let v = value.expr().clone().cast(DataType::Float64);
@@ -1801,15 +1801,16 @@ pub fn width_bucket(value: &Column, min_val: f64, max_val: f64, num_bucket: i64)
         .then(lit(num_bucket + 1))
         .otherwise(bucket_clamped)
         .cast(DataType::Int64);
-    crate::column::Column::from_expr(expr, None)
+    Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Return column at 1-based index (PySpark elt). elt(2, a, b, c) returns b.
-/// Element at 1-based index from list of columns (PySpark elt). **Panics** if `columns` is empty.
-pub fn elt(index: &Column, columns: &[&Column]) -> Column {
+pub fn elt(index: &Column, columns: &[&Column]) -> Result<Column, PolarsError> {
     use polars::prelude::*;
     if columns.is_empty() {
-        panic!("elt requires at least one column");
+        return Err(PolarsError::InvalidOperation(
+            "elt requires at least one column".into(),
+        ));
     }
     let idx_expr = index.expr().clone();
     let null_expr = lit(NULL);
@@ -1820,7 +1821,7 @@ pub fn elt(index: &Column, columns: &[&Column]) -> Column {
             .then(c.expr().clone())
             .otherwise(expr);
     }
-    crate::column::Column::from_expr(expr, None)
+    Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Bit length of string (bytes * 8) (PySpark bit_length).
@@ -2337,17 +2338,21 @@ pub fn factorial(column: &Column) -> Column {
 }
 
 /// Concatenate columns as strings (PySpark concat). Numeric columns are cast to string (#852).
-/// **Panics** if `columns` is empty.
-pub fn concat(columns: &[&Column]) -> Column {
+pub fn concat(columns: &[&Column]) -> Result<Column, PolarsError> {
     use polars::prelude::*;
     if columns.is_empty() {
-        panic!("concat requires at least one column");
+        return Err(PolarsError::InvalidOperation(
+            "concat requires at least one column".into(),
+        ));
     }
     let exprs: Vec<Expr> = columns
         .iter()
         .map(|c| c.expr().clone().cast(DataType::String))
         .collect();
-    crate::column::Column::from_expr(concat_str(&exprs, "", false), None)
+    Ok(crate::column::Column::from_expr(
+        concat_str(&exprs, "", false),
+        None,
+    ))
 }
 
 /// Convert one concat_ws argument to Utf8: scalar columns are cast to string; list columns
@@ -2401,11 +2406,12 @@ fn concat_ws_input_series_to_string(s: Series, separator: &str) -> PolarsResult<
 
 /// Concatenate columns as strings with separator (PySpark concat_ws). Numeric columns cast to string (#852).
 /// List/array columns are element-joined with `separator` first; string columns pass through (#1543).
-/// **Panics** if `columns` is empty.
-pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
+pub fn concat_ws(separator: &str, columns: &[&Column]) -> Result<Column, PolarsError> {
     use polars::prelude::*;
     if columns.is_empty() {
-        panic!("concat_ws requires at least one column");
+        return Err(PolarsError::InvalidOperation(
+            "concat_ws requires at least one column".into(),
+        ));
     }
     let exprs: Vec<Expr> = columns
         .iter()
@@ -2414,7 +2420,10 @@ pub fn concat_ws(separator: &str, columns: &[&Column]) -> Column {
     // PySpark semantics: concat_ws ignores nulls across all arguments, and returns
     // null only when all inputs are null. Polars' concat_str with ignore_nulls=true
     // implements the same behavior.
-    crate::column::Column::from_expr(concat_str(&exprs, separator, true), None)
+    Ok(crate::column::Column::from_expr(
+        concat_str(&exprs, separator, true),
+        None,
+    ))
 }
 
 /// Row number window function (1, 2, 3 by order within partition).
@@ -2489,20 +2498,24 @@ pub fn nth_value(column: &Column, n: i64, partition_by: &[&str], descending: boo
 /// // coalesce(col("a"), col("b"), lit(0))
 /// let expr = coalesce(&[&col("a"), &col("b"), &lit_i64(0)]);
 /// ```
-/// First non-null value across columns (PySpark coalesce). **Panics** if `columns` is empty.
-pub fn coalesce(columns: &[&Column]) -> Column {
+/// First non-null value across columns (PySpark coalesce).
+pub fn coalesce(columns: &[&Column]) -> Result<Column, PolarsError> {
     use polars::prelude::*;
     if columns.is_empty() {
-        panic!("coalesce requires at least one column");
+        return Err(PolarsError::InvalidOperation(
+            "coalesce requires at least one column".into(),
+        ));
     }
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
     let expr = coalesce(&exprs);
-    crate::column::Column::from_expr(expr, None)
+    Ok(crate::column::Column::from_expr(expr, None))
 }
 
 /// Alias for coalesce(col, value). PySpark nvl / ifnull.
 pub fn nvl(column: &Column, value: &Column) -> Column {
-    coalesce(&[column, value])
+    use polars::prelude::*;
+    let exprs = vec![column.expr().clone(), value.expr().clone()];
+    crate::column::Column::from_expr(coalesce(&exprs), None)
 }
 
 /// Alias for nvl. PySpark ifnull.
@@ -2949,6 +2962,7 @@ pub fn zip_with_coalesce(left: &Column, right: &Column) -> Column {
             &crate::column::Column::from_expr(left_field, None),
             &crate::column::Column::from_expr(right_field, None),
         ])
+        .expect("zip_with_coalesce passes two columns")
         .into_expr(),
         None,
     );
@@ -2964,6 +2978,7 @@ pub fn map_zip_with_coalesce(map1: &Column, map2: &Column) -> Column {
         &crate::column::Column::from_expr(v1, None),
         &crate::column::Column::from_expr(v2, None),
     ])
+    .expect("map_zip_with_coalesce passes two columns")
     .into_expr();
     map1.clone().map_zip_with(map2, merge)
 }
@@ -2976,28 +2991,30 @@ pub fn map_filter_value_gt(map_col: &Column, threshold: f64) -> Column {
 }
 
 /// Create struct from columns using column names as field names (PySpark struct).
-/// Struct from columns (PySpark struct). **Panics** if `columns` is empty.
-pub fn struct_(columns: &[&Column]) -> Column {
+pub fn struct_(columns: &[&Column]) -> Result<Column, PolarsError> {
     use polars::prelude::as_struct;
     if columns.is_empty() {
-        panic!("struct requires at least one column");
+        return Err(PolarsError::InvalidOperation(
+            "struct requires at least one column".into(),
+        ));
     }
     let exprs: Vec<Expr> = columns.iter().map(|c| c.expr().clone()).collect();
-    crate::column::Column::from_expr(as_struct(exprs), None)
+    Ok(crate::column::Column::from_expr(as_struct(exprs), None))
 }
 
 /// Create struct with explicit field names (PySpark named_struct). Pairs of (name, column).
-/// Struct from (name, column) pairs (PySpark named_struct). **Panics** if `pairs` is empty.
-pub fn named_struct(pairs: &[(&str, &Column)]) -> Column {
+pub fn named_struct(pairs: &[(&str, &Column)]) -> Result<Column, PolarsError> {
     use polars::prelude::as_struct;
     if pairs.is_empty() {
-        panic!("named_struct requires at least one (name, column) pair");
+        return Err(PolarsError::InvalidOperation(
+            "named_struct requires at least one (name, column) pair".into(),
+        ));
     }
     let exprs: Vec<Expr> = pairs
         .iter()
         .map(|(name, col)| col.expr().clone().alias(*name))
         .collect();
-    crate::column::Column::from_expr(as_struct(exprs), None)
+    Ok(crate::column::Column::from_expr(as_struct(exprs), None))
 }
 
 /// Append element to end of list (PySpark array_append).
@@ -3186,7 +3203,7 @@ pub fn hash(columns: &[&Column]) -> Column {
 }
 
 /// Stack columns into struct (PySpark stack). Alias for struct_.
-pub fn stack(columns: &[&Column]) -> Column {
+pub fn stack(columns: &[&Column]) -> Result<Column, PolarsError> {
     struct_(columns)
 }
 
@@ -3371,7 +3388,7 @@ mod tests {
         let col_a = col("a");
         let col_b = col("b");
         let col_c = col("c");
-        let result = coalesce(&[&col_a, &col_b, &col_c]);
+        let result = coalesce(&[&col_a, &col_b, &col_c]).unwrap();
 
         // Apply the expression
         let result_df = df
@@ -3401,7 +3418,7 @@ mod tests {
         let col_a = col("a");
         let col_b = col("b");
         let fallback = lit_i32(0);
-        let result = coalesce(&[&col_a, &col_b, &fallback]);
+        let result = coalesce(&[&col_a, &col_b, &fallback]).unwrap();
 
         // Apply the expression
         let result_df = df
@@ -3419,10 +3436,13 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "coalesce requires at least one column")]
-    fn test_coalesce_empty_panics() {
+    fn test_coalesce_empty_returns_error() {
         let columns: [&Column; 0] = [];
-        let _ = coalesce(&columns);
+        let err = coalesce(&columns).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("coalesce requires at least one column")
+        );
     }
 
     #[test]

@@ -43,14 +43,7 @@ def test_cast_date_only_string_to_date(spark) -> None:
 
 
 @pytest.mark.skipif(
-    (
-        os.environ.get("SPARKLESS_TEST_MODE")
-        or os.environ.get("SPARKLESS_TEST_MODE")
-        or ""
-    )
-    .strip()
-    .lower()
-    == "pyspark",
+    (os.environ.get("SPARKLESS_TEST_MODE") or "").strip().lower() == "pyspark",
     reason="Skipped in PySpark mode (driver/worker Python version mismatch with pytest-xdist)",
 )
 def test_try_cast_datetime_string_to_date_invalid_null(spark) -> None:

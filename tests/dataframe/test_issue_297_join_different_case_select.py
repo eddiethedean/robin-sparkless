@@ -20,14 +20,7 @@ class TestIssue297JoinDifferentCaseSelect:
     """Test join with different case columns and select with third case."""
 
     @pytest.mark.skipif(
-        (
-            os.environ.get("SPARKLESS_TEST_MODE")
-            or os.environ.get("SPARKLESS_TEST_MODE")
-            or ""
-        )
-        .strip()
-        .lower()
-        == "pyspark",
+        (os.environ.get("SPARKLESS_TEST_MODE") or "").strip().lower() == "pyspark",
         reason="Skipped in PySpark mode (driver/worker Python version mismatch with pytest-xdist)",
     )
     def test_join_different_case_select_third_case(self):

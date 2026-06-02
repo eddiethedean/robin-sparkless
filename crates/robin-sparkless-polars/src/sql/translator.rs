@@ -276,6 +276,45 @@ pub fn translate(
     }
 }
 
+/// Map INSERT ... SELECT output onto the target table schema (respect column list, NULL-fill omitted columns).
+fn align_insert_select_to_target(
+    session: &SparkSession,
+    select_df: DataFrame,
+    target_schema: &StructType,
+    target_cols: &[String],
+    index_map: &[usize],
+    insert_col_count: usize,
+) -> Result<DataFrame, PolarsError> {
+    let select_schema = select_df.schema()?;
+    let select_fields = select_schema.fields();
+    if select_fields.len() != insert_col_count {
+        return Err(PolarsError::InvalidOperation(
+            format!(
+                "SQL: INSERT column list has {insert_col_count} columns but SELECT returns {}",
+                select_fields.len()
+            )
+            .into(),
+        ));
+    }
+    let select_col_names: Vec<String> = select_fields.iter().map(|f| f.name.clone()).collect();
+    let select_rows = select_df.collect_as_json_rows()?;
+    let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(select_rows.len());
+    for select_row in select_rows {
+        let mut row: Vec<JsonValue> = vec![JsonValue::Null; target_cols.len()];
+        for (val_pos, &target_idx) in index_map.iter().enumerate() {
+            let col_name = &select_col_names[val_pos];
+            row[target_idx] = select_row.get(col_name).cloned().unwrap_or(JsonValue::Null);
+        }
+        rows.push(row);
+    }
+    let schema: Vec<(String, String)> = target_schema
+        .fields()
+        .iter()
+        .map(|f| (f.name.clone(), core_data_type_to_str(&f.data_type)))
+        .collect();
+    session.create_dataframe_from_rows(rows, schema, false, false)
+}
+
 /// Translate INSERT INTO table [(col1, col2, ...)] {VALUES (...), (...)} or
 /// INSERT INTO table SELECT ... . Appends rows to an existing catalog table.
 fn translate_insert(
@@ -359,8 +398,18 @@ fn translate_insert(
                     .collect();
                 session.create_dataframe_from_rows(rows, schema, false, false)?
             }
-            // INSERT INTO t SELECT ... : rely on query translation.
-            _ => translate_query(session, query.as_ref())?,
+            // INSERT INTO t SELECT ... : map SELECT columns to target insert list and NULL-fill omitted cols.
+            _ => {
+                let select_df = translate_query(session, query.as_ref())?;
+                align_insert_select_to_target(
+                    session,
+                    select_df,
+                    &target_schema,
+                    &target_cols,
+                    &index_map,
+                    insert_cols.len(),
+                )?
+            }
         },
         None => {
             return Err(PolarsError::InvalidOperation(
@@ -369,10 +418,13 @@ fn translate_insert(
         }
     };
 
-    // Append rows to existing table.
+    // Append rows to existing table in the same namespace that provided the target table.
     let appended = target_df.union(&new_rows_df)?;
-    session.create_or_replace_temp_view(&table_name, appended.clone());
-    session.register_table(&table_name, appended);
+    if session.has_temp_view(&table_name) {
+        session.create_or_replace_temp_view(&table_name, appended);
+    } else {
+        session.register_table(&table_name, appended);
+    }
 
     Ok(DataFrame::from_polars_with_options(
         PlDataFrame::empty(),
@@ -585,11 +637,10 @@ fn translate_set_expr(
             let right_df = translate_set_expr(session, right.as_ref())?;
             let mut df = left_df.union(&right_df)?;
             // DISTINCT (default for UNION) => drop duplicates; ALL => keep all rows.
-            let is_distinct = matches!(
-                set_quantifier,
-                spark_sql_parser::ast::SetQuantifier::Distinct
-            );
-            if is_distinct {
+            // sqlparser uses SetQuantifier::None when neither ALL nor DISTINCT is written;
+            // Spark/SQL default for UNION is DISTINCT.
+            let keep_all = matches!(set_quantifier, spark_sql_parser::ast::SetQuantifier::All);
+            if !keep_all {
                 df = df.distinct(None)?;
             }
             Ok(df)
@@ -1057,6 +1108,24 @@ fn scalar_subquery_to_expr(session: &SparkSession, query: &Query) -> Result<Expr
     let pl_df = df.collect_inner()?;
     if pl_df.height() == 0 {
         return Ok(lit(polars::prelude::NULL));
+    }
+    if pl_df.height() != 1 {
+        return Err(PolarsError::InvalidOperation(
+            format!(
+                "SQL: scalar subquery must return a single row, got {} rows",
+                pl_df.height()
+            )
+            .into(),
+        ));
+    }
+    if pl_df.width() != 1 {
+        return Err(PolarsError::InvalidOperation(
+            format!(
+                "SQL: scalar subquery must return a single column, got {} columns",
+                pl_df.width()
+            )
+            .into(),
+        ));
     }
     let first_col = pl_df.columns().first().ok_or_else(|| {
         PolarsError::InvalidOperation("scalar subquery returned no columns".into())
@@ -1708,7 +1777,7 @@ fn projection_function_to_item(
 
     let args = sql_function_args_to_columns(func, session, df)?;
 
-    // Built-ins
+    // Built-ins (mirror sql_function_to_expr WHERE/HAVING support)
     if let Some(col) = args.first() {
         let builtin = match func_name.to_uppercase().as_str() {
             "UPPER" | "UCASE" if args.len() == 1 => {
@@ -1717,6 +1786,9 @@ fn projection_function_to_item(
             "LOWER" | "LCASE" if args.len() == 1 => {
                 Some(functions::lower(col).expr().clone().alias(&alias))
             }
+            "TRIM" if args.len() == 1 => Some(functions::trim(col).expr().clone().alias(&alias)),
+            "LTRIM" if args.len() == 1 => Some(functions::ltrim(col).expr().clone().alias(&alias)),
+            "RTRIM" if args.len() == 1 => Some(functions::rtrim(col).expr().clone().alias(&alias)),
             _ => None,
         };
         if let Some(e) = builtin {

@@ -92,6 +92,15 @@ fn parse_one_statement_with_dialect(
     Ok(stmts.into_iter().next().expect("len == 1"))
 }
 
+fn strip_backticks(part: &str) -> &str {
+    let p = part.trim();
+    if p.len() >= 2 && p.starts_with('`') && p.ends_with('`') {
+        &p[1..p.len() - 1]
+    } else {
+        p
+    }
+}
+
 fn parse_object_name(name: &str) -> Result<ObjectName, ParseError> {
     let s = name.trim();
     if s.is_empty() {
@@ -99,11 +108,10 @@ fn parse_object_name(name: &str) -> Result<ObjectName, ParseError> {
             "SQL: expected an object name, got empty string.".to_string(),
         ));
     }
-    // Minimal support for Spark-style qualified names like `schema.table` and `global_temp.gv`.
-    // Backtick quoting is intentionally not handled yet (can be added later).
+    // Spark-style qualified names: schema.table, global_temp.gv, and backtick-quoted identifiers.
     let parts: Vec<Ident> = s
         .split('.')
-        .map(|p| p.trim())
+        .map(strip_backticks)
         .filter(|p| !p.is_empty())
         .map(Ident::new)
         .collect();
@@ -1280,5 +1288,11 @@ mod tests {
             }))) => assert_eq!(fmt, "yyyy/MM/dd HH:mm:ss"),
             other => panic!("expected double-quoted format literal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_object_name_backtick_quoted() {
+        let name = parse_object_name("`my_db`.`my_table`").unwrap();
+        assert_eq!(name.to_string(), "my_db.my_table");
     }
 }

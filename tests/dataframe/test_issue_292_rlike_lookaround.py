@@ -595,14 +595,7 @@ class TestIssue292RlikeLookaround:
             spark.stop()
 
     @pytest.mark.skipif(
-        (
-            os.environ.get("SPARKLESS_TEST_MODE")
-            or os.environ.get("SPARKLESS_TEST_MODE")
-            or ""
-        )
-        .strip()
-        .lower()
-        == "pyspark",
+        (os.environ.get("SPARKLESS_TEST_MODE") or "").strip().lower() == "pyspark",
         reason="Skipped in PySpark mode (driver/worker Python version mismatch with pytest-xdist)",
     )
     def test_rlike_lookbehind_with_fixed_width(self):

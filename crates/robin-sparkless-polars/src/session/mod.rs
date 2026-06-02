@@ -1350,6 +1350,27 @@ impl SparkSession {
         }
     }
 
+    /// Returns true when `name` is registered as a session temp view (same resolution as [`Self::table`]).
+    pub fn has_temp_view(&self, name: &str) -> bool {
+        if self
+            .catalog
+            .lock()
+            .ok()
+            .is_some_and(|m| m.contains_key(name))
+        {
+            return true;
+        }
+        if name.contains('.') {
+            let unqualified = name.rsplit_once('.').map(|(_, t)| t).unwrap_or(name);
+            return self
+                .catalog
+                .lock()
+                .ok()
+                .is_some_and(|m| m.contains_key(unqualified));
+        }
+        false
+    }
+
     /// Drop a temporary view by name (PySpark: catalog.dropTempView).
     /// Returns true if a view was removed; false if not present.
     /// If the catalog lock is poisoned, returns false and a message is emitted to stderr.
@@ -4640,5 +4661,47 @@ mod tests {
         assert!(table_path.is_dir());
         let entries: Vec<_> = fs::read_dir(&table_path).unwrap().collect();
         assert!(!entries.is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "sql")]
+    fn test_sql_union_default_distinct() {
+        use serde_json::json;
+        let spark = SparkSession::builder()
+            .app_name("union_distinct")
+            .get_or_create();
+        let df1 = spark
+            .create_dataframe_from_single_column(vec![json!(1), json!(1)], "long")
+            .unwrap();
+        let df2 = spark
+            .create_dataframe_from_single_column(vec![json!(1)], "long")
+            .unwrap();
+        spark.create_or_replace_temp_view("u1", df1);
+        spark.create_or_replace_temp_view("u2", df2);
+        let out = spark
+            .sql("SELECT value AS x FROM u1 UNION SELECT value AS x FROM u2")
+            .unwrap();
+        assert_eq!(out.count().unwrap(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "sql")]
+    fn test_sql_union_all_keeps_duplicates() {
+        use serde_json::json;
+        let spark = SparkSession::builder()
+            .app_name("union_all")
+            .get_or_create();
+        let df1 = spark
+            .create_dataframe_from_single_column(vec![json!(1)], "long")
+            .unwrap();
+        let df2 = spark
+            .create_dataframe_from_single_column(vec![json!(1)], "long")
+            .unwrap();
+        spark.create_or_replace_temp_view("a1", df1);
+        spark.create_or_replace_temp_view("a2", df2);
+        let out = spark
+            .sql("SELECT value AS x FROM a1 UNION ALL SELECT value AS x FROM a2")
+            .unwrap();
+        assert_eq!(out.count().unwrap(), 2);
     }
 }

@@ -90,7 +90,7 @@ SQL (via `SparkSession::sql()` with optional `sql` feature) and session behaviou
 
 **createDataFrame (#151, #372):** Implemented. **Python**: `spark.createDataFrame(data, schema=None)` accepts list of dicts (infer), list of tuples with column names, or explicit schema (list of `(name, dtype_str)` or StructType). **Rust**: `create_dataframe(data, column_names)` for 3-tuples; `create_dataframe_from_rows(rows, schema)` for arbitrary schema. Supported dtypes include bigint, double, string, boolean, date, timestamp.
 
-**pivot (#156):** Stub. `DataFrame::pivot(pivot_col, values)` / `DataFrame.pivot(pivot_col, values=None)` are present but raise "not yet implemented"; use `crosstab(col1, col2)` for two-column cross-tabulation until pivot is implemented.
+**pivot (#156):** Implemented on `GroupedData` (`groupBy(...).pivot(...).sum/avg/...`). `DataFrame.pivot(pivot_col, values)` without groupBy may still differ from PySpark; use `groupBy().pivot()` or `crosstab(col1, col2)`.
 
 ## Failure reasons (converted fixtures)
 
@@ -118,7 +118,7 @@ When a converted fixture fails, classify and document here:
 
 ## Skipped fixtures
 
-Fixtures with `"skip": true` in JSON are not run. **11 hand-written** fixtures remain skipped. See each fixture’s `skip_reason` in JSON. Typical reasons: timezone (timestamp_seconds/millis/micros), struct row format (named_struct_test, struct_test), window frame (nth_value_window, last_value_window, ntile_window), set ops (intersect, subtract), right_join column order, JVM-only (with_jvm_stubs), non-deterministic (with_rand_seed, with_unix_micros), hash/xxhash (with_hash, string_xxhash64), assert_true type, months_between/arrays_overlap, arrays_zip struct length, with_curdate_now, raise_error.
+Fixtures with `"skip": true` in JSON are not run. As of June 2026, **one** hand-written fixture remains skipped: `with_rand_seed.json` (RNG algorithm differs from Spark XORShiftRandom). Other fixtures that may diverge from PySpark without being skipped include window frame edge cases, hash functions, set ops column order, and non-deterministic timestamp helpers.
 
 ## Closed-issue test coverage
 

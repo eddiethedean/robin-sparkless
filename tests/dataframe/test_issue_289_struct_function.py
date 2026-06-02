@@ -454,14 +454,7 @@ class TestIssue289StructFunction:
             spark.stop()
 
     @pytest.mark.skipif(
-        (
-            os.environ.get("SPARKLESS_TEST_MODE")
-            or os.environ.get("SPARKLESS_TEST_MODE")
-            or ""
-        )
-        .strip()
-        .lower()
-        == "pyspark",
+        (os.environ.get("SPARKLESS_TEST_MODE") or "").strip().lower() == "pyspark",
         reason="Skipped in PySpark mode (driver/worker Python version mismatch with pytest-xdist)",
     )
     def test_struct_with_string_functions(self):

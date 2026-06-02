@@ -58,9 +58,14 @@ Individual keys can override profile defaults. See [PYSPARK_COMPAT_PROFILES.md](
 
 ## Join
 
+- **Unknown join type**: Invalid `how` values (e.g. typos like `"lef"`) raise `ValueError` instead of silently defaulting to inner join (June 2026).
 - **Join on expression (#704, #698)**: The **plan interpreter** does not support expression joins; use column names in the join key list. The **Python binding** may fall back to `crossJoin` + `filter` for some non-equi or expression-shaped joins (including some `array_contains` patterns); unsupported shapes should error rather than silently wrong results. Prefer explicit equi-join keys when possible.
 
 ## SQL (optional `sql` feature)
+
+- **UNION default**: Bare `UNION` (without `ALL` or `DISTINCT`) deduplicates rows like Spark/SQL default `UNION DISTINCT` (June 2026). Use `UNION ALL` to keep duplicates.
+- **INSERT … SELECT**: Column lists are honored; omitted target columns are filled with NULL. INSERT updates temp views or saved tables in the namespace where the target was resolved (June 2026).
+- **Scalar subqueries**: Must return exactly one row and one column; multi-row subqueries error (June 2026).
 
 - **Tables and views**: Three namespaces — **temp views** (session-scoped), **saved tables** (`saveAsTable`), and **global temp views** (`createOrReplaceGlobalTempView`, process-scoped). Resolution order for `table(name)`: (1) `global_temp.xyz` → global catalog, (2) temp view, (3) saved table, (4) warehouse (when `spark.sql.warehouse.dir` is set). Global temp views persist across sessions within the same process. Saved tables can optionally persist to disk when `spark.sql.warehouse.dir` is configured.
 - **Supported**: single `SELECT`, `FROM` (single table or JOIN), `WHERE`, `GROUP BY` + aggregates, `HAVING`, `ORDER BY`, `LIMIT`, and temporary views (`createOrReplaceTempView`, `table()`). Unsupported constructs produce clear errors.

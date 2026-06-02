@@ -700,7 +700,12 @@ fn handle_join_op(
         "outer" => JoinType::Outer,
         "left_semi" | "leftsemi" | "semi" => JoinType::LeftSemi,
         "left_anti" | "leftanti" | "anti" => JoinType::LeftAnti,
-        _ => JoinType::Inner,
+        "inner" => JoinType::Inner,
+        other => {
+            return Err(PlanError::UnsupportedOp(format!(
+                "Unsupported join type: {other}. Supported: inner, left, right, outer, semi, anti."
+            )));
+        }
     };
 
     match parse_join_on_spec(on, &df)? {
