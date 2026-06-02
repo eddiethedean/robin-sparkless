@@ -251,10 +251,12 @@ pub fn select_with_exprs(
         .as_ref()
         .map(|(lc, _, _)| format!("__pe_{}", lc.as_str()));
 
+    // Fourth tuple field: list-producing expression to materialize before frame-level explode (#1563).
     type ExplodeTarget = (
         PlSmallStr,
         Option<PlSmallStr>,
         polars::prelude::ExplodeOptions,
+        Option<Expr>,
     );
     let mut explode_targets: Vec<ExplodeTarget> = Vec::new();
     let exprs: Vec<Expr> = exprs
@@ -312,7 +314,7 @@ pub fn select_with_exprs(
                                 None
                             };
                             let out_col = alias_name.clone().unwrap_or_else(|| col_name.clone());
-                            let already = explode_targets.iter().any(|(c, a, o)| {
+                            let already = explode_targets.iter().any(|(c, a, o, _)| {
                                 c.as_str() == col_name.as_str()
                                     && a.as_ref().map(|x| x.as_str())
                                         == alias_name.as_ref().map(|x| x.as_str())
@@ -323,11 +325,26 @@ pub fn select_with_exprs(
                                     col_name.clone(),
                                     alias_name.clone(),
                                     options,
+                                    None,
                                 ));
                             }
                             Expr::Alias(Arc::new(Expr::Column(out_col)), name)
                         } else {
-                            Expr::Alias(inner, name)
+                            // explode(list_expr) e.g. explode(split(col("name"), " ")) (#1563)
+                            let out_col = name.clone();
+                            let already = explode_targets.iter().any(|(_, a, o, _)| {
+                                a.as_ref().map(|x| x.as_str()) == Some(out_col.as_str())
+                                    && *o == options
+                            });
+                            if !already {
+                                explode_targets.push((
+                                    out_col.clone(),
+                                    Some(out_col.clone()),
+                                    options,
+                                    Some(input.as_ref().clone()),
+                                ));
+                            }
+                            Expr::Alias(Arc::new(Expr::Column(out_col)), name)
                         }
                     } else {
                         Expr::Alias(inner, name)
@@ -335,15 +352,27 @@ pub fn select_with_exprs(
                 }
                 Expr::Explode { input, options } => {
                     if let Expr::Column(col_name) = input.as_ref() {
-                        let already = explode_targets.iter().any(|(c, a, o)| {
+                        let already = explode_targets.iter().any(|(c, a, o, _)| {
                             c.as_str() == col_name.as_str() && a.is_none() && *o == options
                         });
                         if !already {
-                            explode_targets.push((col_name.clone(), None, options));
+                            explode_targets.push((col_name.clone(), None, options, None));
                         }
                         Expr::Column(col_name.clone())
                     } else {
-                        Expr::Explode { input, options }
+                        let temp = PlSmallStr::from(format!("__explode_{}", explode_targets.len()));
+                        let already = explode_targets.iter().any(|(c, a, o, _)| {
+                            c.as_str() == temp.as_str() && a.is_none() && *o == options
+                        });
+                        if !already {
+                            explode_targets.push((
+                                temp.clone(),
+                                Some(temp.clone()),
+                                options,
+                                Some(input.as_ref().clone()),
+                            ));
+                        }
+                        Expr::Column(temp)
                     }
                 }
                 other => other,
@@ -380,9 +409,13 @@ pub fn select_with_exprs(
     let had_explode = !explode_targets.is_empty() || posexplode_target.is_some();
 
     // Apply each explode column in select order (PySpark zips when multiple explodes in one select).
-    for (explode_col, alias_name, options) in explode_targets {
+    for (explode_col, alias_name, options, source_expr) in explode_targets {
         if let Some(alias) = &alias_name {
-            lf = lf.with_column(col(explode_col.as_str()).alias(alias.as_str()));
+            if let Some(src) = source_expr {
+                lf = lf.with_column(src.alias(alias.as_str()));
+            } else {
+                lf = lf.with_column(col(explode_col.as_str()).alias(alias.as_str()));
+            }
             let selector = Selector::ByName {
                 names: Arc::from([alias.clone()]),
                 strict: true,
@@ -2874,6 +2907,41 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].get("Size").and_then(|v| v.as_str()), Some("Small"));
         assert_eq!(rows[1].get("Size").and_then(|v| v.as_str()), Some("Large"));
+    }
+
+    /// Issue #1563: select(id, explode(split(name, " ")).alias("word")) replicates id per exploded row.
+    #[test]
+    fn select_explode_split_expression() {
+        use crate::functions;
+        use serde_json::json;
+        let spark = SparkSession::builder()
+            .app_name("select_explode_split")
+            .get_or_create();
+        let schema = vec![
+            ("id".to_string(), "string".to_string()),
+            ("name".to_string(), "string".to_string()),
+        ];
+        let rows = vec![vec![json!("1"), json!("hello world")]];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .unwrap();
+        let name_col = functions::col("name");
+        let split_expr = functions::split(&name_col, " ", None).expr().clone();
+        let explode_expr = split_expr
+            .clone()
+            .explode(polars::prelude::ExplodeOptions {
+                empty_as_null: false,
+                keep_nulls: false,
+            })
+            .alias("word");
+        let items = vec![SelectItem::ColumnName("id"), SelectItem::Expr(explode_expr)];
+        let out = select_items(&df, items, false).unwrap();
+        assert_eq!(out.count().unwrap(), 2);
+        let rows = out.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("id").and_then(|v| v.as_str()), Some("1"));
+        assert_eq!(rows[0].get("word").and_then(|v| v.as_str()), Some("hello"));
+        assert_eq!(rows[1].get("id").and_then(|v| v.as_str()), Some("1"));
+        assert_eq!(rows[1].get("word").and_then(|v| v.as_str()), Some("world"));
     }
 
     /// Issue #1054: select(Name, Value, explode(Value).alias("ExplodedValue")) must preserve list column and expand rows.

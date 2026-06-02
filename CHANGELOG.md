@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **#1563 – `explode(split(...))` in `select`** — Frame-level explode now applies when the list comes from an expression (e.g. `F.explode(F.split(F.col("name"), " "))`), so sibling columns replicate per exploded row.
+
 - **#1562 – `to_date` format string in `spark.sql`** — Double-quoted format literals (e.g. `to_date(B, "yyyy/MM/dd HH:mm:ss")`) are parsed as string constants, not column names; `TO_DATE` is supported as a SQL built-in.
 
 ## [4.9.0] - 2026-05-29
