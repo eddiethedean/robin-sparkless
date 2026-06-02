@@ -3974,7 +3974,7 @@ fn ansi_checked_i64_op(
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, op_name)?;
     let mut values = Vec::with_capacity(ca_a.len());
-    for (oa, ob) in ca_a.into_iter().zip(ca_b.into_iter()) {
+    for (oa, ob) in ca_a.into_iter().zip(&ca_b) {
         match (oa, ob) {
             (Some(a), Some(b)) => match f(a, b) {
                 Some(v) => values.push(Some(v)),

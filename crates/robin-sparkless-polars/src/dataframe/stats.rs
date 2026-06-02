@@ -39,7 +39,7 @@ impl<'a> DataFrameStat<'a> {
         let mut sum_a = 0.0_f64;
         let mut sum_b = 0.0_f64;
         let mut n = 0_usize;
-        for (x, y) in a.into_iter().zip(b.into_iter()) {
+        for (x, y) in a.into_iter().zip(b) {
             if let (Some(xv), Some(yv)) = (x, y) {
                 n += 1;
                 sum_a += xv;
@@ -79,7 +79,7 @@ impl<'a> DataFrameStat<'a> {
         let mut sum_a2 = 0.0_f64;
         let mut sum_b2 = 0.0_f64;
         let mut n = 0_usize;
-        for (x, y) in a.into_iter().zip(b.into_iter()) {
+        for (x, y) in a.into_iter().zip(b) {
             if let (Some(xv), Some(yv)) = (x, y) {
                 n += 1;
                 sum_a += xv;

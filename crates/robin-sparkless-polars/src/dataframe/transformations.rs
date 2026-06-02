@@ -1881,7 +1881,7 @@ pub fn sample(
         ));
     }
     let take_n = (n as f64 * fraction).round() as usize;
-    let take_n = take_n.min(n).max(0);
+    let take_n = take_n.min(n);
     if take_n == 0 {
         return Ok(super::DataFrame::from_lazy_with_options(
             pl.as_ref().head(Some(0)).lazy(),
@@ -2397,7 +2397,7 @@ pub fn freq_items(
                 .ok_or_else(|| PolarsError::ComputeError("column not a series".into()))?
                 .clone();
             let empty_sub = s.head(Some(0));
-            let list_chunked = polars::prelude::ListChunked::from_iter([empty_sub].into_iter())
+            let list_chunked = polars::prelude::ListChunked::from_iter([empty_sub])
                 .with_name(format!("{resolved}_freqItems").into());
             out.push(list_chunked.into_series().into());
         }
@@ -2445,7 +2445,7 @@ pub fn freq_items(
             .as_series()
             .ok_or_else(|| PolarsError::ComputeError("value column not a series".into()))?;
         let filtered = values_series.take(idx_ca)?;
-        let list_chunked = polars::prelude::ListChunked::from_iter([filtered].into_iter())
+        let list_chunked = polars::prelude::ListChunked::from_iter([filtered])
             .with_name(format!("{resolved}_freqItems").into());
         let list_row = list_chunked.into_series();
         out_series.push(list_row.into());
