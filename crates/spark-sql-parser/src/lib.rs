@@ -8,8 +8,8 @@
 //!
 //! Any statement that [sqlparser] parses as a `Query` (e.g. `SELECT`, `WITH ... SELECT`)
 //! is accepted. Clause support is determined by [sqlparser] and the dialect in use
-//! (this crate uses [MySqlDialect](sqlparser::dialect::MySqlDialect) so double-quoted
-//! strings are string literals, matching PySpark/Spark SQL — see issue #1541, #1562).
+//! (this crate uses [GenericDialect](sqlparser::dialect::GenericDialect) for DDL; [MySqlDialect]
+//! for `SELECT` in `parse_spark_sql` so double-quoted strings are literals — issues #1541, #1562).
 //!
 //! ## Known gaps
 //!
@@ -64,8 +64,12 @@ pub enum SparkStatement {
 }
 
 fn parse_one_statement_raw(query: &str) -> Result<Statement, ParseError> {
-    // PySpark/Spark SQL treat double-quoted tokens as string literals in SQL (issues #1541, #1562).
-    // GenericDialect treats `"` as delimited identifiers; MySQL dialect treats them as literals.
+    parse_one_statement_with_dialect(query, &GenericDialect {})
+}
+
+/// Parse a statement for Spark `SELECT` paths. Uses MySQL dialect so double-quoted tokens are
+/// string literals (PySpark parity, issues #1541, #1562). DDL uses [`parse_one_statement_raw`].
+fn parse_query_statement(query: &str) -> Result<Statement, ParseError> {
     parse_one_statement_with_dialect(query, &MySqlDialect {})
 }
 
@@ -396,7 +400,11 @@ pub fn parse_spark_sql(query: &str) -> Result<SparkStatement, ParseError> {
     }
 
     // Fall back to upstream parsing for everything else.
-    let stmt = parse_one_statement_raw(query)?;
+    // Queries use MySQL dialect for double-quoted string literals; DDL stays on GenericDialect.
+    let stmt = match parse_one_statement_raw(query)? {
+        Statement::Query(_) => parse_query_statement(query)?,
+        other => other,
+    };
     Ok(SparkStatement::Sqlparser(Box::new(stmt)))
 }
 

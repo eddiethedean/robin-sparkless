@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SQL parser dialect split** — `parse_spark_sql` uses MySQL dialect only for `SELECT` (double-quoted string literals, #1562); DDL such as `CREATE FUNCTION` continues to use GenericDialect.
+
 - **#1564 – string vs numeric comparison in `groupBy().agg()`** — Apply PySpark-style string–numeric coercion to aggregation expressions (e.g. `F.col("C") == 1` inside `F.when`).
 
 - **#1563 – `explode(split(...))` in `select`** — Frame-level explode now applies when the list comes from an expression (e.g. `F.explode(F.split(F.col("name"), " "))`), so sibling columns replicate per exploded row.

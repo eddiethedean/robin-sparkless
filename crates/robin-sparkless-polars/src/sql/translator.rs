@@ -1431,10 +1431,7 @@ fn sql_expr_to_string_literal(expr: &SqlExpr) -> Result<String, PolarsError> {
     }
 }
 
-fn sql_function_unnamed_expr<'a>(
-    args: &'a [FunctionArg],
-    index: usize,
-) -> Result<&'a SqlExpr, PolarsError> {
+fn sql_function_unnamed_expr(args: &[FunctionArg], index: usize) -> Result<&SqlExpr, PolarsError> {
     let arg = args.get(index).ok_or_else(|| {
         PolarsError::InvalidOperation(
             format!("SQL: function expected argument at index {index}").into(),
