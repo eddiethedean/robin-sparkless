@@ -512,6 +512,31 @@ mod tests {
         );
     }
 
+    /// Issue #1562: double-quoted format literal in spark.sql to_date().
+    #[test]
+    fn test_sql_to_date_double_quoted_format() {
+        use serde_json::json;
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("A".to_string(), "string".to_string()),
+            ("B".to_string(), "string".to_string()),
+        ];
+        let rows = vec![vec![json!("1"), json!("2024/01/15 10:30:00")]];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .unwrap();
+        spark.create_or_replace_temp_view("temp_table", df);
+        let result = spark
+            .sql(r#"SELECT A, to_date(B, "yyyy/MM/dd HH:mm:ss") AS parsed_date FROM temp_table"#)
+            .unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("A").and_then(|v| v.as_str()), Some("1"));
+        assert_eq!(
+            rows[0].get("parsed_date").and_then(|v| v.as_str()),
+            Some("2024-01-15")
+        );
+    }
+
     #[test]
     fn test_sql_from_global_temp_view() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
