@@ -13,7 +13,7 @@ A repeatable plan for finding **bugs** and **needed improvements** in robin-spar
 | Step | Command | What it catches |
 |------|---------|------------------|
 | Rust unit + integration | `cargo test` | Regressions, doc tests |
-| Parity (all phases) | `make test-parity-phases` or `cargo test pyspark_parity_fixtures` | Behavioral drift vs PySpark fixtures |
+| Parity (all phases) | `make test-parity-phases` or `pytest tests/parity/` | Behavioral drift vs PySpark fixtures |
 | Python | Out-of-tree (e.g. Sparkless); no in-repo `make test-python` | Bindings, expression semantics |
 | Full CI | `make check-full` | Format, clippy, audit, deny, Rust tests, Python lint, Python tests |
 

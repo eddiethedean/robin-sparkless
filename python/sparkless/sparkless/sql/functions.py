@@ -388,8 +388,6 @@ def format_number(c: ColumnOrName, d: int) -> _ColumnType:
 
 
 # --- Array / collection functions (native-backed) ---
-array = _ni("array")
-struct = _ni("struct")
 
 
 def explode(col_or_name: ColumnOrName) -> _ColumnType:
@@ -425,9 +423,6 @@ def format_string(fmt: str, *cols: ColumnOrName) -> _ColumnType:
     )
 
 
-concat_ws = _ni("concat_ws")
-
-
 # --- Aggregate functions (native-backed) ---
 def mean(col_or_name: ColumnOrName) -> _ColumnType:
     return _col_result(avg(col_or_name))
@@ -454,13 +449,6 @@ def collect_list(col_or_name: ColumnOrName) -> _ColumnType:
 
 def collect_set(col_or_name: ColumnOrName) -> _ColumnType:
     return _col_result(_native_fn("collect_set")(_as_col(col_or_name)))
-
-
-def array_contains(
-    col_or_name: ColumnOrName, value: Union[ColumnOrName, int, float, bool, str]
-) -> _ColumnType:
-    v = _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
-    return _col_result(_native_fn("array_contains")(_as_col(col_or_name), v))
 
 
 def array_distinct(col_or_name: ColumnOrName) -> _ColumnType:
@@ -554,7 +542,10 @@ def map_values(col_or_name):
     return _native.native_map_values(_as_col(col_or_name))
 
 
-sumDistinct = _ni("sumDistinct")
+def sumDistinct(col_or_name: ColumnOrName) -> _ColumnType:
+    """Sum of distinct values (PySpark sumDistinct); use in groupBy().agg()."""
+    _active_session()
+    return _col_result(_native_fn("sum_distinct")(_as_col(col_or_name)))
 
 
 def count_distinct(*cols):
@@ -730,7 +721,7 @@ def hypot(x, y):
     return _col_result(_native.hypot(_as_col(x), _as_col(y)))
 
 
-# --- Window functions (stubs removed; real implementations below) ---
+# PySpark window() table-function stub — use Window.partitionBy(...).orderBy(...) with .over() instead.
 window = _ni("window")
 
 

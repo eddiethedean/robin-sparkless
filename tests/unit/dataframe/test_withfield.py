@@ -826,12 +826,7 @@ class TestWithField:
         assert rows[1]["my_struct"]["new_field"] == "added"
 
     def test_withfield_combined_with_select(self, spark):
-        """Test withField combined with select operation.
-
-        Note: This test may fail if Object dtype columns are not properly preserved
-        through select operations. This is a known limitation when Object dtype
-        columns are selected after withField operations.
-        """
+        """Test withField combined with select operation."""
         schema = StructType(
             [
                 StructField("id", StringType(), True),
@@ -851,28 +846,20 @@ class TestWithField:
             schema=schema,
         )
 
-        # Add field then select
-        # Use string column names for select to avoid translation issues with Object dtype
         result = df.withColumn(
             "my_struct", F.col("my_struct").withField("value_2", F.lit("new"))
         ).select("id", "my_struct")
 
         rows = result.collect()
-        assert len(rows) > 0
+        assert len(rows) == 1
         assert rows[0]["id"] == "A"
-        # Note: my_struct may be None if Object dtype is not preserved through select
-        # This is a known limitation - skip this assertion for now
-        if rows[0]["my_struct"] is not None:
-            assert rows[0]["my_struct"]["value_1"] == 1
-            assert rows[0]["my_struct"]["value_2"] == "new"
-        # Check that other_col is not in the result
-        # PySpark Row conversion - use asDict() if available, otherwise access fields directly
+        assert rows[0]["my_struct"]["value_1"] == 1
+        assert rows[0]["my_struct"]["value_2"] == "new"
         if hasattr(rows[0], "asDict"):
             row_dict = rows[0].asDict()
         elif hasattr(rows[0], "__fields__"):
             row_dict = {field: rows[0][field] for field in rows[0].__fields__}
         else:
-            # For sparkless Row, convert to dict
             row_dict = dict(rows[0])
         assert "other_col" not in row_dict
 

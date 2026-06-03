@@ -81,12 +81,13 @@ class TestSQLDDLParity(ParityTestBase):
         """Test CREATE TABLE AS SELECT matches PySpark behavior.
 
         Runs in PySpark with Hive support enabled (@pytest.mark.hive) so CTAS succeeds.
-        Sparkless does not support CTAS yet (see issue #1508); skipped in sparkless mode.
+        Sparkless intentionally rejects CTAS without Hive (PySpark parity); Hive-catalog
+        CTAS is tracked as feature work in issue #1508.
         """
         if not is_pyspark_mode():
             pytest.skip(
-                "See https://github.com/eddiethedean/robin-sparkless/issues/1508 – "
-                "sparkless CTAS parity gap; unskip once sparkless matches PySpark."
+                "Sparkless rejects CREATE TABLE AS SELECT without Hive catalog (PySpark parity); "
+                "see https://github.com/eddiethedean/robin-sparkless/issues/1508 for Hive-catalog CTAS."
             )
         suffix = uuid.uuid4().hex[:8]
         employees = f"employees_{suffix}"

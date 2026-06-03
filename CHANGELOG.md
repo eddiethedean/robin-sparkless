@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(none yet)
+### Fixed
+
+- **Join dedup path** — Replace `.unwrap()` with `PolarsError` when deduplicating duplicate join column names (#1165 path).
+- **`F.sumDistinct`** — Implement `sum_distinct` in Rust/PyO3; wire Python `F.sumDistinct` (was `_ni()` stub).
+
+### Changed
+
+- **Python `sql.functions`** — Remove dead `_ni()` stubs for `array`, `struct`, and `concat_ws`; remove duplicate `array_contains` definition.
+- **Docs** — Refresh stale failure checklists and parity doc references (pytest parity harness, not removed Rust harness).
+- **CI** — Run `tests/parity/` in default Python job; remove unused pytest asyncio config from root `pyproject.toml`.
 
 ## [4.10.0] - 2026-06-02
 

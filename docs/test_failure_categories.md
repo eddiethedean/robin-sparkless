@@ -1,5 +1,7 @@
 # Test failure categories
 
+> **Historical only (February 2026).** The main suite is green as of May–June 2026 (**3115 passed, 64 skipped, 0 failed**). For current status use [TEST_FAILURE_CHECKLIST.md](TEST_FAILURE_CHECKLIST.md).
+
 Summary of **~605** failing tests (from `pytest tests/ -n 10` with package installed via maturin in `.venv`), grouped by cause/area.
 
 ---

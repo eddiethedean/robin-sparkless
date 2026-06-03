@@ -9550,6 +9550,14 @@ fn count_distinct(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn sum_distinct(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let c = coerce_to_column(col)?;
+    Ok(PyColumn {
+        inner: functions::sum_distinct(&c),
+    })
+}
+
+#[pyfunction]
 fn corr(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::corr(&col1.inner, &col2.inner),
@@ -10437,6 +10445,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(var_pop, m)?)?;
     m.add_function(wrap_pyfunction!(var_samp, m)?)?;
     m.add_function(wrap_pyfunction!(count_distinct, m)?)?;
+    m.add_function(wrap_pyfunction!(sum_distinct, m)?)?;
     m.add_function(wrap_pyfunction!(corr, m)?)?;
     m.add_function(wrap_pyfunction!(explode_outer, m)?)?;
     m.add_function(wrap_pyfunction!(element_at, m)?)?;

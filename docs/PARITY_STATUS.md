@@ -207,7 +207,7 @@ Python phase smoke tests: `test_phase_a_signature_alignment`, `test_phase_b_func
 | `phase15_aliases_nvl_isnull` | nvl, nvl2, isnull, isnotnull (Phase 15) |
 | `string_left_right_replace` | left, right, replace, startswith, endswith, contains, like, ilike, rlike |
 | `math_cosh_cbrt` | cosh, sinh, tanh, acosh, asinh, atanh, cbrt, expm1, log1p, log10, log2, rint, hypot |
-| `array_distinct` | array_distinct(col) — *skipped* (order divergence) |
+| `array_distinct` | array_distinct(col) — JSON fixture may be skipped; Python tests in `tests/dataframe/test_issue_415_array_distinct*.py` and `test_issue_439_*` run in main suite |
 | `regexp_count` | regexp_count(col, pattern) – count non-overlapping matches |
 | `regexp_substr` | regexp_substr(col, pattern) – first match substring |
 | `regexp_instr` | regexp_instr(col, pattern) – 1-based position of first match |

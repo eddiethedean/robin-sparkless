@@ -1,5 +1,4 @@
 [tool.pytest.ini_options]
-asyncio_default_fixture_loop_scope = "function"
 markers = [
     "sparkless_only: run only in sparkless backend mode",
     "pyspark_only: run only in PySpark backend mode",

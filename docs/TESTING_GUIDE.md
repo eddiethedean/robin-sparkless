@@ -68,10 +68,11 @@ As of May 2026, `pytest tests -n 12` reports **64 skipped** tests. These are int
 | **Delta / integration** | `-m delta`, `-m integration` | Not in default CI subset; run `python-delta` job or `SPARKLESS_ENABLE_DELTA=1 pytest -m delta -n 0` |
 | **JDBC / Docker** | `tests/sql/test_jdbc_sqlite.py` | Requires Docker JDBC fixture |
 | **PySpark-only / pyspark4_only** | Some parity window tests | Oracle or JVM-only behavior |
-| **Known binding gaps** | `test_issue_419_single_column_schema.py` | Single-column schema as bare type ([#419](https://github.com/eddiethedean/robin-sparkless/issues/419)) |
-| **Deferred / env** | SQL feature flags, regex lookaround | Documented in test `skip` reason |
+| **Deferred / env** | SQL feature flags, regex lookaround, CTAS with Hive (#1508) | Documented in test `skip` reason |
 
-CI default: `pytest tests -m "not delta and not integration" -n 4` after `maturin develop --release`.
+CI default: `pytest tests -m "not delta and not integration" -n 4` and `pytest tests/parity/` after `maturin develop --release`.
+
+Before release, maintainers should run `make check-full` (Rust `--all-features`, ruff, mypy, and full Python suite locally).
 
 ---
 

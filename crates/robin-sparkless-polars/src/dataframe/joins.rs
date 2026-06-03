@@ -803,18 +803,20 @@ pub fn join(
             .iter_names_and_dtypes()
             .map(|(_name, dt): (_, &PlDataType)| dt.clone())
             .collect();
-        let exprs: Vec<Expr> = unique_order
-            .iter()
-            .map(|name| {
-                let idx = names.iter().position(|n| n == name).unwrap();
-                let e = nth(idx as i64).as_expr();
-                if let Some(dt) = dtypes_by_index.get(idx) {
-                    e.cast(dt.clone()).alias(name.as_str())
-                } else {
-                    e.alias(name.as_str())
-                }
-            })
-            .collect();
+        let mut exprs: Vec<Expr> = Vec::with_capacity(unique_order.len());
+        for name in &unique_order {
+            let idx = names.iter().position(|n| n == name).ok_or_else(|| {
+                PolarsError::ComputeError(
+                    format!("join dedup: column {name:?} not found in join result schema").into(),
+                )
+            })?;
+            let e = nth(idx as i64).as_expr();
+            exprs.push(if let Some(dt) = dtypes_by_index.get(idx) {
+                e.cast(dt.clone()).alias(name.as_str())
+            } else {
+                e.alias(name.as_str())
+            });
+        }
         joined = joined.select(&exprs);
     }
     // For Right/Outer, reorder columns: keys, left non-keys, right non-keys (PySpark order).

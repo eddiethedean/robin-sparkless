@@ -257,6 +257,18 @@ pub fn count_distinct(col: &Column) -> Column {
     )
 }
 
+/// Sum of distinct values (PySpark sumDistinct). Output name PySpark-style sum(DISTINCT column_name).
+pub fn sum_distinct(col: &Column) -> Column {
+    use polars::prelude::DataType;
+    let name = format!("sum(DISTINCT {})", col.name());
+    let mut c = Column::from_expr(
+        col.expr().clone().cast(DataType::Float64).unique().sum(),
+        Some(name),
+    );
+    c.source_for_running = Some(col.name().to_string());
+    c
+}
+
 /// Approximate count distinct (PySpark approx_count_distinct). Use in groupBy.agg(). rsd reserved for API compatibility; Polars uses exact n_unique.
 /// Output name is PySpark-style approx_count_distinct(column_name) so row["approx_count_distinct(value)"] works.
 pub fn approx_count_distinct(col: &Column, _rsd: Option<f64>) -> Column {

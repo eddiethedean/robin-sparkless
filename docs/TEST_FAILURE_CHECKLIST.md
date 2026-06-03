@@ -192,12 +192,15 @@ Audited June 2026 — main suite green; these tests now pass or were renamed:
 - [x] `test_to_date_requires_string_or_date` — renamed from `test_to_date_requires_string` (tests/dataframe/test_type_strictness.py)
 - [x] `test_column_case_variations` — groupBy().agg(F.count("*").alias("count")) passes (June 2026)
 
-Still open / low priority:
+Still open / low priority (audited June 2026 — all pass in main suite):
+
+- [x] `test_create_dataframe_with_all_null_column` — raises ValueError (`tests/unit/dataframe/test_inferschema_parity.py`)
+- [x] `test_create_dataframe_type_promotion_int_to_float` — raises TypeError (`tests/unit/dataframe/test_inferschema_parity.py`)
+- [x] `test_tuple_data_empty_schema` — raises length mismatch (`tests/unit/test_issue_270_tuple_dataframe.py`)
+- [x] `#419` single-column schema — `createDataFrame([1,2,3], "bigint")` → column `"value"` (`tests/dataframe/test_issue_419_single_column_schema.py`)
+- [x] `#420` `verify_schema=` — Python binding passes through to Rust (`tests/dataframe/test_issue_420_verify_schema.py`)
 
 - [ ] `test_datetime_functions_require_session` — expect RuntimeError (test may not exist in tree)
-- [ ] `test_create_dataframe_with_all_null_column` — expect ValueError
-- [ ] `test_create_dataframe_type_promotion_int_to_float` — expect TypeError
-- [ ] `test_tuple_data_empty_schema` — expect SparklessError
 
 ---
 
@@ -206,7 +209,7 @@ Still open / low priority:
 - [x] `substr(1, 0)` with null: returns `''` instead of `None` (test_substr) — Phase 7.1: preserve null in substr when length < 1
 - [x] `soundex` null/empty: returns `'0000'` instead of `''` (test_issue_189_string_functions_robust) — Phase 7.2: empty string -> ''
 - [x] ArrayType `element_type` equality: `StringType()` vs `StringType()` instance comparison (test_array_type_keywords) — Phase 7.3: DataType.__eq__
-- [ ] ArrayType `nullable` / `containsNull` handling (test_array_type_robust; other array-type gaps remain)
+- [x] ArrayType `nullable` / `containsNull` handling (`test_array_type_robust`) — passes (June 2026)
 - [x] `test_array_type_issue_247_example`: `float parse: invalid float literal` — Phase 7.4: use schema field order for createDataFrame dict rows (column_order from explicit schema)
 - [x] `test_create_table_as_select`: returns 0 rows instead of 1 — Phase 7.5: CTAS run query and register result
 - [x] `test_issue_270_tuple_dataframe`: AttributeError `data`, `StructType` schema handling — Phase 6 (tuple+empty schema raises)
@@ -228,11 +231,11 @@ Still open / low priority:
 | fillna types          | ~15   | ~15   | 0         |
 | astype               | ~20   | ~20   | 0         |
 | nulls-ordering       | ~20   | ~20   | 0         |
-| Map subscript        | ~5    | 0     | ~5        |
-| Pivot methods        | ~10   | 0     | ~10       |
-| Missing functions    | ~50   | 0     | ~50       |
-| UDF                   | ~20   | 0     | ~20       |
-| Other                 | ~200+ | 0     | ~200+     |
+| Map subscript        | ~5    | ~5    | 0         |
+| Pivot methods        | ~10   | ~10   | 0         |
+| Missing functions    | ~50   | ~50   | 0         |
+| UDF                   | ~20   | ~15   | ~5 (WHERE/HAVING deferred) |
+| Other                 | ~200+ | ~200+ | 0 (main suite green) |
 
 ---
 

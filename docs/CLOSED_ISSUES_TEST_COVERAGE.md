@@ -1,6 +1,6 @@
 # Closed GitHub Issues – Test Coverage
 
-This document maps **closed GitHub issues** to tests in this repo. All tests are run by `cargo test` (unit tests, `tests/parity.rs` parity fixtures, and `tests/plan_parity_fixtures` plan fixtures).
+This document maps **closed GitHub issues** to tests in this repo. Tests are run by `cargo test --workspace`, `pytest tests/`, and `pytest tests/parity/` (see [TESTING_GUIDE.md](TESTING_GUIDE.md)).
 
 ## Summary
 
@@ -46,7 +46,7 @@ The following fixtures were previously skipped (platform/algorithm difference). 
 
 ## [Sparkless parity] test_* issues (#1–#140)
 
-Covered by **parity fixtures** (`pyspark_parity_fixtures`) and/or **plan fixtures** (`plan_parity_fixtures`). Fixtures live in `tests/fixtures/*.json` and `tests/fixtures/converted/*.json`; many converted fixtures are still skipped. Root fixtures are the main source of **running** tests.
+Covered by **pytest parity tests** (`tests/parity/`), **JSON fixtures** in `tests/fixtures/` and `tests/fixtures/converted/`, and **plan fixtures** in `tests/fixtures/plans/`. Many converted fixtures are still skipped. Root fixtures and `tests/parity/` are the main source of **running** tests.
 
 Representative mapping (issue test name → fixture(s)):
 
@@ -59,23 +59,25 @@ Representative mapping (issue test name → fixture(s)):
 - **Window**: test_row_number, test_rank, test_dense_rank, etc. → `row_number_window.json`, `rank_window.json`, `lag_lead_window.json`, `ntile_window.json`, etc.
 - **Hash**: test_xxhash64 → **`string_xxhash64.json`**; hash() → **`with_hash.json`** (both now running).
 
-To run a single fixture:
+To run parity tests:
 
 ```bash
-PARITY_FIXTURE=<fixture_name> cargo test pyspark_parity_fixtures
+make test-parity-phases
+# or: pytest tests/parity/ -v
 ```
 
-Plan fixtures (for execute_plan):
+Plan fixtures (for `execute_plan`):
 
 ```bash
-# All plan fixtures in tests/fixtures/plans/
-cargo test plan_parity_fixtures
+cargo test -p robin-sparkless-polars plan_parity --features sql
 ```
 
 ## Verifying all tests pass
 
 ```bash
-cargo test
+make check-full
+pytest tests -n 12
+pytest tests/parity/ -v
 ```
 
-This runs unit tests, `pyspark_parity_fixtures`, `plan_parity_fixtures`, and doc tests. No failures expected.
+This runs Rust checks (all features), Python lint, the main pytest suite, and parity tests. No failures expected on main.
