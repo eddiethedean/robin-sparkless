@@ -1213,11 +1213,28 @@ def expr(sql_expr: str):
     return _native.expr_str(sql_expr)
 
 
+def _wrap_expr_str_in_sql_fn(column: object, fn: str, fmt: str | None = None) -> object:
+    """Compose F.expr() SQL when a function wraps an expr() argument (#1574)."""
+    sql = getattr(column, "sql", None)
+    if not isinstance(sql, str):
+        return column
+    if fmt is not None:
+        esc = fmt.replace("'", "''")
+        return expr(f"{fn}({sql}, '{esc}')")
+    return expr(f"{fn}({sql})")
+
+
 def to_timestamp(column, fmt=None):
+    wrapped = _wrap_expr_str_in_sql_fn(column, "to_timestamp", fmt)
+    if getattr(wrapped, "sql", None) is not None:
+        return wrapped
     return _to_timestamp(_as_col(column), fmt)
 
 
 def to_date(column, fmt=None):
+    wrapped = _wrap_expr_str_in_sql_fn(column, "to_date", fmt)
+    if getattr(wrapped, "sql", None) is not None:
+        return wrapped
     return _to_date(_as_col(column), fmt)
 
 

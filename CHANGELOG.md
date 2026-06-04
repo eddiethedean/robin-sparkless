@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`to_timestamp(F.expr(...))` (#1574)** — `F.expr()` results compose inside `to_timestamp` / `to_date`; SQL `expr()` parsing supports `substring`, `regexp_replace`, and `to_timestamp` for `withColumn` expressions.
+
 - **`F.when(cond, None).otherwise(...)` (#1573)** — Two-argument `when` with Python `None` as the then-value now builds a `PyThenBuilder` (null literal) so `.otherwise()` chains work in `withColumn` / `select`.
 
 - **`DataType.typeName()` (#1572)** — PySpark-style `sf.dataType.typeName()` (e.g. `StringType` → `"string"`, `IntegerType` → `"integer"`) on `sparkless.sql.types` classes.

@@ -1373,6 +1373,25 @@ fn sql_expr_to_polars(
             "SQL: subquery in WHERE (EXISTS (SELECT ...)) is not yet supported.".into(),
         )),
         SqlExpr::Subquery(subq) => scalar_subquery_to_expr(session, subq.as_ref()),
+        SqlExpr::Substring {
+            expr,
+            substring_from,
+            substring_for,
+            ..
+        } => {
+            let col_expr =
+                sql_expr_to_polars(expr, session, df, having_agg_map, having_agg_list)?;
+            let start = match substring_from {
+                Some(e) => sql_parse_i64_literal(e)?,
+                None => 1,
+            };
+            let len = substring_for
+                .as_ref()
+                .map(|e| sql_parse_i64_literal(e))
+                .transpose()?;
+            let c = Column::from_expr(col_expr, None);
+            Ok(functions::substring(&c, start, len).expr().clone())
+        }
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL, LIKE, IN.", expr).into(),
         )),
@@ -1397,6 +1416,10 @@ fn sql_function_to_expr(
 
     if func_name.eq_ignore_ascii_case("TO_DATE") {
         return sql_to_date_from_function(func, session, df);
+    }
+
+    if func_name.eq_ignore_ascii_case("TO_TIMESTAMP") {
+        return sql_to_timestamp_from_function(func, session, df);
     }
 
     if func_name.eq_ignore_ascii_case("DATE_ADD") || func_name.eq_ignore_ascii_case("DATEADD") {
@@ -1431,6 +1454,32 @@ fn sql_function_to_expr(
             "TRIM" if args.len() == 1 => Some(functions::trim(col).expr().clone()),
             "LTRIM" if args.len() == 1 => Some(functions::ltrim(col).expr().clone()),
             "RTRIM" if args.len() == 1 => Some(functions::rtrim(col).expr().clone()),
+            "SUBSTRING" | "SUBSTR" if args.len() >= 2 => {
+                let arg_exprs = function_args_slice(&func.args);
+                let start = sql_parse_i64_literal(sql_function_unnamed_expr(arg_exprs, 1)?)?;
+                let len = if args.len() >= 3 {
+                    Some(sql_parse_i64_literal(sql_function_unnamed_expr(
+                        arg_exprs, 2,
+                    )?)?)
+                } else {
+                    None
+                };
+                Some(functions::substring(col, start, len).expr().clone())
+            }
+            "REGEXP_REPLACE" if args.len() == 3 => {
+                use polars::prelude::DataType;
+                Some(
+                    col.expr()
+                        .clone()
+                        .cast(DataType::String)
+                        .str()
+                        .replace_all(
+                            args[1].expr().clone().cast(DataType::String),
+                            args[2].expr().clone().cast(DataType::String),
+                            false,
+                        ),
+                )
+            }
             _ => None,
         };
         if let Some(e) = builtin_expr {
@@ -1535,6 +1584,54 @@ fn sql_function_unnamed_expr(args: &[FunctionArg], index: usize) -> Result<&SqlE
             "SQL: only positional function arguments supported.".into(),
         )),
     }
+}
+
+fn sql_parse_i64_literal(expr: &SqlExpr) -> Result<i64, PolarsError> {
+    use spark_sql_parser::ast::UnaryOperator;
+    match expr {
+        SqlExpr::Value(ValueWithSpan { value: Value::Number(s, _), .. }) => {
+            let v = match parse_sql_number_val(s, "integer literal")? {
+                SqlNumberVal::Int(i) => i,
+                SqlNumberVal::Float(f) => f.round() as i64,
+            };
+            Ok(v)
+        }
+        SqlExpr::UnaryOp {
+            op: UnaryOperator::Minus,
+            expr: inner,
+        } => Ok(-sql_parse_i64_literal(inner)?),
+        SqlExpr::Nested(inner) => sql_parse_i64_literal(inner.as_ref()),
+        _ => Err(PolarsError::InvalidOperation(
+            format!("SQL: expected integer literal, got {:?}", expr).into(),
+        )),
+    }
+}
+
+/// PySpark `to_timestamp(column[, format])` in SQL (issue #1574).
+fn sql_to_timestamp_from_function(
+    func: &Function,
+    session: &SparkSession,
+    df: Option<&DataFrame>,
+) -> Result<Expr, PolarsError> {
+    let args = function_args_slice(&func.args);
+    if args.is_empty() || args.len() > 2 {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: to_timestamp(column[, format]) expects 1 or 2 arguments.".into(),
+        ));
+    }
+    let col_expr = sql_function_unnamed_expr(args, 0)?;
+    let e = sql_expr_to_polars(col_expr, session, df, None, None)?;
+    let col = Column::from_expr(e, None);
+    let format = if args.len() == 2 {
+        Some(sql_expr_to_string_literal(sql_function_unnamed_expr(
+            args, 1,
+        )?)?)
+    } else {
+        None
+    };
+    let result = functions::to_timestamp(&col, format.as_deref())
+        .map_err(|s| PolarsError::InvalidOperation(s.into()))?;
+    Ok(result.expr().clone())
 }
 
 /// PySpark `to_date(column[, format])` in SQL (issue #1562).
