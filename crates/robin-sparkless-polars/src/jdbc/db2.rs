@@ -1,5 +1,6 @@
 use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
+use crate::jdbc::sql_ident::{self, JdbcDialect};
 
 use odbc_api::{
     ConnectionOptions, Cursor, Environment, IntoParameter, ResultSetMetadata, buffers::TextRowSet,
@@ -36,7 +37,8 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
     let sql = if let Some(query) = &opts.query {
         query.clone()
     } else if let Some(table) = &opts.dbtable {
-        format!("SELECT * FROM {table}")
+        let q = sql_ident::quoted_table(JdbcDialect::Db2, table)?;
+        format!("SELECT * FROM {q}")
     } else {
         return Err(EngineError::User(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
@@ -165,11 +167,12 @@ pub(crate) fn write_jdbc_db2(
 
     let dsn = normalize_db2_dsn(&opts.url, opts)?;
 
-    let table = opts.dbtable.as_deref().ok_or_else(|| {
+    let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::User(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
+    let table = sql_ident::quoted_table(JdbcDialect::Db2, table_raw)?;
 
     let env = Environment::new()
         .map_err(|e| EngineError::Internal(format!("JDBC DB2: ODBC env: {e}")))?;
@@ -259,9 +262,15 @@ pub(crate) fn write_jdbc_db2(
         Sm::Overwrite => {
             let use_truncate = opts.truncate.unwrap_or(true);
             if use_truncate {
-                let _ = conn.execute(&format!("TRUNCATE TABLE {table} IMMEDIATE"), (), None);
+                conn.execute(&format!("TRUNCATE TABLE {table} IMMEDIATE"), (), None)
+                    .map_err(|e| {
+                        EngineError::Sql(format!("JDBC write (DB2): truncate table: {e}"))
+                    })?;
             } else {
-                let _ = conn.execute(&format!("DELETE FROM {table}"), (), None);
+                conn.execute(&format!("DELETE FROM {table}"), (), None)
+                    .map_err(|e| {
+                        EngineError::Sql(format!("JDBC write (DB2): delete from table: {e}"))
+                    })?;
             }
         }
         Sm::Append => {}
@@ -276,13 +285,14 @@ pub(crate) fn write_jdbc_db2(
         .iter()
         .map(|n| n.as_str().to_string())
         .collect();
+    let quoted_cols = sql_ident::quoted_columns(JdbcDialect::Db2, &col_names)?;
     let placeholders = (0..col_names.len())
         .map(|_| "?")
         .collect::<Vec<_>>()
         .join(", ");
     let insert_sql = format!(
         "INSERT INTO {table} ({cols}) VALUES ({vals})",
-        cols = col_names.join(", "),
+        cols = quoted_cols.join(", "),
         vals = placeholders
     );
 

@@ -511,12 +511,16 @@ pub fn write_delta(
                 })?;
                 actions.push(add);
 
+                if merge_schema && !overwrite {
+                    return Err(PolarsError::InvalidOperation(
+                        "write_delta: merge_schema on append is not yet supported".into(),
+                    ));
+                }
                 let mode = if overwrite {
                     deltalake::protocol::SaveMode::Overwrite
                 } else {
                     deltalake::protocol::SaveMode::Append
                 };
-                let _ = merge_schema; // schema merge on append handled by delta commit when types align
                 commit_delta_actions(&mut table, actions, mode)
                     .await
                     .map_err(|e: deltalake::DeltaTableError| {

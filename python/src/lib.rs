@@ -581,34 +581,9 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
     Some(JsonValue::Object(obj))
 }
 
-/// Column names that must stay string in collect() when schema is String (#1165, #1261).
-/// For other String columns, numeric-looking values are coerced to int/float.
-/// True when output has a, nested, missing (get_json_object test shape); then treat those as string (#1146, avoid regression on lone column "a").
-fn is_get_json_object_shape(output_names: Option<&[String]>) -> bool {
-    match output_names {
-        Some(n) => {
-            n.iter().any(|s| s == "a")
-                && n.iter().any(|s| s == "nested")
-                && n.iter().any(|s| s == "missing")
-        }
-        None => false,
-    }
-}
-
-/// True when output has exactly the json_tuple shape: both c0 and c1 present as the only two columns.
-/// Used so we only force c0/c1 to string in that narrow context (#1240: union result columns c1..c5
-/// or generic c0..cN from createDataFrame must stay numeric).
-fn is_json_tuple_shape(output_names: Option<&[String]>) -> bool {
-    match output_names {
-        Some(n) => n.len() == 2 && n.iter().any(|s| s == "c0") && n.iter().any(|s| s == "c1"),
-        None => false,
-    }
-}
-
 /// types are preserved even when the engine sent a string (e.g. string-inferred schema).
 /// Recurses for Array and Struct so nested values are coerced too.
 /// When schema is String, value is preserved as string (#1261 PySpark parity).
-/// output_column_names: when Some (top-level collect), used to treat a/nested/missing as string only when all three present (#1146).
 fn json_value_to_py_with_schema(
     py: Python<'_>,
     value: &JsonValue,
@@ -616,7 +591,7 @@ fn json_value_to_py_with_schema(
     datetime_cls: &Bound<'_, PyAny>,
     date_cls: &Bound<'_, PyAny>,
     column_name: Option<&str>,
-    output_column_names: Option<&[String]>,
+    _output_column_names: Option<&[String]>,
 ) -> PyResult<PyObject> {
     Ok(match (dtype, value) {
         (Some(DataType::Timestamp), JsonValue::String(s)) => datetime_cls
@@ -670,15 +645,7 @@ fn json_value_to_py_with_schema(
         (Some(DataType::String), JsonValue::Number(n)) => n.to_string().into_py(py),
         // Schema says String but engine sent bool: emit "True"/"False".
         (Some(DataType::String), JsonValue::Bool(b)) => b.to_string().into_py(py),
-        // #1146: json_tuple c0/c1 always string when both present; get_json_object a/nested/missing only when all three columns present. #1240: do not force c1 to string when columns are e.g. c1..c5.
-        (Some(DataType::Integer) | Some(DataType::Long), JsonValue::Number(n))
-            if (is_json_tuple_shape(output_column_names)
-                && matches!(column_name, Some("c0") | Some("c1")))
-                || (is_get_json_object_shape(output_column_names)
-                    && matches!(column_name, Some("a") | Some("nested") | Some("missing"))) =>
-        {
-            n.to_string().into_py(py)
-        }
+        // #1146: json_tuple/get_json_object string coercion applies only when values are strings in JSON, not numeric Int64 columns named c0/c1.
         // No schema (e.g. coalesce output): best-effort parse string to int/float/bool for PySpark parity.
         // #1066: If string looks like JSON object/array, parse so nested structs work.
         (None, JsonValue::String(s)) => {
@@ -879,6 +846,7 @@ impl PySparkSessionBuilder {
                         );
                         // Reset builder to avoid config pollution between tests
                         slf.inner = SparkSessionBuilder::new();
+                        ensure_thread_active_session(py, sess.clone_ref(py));
                         return Ok(sess);
                     }
                 }
@@ -1008,6 +976,25 @@ fn register_active_session(
     }
 
     Ok(())
+}
+
+/// Push session onto the thread stack when missing (e.g. getOrCreate reuse on a new thread).
+fn ensure_thread_active_session(py: Python<'_>, session: Py<PySparkSession>) {
+    THREAD_ACTIVE_SESSIONS.with(|cell| {
+        let mut v = cell.borrow_mut();
+        let ptr = session.as_ptr();
+        if v.last().map(|s| s.as_ptr()) != Some(ptr) {
+            v.push(session.clone_ref(py));
+        }
+    });
+}
+
+fn require_active_session(py: Python<'_>) -> PyResult<Py<PySparkSession>> {
+    resolve_active_session(py).ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            "operation requires an active SparkSession",
+        )
+    })
 }
 
 fn unregister_active_session_by_ptr(py: Python<'_>, ptr: *mut pyo3::ffi::PyObject) -> PyResult<()> {
@@ -2820,6 +2807,18 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
         return Ok(JsonValue::Number(serde_json::Number::from(i)));
     }
     if let Ok(f) = v.extract::<f64>() {
+        if f.is_nan() {
+            return Ok(JsonValue::String("NaN".to_string()));
+        }
+        if f.is_infinite() {
+            return Ok(JsonValue::String(
+                if f.is_sign_positive() {
+                    "Infinity".to_string()
+                } else {
+                    "-Infinity".to_string()
+                },
+            ));
+        }
         if let Some(n) = serde_json::Number::from_f64(f) {
             return Ok(JsonValue::Number(n));
         }
@@ -4219,13 +4218,11 @@ impl PyDataFrame {
         }
         // F.expr(...) in filter: handle PyExprStr SQL expression strings.
         if let Ok(py_expr_str) = condition.downcast::<PyExprStr>() {
-            let session = THREAD_ACTIVE_SESSIONS
-                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                        "filter with F.expr() requires an active SparkSession",
-                    )
-                })?;
+            let session = require_active_session(py).map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "filter with F.expr() requires an active SparkSession",
+                )
+            })?;
             let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
             })?;
@@ -4242,13 +4239,11 @@ impl PyDataFrame {
                 .map_err(to_py_err);
         }
         if let Ok(expr_str) = condition.extract::<String>() {
-            let session = THREAD_ACTIVE_SESSIONS
-                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
-                .ok_or_else(|| {
-                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                        "filter with string expression requires an active SparkSession",
-                    )
-                })?;
+            let session = require_active_session(py).map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "filter with string expression requires an active SparkSession",
+                )
+            })?;
             let session_ref = session.bind(py).downcast::<PySparkSession>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
             })?;
@@ -8329,13 +8324,7 @@ fn spark_session_builder() -> PySparkSessionBuilder {
 #[pyfunction]
 fn column(py: Python<'_>, name: &str) -> PyResult<PyColumn> {
     // PySpark parity #1250: col() raises AssertionError when no active SparkSession.
-    // Use class-level singleton so we raise after stop() even when fixture ran in another thread (e.g. pytest-xdist).
-    let has_session = py
-        .get_type_bound::<PySparkSession>()
-        .getattr("_singleton_session")
-        .map(|s| !s.is_none())
-        .unwrap_or(false);
-    if !has_session {
+    if resolve_active_session(py).is_none() {
         return Err(pyo3::exceptions::PyAssertionError::new_err(
             "col() requires an active SparkSession",
         ));
@@ -9606,6 +9595,20 @@ fn corr(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn covar_pop(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::covar_pop(&col1.inner, &col2.inner),
+    }
+}
+
+#[pyfunction]
+fn covar_samp(col1: &PyColumn, col2: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::covar_samp(&col1.inner, &col2.inner),
+    }
+}
+
+#[pyfunction]
 fn explode_outer(column: &PyColumn) -> PyColumn {
     PyColumn {
         inner: functions::explode_outer(&column.inner),
@@ -10488,6 +10491,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(count_distinct, m)?)?;
     m.add_function(wrap_pyfunction!(sum_distinct, m)?)?;
     m.add_function(wrap_pyfunction!(corr, m)?)?;
+    m.add_function(wrap_pyfunction!(covar_pop, m)?)?;
+    m.add_function(wrap_pyfunction!(covar_samp, m)?)?;
     m.add_function(wrap_pyfunction!(explode_outer, m)?)?;
     m.add_function(wrap_pyfunction!(element_at, m)?)?;
     m.add_function(wrap_pyfunction!(array_sort, m)?)?;

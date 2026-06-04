@@ -232,7 +232,5 @@ class TestIssue437MeanStringColumn:
         a_row = next(r for r in rows if r["Type"] == "A")
         b_row = next(r for r in rows if r["Type"] == "B")
         assert _norm(a_row["avg(Value)"]) == 10.0
-        # PySpark returns null for empty aggregate; sparkless may return None
-        assert b_row["avg(Value)"] is None or (
-            isinstance(b_row["avg(Value)"], float) and math.isnan(b_row["avg(Value)"])
-        )
+        # PySpark returns null for empty aggregate in group
+        assert b_row["avg(Value)"] is None

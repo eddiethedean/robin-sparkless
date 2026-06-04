@@ -53,11 +53,12 @@ pub(crate) fn write_jdbc_mysql(
 ) -> Result<(), EngineError> {
     use crate::dataframe::SaveMode as Sm;
 
-    let table = opts.dbtable.as_deref().ok_or_else(|| {
+    let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::User(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
+    let table = sql_ident::quoted_table(JdbcDialect::Mysql, table_raw)?;
 
     let mut conn = connect(opts)?;
 
@@ -92,9 +93,15 @@ pub(crate) fn write_jdbc_mysql(
         Sm::Overwrite => {
             let use_truncate = opts.truncate.unwrap_or(true);
             if use_truncate {
-                let _ = conn.query_drop(format!("TRUNCATE TABLE {table}"));
+                conn.query_drop(format!("TRUNCATE TABLE {table}"))
+                    .map_err(|e| {
+                        EngineError::Sql(format!("JDBC write (MySQL): truncate table: {e}"))
+                    })?;
             } else {
-                let _ = conn.query_drop(format!("DELETE FROM {table}"));
+                conn.query_drop(format!("DELETE FROM {table}"))
+                    .map_err(|e| {
+                        EngineError::Sql(format!("JDBC write (MySQL): delete from table: {e}"))
+                    })?;
             }
         }
         Sm::Append => {}
@@ -109,13 +116,14 @@ pub(crate) fn write_jdbc_mysql(
         .iter()
         .map(|n| n.as_str().to_string())
         .collect();
+    let quoted_cols = sql_ident::quoted_columns(JdbcDialect::Mysql, &col_names)?;
     let placeholders = (0..col_names.len())
         .map(|_| "?")
         .collect::<Vec<_>>()
         .join(", ");
     let insert_sql = format!(
         "INSERT INTO {table} ({cols}) VALUES ({vals})",
-        cols = col_names.join(", "),
+        cols = quoted_cols.join(", "),
         vals = placeholders
     );
 

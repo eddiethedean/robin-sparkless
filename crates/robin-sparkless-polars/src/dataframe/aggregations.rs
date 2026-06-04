@@ -210,26 +210,7 @@ impl GroupedData {
         let agg_expr = vec![col(c.as_str()).sum().alias(format!("sum({column})"))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
-        let all_cols: Vec<String> = pl_df
-            .get_column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let grouping_cols: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
-        let mut reordered_cols: Vec<&str> = Vec::new();
-        for gc in &grouping_cols {
-            if all_cols.iter().any(|c| c == gc) {
-                reordered_cols.push(gc);
-            }
-        }
-        for col_name in &all_cols {
-            if !grouping_cols.iter().any(|gc| *gc == col_name) {
-                reordered_cols.push(col_name);
-            }
-        }
-        if !reordered_cols.is_empty() {
-            pl_df = pl_df.select(reordered_cols)?;
-        }
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
         Ok(super::DataFrame::from_polars_with_options(
             pl_df,
             self.case_sensitive,
@@ -1635,6 +1616,16 @@ mod tests {
         let out = grouped.sum("v").unwrap();
         assert_eq!(out.count().unwrap(), 2);
         let cols = out.columns().unwrap();
+        assert!(cols.iter().any(|c| c.starts_with("sum(")));
+    }
+
+    #[test]
+    fn group_by_empty_sum_drops_ghost_key() {
+        let df = test_df();
+        let grouped = df.group_by(vec![]).unwrap();
+        let out = grouped.sum("v").unwrap();
+        let cols = out.columns().unwrap();
+        assert!(!cols.contains(&"_gb_global".to_string()));
         assert!(cols.iter().any(|c| c.starts_with("sum(")));
     }
 

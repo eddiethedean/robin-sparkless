@@ -168,22 +168,12 @@ pub fn apply_isnan_pyspark_parity(column: Column) -> PolarsResult<Option<Column>
             );
             out.into_series()
         }
-        // PySpark special case: string "NaN" is treated as NaN (true), all other strings false.
-        // This also covers our JSON serialization path where float NaN becomes the string "nan".
-        DataType::String => {
-            let ca = series.str().map_err(|e| compute_err("isnan", e))?;
-            let out = BooleanChunked::from_iter_options(
-                name.as_str().into(),
-                ca.into_iter().map(|opt_s| {
-                    Some(
-                        opt_s
-                            .map(|s| s.trim().eq_ignore_ascii_case("nan"))
-                            .unwrap_or(false),
-                    )
-                }),
-            );
-            out.into_series()
-        }
+        // PySpark: isnan on string columns is always false (including the literal "NaN").
+        DataType::String => BooleanChunked::from_iter_options(
+            name.as_str().into(),
+            (0..series.len()).map(|_| Some(false)),
+        )
+        .into_series(),
         _ => BooleanChunked::from_iter_options(
             name.as_str().into(),
             (0..series.len()).map(|_| Some(false)),

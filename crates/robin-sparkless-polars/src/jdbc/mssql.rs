@@ -1,5 +1,6 @@
 use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
+use crate::jdbc::sql_ident::{self, JdbcDialect};
 
 use futures_util::TryStreamExt;
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
@@ -134,7 +135,8 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     let sql = if let Some(query) = &opts.query {
         query.clone()
     } else if let Some(table) = &opts.dbtable {
-        format!("SELECT * FROM {table}")
+        let q = sql_ident::quoted_table(JdbcDialect::Mssql, table)?;
+        format!("SELECT * FROM {q}")
     } else {
         return Err(EngineError::User(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
@@ -315,24 +317,26 @@ pub(crate) fn write_jdbc_mssql(
 ) -> Result<(), EngineError> {
     use crate::dataframe::SaveMode as Sm;
 
-    let table = opts.dbtable.as_deref().ok_or_else(|| {
+    let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::User(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
+    let table = sql_ident::quoted_table(JdbcDialect::Mssql, table_raw)?;
 
     let col_names: Vec<String> = df
         .get_column_names()
         .iter()
         .map(|n| n.as_str().to_string())
         .collect();
+    let quoted_cols = sql_ident::quoted_columns(JdbcDialect::Mssql, &col_names)?;
     let placeholders = (1..=col_names.len())
         .map(|i| format!("@P{i}"))
         .collect::<Vec<_>>()
         .join(", ");
     let insert_sql = format!(
         "INSERT INTO {table} ({cols}) VALUES ({vals})",
-        cols = col_names.join(", "),
+        cols = quoted_cols.join(", "),
         vals = placeholders
     );
 
@@ -388,9 +392,23 @@ pub(crate) fn write_jdbc_mssql(
             Sm::Overwrite => {
                 let use_truncate = opts.truncate.unwrap_or(true);
                 if use_truncate {
-                    let _ = client.execute(format!("TRUNCATE TABLE {table}"), &[]).await;
+                    client
+                        .execute(format!("TRUNCATE TABLE {table}"), &[])
+                        .await
+                        .map_err(|e| {
+                            EngineError::Sql(format!(
+                                "JDBC write (SQL Server): truncate table: {e}"
+                            ))
+                        })?;
                 } else {
-                    let _ = client.execute(format!("DELETE FROM {table}"), &[]).await;
+                    client
+                        .execute(format!("DELETE FROM {table}"), &[])
+                        .await
+                        .map_err(|e| {
+                            EngineError::Sql(format!(
+                                "JDBC write (SQL Server): delete from table: {e}"
+                            ))
+                        })?;
                 }
             }
             Sm::Append => {}

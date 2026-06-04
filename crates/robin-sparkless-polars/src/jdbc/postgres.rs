@@ -65,12 +65,24 @@ pub(crate) fn write_jdbc_postgres(
             let use_truncate = opts.truncate.unwrap_or(true);
             if use_truncate {
                 if opts.cascade_truncate.unwrap_or(false) {
-                    let _ = client.execute(&format!("TRUNCATE TABLE ONLY {table} CASCADE"), &[]);
+                    client
+                        .execute(&format!("TRUNCATE TABLE ONLY {table} CASCADE"), &[])
+                        .map_err(|e| {
+                            EngineError::Sql(format!("JDBC write: truncate table cascade: {e}"))
+                        })?;
                 } else {
-                    let _ = client.execute(&format!("TRUNCATE TABLE {table}"), &[]);
+                    client
+                        .execute(&format!("TRUNCATE TABLE {table}"), &[])
+                        .map_err(|e| {
+                            EngineError::Sql(format!("JDBC write: truncate table: {e}"))
+                        })?;
                 }
             } else {
-                let _ = client.execute(&format!("DELETE FROM {table}"), &[]);
+                client
+                    .execute(&format!("DELETE FROM {table}"), &[])
+                    .map_err(|e| {
+                        EngineError::Sql(format!("JDBC write: delete from table: {e}"))
+                    })?;
             }
         }
         Sm::Append => {}

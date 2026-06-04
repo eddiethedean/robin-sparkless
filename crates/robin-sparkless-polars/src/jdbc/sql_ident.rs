@@ -79,7 +79,6 @@ pub fn quote_qualified_table(
 }
 
 #[derive(Copy, Clone, Debug)]
-#[allow(dead_code)] // Mssql, Oracle, Db2 used when #1585 lands
 pub enum JdbcDialect {
     Sqlite,
     Postgres,

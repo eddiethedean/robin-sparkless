@@ -592,6 +592,14 @@ def corr(col1, col2):
     return _col_result(_native_fn("corr")(_as_col(col1), _as_col(col2)))
 
 
+def covar_pop(col1, col2):
+    return _col_result(_native_fn("covar_pop")(_as_col(col1), _as_col(col2)))
+
+
+def covar_samp(col1, col2):
+    return _col_result(_native_fn("covar_samp")(_as_col(col1), _as_col(col2)))
+
+
 def broadcast(df):
     """Broadcast hint for DataFrame joins (PySpark parity). No-op on DataFrame."""
     return df

@@ -1381,12 +1381,26 @@ impl DataFrame {
             .iter()
             .zip(plan_dtypes.iter())
             .map(|(name, dt)| {
-                let force_string = dt == &DataType::Int64
+                let force_string_candidate = dt == &DataType::Int64
                     && ((has_json_tuple_shape && (name.as_str() == "c0" || name.as_str() == "c1"))
                         || (has_get_json_object_shape
                             && (name.as_str() == "a"
                                 || name.as_str() == "nested"
                                 || name.as_str() == "missing")));
+                let force_string = force_string_candidate
+                    && collected
+                        .get_column_index(name.as_str())
+                        .map(|idx| {
+                            let s = &collected.columns()[idx];
+                            !matches!(
+                                s.dtype(),
+                                DataType::Int64
+                                    | DataType::Int32
+                                    | DataType::Float64
+                                    | DataType::Float32
+                            )
+                        })
+                        .unwrap_or(true);
                 if force_string {
                     DataType::String
                 } else {

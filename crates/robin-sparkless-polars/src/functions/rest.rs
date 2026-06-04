@@ -305,13 +305,18 @@ pub fn skewness(col: &Column) -> Column {
 }
 
 fn covar_pop_expr_impl(e1: Expr, e2: Expr) -> Expr {
-    use polars::prelude::len;
+    // PySpark excludes rows where either column is null (#1475), same as corr.
+    let cond = e1.clone().is_not_null().and(e2.clone().is_not_null());
     let c1 = e1.clone().cast(DataType::Float64);
     let c2 = e2.clone().cast(DataType::Float64);
-    let n = len().cast(DataType::Float64);
-    let sum_ab = (c1.clone() * c2.clone()).sum();
-    let sum_a = e1.sum().cast(DataType::Float64);
-    let sum_b = e2.sum().cast(DataType::Float64);
+    let n = e1
+        .clone()
+        .filter(cond.clone())
+        .count()
+        .cast(DataType::Float64);
+    let sum_ab = (c1.clone() * c2.clone()).filter(cond.clone()).sum();
+    let sum_a = c1.clone().filter(cond.clone()).sum();
+    let sum_b = c2.clone().filter(cond).sum();
     (sum_ab - sum_a * sum_b / n.clone()) / n
 }
 
@@ -343,15 +348,21 @@ fn corr_expr_impl(e1: Expr, e2: Expr) -> Expr {
 }
 
 fn covar_samp_expr_impl(e1: Expr, e2: Expr) -> Expr {
-    use polars::prelude::{len, lit, when};
+    use polars::prelude::{lit, when};
+    let cond = e1.clone().is_not_null().and(e2.clone().is_not_null());
     let c1 = e1.clone().cast(DataType::Float64);
     let c2 = e2.clone().cast(DataType::Float64);
-    let n = len().cast(DataType::Float64);
-    let sum_ab = (c1.clone() * c2.clone()).sum();
-    let sum_a = e1.sum().cast(DataType::Float64);
-    let sum_b = e2.sum().cast(DataType::Float64);
-    when(len().gt(lit(1)))
-        .then((sum_ab - sum_a * sum_b / n.clone()) / (len() - lit(1)).cast(DataType::Float64))
+    let n = e1
+        .clone()
+        .filter(cond.clone())
+        .count()
+        .cast(DataType::Float64);
+    let n1 = n.clone() - lit(1.0);
+    let sum_ab = (c1.clone() * c2.clone()).filter(cond.clone()).sum();
+    let sum_a = c1.clone().filter(cond.clone()).sum();
+    let sum_b = c2.clone().filter(cond).sum();
+    when(n.clone().gt(lit(1.0)))
+        .then((sum_ab - sum_a * sum_b / n) / n1)
         .otherwise(lit(f64::NAN))
 }
 
@@ -381,6 +392,14 @@ pub fn corr(col1: &Column, col2: &Column) -> Column {
 pub fn covar_samp_expr(col1: &str, col2: &str) -> Expr {
     use polars::prelude::col as pl_col;
     covar_samp_expr_impl(pl_col(col1), pl_col(col2))
+}
+
+/// Sample covariance aggregation (PySpark covar_samp). Module-level; use in groupBy.agg() with two columns.
+pub fn covar_samp(col1: &Column, col2: &Column) -> Column {
+    Column::from_expr(
+        covar_samp_expr_impl(col1.expr().clone(), col2.expr().clone()),
+        Some("covar_samp".to_string()),
+    )
 }
 
 /// Pearson correlation aggregation (PySpark corr). Returns Expr for use in groupBy.agg().

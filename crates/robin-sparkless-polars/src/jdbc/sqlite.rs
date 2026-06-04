@@ -57,7 +57,8 @@ pub(crate) fn write_jdbc_sqlite(
         }
         Sm::Overwrite => {
             // SQLite doesn't support TRUNCATE, always use DELETE
-            let _ = conn.execute(&format!("DELETE FROM {table}"), []);
+            conn.execute(&format!("DELETE FROM {table}"), [])
+                .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): delete from table: {e}")))?;
         }
         Sm::Append => {}
     }

@@ -83,11 +83,10 @@ class TestIssue263IsnanString:
 
         by_id = {r["id"]: (r["s_isnan"], r["x_isnan"]) for r in rows}
 
-        # String column: PySpark treats the string "NaN" as NaN (returns True)
-        # Other strings and None return False
+        # String column: PySpark isnan is always false (including literal "NaN")
         assert by_id[1][0] is False  # None
         assert by_id[2][0] is False  # Empty string
-        assert by_id[3][0] is True  # String "NaN" - PySpark special case
+        assert by_id[3][0] is False  # String "NaN"
         assert by_id[4][0] is False  # Other string
 
         # Numeric column: only real NaN should be True; None should be False

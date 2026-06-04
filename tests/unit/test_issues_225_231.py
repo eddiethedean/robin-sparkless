@@ -500,11 +500,8 @@ class TestIssue229PandasDataFrameSupport:
 
         assert df.count() == 3
         rows = df.collect()
-        # pandas uses NaN for numeric nulls, which becomes None in Sparkless
-        # Check that the null value is None or NaN (both are valid)
-        assert rows[1].id is None or (
-            isinstance(rows[1].id, float) and math.isnan(rows[1].id)
-        )
+        # pandas numeric nulls should collect as None, not the string "nan"
+        assert rows[1].id is None
         assert rows[1].name is None
 
 

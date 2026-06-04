@@ -1,5 +1,6 @@
 use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
+use crate::jdbc::sql_ident::{self, JdbcDialect};
 
 use oracle_rs::{Connection, Value};
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
@@ -54,7 +55,8 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     let sql = if let Some(query) = &opts.query {
         query.clone()
     } else if let Some(table) = &opts.dbtable {
-        format!("SELECT * FROM {table}")
+        let q = sql_ident::quoted_table(JdbcDialect::Oracle, table)?;
+        format!("SELECT * FROM {q}")
     } else {
         return Err(EngineError::User(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
@@ -182,11 +184,12 @@ pub(crate) fn write_jdbc_oracle(
 ) -> Result<(), EngineError> {
     use crate::dataframe::SaveMode as Sm;
 
-    let table = opts.dbtable.as_deref().ok_or_else(|| {
+    let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::User(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
+    let table = sql_ident::quoted_table(JdbcDialect::Oracle, table_raw)?;
 
     with_runtime(async move {
         let conn = connect_async(opts).await?;
@@ -241,14 +244,30 @@ pub(crate) fn write_jdbc_oracle(
                 let use_truncate = opts.truncate.unwrap_or(false); // Oracle default: use DELETE
                 if use_truncate {
                     if opts.cascade_truncate.unwrap_or(false) {
-                        let _ = conn
-                            .execute(&format!("TRUNCATE TABLE {table} CASCADE"), &[])
-                            .await;
+                        conn.execute(&format!("TRUNCATE TABLE {table} CASCADE"), &[])
+                            .await
+                            .map_err(|e| {
+                                EngineError::Sql(format!(
+                                    "JDBC write (Oracle): truncate table cascade: {e}"
+                                ))
+                            })?;
                     } else {
-                        let _ = conn.execute(&format!("TRUNCATE TABLE {table}"), &[]).await;
+                        conn.execute(&format!("TRUNCATE TABLE {table}"), &[])
+                            .await
+                            .map_err(|e| {
+                                EngineError::Sql(format!(
+                                    "JDBC write (Oracle): truncate table: {e}"
+                                ))
+                            })?;
                     }
                 } else {
-                    let _ = conn.execute(&format!("DELETE FROM {table}"), &[]).await;
+                    conn.execute(&format!("DELETE FROM {table}"), &[])
+                        .await
+                        .map_err(|e| {
+                            EngineError::Sql(format!(
+                                "JDBC write (Oracle): delete from table: {e}"
+                            ))
+                        })?;
                 }
                 conn.commit().await.ok();
             }
@@ -264,13 +283,14 @@ pub(crate) fn write_jdbc_oracle(
             .iter()
             .map(|n| n.as_str().to_string())
             .collect();
+        let quoted_cols = sql_ident::quoted_columns(JdbcDialect::Oracle, &col_names)?;
         let placeholders = (1..=col_names.len())
             .map(|i| format!(":{i}"))
             .collect::<Vec<_>>()
             .join(", ");
         let insert_sql = format!(
             "INSERT INTO {table} ({cols}) VALUES ({vals})",
-            cols = col_names.join(", "),
+            cols = quoted_cols.join(", "),
             vals = placeholders
         );
 
