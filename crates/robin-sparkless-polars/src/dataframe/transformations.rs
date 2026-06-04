@@ -47,6 +47,20 @@ fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
     expr_referenced_columns(expr).contains(column_name)
 }
 
+/// True when the select list references at least one input-frame column besides explode outputs.
+/// Frame-level explode is only required in that case (PySpark sibling replication, #1563).
+fn select_has_sibling_frame_columns(
+    exprs: &[Expr],
+    df_columns: &HashSet<String>,
+    ignore_output_names: &HashSet<String>,
+) -> bool {
+    exprs.iter().any(|e| {
+        expr_referenced_columns(e)
+            .iter()
+            .any(|c| df_columns.contains(c) && !ignore_output_names.contains(c))
+    })
+}
+
 /// If the expression contains an Explode node, return its input and options (for posexplode detection).
 fn find_explode_in_expr(expr: &Expr) -> Option<(Arc<Expr>, polars::prelude::ExplodeOptions)> {
     if let Expr::Explode { input, options } = expr {
@@ -259,6 +273,7 @@ pub fn select_with_exprs(
         Option<Expr>,
     );
     let mut explode_targets: Vec<ExplodeTarget> = Vec::new();
+    let exprs_before_explode_rewrite = exprs.clone();
     let exprs: Vec<Expr> = exprs
         .into_iter()
         .enumerate()
@@ -332,19 +347,29 @@ pub fn select_with_exprs(
                         } else {
                             // explode(list_expr) e.g. explode(split(col("name"), " ")) (#1563)
                             let out_col = name.clone();
-                            let already = explode_targets.iter().any(|(_, a, o, _)| {
-                                a.as_ref().map(|x| x.as_str()) == Some(out_col.as_str())
-                                    && *o == options
-                            });
-                            if !already {
-                                explode_targets.push((
-                                    out_col.clone(),
-                                    Some(out_col.clone()),
-                                    options,
-                                    Some(input.as_ref().clone()),
-                                ));
+                            let ignore = HashSet::from([out_col.to_string()]);
+                            let needs_frame = select_has_sibling_frame_columns(
+                                &exprs_before_explode_rewrite,
+                                &df_columns,
+                                &ignore,
+                            );
+                            if needs_frame {
+                                let already = explode_targets.iter().any(|(_, a, o, _)| {
+                                    a.as_ref().map(|x| x.as_str()) == Some(out_col.as_str())
+                                        && *o == options
+                                });
+                                if !already {
+                                    explode_targets.push((
+                                        out_col.clone(),
+                                        Some(out_col.clone()),
+                                        options,
+                                        Some(input.as_ref().clone()),
+                                    ));
+                                }
+                                Expr::Alias(Arc::new(Expr::Column(out_col)), name)
+                            } else {
+                                Expr::Alias(inner, name)
                             }
-                            Expr::Alias(Arc::new(Expr::Column(out_col)), name)
                         }
                     } else {
                         Expr::Alias(inner, name)
@@ -361,18 +386,28 @@ pub fn select_with_exprs(
                         Expr::Column(col_name.clone())
                     } else {
                         let temp = PlSmallStr::from(format!("__explode_{}", explode_targets.len()));
-                        let already = explode_targets.iter().any(|(c, a, o, _)| {
-                            c.as_str() == temp.as_str() && a.is_none() && *o == options
-                        });
-                        if !already {
-                            explode_targets.push((
-                                temp.clone(),
-                                Some(temp.clone()),
-                                options,
-                                Some(input.as_ref().clone()),
-                            ));
+                        let ignore = HashSet::from([temp.to_string()]);
+                        let needs_frame = select_has_sibling_frame_columns(
+                            &exprs_before_explode_rewrite,
+                            &df_columns,
+                            &ignore,
+                        );
+                        if needs_frame {
+                            let already = explode_targets.iter().any(|(c, a, o, _)| {
+                                c.as_str() == temp.as_str() && a.is_none() && *o == options
+                            });
+                            if !already {
+                                explode_targets.push((
+                                    temp.clone(),
+                                    Some(temp.clone()),
+                                    options,
+                                    Some(input.as_ref().clone()),
+                                ));
+                            }
+                            Expr::Column(temp)
+                        } else {
+                            Expr::Explode { input, options }
                         }
-                        Expr::Column(temp)
                     }
                 }
                 other => other,
@@ -466,27 +501,15 @@ pub fn select_with_exprs(
     } else {
         lf.select(&exprs)
     };
-    // When input is Eager (e.g. createDataFrame), return Eager result so collect() uses
-    // schema order that matches columns (#1267). List-of-dicts createDataFrame first column
-    // null is fixed in Python binding (python_row_to_json).
-    if df.is_eager() {
-        let pre = df.lazy_frame();
-        let pl_df = lf.collect()?;
-        Ok(super::DataFrame::from_eager_after_select(
-            pl_df,
-            case_sensitive,
-            pre,
-            exprs.clone(),
-        ))
-    } else {
-        let pre = df.lazy_frame();
-        Ok(super::DataFrame::from_lazy_after_select(
-            lf,
-            case_sensitive,
-            pre,
-            exprs.clone(),
-        ))
-    }
+    // Stay lazy after select so transform chains do not materialize on every step (#1568).
+    // collect() / show() materialize once; plan schema preserves column order (#1267).
+    let pre = df.lazy_frame();
+    Ok(super::DataFrame::from_lazy_after_select(
+        lf,
+        case_sensitive,
+        pre,
+        exprs.clone(),
+    ))
 }
 
 /// Select item: either a column name (str) or an expression (PySpark parity: select("a", col("b").alias("x"))).
@@ -2907,6 +2930,34 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].get("Size").and_then(|v| v.as_str()), Some("Small"));
         assert_eq!(rows[1].get("Size").and_then(|v| v.as_str()), Some("Large"));
+    }
+
+    /// Issue #1568: select on eager createDataFrame input must not materialize every step.
+    #[test]
+    fn select_on_eager_input_stays_lazy() {
+        use serde_json::json;
+        let spark = SparkSession::builder()
+            .app_name("select_eager_lazy")
+            .get_or_create();
+        let df = spark
+            .create_dataframe_from_rows(
+                vec![vec![json!(1), json!("a")]],
+                vec![
+                    ("id".to_string(), "long".to_string()),
+                    ("name".to_string(), "string".to_string()),
+                ],
+                false,
+                false,
+            )
+            .unwrap();
+        assert!(df.is_eager());
+        let out = select_items(
+            &df,
+            vec![SelectItem::ColumnName("id")],
+            false,
+        )
+        .unwrap();
+        assert!(!out.is_eager());
     }
 
     /// Issue #1563: select(id, explode(split(name, " ")).alias("word")) replicates id per exploded row.

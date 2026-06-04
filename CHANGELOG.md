@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(none yet)
+### Fixed
+
+- **Performance regression 4.9 → 4.10 (#1568)** — Keep `select` lazy on eager inputs (avoid materializing every transform step); apply frame-level `explode` for list expressions only when sibling columns need replication; map `INSERT … SELECT` columns lazily instead of round-tripping through JSON rows.
 
 ## [4.10.0] - 2026-06-03
 

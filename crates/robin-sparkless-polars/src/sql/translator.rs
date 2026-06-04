@@ -278,13 +278,15 @@ pub fn translate(
 
 /// Map INSERT ... SELECT output onto the target table schema (respect column list, NULL-fill omitted columns).
 fn align_insert_select_to_target(
-    session: &SparkSession,
-    select_df: DataFrame,
+    select_df: &DataFrame,
     target_schema: &StructType,
     target_cols: &[String],
     index_map: &[usize],
     insert_col_count: usize,
 ) -> Result<DataFrame, PolarsError> {
+    use crate::schema_conv::data_type_to_polars_type;
+    use polars::prelude::DataType as PlDataType;
+
     let select_schema = select_df.schema()?;
     let select_fields = select_schema.fields();
     if select_fields.len() != insert_col_count {
@@ -297,22 +299,24 @@ fn align_insert_select_to_target(
         ));
     }
     let select_col_names: Vec<String> = select_fields.iter().map(|f| f.name.clone()).collect();
-    let select_rows = select_df.collect_as_json_rows()?;
-    let mut rows: Vec<Vec<JsonValue>> = Vec::with_capacity(select_rows.len());
-    for select_row in select_rows {
-        let mut row: Vec<JsonValue> = vec![JsonValue::Null; target_cols.len()];
-        for (val_pos, &target_idx) in index_map.iter().enumerate() {
-            let col_name = &select_col_names[val_pos];
-            row[target_idx] = select_row.get(col_name).cloned().unwrap_or(JsonValue::Null);
+    let case_sensitive = select_df.case_sensitive;
+    let mut exprs: Vec<Expr> = Vec::with_capacity(target_cols.len());
+    for (target_idx, target_name) in target_cols.iter().enumerate() {
+        if let Some(val_pos) = index_map.iter().position(|&tidx| tidx == target_idx) {
+            let src = &select_col_names[val_pos];
+            let resolved = select_df.resolve_column_name(src)?;
+            exprs.push(col(resolved.as_str()).alias(target_name.as_str()));
+        } else {
+            let pl_ty = data_type_to_polars_type(&target_schema.fields()[target_idx].data_type);
+            let null_expr = match pl_ty {
+                PlDataType::String => lit(polars::prelude::NULL).cast(PlDataType::String),
+                other => lit(polars::prelude::NULL).cast(other),
+            };
+            exprs.push(null_expr.alias(target_name.as_str()));
         }
-        rows.push(row);
     }
-    let schema: Vec<(String, String)> = target_schema
-        .fields()
-        .iter()
-        .map(|f| (f.name.clone(), core_data_type_to_str(&f.data_type)))
-        .collect();
-    session.create_dataframe_from_rows(rows, schema, false, false)
+    let lf = select_df.lazy_frame().select(exprs);
+    Ok(DataFrame::from_lazy_with_options(lf, case_sensitive))
 }
 
 /// Translate INSERT INTO table [(col1, col2, ...)] {VALUES (...), (...)} or
@@ -402,8 +406,7 @@ fn translate_insert(
             _ => {
                 let select_df = translate_query(session, query.as_ref())?;
                 align_insert_select_to_target(
-                    session,
-                    select_df,
+                    &select_df,
                     &target_schema,
                     &target_cols,
                     &index_map,
