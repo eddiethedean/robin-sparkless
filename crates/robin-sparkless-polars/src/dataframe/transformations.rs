@@ -47,6 +47,33 @@ fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
     expr_referenced_columns(expr).contains(column_name)
 }
 
+/// Unwrap `Alias` and return the inner `Explode` input and options, if present.
+fn explode_expr_parts(expr: &Expr) -> Option<(Arc<Expr>, polars::prelude::ExplodeOptions)> {
+    let inner = match expr {
+        Expr::Alias(e, _) => e.as_ref(),
+        e => e,
+    };
+    match inner {
+        Expr::Explode { input, options } => Some((input.clone(), *options)),
+        _ => None,
+    }
+}
+
+/// Materialize a list-producing expression into `column_name`, then frame-level explode (#1563, #1570).
+fn lazy_frame_explode_list_expr(
+    lf: polars::prelude::LazyFrame,
+    column_name: &str,
+    list_expr: Expr,
+    options: polars::prelude::ExplodeOptions,
+) -> polars::prelude::LazyFrame {
+    let lf = lf.with_column(list_expr.alias(column_name));
+    let selector = Selector::ByName {
+        names: Arc::from([PlSmallStr::from(column_name)]),
+        strict: true,
+    };
+    lf.explode(selector, options)
+}
+
 /// True when the select list references at least one input-frame column besides explode outputs.
 /// Frame-level explode is only required in that case (PySpark sibling replication, #1563).
 fn select_has_sibling_frame_columns(
@@ -922,25 +949,23 @@ pub fn with_column(
         let all = df.columns()?;
         let existing_str = existing.as_str();
         if expr_refs_column(&expr, existing_str) {
-            let inner = match &expr {
-                Expr::Alias(e, _) => e.as_ref(),
-                e => e,
-            };
-            // Use LazyFrame.explode() when replacing a column with explode(that column) so other columns replicate.
-            let refs = expr_referenced_columns(inner);
-            let use_frame_explode = refs.len() == 1
-                && refs.contains(existing_str)
-                && matches!(inner, Expr::Explode { .. });
-            if use_frame_explode {
-                let options = match inner {
-                    Expr::Explode { options, .. } => *options,
-                    _ => unreachable!(),
-                };
-                let selector = Selector::ByName {
-                    names: Arc::from([PlSmallStr::from(existing_str)]),
-                    strict: true,
-                };
-                lf.explode(selector, options)
+            if let Some((input, options)) = explode_expr_parts(&expr) {
+                // explode(existing list column) in place — not explode(split(existing)) (#1570).
+                let explode_existing_list_col = matches!(input.as_ref(), Expr::Column(c) if c.as_str() == existing_str);
+                if explode_existing_list_col {
+                    let selector = Selector::ByName {
+                        names: Arc::from([PlSmallStr::from(existing_str)]),
+                        strict: true,
+                    };
+                    lf.explode(selector, options)
+                } else {
+                    lazy_frame_explode_list_expr(
+                        lf,
+                        column_name,
+                        input.as_ref().clone(),
+                        options,
+                    )
+                }
             } else {
                 // Replace in one shot: select all columns but use expr for the replaced name.
                 let select_exprs: Vec<Expr> = all
@@ -964,38 +989,44 @@ pub fn with_column(
             lf.select(&to_keep).with_column(expr.alias(column_name))
         }
     } else {
-        // Adding a new column. If expr is explode(some_column), use frame-level explode so row count matches (PySpark parity).
-        // Preserve the original list column: add a copy with column_name, then explode it (so Name/Value stay, ExplodedValue expands).
-        let inner = match &expr {
-            Expr::Alias(e, _) => e.as_ref(),
-            e => e,
-        };
-        if let Expr::Explode {
-            input,
-            options: explode_opts,
-        } = inner
-        {
+        // Adding a new column. If expr is explode(list_col or list expr), use frame-level explode (PySpark parity).
+        if let Some((input, explode_opts)) = explode_expr_parts(&expr) {
             if let Expr::Column(explode_col) = input.as_ref() {
-                let refs = expr_referenced_columns(inner);
+                let refs = expr_referenced_columns(input.as_ref());
                 if refs.len() == 1 {
                     let explode_col_str = explode_col.as_str();
                     if df.resolve_column_name(explode_col_str).is_ok() {
-                        // Add new column as copy of list, then explode it so original column is preserved.
+                        // Preserve the original list column: copy then explode the copy (#1054).
                         let lf_with_copy =
                             lf.with_column(col(explode_col.as_str()).alias(column_name));
                         let selector = Selector::ByName {
                             names: Arc::from([PlSmallStr::from(column_name)]),
                             strict: true,
                         };
-                        lf_with_copy.explode(selector, *explode_opts)
+                        lf_with_copy.explode(selector, explode_opts)
                     } else {
-                        lf.with_column(expr.alias(column_name))
+                        lazy_frame_explode_list_expr(
+                            lf,
+                            column_name,
+                            input.as_ref().clone(),
+                            explode_opts,
+                        )
                     }
                 } else {
-                    lf.with_column(expr.alias(column_name))
+                    lazy_frame_explode_list_expr(
+                        lf,
+                        column_name,
+                        input.as_ref().clone(),
+                        explode_opts,
+                    )
                 }
             } else {
-                lf.with_column(expr.alias(column_name))
+                lazy_frame_explode_list_expr(
+                    lf,
+                    column_name,
+                    input.as_ref().clone(),
+                    explode_opts,
+                )
             }
         } else {
             lf.with_column(expr.alias(column_name))

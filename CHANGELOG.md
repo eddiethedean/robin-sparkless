@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`withColumn(explode(split(...)))` (#1570)** — Frame-level explode for list expressions (e.g. `withColumn('name', explode(split(name, ' ')))`); no longer explodes the raw string column when the argument is `split(...)`.
+
 - **SQL `date_add(unit, quantity, start)` (#1569)** — Recognize unit keywords (`MONTH`, `DAY`, …) in three-argument `date_add`; support `current_date()` / `current_timestamp()` as zero-arg SQL functions in SELECT.
 
 - **Performance regression 4.9 → 4.10 (#1568)** — Keep `select` lazy on eager inputs (avoid materializing every transform step); apply frame-level `explode` for list expressions only when sibling columns need replication; map `INSERT … SELECT` columns lazily instead of round-tripping through JSON rows.
