@@ -1468,17 +1468,11 @@ fn sql_function_to_expr(
             }
             "REGEXP_REPLACE" if args.len() == 3 => {
                 use polars::prelude::DataType;
-                Some(
-                    col.expr()
-                        .clone()
-                        .cast(DataType::String)
-                        .str()
-                        .replace_all(
-                            args[1].expr().clone().cast(DataType::String),
-                            args[2].expr().clone().cast(DataType::String),
-                            false,
-                        ),
-                )
+                Some(col.expr().clone().cast(DataType::String).str().replace_all(
+                    args[1].expr().clone().cast(DataType::String),
+                    args[2].expr().clone().cast(DataType::String),
+                    false,
+                ))
             }
             _ => None,
         };
@@ -1589,7 +1583,10 @@ fn sql_function_unnamed_expr(args: &[FunctionArg], index: usize) -> Result<&SqlE
 fn sql_parse_i64_literal(expr: &SqlExpr) -> Result<i64, PolarsError> {
     use spark_sql_parser::ast::UnaryOperator;
     match expr {
-        SqlExpr::Value(ValueWithSpan { value: Value::Number(s, _), .. }) => {
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::Number(s, _),
+            ..
+        }) => {
             let v = match parse_sql_number_val(s, "integer literal")? {
                 SqlNumberVal::Int(i) => i,
                 SqlNumberVal::Float(f) => f.round() as i64,
@@ -1684,7 +1681,10 @@ fn sql_parse_date_unit(expr: &SqlExpr) -> Option<String> {
 fn sql_parse_int_literal(expr: &SqlExpr) -> Result<i32, PolarsError> {
     use spark_sql_parser::ast::UnaryOperator;
     match expr {
-        SqlExpr::Value(ValueWithSpan { value: Value::Number(s, _), .. }) => {
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::Number(s, _),
+            ..
+        }) => {
             let v = match parse_sql_number_val(s, "integer literal")? {
                 SqlNumberVal::Int(i) => i,
                 SqlNumberVal::Float(f) => f.round() as i64,
@@ -1786,8 +1786,7 @@ fn sql_date_add_from_function(
             Ok(result_col.expr().clone())
         }
         _ => Err(PolarsError::InvalidOperation(
-            "SQL: date_add expects 2 arguments (start, days) or 3 (unit, quantity, start)."
-                .into(),
+            "SQL: date_add expects 2 arguments (start, days) or 3 (unit, quantity, start).".into(),
         )),
     }
 }

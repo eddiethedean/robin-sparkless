@@ -219,6 +219,7 @@ impl DataFrame {
     }
 
     /// Eager DataFrame after select; retains pre-select lazy frame for orderBy on non-selected columns (#1389).
+    #[allow(dead_code)]
     pub(crate) fn from_eager_after_select(
         pl_df: polars::prelude::DataFrame,
         case_sensitive: bool,
@@ -278,6 +279,7 @@ impl DataFrame {
     }
 
     /// True if this DataFrame is backed by an eager Polars DataFrame (e.g. from create_dataframe_from_rows).
+    #[cfg(test)]
     pub(crate) fn is_eager(&self) -> bool {
         matches!(&self.inner, DataFrameInner::Eager(_))
     }
@@ -584,7 +586,7 @@ impl DataFrame {
 
         /// Peel `Alias` wrappers (e.g. from `Column::into_expr()` on literals) so nested comparisons
         /// under logical NOT / map UDFs still match column-vs-literal coercion (#1571).
-        fn peel_expr_alias<'e>(expr: &'e Expr) -> &'e Expr {
+        fn peel_expr_alias(expr: &Expr) -> &Expr {
             let mut e = expr;
             while let Expr::Alias(inner, _) = e {
                 e = inner.as_ref();
@@ -3632,9 +3634,7 @@ mod tests {
     /// #1571: logical NOT (~) on string-column == numeric-literal must coerce inner comparison.
     #[test]
     fn filter_not_string_column_eq_numeric_literal() {
-        use crate::column::Column;
         use crate::functions::col;
-        use polars::prelude::lit;
 
         let s = Series::new("A".into(), &["1"]);
         let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();

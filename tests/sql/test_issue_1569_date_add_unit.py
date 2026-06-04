@@ -36,9 +36,7 @@ def test_sql_date_add_day_two_arg(spark) -> None:
 
 def test_sql_date_add_month_current_date(spark) -> None:
     """PySpark overload: date_add(MONTH, -13, current_date()) runs without unresolved MONTH."""
-    rows = spark.sql(
-        "SELECT date_add(MONTH, -13, current_date()) AS result"
-    ).collect()
+    rows = spark.sql("SELECT date_add(MONTH, -13, current_date()) AS result").collect()
     assert len(rows) == 1
     assert rows[0]["result"] is not None
 

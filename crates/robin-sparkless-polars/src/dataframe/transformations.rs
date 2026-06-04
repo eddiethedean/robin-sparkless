@@ -951,7 +951,8 @@ pub fn with_column(
         if expr_refs_column(&expr, existing_str) {
             if let Some((input, options)) = explode_expr_parts(&expr) {
                 // explode(existing list column) in place — not explode(split(existing)) (#1570).
-                let explode_existing_list_col = matches!(input.as_ref(), Expr::Column(c) if c.as_str() == existing_str);
+                let explode_existing_list_col =
+                    matches!(input.as_ref(), Expr::Column(c) if c.as_str() == existing_str);
                 if explode_existing_list_col {
                     let selector = Selector::ByName {
                         names: Arc::from([PlSmallStr::from(existing_str)]),
@@ -959,12 +960,7 @@ pub fn with_column(
                     };
                     lf.explode(selector, options)
                 } else {
-                    lazy_frame_explode_list_expr(
-                        lf,
-                        column_name,
-                        input.as_ref().clone(),
-                        options,
-                    )
+                    lazy_frame_explode_list_expr(lf, column_name, input.as_ref().clone(), options)
                 }
             } else {
                 // Replace in one shot: select all columns but use expr for the replaced name.
@@ -1021,12 +1017,7 @@ pub fn with_column(
                     )
                 }
             } else {
-                lazy_frame_explode_list_expr(
-                    lf,
-                    column_name,
-                    input.as_ref().clone(),
-                    explode_opts,
-                )
+                lazy_frame_explode_list_expr(lf, column_name, input.as_ref().clone(), explode_opts)
             }
         } else {
             lf.with_column(expr.alias(column_name))
@@ -2982,12 +2973,7 @@ mod tests {
             )
             .unwrap();
         assert!(df.is_eager());
-        let out = select_items(
-            &df,
-            vec![SelectItem::ColumnName("id")],
-            false,
-        )
-        .unwrap();
+        let out = select_items(&df, vec![SelectItem::ColumnName("id")], false).unwrap();
         assert!(!out.is_eager());
     }
 
