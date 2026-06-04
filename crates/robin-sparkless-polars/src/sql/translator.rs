@@ -1399,6 +1399,26 @@ fn sql_function_to_expr(
         return sql_to_date_from_function(func, session, df);
     }
 
+    if func_name.eq_ignore_ascii_case("DATE_ADD") || func_name.eq_ignore_ascii_case("DATEADD") {
+        return sql_date_add_from_function(func, session, df);
+    }
+
+    if matches!(
+        func_name.to_uppercase().as_str(),
+        "CURRENT_DATE" | "CURDATE"
+    ) && function_args_slice(&func.args).is_empty()
+    {
+        return Ok(functions::current_date().expr().clone());
+    }
+
+    if matches!(
+        func_name.to_uppercase().as_str(),
+        "CURRENT_TIMESTAMP" | "NOW" | "LOCALTIMESTAMP"
+    ) && function_args_slice(&func.args).is_empty()
+    {
+        return Ok(functions::current_timestamp().expr().clone());
+    }
+
     let args = sql_function_args_to_columns(func, session, df)?;
 
     let case_sensitive = session.is_case_sensitive();
@@ -1542,6 +1562,137 @@ fn sql_to_date_from_function(
     let result = functions::to_date(&col, format.as_deref())
         .map_err(|s| PolarsError::InvalidOperation(s.into()))?;
     Ok(result.expr().clone())
+}
+
+/// Spark SQL date unit keywords for `date_add(unit, quantity, start)` (#1569, SPARK-43492).
+const SQL_DATE_UNITS: &[&str] = &[
+    "DAY", "DAYS", "WEEK", "WEEKS", "MONTH", "MONTHS", "YEAR", "YEARS", "QUARTER", "QUARTERS",
+    "HOUR", "HOURS", "MINUTE", "MINUTES", "SECOND", "SECONDS",
+];
+
+fn sql_parse_date_unit(expr: &SqlExpr) -> Option<String> {
+    match expr {
+        SqlExpr::Identifier(ident) => {
+            let u = ident.value.to_uppercase();
+            if SQL_DATE_UNITS.contains(&u.as_str()) {
+                Some(u)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn sql_parse_int_literal(expr: &SqlExpr) -> Result<i32, PolarsError> {
+    use spark_sql_parser::ast::UnaryOperator;
+    match expr {
+        SqlExpr::Value(ValueWithSpan { value: Value::Number(s, _), .. }) => {
+            let v = match parse_sql_number_val(s, "integer literal")? {
+                SqlNumberVal::Int(i) => i,
+                SqlNumberVal::Float(f) => f.round() as i64,
+            };
+            i32::try_from(v).map_err(|_| {
+                PolarsError::InvalidOperation(
+                    format!("SQL: integer literal out of range for i32: {v}").into(),
+                )
+            })
+        }
+        SqlExpr::UnaryOp {
+            op: UnaryOperator::Minus,
+            expr: inner,
+        } => Ok(-sql_parse_int_literal(inner)?),
+        SqlExpr::Nested(inner) => sql_parse_int_literal(inner.as_ref()),
+        _ => Err(PolarsError::InvalidOperation(
+            format!("SQL: expected integer literal, got {:?}", expr).into(),
+        )),
+    }
+}
+
+/// Resolve a SQL expression to a date/datetime Polars expr, including zero-arg `current_date()`.
+fn sql_expr_to_datetime_expr(
+    expr: &SqlExpr,
+    session: &SparkSession,
+    df: Option<&DataFrame>,
+) -> Result<Expr, PolarsError> {
+    if let SqlExpr::Function(func) = expr {
+        let name = func
+            .name
+            .0
+            .last()
+            .and_then(|p| p.as_ident())
+            .map(|i| i.value.as_str())
+            .unwrap_or("");
+        if matches!(name.to_uppercase().as_str(), "CURRENT_DATE" | "CURDATE")
+            && function_args_slice(&func.args).is_empty()
+        {
+            return Ok(functions::current_date().expr().clone());
+        }
+        if matches!(
+            name.to_uppercase().as_str(),
+            "CURRENT_TIMESTAMP" | "NOW" | "LOCALTIMESTAMP"
+        ) && function_args_slice(&func.args).is_empty()
+        {
+            return Ok(functions::current_timestamp().expr().clone());
+        }
+    }
+    sql_expr_to_polars(expr, session, df, None, None)
+}
+
+/// PySpark `date_add(start, days)` or `date_add(unit, quantity, start)` in SQL (#1569).
+fn sql_date_add_from_function(
+    func: &Function,
+    session: &SparkSession,
+    df: Option<&DataFrame>,
+) -> Result<Expr, PolarsError> {
+    let args = function_args_slice(&func.args);
+    match args.len() {
+        2 => {
+            let start_expr =
+                sql_expr_to_datetime_expr(sql_function_unnamed_expr(args, 0)?, session, df)?;
+            let n = sql_parse_int_literal(sql_function_unnamed_expr(args, 1)?)?;
+            let start_col = Column::from_expr(start_expr, None);
+            Ok(functions::date_add(&start_col, n).expr().clone())
+        }
+        3 => {
+            let unit_expr = sql_function_unnamed_expr(args, 0)?;
+            let unit = sql_parse_date_unit(unit_expr).ok_or_else(|| {
+                PolarsError::InvalidOperation(
+                    format!(
+                        "SQL: date_add(unit, quantity, start) expected a date unit keyword \
+                         (DAY, MONTH, YEAR, ...), not {:?}",
+                        unit_expr
+                    )
+                    .into(),
+                )
+            })?;
+            let n = sql_parse_int_literal(sql_function_unnamed_expr(args, 1)?)?;
+            let start_expr =
+                sql_expr_to_datetime_expr(sql_function_unnamed_expr(args, 2)?, session, df)?;
+            let start_col = Column::from_expr(start_expr, None);
+            let result_col = match unit.as_str() {
+                "DAY" | "DAYS" => functions::date_add(&start_col, n),
+                "MONTH" | "MONTHS" => functions::add_months(&start_col, n),
+                "WEEK" | "WEEKS" => functions::date_add(&start_col, n.saturating_mul(7)),
+                "YEAR" | "YEARS" => functions::add_months(&start_col, n.saturating_mul(12)),
+                "QUARTER" | "QUARTERS" => functions::add_months(&start_col, n.saturating_mul(3)),
+                "HOUR" | "HOURS" | "MINUTE" | "MINUTES" | "SECOND" | "SECONDS" => {
+                    let amt = Column::from_expr(lit(n as i64), None);
+                    functions::timestampadd(&unit, &amt, &start_col)
+                }
+                _ => {
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: unsupported date_add unit '{unit}'").into(),
+                    ));
+                }
+            };
+            Ok(result_col.expr().clone())
+        }
+        _ => Err(PolarsError::InvalidOperation(
+            "SQL: date_add expects 2 arguments (start, days) or 3 (unit, quantity, start)."
+                .into(),
+        )),
+    }
 }
 
 /// Projection item: either a plain Expr (built-in, Rust UDF, identifier) or Python UDF Column.
@@ -1776,6 +1927,33 @@ fn projection_function_to_item(
     if func_name.eq_ignore_ascii_case("TO_DATE") {
         let e = sql_to_date_from_function(func, session, df)?;
         return Ok(ProjItem::Expr(e.alias(&alias), alias));
+    }
+
+    if func_name.eq_ignore_ascii_case("DATE_ADD") || func_name.eq_ignore_ascii_case("DATEADD") {
+        let e = sql_date_add_from_function(func, session, df)?;
+        return Ok(ProjItem::Expr(e.alias(&alias), alias));
+    }
+
+    if matches!(
+        func_name.to_uppercase().as_str(),
+        "CURRENT_DATE" | "CURDATE"
+    ) && function_args_slice(&func.args).is_empty()
+    {
+        return Ok(ProjItem::Expr(
+            functions::current_date().expr().clone().alias(&alias),
+            alias,
+        ));
+    }
+
+    if matches!(
+        func_name.to_uppercase().as_str(),
+        "CURRENT_TIMESTAMP" | "NOW" | "LOCALTIMESTAMP"
+    ) && function_args_slice(&func.args).is_empty()
+    {
+        return Ok(ProjItem::Expr(
+            functions::current_timestamp().expr().clone().alias(&alias),
+            alias,
+        ));
     }
 
     let args = sql_function_args_to_columns(func, session, df)?;
