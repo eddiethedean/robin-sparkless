@@ -368,28 +368,35 @@ fn parquet_file_to_add_action(
     parquet_path: &Path,
     table_uri: &str,
 ) -> Result<deltalake::kernel::Action, deltalake::DeltaTableError> {
-    use delta_kernel::table_properties::DataSkippingNumIndexedCols;
-    use deltalake::writer::create_add;
-    use indexmap::IndexMap;
-    use std::fs::File;
+    use std::collections::HashMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    let file = File::open(parquet_path)?;
-    let metadata = parquet::file::metadata::ParquetMetaDataReader::new().parse_and_finish(&file)?;
-    let size = std::fs::metadata(parquet_path)?.len() as i64;
+    let size = std::fs::metadata(parquet_path)
+        .map_err(|e| deltalake::DeltaTableError::Io { source: e })?
+        .len() as i64;
     let rel_path = parquet_path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("part.parquet")
         .to_string();
-    let add = create_add(
-        &IndexMap::new(),
-        rel_path,
-        size,
-        &metadata,
-        DataSkippingNumIndexedCols::NumColumns(32),
-        &None::<Vec<&str>>,
-    )?;
+    let modification_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| deltalake::DeltaTableError::Generic(e.to_string()))?
+        .as_millis() as i64;
     let _ = table_uri; // path is relative to table root
+    let add = deltalake::kernel::Add {
+        path: rel_path,
+        partition_values: HashMap::new(),
+        size,
+        modification_time,
+        data_change: true,
+        stats: None,
+        tags: None,
+        deletion_vector: None,
+        base_row_id: None,
+        default_row_commit_version: None,
+        clustering_provider: None,
+    };
     Ok(deltalake::kernel::Action::Add(add))
 }
 
