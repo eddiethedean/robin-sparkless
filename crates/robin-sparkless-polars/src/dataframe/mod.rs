@@ -582,6 +582,16 @@ impl DataFrame {
             }
         }
 
+        /// Peel `Alias` wrappers (e.g. from `Column::into_expr()` on literals) so nested comparisons
+        /// under logical NOT / map UDFs still match column-vs-literal coercion (#1571).
+        fn peel_expr_alias<'e>(expr: &'e Expr) -> &'e Expr {
+            let mut e = expr;
+            while let Expr::Alias(inner, _) = e {
+                e = inner.as_ref();
+            }
+            e
+        }
+
         // Apply root-level coercion first so the top-level filter condition (e.g. col("str_col") == lit(123))
         // is always rewritten even if try_map_expr traversal does not hit the root in the expected order.
         // #1023: Unwrap Alias from Column::into_expr() so we coerce the inner BinaryExpr (string vs numeric).
@@ -821,26 +831,32 @@ impl DataFrame {
                     return Ok(Expr::BinaryExpr { left, op, right });
                 }
 
-                let left_is_col = matches!(&*left, Expr::Column(_));
-                let right_is_col = matches!(&*right, Expr::Column(_));
-                let left_is_lit = matches!(&*left, Expr::Literal(_));
-                let right_is_lit = matches!(&*right, Expr::Literal(_));
-                let left_is_string_lit =
-                    matches!(&*left, Expr::Literal(lv) if lv.get_datatype() == DataType::String);
-                let right_is_string_lit =
-                    matches!(&*right, Expr::Literal(lv) if lv.get_datatype() == DataType::String);
+                let left_peeled = peel_expr_alias(left.as_ref());
+                let right_peeled = peel_expr_alias(right.as_ref());
+                let left_is_col = matches!(left_peeled, Expr::Column(_));
+                let right_is_col = matches!(right_peeled, Expr::Column(_));
+                let left_is_lit = matches!(left_peeled, Expr::Literal(_));
+                let right_is_lit = matches!(right_peeled, Expr::Literal(_));
+                let left_is_string_lit = matches!(
+                    left_peeled,
+                    Expr::Literal(lv) if lv.get_datatype() == DataType::String
+                );
+                let right_is_string_lit = matches!(
+                    right_peeled,
+                    Expr::Literal(lv) if lv.get_datatype() == DataType::String
+                );
 
-                let left_is_numeric_lit = left_is_lit && is_numeric_literal(left.as_ref());
-                let right_is_numeric_lit = right_is_lit && is_numeric_literal(right.as_ref());
+                let left_is_numeric_lit = left_is_lit && is_numeric_literal(left_peeled);
+                let right_is_numeric_lit = right_is_lit && is_numeric_literal(right_peeled);
 
                 // Column-vs-numeric-literal: use column dtype; String (or unknown) -> try_to_number then compare (PySpark #235, #602).
                 let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
-                    let col_ty = if let Expr::Column(n) = &*left {
+                    let col_ty = if let Expr::Column(n) = left_peeled {
                         get_col_dtype(n.as_str())
                     } else {
                         None
                     };
-                    let lit_ty = match &*right {
+                    let lit_ty = match right_peeled {
                         Expr::Literal(lv) => literal_dtype(lv),
                         _ => DataType::Float64,
                     };
@@ -854,12 +870,12 @@ impl DataFrame {
                     )
                     .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
                 } else if right_is_col && left_is_numeric_lit {
-                    let col_ty = if let Expr::Column(n) = &*right {
+                    let col_ty = if let Expr::Column(n) = right_peeled {
                         get_col_dtype(n.as_str())
                     } else {
                         None
                     };
-                    let lit_ty = match &*left {
+                    let lit_ty = match left_peeled {
                         Expr::Literal(lv) => literal_dtype(lv),
                         _ => DataType::Float64,
                     };
@@ -876,12 +892,12 @@ impl DataFrame {
                     || (right_is_col && left_is_string_lit)
                 {
                     let col_name = if left_is_col {
-                        if let Expr::Column(n) = &*left {
+                        if let Expr::Column(n) = left_peeled {
                             n.as_str()
                         } else {
                             unreachable!()
                         }
-                    } else if let Expr::Column(n) = &*right {
+                    } else if let Expr::Column(n) = right_peeled {
                         n.as_str()
                     } else {
                         unreachable!()
@@ -3611,6 +3627,22 @@ mod tests {
         assert_eq!(out.count().unwrap(), 1);
         let rows = out.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("value").and_then(|v| v.as_i64()), Some(100));
+    }
+
+    /// #1571: logical NOT (~) on string-column == numeric-literal must coerce inner comparison.
+    #[test]
+    fn filter_not_string_column_eq_numeric_literal() {
+        use crate::column::Column;
+        use crate::functions::col;
+        use polars::prelude::lit;
+
+        let s = Series::new("A".into(), &["1"]);
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        let cmp = col("A").eq(crate::functions::lit_i64(1).into_expr());
+        let condition = cmp.logical_not().into_expr();
+        let out = df.filter(condition).unwrap();
+        assert_eq!(out.count().unwrap(), 0);
     }
 
     /// #1545: logical Or of numeric-column == string-literal comparisons (filter coercion).

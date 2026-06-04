@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`filter(~(col == numeric))` on string columns (#1571)** — Nested comparisons under logical NOT (`~`) now coerce string–numeric operands when literals are wrapped in `Alias` (Python `Column` RHS); fixes `cannot compare string with numeric type (i32)` for e.g. `df.filter(~(F.col("A") == 1))`.
+
 - **`withColumn(explode(split(...)))` (#1570)** — Frame-level explode for list expressions (e.g. `withColumn('name', explode(split(name, ' ')))`); no longer explodes the raw string column when the argument is `split(...)`.
 
 - **SQL `date_add(unit, quantity, start)` (#1569)** — Recognize unit keywords (`MONTH`, `DAY`, …) in three-argument `date_add`; support `current_date()` / `current_timestamp()` as zero-arg SQL functions in SELECT.
