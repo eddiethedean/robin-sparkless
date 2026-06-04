@@ -25,6 +25,18 @@ RowGetItemReturn = Union[RowValue, Tuple[RowValue, ...]]
 
 
 class DataType:
+    @classmethod
+    def typeName(cls) -> str:
+        """PySpark parity: stable type identifier (e.g. ``string`` for ``StringType``).
+
+        Distinct from :meth:`simpleString` for some types (e.g. ``IntegerType`` →
+        ``integer`` here vs ``int`` in ``simpleString``).
+        """
+        name = cls.__name__
+        if name.endswith("Type"):
+            return name[:-4].lower()
+        return name.lower()
+
     def simpleString(self) -> str:
         return "string"
 
