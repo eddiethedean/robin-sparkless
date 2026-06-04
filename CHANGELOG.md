@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Performance regression 4.9 → 4.10 (#1568)** — Keep `select` lazy on eager inputs (avoid materializing every transform step); apply frame-level `explode` for list expressions only when sibling columns need replication; map `INSERT … SELECT` columns lazily instead of round-tripping through JSON rows.
+
 - **Join dedup path** — Replace `.unwrap()` with `PolarsError` when deduplicating duplicate join column names (#1165 path).
 - **`F.sumDistinct`** — Implement `sum_distinct` in Rust/PyO3; wire Python `F.sumDistinct` (was `_ni()` stub).
 
