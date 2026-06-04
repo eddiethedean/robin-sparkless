@@ -11,16 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Performance regression 4.9 → 4.10 (#1568)** — Keep `select` lazy on eager inputs (avoid materializing every transform step); apply frame-level `explode` for list expressions only when sibling columns need replication; map `INSERT … SELECT` columns lazily instead of round-tripping through JSON rows.
 
-- **Join dedup path** — Replace `.unwrap()` with `PolarsError` when deduplicating duplicate join column names (#1165 path).
-- **`F.sumDistinct`** — Implement `sum_distinct` in Rust/PyO3; wire Python `F.sumDistinct` (was `_ni()` stub).
-
-### Changed
-
-- **Python `sql.functions`** — Remove dead `_ni()` stubs for `array`, `struct`, and `concat_ws`; remove duplicate `array_contains` definition.
-- **Docs** — Refresh stale failure checklists and parity doc references (pytest parity harness, not removed Rust harness).
-- **CI** — Run `tests/parity/` in default Python job; remove unused pytest asyncio config from root `pyproject.toml`.
-
-## [4.10.0] - 2026-06-02
+## [4.10.0] - 2026-06-03
 
 ### Fixed
 
@@ -31,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **#1563 – `explode(split(...))` in `select`** — Frame-level explode now applies when the list comes from an expression (e.g. `F.explode(F.split(F.col("name"), " "))`), so sibling columns replicate per exploded row.
 
 - **#1562 – `to_date` format string in `spark.sql`** — Double-quoted format literals (e.g. `to_date(B, "yyyy/MM/dd HH:mm:ss")`) are parsed as string constants, not column names; `TO_DATE` is supported as a SQL built-in.
+
+- **Join dedup path** — Replace `.unwrap()` with `PolarsError` when deduplicating duplicate join column names (#1165 path).
+
+- **`F.sumDistinct`** — Implement `sum_distinct` in Rust/PyO3; wire Python `F.sumDistinct` (was `_ni()` stub).
+
+### Changed
+
+- **Python `sql.functions`** — Remove dead `_ni()` stubs for `array`, `struct`, and `concat_ws`; remove duplicate `array_contains` definition.
+
+- **Docs** — Refresh stale failure checklists and parity doc references (pytest parity harness, not removed Rust harness).
+
+- **CI** — Run `tests/parity/` in default Python job; remove unused pytest asyncio config from root `pyproject.toml`.
 
 ## [4.9.0] - 2026-05-29
 
