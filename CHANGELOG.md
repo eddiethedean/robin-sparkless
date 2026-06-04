@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`to_timestamp` with fractional seconds (#1578)** — Default-format parsing (no format string) now accepts sub-second precision (e.g. `2026-06-04 12:34:56.78`) via flexible timestamp parsing instead of returning null.
+
 - **`to_timestamp(F.expr(...))` (#1574)** — `F.expr()` results compose inside `to_timestamp` / `to_date`; SQL `expr()` parsing supports `substring`, `regexp_replace`, and `to_timestamp` for `withColumn` expressions.
 
 - **`F.when(cond, None).otherwise(...)` (#1573)** — Two-argument `when` with Python `None` as the then-value now builds a `PyThenBuilder` (null literal) so `.otherwise()` chains work in `withColumn` / `select`.
