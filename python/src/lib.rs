@@ -862,7 +862,9 @@ impl PySparkSessionBuilder {
                 if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
                     let sess_ref = sess.bind(py).downcast::<PySparkSession>()?;
                     let sess_guard = sess_ref.borrow();
-                    if sess_guard.builder_config_compatible(&slf.inner) {
+                    if !sess_guard.stopped.load(std::sync::atomic::Ordering::SeqCst)
+                        && sess_guard.builder_config_compatible(&slf.inner)
+                    {
                         // Ensure thread UDF context is set when returning existing singleton
                         // This fixes test isolation issues where context was cleared but singleton reused
                         robin_sparkless::set_thread_udf_context_full(
@@ -890,6 +892,7 @@ impl PySparkSessionBuilder {
             PySparkSession {
                 inner: session,
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
+                stopped: std::sync::atomic::AtomicBool::new(false),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -915,6 +918,8 @@ struct PySparkSession {
     inner: SparkSession,
     /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
     backend_type: RefCell<String>,
+    /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
+    stopped: std::sync::atomic::AtomicBool,
 }
 
 impl PySparkSession {
@@ -933,6 +938,42 @@ thread_local! {
     static THREAD_ACTIVE_SESSIONS: RefCell<Vec<Py<PySparkSession>>> = const { RefCell::new(Vec::new()) };
     /// Optional Python callable to run Python UDFs when with_column sees a UDF column. Set by Python on session creation.
     static PYTHON_UDF_EXECUTOR: RefCell<Option<Py<PyAny>>> = const { RefCell::new(None) };
+}
+
+/// Resolve the active session: thread-local stack first (PySpark), then non-stopped singleton.
+fn resolve_active_session(py: Python<'_>) -> Option<Py<PySparkSession>> {
+    let from_stack = THREAD_ACTIVE_SESSIONS.with(|cell| {
+        cell.borrow().last().and_then(|s| {
+            let bound = s.bind(py);
+            if let Ok(sess) = bound.downcast::<PySparkSession>() {
+                if sess
+                    .borrow()
+                    .stopped
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    return None;
+                }
+            }
+            Some(s.clone_ref(py))
+        })
+    });
+    if from_stack.is_some() {
+        return from_stack;
+    }
+    let ty = py.get_type_bound::<PySparkSession>();
+    if let Ok(singleton) = ty.getattr("_singleton_session") {
+        if !singleton.is_none() {
+            if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
+                let bound = sess.bind(py);
+                if let Ok(s) = bound.downcast::<PySparkSession>() {
+                    if !s.borrow().stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                        return Some(sess);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn register_active_session(
@@ -983,7 +1024,9 @@ fn unregister_active_session_by_ptr(py: Python<'_>, ptr: *mut pyo3::ffi::PyObjec
             while i < list.len() {
                 if let Ok(item) = list.get_item(i) {
                     if item.as_ptr() == ptr {
-                        let _ = list.del_item(i);
+                        if list.del_item(i).is_err() {
+                            i += 1;
+                        }
                         continue;
                     }
                 }
@@ -1043,6 +1086,7 @@ impl PySparkSession {
             PySparkSession {
                 inner: session,
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
+                stopped: std::sync::atomic::AtomicBool::new(false),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -1081,26 +1125,10 @@ impl PySparkSession {
         _cls: &Bound<'_, pyo3::types::PyType>,
         py: Python<'_>,
     ) -> PyResult<Option<Py<PySparkSession>>> {
-        let ty = py.get_type_bound::<PySparkSession>();
-        if let Ok(singleton) = ty.getattr("_singleton_session") {
-            if !singleton.is_none() {
-                if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
-                    return Ok(Some(sess));
-                }
-            }
+        if let Some(sess) = resolve_active_session(py) {
+            return Ok(Some(sess));
         }
-
-        // Compatibility: if tests manually clear _active_sessions and singleton, treat as no session.
-        if let Ok(list_any) = ty.getattr("_active_sessions") {
-            if let Ok(list) = list_any.downcast::<PyList>() {
-                if list.is_empty() {
-                    return Ok(None);
-                }
-            }
-        }
-
-        let top = THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-        Ok(top)
+        Ok(None)
     }
 
     #[pyo3(name = "newSession")]
@@ -1112,6 +1140,7 @@ impl PySparkSession {
             PySparkSession {
                 inner: session,
                 backend_type: RefCell::new(backend_type),
+                stopped: std::sync::atomic::AtomicBool::new(false),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -1364,6 +1393,8 @@ impl PySparkSession {
     }
 
     fn stop(slf: PyRef<Self>, py: Python<'_>) -> PyResult<()> {
+        slf.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        WINDOW_ORDER_SORT_HINT.with(|cell| *cell.borrow_mut() = None);
         slf.inner.stop();
         let ptr = slf.into_py(py).as_ptr();
         unregister_active_session_by_ptr(py, ptr)?;
@@ -6186,7 +6217,12 @@ impl PyDataFrame {
 
     #[pyo3(name = "isEmpty")]
     fn is_empty(&self) -> PyResult<bool> {
-        self.inner.count().map(|c| c == 0).map_err(to_py_err)
+        self.inner
+            .limit(1)
+            .map_err(to_py_err)?
+            .count()
+            .map(|c| c == 0)
+            .map_err(to_py_err)
     }
 
     fn take(&self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
@@ -6539,6 +6575,11 @@ fn py_any_to_json_string(other: &Bound<'_, PyAny>) -> PyResult<String> {
         return Ok(serde_json::to_string(&i).unwrap());
     }
     if let Ok(f) = other.extract::<f64>() {
+        if !f.is_finite() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "UDF filter comparison rhs float must be finite",
+            ));
+        }
         return Ok(serde_json::to_string(&f).unwrap());
     }
     if let Ok(s) = other.extract::<String>() {

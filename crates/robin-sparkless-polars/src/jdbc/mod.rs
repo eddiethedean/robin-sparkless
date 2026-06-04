@@ -36,6 +36,8 @@ mod mysql;
 #[cfg(feature = "jdbc_oracle")]
 mod oracle;
 
+mod sql_ident;
+
 /// JDBC-style options modeled after PySpark's JDBC DataSource V1 options.
 #[derive(Debug, Clone)]
 pub struct JdbcOptions {
@@ -352,7 +354,7 @@ pub fn write_jdbc_from_polars(
 
     Err(EngineError::User(format!(
         "JDBC write: unsupported URL scheme in '{}'",
-        opts.url
+        sql_ident::redact_jdbc_url(&opts.url)
     )))
 }
 
@@ -428,7 +430,7 @@ pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErro
 
     Err(EngineError::User(format!(
         "JDBC read: unsupported URL scheme in '{}'",
-        opts.url
+        sql_ident::redact_jdbc_url(&opts.url)
     )))
 }
 

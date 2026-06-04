@@ -1321,11 +1321,11 @@ impl DataFrame {
         self.count().map_err(polars_to_core_error)
     }
 
-    /// Show the first n rows
+    /// Show the first n rows (collects at most `n` rows, not the full DataFrame).
     pub fn show(&self, n: Option<usize>) -> Result<(), PolarsError> {
         let n = n.unwrap_or(20);
-        let df = self.collect_inner()?;
-        println!("{}", df.head(Some(n)));
+        let preview = self.clone().limit(n)?.collect_inner()?;
+        println!("{preview}");
         Ok(())
     }
 
@@ -2546,11 +2546,15 @@ impl<'a> DataFrameWriter<'a> {
         let warehouse_paths: Vec<std::path::PathBuf> = session
             .warehouse_dir()
             .map(|w| {
-                let wh = Path::new(w);
                 let mut out = Vec::with_capacity(2);
-                out.push(wh.join(name));
+                if let Ok(p) = robin_sparkless_core::resolve_path_under_base(w, name) {
+                    out.push(p);
+                }
                 if name.contains('.') {
-                    out.push(wh.join(name.replace('.', std::path::MAIN_SEPARATOR_STR)));
+                    let alt = name.replace('.', std::path::MAIN_SEPARATOR_STR);
+                    if let Ok(p) = robin_sparkless_core::resolve_path_under_base(w, &alt) {
+                        out.push(p);
+                    }
                 }
                 out
             })

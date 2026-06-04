@@ -9,7 +9,7 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 [features]
 default = []
 sql = ["dep:spark-sql-parser"]
-delta = ["dep:deltalake", "dep:tokio"]
+delta = ["dep:deltalake", "dep:delta_kernel", "dep:tokio", "dep:futures", "dep:parquet", "dep:indexmap"]
 jdbc = ["dep:postgres"]
 jdbc_mysql = ["dep:mysql"]
 jdbc_mariadb = ["dep:mysql"]
@@ -46,6 +46,10 @@ md5 = "0.7"
 aes-gcm = "0.10"
 spark-sql-parser = { version = "0.5", path = "../spark-sql-parser", optional = true }
 deltalake = { version = "0.31", optional = true }
+delta_kernel = { version = "0.19", optional = true }
+futures = { version = "0.3", optional = true }
+parquet = { version = "57", optional = true }
+indexmap = { version = "2", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
 postgres = { version = "0.19", optional = true }
 rusqlite = { version = "0.32", optional = true }

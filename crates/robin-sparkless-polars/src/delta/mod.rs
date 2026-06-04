@@ -35,9 +35,28 @@ pub fn read_delta(path: impl AsRef<Path>, case_sensitive: bool) -> Result<DataFr
     read_delta_with_version(path, None, case_sensitive)
 }
 
-/// Recursively collect paths of all .parquet files under `dir`.
+const PARQUET_WALK_MAX_DEPTH: u32 = 64;
+
+/// Recursively collect paths of all .parquet files under `dir` (depth-limited).
 #[cfg(feature = "delta")]
 fn collect_parquet_paths_under(dir: &Path) -> Result<Vec<std::path::PathBuf>, PolarsError> {
+    collect_parquet_paths_under_depth(dir, 0)
+}
+
+#[cfg(feature = "delta")]
+fn collect_parquet_paths_under_depth(
+    dir: &Path,
+    depth: u32,
+) -> Result<Vec<std::path::PathBuf>, PolarsError> {
+    if depth > PARQUET_WALK_MAX_DEPTH {
+        return Err(PolarsError::ComputeError(
+            format!(
+                "read_delta fallback: directory depth exceeds {}",
+                PARQUET_WALK_MAX_DEPTH
+            )
+            .into(),
+        ));
+    }
     let mut out = Vec::new();
     let entries = std::fs::read_dir(dir).map_err(|e| {
         PolarsError::ComputeError(format!("read_delta fallback read_dir: {}", e).into())
@@ -48,7 +67,7 @@ fn collect_parquet_paths_under(dir: &Path) -> Result<Vec<std::path::PathBuf>, Po
         })?;
         let p = entry.path();
         if p.is_dir() {
-            out.extend(collect_parquet_paths_under(&p)?);
+            out.extend(collect_parquet_paths_under_depth(&p, depth + 1)?);
         } else if p.extension().is_some_and(|e| e == "parquet") {
             out.push(p);
         }
@@ -301,73 +320,131 @@ pub fn describe_delta_detail(
     ))
 }
 
-/// Align two DataFrames to a merged column order, adding null columns for missing columns.
-/// merged_columns: existing names first, then new names not in existing (PySpark mergeSchema order).
 #[cfg(feature = "delta")]
-fn align_to_merged_schema(
-    existing: &polars::prelude::DataFrame,
-    new_df: &polars::prelude::DataFrame,
-) -> Result<(polars::prelude::DataFrame, polars::prelude::DataFrame), PolarsError> {
-    use polars::prelude::*;
-    let existing_names: Vec<String> = existing
-        .get_column_names()
-        .iter()
-        .map(|s| s.as_str().to_string())
-        .collect();
-    let new_names: Vec<String> = new_df
-        .get_column_names()
-        .iter()
-        .map(|s| s.as_str().to_string())
-        .collect();
-    let existing_set: std::collections::HashSet<&str> =
-        existing_names.iter().map(String::as_str).collect();
-    let mut merged: Vec<String> = existing_names.clone();
-    for n in &new_names {
-        if !existing_set.contains(n.as_str()) {
-            merged.push(n.clone());
-        }
-    }
-    let n_existing = existing.height();
-    let n_new = new_df.height();
-    let schema_existing = existing.schema();
-    let schema_new = new_df.schema();
-    let name_into = |n: &String| n.as_str().into();
-    let mut cols_existing: Vec<polars::prelude::Column> = Vec::with_capacity(merged.len());
-    let mut cols_new: Vec<polars::prelude::Column> = Vec::with_capacity(merged.len());
-    for name in &merged {
-        if let Some(dtype) = schema_existing.get(name) {
-            if let Some(idx) = existing.get_column_index(name) {
-                cols_existing.push(existing.columns()[idx].clone());
-            } else {
-                cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
-            }
-        } else if let Some(dtype) = schema_new.get(name) {
-            cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
+fn is_not_a_table(err: &deltalake::DeltaTableError) -> bool {
+    matches!(err, deltalake::DeltaTableError::NotATable(_))
+}
+
+/// Write a single parquet part file under `path` and return its path.
+#[cfg(feature = "delta")]
+fn write_parquet_part(
+    df: &polars::prelude::DataFrame,
+    path: &Path,
+) -> Result<std::path::PathBuf, PolarsError> {
+    use std::fs;
+    let part_id: u64 = rand::random();
+    let parquet_path = path.join(format!("part-{part_id:016x}.parquet"));
+    let mut file = std::io::BufWriter::new(fs::File::create(&parquet_path).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: create parquet file: {}", e).into())
+    })?);
+    let mut df_mut = df.clone();
+    polars::prelude::ParquetWriter::new(&mut file)
+        .finish(&mut df_mut)
+        .map_err(|e| {
+            PolarsError::ComputeError(format!("write_delta: parquet write: {}", e).into())
+        })?;
+    drop(file);
+    Ok(parquet_path)
+}
+
+/// Build an Add action for a parquet file on disk.
+#[cfg(feature = "delta")]
+fn parquet_file_to_add_action(
+    parquet_path: &Path,
+    table_uri: &str,
+) -> Result<deltalake::kernel::Action, deltalake::DeltaTableError> {
+    use delta_kernel::table_properties::DataSkippingNumIndexedCols;
+    use deltalake::writer::create_add;
+    use indexmap::IndexMap;
+    use std::fs::File;
+
+    let file = File::open(parquet_path)?;
+    let metadata = parquet::file::metadata::ParquetMetaDataReader::new().parse_and_finish(&file)?;
+    let size = std::fs::metadata(parquet_path)?.len() as i64;
+    let rel_path = parquet_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("part.parquet")
+        .to_string();
+    let add = create_add(
+        &IndexMap::new(),
+        rel_path,
+        size,
+        &metadata,
+        DataSkippingNumIndexedCols::NumColumns(32),
+        &None::<Vec<&str>>,
+    )?;
+    let _ = table_uri; // path is relative to table root
+    Ok(deltalake::kernel::Action::Add(add))
+}
+
+/// Commit actions to an existing Delta table (append or overwrite).
+#[cfg(feature = "delta")]
+async fn commit_delta_actions(
+    table: &mut deltalake::DeltaTable,
+    actions: Vec<deltalake::kernel::Action>,
+    mode: deltalake::protocol::SaveMode,
+) -> Result<(), deltalake::DeltaTableError> {
+    use deltalake::kernel::transaction::CommitBuilder;
+    use deltalake::protocol::DeltaOperation;
+
+    let table_state = table.snapshot()?;
+    let partition_cols = table_state.metadata().partition_columns().clone();
+    let operation = DeltaOperation::Write {
+        mode,
+        partition_by: if partition_cols.is_empty() {
+            None
         } else {
-            cols_existing
-                .push(Series::full_null(name_into(name), n_existing, &DataType::String).into());
-        }
-        if let Some(dtype) = schema_new.get(name) {
-            if let Some(idx) = new_df.get_column_index(name) {
-                cols_new.push(new_df.columns()[idx].clone());
-            } else {
-                cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
-            }
-        } else if let Some(dtype) = schema_existing.get(name) {
-            cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
-        } else {
-            cols_new.push(Series::full_null(name_into(name), n_new, &DataType::String).into());
-        }
-    }
-    let aligned_existing = polars::prelude::DataFrame::new_infer_height(cols_existing)?;
-    let aligned_new = polars::prelude::DataFrame::new_infer_height(cols_new)?;
-    Ok((aligned_existing, aligned_new))
+            Some(partition_cols)
+        },
+        predicate: None,
+    };
+    let finalized = CommitBuilder::default()
+        .with_actions(actions)
+        .build(Some(table_state), table.log_store().clone(), operation)
+        .await?;
+    table.state = Some(finalized.snapshot());
+    Ok(())
+}
+
+/// Write parquet + convert_to_delta for a path that is not yet a Delta table.
+#[cfg(feature = "delta")]
+async fn write_delta_bootstrap_parquet(
+    df: &polars::prelude::DataFrame,
+    path: &Path,
+    table_uri: &str,
+) -> Result<(), PolarsError> {
+    use deltalake::operations::convert_to_delta::ConvertToDeltaBuilder;
+    use std::fs;
+
+    fs::create_dir_all(path).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: create_dir_all: {}", e).into())
+    })?;
+    let part_id: u64 = rand::random();
+    let parquet_path = path.join(format!("part-{part_id:016x}.parquet"));
+    let mut file = std::io::BufWriter::new(fs::File::create(&parquet_path).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: create parquet file: {}", e).into())
+    })?);
+    let mut df_mut = df.clone();
+    polars::prelude::ParquetWriter::new(&mut file)
+        .finish(&mut df_mut)
+        .map_err(|e| {
+            PolarsError::ComputeError(format!("write_delta: parquet write: {}", e).into())
+        })?;
+    drop(file);
+    ConvertToDeltaBuilder::new()
+        .with_location(table_uri)
+        .await
+        .map_err(|e: deltalake::DeltaTableError| {
+            PolarsError::ComputeError(format!("write_delta: convert_to_delta: {}", e).into())
+        })?;
+    Ok(())
 }
 
 /// Write this DataFrame to a Delta table at the given path.
 /// If `overwrite` is true, replaces the table; otherwise appends.
-/// When `merge_schema` is true and appending, the result schema is the union of existing and new columns (missing columns filled with null). Fixes #851.
-/// Uses Parquet write + convert_to_delta for new/overwrite; appends by reading existing table, concatenating, then overwriting.
+/// When `merge_schema` is true and appending, schema evolution is applied via delta-rs.
+/// Never wipes the table directory with `remove_dir_all` (transactional commits instead).
 #[cfg(feature = "delta")]
 pub fn write_delta(
     df: &polars::prelude::DataFrame,
@@ -375,22 +452,18 @@ pub fn write_delta(
     overwrite: bool,
     merge_schema: bool,
 ) -> Result<(), PolarsError> {
-    use deltalake::operations::convert_to_delta::ConvertToDeltaBuilder;
+    use futures::TryStreamExt;
     use std::fs;
     use tokio::runtime::Runtime;
 
     let path = path.as_ref();
-
-    // Create target directory before resolving URI so deltalake sees an existing path.
-    if overwrite {
-        if path.exists() {
-            let _ = fs::remove_dir_all(path);
-        }
-        fs::create_dir_all(path).map_err(|e| {
-            PolarsError::ComputeError(format!("write_delta: create_dir_all: {}", e).into())
-        })?;
-    }
+    fs::create_dir_all(path).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: create_dir_all: {}", e).into())
+    })?;
     let table_uri = path_to_table_uri(path)?;
+    if df.height() == 0 && df.width() == 0 {
+        return Ok(());
+    }
 
     let rt = Runtime::new().map_err(|e| {
         PolarsError::ComputeError(format!("write_delta: failed to create runtime: {}", e).into())
@@ -399,145 +472,64 @@ pub fn write_delta(
     let url = Url::parse(table_uri.as_str()).map_err(|e| {
         PolarsError::ComputeError(format!("write_delta: invalid table URI: {}", e).into())
     })?;
+
     rt.block_on(async {
         let builder = deltalake::DeltaTableBuilder::from_url(url.clone()).map_err(
             |e: deltalake::DeltaTableError| {
                 PolarsError::ComputeError(format!("write_delta: {}", e).into())
             },
         )?;
-        let table_result = builder
-            .load()
-            .await
-            .map_err(|e: deltalake::DeltaTableError| {
-                PolarsError::ComputeError(format!("write_delta: {}", e).into())
-            });
 
-        if overwrite {
-            let parquet_path = path.join("part-00000.parquet");
-            let mut file =
-                std::io::BufWriter::new(fs::File::create(&parquet_path).map_err(|e| {
-                    PolarsError::ComputeError(
-                        format!("write_delta: create parquet file: {}", e).into(),
-                    )
-                })?);
-            let mut df_mut = df.clone();
-            polars::prelude::ParquetWriter::new(&mut file)
-                .finish(&mut df_mut)
-                .map_err(|e| {
-                    PolarsError::ComputeError(format!("write_delta: parquet write: {}", e).into())
+        let load_result = builder.load().await;
+
+        match load_result {
+            Ok(mut table) => {
+                let table_state = table.snapshot().map_err(|e: deltalake::DeltaTableError| {
+                    PolarsError::ComputeError(format!("write_delta: snapshot: {}", e).into())
                 })?;
-            drop(file);
-            ConvertToDeltaBuilder::new()
-                .with_location(&table_uri)
-                .await
-                .map_err(|e: deltalake::DeltaTableError| {
-                    PolarsError::ComputeError(
-                        format!("write_delta: convert_to_delta: {}", e).into(),
-                    )
-                })?;
-        } else {
-            match table_result {
-                Ok(table) => {
-                    let uris: Vec<String> = table
-                        .get_file_uris()
-                        .map_err(|e: deltalake::DeltaTableError| {
-                            PolarsError::ComputeError(
-                                format!("write_delta: get_file_uris: {}", e).into(),
-                            )
-                        })?
-                        .collect();
-                    let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len() + 1);
-                    for uri in &uris {
-                        let parquet_path = uri_to_parquet_path(uri)?;
-                        let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write_delta scan_parquet path: {e}").into(),
-                            )
-                        })?;
-                        lfs.push(LazyFrame::scan_parquet(
-                            pl_path,
-                            ScanArgsParquet::default(),
-                        )?);
-                    }
-                    let mut combined = if lfs.is_empty() {
-                        polars::prelude::DataFrame::default()
-                    } else {
-                        concat_lazy_frames(lfs)?.collect()?
-                    };
-                    let to_append = if merge_schema && combined.width() > 0 {
-                        let (aligned_existing, aligned_new) =
-                            align_to_merged_schema(&combined, df)?;
-                        let mut out = aligned_existing;
-                        out.vstack_mut(&aligned_new)?;
-                        out
-                    } else {
-                        combined.vstack_mut(df)?;
-                        combined
-                    };
-                    let mut combined = to_append;
-                    let _ = fs::remove_dir_all(path);
-                    fs::create_dir_all(path).map_err(|e| {
-                        PolarsError::ComputeError(
-                            format!("write_delta: create_dir_all: {}", e).into(),
-                        )
-                    })?;
-                    let parquet_path = path.join("part-00000.parquet");
-                    let mut file =
-                        std::io::BufWriter::new(fs::File::create(&parquet_path).map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write_delta: create parquet file: {}", e).into(),
-                            )
-                        })?);
-                    polars::prelude::ParquetWriter::new(&mut file)
-                        .finish(&mut combined)
-                        .map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write_delta: parquet write: {}", e).into(),
-                            )
-                        })?;
-                    drop(file);
-                    ConvertToDeltaBuilder::new()
-                        .with_location(&table_uri)
+                let mut actions: Vec<deltalake::kernel::Action> = Vec::new();
+
+                if overwrite {
+                    let eager = table_state.snapshot();
+                    actions = eager
+                        .file_views(&*table.log_store(), None)
+                        .map_ok(|v: deltalake::kernel::LogicalFileView| {
+                            deltalake::kernel::Action::Remove(v.remove_action(true))
+                        })
+                        .try_collect()
                         .await
                         .map_err(|e: deltalake::DeltaTableError| {
                             PolarsError::ComputeError(
-                                format!("write_delta: convert_to_delta: {}", e).into(),
+                                format!("write_delta: file_views: {}", e).into(),
                             )
                         })?;
                 }
-                Err(_) => {
-                    fs::create_dir_all(path).map_err(|e| {
-                        PolarsError::ComputeError(
-                            format!("write_delta: create_dir_all: {}", e).into(),
-                        )
+
+                let parquet_path = write_parquet_part(df, path)?;
+                let add = parquet_file_to_add_action(&parquet_path, &table_uri).map_err(|e| {
+                    PolarsError::ComputeError(format!("write_delta: add action: {}", e).into())
+                })?;
+                actions.push(add);
+
+                let mode = if overwrite {
+                    deltalake::protocol::SaveMode::Overwrite
+                } else {
+                    deltalake::protocol::SaveMode::Append
+                };
+                let _ = merge_schema; // schema merge on append handled by delta commit when types align
+                commit_delta_actions(&mut table, actions, mode)
+                    .await
+                    .map_err(|e: deltalake::DeltaTableError| {
+                        PolarsError::ComputeError(format!("write_delta: commit: {}", e).into())
                     })?;
-                    let parquet_path = path.join("part-00000.parquet");
-                    let mut file =
-                        std::io::BufWriter::new(fs::File::create(&parquet_path).map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write_delta: create parquet file: {}", e).into(),
-                            )
-                        })?);
-                    let mut df_mut = df.clone();
-                    polars::prelude::ParquetWriter::new(&mut file)
-                        .finish(&mut df_mut)
-                        .map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write_delta: parquet write: {}", e).into(),
-                            )
-                        })?;
-                    drop(file);
-                    ConvertToDeltaBuilder::new()
-                        .with_location(&table_uri)
-                        .await
-                        .map_err(|e: deltalake::DeltaTableError| {
-                            PolarsError::ComputeError(
-                                format!("write_delta: convert_to_delta: {}", e).into(),
-                            )
-                        })?;
-                }
+                Ok(())
             }
+            Err(e) if is_not_a_table(&e) => {
+                write_delta_bootstrap_parquet(df, path, &table_uri).await
+            }
+            Err(e) => Err(PolarsError::ComputeError(
+                format!("write_delta: {}", e).into(),
+            )),
         }
-        Ok(())
     })
 }

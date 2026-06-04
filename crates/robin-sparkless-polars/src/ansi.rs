@@ -15,7 +15,9 @@ pub fn div_expr(left: Expr, right: Expr) -> Expr {
             |_schema, fields| Ok(fields[0].clone()),
         )
     } else {
-        let zero = right.clone().eq(lit(0i64));
+        let zero_int = right.clone().eq(lit(0i64));
+        let zero_float = right.clone().eq(lit(0.0f64));
+        let zero = zero_int.or(zero_float);
         polars::prelude::when(zero)
             .then(lit(NULL))
             .otherwise(left / right)

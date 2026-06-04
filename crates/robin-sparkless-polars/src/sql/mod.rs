@@ -120,7 +120,8 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                     // For Delta format, use Delta Lake write with overwrite mode
                     let warehouse_dir = session.warehouse_dir();
                     let table_path = if let Some(ref wh) = warehouse_dir {
-                        std::path::PathBuf::from(wh).join(&table_name)
+                        robin_sparkless_core::resolve_path_under_base(wh, &table_name)
+                            .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))?
                     } else {
                         return Err(PolarsError::InvalidOperation(
                             "CREATE OR REPLACE TABLE with USING delta requires spark.sql.warehouse.dir to be set. \

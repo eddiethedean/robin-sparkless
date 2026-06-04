@@ -1,5 +1,7 @@
 use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
+use crate::jdbc::sql_ident::{self, JdbcDialect};
+use robin_sparkless_core::resolve_path_under_base;
 
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
 
@@ -11,11 +13,12 @@ pub(crate) fn write_jdbc_sqlite(
     use crate::dataframe::SaveMode as Sm;
 
     let path = sqlite_url_to_path(&opts.url)?;
-    let table = opts.dbtable.as_deref().ok_or_else(|| {
+    let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::User(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
+    let table = sql_ident::quoted_table(JdbcDialect::Sqlite, table_raw)?;
 
     let conn = rusqlite::Connection::open(&path)
         .map_err(|e| EngineError::Io(format!("JDBC write (SQLite): failed to open: {e}")))?;
@@ -68,13 +71,14 @@ pub(crate) fn write_jdbc_sqlite(
         .iter()
         .map(|n| n.as_str().to_string())
         .collect();
+    let quoted_cols = sql_ident::quoted_columns(JdbcDialect::Sqlite, &col_names)?;
     let placeholders = (0..col_names.len())
         .map(|_| "?")
         .collect::<Vec<_>>()
         .join(", ");
     let insert_sql = format!(
         "INSERT INTO {table} ({cols}) VALUES ({vals})",
-        cols = col_names.join(", "),
+        cols = quoted_cols.join(", "),
         vals = placeholders
     );
 
@@ -136,7 +140,8 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     let sql = if let Some(query) = &opts.query {
         query.clone()
     } else if let Some(table) = &opts.dbtable {
-        format!("SELECT * FROM {table}")
+        let q = sql_ident::quoted_table(JdbcDialect::Sqlite, table)?;
+        format!("SELECT * FROM {q}")
     } else {
         return Err(EngineError::User(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
@@ -218,14 +223,44 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
 }
 
 fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {
+    use std::path::Component;
+
     let rest = url
         .strip_prefix("jdbc:sqlite:")
         .or_else(|| url.strip_prefix("sqlite:"))
         .ok_or_else(|| {
             EngineError::User("SQLite URL must start with jdbc:sqlite: or sqlite:".to_string())
         })?;
-    let path = rest.strip_prefix("file:").unwrap_or(rest);
-    Ok(std::path::PathBuf::from(path))
+    let path_str = rest.strip_prefix("file:").unwrap_or(rest);
+    if path_str.contains("..") {
+        return Err(EngineError::User(
+            "SQLite path must not contain '..'".to_string(),
+        ));
+    }
+    let path = std::path::PathBuf::from(path_str);
+    for component in path.components() {
+        if matches!(component, Component::ParentDir) {
+            return Err(EngineError::User(
+                "SQLite path must not contain '..'".to_string(),
+            ));
+        }
+    }
+    if let Ok(base) = std::env::var("SPARKLESS_SQLITE_BASE") {
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| EngineError::User("invalid SQLite path".to_string()))?;
+        return resolve_path_under_base(&base, name);
+    }
+    if path.is_absolute() {
+        return path
+            .canonicalize()
+            .map_err(|e| EngineError::Io(format!("SQLite path canonicalize failed: {e}")));
+    }
+    let cwd = std::env::current_dir().map_err(|e| EngineError::Io(format!("current_dir: {e}")))?;
+    cwd.join(&path)
+        .canonicalize()
+        .map_err(|e| EngineError::Io(format!("SQLite path canonicalize failed: {e}")))
 }
 
 fn sqlite_values_to_series(

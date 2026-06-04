@@ -1,5 +1,6 @@
 use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
+use crate::jdbc::sql_ident::{self, JdbcDialect};
 
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
 
@@ -18,14 +19,19 @@ pub(crate) fn write_jdbc_postgres(
         url = stripped.to_string();
     }
 
-    let table = opts.dbtable.as_deref().ok_or_else(|| {
+    let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::User(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
+    let table = sql_ident::quoted_table(JdbcDialect::Postgres, table_raw)?;
 
-    let mut client = Client::connect(&url, NoTls)
-        .map_err(|e| EngineError::Io(format!("JDBC write: failed to connect: {e}")))?;
+    let mut client = Client::connect(&url, NoTls).map_err(|e| {
+        EngineError::Io(format!(
+            "JDBC write: failed to connect to {}: {e}",
+            sql_ident::redact_jdbc_url(&url)
+        ))
+    })?;
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
@@ -79,10 +85,11 @@ pub(crate) fn write_jdbc_postgres(
         .iter()
         .map(|n| n.as_str().to_string())
         .collect();
+    let quoted_cols = sql_ident::quoted_columns(JdbcDialect::Postgres, &col_names)?;
     let placeholders: Vec<String> = (1..=col_names.len()).map(|i| format!("${i}")).collect();
     let insert_sql = format!(
         "INSERT INTO {table} ({cols}) VALUES ({vals})",
-        cols = col_names.join(", "),
+        cols = quoted_cols.join(", "),
         vals = placeholders.join(", ")
     );
 
@@ -147,15 +154,20 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
     let sql = if let Some(query) = &opts.query {
         query.clone()
     } else if let Some(table) = &opts.dbtable {
-        format!("SELECT * FROM {table}")
+        let q = sql_ident::quoted_table(JdbcDialect::Postgres, table)?;
+        format!("SELECT * FROM {q}")
     } else {
         return Err(EngineError::User(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
         ));
     };
 
-    let mut client = Client::connect(&url, NoTls)
-        .map_err(|e| EngineError::Io(format!("JDBC read: failed to connect: {e}")))?;
+    let mut client = Client::connect(&url, NoTls).map_err(|e| {
+        EngineError::Io(format!(
+            "JDBC read: failed to connect to {}: {e}",
+            sql_ident::redact_jdbc_url(&url)
+        ))
+    })?;
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {

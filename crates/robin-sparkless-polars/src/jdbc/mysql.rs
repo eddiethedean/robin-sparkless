@@ -1,5 +1,6 @@
 use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
+use crate::jdbc::sql_ident::{self, JdbcDialect};
 
 use mysql::prelude::Queryable;
 use mysql::{Conn, Opts, OptsBuilder, Params, Value};
@@ -172,7 +173,8 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     let sql = if let Some(query) = &opts.query {
         query.clone()
     } else if let Some(table) = &opts.dbtable {
-        format!("SELECT * FROM {table}")
+        let q = sql_ident::quoted_table(JdbcDialect::Mysql, table)?;
+        format!("SELECT * FROM {q}")
     } else {
         return Err(EngineError::User(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),

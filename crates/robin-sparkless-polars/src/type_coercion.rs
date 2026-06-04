@@ -433,8 +433,18 @@ pub fn coerce_for_pyspark_eq_null_safe(
         (None, None) => (DataType::String, DataType::String),
     };
 
-    // Both unknown (column refs): cast both to string so string vs numeric doesn't error (PySpark coercion).
+    // Both unknown column refs: use try_to_number on both sides (PySpark null-safe heterogeneous equality).
     if left_inferred.is_none() && right_inferred.is_none() {
+        if matches!(left, Expr::Column(_)) && matches!(right, Expr::Column(_)) {
+            use crate::column::Column;
+            fn wrap_try_to_number(expr: Expr) -> Result<Expr, PolarsError> {
+                let col = Column::from_expr(expr, None);
+                let coerced = crate::functions::try_to_number(&col, None)
+                    .map_err(|e| PolarsError::ComputeError(e.into()))?;
+                Ok(coerced.into_expr())
+            }
+            return Ok((wrap_try_to_number(left)?, wrap_try_to_number(right)?));
+        }
         let left_str = left.cast(DataType::String);
         let right_str = right.cast(DataType::String);
         return Ok((left_str, right_str));

@@ -1689,7 +1689,7 @@ impl SparkSession {
     #[cfg(feature = "delta")]
     pub fn resolve_delta_table_path(&self, table_name: &str) -> Option<std::path::PathBuf> {
         let warehouse = self.warehouse_dir()?;
-        let path = Path::new(warehouse).join(table_name);
+        let path = robin_sparkless_core::resolve_path_under_base(warehouse, table_name).ok()?;
         if path.is_dir() && path.join("_delta_log").is_dir() {
             Some(path)
         } else {
@@ -3155,6 +3155,9 @@ impl SparkSession {
         let _ = self.udf_registry.clear();
         clear_thread_udf_session();
         crate::clear_thread_udf_context();
+        if let Ok(mut m) = global_temp_catalog().lock() {
+            m.clear();
+        }
     }
 }
 

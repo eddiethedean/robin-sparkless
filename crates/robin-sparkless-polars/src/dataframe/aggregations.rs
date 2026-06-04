@@ -1560,6 +1560,7 @@ pub(super) fn reorder_groupby_columns(
     pl_df: &mut PlDataFrame,
     grouping_cols: &[String],
 ) -> Result<PlDataFrame, PolarsError> {
+    const GHOST_GLOBAL_KEY: &str = "_gb_global";
     let all_cols: Vec<String> = pl_df
         .get_column_names()
         .iter()
@@ -1567,19 +1568,34 @@ pub(super) fn reorder_groupby_columns(
         .collect();
     let mut reordered_cols: Vec<&str> = Vec::new();
     for gc in grouping_cols {
+        if gc == GHOST_GLOBAL_KEY {
+            continue;
+        }
         if all_cols.iter().any(|c| c == gc) {
             reordered_cols.push(gc);
         }
     }
     for col_name in &all_cols {
+        if col_name == GHOST_GLOBAL_KEY {
+            continue;
+        }
         if !grouping_cols.iter().any(|gc| gc == col_name) {
             reordered_cols.push(col_name);
         }
     }
-    if !reordered_cols.is_empty() && reordered_cols.len() == all_cols.len() {
-        pl_df.select(reordered_cols)
+    let out = if !reordered_cols.is_empty() && reordered_cols.len() <= all_cols.len() {
+        pl_df.select(reordered_cols)?
     } else {
-        Ok(pl_df.clone())
+        pl_df.clone()
+    };
+    if out
+        .get_column_names()
+        .iter()
+        .any(|c| c.as_str() == GHOST_GLOBAL_KEY)
+    {
+        out.drop(GHOST_GLOBAL_KEY)
+    } else {
+        Ok(out)
     }
 }
 

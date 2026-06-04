@@ -177,6 +177,11 @@ pub fn join(
         origin,
     } = options;
     use polars::prelude::{JoinBuilder, JoinCoalesce, col};
+    if left_on.is_empty() {
+        return Err(PolarsError::ComputeError(
+            "join: at least one join key column is required".into(),
+        ));
+    }
     if left_on.len() != right_on.len() {
         return Err(PolarsError::ComputeError(
             "join: left_on and right_on must have the same length".into(),
