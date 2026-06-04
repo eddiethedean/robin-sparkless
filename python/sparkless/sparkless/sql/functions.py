@@ -1088,9 +1088,13 @@ def when(condition, value):
     """PySpark-compatible when(condition, value). Both arguments required. Requires active SparkSession."""
     _active_session()
     cond = _as_col(condition)
-    val = (
-        _as_col(value) if not isinstance(value, (int, float, bool, str)) else lit(value)
-    )
+    # Python None is omitted by PyO3 optional args; map to null literal so .otherwise() chains work (#1573).
+    if value is None:
+        val = lit(None)
+    elif isinstance(value, (int, float, bool, str)):
+        val = lit(value)
+    else:
+        val = _as_col(value)
     return _native_when(cond, val)
 
 
