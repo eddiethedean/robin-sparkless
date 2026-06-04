@@ -2352,7 +2352,7 @@ pub enum WriteFormat {
 
 /// Align two DataFrames to a merged column order (existing first, then new columns not in existing).
 /// Adds null columns for missing columns. Used for saveAsTable append with mergeSchema (issue #1109).
-fn align_to_merged_schema_inline(
+pub(crate) fn align_to_merged_schema_inline(
     existing: &PlDataFrame,
     new_df: &PlDataFrame,
 ) -> Result<(PlDataFrame, PlDataFrame), PolarsError> {

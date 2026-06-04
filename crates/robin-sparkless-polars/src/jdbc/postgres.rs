@@ -80,9 +80,7 @@ pub(crate) fn write_jdbc_postgres(
             } else {
                 client
                     .execute(&format!("DELETE FROM {table}"), &[])
-                    .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write: delete from table: {e}"))
-                    })?;
+                    .map_err(|e| EngineError::Sql(format!("JDBC write: delete from table: {e}")))?;
             }
         }
         Sm::Append => {}

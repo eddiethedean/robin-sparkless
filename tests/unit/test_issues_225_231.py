@@ -491,8 +491,6 @@ class TestIssue229PandasDataFrameSupport:
 
     def test_createDataFrame_from_pandas_with_nulls(self, spark, real_pandas):
         """Test createDataFrame with pandas DataFrame containing nulls."""
-        import math
-
         pd_df = real_pandas.DataFrame(
             {"id": [1, None, 3], "name": ["Alice", None, "Charlie"]}
         )

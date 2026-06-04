@@ -29,7 +29,9 @@ class TestCovarNullsParity(ParityTestBase):
         cov_val = rows[0]["cov"]
         assert cov_val is not None
         # Population covariance on three non-null pairs (1,2),(2,4),(4,8)
-        assert abs(cov_val - 28.0 / 9.0) < 1e-5, f"Expected ~{28.0 / 9.0}, got {cov_val}"
+        assert abs(cov_val - 28.0 / 9.0) < 1e-5, (
+            f"Expected ~{28.0 / 9.0}, got {cov_val}"
+        )
 
     def test_covar_samp_excludes_null_pairs(self, spark):
         imports = get_imports()
@@ -49,4 +51,6 @@ class TestCovarNullsParity(ParityTestBase):
         cov_val = rows[0]["cov"]
         assert cov_val is not None
         # Sample covariance on three non-null pairs
-        assert abs(cov_val - 14.0 / 3.0) < 1e-5, f"Expected ~{14.0 / 3.0}, got {cov_val}"
+        assert abs(cov_val - 14.0 / 3.0) < 1e-5, (
+            f"Expected ~{14.0 / 3.0}, got {cov_val}"
+        )

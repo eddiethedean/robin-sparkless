@@ -911,19 +911,18 @@ thread_local! {
 /// Resolve the active session: thread-local stack first (PySpark), then non-stopped singleton.
 fn resolve_active_session(py: Python<'_>) -> Option<Py<PySparkSession>> {
     let from_stack = THREAD_ACTIVE_SESSIONS.with(|cell| {
-        cell.borrow().last().and_then(|s| {
+        let mut v = cell.borrow_mut();
+        v.retain(|s| {
             let bound = s.bind(py);
             if let Ok(sess) = bound.downcast::<PySparkSession>() {
-                if sess
+                return !sess
                     .borrow()
                     .stopped
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                {
-                    return None;
-                }
+                    .load(std::sync::atomic::Ordering::SeqCst);
             }
-            Some(s.clone_ref(py))
-        })
+            true
+        });
+        v.last().map(|s| s.clone_ref(py))
     });
     if from_stack.is_some() {
         return from_stack;
@@ -2811,13 +2810,11 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
             return Ok(JsonValue::String("NaN".to_string()));
         }
         if f.is_infinite() {
-            return Ok(JsonValue::String(
-                if f.is_sign_positive() {
-                    "Infinity".to_string()
-                } else {
-                    "-Infinity".to_string()
-                },
-            ));
+            return Ok(JsonValue::String(if f.is_sign_positive() {
+                "Infinity".to_string()
+            } else {
+                "-Infinity".to_string()
+            }));
         }
         if let Some(n) = serde_json::Number::from_f64(f) {
             return Ok(JsonValue::Number(n));

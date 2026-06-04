@@ -264,9 +264,7 @@ pub(crate) fn write_jdbc_oracle(
                     conn.execute(&format!("DELETE FROM {table}"), &[])
                         .await
                         .map_err(|e| {
-                            EngineError::Sql(format!(
-                                "JDBC write (Oracle): delete from table: {e}"
-                            ))
+                            EngineError::Sql(format!("JDBC write (Oracle): delete from table: {e}"))
                         })?;
                 }
                 conn.commit().await.ok();

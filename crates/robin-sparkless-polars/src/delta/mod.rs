@@ -6,15 +6,6 @@ use polars::prelude::{LazyFrame, PlRefPath, PolarsError, ScanArgsParquet, UnionA
 use std::path::Path;
 use url::Url;
 
-/// Concatenate multiple LazyFrames in order. Returns an error if the slice is empty or concat fails.
-#[cfg(feature = "delta")]
-fn concat_lazy_frames(lfs: Vec<LazyFrame>) -> Result<LazyFrame, PolarsError> {
-    if lfs.is_empty() {
-        return Err(PolarsError::ComputeError("read_delta: no files".into()));
-    }
-    polars::prelude::concat(lfs, UnionArgs::default())
-}
-
 /// Concatenate LazyFrames with diagonal strategy so differing schemas align (missing columns as null).
 #[cfg(feature = "delta")]
 fn concat_lazy_frames_diagonal(lfs: Vec<LazyFrame>) -> Result<LazyFrame, PolarsError> {
@@ -138,7 +129,7 @@ pub fn read_delta_with_version(
                 let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
                 lfs.push(lf);
             }
-            let combined = concat_lazy_frames(lfs)?;
+            let combined = concat_lazy_frames_diagonal(lfs)?;
             let pl_df = combined.collect()?;
             Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive))
         }
@@ -168,6 +159,30 @@ pub fn read_delta_with_version(
             Err(e)
         }
     }
+}
+
+/// Load existing Delta table rows from file URIs (sync; for use inside async write_delta).
+#[cfg(feature = "delta")]
+fn load_pl_from_parquet_uris(uris: &[String]) -> Result<polars::prelude::DataFrame, PolarsError> {
+    use polars::prelude::DataFrame as PlDataFrame;
+    if uris.is_empty() {
+        return Ok(PlDataFrame::default());
+    }
+    let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
+    for uri in uris {
+        let parquet_path = uri_to_parquet_path(uri)?;
+        let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
+            PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
+        })?;
+        let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
+        lfs.push(lf);
+    }
+    let combined = if lfs.len() == 1 {
+        lfs.into_iter().next().unwrap()
+    } else {
+        concat_lazy_frames_diagonal(lfs)?
+    };
+    combined.collect()
 }
 
 #[cfg(feature = "delta")]
@@ -505,17 +520,37 @@ pub fn write_delta(
                         })?;
                 }
 
-                let parquet_path = write_parquet_part(df, path)?;
+                let df_for_part = if merge_schema && !overwrite {
+                    let uris: Vec<String> = table
+                        .get_file_uris()
+                        .map_err(|e: deltalake::DeltaTableError| {
+                            PolarsError::ComputeError(
+                                format!("write_delta: get_file_uris for merge_schema: {e}").into(),
+                            )
+                        })?
+                        .collect();
+                    // Polars collect() may start a runtime; must not run inside block_on.
+                    let df_clone = df.clone();
+                    let existing_pl =
+                        tokio::task::spawn_blocking(move || load_pl_from_parquet_uris(&uris))
+                            .await
+                            .map_err(|e| {
+                                PolarsError::ComputeError(
+                                    format!("write_delta: load existing for merge_schema: {e}")
+                                        .into(),
+                                )
+                            })??;
+                    let (_, aligned_new) =
+                        crate::dataframe::align_to_merged_schema_inline(&existing_pl, &df_clone)?;
+                    aligned_new
+                } else {
+                    df.clone()
+                };
+                let parquet_path = write_parquet_part(&df_for_part, path)?;
                 let add = parquet_file_to_add_action(&parquet_path, &table_uri).map_err(|e| {
                     PolarsError::ComputeError(format!("write_delta: add action: {}", e).into())
                 })?;
                 actions.push(add);
-
-                if merge_schema && !overwrite {
-                    return Err(PolarsError::InvalidOperation(
-                        "write_delta: merge_schema on append is not yet supported".into(),
-                    ));
-                }
                 let mode = if overwrite {
                     deltalake::protocol::SaveMode::Overwrite
                 } else {
