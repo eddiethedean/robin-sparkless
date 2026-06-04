@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.11.0] - 2026-06-04
+
 ### Fixed
 
 - **`to_timestamp` with fractional seconds (#1578)** — Default-format parsing (no format string) now accepts sub-second precision (e.g. `2026-06-04 12:34:56.78`) via flexible timestamp parsing instead of returning null.
