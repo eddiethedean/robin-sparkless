@@ -4312,14 +4312,23 @@ pub fn apply_to_timestamp_format(
                 if strict_iso_no_fraction && (s.len() != 19 || s.contains('.')) {
                     return None;
                 }
-                let ndt = NaiveDateTime::parse_from_str(s, &chrono_fmt)
+                let utc_micros = NaiveDateTime::parse_from_str(s, &chrono_fmt)
                     .or_else(|_| NaiveDateTime::parse_from_str(s, &chrono_fmt_alt))
-                    .ok()?;
-                let parsed_utc = ndt.and_utc();
+                    .ok()
+                    .map(|ndt| ndt.and_utc().timestamp_micros())
+                    .or_else(|| {
+                        // PySpark default to_timestamp accepts fractional seconds (#1578).
+                        if format.is_none() {
+                            parse_timestamp_string_flexible_with_tz(s, None)
+                        } else {
+                            None
+                        }
+                    })?;
+                let parsed_utc = chrono::DateTime::from_timestamp_micros(utc_micros)?;
                 if use_recent_null && parsed_utc >= recent_cutoff && parsed_utc <= ref_ts {
                     return None;
                 }
-                Some(parsed_utc.timestamp_micros())
+                Some(utc_micros)
             })
         }),
     );
