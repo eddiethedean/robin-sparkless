@@ -120,7 +120,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - name: Build test binaries
-        run: cargo build --workspace --all-features --tests
+        # Match CI: sql+delta only. --all-features links every JDBC backend and can
+        # OOM on ubuntu-latest (ld bus error) when examples/tests link in parallel.
+        run: cargo build --workspace --features sql,delta --tests
         env:
           CARGO_BUILD_JOBS: 1
 
@@ -144,8 +146,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - name: Run Rust tests
-        run: cargo test --workspace --all-features
+        # Skip doctests/examples: linking merged targets with sql+delta can OOM on
+        # ubuntu-latest (ld bus error). Examples are exercised under --features sql in CI.
+        run: cargo test --workspace --features sql,delta --lib --tests
         timeout-minutes: 25
+        env:
+          CARGO_BUILD_JOBS: 1
 
   publish:
     name: Build docs and publish to crates.io
