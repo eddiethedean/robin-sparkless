@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Performance regression 4.9 → 4.10 (#1568)** — Keep `select` lazy on eager inputs (avoid materializing every transform step); apply frame-level `explode` for list expressions only when sibling columns need replication; map `INSERT … SELECT` columns lazily instead of round-tripping through JSON rows.
 
+- **Production hardening (Delta, JDBC, paths, sessions)** — Transactional Delta commits (no directory wipe); warehouse/table path constraints; JDBC identifier validation and quoting (SQLite, PostgreSQL, MySQL); `show`/`collect` limits; empty `groupBy`/`join` edge cases; ANSI float divide-by-zero; Python session/FFI lifecycle fixes.
+
+- **`eqNullSafe` and Delta `mergeSchema` append** — Restore PySpark null-safe column compares; implement schema-evolution append without nested runtimes; read evolved Delta tables with diagonal concat; reject unsupported `mergeSchema` modes with clear errors.
+
+- **Parallel test session resolution** — Prune stopped sessions so `col()` fails reliably under pytest-xdist; fix `getOrCreate` thread-local session behavior.
+
+- **Aggregation and collect regressions** — Drop `_gb_global` ghost column from empty `groupBy().sum()`; fix `isnan` on string columns; keep numeric `collect()` values for columns named `c0`/`c1` (json shape heuristics no longer leak across frames); align `covar` null handling with PySpark.
+
+- **JDBC write reliability** — Quote identifiers on all JDBC backends; propagate overwrite errors consistently (DB2, MSSQL, MySQL, Oracle, PostgreSQL, SQLite).
+
+- **Delta CI/build compatibility** — Construct Delta `Add` actions directly (`deltalake` 0.31.1 made `create_add` crate-private) so fresh Cargo resolves match local behavior on CI.
+
 ## [4.10.0] - 2026-06-03
 
 ### Fixed
