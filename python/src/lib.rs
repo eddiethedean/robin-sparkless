@@ -5026,24 +5026,19 @@ impl PyDataFrame {
         self.inner.count().map_err(to_py_err)
     }
 
-    /// PySpark parity: head() returns a DataFrame (so .collect() works); head(n) returns list of Row.
-    /// (issue #413/#1077, #1109 delta schema evolution tests)
+    /// PySpark parity: head() returns the first Row (or None if empty); head(n) returns a list of Row.
     #[pyo3(signature = (n=None))]
     fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
         let k = n.unwrap_or(1);
         let limited = self.inner.limit(k).map_err(to_py_err)?;
+        let limited_py = PyDataFrame::wrap(limited);
+        let rows = limited_py.collect(py)?;
         match n {
-            Some(_) => {
-                // head(n) -> list of Row (PySpark parity for upstream tests e.g. test_delta_lake_schema_evolution)
-                let limited_py = PyDataFrame::wrap(limited);
-                let rows = limited_py.collect(py)?;
-                Ok(PyList::new(py, rows)?.into_py_any(py)?)
-            }
-            None => {
-                // head() -> DataFrame so .collect() can be called (issue #413)
-                let limited_py = PyDataFrame::wrap(limited);
-                Ok(limited_py.into_py_any(py)?)
-            }
+            Some(_) => Ok(PyList::new(py, rows)?.into_py_any(py)?),
+            None => Ok(rows
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| py.None().into_any())),
         }
     }
 
