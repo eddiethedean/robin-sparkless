@@ -772,6 +772,25 @@ impl DataFrame {
                         }
                     }
                     expr_to_coerce.clone()
+                } else if is_comparison_op
+                    && ((left_is_string_lit && !right_is_string_lit && !right_is_col)
+                        || (right_is_string_lit && !left_is_string_lit && !left_is_col))
+                {
+                    if let Some((new_left, new_right)) = self.coerce_temporal_expr_vs_string_literal(
+                        left_inner,
+                        right_inner,
+                        left_is_string_lit,
+                        right_is_string_lit,
+                        op,
+                    ) {
+                        let e = Expr::BinaryExpr {
+                            left: Arc::new(new_left),
+                            op: *op,
+                            right: Arc::new(new_right),
+                        };
+                        return Ok(wrap_expr_with_alias(e, alias_after.as_ref()));
+                    }
+                    expr_to_coerce.clone()
                 } else if is_comparison_op && left_is_col && right_is_col {
                     // Column-to-column: col("id") == col("label") where id is int, label is string.
                     // Get both column types and coerce string-numeric / date-string for PySpark parity.
@@ -946,6 +965,23 @@ impl DataFrame {
                                 right: Arc::new(new_r),
                             });
                         }
+                    }
+                    return Ok(Expr::BinaryExpr { left, op, right });
+                } else if (left_is_string_lit && !right_is_col && !right_is_string_lit)
+                    || (right_is_string_lit && !left_is_col && !left_is_string_lit)
+                {
+                    if let Some((new_l, new_r)) = self.coerce_temporal_expr_vs_string_literal(
+                        left_peeled,
+                        right_peeled,
+                        left_is_string_lit,
+                        right_is_string_lit,
+                        &op,
+                    ) {
+                        return Ok(Expr::BinaryExpr {
+                            left: Arc::new(new_l),
+                            op,
+                            right: Arc::new(new_r),
+                        });
                     }
                     return Ok(Expr::BinaryExpr { left, op, right });
                 } else {
@@ -1268,7 +1304,17 @@ impl DataFrame {
     /// Used to resolve struct field names in chained subscript (e.g. col("Outer")["Inner"]["E1"]).
     fn get_expr_output_dtype(&self, expr: &Expr) -> Option<DataType> {
         use polars::prelude::{FunctionExpr, StructFunction};
-        match expr {
+
+        fn peel_expr_alias_chain(expr: &Expr) -> &Expr {
+            let mut e = expr;
+            while let Expr::Alias(inner, _) = e {
+                e = inner.as_ref();
+            }
+            e
+        }
+
+        let peeled = peel_expr_alias_chain(expr);
+        match peeled {
             Expr::Column(name) => self.get_column_dtype(name.as_str()),
             Expr::Function { input, function } => {
                 if let FunctionExpr::StructExpr(StructFunction::FieldByName(name)) = function {
@@ -1284,6 +1330,50 @@ impl DataFrame {
             }
             _ => None,
         }
+        .or_else(|| self.probe_expr_output_dtype(expr))
+    }
+
+    /// Resolve expression output type via lazy schema (e.g. to_date(col, format) map UDFs).
+    fn probe_expr_output_dtype(&self, expr: &Expr) -> Option<DataType> {
+        const PROBE: &str = "_sparkless_dtype_probe";
+        let probe_name = PlSmallStr::from(PROBE);
+        let schema = self
+            .lazy_frame()
+            .select([expr.clone().alias(probe_name.clone())])
+            .collect_schema()
+            .ok()?;
+        schema.get(PROBE).cloned()
+    }
+
+    /// Coerce temporal expression vs string literal (e.g. to_date(col) == "9999-12-31", #1589).
+    fn coerce_temporal_expr_vs_string_literal(
+        &self,
+        left: &Expr,
+        right: &Expr,
+        left_is_string_lit: bool,
+        right_is_string_lit: bool,
+        op: &polars::prelude::Operator,
+    ) -> Option<(Expr, Expr)> {
+        if left_is_string_lit == right_is_string_lit {
+            return None;
+        }
+        let expr_side = if left_is_string_lit { right } else { left };
+        if matches!(expr_side, Expr::Column(_)) {
+            return None;
+        }
+        let expr_dtype = self.get_expr_output_dtype(expr_side)?;
+        if !matches!(expr_dtype, DataType::Date | DataType::Datetime(_, _)) {
+            return None;
+        }
+        let (left_ty, right_ty) = if left_is_string_lit {
+            (DataType::String, expr_dtype)
+        } else {
+            (expr_dtype, DataType::String)
+        };
+        let (new_left, new_right) =
+            coerce_for_pyspark_comparison(left.clone(), right.clone(), &left_ty, &right_ty, op)
+                .ok()?;
+        Some((new_left, new_right))
     }
 
     /// Get the column type as robin-sparkless schema type (Polars-free). Returns None if column not found.
@@ -3647,6 +3737,25 @@ mod tests {
         assert_eq!(out.count().unwrap(), 1);
         let rows = out.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("value").and_then(|v| v.as_i64()), Some(100));
+    }
+
+    /// #1589: to_date(expr) == string literal coerces string to date (PySpark parity).
+    #[test]
+    fn filter_to_date_expr_eq_string_literal() {
+        use crate::functions::{col, to_date};
+
+        let s = Series::new("end_date".into(), &["2025-01-01", "9999-12-31"]);
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        let date_col = to_date(&col("end_date"), Some("yyyy-MM-dd")).unwrap();
+        let expr = date_col.into_expr().eq(lit("9999-12-31"));
+        let out = df.filter(expr).unwrap();
+        assert_eq!(out.count().unwrap(), 1);
+        let rows = out.collect_as_json_rows().unwrap();
+        assert_eq!(
+            rows[0].get("end_date").and_then(|v| v.as_str()),
+            Some("9999-12-31")
+        );
     }
 
     /// #1571: logical NOT (~) on string-column == numeric-literal must coerce inner comparison.
