@@ -3160,9 +3160,17 @@ pub fn isin_i64(column: &Column, values: &[i64]) -> Column {
 }
 
 /// Check if column values are in the given string slice (PySpark isin with literal list).
+/// #1588: Cast column to string so int column isin(["1", "2"]) works (PySpark parity).
 pub fn isin_str(column: &Column, values: &[&str]) -> Column {
     let s: Series = Series::from_iter(values.iter().copied());
-    Column::from_expr(column.expr().clone().is_in(lit(s).implode(), false), None)
+    Column::from_expr(
+        column
+            .expr()
+            .clone()
+            .cast(DataType::String)
+            .is_in(lit(s).implode(), false),
+        None,
+    )
 }
 
 /// Percent-decode URL-encoded string (PySpark url_decode).
