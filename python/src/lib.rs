@@ -4289,6 +4289,14 @@ impl PyDataFrame {
             names: &mut Vec<Box<str>>,
             _py: Python<'_>,
         ) -> PyResult<()> {
+            if let Ok(star) = item.downcast::<PyStarColumns>() {
+                for c in &star.borrow().columns {
+                    let idx = names.len();
+                    names.push(c.clone().into_boxed_str());
+                    out.push(ItemOrExprStr::Resolved(Tmp::NameIdx(idx)));
+                }
+                return Ok(());
+            }
             if let Some(col) = py_any_to_dataframe_column(item)? {
                 out.push(ItemOrExprStr::Resolved(Tmp::Expr(col.into_expr())));
                 return Ok(());
@@ -4662,6 +4670,10 @@ impl PyDataFrame {
         // PySpark: df["col"] -> Column; df[["a","b"]] -> DataFrame selecting those columns.
         // Sparkless parity: accept list/tuple of str for projection.
         if let Ok(name) = key.extract::<String>() {
+            if name == "*" {
+                let columns = self.inner.columns().map_err(to_py_err)?;
+                return Ok(Py::new(py, PyStarColumns { columns })?.into_py(py));
+            }
             let col = self
                 .inner
                 .column(&name)
@@ -6672,6 +6684,12 @@ impl PyUdfFilterColumn {
     fn other_json(&self) -> &str {
         &self.other_json
     }
+}
+
+/// Internal marker for `df["*"]`: expands to all columns from that DataFrame in `select()` (PySpark parity #1587).
+#[pyclass]
+struct PyStarColumns {
+    columns: Vec<String>,
 }
 
 #[pyclass]
@@ -10373,6 +10391,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDataFrame>()?;
     m.add_class::<PyRDD>()?;
     m.add_class::<PyDataFrameWriter>()?;
+    m.add_class::<PyStarColumns>()?;
     m.add_class::<PyColumn>()?;
     m.add_class::<PyUdfFilterColumn>()?;
     m.add_class::<PySortOrder>()?;
