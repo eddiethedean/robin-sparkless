@@ -35,6 +35,14 @@ fn dtype_to_precedence(dtype: &DataType) -> Option<TypePrecedence> {
 /// Returns the tightest (highest precedence) common type that both can be coerced to.
 /// #681: Unknown dtype is treated as String so join/union with Int64 vs Unknown coerce to String (PySpark parity).
 pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, PolarsError> {
+    // #1590: untyped null adopts the other side's type (unionByName with lit(None) vs array).
+    if left == &DataType::Null {
+        return Ok(right.clone());
+    }
+    if right == &DataType::Null {
+        return Ok(left.clone());
+    }
+
     let left_norm = if matches!(left, DataType::Unknown(_)) {
         DataType::String
     } else {
@@ -485,6 +493,14 @@ pub fn coerce_for_pyspark_arithmetic(
 mod tests {
     use super::*;
     use polars::prelude::{IntoLazy, df};
+
+    #[test]
+    fn find_common_type_null_adopts_other_type() -> Result<(), PolarsError> {
+        let list_str = DataType::List(Box::new(DataType::String));
+        assert_eq!(find_common_type(&DataType::Null, &list_str)?, list_str);
+        assert_eq!(find_common_type(&list_str, &DataType::Null)?, list_str);
+        Ok(())
+    }
 
     #[test]
     fn numeric_numeric_uses_standard_coercion() -> Result<(), PolarsError> {
