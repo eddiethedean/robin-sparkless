@@ -605,7 +605,9 @@ def broadcast(df):
     return df
 
 
-percentile_approx = _percentile_approx
+def percentile_approx(col_or_name, percentage, accuracy=None):
+    """Approximate percentile (PySpark percentile_approx). Accepts column name or Column."""
+    return _percentile_approx(_as_col(col_or_name), percentage, accuracy)
 
 
 # --- String functions (native-backed) ---
