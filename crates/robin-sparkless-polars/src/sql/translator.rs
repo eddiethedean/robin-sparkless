@@ -1221,7 +1221,7 @@ fn sql_expr_to_polars(
             let r = sql_expr_to_polars(right, session, df, having_agg_map, having_agg_list)?;
             match op {
                 BinaryOperator::Eq => Ok(l.eq(r)),
-                BinaryOperator::NotEq => Ok(l.eq(r).not()),
+                BinaryOperator::NotEq => Ok(l.neq(r)),
                 BinaryOperator::Gt => Ok(l.gt(r)),
                 BinaryOperator::GtEq => Ok(l.gt_eq(r)),
                 BinaryOperator::Lt => Ok(l.lt(r)),
