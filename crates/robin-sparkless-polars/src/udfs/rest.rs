@@ -5923,6 +5923,47 @@ pub fn apply_string_to_double(column: Column, strict: bool) -> PolarsResult<Opti
     Ok(Some(Column::new(name, out)))
 }
 
+/// Format one list row as PySpark's array-to-string cast (`[x, y]`).
+fn format_list_row_as_pyspark_string(inner: Series) -> PolarsResult<String> {
+    let inner = inner.cast(&DataType::String)?;
+    let ca = inner
+        .str()
+        .map_err(|e| compute_err("cast list element to string", e))?;
+    let parts: Vec<&str> = ca.into_iter().flatten().collect();
+    Ok(format!("[{}]", parts.join(", ")))
+}
+
+/// Cast column to string (PySpark parity). List columns stringify as `[elem1, elem2]` (#1594).
+pub fn apply_cast_to_string(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
+    use polars::chunked_array::builder::StringChunkedBuilder;
+
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let out: Series = match series.dtype() {
+        DataType::List(_) => {
+            let list = series
+                .list()
+                .map_err(|e| compute_err("cast to string", e))?;
+            let mut builder = StringChunkedBuilder::new(name.as_str().into(), list.len());
+            for opt_inner in list.into_iter() {
+                match opt_inner {
+                    None => builder.append_null(),
+                    Some(inner) => builder.append_value(format_list_row_as_pyspark_string(inner)?),
+                }
+            }
+            builder.finish().into_series()
+        }
+        _ => {
+            if strict {
+                series.strict_cast(&DataType::String)?
+            } else {
+                series.cast(&DataType::String)?
+            }
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
 /// Apply string-to-date cast. Handles string columns (accepts date and datetime strings, Spark parity); passes through date; casts datetime to date; others error (cast) or null (try_cast).
 pub fn apply_string_to_date(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;

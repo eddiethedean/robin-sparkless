@@ -1540,6 +1540,15 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         );
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
+    if dtype == DataType::String {
+        let expr = column.expr().clone().map(
+            move |col| {
+                crate::column::expect_col(crate::udfs::apply_cast_to_string(col, ansi_strict))
+            },
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+        );
+        return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
+    }
     let expr = if ansi_strict {
         column.expr().clone().strict_cast(dtype)
     } else {
