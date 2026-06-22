@@ -43,6 +43,17 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
         return Ok(left.clone());
     }
 
+    // #615 / #1596: Date vs Datetime — cast date to datetime (start-of-day) for join/compare parity.
+    let date_vs_datetime = (left == &DataType::Date && matches!(right, DataType::Datetime(_, _)))
+        || (matches!(left, DataType::Datetime(_, _)) && right == &DataType::Date);
+    if date_vs_datetime {
+        return Ok(if matches!(left, DataType::Datetime(_, _)) {
+            left.clone()
+        } else {
+            right.clone()
+        });
+    }
+
     let left_norm = if matches!(left, DataType::Unknown(_)) {
         DataType::String
     } else {
@@ -499,6 +510,14 @@ mod tests {
         let list_str = DataType::List(Box::new(DataType::String));
         assert_eq!(find_common_type(&DataType::Null, &list_str)?, list_str);
         assert_eq!(find_common_type(&list_str, &DataType::Null)?, list_str);
+        Ok(())
+    }
+
+    #[test]
+    fn find_common_type_date_datetime_prefers_datetime() -> Result<(), PolarsError> {
+        let ts = DataType::Datetime(TimeUnit::Microseconds, None);
+        assert_eq!(find_common_type(&DataType::Date, &ts)?, ts);
+        assert_eq!(find_common_type(&ts, &DataType::Date)?, ts);
         Ok(())
     }
 
