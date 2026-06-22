@@ -927,6 +927,31 @@ pub fn join(
     ))
 }
 
+fn max_cross_join_rows() -> u64 {
+    std::env::var("SPARKLESS_MAX_CROSS_JOIN_ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000_000)
+}
+
+/// Reject expression joins that would materialize an excessive cartesian product.
+pub fn check_cross_join_budget(left: &DataFrame, right: &DataFrame) -> Result<(), PolarsError> {
+    let max = max_cross_join_rows();
+    let lc = left.count()? as u64;
+    let rc = right.count()? as u64;
+    let product = lc.saturating_mul(rc);
+    if product > max {
+        return Err(PolarsError::InvalidOperation(
+            format!(
+                "join: non-equality condition would materialize ~{product} rows, \
+                 exceeding limit of {max} (set SPARKLESS_MAX_CROSS_JOIN_ROWS to override)"
+            )
+            .into(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

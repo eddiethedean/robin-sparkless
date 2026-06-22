@@ -6,7 +6,8 @@ mod expr;
 mod logical;
 
 use crate::dataframe::joins::{
-    expr_contains_only_join_key_equalities, try_extract_join_eq_columns_all,
+    check_cross_join_budget, expr_contains_only_join_key_equalities,
+    try_extract_join_eq_columns_all,
 };
 use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names};
 use crate::functions::{
@@ -790,6 +791,7 @@ fn execute_plan_join_on_expression(
             return Ok(joined);
         }
     }
+    check_cross_join_budget(&df, &other_df).map_err(PlanError::Session)?;
     let crossed = df.cross_join(&other_df).map_err(PlanError::Session)?;
     let filter_expr = crossed
         .resolve_expr_column_names(expr)

@@ -2905,7 +2905,10 @@ impl<'a> DataFrameWriter<'a> {
     /// With partition_by, path is a directory; each partition is written as path/col1=val1/col2=val2/... with partition columns omitted from the file (Spark/Hive style).
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
         use polars::prelude::*;
-        let path = path.as_ref();
+        let path = robin_sparkless_core::maybe_confine_files_path(path.as_ref()).map_err(|e| {
+            PolarsError::InvalidOperation(format!("write path confinement: {e}").into())
+        })?;
+        let path = path.as_path();
         let to_write: PlDataFrame = match self.mode {
             WriteMode::Overwrite => self.df.collect_inner()?.as_ref().clone(),
             WriteMode::Append => {

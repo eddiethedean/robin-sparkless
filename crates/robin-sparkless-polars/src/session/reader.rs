@@ -1,7 +1,7 @@
 //! DataFrameReader for reading various file formats (CSV, Parquet, JSON, Delta).
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use polars::prelude::PolarsError;
 
@@ -17,7 +17,7 @@ use crate::dataframe::DataFrame;
 ))]
 use crate::jdbc::JdbcOptions;
 
-use super::SparkSession;
+use super::{SparkSession, confine_io_path};
 
 /// DataFrameReader for reading various file formats
 /// Similar to PySpark's DataFrameReader with option/options/format/load/table
@@ -196,7 +196,8 @@ impl DataFrameReader {
 
     pub fn csv(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        let path = path.as_ref();
+        let path: PathBuf = confine_io_path(path.as_ref())?;
+        let path = path.as_path();
         let path_display = path.display();
         let pl_path = PlRefPath::try_from_path(path).map_err(|e| {
             PolarsError::ComputeError(format!("csv({path_display}): path: {e}").into())
@@ -232,7 +233,8 @@ impl DataFrameReader {
 
     pub fn parquet(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        let path = path.as_ref();
+        let path: PathBuf = confine_io_path(path.as_ref())?;
+        let path = path.as_path();
         let pl_path = PlRefPath::try_from_path(path)
             .map_err(|e| PolarsError::ComputeError(format!("parquet: path: {e}").into()))?;
         let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
@@ -246,7 +248,8 @@ impl DataFrameReader {
     pub fn json(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         use std::num::NonZeroUsize;
-        let path = path.as_ref();
+        let path: PathBuf = confine_io_path(path.as_ref())?;
+        let path = path.as_path();
         let pl_path = PlRefPath::try_from_path(path)
             .map_err(|e| PolarsError::ComputeError(format!("json: path: {e}").into()))?;
         let reader = LazyJsonLineReader::new(pl_path);

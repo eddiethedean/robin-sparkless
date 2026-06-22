@@ -214,6 +214,15 @@ Rust engine, UDFs, embedding: see the main [README](https://github.com/eddiethed
 - **UDFs:** Use built-in functions and expressions; Python UDFs are not exposed. Rust UDFs are supported in the engine ([UDF_GUIDE](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/UDF_GUIDE.md)).
 - **Compatibility:** Some APIs or behaviors differ from PySpark; see [PYSPARK_DIFFERENCES.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md).
 
+### Optional security hardening
+
+For production or multi-tenant use, set `SPARKLESS_HARDENED=1` and/or:
+
+- `SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL=false` — disallow arbitrary JDBC SQL; use `dbtable` only
+- `SPARKLESS_FILES_BASE=/path/to/sandbox` — confine `read`/`write` file paths to that directory
+
+See [PYSPARK_DIFFERENCES.md — Security hardening](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md#security-hardening-optional) for resource limits and multiprocessing notes.
+
 ---
 
 ## Version history: v3 vs v4

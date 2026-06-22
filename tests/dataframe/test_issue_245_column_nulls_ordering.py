@@ -49,3 +49,13 @@ def test_order_by_asc_nulls_first(spark) -> None:
     assert values[1] == "A"
     assert values[2] == "B"
     assert values[3] == "C"
+
+
+def test_order_by_asc_default_nulls_first(spark) -> None:
+    """Plain orderBy('col') ASC uses Spark SQL default: nulls first (H-11)."""
+    data = [{"value": "A"}, {"value": "B"}, {"value": None}, {"value": "C"}]
+    df = spark.createDataFrame(data, ["value"])
+    out = df.orderBy("value").collect()
+    values = [r["value"] for r in out]
+    assert values[0] is None
+    assert values[1:] == ["A", "B", "C"]

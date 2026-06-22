@@ -76,12 +76,17 @@ impl EngineDataFrame for DataFrame {
     }
 }
 
+pub use robin_sparkless_polars::dataframe::joins::check_cross_join_budget;
 /// Re-export for API compatibility.
 pub use robin_sparkless_polars::dataframe::{
     GroupBySpec, JoinType, SaveMode, SelectItem, WriteFormat, WriteMode,
     expr_contains_only_join_key_equalities, try_extract_join_eq_columns,
     try_extract_join_eq_columns_all,
 };
+
+pub mod joins {
+    pub use robin_sparkless_polars::dataframe::joins::check_cross_join_budget;
+}
 
 /// Root-owned DataFrameStat; delegates to the Polars backend.
 pub struct DataFrameStat<'a>(PolarsDataFrameStat<'a>);
@@ -421,6 +426,11 @@ impl DataFrame {
 
     pub fn cross_join(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
         self.0.cross_join(&other.0).map(DataFrame)
+    }
+
+    /// Reject expression joins that would materialize an excessive cartesian product.
+    pub fn check_cross_join_budget(&self, other: &DataFrame) -> Result<(), PolarsError> {
+        check_cross_join_budget(&self.0, &other.0)
     }
 
     pub fn describe(&self) -> Result<DataFrame, PolarsError> {

@@ -180,3 +180,18 @@ The following are **not implemented** or are **stubs**; tracked in GitHub issues
 - **Wrong result value (#709, #707)**: If a Sparkless test fails with e.g. `assert False` or `assert 0 == 1`, the root cause may be filter predicate, aggregate (e.g. count), or collect/serialization. Reproduce in Robin (plan or session test) to fix; check filter expr, agg result column, and `any_value_to_json` for the affected type.
 
 See [ROADMAP.md](ROADMAP.md) and [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) for the full list.
+
+## Security hardening (optional)
+
+Robin-sparkless defaults to PySpark parity. For locked-down deployments, set environment variables before creating a `SparkSession`:
+
+| Variable | Default | When set |
+|----------|---------|----------|
+| `SPARKLESS_HARDENED=1` | off | Enables hardened defaults (see below) |
+| `SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL` | `true` | Set `false` (or with `SPARKLESS_HARDENED=1`, omit unless `true`) to block JDBC `query`, `sessionInitStatement`, and `prepareQuery`; use `dbtable` only |
+| `SPARKLESS_FILES_BASE` | unset | When set, all general file read/write paths must resolve under this directory |
+| `SPARKLESS_MAX_RANGE_ROWS` | `10000000` | Caps `spark.range()` row count |
+| `SPARKLESS_MAX_CROSS_JOIN_ROWS` | `10000000` | Caps non-equality join materialization (cross join + filter) |
+| `SPARKLESS_RDD_MAX_ROWS` | `10000000` | Caps RDD `map` / `flatMap` / `reduce` materialization |
+
+Warehouse table paths and Delta parquet URIs are always confined to their table roots. Call `sparkless._configure_for_multiprocessing()` (or set `ROBIN_SPARKLESS_MULTIPROCESSING=1`) before Polars use when using `pytest-xdist` or fork-based multiprocessing.

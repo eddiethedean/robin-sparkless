@@ -1130,6 +1130,15 @@ impl PySparkSession {
     #[pyo3(name = "newSession")]
     fn new_session(slf: PyRef<Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
         let session = slf.inner.new_session();
+        robin_sparkless::set_thread_udf_context_full(
+            std::sync::Arc::new(session.udf_registry().clone()),
+            session.is_case_sensitive(),
+            session
+                .get_config()
+                .get("spark.sql.session.timeZone")
+                .cloned(),
+            session.runtime_config().clone(),
+        );
         let backend_type = slf.backend_type.borrow().clone();
         let obj = Py::new(
             py,
@@ -3854,6 +3863,25 @@ fn resolve_join_keys_with_aliases(
     (left_key, right_key)
 }
 
+fn rdd_max_rows() -> i64 {
+    std::env::var("SPARKLESS_RDD_MAX_ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000_000)
+}
+
+fn check_rdd_dataframe_size(df: &DataFrame) -> PyResult<()> {
+    let count = df.count().map_err(to_py_err)? as i64;
+    let max = rdd_max_rows();
+    if count > max {
+        return Err(SparklessError::new_err(format!(
+            "RDD operations are limited to {max} rows (source has {count}); \
+             set SPARKLESS_RDD_MAX_ROWS to override"
+        )));
+    }
+    Ok(())
+}
+
 /// RDD-like wrapper for createDataFrame(df.rdd, schema) (issue #1147 / #361) and df.rdd.flatMap (issue #408 / #1238).
 /// When from df.rdd: holds source_df and inner (DataFrame). When from flatMap/map/filter: holds elements (materialized list).
 #[pyclass]
@@ -4024,11 +4052,36 @@ impl PyRDD {
             ));
         };
         let df = source_df.bind(py).cast::<PyDataFrame>()?;
+        check_rdd_dataframe_size(&df.borrow().inner)?;
         let list_obj = df.call_method0("collect")?;
         let list = list_obj.cast::<PyList>()?;
         let mut vec = Vec::with_capacity(list.len());
         for item in list.iter() {
             vec.push(item.into_py_any(py)?);
+        }
+        Ok(vec)
+    }
+
+    fn collect_elements_limited(&self, py: Python<'_>, limit: usize) -> PyResult<Vec<PyObject>> {
+        if let Some(ref elements) = self.elements {
+            let n = limit.min(elements.len());
+            return Ok(elements.iter().take(n).map(|o| o.clone_ref(py)).collect());
+        }
+        let Some(ref source_df) = self.source_df else {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "RDD has no source",
+            ));
+        };
+        let df = source_df.bind(py).cast::<PyDataFrame>()?;
+        let limited = df.borrow().inner.limit(limit).map_err(to_py_err)?;
+        let rows = limited.collect_as_json_rows().map_err(to_py_err)?;
+        let mut vec = Vec::with_capacity(rows.len());
+        for row in rows {
+            let dict = PyDict::new(py);
+            for (k, v) in row {
+                dict.set_item(k, json_to_py(&v, py)?)?;
+            }
+            vec.push(dict.into_py_any(py)?);
         }
         Ok(vec)
     }
@@ -4095,9 +4148,8 @@ impl PyRDD {
     }
 
     fn take(&self, py: Python<'_>, n: usize) -> PyResult<PyObject> {
-        let elements = self.collect_elements(py)?;
-        let n = n.min(elements.len());
-        let list = PyList::new(py, elements.iter().take(n).map(|o| o.bind(py)))?;
+        let elements = self.collect_elements_limited(py, n)?;
+        let list = PyList::new(py, elements.iter().map(|o| o.bind(py)))?;
         list.into_py_any(py)
     }
 
@@ -5620,17 +5672,20 @@ impl PyDataFrame {
                         }
 
                         // For LEFT / RIGHT joins implemented via FULL OUTER on same-named keys,
-                        // filter the OUTER result to restore LEFT / RIGHT semantics.
+                        // drop rows from the non-preserved side only (keep left rows with null keys).
                         if only_key_equalities && same_named_keys {
                             use robin_sparkless::functions;
                             match join_type {
                                 JoinType::Left => {
-                                    let cond = left_keys.iter().fold(
+                                    let cond = left_keys.iter().zip(right_keys.iter()).fold(
                                         None::<robin_sparkless::Expr>,
-                                        |acc, k| {
-                                            let c = functions::col(k.as_str())
-                                                .is_not_null()
-                                                .into_expr();
+                                        |acc, (k, _)| {
+                                            let right_col_name = format!("{}_right", k.as_str());
+                                            let left_nn = functions::col(k.as_str()).is_not_null();
+                                            let right_null =
+                                                functions::col(right_col_name.as_str()).is_null();
+                                            let keep = left_nn.or_(&right_null);
+                                            let c = keep.into_expr();
                                             Some(match acc {
                                                 None => c,
                                                 Some(prev) => prev.and(c),
@@ -5642,13 +5697,15 @@ impl PyDataFrame {
                                     }
                                 }
                                 JoinType::Right => {
-                                    let cond = right_keys.iter().fold(
+                                    let cond = left_keys.iter().zip(right_keys.iter()).fold(
                                         None::<robin_sparkless::Expr>,
-                                        |acc, k| {
+                                        |acc, (k, _)| {
                                             let right_col_name = format!("{}_right", k.as_str());
-                                            let c = functions::col(right_col_name.as_str())
-                                                .is_not_null()
-                                                .into_expr();
+                                            let right_nn = functions::col(right_col_name.as_str())
+                                                .is_not_null();
+                                            let left_null = functions::col(k.as_str()).is_null();
+                                            let keep = right_nn.or_(&left_null);
+                                            let c = keep.into_expr();
                                             Some(match acc {
                                                 None => c,
                                                 Some(prev) => prev.and(c),
@@ -5667,6 +5724,9 @@ impl PyDataFrame {
                     }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
+                self.inner
+                    .check_cross_join_budget(&other.inner)
+                    .map_err(to_py_err)?;
                 let crossed = self.inner.cross_join(&other.inner).map_err(to_py_err)?;
                 let filtered = crossed.filter(expr).map_err(to_py_err)?;
                 // For left/outer joins, include unmatched left rows with nulls on right columns (best-effort PySpark parity).
@@ -10533,6 +10593,16 @@ fn struct_(columns: &Bound<'_, PyTuple>) -> PyResult<PyColumn> {
     })
 }
 
+#[pyfunction]
+fn configure_for_multiprocessing() {
+    // SAFETY: set once before Polars/Rayon worker pools start (pytest-xdist parent or early import).
+    unsafe {
+        std::env::set_var("POLARS_MAX_THREADS", "1");
+        std::env::set_var("RAYON_NUM_THREADS", "1");
+        std::env::set_var("ROBIN_SPARKLESS_MULTIPROCESSING", "1");
+    }
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SparklessError", m.py().get_type::<SparklessError>())?;
@@ -10748,6 +10818,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(array_contains, m)?)?;
     m.add_function(wrap_pyfunction!(arrays_overlap, m)?)?;
     m.add_function(wrap_pyfunction!(explode, m)?)?;
+    m.add_function(wrap_pyfunction!(configure_for_multiprocessing, m)?)?;
     // #1267: define Python helper in this module so createDataFrame list-of-dicts can convert in Python.
     let py = m.py();
     let code = "def _cdf_dict_rows_to_lists(data, keys):\n    return [[d.get(k) for k in keys] for d in data]";

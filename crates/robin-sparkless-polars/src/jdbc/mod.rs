@@ -238,6 +238,40 @@ impl JdbcOptions {
     pub fn has_dbtable(&self) -> bool {
         self.dbtable.is_some()
     }
+
+    /// Reject arbitrary SQL options when hardened (see `SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL`).
+    pub fn enforce_sql_trust_boundary(&self) -> Result<(), EngineError> {
+        if jdbc_allow_arbitrary_sql() {
+            return Ok(());
+        }
+        if self.query.is_some()
+            || self.session_init_statement.is_some()
+            || self.prepare_query.is_some()
+        {
+            return Err(EngineError::User(
+                "JDBC query/sessionInitStatement/prepareQuery disabled. \
+                 Set SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL=true or use dbtable only."
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Whether JDBC `query` / `sessionInitStatement` / `prepareQuery` are permitted.
+pub fn jdbc_allow_arbitrary_sql() -> bool {
+    if std::env::var("SPARKLESS_HARDENED")
+        .ok()
+        .is_some_and(|v| v == "1")
+    {
+        return std::env::var("SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL")
+            .ok()
+            .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    }
+    std::env::var("SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL")
+        .ok()
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true)
 }
 
 /// True if the URL is for SQLite (e.g. `jdbc:sqlite:/path` or `jdbc:sqlite:file:path`).
@@ -369,6 +403,7 @@ pub fn write_jdbc_from_polars(
     feature = "jdbc_db2"
 ))]
 pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
+    opts.enforce_sql_trust_boundary()?;
     if is_sqlite_url(&opts.url) || driver_hint_is(&opts.driver, "org.sqlite.JDBC") {
         #[cfg(feature = "sqlite")]
         return sqlite::read_jdbc_sqlite(opts);

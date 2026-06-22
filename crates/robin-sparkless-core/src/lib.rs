@@ -27,6 +27,9 @@ pub use jdbc_mapping::{
     db2_v4_type_mapping, jdbc_v4_type_mappings, mssql_v4_type_mapping, mysql_v4_type_mapping,
     oracle_v4_timestamp_mapping, postgres_v4_datetime_mapping,
 };
-pub use path_security::{resolve_path_under_base, validate_table_name};
+pub use path_security::{
+    confine_user_path_under_base, maybe_confine_files_path, resolve_path_under_base,
+    validate_table_name,
+};
 pub use runtime_config::{PysparkCompat, SessionRuntimeConfig};
 pub use schema::{DataType, StructField, StructType};

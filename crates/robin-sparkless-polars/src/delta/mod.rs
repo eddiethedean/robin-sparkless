@@ -123,9 +123,10 @@ pub fn read_delta_with_version(
                     case_sensitive,
                 ));
             }
+            let table_root_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
             let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
             for uri in &uris {
-                let parquet_path = uri_to_parquet_path(uri)?;
+                let parquet_path = confine_parquet_uri_to_table_root(uri, &table_root_canonical)?;
                 let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
                     PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
                 })?;
@@ -166,14 +167,20 @@ pub fn read_delta_with_version(
 
 /// Load existing Delta table rows from file URIs (sync; for use inside async write_delta).
 #[cfg(feature = "delta")]
-fn load_pl_from_parquet_uris(uris: &[String]) -> Result<polars::prelude::DataFrame, PolarsError> {
+fn load_pl_from_parquet_uris(
+    uris: &[String],
+    table_root: &Path,
+) -> Result<polars::prelude::DataFrame, PolarsError> {
     use polars::prelude::DataFrame as PlDataFrame;
     if uris.is_empty() {
         return Ok(PlDataFrame::default());
     }
+    let table_root_canonical = table_root
+        .canonicalize()
+        .unwrap_or_else(|_| table_root.to_path_buf());
     let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
     for uri in uris {
-        let parquet_path = uri_to_parquet_path(uri)?;
+        let parquet_path = confine_parquet_uri_to_table_root(uri, &table_root_canonical)?;
         let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
             PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
         })?;
@@ -225,24 +232,99 @@ fn path_to_table_uri(path: &Path) -> Result<String, PolarsError> {
 }
 
 #[cfg(feature = "delta")]
+fn confine_parquet_uri_to_table_root(
+    uri: &str,
+    table_root: &Path,
+) -> Result<std::path::PathBuf, PolarsError> {
+    // Delta-rs may prefix absolute file URIs with the table path, e.g.
+    // `/data/table/file:/etc/passwd`. Extract and confine the embedded URI.
+    if let Some(pos) = uri.find("file:") {
+        if pos > 0 {
+            return confine_parquet_uri_to_table_root(&uri[pos..], table_root);
+        }
+    }
+    let parquet_path = uri_to_parquet_path(uri)?;
+    let table_canonical = table_root.canonicalize().map_err(|e| {
+        PolarsError::ComputeError(format!("read_delta: canonicalize table root: {e}").into())
+    })?;
+    let resolved = if parquet_path.is_absolute() {
+        parquet_path
+    } else {
+        table_canonical.join(parquet_path)
+    };
+    let canonical = canonicalize_path_for_confinement(&resolved, &table_canonical)?;
+    if !canonical.starts_with(&table_canonical) {
+        return Err(PolarsError::ComputeError(
+            format!(
+                "read_delta: parquet URI '{}' escapes table root '{}'",
+                canonical.display(),
+                table_canonical.display()
+            )
+            .into(),
+        ));
+    }
+    Ok(canonical)
+}
+
+/// Resolve `..` / `.` by canonicalizing the nearest existing ancestor (same idea as path_security).
+#[cfg(feature = "delta")]
+fn canonicalize_path_for_confinement(
+    resolved: &Path,
+    fallback_base: &Path,
+) -> Result<std::path::PathBuf, PolarsError> {
+    if resolved.exists() {
+        return resolved.canonicalize().map_err(|e| {
+            PolarsError::ComputeError(format!("read_delta: canonicalize parquet path: {e}").into())
+        });
+    }
+    let parent = resolved.parent().unwrap_or(fallback_base);
+    let file_name = resolved
+        .file_name()
+        .ok_or_else(|| PolarsError::ComputeError("read_delta: invalid parquet path".into()))?;
+    if parent.exists() {
+        let canonical_parent = parent.canonicalize().map_err(|e| {
+            PolarsError::ComputeError(format!("read_delta: canonicalize parent: {e}").into())
+        })?;
+        Ok(canonical_parent.join(file_name))
+    } else {
+        Ok(resolved.to_path_buf())
+    }
+}
+
+#[cfg(feature = "delta")]
+fn decode_percent_path(s: &str) -> String {
+    percent_encoding::percent_decode_str(s)
+        .decode_utf8()
+        .map(|cow| cow.into_owned())
+        .unwrap_or_else(|_| s.to_string())
+}
+
+#[cfg(feature = "delta")]
 fn uri_to_parquet_path(uri: &str) -> Result<std::path::PathBuf, PolarsError> {
-    if let Some(stripped) = uri.strip_prefix("file://") {
+    let file_uri = uri
+        .strip_prefix("file://")
+        .or_else(|| uri.strip_prefix("file:/"));
+    if let Some(stripped) = file_uri {
         #[cfg(target_os = "windows")]
         {
-            let s = stripped.trim_start_matches('/').replace('/', "\\");
+            let s = decode_percent_path(stripped.trim_start_matches('/')).replace('/', "\\");
             return Ok(std::path::PathBuf::from(s));
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let s = stripped.trim_start_matches('/');
-            return Ok(std::path::PathBuf::from(format!("/{}", s)));
+            let s = decode_percent_path(stripped.trim_start_matches('/'));
+            return Ok(std::path::PathBuf::from(format!("/{s}")));
         }
     }
     // deltalake may return bare absolute paths (e.g. /private/var/.../file.parquet).
     if uri.starts_with('/')
         || (cfg!(target_os = "windows") && uri.len() >= 2 && uri.chars().nth(1) == Some(':'))
     {
-        return Ok(std::path::PathBuf::from(uri));
+        return Ok(std::path::PathBuf::from(decode_percent_path(uri)));
+    }
+    // Relative paths within the table directory (common in Delta add actions).
+    if !uri.contains("://") && !uri.starts_with("file:") {
+        return Ok(std::path::PathBuf::from(decode_percent_path(uri)));
     }
     Err(PolarsError::ComputeError(
         format!("read_delta: unsupported URI (local file only): {}", uri).into(),
@@ -540,16 +622,17 @@ pub fn write_delta(
                         })?
                         .collect();
                     // Polars collect() may start a runtime; must not run inside block_on.
+                    let table_root = path.to_path_buf();
                     let df_clone = df.clone();
-                    let existing_pl =
-                        tokio::task::spawn_blocking(move || load_pl_from_parquet_uris(&uris))
-                            .await
-                            .map_err(|e| {
-                                PolarsError::ComputeError(
-                                    format!("write_delta: load existing for merge_schema: {e}")
-                                        .into(),
-                                )
-                            })??;
+                    let existing_pl = tokio::task::spawn_blocking(move || {
+                        load_pl_from_parquet_uris(&uris, &table_root)
+                    })
+                    .await
+                    .map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("write_delta: load existing for merge_schema: {e}").into(),
+                        )
+                    })??;
                     let (_, aligned_new) =
                         crate::dataframe::align_to_merged_schema_inline(&existing_pl, &df_clone)?;
                     aligned_new
@@ -581,4 +664,106 @@ pub fn write_delta(
             )),
         }
     })
+}
+
+#[cfg(all(test, feature = "delta"))]
+mod confinement_tests {
+    use super::{
+        canonicalize_path_for_confinement, confine_parquet_uri_to_table_root, uri_to_parquet_path,
+    };
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn uri_to_parquet_path_parses_file_colon_slash() {
+        let got = uri_to_parquet_path("file:/private/tmp/foo.parquet").unwrap();
+        assert_eq!(got, std::path::PathBuf::from("/private/tmp/foo.parquet"));
+    }
+
+    #[test]
+    fn rejects_relative_escape_via_parent_dir() {
+        let dir = TempDir::new().unwrap();
+        let table = dir.path().join("table");
+        let outside = dir.path().join("outside.parquet");
+        fs::create_dir_all(&table).unwrap();
+        fs::write(&outside, b"x").unwrap();
+        let err = confine_parquet_uri_to_table_root("../outside.parquet", &table).unwrap_err();
+        assert!(err.to_string().contains("escapes table root"));
+    }
+
+    #[test]
+    fn rejects_absolute_path_outside_table() {
+        let dir = TempDir::new().unwrap();
+        let table = dir.path().join("table");
+        let outside = dir.path().join("outside.parquet");
+        fs::create_dir_all(&table).unwrap();
+        fs::write(&outside, b"x").unwrap();
+        let uri = format!("file://{}", outside.canonicalize().unwrap().display());
+        let err = confine_parquet_uri_to_table_root(&uri, &table).unwrap_err();
+        assert!(err.to_string().contains("escapes table root"));
+    }
+
+    #[test]
+    fn allows_parquet_inside_table() {
+        let dir = TempDir::new().unwrap();
+        let table = dir.path().join("table");
+        let inside = table.join("part-00000.parquet");
+        fs::create_dir_all(&table).unwrap();
+        fs::write(&inside, b"x").unwrap();
+        let got = confine_parquet_uri_to_table_root("part-00000.parquet", &table).unwrap();
+        assert!(got.starts_with(table.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn canonicalize_resolves_parent_dir() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(dir.path().join("sibling.txt"), b"x").unwrap();
+        let resolved = base.join("..").join("sibling.txt");
+        let canonical = canonicalize_path_for_confinement(&resolved, &base).unwrap();
+        assert_eq!(
+            canonical,
+            dir.path().join("sibling.txt").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_percent_encoded_parent_dir_escape() {
+        let dir = TempDir::new().unwrap();
+        let table = dir.path().join("table");
+        let outside = dir.path().join("outside.parquet");
+        fs::create_dir_all(&table).unwrap();
+        fs::write(&outside, b"x").unwrap();
+        let err = confine_parquet_uri_to_table_root("%2E%2E/outside.parquet", &table).unwrap_err();
+        assert!(err.to_string().contains("escapes table root"));
+    }
+
+    #[test]
+    fn rejects_embedded_file_uri_under_table_prefix() {
+        let dir = TempDir::new().unwrap();
+        let table = dir.path().join("table");
+        let outside = dir.path().join("outside.parquet");
+        fs::create_dir_all(&table).unwrap();
+        fs::write(&outside, b"x").unwrap();
+        let embedded = format!(
+            "{}/file:{}",
+            table.canonicalize().unwrap().display(),
+            outside.canonicalize().unwrap().display()
+        );
+        let err = confine_parquet_uri_to_table_root(&embedded, &table).unwrap_err();
+        assert!(err.to_string().contains("escapes table root"));
+    }
+
+    #[test]
+    fn rejects_file_colon_single_slash_absolute_uri() {
+        let dir = TempDir::new().unwrap();
+        let table = dir.path().join("table");
+        let outside = dir.path().join("outside.parquet");
+        fs::create_dir_all(&table).unwrap();
+        fs::write(&outside, b"x").unwrap();
+        let uri = format!("file:{}", outside.canonicalize().unwrap().display());
+        let err = confine_parquet_uri_to_table_root(&uri, &table).unwrap_err();
+        assert!(err.to_string().contains("escapes table root"));
+    }
 }

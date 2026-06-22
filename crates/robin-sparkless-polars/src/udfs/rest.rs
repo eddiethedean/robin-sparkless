@@ -8,8 +8,11 @@ use std::borrow::Cow;
 use std::ops::Not;
 
 /// Normalize float map keys (-0.0 -> 0.0) per PySpark 4.0 when enabled.
-pub fn normalize_map_key_series(s: Series) -> PolarsResult<Series> {
-    if crate::udf_context::get_thread_runtime_config().disable_map_key_normalization {
+pub fn normalize_map_key_series(
+    s: Series,
+    disable_map_key_normalization: bool,
+) -> PolarsResult<Series> {
+    if disable_map_key_normalization {
         return Ok(s);
     }
     match s.dtype() {
@@ -1044,7 +1047,10 @@ pub fn apply_str_to_map(
 }
 
 /// Merge two map columns (PySpark map_concat). Last value wins for duplicate keys.
-pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+pub fn apply_map_concat(
+    columns: &mut [Column],
+    disable_map_key_normalization: bool,
+) -> PolarsResult<Option<Column>> {
     use polars::chunked_array::StructChunked;
     use polars::chunked_array::builder::get_list_builder;
     use polars::datatypes::Field;
@@ -1094,7 +1100,7 @@ pub fn apply_map_concat(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
                 let k_s = st
                     .field_by_name("key")
                     .map_err(|e| compute_err("map_concat key", e))?;
-                let k_s = normalize_map_key_series(k_s)?;
+                let k_s = normalize_map_key_series(k_s, disable_map_key_normalization)?;
                 let v_s = st
                     .field_by_name("value")
                     .map_err(|e| compute_err("map_concat value", e))?;
@@ -3242,7 +3248,10 @@ pub fn apply_least2(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
 }
 
 /// Build map (list of structs {key, value}) from two list columns. PySpark map_from_arrays.
-pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+pub fn apply_map_from_arrays(
+    columns: &mut [Column],
+    disable_map_key_normalization: bool,
+) -> PolarsResult<Option<Column>> {
     use polars::chunked_array::StructChunked;
     use polars::chunked_array::builder::get_list_builder;
     use polars::datatypes::Field;
@@ -3275,7 +3284,10 @@ pub fn apply_map_from_arrays(columns: &mut [Column]) -> PolarsResult<Option<Colu
                 let mut row_structs: Vec<Series> = Vec::new();
                 for (opt_ke, opt_ve) in k_list.amortized_iter().zip(v_list.amortized_iter()) {
                     if let (Some(ke), Some(ve)) = (opt_ke, opt_ve) {
-                        let ke_s = normalize_map_key_series(ke.deep_clone())?;
+                        let ke_s = normalize_map_key_series(
+                            ke.deep_clone(),
+                            disable_map_key_normalization,
+                        )?;
                         let ve_s = ve.deep_clone();
                         let len = ke_s.len();
                         let fields: [&Series; 2] = [&ke_s, &ve_s];
@@ -6308,7 +6320,7 @@ mod tests_parse_timestamp {
             SessionRuntimeConfig::for_compat(PysparkCompat::V4_0),
         );
         let s = Series::new("k".into(), vec![-0.0f64]);
-        let out = super::normalize_map_key_series(s).unwrap();
+        let out = super::normalize_map_key_series(s, false).unwrap();
         assert_eq!(out.f64().unwrap().get(0), Some(0.0));
         clear_thread_udf_context();
     }

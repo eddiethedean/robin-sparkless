@@ -1065,7 +1065,7 @@ pub fn order_by(
         if all_in_pre {
             let sort_exprs: Vec<Expr> = pre_resolved.iter().map(|s| col(s.as_str())).collect();
             let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
-            let nulls_last: Vec<bool> = vec![true; column_names.len()];
+            let nulls_last: Vec<bool> = asc.iter().map(|&a| !a).collect();
             let sorted = pre.clone().sort_by_exprs(
                 sort_exprs,
                 SortMultipleOptions::new()
@@ -1079,8 +1079,8 @@ pub fn order_by(
     let resolved = resolved?;
     let exprs: Vec<Expr> = resolved.iter().map(|s| col(s.as_str())).collect();
     let descending: Vec<bool> = asc.iter().map(|&a| !a).collect();
-    // PySpark default: nulls last for both ASC and DESC (issue #1052 / #327 test expectation).
-    let nulls_last: Vec<bool> = vec![true; column_names.len()];
+    // PySpark/SQL default: ASC nulls first, DESC nulls last.
+    let nulls_last: Vec<bool> = asc.iter().map(|&a| !a).collect();
     let lf = df.lazy_frame().sort_by_exprs(
         exprs,
         SortMultipleOptions::new()

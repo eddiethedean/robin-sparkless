@@ -1735,9 +1735,10 @@ impl Column {
     /// Divide with PySpark-style string/number coercion (used by Python Column operators).
     pub fn divide_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
+        let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
         let expr = self.expr().clone().map_many(
-            |cols| {
-                if crate::udf_context::get_thread_ansi_enabled() {
+            move |cols| {
+                if ansi_enabled {
                     expect_col(crate::udfs::apply_ansi_divide(cols))
                 } else {
                     expect_col(crate::udfs::apply_pyspark_divide(cols))
@@ -3618,8 +3619,15 @@ impl Column {
     /// Build map from two array columns (keys, values) (PySpark map_from_arrays). Implemented via map_many UDF.
     pub fn map_from_arrays(&self, values: &Column) -> Column {
         let args = [values.expr().clone()];
+        let disable_map_key_normalization =
+            crate::udf_context::get_thread_runtime_config().disable_map_key_normalization;
         let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_map_from_arrays(cols)),
+            move |cols| {
+                expect_col(crate::udfs::apply_map_from_arrays(
+                    cols,
+                    disable_map_key_normalization,
+                ))
+            },
             &args,
             |_schema, fields| Ok(fields[0].clone()),
         );
@@ -3629,8 +3637,15 @@ impl Column {
     /// Merge two map columns (PySpark map_concat). Last value wins for duplicate keys.
     pub fn map_concat(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
+        let disable_map_key_normalization =
+            crate::udf_context::get_thread_runtime_config().disable_map_key_normalization;
         let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_map_concat(cols)),
+            move |cols| {
+                expect_col(crate::udfs::apply_map_concat(
+                    cols,
+                    disable_map_key_normalization,
+                ))
+            },
             &args,
             |_schema, fields| Ok(fields[0].clone()),
         );

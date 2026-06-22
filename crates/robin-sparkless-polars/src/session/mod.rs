@@ -1129,9 +1129,58 @@ fn json_object_to_map_struct_series(
 }
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread_local;
+
+/// When `SPARKLESS_FILES_BASE` is set, confine read/write paths under that directory.
+pub(crate) fn confine_io_path(path: &Path) -> Result<PathBuf, PolarsError> {
+    robin_sparkless_core::maybe_confine_files_path(path)
+        .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))
+}
+
+fn max_range_rows() -> u64 {
+    std::env::var("SPARKLESS_MAX_RANGE_ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000_000)
+}
+
+fn range_row_count(start: i64, end: i64, step: i64) -> Result<u64, PolarsError> {
+    if step > 0 {
+        if end <= start {
+            return Ok(0);
+        }
+        let span = (end - start) as u128;
+        let s = step as u128;
+        Ok(span.div_ceil(s).min(u64::MAX as u128) as u64)
+    } else {
+        if end >= start {
+            return Ok(0);
+        }
+        let span = (start - end) as u128;
+        let s = (-step) as u128;
+        Ok(span.div_ceil(s).min(u64::MAX as u128) as u64)
+    }
+}
+
+/// Read a disk-backed warehouse table directory if it exists under the warehouse.
+fn read_warehouse_table_at(
+    spark: &SparkSession,
+    warehouse: &str,
+    table_name: &str,
+) -> Result<Option<DataFrame>, PolarsError> {
+    let dir =
+        robin_sparkless_core::resolve_path_under_base(warehouse, table_name).map_err(|e| {
+            PolarsError::InvalidOperation(format!("warehouse table lookup: {e}").into())
+        })?;
+    if !dir.is_dir() {
+        return Ok(None);
+    }
+    let data_file = dir.join("data.parquet");
+    let read_path = if data_file.is_file() { data_file } else { dir };
+    Ok(Some(spark.read_parquet_unchecked(&read_path)?))
+}
 
 thread_local! {
     /// Thread-local SparkSession for UDF resolution in call_udf. Set by get_or_create.
@@ -1761,23 +1810,13 @@ impl SparkSession {
         // Warehouse fallback (disk-backed saveAsTable). #760: schema-qualified name try both
         // "schema.table" as single dir and "schema/table" (schema as subdir).
         if let Some(warehouse) = self.warehouse_dir() {
-            let wh = Path::new(warehouse);
-            let dir = wh.join(name);
-            if dir.is_dir() {
-                let data_file = dir.join("data.parquet");
-                let read_path = if data_file.is_file() { data_file } else { dir };
-                return self.read_parquet(&read_path);
+            if let Some(df) = read_warehouse_table_at(self, warehouse, name)? {
+                return Ok(df);
             }
             if name.contains('.') {
-                let dir_qualified = wh.join(name.replace('.', std::path::MAIN_SEPARATOR_STR));
-                if dir_qualified.is_dir() {
-                    let data_file = dir_qualified.join("data.parquet");
-                    let read_path = if data_file.is_file() {
-                        data_file
-                    } else {
-                        dir_qualified
-                    };
-                    return self.read_parquet(&read_path);
+                let alt = name.replace('.', std::path::MAIN_SEPARATOR_STR);
+                if let Some(df) = read_warehouse_table_at(self, warehouse, &alt)? {
+                    return Ok(df);
                 }
             }
         }
@@ -2884,6 +2923,17 @@ impl SparkSession {
                 "range: step must not be 0".into(),
             ));
         }
+        let row_count = range_row_count(start, end, step)?;
+        let max_rows = max_range_rows();
+        if row_count > max_rows {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "range: would create {row_count} rows, exceeding limit of {max_rows} \
+                     (set SPARKLESS_MAX_RANGE_ROWS to override)"
+                )
+                .into(),
+            ));
+        }
         let mut vals: Vec<i64> = Vec::new();
         let mut v = start;
         if step > 0 {
@@ -2921,7 +2971,7 @@ impl SparkSession {
     /// ```
     pub fn read_csv(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        let path = path.as_ref();
+        let path = confine_io_path(path.as_ref())?;
         if !path.exists() {
             return Err(PolarsError::ComputeError(
                 format!("read_csv: file not found: {}", path.display()).into(),
@@ -2929,7 +2979,7 @@ impl SparkSession {
         }
         let path_display = path.display();
         // Use LazyCsvReader - call finish() to get LazyFrame, then collect
-        let pl_path = PlRefPath::try_from_path(path).map_err(|e| {
+        let pl_path = PlRefPath::try_from_path(&path).map_err(|e| {
             PolarsError::ComputeError(format!("read_csv({path_display}): path: {e}").into())
         })?;
         let lf = LazyCsvReader::new(pl_path)
@@ -2969,6 +3019,15 @@ impl SparkSession {
     /// // Handle the Result as appropriate in your application
     /// ```
     pub fn read_parquet(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+        let path = confine_io_path(path.as_ref())?;
+        self.read_parquet_unchecked(&path)
+    }
+
+    /// Read parquet without `SPARKLESS_FILES_BASE` confinement (warehouse-internal use).
+    pub(crate) fn read_parquet_unchecked(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         let path = path.as_ref();
         if !path.exists() {
@@ -3007,14 +3066,14 @@ impl SparkSession {
     pub fn read_json(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
         use std::num::NonZeroUsize;
-        let path = path.as_ref();
+        let path = confine_io_path(path.as_ref())?;
         if !path.exists() {
             return Err(PolarsError::ComputeError(
                 format!("read_json: file not found: {}", path.display()).into(),
             ));
         }
         // Use LazyJsonLineReader - call finish() to get LazyFrame, then collect
-        let pl_path = PlRefPath::try_from_path(path)
+        let pl_path = PlRefPath::try_from_path(&path)
             .map_err(|e| PolarsError::ComputeError(format!("read_json: path: {e}").into()))?;
         let lf = LazyJsonLineReader::new(pl_path)
             .with_infer_schema_length(NonZeroUsize::new(100))
@@ -3059,6 +3118,7 @@ impl SparkSession {
     /// Read a Delta table from path (latest version). Internal; use read_delta(name_or_path: &str) for dispatch.
     #[cfg(feature = "delta")]
     pub fn read_delta_path(&self, path: impl AsRef<Path>) -> Result<DataFrame, PolarsError> {
+        let path = confine_io_path(path.as_ref())?;
         crate::delta::read_delta(path, self.is_case_sensitive())
     }
 
@@ -3069,6 +3129,7 @@ impl SparkSession {
         path: impl AsRef<Path>,
         version: Option<i64>,
     ) -> Result<DataFrame, PolarsError> {
+        let path = confine_io_path(path.as_ref())?;
         crate::delta::read_delta_with_version(path, version, self.is_case_sensitive())
     }
 
@@ -3155,9 +3216,6 @@ impl SparkSession {
         let _ = self.udf_registry.clear();
         clear_thread_udf_session();
         crate::clear_thread_udf_context();
-        if let Ok(mut m) = global_temp_catalog().lock() {
-            m.clear();
-        }
     }
 }
 

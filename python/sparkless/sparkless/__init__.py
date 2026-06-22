@@ -551,3 +551,10 @@ class _SQLModule:
 
 
 sql = _SQLModule()
+
+
+def _configure_for_multiprocessing() -> None:
+    """Configure thread pools for safe use with multiprocessing (pytest-xdist)."""
+    from sparkless._native import configure_for_multiprocessing
+
+    configure_for_multiprocessing()
