@@ -2787,6 +2787,42 @@ fn python_row_to_json(
     )))
 }
 
+/// Convert PySpark/sparkless Row (or similar) to JSON object for nested struct columns (#1597).
+fn py_row_like_to_json(py: Python<'_>, v: &Bound<'_, PyAny>) -> Option<PyResult<JsonValue>> {
+    if let Ok(as_dict) = v.getattr("asDict") {
+        if as_dict.is_callable() {
+            if let Ok(d) = as_dict.call0() {
+                if let Ok(dict) = d.cast::<PyDict>() {
+                    return Some((|| {
+                        let mut obj = serde_json::Map::new();
+                        for (k, val) in dict.iter() {
+                            let key = k.extract::<String>().unwrap_or_else(|_| k.to_string());
+                            obj.insert(key, py_any_to_json(py, &val)?);
+                        }
+                        Ok(JsonValue::Object(obj))
+                    })());
+                }
+            }
+        }
+    }
+    if let Ok(fields_attr) = v.getattr("_fields") {
+        if let Ok(fields_list) = fields_attr.cast::<PyList>() {
+            if !fields_list.is_empty() {
+                return Some((|| {
+                    let mut obj = serde_json::Map::new();
+                    for (i, field_py) in fields_list.iter().enumerate() {
+                        let key = field_py.extract::<String>()?;
+                        let val_py = v.get_item(i)?;
+                        obj.insert(key, py_any_to_json(py, &val_py)?);
+                    }
+                    Ok(JsonValue::Object(obj))
+                })());
+            }
+        }
+    }
+    None
+}
+
 fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> {
     if v.is_none() {
         return Ok(JsonValue::Null);
@@ -2858,6 +2894,16 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
             obj.insert(key, py_any_to_json(_py, &val)?);
         }
         return Ok(JsonValue::Object(obj));
+    }
+    if let Some(result) = py_row_like_to_json(_py, v) {
+        return result;
+    }
+    if let Ok(tup) = v.cast::<PyTuple>() {
+        let mut arr = Vec::with_capacity(tup.len());
+        for item in tup.iter() {
+            arr.push(py_any_to_json(_py, &item)?);
+        }
+        return Ok(JsonValue::Array(arr));
     }
     Ok(JsonValue::String(v.to_string()))
 }
