@@ -1,6 +1,6 @@
 [package]
 name = "sparkless-native"
-version = "4.11.0"
+version = "4.12.0"
 edition = "2021"
 description = "Native extension for sparkless Python package (robin-sparkless backend)."
 readme = "README.md"
@@ -22,7 +22,7 @@ sqlite = ["robin-sparkless/sqlite"]
 robin-sparkless = { path = "..", features = ["sql"] }
 robin-sparkless-core = { path = "../crates/robin-sparkless-core" }
 polars = { version = "0.53", default-features = false, features = ["dtype-struct"] }
-pyo3 = { version = "0.22", features = ["extension-module", "abi3-py38", "generate-import-lib"] }
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py38", "generate-import-lib"] }
 serde_json = "1.0"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }

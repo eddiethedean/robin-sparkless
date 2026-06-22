@@ -95,7 +95,10 @@ pub fn read_delta_with_version(
                 },
             )?;
             let result = if let Some(v) = version {
-                builder.with_version(v).load().await
+                let version = u64::try_from(v).map_err(|_| {
+                    PolarsError::ComputeError(format!("read_delta: invalid version {v}").into())
+                })?;
+                builder.with_version(version).load().await
             } else {
                 builder.load().await
             };
@@ -411,7 +414,7 @@ async fn commit_delta_actions(
     use deltalake::protocol::DeltaOperation;
 
     let table_state = table.snapshot()?;
-    let partition_cols = table_state.metadata().partition_columns().clone();
+    let partition_cols: Vec<String> = table_state.metadata().partition_columns().to_vec();
     let operation = DeltaOperation::Write {
         mode,
         partition_by: if partition_cols.is_empty() {

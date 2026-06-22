@@ -1,6 +1,6 @@
 [package]
 name = "robin-sparkless-polars"
-version = "4.11.0"
+version = "4.12.0"
 edition = "2024"
 description = "Polars-backed DataFrame, Session, and expression layer for robin-sparkless."
 license = "MIT"
@@ -9,7 +9,7 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 [features]
 default = []
 sql = ["dep:spark-sql-parser"]
-delta = ["dep:deltalake", "dep:delta_kernel", "dep:tokio", "dep:futures", "dep:parquet", "dep:indexmap"]
+delta = ["dep:deltalake", "dep:tokio", "dep:futures", "dep:parquet", "dep:indexmap"]
 jdbc = ["dep:postgres"]
 jdbc_mysql = ["dep:mysql"]
 jdbc_mariadb = ["dep:mysql"]
@@ -19,7 +19,7 @@ jdbc_db2 = ["dep:odbc-api"]
 sqlite = ["dep:rusqlite"]
 
 [dependencies]
-robin-sparkless-core = { version = "4.11.0", path = "../robin-sparkless-core" }
+robin-sparkless-core = { version = "4.12.0", path = "../robin-sparkless-core" }
 polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment", "rolling_window"] }
 polars-plan = "0.53"
 serde = { version = "1.0", features = ["derive"] }
@@ -45,15 +45,14 @@ sha2 = "0.10"
 md5 = "0.7"
 aes-gcm = "0.10"
 spark-sql-parser = { version = "0.5", path = "../spark-sql-parser", optional = true }
-deltalake = { version = "0.31", optional = true }
-delta_kernel = { version = "0.19", optional = true }
+deltalake = { version = "0.32", optional = true }
 futures = { version = "0.3", optional = true }
 parquet = { version = "57", optional = true }
 indexmap = { version = "2", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
-postgres = { version = "0.19", optional = true }
+postgres = { version = "0.19.14", optional = true }
 rusqlite = { version = "0.32", optional = true }
-mysql = { version = "27.0.0", optional = true }
+mysql = { version = "28", optional = true }
 tiberius = { version = "0.12.3", optional = true, default-features = false, features = ["tds73", "rustls", "chrono", "tokio", "sql-browser-tokio"] }
 tokio-util = { version = "0.7", optional = true, features = ["compat"] }
 futures-util = { version = "0.3", optional = true }

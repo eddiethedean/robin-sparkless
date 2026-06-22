@@ -22,6 +22,8 @@ ignore = [
     "RUSTSEC-2026-0104",
     # rand unsound advisory (transitive; remove once dependencies upgrade).
     "RUSTSEC-2026-0097",
+    # proc-macro-error2 via deltalake-core -> validator 0.19 (no safe upgrade yet).
+    "RUSTSEC-2026-0173",
 ]
 # Don't warn when ignored advisories aren't in the graph (e.g. when delta feature is off)
 unused-ignored-advisory = "allow"
