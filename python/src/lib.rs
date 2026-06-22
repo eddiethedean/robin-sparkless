@@ -1802,6 +1802,15 @@ fn simple_string_to_type(s: &str) -> String {
     }
 }
 
+/// Explicit schema string types use "str" (not "string") so Rust does not re-infer from data (#1603).
+fn mark_explicit_schema_string_type(typ: String) -> String {
+    if typ.eq_ignore_ascii_case("string") {
+        "str".to_string()
+    } else {
+        typ
+    }
+}
+
 /// Parse DDL schema string (e.g. "name: string, age: int" or "a string, b int") into (name, type) pairs.
 fn parse_ddl_schema_string(ddl: &str) -> Vec<(String, String)> {
     fn split_top_level_commas(s: &str) -> Vec<String> {
@@ -1886,7 +1895,10 @@ fn parse_ddl_schema_string(ddl: &str) -> Vec<(String, String)> {
             }
         };
         if !name.is_empty() {
-            pairs.push((name, simple_string_to_type(&typ)));
+            pairs.push((
+                name,
+                mark_explicit_schema_string_type(simple_string_to_type(&typ)),
+            ));
         }
     }
     pairs
@@ -1973,7 +1985,10 @@ fn parse_schema_from_py(
             }
             let name = pair.get_item(0)?.extract::<String>()?;
             let typ = pair.get_item(1)?.extract::<String>()?;
-            pairs.push((name, simple_string_to_type(&typ)));
+            pairs.push((
+                name,
+                mark_explicit_schema_string_type(simple_string_to_type(&typ)),
+            ));
         }
         return Ok(Some(pairs));
     }

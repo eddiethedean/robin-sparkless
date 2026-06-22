@@ -2189,9 +2189,7 @@ impl SparkSession {
         }
         // #624: When schema is only column names (all "string"), infer from data (PySpark parity).
         // #731, #769, #772: createDataFrame(rows, ["name", "age"]) yields int/double/bool columns.
-        // Only when Python did not pass explicit types (#1603: DDL "col1 string, col2 string" must not re-infer).
-        let schema_inferred_in_rust = schema_was_inferred
-            && !schema.is_empty()
+        let schema_inferred_in_rust = !schema.is_empty()
             && !rows.is_empty()
             && schema
                 .iter()
