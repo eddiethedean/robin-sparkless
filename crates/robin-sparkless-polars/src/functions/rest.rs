@@ -1541,6 +1541,13 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if dtype == DataType::String {
+        // Use strict_cast when expr is not a plain column (e.g. aggregate) so we get a Cast node
+        // and PySpark-style column name "CAST(avg(value) AS STRING)" in groupby agg (issue #1255, #265).
+        let is_plain_column = matches!(column.expr(), Expr::Column(_));
+        if !is_plain_column {
+            let expr = column.expr().clone().strict_cast(dtype);
+            return Ok(Column::from_expr(expr, Some(base_name)));
+        }
         let expr = column.expr().clone().map(
             move |col| {
                 crate::column::expect_col(crate::udfs::apply_cast_to_string(col, ansi_strict))
