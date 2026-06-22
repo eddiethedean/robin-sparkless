@@ -917,14 +917,18 @@ fn translate_select_from(
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
     let left_alias_opt = table_alias_from_factor(&first_tj.relation);
     if let Some(ref prefix) = left_alias_opt {
-        df = df_prefix_columns(&df, prefix)?;
+        if should_prefix_columns(&first_tj.relation) {
+            df = df_prefix_columns(&df, prefix)?;
+        }
     }
     let current_left_alias = left_alias_opt.as_deref();
     for join_spec in &first_tj.joins {
         let mut right_df = resolve_table_factor(session, &join_spec.relation)?;
         let right_alias_opt = table_alias_from_factor(&join_spec.relation);
         if let Some(ref prefix) = right_alias_opt {
-            right_df = df_prefix_columns(&right_df, prefix)?;
+            if should_prefix_columns(&join_spec.relation) {
+                right_df = df_prefix_columns(&right_df, prefix)?;
+            }
         }
         let right_alias_ref = right_alias_opt.as_deref();
         match &join_spec.join_operator {
@@ -1026,8 +1030,20 @@ fn table_alias_from_factor(factor: &TableFactor) -> Option<String> {
             if a == table_name { None } else { Some(a) }
         }
         TableFactor::Table { alias: None, .. } => None,
+        TableFactor::Derived {
+            alias: Some(TableAlias {
+                name: alias_name, ..
+            }),
+            ..
+        } => Some(alias_name.value.clone()),
+        TableFactor::Derived { alias: None, .. } => None,
         _ => None,
     }
+}
+
+/// Derived tables keep inner column names; plain tables with aliases are prefixed (#152).
+fn should_prefix_columns(factor: &TableFactor) -> bool {
+    !matches!(factor, TableFactor::Derived { .. })
 }
 
 /// Prefix all column names with "prefix_". Used when FROM has alias so qualified refs (e.name) become e_name.
@@ -1049,6 +1065,12 @@ fn resolve_table_factor(
             let table_name = table_name_from_object_name(name);
             session.table(&table_name)
         }
+        TableFactor::Derived {
+            lateral: true, ..
+        } => Err(PolarsError::InvalidOperation(
+            "SQL: LATERAL derived tables in FROM are not yet supported.".into(),
+        )),
+        TableFactor::Derived { subquery, .. } => translate_query(session, subquery.as_ref()),
         _ => Err(PolarsError::InvalidOperation(
             "SQL: only plain table names are supported in FROM (no subqueries, derived tables). Register with create_or_replace_temp_view.".into(),
         )),
