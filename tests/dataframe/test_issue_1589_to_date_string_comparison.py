@@ -18,7 +18,9 @@ def test_to_date_eq_string_literal(spark) -> None:
         [("2025-01-01",), ("9999-12-31",)],
         ["end_date"],
     )
-    rows = df.filter(F.to_date(F.col("end_date"), "yyyy-MM-dd") == "9999-12-31").collect()
+    rows = df.filter(
+        F.to_date(F.col("end_date"), "yyyy-MM-dd") == "9999-12-31"
+    ).collect()
     assert len(rows) == 1
     assert rows[0]["end_date"] == "9999-12-31"
 
@@ -29,6 +31,8 @@ def test_to_date_ne_string_literal(spark) -> None:
         [("2025-01-01",), ("9999-12-31",)],
         ["end_date"],
     )
-    rows = df.filter(F.to_date(F.col("end_date"), "yyyy-MM-dd") != "9999-12-31").collect()
+    rows = df.filter(
+        F.to_date(F.col("end_date"), "yyyy-MM-dd") != "9999-12-31"
+    ).collect()
     assert len(rows) == 1
     assert rows[0]["end_date"] == "2025-01-01"

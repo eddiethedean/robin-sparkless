@@ -776,13 +776,15 @@ impl DataFrame {
                     && ((left_is_string_lit && !right_is_string_lit && !right_is_col)
                         || (right_is_string_lit && !left_is_string_lit && !left_is_col))
                 {
-                    if let Some((new_left, new_right)) = self.coerce_temporal_expr_vs_string_literal(
-                        left_inner,
-                        right_inner,
-                        left_is_string_lit,
-                        right_is_string_lit,
-                        op,
-                    ) {
+                    if let Some((new_left, new_right)) = self
+                        .coerce_temporal_expr_vs_string_literal(
+                            left_inner,
+                            right_inner,
+                            left_is_string_lit,
+                            right_is_string_lit,
+                            op,
+                        )
+                    {
                         let e = Expr::BinaryExpr {
                             left: Arc::new(new_left),
                             op: *op,
