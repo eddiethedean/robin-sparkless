@@ -1,6 +1,6 @@
 [package]
 name = "sparkless-native"
-version = "4.11.0"
+version = "4.12.0"
 edition = "2021"
 description = "Native extension for sparkless Python package (robin-sparkless backend)."
 readme = "README.md"

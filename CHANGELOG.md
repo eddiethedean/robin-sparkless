@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.12.0] - 2026-06-22
+
+### Fixed
+
+- **`df["*"]` in `select()` (#1587)** — Bracket notation `df["*"]` now expands to all columns in `select()` (matching `select("*")` and PySpark), including after joins.
+
+### Changed
+
+- **Dependencies** — Upgrade `pyo3` 0.22 → 0.29, `deltalake` 0.31 → 0.32, `postgres` 0.19.14, `mysql` 28; address `cargo audit` / `cargo deny` advisories (tokio-postgres, postgres-protocol, proc-macro-error2 via deltalake).
+
 ## [4.11.0] - 2026-06-04
 
 ### Fixed
