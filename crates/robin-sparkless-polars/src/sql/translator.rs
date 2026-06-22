@@ -1468,6 +1468,20 @@ fn sql_function_to_expr(
 
     let case_sensitive = session.is_case_sensitive();
 
+    if matches!(
+        func_name.to_uppercase().as_str(),
+        "PERCENTILE_APPROX" | "APPROX_PERCENTILE"
+    ) && args.len() >= 2
+    {
+        let pct = sql_parse_f64_literal(sql_function_unnamed_expr(
+            function_args_slice(&func.args),
+            1,
+        )?)?;
+        return Ok(functions::approx_percentile(&args[0], pct, None)
+            .expr()
+            .clone());
+    }
+
     // Built-in scalar functions (single-column arg)
     if let Some(col) = args.first() {
         let builtin_expr = match func_name.to_uppercase().as_str() {
@@ -1622,6 +1636,27 @@ fn sql_parse_i64_literal(expr: &SqlExpr) -> Result<i64, PolarsError> {
         SqlExpr::Nested(inner) => sql_parse_i64_literal(inner.as_ref()),
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: expected integer literal, got {:?}", expr).into(),
+        )),
+    }
+}
+
+fn sql_parse_f64_literal(expr: &SqlExpr) -> Result<f64, PolarsError> {
+    use spark_sql_parser::ast::UnaryOperator;
+    match expr {
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::Number(s, _),
+            ..
+        }) => match parse_sql_number_val(s, "float literal")? {
+            SqlNumberVal::Int(i) => Ok(i as f64),
+            SqlNumberVal::Float(f) => Ok(f),
+        },
+        SqlExpr::UnaryOp {
+            op: UnaryOperator::Minus,
+            expr: inner,
+        } => Ok(-sql_parse_f64_literal(inner)?),
+        SqlExpr::Nested(inner) => sql_parse_f64_literal(inner.as_ref()),
+        _ => Err(PolarsError::InvalidOperation(
+            format!("SQL: expected float literal, got {:?}", expr).into(),
         )),
     }
 }
@@ -2235,6 +2270,27 @@ fn push_agg_function(
                     "SQL: MAX requires one expression argument.".into(),
                 ));
             }
+        }
+        "PERCENTILE_APPROX" | "APPROX_PERCENTILE" => {
+            if args.len() < 2 {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: percentile_approx requires column and percentage arguments.".into(),
+                ));
+            }
+            let col_arg = sql_function_unnamed_expr(args, 0)?;
+            let inner = sql_expr_to_polars(col_arg, session, Some(df), None, None)?;
+            let pct = sql_parse_f64_literal(sql_function_unnamed_expr(args, 1)?)?;
+            let default = match col_arg {
+                SqlExpr::Identifier(ident) => {
+                    format!("percentile_approx({}, {})", ident.value, pct)
+                }
+                _ => format!("percentile_approx({pct})"),
+            };
+            let col = Column::from_expr(inner, None);
+            (
+                functions::approx_percentile(&col, pct, None).into_expr(),
+                default,
+            )
         }
         _ => {
             return Err(PolarsError::InvalidOperation(

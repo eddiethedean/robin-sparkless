@@ -829,6 +829,11 @@ impl GroupedData {
         &self.grouping_cols
     }
 
+    /// Input DataFrame before grouping (for expr() column resolution in agg).
+    pub fn input_dataframe(&self) -> DataFrame {
+        super::DataFrame::from_lazy_with_options(self.lf.clone(), self.case_sensitive)
+    }
+
     /// Pivot a column for pivot-table aggregation (PySpark: groupBy(...).pivot(pivot_col).sum(value_col)).
     /// Returns PivotedGroupedData; call .sum(column), .avg(column), etc. to run the aggregation.
     pub fn pivot(&self, pivot_col: &str, values: Option<Vec<String>>) -> PivotedGroupedData {
@@ -1345,6 +1350,11 @@ pub struct CubeRollupData {
 }
 
 impl CubeRollupData {
+    /// Input DataFrame before cube/rollup (for expr() column resolution in agg).
+    pub fn input_dataframe(&self) -> DataFrame {
+        super::DataFrame::from_lazy_with_options(self.lf.clone(), self.case_sensitive)
+    }
+
     /// Count rows per grouping set (PySpark cube/rollup .count()).
     pub fn count(&self) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;

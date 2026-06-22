@@ -865,6 +865,11 @@ impl GroupedData {
     pub fn pivot(&self, pivot_col: &str, values: Option<Vec<String>>) -> PivotedGroupedData {
         PivotedGroupedData(self.0.pivot(pivot_col, values))
     }
+
+    /// Input DataFrame before grouping (for expr() column resolution in agg).
+    pub fn input_dataframe(&self) -> DataFrame {
+        DataFrame(self.0.input_dataframe())
+    }
 }
 
 impl CubeRollupData {
@@ -890,6 +895,11 @@ impl CubeRollupData {
 
     pub fn agg(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         self.0.agg(exprs).map(DataFrame)
+    }
+
+    /// Input DataFrame before cube/rollup (for expr() column resolution in agg).
+    pub fn input_dataframe(&self) -> DataFrame {
+        DataFrame(self.0.input_dataframe())
     }
 }
 

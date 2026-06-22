@@ -8050,35 +8050,46 @@ impl PyCubeRollupData {
     }
 
     #[pyo3(signature = (*exprs))]
-    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        fn push_expr(
-            item: &Bound<'_, PyAny>,
-            out: &mut Vec<robin_sparkless::Expr>,
-        ) -> PyResult<()> {
-            if let Ok(c) = item.cast::<PyColumn>() {
-                out.push(c.borrow().inner.clone().into_expr());
-                return Ok(());
+    fn agg(&self, py: Python<'_>, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let mut needs_expr_ctx = false;
+        for item in exprs.iter() {
+            if py_agg_item_contains_expr_str(&item)? {
+                needs_expr_ctx = true;
+                break;
             }
-            if let Ok(list) = item.cast::<PyList>() {
-                for sub in list.iter() {
-                    push_expr(&sub, out)?;
-                }
-                return Ok(());
-            }
-            if let Ok(tup) = item.cast::<PyTuple>() {
-                for sub in tup.iter() {
-                    push_expr(&sub, out)?;
-                }
-                return Ok(());
-            }
-            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "agg() expects Column expressions",
-            ))
         }
 
         let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
-        for item in exprs.iter() {
-            push_expr(&item, &mut rust_exprs)?;
+        if needs_expr_ctx {
+            let session = THREAD_ACTIVE_SESSIONS
+                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "agg() with expr() requires an active SparkSession",
+                    )
+                })?;
+            let session_ref = session.bind(py).cast::<PySparkSession>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+            })?;
+            let input_df = self.inner.input_dataframe();
+            session_ref
+                .borrow()
+                .inner
+                .create_or_replace_temp_view("__agg_expr_t", input_df.clone());
+            let expr_ctx = (session_ref.clone(), input_df);
+            for item in exprs.iter() {
+                py_agg_push_expr(
+                    &item,
+                    &mut rust_exprs,
+                    false,
+                    Some((&expr_ctx.0, &expr_ctx.1)),
+                )?;
+            }
+            let _ = session_ref.borrow().inner.drop_temp_view("__agg_expr_t");
+        } else {
+            for item in exprs.iter() {
+                py_agg_push_expr(&item, &mut rust_exprs, false, None)?;
+            }
         }
         self.inner
             .agg(rust_exprs)
@@ -8147,61 +8158,46 @@ impl PyGroupedData {
     }
 
     #[pyo3(signature = (*exprs))]
-    fn agg(&self, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
-        fn push_expr(
-            item: &Bound<'_, PyAny>,
-            out: &mut Vec<robin_sparkless::Expr>,
-        ) -> PyResult<()> {
-            if let Ok(c) = item.cast::<PyColumn>() {
-                out.push(c.borrow().inner.clone().into_expr());
-                return Ok(());
+    fn agg(&self, py: Python<'_>, exprs: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
+        let mut needs_expr_ctx = false;
+        for item in exprs.iter() {
+            if py_agg_item_contains_expr_str(&item)? {
+                needs_expr_ctx = true;
+                break;
             }
-            if let Ok(list) = item.cast::<PyList>() {
-                for sub in list.iter() {
-                    push_expr(&sub, out)?;
-                }
-                return Ok(());
-            }
-            if let Ok(tup) = item.cast::<PyTuple>() {
-                for sub in tup.iter() {
-                    push_expr(&sub, out)?;
-                }
-                return Ok(());
-            }
-            if let Ok(dict) = item.cast::<PyDict>() {
-                for (k, v) in dict.iter() {
-                    let col_name: String = k.extract().map_err(|_| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("agg dict keys must be str")
-                    })?;
-                    let func_name: String = v.extract().map_err(|_| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                            "agg dict values must be str",
-                        )
-                    })?;
-                    let c = Column::new(col_name);
-                    let expr_col = match func_name.as_str() {
-                        "sum" => functions::sum(&c),
-                        "avg" | "mean" => functions::avg(&c),
-                        "min" => functions::min(&c),
-                        "max" => functions::max(&c),
-                        "count" => functions::count(&c),
-                        "first" => c, // best effort
-                        _ => {
-                            return Err(to_py_err(format!("unsupported agg function: {func_name}")))
-                        }
-                    };
-                    out.push(expr_col.into_expr());
-                }
-                return Ok(());
-            }
-            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "agg() expects Column expressions or dict",
-            ))
         }
 
         let mut rust_exprs: Vec<robin_sparkless::Expr> = Vec::new();
-        for item in exprs.iter() {
-            push_expr(&item, &mut rust_exprs)?;
+        if needs_expr_ctx {
+            let session = THREAD_ACTIVE_SESSIONS
+                .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
+                .ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                        "agg() with expr() requires an active SparkSession",
+                    )
+                })?;
+            let session_ref = session.bind(py).cast::<PySparkSession>().map_err(|_| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession")
+            })?;
+            let input_df = self.inner.input_dataframe();
+            session_ref
+                .borrow()
+                .inner
+                .create_or_replace_temp_view("__agg_expr_t", input_df.clone());
+            let expr_ctx = (session_ref.clone(), input_df);
+            for item in exprs.iter() {
+                py_agg_push_expr(
+                    &item,
+                    &mut rust_exprs,
+                    true,
+                    Some((&expr_ctx.0, &expr_ctx.1)),
+                )?;
+            }
+            let _ = session_ref.borrow().inner.drop_temp_view("__agg_expr_t");
+        } else {
+            for item in exprs.iter() {
+                py_agg_push_expr(&item, &mut rust_exprs, true, None)?;
+            }
         }
         self.inner
             .agg(rust_exprs)
@@ -8715,6 +8711,96 @@ fn py_any_to_dataframe_column(col_any: &Bound<'_, PyAny>) -> PyResult<Option<Col
         ));
     }
     Ok(None)
+}
+
+fn py_agg_item_contains_expr_str(item: &Bound<'_, PyAny>) -> PyResult<bool> {
+    if item.cast::<PyExprStr>().is_ok() {
+        return Ok(true);
+    }
+    if let Ok(list) = item.cast::<PyList>() {
+        for sub in list.iter() {
+            if py_agg_item_contains_expr_str(&sub)? {
+                return Ok(true);
+            }
+        }
+    }
+    if let Ok(tup) = item.cast::<PyTuple>() {
+        for sub in tup.iter() {
+            if py_agg_item_contains_expr_str(&sub)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn py_agg_push_expr(
+    item: &Bound<'_, PyAny>,
+    out: &mut Vec<robin_sparkless::Expr>,
+    allow_dict: bool,
+    expr_ctx: Option<(&Bound<'_, PySparkSession>, &robin_sparkless::DataFrame)>,
+) -> PyResult<()> {
+    if let Ok(c) = item.cast::<PyColumn>() {
+        out.push(c.borrow().inner.clone().into_expr());
+        return Ok(());
+    }
+    if let Ok(py_expr_str) = item.cast::<PyExprStr>() {
+        let (session_ref, input_df) = expr_ctx.ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "agg() with expr() requires an active SparkSession",
+            )
+        })?;
+        let expr = robin_sparkless::sql::expr_string_to_polars(
+            &py_expr_str.borrow().sql,
+            &session_ref.borrow().inner,
+            input_df,
+        )
+        .map_err(to_py_err)?;
+        out.push(expr);
+        return Ok(());
+    }
+    if let Ok(list) = item.cast::<PyList>() {
+        for sub in list.iter() {
+            py_agg_push_expr(&sub, out, allow_dict, expr_ctx)?;
+        }
+        return Ok(());
+    }
+    if let Ok(tup) = item.cast::<PyTuple>() {
+        for sub in tup.iter() {
+            py_agg_push_expr(&sub, out, allow_dict, expr_ctx)?;
+        }
+        return Ok(());
+    }
+    if allow_dict {
+        if let Ok(dict) = item.cast::<PyDict>() {
+            for (k, v) in dict.iter() {
+                let col_name: String = k.extract().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("agg dict keys must be str")
+                })?;
+                let func_name: String = v.extract().map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("agg dict values must be str")
+                })?;
+                let c = Column::new(col_name);
+                let expr_col = match func_name.as_str() {
+                    "sum" => functions::sum(&c),
+                    "avg" | "mean" => functions::avg(&c),
+                    "min" => functions::min(&c),
+                    "max" => functions::max(&c),
+                    "count" => functions::count(&c),
+                    "first" => c, // best effort
+                    _ => return Err(to_py_err(format!("unsupported agg function: {func_name}"))),
+                };
+                out.push(expr_col.into_expr());
+            }
+            return Ok(());
+        }
+    }
+    let msg = if allow_dict {
+        "agg() expects Column expressions or dict"
+    } else {
+        "agg() expects Column expressions"
+    };
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(msg))
 }
 
 #[pyfunction]
