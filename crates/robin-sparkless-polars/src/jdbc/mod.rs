@@ -479,13 +479,17 @@ mod tests {
             std::env::set_var("SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL", "false");
         }
         let mut m = HashMap::new();
-        m.insert("url".to_string(), "jdbc:postgresql://localhost/db".to_string());
+        m.insert(
+            "url".to_string(),
+            "jdbc:postgresql://localhost/db".to_string(),
+        );
         m.insert("query".to_string(), "SELECT 1".to_string());
         let opts = JdbcOptions::from_options_map(&m).unwrap();
         let err = opts.enforce_sql_trust_boundary().unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("query/sessionInitStatement/prepareQuery disabled"));
+        assert!(
+            err.to_string()
+                .contains("query/sessionInitStatement/prepareQuery disabled")
+        );
         unsafe {
             std::env::remove_var("SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL");
         }
