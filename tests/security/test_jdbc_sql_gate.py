@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from sparkless.testing import get_imports
+from tests.sql.conftest import jdbc_available
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession
 
-pytestmark = pytest.mark.sparkless_only
+pytestmark = [
+    pytest.mark.sparkless_only,
+    pytest.mark.skipif(
+        not jdbc_available(),
+        reason="JDBC feature not enabled in this build",
+    ),
+]
 
 
 def test_jdbc_query_blocked_when_gate_disabled(monkeypatch) -> None:

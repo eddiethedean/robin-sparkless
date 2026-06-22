@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from sparkless.testing import get_imports
@@ -16,9 +14,12 @@ F = _imports.F
 def ansi_spark(monkeypatch):
     monkeypatch.setenv("POLARS_MAX_THREADS", "4")
     spark = _imports.SparkSession.builder.appName("ansi-parallel").getOrCreate()
+    prev_ansi = spark.conf.get("spark.sql.ansi.enabled", "false")
     spark.conf.set("spark.sql.ansi.enabled", "true")
-    yield spark
-    spark.stop()
+    try:
+        yield spark
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", prev_ansi)
 
 
 def test_divide_by_zero_errors_under_parallel_polars(ansi_spark) -> None:
