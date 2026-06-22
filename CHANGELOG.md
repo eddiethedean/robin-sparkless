@@ -9,9 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.12.0] - 2026-06-22
 
+### Added
+
+- **Security hardening (opt-in)** — Documented env vars for production deployments: `SPARKLESS_HARDENED`, `SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL`, `SPARKLESS_FILES_BASE`, `SPARKLESS_MAX_RANGE_ROWS`, `SPARKLESS_MAX_CROSS_JOIN_ROWS`, `SPARKLESS_RDD_MAX_ROWS`. See [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md#security-hardening-optional).
+- **`sparkless._configure_for_multiprocessing()`** — Limit Polars/Rayon to one thread for pytest-xdist and fork-based multiprocessing.
+
 ### Fixed
 
 - **`df["*"]` in `select()` (#1587)** — Bracket notation `df["*"]` now expands to all columns in `select()` (matching `select("*")` and PySpark), including after joins.
+- **Path security** — Warehouse `table()` reads confined with `resolve_path_under_base`; Delta parquet URIs confined to table root (including `..` and embedded `file:` URIs); optional `SPARKLESS_FILES_BASE` sandbox for general file read/write (including `DataFrameReader`).
+- **JDBC SQL gate** — Optional block on `query` / `sessionInitStatement` / `prepareQuery` when `SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL=false`.
+- **Join/sort correctness** — Left/right expression joins preserve null-key rows; `orderBy` ASC uses Spark SQL nulls-first default.
+- **Session lifecycle** — `stop()` no longer clears global temp views; `newSession()` syncs thread UDF/runtime config.
+- **Resource limits** — Cross-join guard for non-equality joins; `spark.range()` row cap; RDD `take()` via `limit()` and materialization caps.
+- **ANSI under parallel Polars** — Capture session config at plan-build time (divide-by-zero, map key normalization).
 
 ### Changed
 

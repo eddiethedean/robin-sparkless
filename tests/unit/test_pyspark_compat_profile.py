@@ -7,6 +7,14 @@ import pytest
 pytest_plugins = ["sparkless.testing"]
 
 
+@pytest.fixture(autouse=True)
+def _reset_compat_profile_after_test(spark):
+    """Shared sessions keep conf across tests; restore 3.5 defaults after each case."""
+    yield
+    spark.conf.set("sparkless.pyspark.compat", "3.5")
+    spark.conf.set("spark.sql.ansi.enabled", "false")
+
+
 @pytest.mark.sparkless_only
 def test_default_compat_is_3_5(spark):
     assert spark.conf.get("sparkless.pyspark.compat", "3.5") == "3.5"
