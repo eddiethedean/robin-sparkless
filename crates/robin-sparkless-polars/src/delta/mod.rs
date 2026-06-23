@@ -677,9 +677,9 @@ mod confinement_tests {
         canonicalize_path_for_confinement, confine_parquet_uri_to_table_root, path_to_table_uri,
         uri_to_parquet_path,
     };
-    use url::Url;
     use std::fs;
     use tempfile::TempDir;
+    use url::Url;
 
     #[test]
     fn path_to_table_uri_produces_valid_file_url() {
