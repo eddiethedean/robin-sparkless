@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.12.1] - 2026-06-22
+
+### Fixed
+
+- **Release workflow** — Add mypy stub for `configure_for_multiprocessing`; fix Windows Delta `path_to_table_uri` (extended `\\?\` paths produced invalid `file:///?/C:/...` URLs).
+
 ## [4.12.0] - 2026-06-22
 
 ### Added

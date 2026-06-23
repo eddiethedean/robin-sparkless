@@ -223,12 +223,17 @@ fn path_to_table_uri(path: &Path) -> Result<String, PolarsError> {
                 .join(path)
         }
     };
-    let path_str = abs_path.to_string_lossy();
-    #[cfg(target_os = "windows")]
-    let uri = format!("file:///{}", path_str.replace('\\', "/"));
-    #[cfg(not(target_os = "windows"))]
-    let uri = format!("file://{}", path_str);
-    Ok(uri)
+    Url::from_file_path(&abs_path)
+        .map(|url| url.to_string())
+        .map_err(|_| {
+            PolarsError::ComputeError(
+                format!(
+                    "path_to_table_uri: invalid path for file URL: {}",
+                    abs_path.display()
+                )
+                .into(),
+            )
+        })
 }
 
 #[cfg(feature = "delta")]
@@ -669,10 +674,26 @@ pub fn write_delta(
 #[cfg(all(test, feature = "delta"))]
 mod confinement_tests {
     use super::{
-        canonicalize_path_for_confinement, confine_parquet_uri_to_table_root, uri_to_parquet_path,
+        canonicalize_path_for_confinement, confine_parquet_uri_to_table_root, path_to_table_uri,
+        uri_to_parquet_path,
     };
+    use url::Url;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn path_to_table_uri_produces_valid_file_url() {
+        let dir = TempDir::new().unwrap();
+        let table = dir.path().join("table");
+        fs::create_dir_all(&table).unwrap();
+        let uri = path_to_table_uri(&table).unwrap();
+        let parsed = Url::parse(&uri).unwrap();
+        assert_eq!(parsed.scheme(), "file");
+        assert!(
+            !uri.contains("?/"),
+            "extended path prefix leaked into URI: {uri}"
+        );
+    }
 
     #[test]
     fn uri_to_parquet_path_parses_file_colon_slash() {
