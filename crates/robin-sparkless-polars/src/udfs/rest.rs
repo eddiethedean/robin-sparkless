@@ -4149,6 +4149,81 @@ pub fn apply_from_unixtime(column: Column, format: Option<&str>) -> PolarsResult
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Format date/datetime as string (PySpark date_format). Date columns use midnight for time tokens (#1641).
+pub fn apply_date_format(column: Column, format: &str) -> PolarsResult<Option<Column>> {
+    use chrono::NaiveDateTime;
+    let chrono_fmt = pyspark_format_to_chrono(format);
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+
+    let format_ndt = |ndt: NaiveDateTime| ndt.format(&chrono_fmt).to_string();
+
+    let out = match series.dtype() {
+        DataType::Date => {
+            let ca = date_series_to_days(&series)?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_days| {
+                    opt_days.and_then(|days| {
+                        let d = days_to_naive_date(days)?;
+                        let ndt = d.and_hms_opt(0, 0, 0)?;
+                        Some(format_ndt(ndt))
+                    })
+                }),
+            )
+        }
+        DataType::Datetime(_, _) => {
+            let casted = series
+                .cast(&DataType::Int64)
+                .map_err(|e| compute_err("date_format datetime cast", e))?;
+            let ca = casted
+                .i64()
+                .map_err(|e| compute_err("date_format datetime", e))?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_micros| {
+                    opt_micros.and_then(|micros| {
+                        chrono::DateTime::from_timestamp_micros(micros)
+                            .map(|dt| format_ndt(dt.naive_utc()))
+                    })
+                }),
+            )
+        }
+        DataType::String => {
+            let ca = series.str().map_err(|e| compute_err("date_format string", e))?;
+            StringChunked::from_iter_options(
+                name.as_str().into(),
+                ca.into_iter().map(|opt_s| {
+                    opt_s.and_then(|s| {
+                        parse_str_to_datetime_micros(s)
+                            .and_then(chrono::DateTime::from_timestamp_micros)
+                            .map(|dt| format_ndt(dt.naive_utc()))
+                            .or_else(|| {
+                                parse_str_to_date(s)
+                                    .and_then(|d| d.and_hms_opt(0, 0, 0))
+                                    .map(format_ndt)
+                            })
+                    })
+                }),
+            )
+        }
+        DataType::Null => StringChunked::from_iter_options(
+            name.as_str().into(),
+            (0..series.len()).map(|_| None::<String>),
+        ),
+        _ => {
+            return Err(PolarsError::ComputeError(
+                format!(
+                    "date_format: expected Date, Datetime, or String input, got `{}`",
+                    series.dtype()
+                )
+                .into(),
+            ))
+        }
+    };
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// make_timestamp(year, month, day, hour, min, sec, timezone?) - six columns to timestamp (micros).
 /// When timezone is Some(tz_str), components are interpreted as local time in that zone, then converted to UTC.
 pub fn apply_make_timestamp(

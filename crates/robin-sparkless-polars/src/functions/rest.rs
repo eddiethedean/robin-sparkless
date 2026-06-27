@@ -1981,12 +1981,15 @@ pub fn to_date(column: &Column, format: Option<&str>) -> Result<Column, String> 
 pub fn date_format(column: &Column, format: &str) -> Column {
     use polars::prelude::*;
     let out_name = format!("date_format({}, {format})", column.name());
-    let chrono_fmt = crate::udfs::pyspark_format_to_chrono(format);
-    let parsed = column.expr().clone().map(
-        |s| crate::column::expect_col(crate::udfs::apply_string_to_date_format(s, None, false)),
-        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
-    );
-    let expr = parsed.dt().strftime(&chrono_fmt).alias(&out_name);
+    let fmt = format.to_string();
+    let expr = column
+        .expr()
+        .clone()
+        .map(
+            move |s| crate::column::expect_col(crate::udfs::apply_date_format(s, &fmt)),
+            |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+        )
+        .alias(&out_name);
     crate::column::Column::from_expr(expr, Some(out_name))
 }
 
