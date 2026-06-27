@@ -12,10 +12,10 @@ use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
-    BinaryOperator, Expr as SqlExpr, FromTable, Function, FunctionArg, FunctionArgExpr,
-    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause, ObjectType,
-    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
-    TableFactor, TableObject, Value, ValueWithSpan,
+    BinaryOperator, CastKind, Expr as SqlExpr, FromTable, Function, FunctionArg,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
+    ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
+    TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -44,6 +44,29 @@ fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
     match parse_sql_number_val(s, "literal")? {
         SqlNumberVal::Int(i) => Ok(lit(i)),
         SqlNumberVal::Float(f) => Ok(lit(f)),
+    }
+}
+
+/// Map SQL AST data types to PySpark-style cast type names.
+fn sql_ast_data_type_to_cast_name(dt: &spark_sql_parser::ast::DataType) -> String {
+    let s = dt.to_string().to_lowercase();
+    if s.starts_with("int") || s.starts_with("integer") || s == "int4" {
+        "int".to_string()
+    } else if s.starts_with("bigint") || s == "int8" || s == "long" {
+        "long".to_string()
+    } else if s.starts_with("double") {
+        "double".to_string()
+    } else if s.starts_with("float") {
+        "float".to_string()
+    } else if s.starts_with("bool") {
+        "boolean".to_string()
+    } else if s.starts_with("date") {
+        "date".to_string()
+    } else if s.starts_with("timestamp") {
+        "timestamp".to_string()
+    } else {
+        // STRING, VARCHAR, CHAR, etc.
+        "string".to_string()
     }
 }
 
@@ -145,32 +168,15 @@ pub fn translate(
                 ));
             }
 
-            fn dtype_to_schema_str(dt: &spark_sql_parser::ast::DataType) -> String {
-                let s = dt.to_string().to_lowercase();
-                if s.starts_with("int") || s.starts_with("integer") || s == "int4" {
-                    "int".to_string()
-                } else if s.starts_with("bigint") || s == "int8" || s == "long" {
-                    "long".to_string()
-                } else if s.starts_with("double") {
-                    "double".to_string()
-                } else if s.starts_with("float") {
-                    "float".to_string()
-                } else if s.starts_with("bool") {
-                    "boolean".to_string()
-                } else if s.starts_with("date") {
-                    "date".to_string()
-                } else if s.starts_with("timestamp") {
-                    "timestamp".to_string()
-                } else {
-                    // STRING, VARCHAR, CHAR, etc.
-                    "string".to_string()
-                }
-            }
-
             let schema: Vec<(String, String)> = create_table
                 .columns
                 .iter()
-                .map(|c| (c.name.value.clone(), dtype_to_schema_str(&c.data_type)))
+                .map(|c| {
+                    (
+                        c.name.value.clone(),
+                        sql_ast_data_type_to_cast_name(&c.data_type),
+                    )
+                })
                 .collect();
             let df = session.create_dataframe_from_rows(
                 Vec::<Vec<JsonValue>>::new(),
@@ -1447,6 +1453,23 @@ fn sql_expr_to_polars(
                 .transpose()?;
             let c = Column::from_expr(col_expr, None);
             Ok(functions::substring(&c, start, len).expr().clone())
+        }
+        SqlExpr::Cast {
+            kind,
+            expr: inner,
+            data_type,
+            ..
+        } => {
+            let inner_expr =
+                sql_expr_to_polars(inner, session, df, having_agg_map, having_agg_list)?;
+            let col = Column::from_expr(inner_expr, None);
+            let type_name = sql_ast_data_type_to_cast_name(data_type);
+            let result = match kind {
+                CastKind::TryCast | CastKind::SafeCast => functions::try_cast(&col, &type_name),
+                _ => functions::cast(&col, &type_name),
+            }
+            .map_err(|s| PolarsError::InvalidOperation(s.into()))?;
+            Ok(result.expr().clone())
         }
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: unsupported expression in WHERE: {:?}. Use column, literal, =, <, >, AND, OR, IS NULL, LIKE, IN.", expr).into(),

@@ -462,6 +462,25 @@ mod tests {
         assert_eq!(in_result.count().unwrap(), 2);
     }
 
+    /// Issue #1640: CAST expressions in WHERE clause.
+    #[test]
+    fn test_sql_where_cast_issue_1640() {
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let df = spark
+            .create_dataframe(
+                vec![(0, 0, "2025".to_string()), (0, 0, "2026".to_string())],
+                vec!["dummy", "v", "col1"],
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("tbl", df);
+        let result = spark
+            .sql("SELECT col1 FROM tbl WHERE cast(col1 as int) > 2025")
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 1);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("col1").and_then(|v| v.as_str()), Some("2026"));
+    }
+
     #[test]
     fn test_sql_table_not_found() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
