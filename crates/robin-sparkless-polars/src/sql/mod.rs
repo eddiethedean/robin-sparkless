@@ -513,6 +513,97 @@ mod tests {
         );
     }
 
+    /// Issue #1638: standard Spark SQL scalar built-ins in spark.sql().
+    #[test]
+    fn test_sql_builtin_scalar_functions_issue_1638() {
+        use serde_json::json;
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema = vec![
+            ("col1".to_string(), "bigint".to_string()),
+            ("col2".to_string(), "double".to_string()),
+            ("col3".to_string(), "string".to_string()),
+        ];
+        let rows = vec![
+            vec![json!(1), json!(10.0), json!("abc-123")],
+            vec![json!(2), json!(100.0), json!("xy")],
+            vec![json!(3), json!(null), json!("z")],
+        ];
+        let df = spark
+            .create_dataframe_from_rows(rows, schema, false, false)
+            .unwrap();
+        spark.create_or_replace_temp_view("tbl", df);
+
+        let coalesce = spark
+            .sql("SELECT coalesce(col2, 0) AS c FROM tbl WHERE col1 = 2")
+            .unwrap();
+        let rows = coalesce.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("c").and_then(|v| v.as_f64()), Some(100.0));
+
+        let nvl = spark
+            .sql("SELECT nvl(col2, 0) AS n FROM tbl WHERE col1 = 3")
+            .unwrap();
+        let rows = nvl.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 1, "expected one row for col1=3, got {:?}", rows);
+        let n_val = rows[0].get("n");
+        assert!(
+            n_val.and_then(|v| v.as_i64()) == Some(0)
+                || n_val.and_then(|v| v.as_f64()) == Some(0.0),
+            "nvl(col2, 0) expected 0, got {:?}",
+            n_val
+        );
+
+        let log10 = spark
+            .sql("SELECT log10(col2) AS l FROM tbl WHERE col1 = 2")
+            .unwrap();
+        let rows = log10.collect_as_json_rows().unwrap();
+        assert!((rows[0].get("l").and_then(|v| v.as_f64()).unwrap() - 2.0).abs() < 1e-9);
+
+        let log_nat = spark
+            .sql("SELECT log(col2) AS l FROM tbl WHERE col1 = 2")
+            .unwrap();
+        let rows = log_nat.collect_as_json_rows().unwrap();
+        assert!(
+            (rows[0].get("l").and_then(|v| v.as_f64()).unwrap() - 100.0_f64.ln()).abs() < 1e-9
+        );
+
+        let log_base = spark
+            .sql("SELECT log(10, col2) AS l FROM tbl WHERE col1 = 2")
+            .unwrap();
+        let rows = log_base.collect_as_json_rows().unwrap();
+        assert!((rows[0].get("l").and_then(|v| v.as_f64()).unwrap() - 2.0).abs() < 1e-9);
+
+        let log2 = spark
+            .sql("SELECT log2(col2) AS l FROM tbl WHERE col1 = 2")
+            .unwrap();
+        let rows = log2.collect_as_json_rows().unwrap();
+        let expected_log2 = 100.0_f64.log2();
+        assert!((rows[0].get("l").and_then(|v| v.as_f64()).unwrap() - expected_log2).abs() < 1e-9);
+
+        let pow = spark
+            .sql("SELECT pow(col2, 2) AS p FROM tbl WHERE col1 = 1")
+            .unwrap();
+        let rows = pow.collect_as_json_rows().unwrap();
+        assert!((rows[0].get("p").and_then(|v| v.as_f64()).unwrap() - 100.0).abs() < 1e-9);
+
+        let mod_ = spark
+            .sql("SELECT mod(col1, 3) AS m FROM tbl WHERE col1 = 1")
+            .unwrap();
+        let rows = mod_.collect_as_json_rows().unwrap();
+        assert!((rows[0].get("m").and_then(|v| v.as_f64()).unwrap() - 1.0).abs() < 1e-9);
+
+        let regexp = spark
+            .sql(r#"SELECT regexp_extract(col3, '([0-9]+)', 1) AS r FROM tbl WHERE col1 = 1"#)
+            .unwrap();
+        let rows = regexp.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("r").and_then(|v| v.as_str()), Some("123"));
+
+        let len = spark
+            .sql("SELECT len(col3) AS l FROM tbl WHERE col1 = 1")
+            .unwrap();
+        let rows = len.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("l").and_then(|v| v.as_i64()), Some(7));
+    }
+
     /// Issue #1562: double-quoted format literal in spark.sql to_date().
     #[test]
     fn test_sql_to_date_double_quoted_format() {
