@@ -1420,6 +1420,84 @@ fn sql_expr_to_polars(
     }
 }
 
+/// Resolve SQL scalar built-ins to Polars Expr. Returns None if not a known built-in.
+fn sql_scalar_builtin_to_expr(
+    func_name: &str,
+    func: &Function,
+    args: &[Column],
+) -> Result<Option<Expr>, PolarsError> {
+    let name = func_name.to_uppercase();
+    let arg_exprs = function_args_slice(&func.args);
+
+    let expr = match name.as_str() {
+        "COALESCE" if !args.is_empty() => {
+            let refs: Vec<&Column> = args.iter().collect();
+            functions::coalesce(&refs)?.expr().clone()
+        }
+        "NVL" | "IFNULL" if args.len() == 2 => {
+            functions::nvl(&args[0], &args[1]).expr().clone()
+        }
+        "LOG10" if args.len() == 1 => functions::log10(&args[0]).expr().clone(),
+        "LOG2" if args.len() == 1 => functions::log2(&args[0]).expr().clone(),
+        "LOG" | "LN" if args.len() == 1 => functions::log(&args[0]).expr().clone(),
+        "LOG" if args.len() == 2 => {
+            // Spark SQL / PySpark: log(base, expr)
+            let base = sql_parse_f64_literal(sql_function_unnamed_expr(arg_exprs, 0)?)?;
+            functions::log_with_base(&args[1], base).expr().clone()
+        }
+        "POW" | "POWER" if args.len() == 2 => {
+            if let Ok(exp) = sql_parse_i64_literal(sql_function_unnamed_expr(arg_exprs, 1)?) {
+                functions::pow(&args[0], exp).expr().clone()
+            } else {
+                args[0].pow_with(&args[1]).expr().clone()
+            }
+        }
+        "MOD" if args.len() == 2 => args[0].mod_pyspark(&args[1]).expr().clone(),
+        "REGEXP_EXTRACT" if args.len() >= 2 => {
+            let pattern = sql_expr_to_string_literal(sql_function_unnamed_expr(arg_exprs, 1)?)?;
+            let idx = if args.len() >= 3 {
+                sql_parse_i64_literal(sql_function_unnamed_expr(arg_exprs, 2)?)? as usize
+            } else {
+                1
+            };
+            functions::regexp_extract(&args[0], &pattern, idx).expr().clone()
+        }
+        "LENGTH" | "LEN" | "CHAR_LENGTH" if args.len() == 1 => {
+            functions::length(&args[0]).expr().clone()
+        }
+        "UPPER" | "UCASE" if args.len() == 1 => functions::upper(&args[0]).expr().clone(),
+        "LOWER" | "LCASE" if args.len() == 1 => functions::lower(&args[0]).expr().clone(),
+        "TRIM" if args.len() == 1 => functions::trim(&args[0]).expr().clone(),
+        "LTRIM" if args.len() == 1 => functions::ltrim(&args[0]).expr().clone(),
+        "RTRIM" if args.len() == 1 => functions::rtrim(&args[0]).expr().clone(),
+        "SUBSTRING" | "SUBSTR" if args.len() >= 2 => {
+            let col = &args[0];
+            let start = sql_parse_i64_literal(sql_function_unnamed_expr(arg_exprs, 1)?)?;
+            let len = if args.len() >= 3 {
+                Some(sql_parse_i64_literal(sql_function_unnamed_expr(arg_exprs, 2)?)?)
+            } else {
+                None
+            };
+            functions::substring(col, start, len).expr().clone()
+        }
+        "REGEXP_REPLACE" if args.len() == 3 => {
+            use polars::prelude::DataType;
+            args[0]
+                .expr()
+                .clone()
+                .cast(DataType::String)
+                .str()
+                .replace_all(
+                    args[1].expr().clone().cast(DataType::String),
+                    args[2].expr().clone().cast(DataType::String),
+                    false,
+                )
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(expr))
+}
+
 /// Convert SQL function call to Polars Expr. Supports built-ins (UPPER, LOWER, etc.) and UDFs.
 /// For Python UDF in WHERE/HAVING we cannot return a lazy Expr; returns error (Python UDF in
 /// predicates requires eager materialization - deferred).
@@ -1482,39 +1560,8 @@ fn sql_function_to_expr(
             .clone());
     }
 
-    // Built-in scalar functions (single-column arg)
-    if let Some(col) = args.first() {
-        let builtin_expr = match func_name.to_uppercase().as_str() {
-            "UPPER" | "UCASE" if args.len() == 1 => Some(functions::upper(col).expr().clone()),
-            "LOWER" | "LCASE" if args.len() == 1 => Some(functions::lower(col).expr().clone()),
-            "TRIM" if args.len() == 1 => Some(functions::trim(col).expr().clone()),
-            "LTRIM" if args.len() == 1 => Some(functions::ltrim(col).expr().clone()),
-            "RTRIM" if args.len() == 1 => Some(functions::rtrim(col).expr().clone()),
-            "SUBSTRING" | "SUBSTR" if args.len() >= 2 => {
-                let arg_exprs = function_args_slice(&func.args);
-                let start = sql_parse_i64_literal(sql_function_unnamed_expr(arg_exprs, 1)?)?;
-                let len = if args.len() >= 3 {
-                    Some(sql_parse_i64_literal(sql_function_unnamed_expr(
-                        arg_exprs, 2,
-                    )?)?)
-                } else {
-                    None
-                };
-                Some(functions::substring(col, start, len).expr().clone())
-            }
-            "REGEXP_REPLACE" if args.len() == 3 => {
-                use polars::prelude::DataType;
-                Some(col.expr().clone().cast(DataType::String).str().replace_all(
-                    args[1].expr().clone().cast(DataType::String),
-                    args[2].expr().clone().cast(DataType::String),
-                    false,
-                ))
-            }
-            _ => None,
-        };
-        if let Some(e) = builtin_expr {
-            return Ok(e);
-        }
+    if let Some(e) = sql_scalar_builtin_to_expr(func_name, func, &args)? {
+        return Ok(e);
     }
 
     // UDF lookup
@@ -1529,7 +1576,11 @@ fn sql_function_to_expr(
     }
 
     Err(PolarsError::InvalidOperation(
-        format!("SQL: unknown function '{}'. Register with spark.udf.register() or use built-ins: UPPER, LOWER.", func_name).into(),
+        format!(
+            "SQL: unknown function '{}'. Register with spark.udf.register() or use a built-in scalar function.",
+            func_name
+        )
+        .into(),
     ))
 }
 
@@ -2111,23 +2162,8 @@ fn projection_function_to_item(
 
     let args = sql_function_args_to_columns(func, session, df)?;
 
-    // Built-ins (mirror sql_function_to_expr WHERE/HAVING support)
-    if let Some(col) = args.first() {
-        let builtin = match func_name.to_uppercase().as_str() {
-            "UPPER" | "UCASE" if args.len() == 1 => {
-                Some(functions::upper(col).expr().clone().alias(&alias))
-            }
-            "LOWER" | "LCASE" if args.len() == 1 => {
-                Some(functions::lower(col).expr().clone().alias(&alias))
-            }
-            "TRIM" if args.len() == 1 => Some(functions::trim(col).expr().clone().alias(&alias)),
-            "LTRIM" if args.len() == 1 => Some(functions::ltrim(col).expr().clone().alias(&alias)),
-            "RTRIM" if args.len() == 1 => Some(functions::rtrim(col).expr().clone().alias(&alias)),
-            _ => None,
-        };
-        if let Some(e) = builtin {
-            return Ok(ProjItem::Expr(e, alias));
-        }
+    if let Some(e) = sql_scalar_builtin_to_expr(func_name, func, &args)? {
+        return Ok(ProjItem::Expr(e.alias(&alias), alias));
     }
 
     // UDF lookup
@@ -2141,7 +2177,7 @@ fn projection_function_to_item(
 
     Err(PolarsError::InvalidOperation(
         format!(
-            "SQL: unknown function '{}'. Register with spark.udf.register() or use built-ins: UPPER, LOWER.",
+            "SQL: unknown function '{}'. Register with spark.udf.register() or use a built-in scalar function.",
             func_name
         )
         .into(),

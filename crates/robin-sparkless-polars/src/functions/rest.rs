@@ -2561,8 +2561,11 @@ pub fn coalesce(columns: &[&Column]) -> Result<Column, PolarsError> {
 /// Alias for coalesce(col, value). PySpark nvl / ifnull.
 pub fn nvl(column: &Column, value: &Column) -> Column {
     use polars::prelude::*;
-    let exprs = vec![column.expr().clone(), value.expr().clone()];
-    crate::column::Column::from_expr(coalesce(&exprs), None)
+    let cond = column.expr().clone().is_null();
+    let expr = when(cond)
+        .then(value.expr().clone())
+        .otherwise(column.expr().clone());
+    crate::column::Column::from_expr(expr, None)
 }
 
 /// Alias for nvl. PySpark ifnull.
