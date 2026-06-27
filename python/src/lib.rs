@@ -2442,6 +2442,7 @@ fn python_data_and_schema(
                             column_order.as_deref(),
                             from_pandas,
                             allow_scalar_single_column,
+                            schema_names_only,
                         )?
                     }
                 } else {
@@ -2452,6 +2453,7 @@ fn python_data_and_schema(
                         column_order.as_deref(),
                         from_pandas,
                         allow_scalar_single_column,
+                        schema_names_only,
                     )?
                 }
             } else if item.cast::<PyDict>().is_ok() {
@@ -2462,6 +2464,7 @@ fn python_data_and_schema(
                     column_order.as_deref(),
                     from_pandas,
                     allow_scalar_single_column,
+                    schema_names_only,
                 )?
             } else if let Some((ref row_fn, ref kpy)) = per_row_fn {
                 if item
@@ -2488,6 +2491,7 @@ fn python_data_and_schema(
                                 column_order.as_deref(),
                                 from_pandas,
                                 allow_scalar_single_column,
+                                schema_names_only,
                             )?
                         }
                     } else {
@@ -2498,6 +2502,7 @@ fn python_data_and_schema(
                             column_order.as_deref(),
                             from_pandas,
                             allow_scalar_single_column,
+                            schema_names_only,
                         )?
                     }
                 } else {
@@ -2508,6 +2513,7 @@ fn python_data_and_schema(
                         column_order.as_deref(),
                         from_pandas,
                         allow_scalar_single_column,
+                        schema_names_only,
                     )?
                 }
             } else {
@@ -2518,6 +2524,7 @@ fn python_data_and_schema(
                     column_order.as_deref(),
                     from_pandas,
                     allow_scalar_single_column,
+                    schema_names_only,
                 )?
             };
             // For dict rows without explicit schema, infer full schema from all rows/keys later so we
@@ -2582,6 +2589,19 @@ fn python_data_and_schema(
                 .unwrap_or_default()
         })
     };
+    // #1642: names-only schema with tuple/list rows — PySpark adds _4, _5, ... for extra values.
+    if schema_names_only {
+        if let Some(max_len) = rows.iter().map(|r| r.len()).max() {
+            while schema.len() < max_len {
+                schema.push((format!("_{}", schema.len() + 1), "string".to_string()));
+            }
+            for row in &mut rows {
+                while row.len() < schema.len() {
+                    row.push(JsonValue::Null);
+                }
+            }
+        }
+    }
     if let (Some(first_row), true) = (rows.first(), schema.iter().all(|(_, t)| t == "string")) {
         if first_row.len() == schema.len() {
             schema = schema
@@ -2628,8 +2648,14 @@ fn python_data_and_schema(
 }
 
 /// PySpark parity (#711, #270): tuple/list row length must match explicit schema field count.
-fn validate_tuple_list_row_length(row_idx: usize, got: usize, expected: usize) -> PyResult<()> {
-    if got != expected {
+/// When `allow_extra` (#1642), rows may have more values than names-only schema columns.
+fn validate_tuple_list_row_length(
+    row_idx: usize,
+    got: usize,
+    expected: usize,
+    allow_extra: bool,
+) -> PyResult<()> {
+    if got < expected || (got > expected && !allow_extra) {
         return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
             "createDataFrame: LENGTH_SHOULD_BE_THE_SAME. length should be the same. Expected {} fields, got {} (row index {}).",
             expected, got, row_idx
@@ -2645,14 +2671,25 @@ fn python_row_to_json(
     column_order: Option<&[String]>,
     from_pandas: bool,
     allow_scalar_single_column: bool,
+    allow_extra_seq_fields: bool,
 ) -> PyResult<Vec<JsonValue>> {
     // When column_order is given: use Python items() so key/value come from Python (#1267).
     if let Some(order) = column_order {
         // Tuple/list rows map by position to schema columns (PySpark parity; #1544).
         if let Ok(tup) = item.cast::<pyo3::types::PyTuple>() {
-            validate_tuple_list_row_length(row_idx, tup.len(), order.len())?;
-            let mut values = Vec::with_capacity(order.len());
-            for (i, _) in order.iter().enumerate() {
+            validate_tuple_list_row_length(
+                row_idx,
+                tup.len(),
+                order.len(),
+                allow_extra_seq_fields,
+            )?;
+            let field_count = if allow_extra_seq_fields {
+                tup.len()
+            } else {
+                order.len()
+            };
+            let mut values = Vec::with_capacity(field_count);
+            for i in 0..field_count {
                 let v = tup
                     .get_item(i)
                     .ok()
@@ -2663,9 +2700,19 @@ fn python_row_to_json(
             return Ok(values);
         }
         if let Ok(seq) = item.cast::<PyList>() {
-            validate_tuple_list_row_length(row_idx, seq.len(), order.len())?;
-            let mut values = Vec::with_capacity(order.len());
-            for (i, _) in order.iter().enumerate() {
+            validate_tuple_list_row_length(
+                row_idx,
+                seq.len(),
+                order.len(),
+                allow_extra_seq_fields,
+            )?;
+            let field_count = if allow_extra_seq_fields {
+                seq.len()
+            } else {
+                order.len()
+            };
+            let mut values = Vec::with_capacity(field_count);
+            for i in 0..field_count {
                 let v = seq
                     .get_item(i)
                     .ok()
