@@ -1001,6 +1001,47 @@ mod tests {
         assert_eq!(rows[0].get("tag").and_then(|v| v.as_str()), Some("x"));
     }
 
+    /// Issue #1639: JOIN ON with multiple AND equality conditions.
+    #[test]
+    fn test_sql_join_on_multiple_conditions_issue_1639() {
+        use serde_json::json;
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let schema_a = vec![
+            ("col1".to_string(), "string".to_string()),
+            ("col2".to_string(), "bigint".to_string()),
+        ];
+        let rows_a = vec![
+            vec![json!("A"), json!(1)],
+            vec![json!("B"), json!(2)],
+        ];
+        let df_a = spark
+            .create_dataframe_from_rows(rows_a, schema_a, false, false)
+            .unwrap();
+        let schema_b = vec![
+            ("col1".to_string(), "string".to_string()),
+            ("col2".to_string(), "bigint".to_string()),
+            ("col3".to_string(), "string".to_string()),
+        ];
+        let rows_b = vec![
+            vec![json!("A"), json!(1), json!("X")],
+            vec![json!("B"), json!(3), json!("Y")],
+        ];
+        let df_b = spark
+            .create_dataframe_from_rows(rows_b, schema_b, false, false)
+            .unwrap();
+        spark.create_or_replace_temp_view("tbl_a", df_a);
+        spark.create_or_replace_temp_view("tbl_b", df_b);
+        let result = spark
+            .sql(
+                "SELECT a.col1, b.col3 FROM tbl_a a JOIN tbl_b b ON a.col1 = b.col1 AND a.col2 = b.col2",
+            )
+            .unwrap();
+        assert_eq!(result.count().unwrap(), 1);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0].get("a_col1").and_then(|v| v.as_str()), Some("A"));
+        assert_eq!(rows[0].get("b_col3").and_then(|v| v.as_str()), Some("X"));
+    }
+
     /// Batch 4 / #708: LEFT JOIN supported; returns all left rows with nulls for non-matching right.
     #[test]
     fn test_sql_left_join_supported() {

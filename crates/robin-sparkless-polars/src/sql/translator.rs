@@ -1077,6 +1077,44 @@ fn resolve_table_factor(
     }
 }
 
+/// Extract (left_col, right_col) pairs from JOIN ON. Supports `a.x = b.x AND a.y = b.y` (#1639).
+fn join_on_equality_pairs(
+    expr: &SqlExpr,
+    left_alias: Option<&str>,
+    right_alias: Option<&str>,
+) -> Result<Vec<(String, String)>, PolarsError> {
+    match expr {
+        SqlExpr::BinaryOp {
+            left,
+            op: BinaryOperator::Eq,
+            right,
+        } => {
+            let l = sql_expr_to_qualified_col_name(left.as_ref(), left_alias)?;
+            let r = sql_expr_to_qualified_col_name(right.as_ref(), right_alias)?;
+            Ok(vec![(l, r)])
+        }
+        SqlExpr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            let mut pairs = join_on_equality_pairs(left.as_ref(), left_alias, right_alias)?;
+            pairs.extend(join_on_equality_pairs(
+                right.as_ref(),
+                left_alias,
+                right_alias,
+            )?);
+            Ok(pairs)
+        }
+        SqlExpr::Nested(inner) => {
+            join_on_equality_pairs(inner.as_ref(), left_alias, right_alias)
+        }
+        _ => Err(PolarsError::InvalidOperation(
+            "SQL: JOIN ON must be equality conditions combined with AND.".into(),
+        )),
+    }
+}
+
 /// Returns (left_column_names, right_column_names) for JOIN ON. When table aliases are used, names are prefixed (e.g. e_dept_id, d_id) (#152).
 fn join_condition_to_on_columns(
     join_op: &JoinOperator,
@@ -1107,20 +1145,16 @@ fn join_condition_to_on_columns(
         }
     };
     match constraint {
-        JoinConstraint::On(expr) => match expr {
-            SqlExpr::BinaryOp {
-                left,
-                op: BinaryOperator::Eq,
-                right,
-            } => {
-                let l = sql_expr_to_qualified_col_name(left.as_ref(), left_alias)?;
-                let r = sql_expr_to_qualified_col_name(right.as_ref(), right_alias)?;
-                Ok((vec![l], vec![r]))
+        JoinConstraint::On(expr) => {
+            let pairs = join_on_equality_pairs(expr, left_alias, right_alias)?;
+            if pairs.is_empty() {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: JOIN ON requires at least one equality condition.".into(),
+                ));
             }
-            _ => Err(PolarsError::InvalidOperation(
-                "SQL: JOIN ON must be a single equality (col = col).".into(),
-            )),
-        },
+            let (left_on, right_on): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
+            Ok((left_on, right_on))
+        }
         _ => Err(PolarsError::InvalidOperation(
             "SQL: JOIN must use ON (equality); NATURAL/USING not supported.".into(),
         )),
