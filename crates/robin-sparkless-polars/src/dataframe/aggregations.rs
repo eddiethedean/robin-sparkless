@@ -869,6 +869,70 @@ fn pivot_agg_input_column_name(input_expr: &Expr) -> Option<String> {
     }
 }
 
+/// Parsed pivot aggregation: column-based agg or bare literal (PySpark: pivot().agg(F.lit(1))).
+enum PivotAggParsed {
+    ColumnAgg {
+        alias: String,
+        agg_kind: &'static str,
+        value_col: String,
+    },
+    Literal {
+        alias: String,
+        literal: Expr,
+    },
+}
+
+/// Parse pivot agg expr including literals (issue #1643).
+fn parse_pivot_agg_spec(expr: &Expr) -> Option<PivotAggParsed> {
+    if let Some((alias, agg_kind, value_col)) = parse_pivot_agg_expr(expr) {
+        return Some(PivotAggParsed::ColumnAgg {
+            alias,
+            agg_kind,
+            value_col,
+        });
+    }
+    parse_pivot_literal_expr(expr).map(|(alias, literal)| PivotAggParsed::Literal { alias, literal })
+}
+
+/// Alias(Literal) or Literal -> (alias, literal expr).
+fn parse_pivot_literal_expr(expr: &Expr) -> Option<(String, Expr)> {
+    let mut inner = expr;
+    let mut alias_opt: Option<String> = None;
+    while let Expr::Alias(e, name) = inner {
+        alias_opt = Some(name.as_str().to_string());
+        inner = e.as_ref();
+    }
+    let inner = match inner {
+        Expr::Cast { expr: e, .. } => e.as_ref(),
+        other => other,
+    };
+    if let Expr::Literal(_) = inner {
+        let alias = alias_opt.unwrap_or_else(|| "literal".to_string());
+        return Some((alias, inner.clone()));
+    }
+    None
+}
+
+/// Apply agg kind to a per-row filtered value expression (multi-agg pivot path).
+fn pivot_filtered_agg_expr(expr: Expr, agg_kind: &str) -> Result<Expr, PolarsError> {
+    Ok(match agg_kind {
+        "sum" => expr.sum(),
+        "avg" => expr.mean(),
+        "min" => expr.min(),
+        "max" => expr.max(),
+        "first" => expr.first_non_null(),
+        "last" => expr.last(),
+        "count_distinct" => expr.n_unique(),
+        "stddev" => expr.std(1),
+        "variance" => expr.var(1),
+        other => {
+            return Err(PolarsError::ComputeError(
+                format!("pivot.agg unsupported agg: {other}").into(),
+            ));
+        }
+    })
+}
+
 /// Parse a simple pivot agg expr: Alias(Agg(...), alias) or bare Agg(...) or Cast(Agg(...), _) -> (alias, agg_kind, value_col).
 /// Supports sum, avg, min, max, count_distinct, first, last, collect_list, stddev, variance (PySpark pivot.agg parity).
 /// When no alias is present, use a default like "sum(salary)" (PySpark parity).
@@ -1039,6 +1103,54 @@ impl PivotedGroupedData {
         ))
     }
 
+    /// Pivot with a constant literal per pivot column (PySpark: groupBy(...).pivot(...).agg(F.lit(1))).
+    fn pivot_literal(&self, literal: Expr) -> Result<DataFrame, PolarsError> {
+        use polars::prelude::*;
+        let pivot_resolved = self.resolve_column(&self.pivot_col)?;
+        let pivot_vals = self.pivot_values()?;
+        if pivot_vals.is_empty() {
+            let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+            let lf = self.lf.clone().group_by(by).agg(vec![]);
+            let pl_df = lf.collect()?;
+            return Ok(super::DataFrame::from_polars_with_options(
+                pl_df,
+                self.case_sensitive,
+            ));
+        }
+        let mut agg_exprs: Vec<Expr> = Vec::with_capacity(pivot_vals.len());
+        use polars::prelude::DataType;
+        for v in &pivot_vals {
+            let pred = if v == "null" {
+                col(pivot_resolved.as_str()).is_null()
+            } else {
+                col(pivot_resolved.as_str())
+                    .cast(DataType::String)
+                    .eq(lit(v.as_str()))
+            };
+            let row_expr = when(pred).then(literal.clone()).otherwise(lit(NULL));
+            let has_any = row_expr
+                .clone()
+                .is_not_null()
+                .cast(DataType::UInt32)
+                .sum()
+                .gt(lit(0));
+            let agg_expr = when(has_any)
+                .then(row_expr.max())
+                .otherwise(lit(NULL))
+                .alias(v.as_str());
+            agg_exprs.push(agg_expr);
+        }
+        let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+        let lf = self.lf.clone().group_by(by).agg(agg_exprs);
+        let mut pl_df = lf.collect()?;
+        pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+        pl_df = reorder_pivot_columns(&pl_df, &self.grouping_cols, &pivot_vals)?;
+        Ok(super::DataFrame::from_polars_with_options(
+            pl_df,
+            self.case_sensitive,
+        ))
+    }
+
     /// Pivot then sum (PySpark: groupBy(...).pivot(...).sum(column)).
     pub fn sum(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         self.pivot_agg(value_col, polars::prelude::Expr::sum)
@@ -1116,7 +1228,7 @@ impl PivotedGroupedData {
     /// Internal: pivot then first (not in PySpark pivot API).
     pub fn _first(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
-        self.pivot_agg(value_col, Expr::first)
+        self.pivot_agg(value_col, |e| e.first_non_null())
     }
 
     /// Internal: pivot then last (not in PySpark pivot API).
@@ -1140,11 +1252,11 @@ impl PivotedGroupedData {
     }
 
     /// Pivot with multiple aggregations (PySpark: groupBy(...).pivot(...).agg(F.sum("v").alias("total"), ...)).
-    /// Each expr must be Alias(Agg(Sum/Mean/Min/Max(Column(name))), alias). With one expr: column named by alias; with multiple: columns {pivot_val}_{alias}.
+    /// Each expr must be Alias(Agg(Sum/Mean/Min/Max(Column(name))), alias) or a literal. With one expr: column named by alias or pivot columns; with multiple: columns {pivot_val}_{alias}.
     pub fn agg(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
         let mut parsed = Vec::with_capacity(exprs.len());
         for e in &exprs {
-            match parse_pivot_agg_expr(e) {
+            match parse_pivot_agg_spec(e) {
                 Some(t) => parsed.push(t),
                 None => {
                     return Err(PolarsError::ComputeError(
@@ -1160,39 +1272,49 @@ impl PivotedGroupedData {
 
         // PySpark: single expression → pivot columns (A, B) when agg is per-pivot; or one column when sum/avg/min/max with alias.
         if parsed.len() == 1 {
-            let (alias, agg_kind, value_col) = &parsed[0];
-            match *agg_kind {
-                "count_distinct" => return self._count_distinct(value_col),
-                "first" => return self._first(value_col),
-                "last" => return self._last(value_col),
-                "collect_list" => return self._collect_list(value_col),
-                "collect_set" => return self._collect_set(value_col),
-                "stddev" => return self._stddev(value_col),
-                "variance" => return self._variance(value_col),
-                _ => {}
-            }
-            // sum, avg, min, max: one column named by alias (no pivot split)
-            let value_resolved = self.resolve_column(value_col)?;
-            let col_expr = col(value_resolved.as_str());
-            let agg_expr = match *agg_kind {
-                "sum" => col_expr.sum().alias(alias.as_str()),
-                "avg" => col_expr.mean().alias(alias.as_str()),
-                "min" => col_expr.min().alias(alias.as_str()),
-                "max" => col_expr.max().alias(alias.as_str()),
-                _ => {
-                    return Err(PolarsError::ComputeError(
-                        format!("pivot.agg unsupported agg: {}", agg_kind).into(),
+            match &parsed[0] {
+                PivotAggParsed::Literal { literal, .. } => {
+                    return self.pivot_literal(literal.clone());
+                }
+                PivotAggParsed::ColumnAgg {
+                    alias,
+                    agg_kind,
+                    value_col,
+                } => {
+                    match *agg_kind {
+                        "count_distinct" => return self._count_distinct(value_col),
+                        "first" => return self._first(value_col),
+                        "last" => return self._last(value_col),
+                        "collect_list" => return self._collect_list(value_col),
+                        "collect_set" => return self._collect_set(value_col),
+                        "stddev" => return self._stddev(value_col),
+                        "variance" => return self._variance(value_col),
+                        _ => {}
+                    }
+                    // sum, avg, min, max: one column named by alias (no pivot split)
+                    let value_resolved = self.resolve_column(value_col)?;
+                    let col_expr = col(value_resolved.as_str());
+                    let agg_expr = match *agg_kind {
+                        "sum" => col_expr.sum().alias(alias.as_str()),
+                        "avg" => col_expr.mean().alias(alias.as_str()),
+                        "min" => col_expr.min().alias(alias.as_str()),
+                        "max" => col_expr.max().alias(alias.as_str()),
+                        other => {
+                            return Err(PolarsError::ComputeError(
+                                format!("pivot.agg unsupported agg: {other}").into(),
+                            ));
+                        }
+                    };
+                    let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+                    let lf = self.lf.clone().group_by(by).agg(vec![agg_expr]);
+                    let mut pl_df = lf.collect()?;
+                    pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
+                    return Ok(super::DataFrame::from_polars_with_options(
+                        pl_df,
+                        self.case_sensitive,
                     ));
                 }
-            };
-            let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
-            let lf = self.lf.clone().group_by(by).agg(vec![agg_expr]);
-            let mut pl_df = lf.collect()?;
-            pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
-            return Ok(super::DataFrame::from_polars_with_options(
-                pl_df,
-                self.case_sensitive,
-            ));
+            }
         }
 
         if pivot_vals.is_empty() {
@@ -1214,32 +1336,49 @@ impl PivotedGroupedData {
                     .cast(DataType::String)
                     .eq(lit(v.as_str()))
             };
-            for (alias, agg_kind, value_col) in &parsed {
-                let value_resolved = self.resolve_column(value_col)?;
-                let then_expr = col(value_resolved.as_str());
-                let expr = when(pred.clone()).then(then_expr).otherwise(lit(NULL));
-                let has_any = expr
-                    .clone()
-                    .is_not_null()
-                    .cast(DataType::UInt32)
-                    .sum()
-                    .gt(lit(0));
-                let aggregated = match *agg_kind {
-                    "sum" => expr.sum(),
-                    "avg" => expr.mean(),
-                    "min" => expr.min(),
-                    "max" => expr.max(),
-                    _ => {
-                        return Err(PolarsError::ComputeError(
-                            format!("pivot.agg unsupported agg: {}", agg_kind).into(),
-                        ));
+            for spec in &parsed {
+                match spec {
+                    PivotAggParsed::Literal { alias, literal } => {
+                        let row_expr = when(pred.clone())
+                            .then(literal.clone())
+                            .otherwise(lit(NULL));
+                        let has_any = row_expr
+                            .clone()
+                            .is_not_null()
+                            .cast(DataType::UInt32)
+                            .sum()
+                            .gt(lit(0));
+                        let aggregated = row_expr.max();
+                        let agg_expr = when(has_any)
+                            .then(aggregated)
+                            .otherwise(lit(NULL))
+                            .alias(format!("{}_{}", v, alias));
+                        agg_exprs.push(agg_expr);
                     }
-                };
-                let agg_expr = when(has_any)
-                    .then(aggregated)
-                    .otherwise(lit(NULL))
-                    .alias(format!("{}_{}", v, alias));
-                agg_exprs.push(agg_expr);
+                    PivotAggParsed::ColumnAgg {
+                        alias,
+                        agg_kind,
+                        value_col,
+                    } => {
+                        let value_resolved = self.resolve_column(value_col)?;
+                        let then_expr = col(value_resolved.as_str());
+                        let expr = when(pred.clone())
+                            .then(then_expr)
+                            .otherwise(lit(NULL));
+                        let has_any = expr
+                            .clone()
+                            .is_not_null()
+                            .cast(DataType::UInt32)
+                            .sum()
+                            .gt(lit(0));
+                        let aggregated = pivot_filtered_agg_expr(expr, agg_kind)?;
+                        let agg_expr = when(has_any)
+                            .then(aggregated)
+                            .otherwise(lit(NULL))
+                            .alias(format!("{}_{}", v, alias));
+                        agg_exprs.push(agg_expr);
+                    }
+                }
             }
         }
         let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
