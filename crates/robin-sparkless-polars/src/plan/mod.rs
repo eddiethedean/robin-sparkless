@@ -698,7 +698,7 @@ fn handle_join_op(
     let join_type = match how {
         "left" => JoinType::Left,
         "right" => JoinType::Right,
-        "outer" => JoinType::Outer,
+        "outer" | "full" | "full_outer" | "fullouter" => JoinType::Outer,
         "left_semi" | "leftsemi" | "semi" => JoinType::LeftSemi,
         "left_anti" | "leftanti" | "anti" => JoinType::LeftAnti,
         "inner" => JoinType::Inner,
