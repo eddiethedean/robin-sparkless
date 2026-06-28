@@ -5,7 +5,9 @@ from __future__ import annotations
 
 def test_sql_join_on_multiple_conditions_issue_1639(spark):
     df_a = spark.createDataFrame([("A", 1), ("B", 2)], ["col1", "col2"])
-    df_b = spark.createDataFrame([("A", 1, "X"), ("B", 3, "Y")], ["col1", "col2", "col3"])
+    df_b = spark.createDataFrame(
+        [("A", 1, "X"), ("B", 3, "Y")], ["col1", "col2", "col3"]
+    )
     df_a.createOrReplaceTempView("tbl_a")
     df_b.createOrReplaceTempView("tbl_b")
 

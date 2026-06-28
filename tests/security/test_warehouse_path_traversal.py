@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 
 import pytest
 
@@ -20,7 +18,7 @@ def test_table_rejects_path_traversal_outside_warehouse(tmp_path) -> None:
     outside.mkdir()
     secret = outside / "secret_table"
     secret.mkdir()
-  # empty dir mimics saveAsTable layout
+    # empty dir mimics saveAsTable layout
 
     spark = (
         SparkSession.builder.app_name("path-security")

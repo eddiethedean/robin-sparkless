@@ -5588,7 +5588,7 @@ impl PyDataFrame {
             "inner" => JoinType::Inner,
             "left" | "left_outer" => JoinType::Left,
             "right" | "right_outer" => JoinType::Right,
-            "outer" | "full" | "full_outer" => JoinType::Outer,
+            "outer" | "full" | "full_outer" | "fullouter" => JoinType::Outer,
             "semi" | "left_semi" | "leftsemi" => JoinType::LeftSemi,
             "anti" | "left_anti" | "leftanti" => JoinType::LeftAnti,
             other => {

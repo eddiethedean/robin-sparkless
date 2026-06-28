@@ -581,9 +581,7 @@ mod tests {
             .sql("SELECT log(col2) AS l FROM tbl WHERE col1 = 2")
             .unwrap();
         let rows = log_nat.collect_as_json_rows().unwrap();
-        assert!(
-            (rows[0].get("l").and_then(|v| v.as_f64()).unwrap() - 100.0_f64.ln()).abs() < 1e-9
-        );
+        assert!((rows[0].get("l").and_then(|v| v.as_f64()).unwrap() - 100.0_f64.ln()).abs() < 1e-9);
 
         let log_base = spark
             .sql("SELECT log(10, col2) AS l FROM tbl WHERE col1 = 2")
@@ -1029,10 +1027,7 @@ mod tests {
             ("col1".to_string(), "string".to_string()),
             ("col2".to_string(), "bigint".to_string()),
         ];
-        let rows_a = vec![
-            vec![json!("A"), json!(1)],
-            vec![json!("B"), json!(2)],
-        ];
+        let rows_a = vec![vec![json!("A"), json!(1)], vec![json!("B"), json!(2)]];
         let df_a = spark
             .create_dataframe_from_rows(rows_a, schema_a, false, false)
             .unwrap();

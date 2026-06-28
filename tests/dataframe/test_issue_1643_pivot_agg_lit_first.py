@@ -29,9 +29,13 @@ def test_pivot_agg_lit_issue_1643(spark) -> None:
 
 def test_pivot_agg_multiple_first_issue_1643(spark) -> None:
     df = _issue_1643_df(spark)
-    result = df.groupBy("col1").pivot("col2").agg(
-        F.first(F.col("col3")).alias("col3"),
-        F.first(F.col("col4")).alias("col4"),
+    result = (
+        df.groupBy("col1")
+        .pivot("col2")
+        .agg(
+            F.first(F.col("col3")).alias("col3"),
+            F.first(F.col("col4")).alias("col4"),
+        )
     )
     rows = {r["col1"]: r.asDict() for r in result.collect()}
 

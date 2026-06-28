@@ -12,10 +12,10 @@ use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
-    BinaryOperator, CastKind, Expr as SqlExpr, FromTable, Function, FunctionArg,
-    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
-    ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
-    TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
+    BinaryOperator, CastKind, Expr as SqlExpr, FromTable, Function, FunctionArg, FunctionArgExpr,
+    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause, ObjectType,
+    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
+    TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -1112,9 +1112,7 @@ fn join_on_equality_pairs(
             )?);
             Ok(pairs)
         }
-        SqlExpr::Nested(inner) => {
-            join_on_equality_pairs(inner.as_ref(), left_alias, right_alias)
-        }
+        SqlExpr::Nested(inner) => join_on_equality_pairs(inner.as_ref(), left_alias, right_alias),
         _ => Err(PolarsError::InvalidOperation(
             "SQL: JOIN ON must be equality conditions combined with AND.".into(),
         )),
@@ -1491,9 +1489,7 @@ fn sql_scalar_builtin_to_expr(
             let refs: Vec<&Column> = args.iter().collect();
             functions::coalesce(&refs)?.expr().clone()
         }
-        "NVL" | "IFNULL" if args.len() == 2 => {
-            functions::nvl(&args[0], &args[1]).expr().clone()
-        }
+        "NVL" | "IFNULL" if args.len() == 2 => functions::nvl(&args[0], &args[1]).expr().clone(),
         "LOG10" if args.len() == 1 => functions::log10(&args[0]).expr().clone(),
         "LOG2" if args.len() == 1 => functions::log2(&args[0]).expr().clone(),
         "LOG" | "LN" if args.len() == 1 => functions::log(&args[0]).expr().clone(),
@@ -1517,7 +1513,9 @@ fn sql_scalar_builtin_to_expr(
             } else {
                 1
             };
-            functions::regexp_extract(&args[0], &pattern, idx).expr().clone()
+            functions::regexp_extract(&args[0], &pattern, idx)
+                .expr()
+                .clone()
         }
         "LENGTH" | "LEN" | "CHAR_LENGTH" if args.len() == 1 => {
             functions::length(&args[0]).expr().clone()
@@ -1531,7 +1529,9 @@ fn sql_scalar_builtin_to_expr(
             let col = &args[0];
             let start = sql_parse_i64_literal(sql_function_unnamed_expr(arg_exprs, 1)?)?;
             let len = if args.len() >= 3 {
-                Some(sql_parse_i64_literal(sql_function_unnamed_expr(arg_exprs, 2)?)?)
+                Some(sql_parse_i64_literal(sql_function_unnamed_expr(
+                    arg_exprs, 2,
+                )?)?)
             } else {
                 None
             };

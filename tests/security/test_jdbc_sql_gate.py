@@ -23,7 +23,9 @@ def test_jdbc_query_blocked_when_gate_disabled(monkeypatch) -> None:
     monkeypatch.setenv("SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL", "false")
     spark = SparkSession.builder.appName("jdbc-gate").getOrCreate()
     try:
-        with pytest.raises(Exception, match="query/sessionInitStatement/prepareQuery disabled"):
+        with pytest.raises(
+            Exception, match="query/sessionInitStatement/prepareQuery disabled"
+        ):
             spark.read.format("jdbc").option(
                 "url", "jdbc:postgresql://localhost:5432/test"
             ).option("query", "SELECT 1").load(".")
