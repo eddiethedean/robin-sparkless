@@ -7475,6 +7475,13 @@ impl PyColumn {
         }
     }
 
+    /// True if string ends with suffix (PySpark endswith).
+    fn endswith(&self, suffix: &str) -> PyColumn {
+        PyColumn {
+            inner: self.inner.endswith(suffix),
+        }
+    }
+
     /// Extract first match of regex pattern. PySpark regexp_extract. idx=0 is full match.
     #[pyo3(signature = (pattern, idx=0))]
     fn regexp_extract(&self, pattern: &str, idx: usize) -> PyColumn {
