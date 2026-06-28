@@ -19,6 +19,7 @@ from sparkless import (
     greatest as _greatest,
     least as _least,
     array_distinct as _array_distinct,
+    array_compact as _array_compact,
     posexplode as _posexplode,
     posexplode_outer as _posexplode_outer,
     upper,
@@ -458,6 +459,16 @@ def array_distinct(col_or_name: ColumnOrName) -> _ColumnType:
     out = _native_fn("array_distinct")(col_obj)
     if base_name is not None:
         return out.alias(f"array_distinct({base_name})")
+    return out
+
+
+def array_compact(col_or_name: ColumnOrName) -> _ColumnType:
+    """Remove null elements from array (PySpark array_compact). Output column name matches PySpark: array_compact(col)."""
+    col_obj = _as_col(col_or_name)
+    base_name = getattr(col_obj, "name", None)
+    out = _native_fn("array_compact")(col_obj)
+    if base_name is not None:
+        return out.alias(f"array_compact({base_name})")
     return out
 
 
@@ -1053,6 +1064,7 @@ __all__ = [
     "greatest",
     "least",
     "array_distinct",
+    "array_compact",
     "posexplode",
     "approx_count_distinct",
     "date_trunc",

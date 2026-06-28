@@ -62,6 +62,7 @@ _mod = __import__(
         "greatest",
         "least",
         "array_distinct",
+        "array_compact",
         "posexplode",
         "to_timestamp",
         "to_date",
@@ -164,6 +165,7 @@ printf = format_string  # PySpark alias
 greatest = _mod.greatest
 least = _mod.least
 array_distinct = _mod.array_distinct
+array_compact = _mod.array_compact
 
 
 class _PosexplodeResult(tuple):

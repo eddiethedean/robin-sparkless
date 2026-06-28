@@ -7333,6 +7333,13 @@ impl PyColumn {
         }
     }
 
+    /// Remove null elements from list (PySpark array_compact).
+    fn array_compact(&self) -> PyColumn {
+        PyColumn {
+            inner: functions::array_compact(&self.inner),
+        }
+    }
+
     fn posexplode(&self) -> (PyColumn, PyColumn) {
         let (pos, val) = functions::posexplode(&self.inner);
         (PyColumn { inner: pos }, PyColumn { inner: val })
@@ -9499,6 +9506,13 @@ fn array_distinct(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
+fn array_compact(column: &PyColumn) -> PyColumn {
+    PyColumn {
+        inner: functions::array_compact(&column.inner),
+    }
+}
+
+#[pyfunction]
 fn posexplode(column: &PyColumn) -> (PyColumn, PyColumn) {
     let (pos, val) = functions::posexplode(&column.inner);
     (PyColumn { inner: pos }, PyColumn { inner: val })
@@ -10768,6 +10782,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(greatest, m)?)?;
     m.add_function(wrap_pyfunction!(least, m)?)?;
     m.add_function(wrap_pyfunction!(array_distinct, m)?)?;
+    m.add_function(wrap_pyfunction!(array_compact, m)?)?;
     m.add_function(wrap_pyfunction!(posexplode, m)?)?;
     m.add_function(wrap_pyfunction!(posexplode_outer, m)?)?;
     m.add_function(wrap_pyfunction!(to_timestamp, m)?)?;
