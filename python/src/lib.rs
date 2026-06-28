@@ -4225,6 +4225,42 @@ impl PyRDD {
         }
         Ok(acc)
     }
+
+    /// PySpark parity: True when the RDD has no elements.
+    #[pyo3(name = "isEmpty")]
+    fn is_empty_rdd(&self, py: Python<'_>) -> PyResult<bool> {
+        if let Some(ref elements) = self.elements {
+            return Ok(elements.is_empty());
+        }
+        if let Some(ref inner) = self.inner {
+            return Ok(inner.is_empty());
+        }
+        Ok(self.collect_elements(py)?.is_empty())
+    }
+
+    /// PySpark parity: return an RDD with duplicate elements removed (first occurrence kept).
+    fn distinct(slf: PyRef<Self>, py: Python<'_>) -> PyResult<PyRDD> {
+        let elements = slf.collect_elements(py)?;
+        let mut out: Vec<PyObject> = Vec::new();
+        for item in elements {
+            let item_bound = item.bind(py);
+            let mut duplicate = false;
+            for prev in &out {
+                if item_bound.eq(prev.bind(py))? {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if !duplicate {
+                out.push(item);
+            }
+        }
+        Ok(PyRDD {
+            source_df: None,
+            inner: None,
+            elements: Some(out),
+        })
+    }
 }
 
 #[pyclass]
