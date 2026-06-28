@@ -1507,6 +1507,10 @@ impl PySparkContext {
     fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
+
+    /// PySpark parity: set JVM/log4j log level. No-op in sparkless (no JVM).
+    #[pyo3(name = "setLogLevel")]
+    fn set_log_level(&self, _log_level: &str) {}
 }
 
 #[pyclass]
