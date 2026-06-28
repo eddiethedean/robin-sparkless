@@ -891,7 +891,8 @@ fn parse_pivot_agg_spec(expr: &Expr) -> Option<PivotAggParsed> {
             value_col,
         });
     }
-    parse_pivot_literal_expr(expr).map(|(alias, literal)| PivotAggParsed::Literal { alias, literal })
+    parse_pivot_literal_expr(expr)
+        .map(|(alias, literal)| PivotAggParsed::Literal { alias, literal })
 }
 
 /// Alias(Literal) or Literal -> (alias, literal expr).
@@ -1227,7 +1228,6 @@ impl PivotedGroupedData {
 
     /// Internal: pivot then first (not in PySpark pivot API).
     pub fn _first(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
         self.pivot_agg(value_col, |e| e.first_non_null())
     }
 
@@ -1362,9 +1362,7 @@ impl PivotedGroupedData {
                     } => {
                         let value_resolved = self.resolve_column(value_col)?;
                         let then_expr = col(value_resolved.as_str());
-                        let expr = when(pred.clone())
-                            .then(then_expr)
-                            .otherwise(lit(NULL));
+                        let expr = when(pred.clone()).then(then_expr).otherwise(lit(NULL));
                         let has_any = expr
                             .clone()
                             .is_not_null()

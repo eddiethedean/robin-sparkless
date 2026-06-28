@@ -4190,7 +4190,9 @@ pub fn apply_date_format(column: Column, format: &str) -> PolarsResult<Option<Co
             )
         }
         DataType::String => {
-            let ca = series.str().map_err(|e| compute_err("date_format string", e))?;
+            let ca = series
+                .str()
+                .map_err(|e| compute_err("date_format string", e))?;
             StringChunked::from_iter_options(
                 name.as_str().into(),
                 ca.into_iter().map(|opt_s| {
@@ -4218,7 +4220,7 @@ pub fn apply_date_format(column: Column, format: &str) -> PolarsResult<Option<Co
                     series.dtype()
                 )
                 .into(),
-            ))
+            ));
         }
     };
     Ok(Some(Column::new(name, out.into_series())))

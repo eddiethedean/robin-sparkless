@@ -32,6 +32,7 @@ def test_create_dataframe_structtype_still_rejects_extra_fields(spark):
 
     with pytest.raises(Exception) as exc_info:
         spark.createDataFrame([("A", "B", "C", "D")], schema=schema)
-    assert "LENGTH_SHOULD_BE_THE_SAME" in str(exc_info.value) or "length" in str(
-        exc_info.value
-    ).lower()
+    assert (
+        "LENGTH_SHOULD_BE_THE_SAME" in str(exc_info.value)
+        or "length" in str(exc_info.value).lower()
+    )

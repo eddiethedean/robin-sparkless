@@ -16,7 +16,7 @@ class TestIssue1644FullouterJoinAlias:
         df_b = spark.createDataFrame([("A", 100), ("C", 300)], ["col1", "col3"])
 
         result = df_a.join(df_b, "col1", "fullouter")
-        rows = { _row_val(r, "col1"): r for r in result.collect() }
+        rows = {_row_val(r, "col1"): r for r in result.collect()}
 
         assert set(rows) == {"A", "B", "C"}
         assert _row_val(rows["A"], "col2") == 1
