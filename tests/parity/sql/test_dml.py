@@ -12,6 +12,16 @@ _RAISE_ANALYSIS = (Exception,)
 _RAISE_UNSUPPORTED = (Exception,)
 
 
+def _assert_update_table_unsupported(exc_value: BaseException) -> None:
+    """PySpark 3.x and Sparkless use one message; PySpark 4.x uses TABLE_OPERATION."""
+    msg = str(exc_value)
+    assert (
+        "UPDATE TABLE is not supported temporarily" in msg
+        or "UNSUPPORTED_FEATURE.TABLE_OPERATION" in msg
+        or "does not support UPDATE TABLE" in msg
+    )
+
+
 class TestSQLDMLParity(ParityTestBase):
     """Test SQL DML operations parity with PySpark."""
 
@@ -84,7 +94,7 @@ class TestSQLDMLParity(ParityTestBase):
         # PySpark and Sparkless reject UPDATE for default catalog tables (#1507).
         with pytest.raises(_RAISE_UNSUPPORTED) as excinfo:
             spark.sql("UPDATE update_test SET age = 26 WHERE name = 'Alice'")
-        assert "UPDATE TABLE is not supported temporarily" in str(excinfo.value)
+        _assert_update_table_unsupported(excinfo.value)
 
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS update_test")
@@ -100,7 +110,7 @@ class TestSQLDMLParity(ParityTestBase):
             spark.sql(
                 "UPDATE update_multi SET age = 26, dept = 'HR' WHERE name = 'Alice'"
             )
-        assert "UPDATE TABLE is not supported temporarily" in str(excinfo.value)
+        _assert_update_table_unsupported(excinfo.value)
 
         # Cleanup
         spark.sql("DROP TABLE IF EXISTS update_multi")
