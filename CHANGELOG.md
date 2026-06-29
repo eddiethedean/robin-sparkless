@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **UDF filter comparisons** — `df.filter(udf(col) == lit)` and other non-`>` operators now evaluate the UDF before comparing instead of comparing a dummy `lit(0)` placeholder (#1664).
+
 ## [4.13.0] - 2026-06-29
 
 ### User-facing highlights

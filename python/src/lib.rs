@@ -5,6 +5,7 @@
 #![allow(unexpected_cfgs)] // pyo3 create_exception! uses cfg(gil-refs)
 #![allow(clippy::useless_conversion)] // PyO3 PyResult<T> / PyErr false positives (fixed in pyo3 0.23+)
 
+use pyo3::class::basic::CompareOp;
 use pyo3::create_exception;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
@@ -4371,15 +4372,14 @@ impl PyDataFrame {
                 Ok(PyDataFrame::wrap(py_df.borrow().inner.clone()))
             })?;
             let lit_expr = json_str_to_lit_expr(&other_json)?;
-            let filter_expr = robin_sparkless::Column::new(temp_name.clone())
-                .gt(lit_expr)
-                .into_expr();
+            let op: String = udf_filter.getattr("op")?.extract()?;
+            let filter_expr = udf_filter_comparison_expr(temp_name.clone(), op.as_str(), lit_expr)?;
             let filtered = df_with_col.inner.filter(filter_expr).map_err(to_py_err)?;
             let out = filtered.drop(vec![temp_name.as_str()]).map_err(to_py_err)?;
             return Ok(PyDataFrame::wrap(out));
         }
-        if let Ok(py_col) = condition.cast::<PyColumn>() {
-            let col_ref = py_col.borrow();
+        if let Some(py_col) = py_any_to_py_column_ref(condition) {
+            let col_ref = py_col.bind(py).borrow();
             if let Some((udf_name, arg_names, literal_jsons)) =
                 col_ref.inner.udf_call_info_with_literals()
             {
@@ -6778,6 +6778,56 @@ fn json_str_to_lit_expr(s: &str) -> PyResult<robin_sparkless::Expr> {
     })
 }
 
+/// Build filter expression for UDF filter temp column vs literal using the comparison op.
+fn udf_filter_comparison_expr(
+    temp_name: String,
+    op: &str,
+    lit_expr: robin_sparkless::Expr,
+) -> PyResult<robin_sparkless::Expr> {
+    let col = robin_sparkless::Column::new(temp_name);
+    let filter_col = match op {
+        "gt" => col.gt(lit_expr),
+        "ge" => col.gt_eq(lit_expr),
+        "lt" => col.lt(lit_expr),
+        "le" => col.lt_eq(lit_expr),
+        "eq" => col.eq(lit_expr),
+        "ne" => col.neq(lit_expr),
+        other => {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "unsupported UDF filter op: {other}"
+            )));
+        }
+    };
+    Ok(filter_col.into_expr())
+}
+
+/// When `inner` is a UDF column compared to a literal, return PyUdfFilterColumn for filter() expansion.
+fn py_udf_filter_column_from_comparison(
+    py: Python<'_>,
+    inner: &Column,
+    other: &Bound<'_, PyAny>,
+    op: &str,
+) -> PyResult<Option<PyObject>> {
+    if inner.udf_call_info().is_some() {
+        let other_json = py_any_to_json_string(other)?;
+        let udf_column = Py::new(
+            py,
+            PyColumn {
+                inner: inner.clone(),
+            },
+        )?;
+        return Ok(Some(
+            PyUdfFilterColumn {
+                udf_column,
+                op: op.to_string(),
+                other_json,
+            }
+            .into_py_any(py)?,
+        ));
+    }
+    Ok(None)
+}
+
 /// Serialize a simple Python value to JSON for UDF filter (e.g. my_udf("x","y") > 20).
 fn py_any_to_json_string(other: &Bound<'_, PyAny>) -> PyResult<String> {
     if other.is_none() {
@@ -6808,10 +6858,50 @@ fn py_any_to_json_string(other: &Bound<'_, PyAny>) -> PyResult<String> {
     ))
 }
 
+/// Extract PyColumn from a Column or Python UDF wrapper (_sparkless_udf_inner).
+fn py_any_to_py_column_ref(col_any: &Bound<'_, PyAny>) -> Option<Py<PyColumn>> {
+    if let Ok(py_col) = col_any.cast::<PyColumn>() {
+        return Some(py_col.clone().unbind());
+    }
+    if let Ok(inner) = col_any.getattr("_sparkless_udf_inner") {
+        if let Ok(py_col) = inner.cast::<PyColumn>() {
+            return Some(py_col.clone().unbind());
+        }
+    }
+    None
+}
+
+/// Build PyUdfFilterColumn for (udf_column op literal). Used by Python UDF wrapper comparisons.
+#[pyfunction]
+#[pyo3(name = "make_udf_filter_column")]
+fn make_udf_filter_column(
+    py: Python<'_>,
+    udf_column: &Bound<'_, PyAny>,
+    op: &str,
+    other: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let py_col = py_any_to_py_column_ref(udf_column).ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "make_udf_filter_column expects a UDF Column",
+        )
+    })?;
+    let inner = &py_col.bind(py).borrow().inner;
+    if inner.udf_call_info().is_none() {
+        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "make_udf_filter_column expects a UDF Column",
+        ));
+    }
+    py_udf_filter_column_from_comparison(py, inner, other, op)?.ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "make_udf_filter_column could not build comparison",
+        )
+    })
+}
+
 /// Convert Python value (int, float, str, bool, None, list) or PyColumn to robin_sparkless Column.
 fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
-    if let Ok(py_col) = other.cast::<PyColumn>() {
-        return Ok(py_col.borrow().inner.clone());
+    if let Some(py_col) = py_any_to_py_column_ref(other) {
+        return Ok(py_col.bind(other.py()).borrow().inner.clone());
     }
     if other.is_none() {
         return Ok(robin_sparkless::functions::lit_null_untyped());
@@ -7197,63 +7287,42 @@ impl PyColumn {
         })
     }
 
-    /// Python: col("x") > 1. When self is a UDF column, return PyUdfFilterColumn so filter() can expand (UDF op literal).
-    fn __gt__(slf: PyRef<Self>, py: Python<'_>, other: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    /// Rich comparison for Column (PySpark returns Column from comparisons, not bool).
+    /// UDF columns compared to literals route through PyUdfFilterColumn for filter() expansion.
+    fn __richcmp__(
+        slf: PyRef<Self>,
+        other: &Bound<'_, PyAny>,
+        op: CompareOp,
+        py: Python<'_>,
+    ) -> PyResult<PyObject> {
+        let op_str = match op {
+            CompareOp::Eq => "eq",
+            CompareOp::Ne => "ne",
+            CompareOp::Lt => "lt",
+            CompareOp::Le => "le",
+            CompareOp::Gt => "gt",
+            CompareOp::Ge => "ge",
+        };
         if slf.inner.udf_call_info().is_some() {
-            let other_json = py_any_to_json_string(other)?;
-            let udf_column = Py::new(
-                py,
-                PyColumn {
-                    inner: slf.inner.clone(),
-                },
-            )?;
-            return PyUdfFilterColumn {
-                udf_column,
-                op: "gt".to_string(),
-                other_json,
+            if let Some(obj) = py_udf_filter_column_from_comparison(py, &slf.inner, other, op_str)?
+            {
+                return Ok(obj);
             }
-            .into_py_any(py);
         }
-        let other_col = py_any_to_column(other)?;
-        PyColumn {
-            inner: slf.inner.gt(other_col.into_expr()),
-        }
-        .into_py_any(py)
-    }
-
-    fn __ge__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let other_col = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.gt_eq(other_col.into_expr()),
-        })
-    }
-
-    fn __lt__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let other_col = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.lt(other_col.into_expr()),
-        })
-    }
-
-    fn __le__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let other_col = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.lt_eq(other_col.into_expr()),
-        })
-    }
-
-    fn __eq__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let other_col = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.eq(other_col.into_expr()),
-        })
-    }
-
-    fn __ne__(&self, other: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
-        let other_col = py_any_to_column(other)?;
-        Ok(PyColumn {
-            inner: self.inner.neq(other_col.into_expr()),
-        })
+        let other_col = match py_any_to_column(other) {
+            Ok(c) => c,
+            Err(_) => return Ok(py.NotImplemented()),
+        };
+        let inner = &slf.inner;
+        let result = match op {
+            CompareOp::Eq => inner.eq(other_col.into_expr()),
+            CompareOp::Ne => inner.neq(other_col.into_expr()),
+            CompareOp::Lt => inner.lt(other_col.into_expr()),
+            CompareOp::Le => inner.lt_eq(other_col.into_expr()),
+            CompareOp::Gt => inner.gt(other_col.into_expr()),
+            CompareOp::Ge => inner.gt_eq(other_col.into_expr()),
+        };
+        PyColumn { inner: result }.into_py_any(py)
     }
 
     fn is_null(&self) -> PyColumn {
@@ -8901,8 +8970,8 @@ fn py_then_builder_to_column(tb: &mut PyThenBuilder) -> PyResult<Column> {
 
 /// Resolve a withColumn/select expression: Column, finalized chained-when, or incomplete when builders.
 fn py_any_to_dataframe_column(col_any: &Bound<'_, PyAny>) -> PyResult<Option<Column>> {
-    if let Ok(py_col) = col_any.cast::<PyColumn>() {
-        return Ok(Some(py_col.borrow().inner.clone()));
+    if let Some(py_col) = py_any_to_py_column_ref(col_any) {
+        return Ok(Some(py_col.bind(col_any.py()).borrow().inner.clone()));
     }
     if let Ok(py_tb) = col_any.cast::<PyThenBuilder>() {
         return Ok(Some(py_then_builder_to_column(&mut py_tb.borrow_mut())?));
@@ -10765,6 +10834,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(column, m)?)?;
     m.add_function(wrap_pyfunction!(expr_str, m)?)?;
     m.add_function(wrap_pyfunction!(create_udf_column, m)?)?;
+    m.add_function(wrap_pyfunction!(make_udf_filter_column, m)?)?;
     m.add_function(wrap_pyfunction!(set_python_udf_executor, m)?)?;
     m.add_function(wrap_pyfunction!(lit, m)?)?;
     m.add_function(wrap_pyfunction!(lit_i64, m)?)?;
