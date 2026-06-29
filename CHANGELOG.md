@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **UDF filter comparisons** — `df.filter(udf(col) == lit)` and other non-`>` operators now evaluate the UDF before comparing instead of comparing a dummy `lit(0)` placeholder (#1664).
-
 ## [4.13.0] - 2026-06-29
 
 ### User-facing highlights
@@ -19,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **String & array** — `Column.endswith()`, `F.array_compact()`, dynamic `substr`/`substring` with Column args (#1647–#1649).
 - **Schema & data** — `StructType` subscript access; `createDataFrame` ignores extra tuple fields (#1642, #1650).
 - **Joins & pivot** — `fullouter` alias; `pivot().agg()` with literals and multiple `first()` (#1643–#1644).
+- **UDF filters** — All comparison operators (`==`, `>=`, `<=`, `!=`, `<`, `>`) now evaluate UDF output correctly in `filter()` (#1664).
 
 ### Added
 
@@ -38,10 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`pivot().agg()` with literals and multiple `first()`** — `F.lit()` and multi-`F.first()` aggregations (#1643).
 - **`fullouter` join alias** — Accept `fullouter` as alias for full outer join (#1644).
 - **`Column.substr()` / `F.substring()` with Column args** — Dynamic start/length from expressions such as `F.instr()` (#1649).
+- **UDF filter comparisons** — `df.filter(udf(col) == lit)` and other non-`>` operators now evaluate the UDF before comparing instead of comparing a dummy `lit(0)` placeholder (#1664).
 
 ### Changed
 
 - **Audit config** — Ignore transitive `quinn-proto` advisory (RUSTSEC-2026-0185) until upstream deps upgrade.
+- **Documentation** — Python-first adoption guide, FAQ, troubleshooting, CONTRIBUTING, and MkDocs nav refresh.
 
 ## [4.12.1] - 2026-06-22
 
