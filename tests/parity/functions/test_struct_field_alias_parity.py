@@ -7,6 +7,29 @@ These tests verify that Sparkless behavior matches PySpark behavior.
 from sparkless.testing import get_imports
 
 
+def _struct_df_schema(imports):
+    """Explicit struct schema so E1 stays IntegerType under PySpark 4 dict inference."""
+    StructType = imports.StructType
+    StructField = imports.StructField
+    StringType = imports.StringType
+    IntegerType = imports.IntegerType
+    return StructType(
+        [
+            StructField("Name", StringType(), True),
+            StructField(
+                "StructValue",
+                StructType(
+                    [
+                        StructField("E1", IntegerType(), True),
+                        StructField("E2", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+        ]
+    )
+
+
 class TestStructFieldAliasParity:
     """PySpark parity tests for struct field selection with alias."""
 
@@ -18,11 +41,13 @@ class TestStructFieldAliasParity:
 
         spark = SparkSession.builder.appName("struct-field-alias-parity").getOrCreate()
         try:
+            schema = _struct_df_schema(spark_imports)
             df = spark.createDataFrame(
                 [
                     {"Name": "Alice", "StructValue": {"E1": 1, "E2": "A"}},
                     {"Name": "Bob", "StructValue": {"E1": 2, "E2": "B"}},
-                ]
+                ],
+                schema=schema,
             )
 
             result = df.select(F.col("StructValue.E1").alias("E1-Extract"))
@@ -42,11 +67,13 @@ class TestStructFieldAliasParity:
 
         spark = SparkSession.builder.appName("struct-field-alias-parity").getOrCreate()
         try:
+            schema = _struct_df_schema(spark_imports)
             df = spark.createDataFrame(
                 [
                     {"Name": "Alice", "StructValue": {"E1": 1, "E2": "A"}},
                     {"Name": "Bob", "StructValue": {"E1": 2, "E2": "B"}},
-                ]
+                ],
+                schema=schema,
             )
 
             result = df.select(
@@ -57,10 +84,9 @@ class TestStructFieldAliasParity:
 
             assert len(rows) == 2
             assert rows[0]["E1-Extract"] == 1
-            # PySpark behavior (dict-inferred struct): E2 is not present in schema => null.
-            assert rows[0]["E2-Extract"] is None
+            assert rows[0]["E2-Extract"] == "A"
             assert rows[1]["E1-Extract"] == 2
-            assert rows[1]["E2-Extract"] is None
+            assert rows[1]["E2-Extract"] == "B"
         finally:
             spark.stop()
 
@@ -72,11 +98,13 @@ class TestStructFieldAliasParity:
 
         spark = SparkSession.builder.appName("struct-field-alias-parity").getOrCreate()
         try:
+            schema = _struct_df_schema(spark_imports)
             df = spark.createDataFrame(
                 [
                     {"Name": "Alice", "StructValue": {"E1": 1, "E2": "A"}},
                     {"Name": "Bob", "StructValue": {"E1": 2, "E2": "B"}},
-                ]
+                ],
+                schema=schema,
             )
 
             result = df.select(
@@ -89,9 +117,9 @@ class TestStructFieldAliasParity:
             assert len(rows) == 2
             assert rows[0]["Name"] == "Alice"
             assert rows[0]["E1-Extract"] == 1
-            assert rows[0]["E2-Extract"] is None
+            assert rows[0]["E2-Extract"] == "A"
             assert rows[1]["Name"] == "Bob"
             assert rows[1]["E1-Extract"] == 2
-            assert rows[1]["E2-Extract"] is None
+            assert rows[1]["E2-Extract"] == "B"
         finally:
             spark.stop()
