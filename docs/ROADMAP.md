@@ -1,5 +1,7 @@
 # Roadmap: PySpark Semantics in a Rust Crate (No JVM)
 
+> **Historical maintainer doc.** Sparkless v4 integration is complete; this roadmap tracks engine phases and parity history. For current status see [Parity status](PARITY_STATUS.md). For adoption see [Before you adopt](BEFORE_YOU_ADOPT.md).
+
 ## Core Principle: PySpark Parity on a Polars Backend
 
 **Primary Goal**: Implement a Rust crate whose behavior closely emulates PySpark's `SparkSession` / `DataFrame` / `Column` semantics, but runs entirely in Rust with Polars as the execution engine (no JVM, no Python runtime).
@@ -130,7 +132,7 @@ The path to full backend replacement is planned in [FULL_BACKEND_ROADMAP.md](FUL
 
 We know we're on track if:
 
-- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, array and string functions, math, datetime, type/conditional), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (159 fixtures)**
+- ✅ **Behavioral parity**: For core operations (filter, select, orderBy, groupBy+count/sum/avg/min/max/agg, when/coalesce, basic type coercion, null semantics, joins, window functions, array and string functions, math, datetime, type/conditional), DataFrame methods (union, distinct, drop, dropna, fillna, limit, withColumnRenamed), and file readers (CSV/Parquet/JSON), PySpark and Robin Sparkless produce the same schema and data on test fixtures. **Status: PASSING (212+ fixtures as of 4.13.x — see [PARITY_STATUS](PARITY_STATUS.md))**
 - ✅ **Documentation of differences**: Any divergence from PySpark semantics is called out in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) (window, SQL, Delta, Phase 8).
 - ✅ **Performance envelope**: For supported operations, we stay within ~2x of doing the same thing directly in Polars. **Status: BENCHMARKED** (`cargo bench`; see [QUICKSTART.md](QUICKSTART.md) § Benchmarks)
 

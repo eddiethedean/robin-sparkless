@@ -1,8 +1,8 @@
 # MkDocs configuration for Read the Docs and local builds
 # https://www.mkdocs.org/user-guide/configuration/
 
-site_name: Robin Sparkless
-site_description: PySpark-style DataFrames in Rust on Polars—no JVM
+site_name: Sparkless / Robin Sparkless
+site_description: PySpark-compatible DataFrames without the JVM — Python testing and Rust embedding on Polars
 site_url: https://robin-sparkless.readthedocs.io/
 repo_url: https://github.com/eddiethedean/robin-sparkless
 repo_name: eddiethedean/robin-sparkless
@@ -46,64 +46,71 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Doc index: DOC_INDEX.md
-  - Python (Sparkless v4):
+  - Python users:
     - Getting started: python_getting_started.md
-    - Testing Guide: TESTING_GUIDE.md
-    - Migration (PySpark / Sparkless 3): python_migration.md
-  - Getting started:
-    - User guide: USER_GUIDE.md
+    - Before you adopt: BEFORE_YOU_ADOPT.md
+    - Testing guide: TESTING_GUIDE.md
+    - Migration: python_migration.md
+    - FAQ: FAQ.md
+    - Troubleshooting: TROUBLESHOOTING_PYTHON.md
+    - Python API reference: PYTHON_API_REFERENCE.md
+  - Rust users:
     - Quickstart: QUICKSTART.md
+    - User guide: USER_GUIDE.md
     - Embedding: EMBEDDING.md
     - Persistence guide: PERSISTENCE_GUIDE.md
-    - Releasing: RELEASING.md
+    - UDF guide: UDF_GUIDE.md
   - Reference:
     - PySpark differences: PYSPARK_DIFFERENCES.md
-    - PySpark 4 parity plan: PYSPARK_4_PARITY_PLAN.md
     - Parity status: PARITY_STATUS.md
-    - Robin-Sparkless missing: ROBIN_SPARKLESS_MISSING.md
-  - Sparkless integration:
-    - Integration analysis: SPARKLESS_INTEGRATION_ANALYSIS.md
-    - Full backend roadmap: FULL_BACKEND_ROADMAP.md
-    - Refactor plan: SPARKLESS_REFACTOR_PLAN.md
-    - Readiness plan: READINESS_FOR_SPARKLESS_PLAN.md
-    - Logical plan format: LOGICAL_PLAN_FORMAT.md
-  - Development:
-    - Roadmap: ROADMAP.md
-    - Test creation guide: TEST_CREATION_GUIDE.md
-    - Converter status: CONVERTER_STATUS.md
-    - Sparkless parity status: SPARKLESS_PARITY_STATUS.md
-  - Status & analysis:
-    - Signature gap analysis: SIGNATURE_GAP_ANALYSIS.md
-    - Signature alignment tasks: SIGNATURE_ALIGNMENT_TASKS.md
-    - Gap analysis (Sparkless 3.28): GAP_ANALYSIS_SPARKLESS_3.28.md
-    - Parity check (Sparkless 3.28): PARITY_CHECK_SPARKLESS_3.28.md
-    - Phase 15 gap list: PHASE15_GAP_LIST.md
-    - Sparkless 3.28 API snapshot: SPARKLESS_3.28_API_SNAPSHOT.md
-    - Sparkless parity issues reported: SPARKLESS_PARITY_ISSUES_REPORTED.md
-    - Implementation status: IMPLEMENTATION_STATUS.md
-  - More:
-    - Bugs and improvements plan: BUGS_AND_IMPROVEMENTS_PLAN.md
-    - Closed issues test coverage: CLOSED_ISSUES_TEST_COVERAGE.md
-    - CreateDataFrame gaps: CREATEDATAFRAME_GAPS.md
-    - DataFrame test guide: DATAFRAME_TEST_GUIDE.md
+    - Production deployment: PRODUCTION.md
+    - Product history: PRODUCT_HISTORY.md
     - Deferred scope: DEFERRED_SCOPE.md
-    - Full parity roadmap: FULL_PARITY_ROADMAP.md
-    - Gap analysis (PySpark repo): GAP_ANALYSIS_PYSPARK_REPO.md
-    - Integration test guide: INTEGRATION_TEST_GUIDE.md
-    - Lazy backend plan: LAZY_BACKEND_PLAN.md
-    - Migration status: MIGRATION_STATUS.md
-    - Parity functions expectations: PARITY_FUNCTIONS_EXPECTATIONS.md
-    - Persistence between sessions: PERSISTENCE_BETWEEN_SESSIONS.md
-    - Polars crate isolation: POLARS_CRATE_ISOLATION.md
-    - Ported test expectations: PORTED_TEST_EXPECTATIONS.md
-    - PySpark mode test failures: PYSPARK_MODE_TEST_FAILURES.md
-    - PySpark test translation: PYSPARK_TEST_TRANSLATION.md
-    - PySpark version notes: PYSPARK_VERSION_NOTES.md
-    - Rust-first testing: RUST_FIRST_TESTING.md
-    - Sparkless Python test port: SPARKLESS_PYTHON_TEST_PORT.md
-    - Subcrate split plan: SUBCRATE_SPLIT_PLAN.md
-    - Test failure checklist: TEST_FAILURE_CHECKLIST.md
-    - TODO Spark DDL parser Rust: TODO_SPARK_DDL_PARSER_RUST.md
-    - UDF guide: UDF_GUIDE.md
-    - Test failure categories: test_failure_categories.md
+    - Rust API (docs.rs): https://docs.rs/robin-sparkless
+  - Contributing:
+    - Overview: https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md
+    - Releasing: RELEASING.md
+    - Test creation guide: TEST_CREATION_GUIDE.md
+  - Design & maintainer docs:
+    - Doc index: DOC_INDEX.md
+    - Roadmap: ROADMAP.md
+    - Robin-Sparkless missing: ROBIN_SPARKLESS_MISSING.md
+    - Sparkless integration analysis: SPARKLESS_INTEGRATION_ANALYSIS.md
+    - Full backend roadmap: FULL_BACKEND_ROADMAP.md
+    - Logical plan format: LOGICAL_PLAN_FORMAT.md
+    - PySpark 4 parity plan: PYSPARK_4_PARITY_PLAN.md
+    - Gap analysis (Sparkless 3.28): GAP_ANALYSIS_SPARKLESS_3.28.md
+    - Phase 15 gap list: PHASE15_GAP_LIST.md
+    - Implementation status: IMPLEMENTATION_STATUS.md
+    - More maintainer docs:
+      - Sparkless refactor plan: SPARKLESS_REFACTOR_PLAN.md
+      - Readiness plan: READINESS_FOR_SPARKLESS_PLAN.md
+      - Converter status: CONVERTER_STATUS.md
+      - Sparkless parity status: SPARKLESS_PARITY_STATUS.md
+      - Signature gap analysis: SIGNATURE_GAP_ANALYSIS.md
+      - Signature alignment tasks: SIGNATURE_ALIGNMENT_TASKS.md
+      - Parity check (Sparkless 3.28): PARITY_CHECK_SPARKLESS_3.28.md
+      - Sparkless 3.28 API snapshot: SPARKLESS_3.28_API_SNAPSHOT.md
+      - Sparkless parity issues reported: SPARKLESS_PARITY_ISSUES_REPORTED.md
+      - Bugs and improvements plan: BUGS_AND_IMPROVEMENTS_PLAN.md
+      - Closed issues test coverage: CLOSED_ISSUES_TEST_COVERAGE.md
+      - CreateDataFrame gaps: CREATEDATAFRAME_GAPS.md
+      - DataFrame test guide: DATAFRAME_TEST_GUIDE.md
+      - Full parity roadmap: FULL_PARITY_ROADMAP.md
+      - Gap analysis (PySpark repo): GAP_ANALYSIS_PYSPARK_REPO.md
+      - Integration test guide: INTEGRATION_TEST_GUIDE.md
+      - Lazy backend plan: LAZY_BACKEND_PLAN.md
+      - Migration status: MIGRATION_STATUS.md
+      - Parity functions expectations: PARITY_FUNCTIONS_EXPECTATIONS.md
+      - Persistence between sessions: PERSISTENCE_BETWEEN_SESSIONS.md
+      - Polars crate isolation: POLARS_CRATE_ISOLATION.md
+      - Ported test expectations: PORTED_TEST_EXPECTATIONS.md
+      - PySpark mode test failures: PYSPARK_MODE_TEST_FAILURES.md
+      - PySpark test translation: PYSPARK_TEST_TRANSLATION.md
+      - PySpark version notes: PYSPARK_VERSION_NOTES.md
+      - Rust-first testing: RUST_FIRST_TESTING.md
+      - Sparkless Python test port: SPARKLESS_PYTHON_TEST_PORT.md
+      - Subcrate split plan: SUBCRATE_SPLIT_PLAN.md
+      - Test failure checklist: TEST_FAILURE_CHECKLIST.md
+      - Test failure categories: test_failure_categories.md
+      - TODO Spark DDL parser Rust: TODO_SPARK_DDL_PARSER_RUST.md

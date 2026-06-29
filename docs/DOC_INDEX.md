@@ -1,5 +1,7 @@
 # Robin Sparkless Documentation
 
+> **Maintainer index.** User-facing docs are in the MkDocs nav (Python users, Rust users, Reference). This page lists all documents including historical planning artifacts.
+
 This page is the **legacy doc index**. The full documentation is built with [MkDocs](https://www.mkdocs.org/) and published on [Read the Docs](https://robin-sparkless.readthedocs.io/). To build locally: `pip install -r docs/requirements.txt` then `mkdocs serve`.
 
 ## Python (Sparkless v4)
@@ -25,7 +27,7 @@ Documentation for the Python package mirrors the [Sparkless](https://sparkless.r
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
 | [RELEASING](RELEASING.md) | How to cut a release (version bump, tag, crates.io publish) |
 | [CHANGELOG](https://github.com/eddiethedean/robin-sparkless/blob/main/CHANGELOG.md) | Version history and release notes |
-| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (159 fixtures; 3 plan fixtures; Phases 12–25 + signature alignment + gap closure) |
+| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (212+ JSON fixtures; plan fixtures; phases A–G) |
 | [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta, rand/randn semantics; DataFrame cube/rollup/write/saveAsTable and stubs; in-memory tables and catalog; Phase 8 + gap closure) |
 | [ROBIN_SPARKLESS_MISSING](ROBIN_SPARKLESS_MISSING.md) | What Sparkless has and robin-sparkless does not (or stub only); XML/XPath/sentences deferred |
 | [SIGNATURE_GAP_ANALYSIS](SIGNATURE_GAP_ANALYSIS.md) | PySpark vs robin-sparkless signature gap analysis (params, types, defaults) and recommendations |

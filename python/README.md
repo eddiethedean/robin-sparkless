@@ -3,6 +3,8 @@
 **PySpark-compatible DataFrames in Python—no JVM, no cluster.**  
 Drop-in replacement for local development and testing. Same API, 10–100× faster feedback.
 
+> **Before you adopt:** [Read caveats](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/BEFORE_YOU_ADOPT.md) — UDF limits, parity gaps, not a Spark cluster replacement.
+
 - **Python 3.8+** · **PySpark 3.2–3.5 compatible** · MIT
 
 ---
@@ -65,6 +67,20 @@ cd python && maturin develop
 | `pip install "sparkless[dev]"` | pytest, pandas, hypothesis, pytest-xdist |
 | `pip install "sparkless[jdbc]"` | JDBC integration tests (testcontainers, drivers) |
 | `pip install "sparkless[pyspark]"` | Run tests against real PySpark (`SPARKLESS_TEST_MODE=pyspark`) |
+
+### Supported platforms
+
+Prebuilt wheels are published for CI targets on each release (see [PyPI files](https://pypi.org/project/sparkless/#files)):
+
+| OS | Architectures | Notes |
+|----|---------------|-------|
+| **Linux** | x86_64, aarch64 | glibc manylinux; musl (Alpine) wheels where available |
+| **macOS** | arm64, x86_64 | Universal coverage via separate wheels |
+| **Windows** | x86_64, arm64 | Prebuilt extension modules |
+
+**Python:** 3.8, 3.9, 3.10, 3.11, 3.12 (cp38–cp312 ABI tags on wheels).
+
+If no wheel matches your platform, build from source: `cd python && maturin develop` ([CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 ---
 

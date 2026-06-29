@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.13.0] - 2026-06-29
 
+### User-facing highlights
+
+- **SQL improvements** — Built-in functions in `spark.sql()`, multi-column `JOIN … ON`, and `CAST` in `WHERE` (#1638–#1640).
+- **String & array** — `Column.endswith()`, `F.array_compact()`, dynamic `substr`/`substring` with Column args (#1647–#1649).
+- **Schema & data** — `StructType` subscript access; `createDataFrame` ignores extra tuple fields (#1642, #1650).
+- **Joins & pivot** — `fullouter` alias; `pivot().agg()` with literals and multiple `first()` (#1643–#1644).
+
 ### Added
 
 - **`F.array_compact`** — Remove null elements from array columns (#1648).

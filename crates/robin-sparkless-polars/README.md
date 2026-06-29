@@ -33,8 +33,8 @@ If you need to depend on the Polars backend directly (e.g. for a custom build or
 
 ```toml
 [dependencies]
-robin-sparkless-core = "0.15"
-robin-sparkless-polars = { version = "0.15", features = ["sql", "delta"] }
+robin-sparkless-core = "4"
+robin-sparkless-polars = { version = "4", features = ["sql", "delta"] }
 ```
 
 ## License

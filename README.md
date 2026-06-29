@@ -1,6 +1,10 @@
-# Robin Sparkless
+# Sparkless — PySpark-compatible DataFrames without the JVM
 
-**PySpark-style DataFrames in Python—no JVM.** Install the **`sparkless`** package for a drop-in local PySpark replacement (fast unit tests + CI, no Java/Spark). Under the hood it’s powered by the `robin-sparkless` Rust engine using [Polars](https://www.pola.rs/) for execution.
+Install: `pip install "sparkless>=4,<5"`
+
+Use Sparkless to run PySpark-style unit tests and local pipelines **10–100× faster** in CI. Powered by the open-source Rust engine **robin-sparkless** (Polars execution).
+
+> **Not a full cluster replacement.** See [Before you adopt](docs/BEFORE_YOU_ADOPT.md) for UDF, parity, and production caveats.
 
 [![CI](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml/badge.svg)](https://github.com/eddiethedean/robin-sparkless/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/sparkless.svg)](https://pypi.org/project/sparkless/)
@@ -8,6 +12,18 @@
 [![docs.rs](https://docs.rs/robin-sparkless/badge.svg)](https://docs.rs/robin-sparkless)
 [![Documentation](https://readthedocs.org/projects/robin-sparkless/badge/?version=latest)](https://robin-sparkless.readthedocs.io/en/latest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+---
+
+## Choose your path
+
+| I want to… | Start here |
+|------------|------------|
+| **Use Sparkless in Python** (tests, local pipelines) | [python/README.md](python/README.md) · `pip install "sparkless>=4,<5"` |
+| **Embed the Rust engine** | [docs/QUICKSTART.md](docs/QUICKSTART.md) · `robin-sparkless = "4"` on crates.io |
+| **Contribute** | [CONTRIBUTING.md](CONTRIBUTING.md) · `make check-full` |
+
+Full documentation: [Read the Docs](https://robin-sparkless.readthedocs.io/)
 
 ---
 
@@ -22,13 +38,11 @@ df = spark.createDataFrame([{"x": 1}, {"x": 2}])
 df.filter(F.col("x") > 1).show()
 ```
 
-Install from PyPI:
-
 ```bash
 pip install "sparkless>=4,<5"
 ```
 
-More Python docs (SQL/temp views, Delta, JDBC, testing plugin): see `python/README.md`.
+More: [Python getting started](docs/python_getting_started.md) · [Testing guide](docs/TESTING_GUIDE.md) · [FAQ](docs/FAQ.md)
 
 ---
 
@@ -37,7 +51,7 @@ More Python docs (SQL/temp views, Delta, JDBC, testing plugin): see `python/READ
 - **Familiar API** — `SparkSession`, `DataFrame`, `Column`, and PySpark-like functions so you can reuse patterns without the JVM.
 - **Fast local execution** — Runs natively (no JVM) and uses Polars for IO, expressions, and aggregations.
 - **Test the same suite two ways** — Use `sparkless.testing` to run tests with Sparkless (fast) or real PySpark (parity checks).
-- **Optional “Spark-like” features** — SQL, temp/global temp views, `saveAsTable`, Delta, and JDBC (see `python/README.md`).
+- **Optional “Spark-like” features** — SQL, temp/global temp views, `saveAsTable`, Delta, and JDBC (see [python/README.md](python/README.md)).
 
 ---
 
@@ -54,71 +68,45 @@ More Python docs (SQL/temp views, Delta, JDBC, testing plugin): see `python/READ
 | **SQL + views** | `spark.sql`, temp/global temp views, `saveAsTable`, `catalog().listTables()` |
 | **JDBC** | Read/write via `spark.read.jdbc(...)` / `df.write.jdbc(...)` |
 
-**Parity:** 200+ fixtures validated against PySpark. Known differences: `docs/PYSPARK_DIFFERENCES.md`. Full parity status: `docs/PARITY_STATUS.md`. Out-of-scope items: `docs/DEFERRED_SCOPE.md`.
+**Parity:** 200+ fixtures validated against PySpark. [Before you adopt](docs/BEFORE_YOU_ADOPT.md) · [PySpark differences](docs/PYSPARK_DIFFERENCES.md) · [Parity status](docs/PARITY_STATUS.md)
 
 ---
 
 ## Installation
 
-### Python (`sparkless` v4)
-
-Install from **PyPI**:
+### Python (`sparkless` v4) — recommended
 
 ```bash
 pip install "sparkless>=4,<5"
 ```
 
-Or from this repo:
-
-```bash
-pip install ./python
-```
-
-See `python/README.md` for usage and development (including `maturin develop`).
+Contributors: `pip install ./python` or `cd python && maturin develop` — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Rust engine (optional)
 
-Most users should use the Python package above. If you want to embed the engine directly in Rust, depend on `robin-sparkless`.
-
-Add to your `Cargo.toml`:
+Most users should use the Python package above. To embed the engine in Rust:
 
 ```toml
 [dependencies]
 robin-sparkless = "4"
 ```
 
-Optional features:
+Optional features: `sql`, `delta`, `jdbc`, `sqlite`, `jdbc_mysql`. See [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
-```toml
-robin-sparkless = { version = "4", features = ["sql"] }      # spark.sql(), temp views
-robin-sparkless = { version = "4", features = ["delta"] }    # Delta Lake read/write
-robin-sparkless = { version = "4", features = ["jdbc"] }     # PostgreSQL JDBC
-robin-sparkless = { version = "4", features = ["sqlite"] }   # SQLite JDBC
-robin-sparkless = { version = "4", features = ["jdbc_mysql"] } # MySQL/MariaDB JDBC
-```
+---
 
 ## Development
 
-If you’re working on the Python package, start in `python/README.md` (it covers `maturin develop`, pytest, and dual-mode testing).
+**Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)), Python 3.8+, maturin. Java only for `SPARKLESS_TEST_MODE=pyspark`.
 
-If you’re working on the Rust engine crates, see `docs/QUICKSTART.md` and the crate READMEs in `crates/`.
-
-This repository contains:
-
-- **`python/`**: the `sparkless` Python package (v4)
-- **Rust crates**: the `robin-sparkless` engine (Cargo workspace)
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, `make check-full`, pytest, and maturin workflow.
 
 | Command | Description |
 |---------|-------------|
-| `pip install ./python` | Install the Python package from this repo |
-| `cd python && maturin develop` | Editable install for Python development |
-| `pytest tests/ -v` | Run Python tests (sparkless backend) |
-| `SPARKLESS_TEST_MODE=pyspark pytest tests/ -v` | Run the same tests against real PySpark |
-| `scripts/typecheck_strict.sh` | Strict mypy for the Python `sparkless` package |
-| `make check` | Rust engine: format, clippy, audit/deny, Rust tests |
-| `make test-parity-phases` | Run PySpark parity fixtures (Rust engine) |
-
-CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
+| `make check-full` | Full CI-equivalent check (Rust + Python) |
+| `pytest tests/ -v` | Python tests (sparkless backend) |
+| `SPARKLESS_TEST_MODE=pyspark pytest tests/ -v` | Same tests against real PySpark |
+| `make check` | Rust: format, clippy, audit, tests |
 
 ---
 
@@ -126,16 +114,13 @@ CI runs format, clippy, audit, deny, Rust tests, and parity tests on push/PR (se
 
 | Resource | Description |
 |----------|-------------|
-| [**Python package**](python/README.md) | **Sparkless v4** — install from PyPI (`pip install sparkless`) or `pip install ./python`, quick start, Sparkless 3 vs 4.x, API overview |
-| [**Read the Docs**](https://robin-sparkless.readthedocs.io/) | Full docs: quickstart, Rust usage, Python getting started, Sparkless integration (MkDocs) |
+| [**Python package**](python/README.md) | Install, quick start, platform matrix, API overview |
+| [**Read the Docs**](https://robin-sparkless.readthedocs.io/) | Getting started, testing, migration, FAQ |
+| [**Before you adopt**](docs/BEFORE_YOU_ADOPT.md) | UDF limits, parity caveats, production notes |
+| [**CONTRIBUTING**](CONTRIBUTING.md) | Dev setup and PR checklist |
 | [**docs.rs**](https://docs.rs/robin-sparkless) | Rust API reference |
-| [QUICKSTART](docs/QUICKSTART.md) | Build, usage, optional features, benchmarks |
-| [User Guide](docs/USER_GUIDE.md) | Everyday usage (Rust) |
-| [Persistence Guide](docs/PERSISTENCE_GUIDE.md) | Global temp views, disk-backed saveAsTable |
-| [UDF Guide](docs/UDF_GUIDE.md) | Scalar, vectorized, and grouped UDFs |
 | [Testing Guide](docs/TESTING_GUIDE.md) | Dual-mode testing with `sparkless.testing` |
 | [PySpark Differences](docs/PYSPARK_DIFFERENCES.md) | Known divergences |
-| [Roadmap](docs/ROADMAP.md) | Development phases, Sparkless integration |
 | [RELEASING](docs/RELEASING.md) | Publishing to crates.io and PyPI |
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

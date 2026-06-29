@@ -7,14 +7,14 @@ This page helps you switch to **Sparkless v4** (Rust backend) from **PySpark** o
 | Aspect        | Sparkless 3.x              | Sparkless v4                    |
 | ------------- | -------------------------- | --------------------------------- |
 | **Backend**   | Polars **Python** package   | **Rust** crate (robin-sparkless)  |
-| **Install**   | `pip install sparkless`    | `pip install ./python` (this repo) |
+| **Install**   | `pip install sparkless` (3.x) | `pip install "sparkless>=4,<5"` (PyPI) |
 | **Import**    | `from sparkless.sql import SparkSession` | Same |
 | **API**       | PySpark-like               | Same PySpark-like API             |
 | **Runtime**  | Polars + Python            | Native extension + Rust; no Polars Python |
 
 **What to do:**
 
-1. Install the v4 package from the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) repo: `pip install ./python` (or from a built wheel).
+1. Install Sparkless v4 from **PyPI**: `pip install "sparkless>=4,<5"`. Contributors can use `pip install ./python` from the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) repo.
 2. Keep your existing `from sparkless.sql import SparkSession, functions as F` and DataFrame code.
 3. Use `SparkSession.builder.app_name("...").get_or_create()` if you already do; v4 supports the same builder API.
 4. See [PySpark differences](PYSPARK_DIFFERENCES.md) for any behavioral differences from PySpark (and thus from Sparkless 3.x where it matches PySpark).

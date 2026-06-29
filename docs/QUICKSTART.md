@@ -1,19 +1,23 @@
 # Quick Start Guide
 
-Robin-sparkless is a PySpark-like DataFrame library in Rust, with Polars as the engine. Long-term, it is designed to replace the backend of [Sparkless](https://github.com/eddiethedean/sparkless). See [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) for integration details.
+Robin-sparkless is a PySpark-like DataFrame library in Rust with Polars as the execution engine.
 
-## Building the Project
+## Build and run the demo
 
 ### Prerequisites
+
 - Rust (use the repo-pinned toolchain via `rust-toolchain.toml`)
 
-### Build (Rust only)
+### Build
 
 ```bash
 cargo build
+cargo run --example demo
 ```
 
-**Delta Lake** (optional `delta` feature): No extra runtime dependencies. Build with `--features delta` on the Rust crate. Then use `spark.read_delta(path)`, `spark.read_delta_version(path, version)`, and `df.write_delta(path, overwrite)`. With the `sql` feature, `read_delta(name_or_path)` also accepts a **table name**: if the argument is not path-like, it resolves like `table(name)` (temp view first, then saved table), so you can `df.write_delta_table("t")` then `spark.read_delta("t")` without writing to disk.
+The [demo example](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/demo.rs) matches the README quick start: `create_dataframe`, filter, show.
+
+**Delta Lake** (optional `delta` feature): Build with `--features delta`. Use `spark.read_delta(path)`, `read_delta_version`, and `df.write_delta`. With the `sql` feature, `read_delta(name_or_path)` resolves table names like `table(name)`.
 
 ### Add as a dependency
 
@@ -201,3 +205,11 @@ Common commands when working on robin-sparkless:
 - `make test-parity-phase-a` … `make test-parity-phase-g` – run PySpark parity fixtures for a specific phase (see `docs/PARITY_STATUS.md`).
 - `make test-parity-phases` – run all parity phases (A–G).
 - `make sparkless-parity` – when `SPARKLESS_EXPECTED_OUTPUTS` is set and PySpark/Java are available, convert Sparkless fixtures, regenerate expected from PySpark, and run the Rust parity tests.
+
+---
+
+## Appendix: Sparkless Python integration
+
+Robin-sparkless powers **Sparkless v4** on PyPI (`pip install "sparkless>=4,<5"`). Python users typically do not embed the Rust crate directly — see [Python getting started](python_getting_started.md).
+
+For architecture mapping, fixture conversion, and historical integration analysis, see [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) and [Product history](PRODUCT_HISTORY.md).

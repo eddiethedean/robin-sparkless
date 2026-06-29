@@ -4,30 +4,34 @@ This guide is for the **Sparkless v4** Python package: a PySpark-like API backed
 
 ## Installation
 
-Install from the robin-sparkless repository (after cloning):
+> **Before you adopt:** Read [Before you adopt](BEFORE_YOU_ADOPT.md) for UDF limits, parity gaps, and production caveats.
+
+### From PyPI (recommended)
+
+```bash
+pip install "sparkless>=4,<5"
+```
+
+Requires **Python 3.8+**. Prebuilt wheels: Linux (glibc and musl), macOS (arm64 and x86_64), Windows (x86_64 and arm64). See [Supported platforms](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md#supported-platforms) in the package README.
+
+Optional extras:
+
+```bash
+pip install "sparkless[dev]"     # pytest, pandas, hypothesis, pytest-xdist
+pip install "sparkless[pyspark]" # run tests with real PySpark (requires Java)
+```
+
+### From source (contributors)
+
+Clone [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) and install from the repo:
 
 ```bash
 pip install ./python
-```
-
-Or from the `python/` directory:
-
-```bash
-pip install .
-```
-
-For development (editable install with the native extension):
-
-```bash
+# Or editable install (rebuilds native extension on changes):
 cd python && maturin develop
 ```
 
-Optional dependencies:
-
-```bash
-pip install -e "./python[dev]"     # pytest, pandas, pytest-xdist, etc.
-pip install -e "./python[pyspark]" # run tests with real PySpark (requires Java)
-```
+See [CONTRIBUTING.md](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md) for the full dev workflow.
 
 ## Quick Start
 
@@ -54,9 +58,9 @@ df.show()
 spark.stop()
 ```
 
-### Drop-in PySpark Replacement
+### PySpark-style import swap
 
-Sparkless v4 is designed to be a drop-in replacement for PySpark in tests and local workflows:
+Sparkless v4 matches PySpark APIs for tests and local workflows (not a full Spark cluster replacement — see [Before you adopt](BEFORE_YOU_ADOPT.md)):
 
 ```python
 # Before (PySpark)
