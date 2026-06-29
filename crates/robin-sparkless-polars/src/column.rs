@@ -726,30 +726,39 @@ impl Column {
     /// - Length less than 1: empty string; null input yields null (Phase 7 / PySpark parity).
     pub fn substr(&self, start: i64, length: Option<i64>) -> Column {
         use polars::prelude::*;
-        // PySpark: len < 1 -> empty string; null input must stay null (test_substr_pyspark_parity_comprehensive)
-        if length.map(|l| l < 1).unwrap_or(false) {
-            let expr = when(self.expr().clone().is_null())
-                .then(lit(NULL))
-                .otherwise(lit(""));
-            return Self::from_expr(expr, None);
-        }
-        let len_chars = self.expr().clone().str().len_chars();
-        // Start 0: 0-based (substr(0, 3) = "Hel"); start >= 1: 1-based; negative: from end.
-        let offset_expr = if start == 0 {
-            lit(0i64)
-        } else if start >= 1 {
-            lit((start - 1).max(0))
-        } else {
-            let from_end = len_chars + lit(start);
-            when(from_end.clone().lt(lit(0i64)))
-                .then(lit(0i64))
-                .otherwise(from_end)
-        };
-        let length_expr = length.map(lit).unwrap_or_else(|| lit(i64::MAX));
-        Self::from_expr(
-            self.expr().clone().str().slice(offset_expr, length_expr),
-            None,
+        self.substr_with(
+            &Self::from_expr(lit(start), None),
+            length.map(|l| Self::from_expr(lit(l), None)).as_ref(),
         )
+    }
+
+    /// Substring with Column (or literal) start and optional length expressions (#1649).
+    pub fn substr_with(&self, start: &Column, length: Option<&Column>) -> Column {
+        use polars::prelude::*;
+        let base = self.expr().clone();
+        let len_chars = base.clone().str().len_chars();
+        let start_expr = start.expr().clone();
+        let max_len = lit(i32::MAX as i64);
+        // Start 0: 0-based; start >= 1: 1-based; negative: from end.
+        let offset_expr = when(start_expr.clone().eq(lit(0i64)))
+            .then(lit(0i64))
+            .when(start_expr.clone().gt_eq(lit(1i64)))
+            .then((start_expr.clone() - lit(1i64)).clip(lit(0i64), max_len.clone()))
+            .otherwise({
+                let from_end = len_chars.clone() + start_expr.clone();
+                when(from_end.clone().lt(lit(0i64)))
+                    .then(lit(0i64))
+                    .otherwise(from_end)
+            });
+        let length_expr = length
+            .map(|c| c.expr().clone())
+            .unwrap_or(max_len);
+        let sliced = base.clone().str().slice(offset_expr, length_expr.clone());
+        // PySpark: len < 1 -> empty string; null input must stay null.
+        let result = when(length_expr.lt(lit(1i64)))
+            .then(when(base.is_null()).then(lit(NULL)).otherwise(lit("")))
+            .otherwise(sliced);
+        Self::from_expr(result, None)
     }
 
     /// String length in characters (PySpark length)

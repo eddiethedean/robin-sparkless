@@ -648,6 +648,11 @@ pub fn substring(column: &Column, start: i64, length: Option<i64>) -> Column {
     column.clone().substr(start, length)
 }
 
+/// Substring with Column start/length expressions (#1649).
+pub fn substring_with(column: &Column, start: &Column, length: Option<&Column>) -> Column {
+    column.clone().substr_with(start, length)
+}
+
 /// String length in characters (PySpark length)
 pub fn length(column: &Column) -> Column {
     column.clone().length()
@@ -2608,6 +2613,11 @@ pub fn nvl2(col1: &Column, col2: &Column, col3: &Column) -> Column {
 /// Alias for substring. PySpark substr.
 pub fn substr(column: &Column, start: i64, length: Option<i64>) -> Column {
     substring(column, start, length)
+}
+
+/// Alias for substring_with. PySpark substr with Column start/length (#1649).
+pub fn substr_with(column: &Column, start: &Column, length: Option<&Column>) -> Column {
+    substring_with(column, start, length)
 }
 
 /// Alias for pow. PySpark power.
