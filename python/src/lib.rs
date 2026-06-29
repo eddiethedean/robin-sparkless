@@ -7575,10 +7575,18 @@ impl PyColumn {
     }
 
     #[pyo3(signature = (start, length=None))]
-    fn substr(&self, start: i64, length: Option<i64>) -> PyColumn {
-        PyColumn {
-            inner: self.inner.substr(start, length),
-        }
+    fn substr(
+        &self,
+        start: &Bound<'_, PyAny>,
+        length: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyColumn> {
+        let start_col = py_any_to_i64_or_column(start)?;
+        let length_col = length
+            .map(py_any_to_i64_or_column)
+            .transpose()?;
+        Ok(PyColumn {
+            inner: self.inner.substr_with(&start_col, length_col.as_ref()),
+        })
     }
 
     /// PySpark parity #1249: Column has .length attribute but it is not callable; use F.length(col) instead.
@@ -8695,6 +8703,19 @@ fn coerce_to_column(v: &Bound<'_, PyAny>) -> PyResult<Column> {
     ))
 }
 
+/// Accept int literal or Column for substr/substring position and length (#1649).
+fn py_any_to_i64_or_column(v: &Bound<'_, PyAny>) -> PyResult<Column> {
+    if let Ok(c) = v.cast::<PyColumn>() {
+        return Ok(c.borrow().inner.clone());
+    }
+    if let Ok(i) = v.extract::<i64>() {
+        return Ok(robin_sparkless::functions::lit_i64(i));
+    }
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "expected int or Column",
+    ))
+}
+
 /// Create a PySpark-like UNRESOLVED_COLUMN error for regexp_extract_all when the pattern
 /// is passed as a plain string instead of a literal Column (e.g. F.lit(r"\\d+")).
 /// This mirrors PySpark's behavior where such patterns are interpreted as unresolved
@@ -8746,10 +8767,17 @@ fn lower(col: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
 }
 
 #[pyfunction]
-fn substring(column: &Bound<'_, PyAny>, start: i64, length: i64) -> PyResult<PyColumn> {
+#[pyo3(signature = (column, start, length))]
+fn substring(
+    column: &Bound<'_, PyAny>,
+    start: &Bound<'_, PyAny>,
+    length: &Bound<'_, PyAny>,
+) -> PyResult<PyColumn> {
     let c = coerce_to_column(column)?;
+    let start_col = py_any_to_i64_or_column(start)?;
+    let length_col = py_any_to_i64_or_column(length)?;
     Ok(PyColumn {
-        inner: robin_sparkless::functions::substring(&c, start, Some(length)),
+        inner: robin_sparkless::functions::substring_with(&c, &start_col, Some(&length_col)),
     })
 }
 
