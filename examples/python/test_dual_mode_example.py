@@ -20,7 +20,11 @@ def spark():
 
 def test_filter_and_aggregate(spark):
     df = spark.createDataFrame(
-        [{"team": "A", "score": 10}, {"team": "A", "score": 20}, {"team": "B", "score": 5}]
+        [
+            {"team": "A", "score": 10},
+            {"team": "A", "score": 20},
+            {"team": "B", "score": 5},
+        ]
     )
     totals = df.groupBy("team").agg(F.sum("score").alias("total"))
     rows = {r["team"]: r["total"] for r in totals.collect()}
