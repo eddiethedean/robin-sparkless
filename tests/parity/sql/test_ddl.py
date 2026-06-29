@@ -128,11 +128,12 @@ class TestSQLDDLParity(ParityTestBase):
         spark.sql(f"DROP TABLE IF EXISTS {employees}")
         spark.sql(f"DROP TABLE IF EXISTS {it_employees}")
 
+    @pytest.mark.pyspark3_only
     def test_create_table_with_select_fails_without_hive(self, spark):
         """Test that CREATE TABLE AS SELECT fails when Hive support is not enabled.
 
-        Uses the default session (no @pytest.mark.hive). PySpark and Sparkless both
-        raise with NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT in the message.
+        Uses the default session (no @pytest.mark.hive). PySpark 3.x and Sparkless raise
+        with NOT_SUPPORTED_COMMAND_WITHOUT_HIVE_SUPPORT; PySpark 4.x allows CTAS without Hive.
         """
         data = [("a", 1, "X"), ("b", 2, "Y")]
         df = spark.createDataFrame(data, ["name", "age", "dept"])
