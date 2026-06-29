@@ -378,6 +378,12 @@ def pytest_collection_modifyitems(
         (
             Path(__file__).resolve().parent / "unit" / "test_jdbc_v4_runtime_config.py"
         ).resolve(),
+        (
+            Path(__file__).resolve().parent
+            / "parity"
+            / "internal"
+            / "test_issue_1537_catalog_drop_returns_bool.py"
+        ).resolve(),
     }
 
     # Collect unique test file paths from collected items.

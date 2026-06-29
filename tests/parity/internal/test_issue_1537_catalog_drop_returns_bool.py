@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 def test_issue_1537_catalog_drop_temp_view_returns_bool(spark, spark_imports) -> None:
     _ = spark_imports
@@ -25,7 +27,9 @@ def test_issue_1537_catalog_drop_global_temp_view_returns_bool(
     assert spark.catalog.dropGlobalTempView("gtmp_v") is False
 
 
+@pytest.mark.sparkless_only
 def test_issue_1537_catalog_drop_table_returns_bool(spark, spark_imports) -> None:
+    """dropTable is a sparkless in-memory catalog API; PySpark 4 has no Catalog.dropTable."""
     _ = spark_imports
     df = spark.createDataFrame([(1,)], "v INT")
 
