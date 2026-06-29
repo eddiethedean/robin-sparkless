@@ -343,11 +343,35 @@ def pytest_collection_modifyitems(
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
-    """Apply backend marker so tests run with requested backend; no skip by mode.
+    """Skip backend-only marked tests; enforce no backend branching in test modules."""
+    from sparkless.testing.compat import get_compat_profile
+    from sparkless.testing.mode import Mode, get_mode
 
-    All tests run in both sparkless and pyspark mode by default. Tests must not
-    branch on backend; use the same scenario and logic for each (spark + spark_imports).
-    """
+    mode = get_mode()
+    compat = get_compat_profile()
+    skip_sparkless = pytest.mark.skip(
+        reason="Test marked sparkless_only, running in PySpark mode"
+    )
+    skip_pyspark = pytest.mark.skip(
+        reason="Test marked pyspark_only, running in sparkless mode"
+    )
+    skip_pyspark4 = pytest.mark.skip(
+        reason=f"Test marked pyspark4_only, compat profile is {compat}"
+    )
+    skip_pyspark3 = pytest.mark.skip(
+        reason=f"Test marked pyspark3_only, compat profile is {compat}"
+    )
+
+    for item in items:
+        if mode == Mode.PYSPARK and "sparkless_only" in item.keywords:
+            item.add_marker(skip_sparkless)
+        elif mode == Mode.SPARKLESS and "pyspark_only" in item.keywords:
+            item.add_marker(skip_pyspark)
+        if compat != "4.0" and "pyspark4_only" in item.keywords:
+            item.add_marker(skip_pyspark4)
+        if compat != "3.5" and "pyspark3_only" in item.keywords:
+            item.add_marker(skip_pyspark3)
+
     # Enforce: no backend-conditional logic or backend-only imports in test modules.
     # If a behavior differs, we want the test to fail in sparkless mode (parity signal),
     # not to branch and hide the discrepancy.
