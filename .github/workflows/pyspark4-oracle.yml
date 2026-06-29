@@ -32,6 +32,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.1
+          components: rustfmt, clippy
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -48,11 +49,9 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip maturin
-          # Stale cargo-fmt/rustfmt shims can leave rustfmt half-installed; reinstall via rustup.
+          # Stale cargo-fmt/rustfmt shims from cached ~/.cargo can shadow rustup; remove before maturin.
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
-          rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
-          rustup component add rustfmt clippy --toolchain 1.93.1
-          cd python && ../.venv/bin/maturin develop
+          cd python && ../.venv/bin/maturin develop --release
           cd ..
           .venv/bin/pip install -r tests/requirements-pyspark4.txt pytest pytest-xdist pytest-timeout
         working-directory: ${{ github.workspace }}
