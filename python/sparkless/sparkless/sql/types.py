@@ -298,9 +298,7 @@ class StructType(DataType):
     def __len__(self) -> int:
         return len(self.fields)
 
-    def __getitem__(
-        self, key: str | int | slice
-    ) -> "StructField | StructType":
+    def __getitem__(self, key: str | int | slice) -> "StructField | StructType":
         """Access fields by name, index, or slice (PySpark parity, #1650)."""
         if isinstance(key, str):
             for field in self.fields:

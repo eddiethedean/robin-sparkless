@@ -31,12 +31,12 @@ class TestIssue1648ArrayCompact:
 
     def test_array_compact_all_nulls(self, spark) -> None:
         schema = StructType([StructField("col1", ArrayType(StringType()))])
-        df = spark.createDataFrame([( [None, None], )], schema)
+        df = spark.createDataFrame([([None, None],)], schema)
         row = df.withColumn("col2", F.array_compact("col1")).collect()[0]
         assert _row_val(row, "col2") == []
 
     def test_array_compact_no_nulls_unchanged(self, spark) -> None:
         schema = StructType([StructField("col1", ArrayType(StringType()))])
-        df = spark.createDataFrame([( ["x", "y"], )], schema)
+        df = spark.createDataFrame([(["x", "y"],)], schema)
         row = df.withColumn("col2", F.array_compact("col1")).collect()[0]
         assert _row_val(row, "col2") == ["x", "y"]

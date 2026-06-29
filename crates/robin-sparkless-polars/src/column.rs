@@ -750,9 +750,7 @@ impl Column {
                     .then(lit(0i64))
                     .otherwise(from_end)
             });
-        let length_expr = length
-            .map(|c| c.expr().clone())
-            .unwrap_or(max_len);
+        let length_expr = length.map(|c| c.expr().clone()).unwrap_or(max_len);
         let sliced = base.clone().str().slice(offset_expr, length_expr.clone());
         // PySpark: len < 1 -> empty string; null input must stay null.
         let result = when(length_expr.lt(lit(1i64)))
