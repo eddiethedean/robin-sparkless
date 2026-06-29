@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [4.13.0] - 2026-06-27
+## [4.13.0] - 2026-06-29
+
+### Added
+
+- **`F.array_compact`** — Remove null elements from array columns (#1648).
+- **`Column.endswith()`** — PySpark parity for string suffix tests (#1647).
+- **RDD `isEmpty()` and `distinct()`** — PySpark parity for local RDD operations (#1646).
+- **`SparkContext.setLogLevel`** — No-op stub so PySpark call sites do not fail (#1645).
+- **`StructType` subscript access** — `schema["field"]`, index, and slice lookup like PySpark (#1650).
+
+### Fixed
+
+- **SQL built-in functions in `spark.sql()`** — Recognize built-ins that were previously unresolved (#1638).
+- **SQL `JOIN … ON` with multiple equalities** — Multiple `AND` join keys in SQL (#1639).
+- **SQL `CAST` in `WHERE`** — Cast expressions in filter clauses (#1640).
+- **`date_format` on `DateType`** — Time patterns (e.g. `HH:mm:ss`) on date columns (#1641).
+- **`createDataFrame` with extra tuple fields** — Ignore trailing tuple values when column names are supplied (#1642).
+- **`pivot().agg()` with literals and multiple `first()`** — `F.lit()` and multi-`F.first()` aggregations (#1643).
+- **`fullouter` join alias** — Accept `fullouter` as alias for full outer join (#1644).
+- **`Column.substr()` / `F.substring()` with Column args** — Dynamic start/length from expressions such as `F.instr()` (#1649).
+
+### Changed
+
+- **Audit config** — Ignore transitive `quinn-proto` advisory (RUSTSEC-2026-0185) until upstream deps upgrade.
 
 ## [4.12.1] - 2026-06-22
 
