@@ -17,4 +17,8 @@ ignore = [
     "RUSTSEC-2026-0104",
     # rand unsound advisory (transitive; remove once dependencies upgrade).
     "RUSTSEC-2026-0097",
+    # Transitive via deltalake-core -> validator 0.19; no safe upgrade until delta-rs updates validator.
+    "RUSTSEC-2026-0173",
+    # Transitive via reqwest -> quinn -> quinn-proto (deltalake/polars object_store). Upgrade blocked upstream.
+    "RUSTSEC-2026-0185",
 ]
