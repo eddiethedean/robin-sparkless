@@ -881,6 +881,41 @@ def _python_udf_executor(df, column_name, udf_name, arg_names, arg_literal_jsons
     return session.createDataFrame(row_lists, schema=extended_schema)
 
 
+class _SparklessUdfColumn:
+    """Wraps a native UDF Column so comparisons build PyUdfFilterColumn (issue #1664)."""
+
+    __slots__ = ("_sparkless_udf_inner",)
+
+    def __init__(self, inner):
+        self._sparkless_udf_inner = inner
+
+    def _udf_filter(self, other, op: str):
+        from sparkless import _native
+
+        return _native.make_udf_filter_column(self._sparkless_udf_inner, op, other)
+
+    def __gt__(self, other):
+        return self._udf_filter(other, "gt")
+
+    def __ge__(self, other):
+        return self._udf_filter(other, "ge")
+
+    def __lt__(self, other):
+        return self._udf_filter(other, "lt")
+
+    def __le__(self, other):
+        return self._udf_filter(other, "le")
+
+    def __eq__(self, other):
+        return self._udf_filter(other, "eq")
+
+    def __ne__(self, other):
+        return self._udf_filter(other, "ne")
+
+    def __getattr__(self, name):
+        return getattr(self._sparkless_udf_inner, name)
+
+
 def udf(f=None, returnType=None):
     """Create a Python UDF. Use as F.udf(func, returnType) or @udf(returnType) def func ...
 
@@ -930,7 +965,7 @@ def udf(f=None, returnType=None):
                     "Got a single callable - ensure you call the UDF with column arguments."
                 )
             resolved = [_col(c) if isinstance(c, str) else c for c in cols]
-            return _native.create_udf_column(udf_name, resolved)
+            return _SparklessUdfColumn(_native.create_udf_column(udf_name, resolved))
 
         return wrapper
 

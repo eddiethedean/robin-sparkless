@@ -3,6 +3,7 @@
 
 from sparkless.sql import SparkSession, functions as F
 
+
 def main() -> None:
     spark = SparkSession.builder.app_name("basic_example").get_or_create()
 
