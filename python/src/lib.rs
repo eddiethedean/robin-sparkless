@@ -7581,9 +7581,7 @@ impl PyColumn {
         length: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyColumn> {
         let start_col = py_any_to_i64_or_column(start)?;
-        let length_col = length
-            .map(py_any_to_i64_or_column)
-            .transpose()?;
+        let length_col = length.map(py_any_to_i64_or_column).transpose()?;
         Ok(PyColumn {
             inner: self.inner.substr_with(&start_col, length_col.as_ref()),
         })

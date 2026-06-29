@@ -19,7 +19,6 @@ from sparkless import (
     greatest as _greatest,
     least as _least,
     array_distinct as _array_distinct,
-    array_compact as _array_compact,
     posexplode as _posexplode,
     posexplode_outer as _posexplode_outer,
     upper,
