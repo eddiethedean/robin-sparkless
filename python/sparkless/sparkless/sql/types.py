@@ -298,6 +298,24 @@ class StructType(DataType):
     def __len__(self) -> int:
         return len(self.fields)
 
+    def __getitem__(
+        self, key: str | int | slice
+    ) -> "StructField | StructType":
+        """Access fields by name, index, or slice (PySpark parity, #1650)."""
+        if isinstance(key, str):
+            for field in self.fields:
+                if field.name == key:
+                    return field
+            raise KeyError(f"No StructField named {key}")
+        if isinstance(key, int):
+            try:
+                return self.fields[key]
+            except IndexError as exc:
+                raise IndexError("StructType index out of range") from exc
+        if isinstance(key, slice):
+            return StructType(self.fields[key])
+        raise TypeError("StructType keys should be strings, integers or slices")
+
     def fieldNames(self) -> List[str]:
         """PySpark parity: returns all field names in a list."""
         return [f.name for f in self.fields]
