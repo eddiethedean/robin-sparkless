@@ -24,6 +24,9 @@ ignore = [
     "RUSTSEC-2026-0097",
     # proc-macro-error2 via deltalake-core -> validator 0.19 (no safe upgrade yet).
     "RUSTSEC-2026-0173",
+    # Transitive via polars -> object_store -> quick-xml 0.39; needs object_store/polars bump to >=0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 # Don't warn when ignored advisories aren't in the graph (e.g. when delta feature is off)
 unused-ignored-advisory = "allow"

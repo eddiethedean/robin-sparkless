@@ -10,6 +10,8 @@ import pytest
 
 from sparkless.testing import get_imports
 
+from tests.security.conftest import SECURITY_ERROR, assert_security_error
+
 _imports = get_imports()
 SparkSession = _imports.SparkSession
 
@@ -63,18 +65,36 @@ def delta_escape_fixture(tmp_path):
 
 
 def test_delta_rejects_log_entry_outside_table(delta_escape_fixture) -> None:
-    spark, table, outside = delta_escape_fixture
+    spark, table, _outside = delta_escape_fixture
     _write_minimal_delta_log(table, "../outside.parquet")
-    with pytest.raises(Exception, match="escapes table root"):
+
+    with pytest.raises(SECURITY_ERROR) as exc_info:
         spark.read.format("delta").load(str(table)).collect()
+    assert_security_error(exc_info.value, "escapes", "table root")
 
 
 def test_delta_rejects_absolute_uri_outside_table(delta_escape_fixture) -> None:
     spark, table, outside = delta_escape_fixture
     outside_uri = f"file://{outside.resolve()}"
     _write_minimal_delta_log(table, outside_uri)
-    with pytest.raises(Exception, match="escapes table root"):
+
+    with pytest.raises(SECURITY_ERROR) as exc_info:
         spark.read.format("delta").load(str(table)).collect()
+    assert_security_error(exc_info.value, "escapes", "table root")
+
+
+def test_delta_escape_does_not_return_outside_secret_value(
+    delta_escape_fixture,
+) -> None:
+    """Malicious delta log must not surface x=999 from outside parquet."""
+    spark, table, _outside = delta_escape_fixture
+    _write_minimal_delta_log(table, "../outside.parquet")
+
+    with pytest.raises(SECURITY_ERROR):
+        rows = spark.read.format("delta").load(str(table)).collect()
+        assert not any(r.get("x") == 999 for r in rows), (
+            "delta URI confinement leaked outside parquet data"
+        )
 
 
 def test_delta_reads_in_table_parquet(delta_escape_fixture) -> None:

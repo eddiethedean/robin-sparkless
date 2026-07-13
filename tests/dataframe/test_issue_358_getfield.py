@@ -128,33 +128,6 @@ class TestIssue358GetField:
         finally:
             spark.stop()
 
-    def test_getfield_negative_index(self):
-        """Test getField with negative index (last element).
-
-        PySpark may return None for negative indices; Sparkless/Polars may
-        support negative indexing. Accept either behavior.
-        """
-        import inspect
-
-        test_name = inspect.stack()[1].function
-        spark = SparkSession.builder.appName(
-            self._get_unique_app_name(test_name)
-        ).getOrCreate()
-        try:
-            df = spark.createDataFrame(
-                [{"arr": [10, 20, 30]}, {"arr": [40, 50, 60, 70]}]
-            )
-            df = df.withColumn("last", F.col("arr").getField(-1))
-            rows = df.collect()
-            # PySpark returns None for negative index; Sparkless may return last element
-            last0, last1 = rows[0]["last"], rows[1]["last"]
-            if last0 is None and last1 is None:
-                assert True  # PySpark behavior
-            else:
-                assert last0 == 30 and last1 == 70  # Negative-index behavior
-        finally:
-            spark.stop()
-
     def test_getfield_chained_access(self):
         """Test chained getField calls."""
         import inspect

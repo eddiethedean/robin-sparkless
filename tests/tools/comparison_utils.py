@@ -39,7 +39,11 @@ def _schema_field_type_name(dtype: Any) -> str:
 
 
 def _dataframe_to_expected_output(df: Any) -> Dict[str, Any]:
-    """Build expected_output dict from a live DataFrame (same shape as JSON). Used when backend is PySpark."""
+    """Build expected_output dict from a live DataFrame (same shape as JSON).
+
+    Offline regeneration helper only. Do NOT use in dual-mode tests to set
+    expected = actual — that would be circular validation.
+    """
     columns = _get_columns(df)
     rows = _collect_rows(df, columns)
     schema = getattr(df, "schema", None) or getattr(df, "_schema", None)
@@ -96,8 +100,9 @@ def compare_dataframes(
     """
     Compare a sparkless DataFrame with expected PySpark output.
 
-    When SPARKLESS_TEST_MODE=pyspark, expected is built from the actual result
-    so the test validates the operation runs correctly (same logic, no skip).
+    Primary parity signal: sparkless backend vs frozen PySpark JSON oracles.
+    PySpark mode against the same JSON is a smoke check (near-tautological for
+    values); independent verification requires sparkless-mode runs.
 
     Args:
         mock_df: sparkless DataFrame
@@ -817,6 +822,69 @@ def compare_schemas(mock_df: Any, expected_schema: Dict[str, Any]) -> Comparison
     return result
 
 
+def _parse_datetime_value(value: Any) -> dt.datetime | None:
+    """Parse collect() datetime string to aware or naive datetime."""
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return value
+    if isinstance(value, dt.date) and not isinstance(value, dt.datetime):
+        return dt.datetime.combine(value, dt.time.min)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d",
+        ):
+            try:
+                return dt.datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        try:
+            return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _validate_current_datetime_rows(
+    mock_rows: List[Dict[str, Any]],
+    mock_columns: List[str],
+    *,
+    is_timestamp: bool,
+) -> None:
+    """Validate current_date/current_timestamp against wall clock, not frozen JSON."""
+    now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+    today = now.date()
+
+    for row in mock_rows:
+        for col_name in mock_columns:
+            if "current" not in col_name.lower():
+                continue
+            value = row.get(col_name)
+            if value is None:
+                raise AssertionError("current_datetime function returned None")
+
+            parsed = _parse_datetime_value(value)
+            if parsed is None:
+                raise AssertionError(f"current_datetime value not parseable: {value!r}")
+
+            if is_timestamp:
+                delta = abs((parsed - now).total_seconds())
+                if delta > 120:
+                    raise AssertionError(
+                        f"current_timestamp() {value!r} not within 120s of now"
+                    )
+            else:
+                if parsed.date() != today:
+                    raise AssertionError(
+                        f"current_date() {value!r} does not match today's date {today}"
+                    )
+
+
 def assert_dataframes_equal(
     mock_df: Any,
     expected_output: Dict[str, Any],
@@ -840,8 +908,6 @@ def assert_dataframes_equal(
     )
 
     if is_current_datetime_test:
-        # For current date/time functions, we only validate structure and that values exist
-        # Check that the column exists and has correct type
         mock_columns = _get_columns(mock_df)
         mock_rows = _collect_rows(mock_df, mock_columns)
 
@@ -850,23 +916,19 @@ def assert_dataframes_equal(
             "row_count", 0
         )
 
-        # Check row count
         if len(mock_rows) != expected_row_count:
             raise AssertionError(
                 f"Row count mismatch for current_datetime: {len(mock_rows)} vs {expected_row_count}"
             )
 
-        # Check column exists (we can't check exact values for current date/time)
         if len(mock_columns) != expected_schema.get("field_count", 0):
             raise AssertionError("Column count mismatch for current_datetime")
 
-        # Values will always be current, so just check they're not None
-        for row in mock_rows:
-            for col_name, value in row.items():
-                if "current" in col_name.lower() and value is None:
-                    raise AssertionError("current_datetime function returned None")
-
-        return  # Skip normal comparison for current date/time tests
+        is_timestamp = "current_timestamp" in operation
+        _validate_current_datetime_rows(
+            mock_rows, mock_columns, is_timestamp=is_timestamp
+        )
+        return
 
     result = compare_dataframes(mock_df, expected_output, tolerance)
 

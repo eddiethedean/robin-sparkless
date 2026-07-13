@@ -82,6 +82,7 @@ Individual keys can override profile defaults. See [PYSPARK_COMPAT_PROFILES.md](
 ## Array
 
 - **array_distinct order**: Implemented with first-occurrence order to match PySpark (via UDF; parity fixture enabled).
+- **getField negative index**: PySpark returns `null` for negative array indices in `Column.getField(int)`. Sparkless uses Polars negative indexing and returns the last element (e.g. `getField(-1)` on `[10,20,30]` → `30`). Use non-negative indices for portable code.
 - **explode, posexplode, array_distinct (#692, #703, #705)**: Implemented in plan/expr; adapter should forward to Robin backend. Add plan fixtures or see docs for plan format.
 
 ## Control functions (assert_true, raise_error)

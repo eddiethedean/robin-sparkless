@@ -21,4 +21,7 @@ ignore = [
     "RUSTSEC-2026-0173",
     # Transitive via reqwest -> quinn -> quinn-proto (deltalake/polars object_store). Upgrade blocked upstream.
     "RUSTSEC-2026-0185",
+    # Transitive via polars -> object_store -> quick-xml 0.39; needs object_store/polars bump to >=0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]

@@ -11,5 +11,8 @@ advisories = { ignore = [
   "RUSTSEC-2026-0104",
   # Transitive via deltalake-core -> validator 0.19; no safe upgrade until delta-rs updates validator.
   "RUSTSEC-2026-0173",
+  # Transitive via polars -> object_store -> quick-xml 0.39; needs object_store/polars bump to >=0.41.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
 ] }
 

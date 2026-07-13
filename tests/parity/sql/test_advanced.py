@@ -124,9 +124,8 @@ class TestSQLAdvancedParity(ParityTestBase):
         spark.sql("DROP TABLE IF EXISTS having_test")
 
     def test_sql_with_union(self, spark):
-        """Test SQL UNION matches PySpark behavior."""
-        # Create two tables
-        data1 = [("Alice", 25), ("Bob", 30)]
+        """Test SQL UNION deduplicates (UNION DISTINCT) vs UNION ALL."""
+        data1 = [("Alice", 25), ("Bob", 30), ("Alice", 25)]
         df1 = spark.createDataFrame(data1, ["name", "age"])
         df1.write.mode("overwrite").saveAsTable("union_table1")
 
@@ -134,16 +133,20 @@ class TestSQLAdvancedParity(ParityTestBase):
         df2 = spark.createDataFrame(data2, ["name", "age"])
         df2.write.mode("overwrite").saveAsTable("union_table2")
 
-        # Union
-        result = spark.sql("""
+        distinct = spark.sql("""
             SELECT name, age FROM union_table1
             UNION
             SELECT name, age FROM union_table2
         """)
+        all_rows = spark.sql("""
+            SELECT name, age FROM union_table1
+            UNION ALL
+            SELECT name, age FROM union_table2
+        """)
 
-        assert result.count() == 4
+        assert distinct.count() == 4
+        assert all_rows.count() == 5
 
-        # Cleanup
         spark.sql("DROP TABLE IF EXISTS union_table1")
         spark.sql("DROP TABLE IF EXISTS union_table2")
 
