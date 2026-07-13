@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **PySpark 4 oracle / parity CI** — Struct field alias parity; honor `sparkless_only` / `pyspark_only` markers in conftest; skip Sparkless-only and Hive-dependent cases on the PySpark 4 oracle; accept PySpark 4 `UPDATE` rejection messaging in DML parity tests; rustfmt install conflict in the oracle workflow.
+- **Release publish skip logic** — crates.io publish only skips when cargo reports the version already exists; do not treat every exit 101 (e.g. transient 503) as already published.
+
+### Changed
+
+- **Audit / deny** — Ignore transitive `quick-xml` advisories (`RUSTSEC-2026-0194`, `RUSTSEC-2026-0195`) pulled in via Polars `object_store` until upstream upgrades.
+- **Test suite hardening** — Stronger security path/JDBC/Delta assertions; JVM stub tests assert documented values; `current_date`/`current_timestamp` parity checks use wall-clock windows; document `getField(-1)` Sparkless divergence.
 
 ## [4.13.0] - 2026-06-29
 
