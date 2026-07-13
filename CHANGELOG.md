@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.13.1] - 2026-07-13
+
+### Fixed
+
+- **PySpark 4 oracle / parity CI** — Struct field alias parity; honor `sparkless_only` / `pyspark_only` markers in conftest; skip Sparkless-only and Hive-dependent cases on the PySpark 4 oracle; accept PySpark 4 `UPDATE` rejection messaging in DML parity tests; rustfmt install conflict in the oracle workflow.
+
 ## [4.13.0] - 2026-06-29
 
 ### User-facing highlights

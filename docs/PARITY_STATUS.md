@@ -6,7 +6,7 @@ This doc is the **living parity matrix** for `robin-sparkless` and the Sparkless
 
 | Metric | Value |
 |--------|-------|
-| **Last updated** | June 2026 (release 4.13.0) |
+| **Last updated** | July 2026 (release 4.13.1) |
 | **Main pytest suite** | 3100+ tests passing (CI on `main`; run `pytest tests -n 12`) |
 | **Parity JSON fixtures** | 212+ hand-written fixtures in phases A–G (`make test-parity-phases`) |
 | **Oracle** | PySpark 3.5 default; PySpark 4.1 opt-in ([compat profiles](PYSPARK_COMPAT_PROFILES.md)) |
