@@ -250,7 +250,7 @@ impl SparkSession {
             .map(DataFrame)
     }
 
-    /// #419: Create a DataFrame with a single column "value" from scalar values (e.g. createDataFrame([1,2,3], "bigint")).
+    /// #419: Create a DataFrame with a single column "value" from scalar values (e.g. createDataFrame(\[1,2,3\], "bigint")).
     pub fn create_dataframe_from_single_column(
         &self,
         values: Vec<serde_json::Value>,

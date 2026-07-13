@@ -12,6 +12,17 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 keywords = ["pyspark", "polars", "dataframe", "spark", "etl"]
 categories = ["data-structures", "development-tools"]
 authors = ["Robin Sparkless contributors"]
+# Thin facade only — do not ship monorepo tests/docs/scripts (crates.io rejects oversized uploads).
+# Patterns without `/` match any basename anywhere; use rooted paths.
+include = [
+  "/src/**/*.rs",
+  "/benches/**/*.rs",
+  "/examples/*.rs",
+  "/Cargo.toml",
+  "/README.md",
+  "/LICENSE",
+  "/CHANGELOG.md",
+]
 
 # docs.rs builds with rustc nightly; if the build fails with an ICE (e.g. in polars-core),
 # it is a compiler bug. Build docs locally: cargo doc --open

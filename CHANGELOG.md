@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **PySpark 4 oracle / parity CI** — Struct field alias parity; honor `sparkless_only` / `pyspark_only` markers in conftest; skip Sparkless-only and Hive-dependent cases on the PySpark 4 oracle; accept PySpark 4 `UPDATE` rejection messaging in DML parity tests; rustfmt install conflict in the oracle workflow.
 - **Release publish skip logic** — crates.io publish only skips when cargo reports the version already exists; do not treat every exit 101 (e.g. transient 503) as already published.
+- **crates.io package size** — Root `robin-sparkless` crate now `include`s only facade sources/examples (was packaging the whole monorepo ~25 MiB and failing upload with HTTP 503).
 
 ### Changed
 
