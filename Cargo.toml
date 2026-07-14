@@ -5,6 +5,7 @@ members = ["crates/robin-sparkless-core", "crates/robin-sparkless-polars", "crat
 name = "robin-sparkless"
 version = "4.13.1"
 edition = "2024"
+rust-version = "1.93"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
 readme = "README.md"
 license = "MIT"

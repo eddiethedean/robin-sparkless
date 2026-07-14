@@ -667,15 +667,25 @@ impl DataFrame {
                 if root_is_col_vs_numeric {
                     // PySpark: string column vs numeric literal -> coerce string via try_to_number and compare (issue #235, #602).
                     let col_name = if left_is_col {
-                        if let Expr::Column(n) = left_inner {
-                            n.as_str()
-                        } else {
-                            unreachable!()
+                        match left_inner {
+                            Expr::Column(n) => n.as_str(),
+                            _ => {
+                                return Err(PolarsError::ComputeError(
+                                    "internal: expected column expression on numeric comparison side"
+                                        .into(),
+                                ));
+                            }
                         }
-                    } else if let Expr::Column(n) = right_inner {
-                        n.as_str()
                     } else {
-                        unreachable!()
+                        match right_inner {
+                            Expr::Column(n) => n.as_str(),
+                            _ => {
+                                return Err(PolarsError::ComputeError(
+                                    "internal: expected column expression on numeric comparison side"
+                                        .into(),
+                                ));
+                            }
+                        }
                     };
                     // Use column dtype so numeric columns compare numerically; String (or unknown) uses coercion (try_to_number).
                     let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
@@ -716,15 +726,25 @@ impl DataFrame {
                     }
                 } else if root_is_col_vs_string {
                     let col_name = if left_is_col {
-                        if let Expr::Column(n) = left_inner {
-                            n.as_str()
-                        } else {
-                            unreachable!()
+                        match left_inner {
+                            Expr::Column(n) => n.as_str(),
+                            _ => {
+                                return Err(PolarsError::ComputeError(
+                                    "internal: expected column expression on string comparison side"
+                                        .into(),
+                                ));
+                            }
                         }
-                    } else if let Expr::Column(n) = right_inner {
-                        n.as_str()
                     } else {
-                        unreachable!()
+                        match right_inner {
+                            Expr::Column(n) => n.as_str(),
+                            _ => {
+                                return Err(PolarsError::ComputeError(
+                                    "internal: expected column expression on string comparison side"
+                                        .into(),
+                                ));
+                            }
+                        }
                     };
                     if let Some(col_dtype) = self.get_column_dtype(col_name) {
                         if matches!(col_dtype, DataType::Date | DataType::Datetime(_, _)) {
@@ -796,15 +816,23 @@ impl DataFrame {
                 } else if is_comparison_op && left_is_col && right_is_col {
                     // Column-to-column: col("id") == col("label") where id is int, label is string.
                     // Get both column types and coerce string-numeric / date-string for PySpark parity.
-                    let left_name = if let Expr::Column(n) = left_inner {
-                        n.as_str()
-                    } else {
-                        unreachable!()
+                    let left_name = match left_inner {
+                        Expr::Column(n) => n.as_str(),
+                        _ => {
+                            return Err(PolarsError::ComputeError(
+                                "internal: expected column on left of column-column comparison"
+                                    .into(),
+                            ));
+                        }
                     };
-                    let right_name = if let Expr::Column(n) = right_inner {
-                        n.as_str()
-                    } else {
-                        unreachable!()
+                    let right_name = match right_inner {
+                        Expr::Column(n) => n.as_str(),
+                        _ => {
+                            return Err(PolarsError::ComputeError(
+                                "internal: expected column on right of column-column comparison"
+                                    .into(),
+                            ));
+                        }
                     };
                     if let (Some(left_ty), Some(right_ty)) = (
                         self.get_column_dtype(left_name),
@@ -915,15 +943,23 @@ impl DataFrame {
                     || (right_is_col && left_is_string_lit)
                 {
                     let col_name = if left_is_col {
-                        if let Expr::Column(n) = left_peeled {
-                            n.as_str()
-                        } else {
-                            unreachable!()
+                        match left_peeled {
+                            Expr::Column(n) => n.as_str(),
+                            _ => {
+                                return Err(PolarsError::ComputeError(
+                                    "internal: expected column in nested string comparison".into(),
+                                ));
+                            }
                         }
-                    } else if let Expr::Column(n) = right_peeled {
-                        n.as_str()
                     } else {
-                        unreachable!()
+                        match right_peeled {
+                            Expr::Column(n) => n.as_str(),
+                            _ => {
+                                return Err(PolarsError::ComputeError(
+                                    "internal: expected column in nested string comparison".into(),
+                                ));
+                            }
+                        }
                     };
                     if let Some(col_dtype) = self.get_column_dtype(col_name) {
                         if matches!(col_dtype, DataType::Date | DataType::Datetime(_, _)) {

@@ -53,7 +53,12 @@ pub fn resolve_path_under_base(base: impl AsRef<Path>, name: &str) -> Result<Pat
             ))
         })?
     } else {
-        let parent = joined.parent().unwrap_or(base);
+        let parent = joined.parent().ok_or_else(|| {
+            EngineError::User(format!(
+                "invalid table path '{}': missing parent",
+                joined.display()
+            ))
+        })?;
         let file_name = joined
             .file_name()
             .ok_or_else(|| EngineError::User("invalid table path".to_string()))?;

@@ -3,45 +3,40 @@
 //! Use [`EngineError`] when you want to map robin-sparkless and Polars errors
 //! to a single type (e.g. for FFI or CLI) without depending on Polars error types.
 //!
-//! Note: `From<PolarsError>` for `EngineError` is implemented in the main robin-sparkless
-//! crate, which has a Polars dependency.
+//! Note: `From<PolarsError>` for `EngineError` is implemented in the Polars backend
+//! crate (`robin-sparkless-polars`), which has a Polars dependency.
+//!
+//! Payloads are currently strings so Python/FFI can surface stable messages without
+//! coupling to Polars' error enum. Prefer matching on the variant for recovery logic;
+//! use [`EngineError::user_message`] for host-facing text.
 
-use std::fmt;
+use thiserror::Error;
 
 /// Unified error type for robin-sparkless operations.
 ///
 /// Embedders (Python, Node, CLI) can map these variants to native errors
 /// without depending on `PolarsError`.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum EngineError {
     /// User-facing error (invalid input, unsupported operation).
+    #[error("user error: {0}")]
     User(String),
     /// Internal / compute error.
+    #[error("internal error: {0}")]
     Internal(String),
     /// I/O error (file not found, permission, etc.).
+    #[error("io error: {0}")]
     Io(String),
     /// SQL parsing or execution error.
+    #[error("sql error: {0}")]
     Sql(String),
     /// Resource not found (column, table, file).
+    #[error("not found: {0}")]
     NotFound(String),
     /// Other / unclassified.
+    #[error("{0}")]
     Other(String),
 }
-
-impl fmt::Display for EngineError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EngineError::User(s) => write!(f, "user error: {s}"),
-            EngineError::Internal(s) => write!(f, "internal error: {s}"),
-            EngineError::Io(s) => write!(f, "io error: {s}"),
-            EngineError::Sql(s) => write!(f, "sql error: {s}"),
-            EngineError::NotFound(s) => write!(f, "not found: {s}"),
-            EngineError::Other(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl std::error::Error for EngineError {}
 
 impl EngineError {
     /// User-facing message without variant prefixes (for FFI / Python bindings).
@@ -121,6 +116,12 @@ mod tests {
             "not found: column x"
         );
         assert_eq!(EngineError::Other("misc".into()).to_string(), "misc");
+    }
+
+    #[test]
+    fn engine_error_is_std_error() {
+        let err: Box<dyn std::error::Error> = Box::new(EngineError::User("x".into()));
+        assert!(err.to_string().contains("user error"));
     }
 
     #[test]

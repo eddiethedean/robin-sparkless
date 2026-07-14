@@ -301,12 +301,10 @@ impl SparkSessionBackend for SparkSession {
         Ok(Box::new(df))
     }
 
-    fn register_table(&self, name: &str, df: &dyn DataFrameBackend) {
-        let polars_df = df
-            .as_any()
-            .downcast_ref::<DataFrame>()
-            .expect("register_table only supported with same backend (Polars)");
+    fn register_table(&self, name: &str, df: &dyn DataFrameBackend) -> Result<(), CoreEngineError> {
+        let polars_df = downcast_df(df, "register_table")?;
         SparkSession::register_table(self, name, polars_df.clone());
+        Ok(())
     }
 
     fn is_case_sensitive(&self) -> bool {

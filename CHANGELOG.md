@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`DataFrameReader.schema()`** — Applies JSON `StructType` or simple Spark-style DDL (`id LONG, name STRING`) when reading CSV/JSON. Unsupported formats (parquet/delta/jdbc) return an error if a schema was set instead of silently ignoring it.
+
+### Changed
+
+- **`SparkSessionBackend::register_table`** — Returns `Result<(), EngineError>` instead of panicking when the DataFrame is from a different backend (semver note for embedders implementing the trait).
+- **`EngineError`** — Uses `thiserror`; display strings and variants unchanged.
+- **Declared `rust-version = "1.93"`** on workspace Rust crates (matches `rust-toolchain.toml`).
+
+### Fixed
+
+- **Python FFI** — Replaced panic-prone `into_py_unchecked` / JSON `unwrap`s and unsafe borrowed `PyDataFrame` pointer in UDF filter path with fallible conversions / owned wraps.
+- **Comparison rewrite** — Invariant mismatches in string/numeric comparison coercion return `ComputeError` instead of `unreachable!`.
+- **Docs** — Clarified JVM stub semantics for `monotonically_increasing_id` and that catalog `currentDatabase` exists separately from `F.current_database()` stubs.
+
 ## [4.13.1] - 2026-07-13
 
 ### Fixed

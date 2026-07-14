@@ -21,7 +21,10 @@ pub trait SparkSessionBackend: Send + Sync {
         column_names: Vec<&str>,
     ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn sql(&self, query: &str) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn register_table(&self, name: &str, df: &dyn DataFrameBackend);
+    /// Register `df` under `name` in the session catalog.
+    ///
+    /// Returns [`EngineError::User`] if `df` is not from the same backend as `self`.
+    fn register_table(&self, name: &str, df: &dyn DataFrameBackend) -> Result<(), EngineError>;
     fn is_case_sensitive(&self) -> bool;
     fn get_config(&self) -> &std::collections::HashMap<String, String>;
 }

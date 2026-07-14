@@ -2,8 +2,10 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use polars::prelude::PolarsError;
+use polars::prelude::{PolarsError, SchemaRef};
+use robin_sparkless_core::{DataType, StructField, StructType};
 
 use crate::dataframe::DataFrame;
 #[cfg(any(
@@ -16,6 +18,8 @@ use crate::dataframe::DataFrame;
     feature = "sqlite"
 ))]
 use crate::jdbc::JdbcOptions;
+use crate::schema::schema_from_json;
+use crate::schema_conv::StructTypePolarsExt;
 
 use super::{SparkSession, confine_io_path};
 
@@ -25,6 +29,8 @@ pub struct DataFrameReader {
     pub(super) session: SparkSession,
     options: HashMap<String, String>,
     format: Option<String>,
+    /// Optional schema override from [`Self::schema`] (JSON StructType or Spark-like DDL).
+    schema: Option<String>,
 }
 
 impl DataFrameReader {
@@ -33,6 +39,7 @@ impl DataFrameReader {
             session,
             options: HashMap::new(),
             format: None,
+            schema: None,
         }
     }
 
@@ -56,9 +63,32 @@ impl DataFrameReader {
         self
     }
 
-    /// Set the schema (PySpark: schema(schema)). Stub: stores but does not apply yet.
-    pub fn schema(self, _schema: impl Into<String>) -> Self {
+    /// Set the schema used when reading CSV/JSON (PySpark: `schema(...)`).
+    ///
+    /// Accepts either:
+    /// - JSON for [`StructType`] (`{"fields":[{"name":"id","data_type":"Long","nullable":true},...]}`)
+    /// - Simple Spark-style DDL (`id LONG, name STRING`)
+    ///
+    /// Applied on [`Self::csv`] / [`Self::json`] / [`Self::load`] for those formats.
+    /// Unsupported formats ignore an unset schema; if a schema is set for an unsupported
+    /// format (e.g. parquet path via `load`), [`Self::load`] returns an error.
+    pub fn schema(mut self, schema: impl Into<String>) -> Self {
+        self.schema = Some(schema.into());
         self
+    }
+
+    fn parsed_schema(&self) -> Result<Option<StructType>, PolarsError> {
+        match &self.schema {
+            None => Ok(None),
+            Some(s) if s.trim().is_empty() => Ok(None),
+            Some(s) => parse_reader_schema(s).map(Some),
+        }
+    }
+
+    fn polars_schema_ref(&self) -> Result<Option<SchemaRef>, PolarsError> {
+        Ok(self
+            .parsed_schema()?
+            .map(|st| Arc::new(st.to_polars_schema()) as SchemaRef))
     }
 
     /// Load data from path using format (or infer from extension) and options.
@@ -70,11 +100,26 @@ impl DataFrameReader {
                 .map(|s| s.to_lowercase())
         });
         match fmt.as_deref() {
-            Some("parquet") => self.parquet(path),
+            Some("parquet") => {
+                if self.schema.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "DataFrameReader.schema() is not applied for parquet; use CSV/JSON or cast after read"
+                            .into(),
+                    ));
+                }
+                self.parquet(path)
+            }
             Some("csv") => self.csv(path),
             Some("json") | Some("jsonl") => self.json(path),
             #[cfg(feature = "delta")]
-            Some("delta") => self.session.read_delta_from_path(path),
+            Some("delta") => {
+                if self.schema.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "DataFrameReader.schema() is not applied for delta; cast after read".into(),
+                    ));
+                }
+                self.session.read_delta_from_path(path)
+            }
             #[cfg(any(
                 feature = "jdbc",
                 feature = "jdbc_mysql",
@@ -85,6 +130,11 @@ impl DataFrameReader {
                 feature = "sqlite"
             ))]
             Some("jdbc") => {
+                if self.schema.is_some() {
+                    return Err(PolarsError::ComputeError(
+                        "DataFrameReader.schema() is not applied for jdbc; cast after read".into(),
+                    ));
+                }
                 let opts = JdbcOptions::from_options_map(&self.options).map_err(|e| {
                     PolarsError::ComputeError(format!("jdbc load: invalid options: {e}").into())
                 })?;
@@ -202,8 +252,9 @@ impl DataFrameReader {
         let pl_path = PlRefPath::try_from_path(path).map_err(|e| {
             PolarsError::ComputeError(format!("csv({path_display}): path: {e}").into())
         })?;
+        let schema = self.polars_schema_ref()?;
         let reader = LazyCsvReader::new(pl_path);
-        let reader = if self.options.is_empty() {
+        let mut reader = if self.options.is_empty() {
             reader
                 .with_has_header(true)
                 // Default: inferSchema enabled with a reasonable sample size (PySpark parity tests rely on this).
@@ -217,6 +268,12 @@ impl DataFrameReader {
                     .with_infer_schema_length(Some(100)),
             )
         };
+        if let Some(schema) = schema {
+            // Explicit schema: stop inferring and force dtypes (PySpark schema(...) parity).
+            reader = reader
+                .with_schema(Some(schema))
+                .with_infer_schema_length(Some(0));
+        }
         let lf = reader.finish().map_err(|e| {
             PolarsError::ComputeError(format!("read csv({path_display}): {e}").into())
         })?;
@@ -233,6 +290,11 @@ impl DataFrameReader {
 
     pub fn parquet(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
         use polars::prelude::*;
+        if self.schema.is_some() {
+            return Err(PolarsError::ComputeError(
+                "DataFrameReader.schema() is not applied for parquet; cast after read".into(),
+            ));
+        }
         let path: PathBuf = confine_io_path(path.as_ref())?;
         let path = path.as_path();
         let pl_path = PlRefPath::try_from_path(path)
@@ -252,12 +314,17 @@ impl DataFrameReader {
         let path = path.as_path();
         let pl_path = PlRefPath::try_from_path(path)
             .map_err(|e| PolarsError::ComputeError(format!("json: path: {e}").into()))?;
+        let schema = self.polars_schema_ref()?;
         let reader = LazyJsonLineReader::new(pl_path);
-        let reader = if self.options.is_empty() {
+        let mut reader = if self.options.is_empty() {
             reader.with_infer_schema_length(NonZeroUsize::new(100))
         } else {
             self.apply_json_options(reader.with_infer_schema_length(NonZeroUsize::new(100)))
         };
+        if let Some(schema) = schema {
+            // Force dtypes; still allow header discovery when needed.
+            reader = reader.with_schema(Some(schema));
+        }
         let lf = reader.finish()?;
         let pl_df = lf.collect()?;
         Ok(crate::dataframe::DataFrame::from_polars_with_options(
@@ -268,6 +335,112 @@ impl DataFrameReader {
 
     #[cfg(feature = "delta")]
     pub fn delta(&self, path: impl AsRef<std::path::Path>) -> Result<DataFrame, PolarsError> {
+        if self.schema.is_some() {
+            return Err(PolarsError::ComputeError(
+                "DataFrameReader.schema() is not applied for delta; cast after read".into(),
+            ));
+        }
         self.session.read_delta_from_path(path)
+    }
+}
+
+/// Parse reader schema from JSON [`StructType`] or a simple Spark-style DDL string.
+fn parse_reader_schema(raw: &str) -> Result<StructType, PolarsError> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with('{') {
+        return schema_from_json(trimmed).map_err(|e| {
+            PolarsError::ComputeError(format!("DataFrameReader.schema JSON: {e}").into())
+        });
+    }
+    parse_simple_spark_ddl(trimmed).map_err(|e| {
+        PolarsError::ComputeError(
+            format!(
+                "DataFrameReader.schema(): expected JSON StructType or Spark-like DDL \
+                 (e.g. `id LONG, name STRING`); {e}"
+            )
+            .into(),
+        )
+    })
+}
+
+fn parse_simple_spark_ddl(ddl: &str) -> Result<StructType, String> {
+    let mut fields = Vec::new();
+    for part in ddl.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let mut tokens = part.split_whitespace();
+        let name = tokens
+            .next()
+            .ok_or_else(|| format!("missing column name in '{part}'"))?
+            .to_string();
+        let ty_token = tokens
+            .next()
+            .ok_or_else(|| format!("missing type for column '{name}'"))?;
+        if tokens.next().is_some() {
+            return Err(format!(
+                "unsupported DDL fragment '{part}' (nested types/NULLABLE not supported in this parser)"
+            ));
+        }
+        let data_type = spark_type_token_to_data_type(ty_token)
+            .ok_or_else(|| format!("unsupported type '{ty_token}' for column '{name}'"))?;
+        fields.push(StructField::new(name, data_type, true));
+    }
+    if fields.is_empty() {
+        return Err("empty schema".to_string());
+    }
+    Ok(StructType::new(fields))
+}
+
+fn spark_type_token_to_data_type(token: &str) -> Option<DataType> {
+    match token.to_ascii_lowercase().as_str() {
+        "string" | "str" | "varchar" | "text" => Some(DataType::String),
+        "int" | "integer" => Some(DataType::Integer),
+        "long" | "bigint" => Some(DataType::Long),
+        "double" | "float" | "real" => Some(DataType::Double),
+        "boolean" | "bool" => Some(DataType::Boolean),
+        "date" => Some(DataType::Date),
+        "timestamp" | "datetime" => Some(DataType::Timestamp),
+        "binary" | "bytes" => Some(DataType::Binary),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn parse_simple_ddl_types() {
+        let st = parse_simple_spark_ddl("id LONG, name STRING, active BOOLEAN").unwrap();
+        assert_eq!(st.fields().len(), 3);
+        assert!(matches!(st.fields()[0].data_type, DataType::Long));
+        assert!(matches!(st.fields()[1].data_type, DataType::String));
+        assert!(matches!(st.fields()[2].data_type, DataType::Boolean));
+    }
+
+    #[test]
+    fn csv_schema_override_forces_long() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.csv");
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "id,name").unwrap();
+            writeln!(f, "1,a").unwrap();
+            writeln!(f, "2,b").unwrap();
+        }
+        let spark = SparkSession::builder()
+            .app_name("schema-test")
+            .get_or_create();
+        let df = spark
+            .read()
+            .schema("id LONG, name STRING")
+            .csv(&path)
+            .unwrap();
+        let schema = df.schema().unwrap();
+        assert!(matches!(schema.fields()[0].data_type, DataType::Long));
+        assert!(matches!(schema.fields()[1].data_type, DataType::String));
     }
 }

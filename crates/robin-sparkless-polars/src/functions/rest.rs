@@ -846,8 +846,10 @@ pub fn input_file_name() -> Column {
     Column::from_expr(lit(""), Some("input_file_name".to_string()))
 }
 
-/// Stub monotonically_increasing_id - per-row 0, 1, 2, ... (PySpark-like; not partition-aware).
-/// Stub monotonically_increasing_id (JVM stub; constant 0 per row batch). See PYSPARK_DIFFERENCES.md.
+/// Stub monotonically_increasing_id (JVM stub; **constant 0** for all rows).
+///
+/// Not a strictly increasing id — see [PYSPARK_DIFFERENCES.md](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/PYSPARK_DIFFERENCES.md#jvm--runtime-stubs).
+/// Callers that need uniqueness should generate ids another way (e.g. `row_number().over(...)`).
 pub fn monotonically_increasing_id() -> Column {
     Column::from_expr(lit(0i64), Some("monotonically_increasing_id".to_string()))
 }

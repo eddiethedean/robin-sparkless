@@ -13,11 +13,11 @@ use pyo3::IntoPyObjectExt;
 
 type PyObject = Py<PyAny>;
 
-fn into_py_unchecked<'py, T>(py: Python<'py>, value: T) -> PyObject
+fn into_py_object<'py, T>(py: Python<'py>, value: T) -> PyResult<PyObject>
 where
     T: IntoPyObject<'py>,
 {
-    value.into_py_any(py).unwrap()
+    value.into_py_any(py)
 }
 use robin_sparkless::dataframe::{
     expr_contains_only_join_key_equalities, try_extract_join_eq_columns_all, JoinType,
@@ -426,16 +426,16 @@ fn try_coerce_string_to_numeric_or_bool(py: Python<'_>, s: &str) -> Option<PyObj
     let s = s.trim();
     let lower = s.to_lowercase();
     if lower == "true" || lower == "1" {
-        return Some(into_py_unchecked(py, true));
+        return into_py_object(py, true).ok();
     }
     if lower == "false" || lower == "0" {
-        return Some(into_py_unchecked(py, false));
+        return into_py_object(py, false).ok();
     }
     if let Ok(i) = s.parse::<i64>() {
-        return Some(into_py_unchecked(py, i));
+        return into_py_object(py, i).ok();
     }
     if let Ok(f) = s.parse::<f64>() {
-        return Some(into_py_unchecked(py, f));
+        return into_py_object(py, f).ok();
     }
     None
 }
@@ -608,11 +608,11 @@ fn json_value_to_py_with_schema(
         (Some(DataType::Timestamp), JsonValue::String(s)) => datetime_cls
             .call_method1("fromisoformat", (s.as_str(),))
             .and_then(|o| o.into_py_any(py))
-            .unwrap_or_else(|_| into_py_unchecked(py, s.clone())),
+            .or_else(|_| into_py_object(py, s.clone()))?,
         (Some(DataType::Date), JsonValue::String(s)) => date_cls
             .call_method1("fromisoformat", (s.as_str(),))
             .and_then(|o| o.into_py_any(py))
-            .unwrap_or_else(|_| into_py_unchecked(py, s.clone())),
+            .or_else(|_| into_py_object(py, s.clone()))?,
         (Some(DataType::Integer) | Some(DataType::Long), JsonValue::String(s)) => {
             let s = s.trim();
             if let Ok(i) = s.parse::<i64>() {
@@ -4400,8 +4400,7 @@ impl PyDataFrame {
                             Some(c) => c,
                             None => return Ok(None),
                         };
-                        let df_obj: Bound<'_, PyAny> =
-                            unsafe { Bound::from_borrowed_ptr(py, slf.as_ptr()) };
+                        let df_obj = PyDataFrame::wrap(slf.inner.clone());
                         let result = callback.bind(py).call1((
                             df_obj,
                             &temp_name,
@@ -4610,10 +4609,14 @@ impl PyDataFrame {
         } else {
             raw.into_iter()
                 .map(|x| match x {
-                    ItemOrExprStr::Resolved(t) => t,
-                    ItemOrExprStr::ExprStr(_) => unreachable!(),
+                    ItemOrExprStr::Resolved(t) => Ok(t),
+                    ItemOrExprStr::ExprStr(_) => {
+                        Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                            "internal: unresolved expr() string after select() rewrite",
+                        ))
+                    }
                 })
-                .collect()
+                .collect::<PyResult<Vec<_>>>()?
         };
 
         // Fast-path: all arguments are simple string column names (possibly nested in lists/tuples),
@@ -6833,14 +6836,17 @@ fn py_any_to_json_string(other: &Bound<'_, PyAny>) -> PyResult<String> {
     if other.is_none() {
         return Ok("null".to_string());
     }
+    let json_err = |e: serde_json::Error| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("JSON encode failed: {e}"))
+    };
     if let Ok(b) = other.extract::<bool>() {
-        return Ok(serde_json::to_string(&b).unwrap());
+        return serde_json::to_string(&b).map_err(json_err);
     }
     if let Ok(i) = other.extract::<i64>() {
-        return Ok(serde_json::to_string(&i).unwrap());
+        return serde_json::to_string(&i).map_err(json_err);
     }
     if let Ok(i) = other.extract::<i32>() {
-        return Ok(serde_json::to_string(&i).unwrap());
+        return serde_json::to_string(&i).map_err(json_err);
     }
     if let Ok(f) = other.extract::<f64>() {
         if !f.is_finite() {
@@ -6848,10 +6854,10 @@ fn py_any_to_json_string(other: &Bound<'_, PyAny>) -> PyResult<String> {
                 "UDF filter comparison rhs float must be finite",
             ));
         }
-        return Ok(serde_json::to_string(&f).unwrap());
+        return serde_json::to_string(&f).map_err(json_err);
     }
     if let Ok(s) = other.extract::<String>() {
-        return Ok(serde_json::to_string(&s).unwrap());
+        return serde_json::to_string(&s).map_err(json_err);
     }
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
         "UDF filter comparison rhs must be int, float, str, bool, or None",
@@ -8673,9 +8679,9 @@ fn create_udf_column(udf_name: String, columns: &Bound<'_, PyList>) -> PyResult<
 #[pyfunction]
 fn set_python_udf_executor(py: Python<'_>, callback: &Bound<'_, PyAny>) -> PyResult<()> {
     PYTHON_UDF_EXECUTOR.with(|cell| {
-        *cell.borrow_mut() = Some(into_py_unchecked(py, callback.clone()));
-    });
-    Ok(())
+        *cell.borrow_mut() = Some(into_py_object(py, callback.clone())?);
+        Ok(())
+    })
 }
 
 #[pyfunction]

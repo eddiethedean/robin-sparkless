@@ -134,8 +134,12 @@ The following JVM- or runtime-related functions are implemented as **stubs for A
 - **spark_partition_id()**: Returns a **constant 0** for all rows, rather than the actual Spark partition id. This is sufficient for tests that only require the function to exist but does not model Spark's partitioning behavior.
 - **input_file_name()**: Returns an **empty string** for all rows. File path information is not tracked on a per-row basis.
 - **monotonically_increasing_id()**: Returns a **constant 0** for all rows, rather than a strictly increasing 64-bit id. This is a compatibility stub; code that relies on uniqueness should not use this stub.
-- **current_catalog() / current_database() / current_schema()**: Return constant strings (`\"spark_catalog\"`, `\"default\"`, `\"default\"` respectively). There is no catalog or database concept in robin-sparkless.
+- **current_catalog() / current_database() / current_schema()**: SQL/Column helpers return constant strings (`\"spark_catalog\"`, `\"default\"`, `\"default\"` respectively). Session catalog APIs (`spark.catalog().currentDatabase()`, `setCurrentDatabase`) **do** track a current database name; those helpers are not wired into `F.current_database()` yet.
 - **current_user() / user()**: Return the constant string `\"unknown\"`. The actual OS or session user is not surfaced.
+
+## DataFrameReader.schema
+
+- **`spark.read.schema(...).csv/json`**: Supported for JSON [`StructType`] payloads and simple Spark-style DDL (`id LONG, name STRING`). Schema is applied to force column dtypes when reading CSV/JSON. Not applied for parquet/delta/jdbc — those paths error if a schema was set, so callers are not silently ignored.
 
 ## Random functions (rand, randn)
 
