@@ -1,4 +1,8 @@
-advisories = { ignore = [
+# cargo-audit configuration (project root).
+# https://docs.rs/cargo-audit/latest/cargo_audit/config/struct.AuditConfig.html
+
+[advisories]
+ignore = [
   "RUSTSEC-2026-0037",
   "RUSTSEC-2026-0041",
   "RUSTSEC-2026-0044",
@@ -14,5 +18,6 @@ advisories = { ignore = [
   # Transitive via polars -> object_store -> quick-xml 0.39; needs object_store/polars bump to >=0.41.
   "RUSTSEC-2026-0194",
   "RUSTSEC-2026-0195",
-] }
-
+  # Transitive via polars-utils (memmap2); unsound advisory; wait for polars upgrade.
+  "RUSTSEC-2026-0186",
+]

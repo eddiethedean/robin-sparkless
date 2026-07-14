@@ -27,6 +27,8 @@ ignore = [
     # Transitive via polars -> object_store -> quick-xml 0.39; needs object_store/polars bump to >=0.41.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # Transitive via polars-utils (memmap2); unsound advisory; wait for polars upgrade.
+    "RUSTSEC-2026-0186",
 ]
 # Don't warn when ignored advisories aren't in the graph (e.g. when delta feature is off)
 unused-ignored-advisory = "allow"

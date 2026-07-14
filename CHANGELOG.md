@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.13.2] - 2026-07-13
+
+### User-facing highlights
+
+- **`DataFrameReader.schema()` works for CSV/JSON** — JSON StructType or simple Spark DDL (`id LONG, name STRING`); unsupported formats error instead of silently ignoring schema.
+- **Safer Python native layer** — Fallible conversions replace panic/`unsafe` paths in UDF filter and JSON helpers.
+- **Safer engine trait** — `SparkSessionBackend::register_table` returns `Result` instead of panicking on a mismatched backend.
+
 ### Added
 
 - **`DataFrameReader.schema()`** — Applies JSON `StructType` or simple Spark-style DDL (`id LONG, name STRING`) when reading CSV/JSON. Unsupported formats (parquet/delta/jdbc) return an error if a schema was set instead of silently ignoring it.
@@ -16,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SparkSessionBackend::register_table`** — Returns `Result<(), EngineError>` instead of panicking when the DataFrame is from a different backend (semver note for embedders implementing the trait).
 - **`EngineError`** — Uses `thiserror`; display strings and variants unchanged.
 - **Declared `rust-version = "1.93"`** on workspace Rust crates (matches `rust-toolchain.toml`).
+- **Audit / deny** — Ignore transitive `memmap2` advisory (`RUSTSEC-2026-0186`) pulled in via Polars until upstream upgrades.
 
 ### Fixed
 
