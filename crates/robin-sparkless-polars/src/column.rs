@@ -2833,7 +2833,9 @@ impl Column {
                 lit(1u32)
                     .repeat_by(polars::prelude::len())
                     .explode(ExplodeOptions {
-                        empty_as_null: true,
+                        // An empty input must stay empty.  Turning an empty list into
+                        // a null here fabricates one row for a zero-row relation.
+                        empty_as_null: false,
                         keep_nulls: true,
                     })
                     .cum_count(false)
@@ -2851,13 +2853,13 @@ impl Column {
         // rank-like windows. The prior implementation negated Float64 casts for
         // descending keys, which made string tiebreakers NULL and silently ignored
         // them.
-        let first_name = parse_order_key(&order_by_encoded[0]).0;
+        let (first_name, first_descending) = parse_order_key(&order_by_encoded[0]);
         let order_col = Self::new(first_name.to_string());
         let expr = order_col
             .ordered_rank_expr(
                 order_by_encoded,
                 RankMethod::Ordinal,
-                false,
+                first_descending,
                 &partition_exprs,
             )
             .over(partition_exprs);
