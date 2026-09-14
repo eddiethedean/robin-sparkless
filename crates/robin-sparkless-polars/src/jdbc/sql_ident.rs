@@ -79,6 +79,10 @@ pub fn quote_qualified_table(
 }
 
 #[derive(Copy, Clone, Debug)]
+// Backends are independently feature-gated. A valid dialect can therefore be
+// inactive in a particular local build while remaining part of this shared
+// identifier-quoting API.
+#[allow(dead_code)]
 pub enum JdbcDialect {
     Sqlite,
     Postgres,
