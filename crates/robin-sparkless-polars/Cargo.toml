@@ -10,7 +10,16 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 [features]
 default = []
 sql = ["dep:spark-sql-parser"]
-delta = ["dep:deltalake", "dep:tokio", "dep:futures", "dep:parquet", "dep:indexmap", "dep:delta_kernel_derive"]
+# deltalake 0.32.4 / buoyant_kernel 0.22.2 uses the 1.0 derive-macro API.
+# Keep Cargo from resolving the semver-compatible but incompatible 1.2 release.
+delta = [
+    "dep:deltalake",
+    "dep:tokio",
+    "dep:futures",
+    "dep:parquet",
+    "dep:indexmap",
+    "dep:delta_kernel_derive",
+]
 jdbc = ["dep:postgres"]
 jdbc_mysql = ["dep:mysql"]
 jdbc_mariadb = ["dep:mysql"]
@@ -47,6 +56,8 @@ md5 = "0.7"
 aes-gcm = "0.10"
 spark-sql-parser = { version = "0.5", path = "../spark-sql-parser", optional = true }
 deltalake = { version = "0.32", optional = true }
+# This is an indirect deltalake dependency; the alias makes the compatibility
+# pin explicit without exposing it as part of the public API.
 delta_kernel_derive = { package = "buoyant_kernel_derive", version = "=1.0.0", optional = true }
 futures = { version = "0.3", optional = true }
 parquet = { version = "57", optional = true }
