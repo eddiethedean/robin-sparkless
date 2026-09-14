@@ -158,7 +158,12 @@ pub fn apply_repeat_dynamic(columns: &mut [Column]) -> PolarsResult<Option<Colum
         .cast(&DataType::Int64)?;
     let values = value.str().map_err(|e| compute_err("repeat", e))?;
     let counts = counts.i64().map_err(|e| compute_err("repeat", e))?;
-    let out_len = values.len().max(counts.len());
+    let out_len =
+        if (values.is_empty() && counts.len() <= 1) || (counts.is_empty() && values.len() <= 1) {
+            0
+        } else {
+            values.len().max(counts.len())
+        };
     if (values.len() != 1 && values.len() != out_len)
         || (counts.len() != 1 && counts.len() != out_len)
     {
@@ -171,7 +176,13 @@ pub fn apply_repeat_dynamic(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         (0..out_len).map(|idx| match (value_at(idx), count_at(idx)) {
-            (Some(s), Some(n)) if n > 0 => usize::try_from(n).ok().map(|count| s.repeat(count)),
+            (Some(s), Some(n)) if n > 0 => usize::try_from(n).ok().and_then(|count| {
+                if !s.is_empty() && count > usize::MAX / s.len() {
+                    None
+                } else {
+                    Some(s.repeat(count))
+                }
+            }),
             (Some(_), Some(_)) => Some(String::new()),
             _ => None,
         }),
@@ -847,8 +858,8 @@ pub fn apply_arrays_zip(columns: &mut [Column]) -> PolarsResult<Option<Column>> 
         .collect::<PolarsResult<Vec<_>>>()?;
     let len = list_cas[0].len();
     let inner_dtype = list_cas[0].inner_dtype().clone();
-    use polars::chunked_array::StructChunked;
     use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
     use polars::datatypes::Field;
     let struct_fields: Vec<Field> = (0..n)
         .map(|i| Field::new(format!("field_{i}").into(), inner_dtype.clone()))
@@ -1031,8 +1042,8 @@ pub fn apply_str_to_map(
     pair_delim: &str,
     key_value_delim: &str,
 ) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::StructChunked;
     use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
     use polars::datatypes::Field;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -1086,8 +1097,8 @@ pub fn apply_map_concat(
     columns: &mut [Column],
     disable_map_key_normalization: bool,
 ) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::StructChunked;
     use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
     use polars::datatypes::Field;
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -2075,9 +2086,9 @@ pub fn apply_try_to_binary(column: Column, fmt: &str) -> PolarsResult<Option<Col
 
 /// AES-GCM encrypt (PySpark aes_encrypt). Key: UTF-8 string, 16 or 32 bytes for AES-128/256. Output: hex(nonce||ciphertext).
 fn aes_gcm_encrypt_one(plaintext: &[u8], key: &[u8]) -> Option<String> {
-    use aes_gcm::Aes128Gcm;
     use aes_gcm::aead::generic_array::GenericArray;
     use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::Aes128Gcm;
     use rand::RngCore;
     let key_arr: [u8; 16] = key
         .iter()
@@ -2099,9 +2110,9 @@ fn aes_gcm_encrypt_one(plaintext: &[u8], key: &[u8]) -> Option<String> {
 
 /// AES-GCM decrypt (PySpark aes_decrypt). Input: hex(nonce||ciphertext).
 fn aes_gcm_decrypt_one(hex_input: &str, key: &[u8]) -> Option<String> {
-    use aes_gcm::Aes128Gcm;
     use aes_gcm::aead::generic_array::GenericArray;
     use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::Aes128Gcm;
     let bytes = hex::decode(hex_input.as_bytes()).ok()?;
     if bytes.len() < 12 + 16 {
         return None; // nonce + at least tag
@@ -2254,7 +2265,12 @@ pub fn apply_add_months_dynamic(columns: &mut [Column]) -> PolarsResult<Option<C
         .cast(&DataType::Int64)?;
     let days = date_series_to_days(&dates)?;
     let counts = counts.i64().map_err(|e| compute_err("add_months", e))?;
-    let out_len = days.len().max(counts.len());
+    let out_len =
+        if (days.is_empty() && counts.len() <= 1) || (counts.is_empty() && days.len() <= 1) {
+            0
+        } else {
+            days.len().max(counts.len())
+        };
     if (days.len() != 1 && days.len() != out_len) || (counts.len() != 1 && counts.len() != out_len)
     {
         return Err(PolarsError::ShapeMismatch(
@@ -3330,8 +3346,8 @@ pub fn apply_map_from_arrays(
     columns: &mut [Column],
     disable_map_key_normalization: bool,
 ) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::StructChunked;
     use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
     use polars::datatypes::Field;
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -3404,8 +3420,8 @@ pub fn apply_map_from_arrays(
 
 /// Zip two array columns into List(Struct{left, right}) for zip_with. Shorter padded with null.
 pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::StructChunked;
     use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
     use polars::datatypes::Field;
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -3523,8 +3539,8 @@ pub fn apply_zip_arrays_to_struct(columns: &mut [Column]) -> PolarsResult<Option
 
 /// Merge two maps into List(Struct{key, value1, value2}) for map_zip_with. Union of keys.
 pub fn apply_map_zip_to_struct(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
-    use polars::chunked_array::StructChunked;
     use polars::chunked_array::builder::get_list_builder;
+    use polars::chunked_array::StructChunked;
     use polars::datatypes::Field;
     use std::collections::BTreeMap;
     if columns.len() < 2 {
@@ -5047,7 +5063,7 @@ pub fn apply_url_decode(column: Column) -> PolarsResult<Option<Column>> {
 
 /// url_encode(column) - percent-encode string for URL (PySpark url_encode).
 pub fn apply_url_encode(column: Column) -> PolarsResult<Option<Column>> {
-    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
     let ca = series.str().map_err(|e| compute_err("url_encode", e))?;
