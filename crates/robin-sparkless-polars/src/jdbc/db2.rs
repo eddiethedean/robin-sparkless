@@ -27,8 +27,11 @@ fn normalize_db2_dsn(url: &str, opts: &JdbcOptions) -> Result<String, EngineErro
     let user = opts.user.clone().unwrap_or_default();
     let password = opts.password.clone().unwrap_or_default();
 
+    let escape_value = |value: &str| format!("{{{}}}", value.replace('}', "}}"));
     Ok(format!(
-        "DRIVER={{IBM DB2 ODBC DRIVER}};SERVER={host};PORT={port};DATABASE={db_name};UID={user};PWD={password};"
+        "DRIVER={{IBM DB2 ODBC DRIVER}};SERVER={host};PORT={port};DATABASE={db_name};UID={};PWD={};",
+        escape_value(&user),
+        escape_value(&password),
     ))
 }
 
@@ -189,6 +192,18 @@ fn db2_values_to_series(name: &str, values: &[Option<String>], data_type: OdbcDa
         };
     }
     match data_type {
+        OdbcDataType::Char { .. }
+        | OdbcDataType::WChar { .. }
+        | OdbcDataType::Varchar { .. }
+        | OdbcDataType::WVarchar { .. }
+        | OdbcDataType::LongVarchar { .. }
+        | OdbcDataType::WLongVarchar { .. }
+        | OdbcDataType::Bit
+        | OdbcDataType::Varbinary { .. }
+        | OdbcDataType::Binary { .. }
+        | OdbcDataType::LongVarbinary { .. } => {
+            return Series::new(name.into(), values.to_vec());
+        }
         OdbcDataType::SmallInt | OdbcDataType::TinyInt => {
             return Series::new(
                 name.into(),

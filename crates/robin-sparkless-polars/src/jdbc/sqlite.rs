@@ -211,12 +211,18 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     } else {
         Vec::new()
     };
+    let query_sources = sqlite_query_column_sources(opts.query.as_deref().unwrap_or_default());
     let declared_types: Vec<Option<String>> = column_names
         .iter()
         .map(|name| {
+            let source_name = query_sources
+                .iter()
+                .find(|(output, _)| output == name)
+                .map(|(_, source)| source.as_str())
+                .unwrap_or(name.as_str());
             table_types
                 .iter()
-                .find(|(column, _)| column == name)
+                .find(|(column, _)| column == source_name)
                 .map(|(_, dtype)| dtype.to_ascii_uppercase())
         })
         .collect();
@@ -261,6 +267,42 @@ fn sqlite_query_source_table(query: &str) -> Option<&str> {
         return None;
     }
     Some(table.trim_matches(|c| c == '`' || c == '\"' || c == '[' || c == ']'))
+}
+
+/// Return output-name/source-name pairs for simple SELECT column references.
+fn sqlite_query_column_sources(query: &str) -> Vec<(String, String)> {
+    let lower = query.to_ascii_lowercase();
+    let Some(select) = lower.find("select") else {
+        return Vec::new();
+    };
+    let Some(from) = lower[select + 6..].find("from") else {
+        return Vec::new();
+    };
+    let list = &query[select + 6..select + 6 + from];
+    list.split(',')
+        .filter_map(|item| {
+            let words: Vec<&str> = item.split_whitespace().collect();
+            let source = words
+                .first()?
+                .trim_matches(|c| c == '`' || c == '"' || c == '[' || c == ']');
+            if source == "*" || source.contains('(') {
+                return None;
+            }
+            let output = if words.len() >= 3 && words[words.len() - 2].eq_ignore_ascii_case("as") {
+                words[words.len() - 1]
+            } else if words.len() == 2 {
+                words[1]
+            } else {
+                source
+            };
+            Some((
+                output
+                    .trim_matches(|c| c == '`' || c == '"' || c == '[' || c == ']')
+                    .to_string(),
+                source.to_string(),
+            ))
+        })
+        .collect()
 }
 
 fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {
