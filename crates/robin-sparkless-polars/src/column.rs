@@ -1,8 +1,9 @@
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions,
+    DataType, Expr, Field, LiteralValue, PolarsError, PolarsResult, RankMethod, RankOptions,
     RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, as_struct, col, lit,
 };
 use polars_plan::dsl::AggExpr;
+use polars_plan::prelude::DynLiteralValue;
 
 /// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
 #[inline]
@@ -296,11 +297,66 @@ impl Column {
 
     /// If this column is a literal expression, return its value as JSON string for Python UDF executor (literal args).
     pub fn literal_as_json_string(&self) -> Option<String> {
-        match &self.expr {
-            Expr::Literal(lv) => crate::dataframe::literal_value_to_serde_value(lv)
-                .and_then(|v| serde_json::to_string(&v).ok()),
-            _ => None,
+        self.value_preserving_literal_value().and_then(|lv| {
+            crate::dataframe::literal_value_to_serde_value(lv)
+                .and_then(|v| serde_json::to_string(&v).ok())
+        })
+    }
+
+    /// Return a literal through aliases and casts which do not alter its value.
+    /// A value-converting cast must remain an executable expression: serializing
+    /// the raw literal for a Python UDF would otherwise bypass that conversion.
+    pub(crate) fn value_preserving_literal_value(&self) -> Option<&LiteralValue> {
+        fn find_value_preserving_literal(expr: &Expr) -> Option<&LiteralValue> {
+            match expr {
+                Expr::Literal(value) => Some(value),
+                Expr::Alias(inner, _) => find_value_preserving_literal(inner.as_ref()),
+                Expr::Cast {
+                    expr: inner, dtype, ..
+                } => {
+                    let value = find_value_preserving_literal(inner.as_ref())?;
+                    let target = dtype.as_literal()?;
+                    literal_cast_preserves_value(value, target).then_some(value)
+                }
+                _ => None,
+            }
         }
+
+        find_value_preserving_literal(&self.expr)
+    }
+
+    /// Whether this expression is made only from a scalar literal and wrappers
+    /// that can be evaluated without input columns. Series and range literals
+    /// can expand to multiple rows and must remain regular expressions for
+    /// aggregations.
+    pub(crate) fn is_scalar_literal_expression(&self) -> bool {
+        fn is_scalar_literal(expr: &Expr) -> bool {
+            match expr {
+                Expr::Literal(LiteralValue::Dyn(_) | LiteralValue::Scalar(_)) => true,
+                Expr::Alias(inner, _) => is_scalar_literal(inner.as_ref()),
+                Expr::Cast { expr: inner, .. } => is_scalar_literal(inner.as_ref()),
+                _ => false,
+            }
+        }
+
+        is_scalar_literal(&self.expr)
+    }
+
+    /// Return the observable type of a literal expression.  A literal Cast has
+    /// the cast target type, rather than the raw literal's inferred type.
+    pub(crate) fn literal_dtype(&self) -> Option<DataType> {
+        fn find_dtype(expr: &Expr) -> Option<DataType> {
+            match expr {
+                Expr::Literal(value) => Some(value.get_datatype()),
+                Expr::Alias(inner, _) => find_dtype(inner.as_ref()),
+                Expr::Cast {
+                    expr: inner, dtype, ..
+                } => find_dtype(inner.as_ref()).and_then(|_| dtype.as_literal().cloned()),
+                _ => None,
+            }
+        }
+
+        find_dtype(&self.expr)
     }
 
     /// If this column is a Python UDF call, return (udf_name, arg_names, arg_literal_json_strings).
@@ -4268,6 +4324,46 @@ impl Column {
     }
 }
 
+/// Whether peeling a cast would retain the literal's evaluated value. Inferred
+/// integers must fit the requested type: their `Unknown` source type alone is
+/// not proof that a narrowing cast is only a type annotation.
+fn literal_cast_preserves_value(value: &LiteralValue, target: &DataType) -> bool {
+    if value.get_datatype() == *target {
+        return true;
+    }
+
+    match (value, target) {
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int8) => {
+            i8::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int16) => {
+            i16::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int32) => {
+            i32::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int64) => {
+            i64::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt8) => {
+            u8::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt16) => {
+            u16::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt32) => {
+            u32::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt64) => {
+            u64::try_from(*value).is_ok()
+        }
+        // Polars represents inferred floats as f64. Float64 is therefore an
+        // annotation; Float32 can change precision and must be evaluated.
+        (LiteralValue::Dyn(DynLiteralValue::Float(_)), DataType::Float64) => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Column;
@@ -4295,6 +4391,15 @@ mod tests {
     fn test_column_new() {
         let column = Column::new("age".to_string());
         assert_eq!(column.name(), "age");
+    }
+
+    #[test]
+    fn typed_string_literal_is_available_to_literal_consumers() {
+        let column = crate::functions::lit_str(r"\d+");
+        assert_eq!(
+            column.literal_as_json_string().as_deref(),
+            Some(r#""\\d+""#)
+        );
     }
 
     #[test]

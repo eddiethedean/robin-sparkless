@@ -13,23 +13,43 @@ pub fn count(col: &Column) -> Column {
     // Treat count("*") and count(lit(1)) (and similar numeric/bool literals) as
     // "count all rows", matching PySpark's count(lit(1)) / count("*") semantics.
     let is_star = col.name() == "*";
-    let is_literal_numeric_or_bool = matches!(col.expr(), Expr::Literal(lv) if matches!(
-        lv.get_datatype(),
-        DataType::Int8
-            | DataType::Int16
-            | DataType::Int32
-            | DataType::Int64
-            | DataType::UInt8
-            | DataType::UInt16
-            | DataType::UInt32
-            | DataType::UInt64
-            | DataType::Float32
-            | DataType::Float64
-            | DataType::Boolean
-    ));
+    // Every input-cardinality shortcut requires a scalar, including the
+    // numeric path: aliases and value-preserving casts can also wrap Series.
+    let is_scalar_literal = col.is_scalar_literal_expression();
+    let is_literal_numeric_or_bool = is_scalar_literal
+        && col.value_preserving_literal_value().is_some_and(|value| {
+            !matches!(value.to_any_value().as_ref(), Some(AnyValue::Null))
+                && matches!(col.literal_dtype(), Some(dtype) if matches!(
+                    dtype,
+                    DataType::Int8
+                        | DataType::Int16
+                        | DataType::Int32
+                        | DataType::Int64
+                        | DataType::UInt8
+                        | DataType::UInt16
+                        | DataType::UInt32
+                        | DataType::UInt64
+                        | DataType::Float32
+                        | DataType::Float64
+                        | DataType::Boolean
+                ))
+        });
 
+    let is_literal_with_evaluated_nullness =
+        is_scalar_literal && !is_literal_numeric_or_bool && !is_star;
     let (expr, name) = if is_star || is_literal_numeric_or_bool {
         (len().cast(DataType::Int64), "count(1)".to_string())
+    } else if is_literal_with_evaluated_nullness {
+        // A cast-wrapped literal may change value or become NULL. Evaluate its
+        // nullness, then use the input cardinality for non-null values instead
+        // of counting the scalar expression itself (which would always produce
+        // one value).
+        (
+            polars::prelude::when(col.expr().clone().is_null())
+                .then(lit(0i64))
+                .otherwise(len().cast(DataType::Int64)),
+            "count(1)".to_string(),
+        )
     } else {
         (
             col.expr().clone().count().cast(DataType::Int64),
@@ -1796,7 +1816,7 @@ pub fn try_add(left: &Column, right: &Column) -> Column {
     let expr = left.expr().clone().map_many(
         |cols| crate::column::expect_col(crate::udfs::apply_try_add(cols)),
         &args,
-        |_schema, fields| Ok(fields[0].clone()),
+        |_schema, fields| crate::ansi::arithmetic_field(fields),
     );
     Column::from_expr(expr, None)
 }
@@ -1807,7 +1827,7 @@ pub fn try_subtract(left: &Column, right: &Column) -> Column {
     let expr = left.expr().clone().map_many(
         |cols| crate::column::expect_col(crate::udfs::apply_try_subtract(cols)),
         &args,
-        |_schema, fields| Ok(fields[0].clone()),
+        |_schema, fields| crate::ansi::arithmetic_field(fields),
     );
     Column::from_expr(expr, None)
 }
@@ -1818,7 +1838,7 @@ pub fn try_multiply(left: &Column, right: &Column) -> Column {
     let expr = left.expr().clone().map_many(
         |cols| crate::column::expect_col(crate::udfs::apply_try_multiply(cols)),
         &args,
-        |_schema, fields| Ok(fields[0].clone()),
+        |_schema, fields| crate::ansi::arithmetic_field(fields),
     );
     Column::from_expr(expr, None)
 }
@@ -3303,6 +3323,20 @@ mod tests {
     fn test_lit_i64() {
         let column = lit_i64(123456789012345i64);
         assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn count_typed_literal_counts_every_row() {
+        let input = df!("value" => [Some(1i64), None, Some(3), None]).unwrap();
+        let out = input
+            .lazy()
+            .select([count(&lit_i64(1)).into_expr().alias("count_all")])
+            .collect()
+            .unwrap();
+        assert_eq!(
+            out.column("count_all").unwrap().i64().unwrap().get(0),
+            Some(4)
+        );
     }
 
     #[test]

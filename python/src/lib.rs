@@ -6932,9 +6932,19 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
         if first.extract::<i64>().is_ok() {
             let vals: Vec<i64> = list
                 .iter()
-                .filter_map(|x| x.extract::<i64>().ok())
-                .collect();
+                .map(|x| x.extract::<i64>())
+                .collect::<PyResult<_>>()
+                .map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "list comparison values must all be integers",
+                    )
+                })?;
             return Ok(robin_sparkless::functions::lit_str(&format!("{:?}", vals)));
+        }
+        if list.iter().any(|x| x.extract::<i64>().is_ok()) {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "list comparison values must have a consistent type",
+            ));
         }
     }
     // datetime.date / datetime.datetime: convert to ISO string so plan gets string literal;
@@ -7460,16 +7470,24 @@ impl PyColumn {
         let base_result = if first.extract::<i64>().is_ok() {
             let vals: Vec<i64> = expanded
                 .iter()
-                .filter_map(|v| v.bind(py).extract::<i64>().ok())
-                .collect();
-            if vals.len() == expanded.len() {
-                functions::isin_i64(&self.inner, &vals)
-            } else {
-                let vals: Vec<String> = expanded.iter().map(|v| v.bind(py).to_string()).collect();
-                let refs: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
-                functions::isin_str(&self.inner, &refs)
-            }
+                .map(|v| v.bind(py).extract::<i64>())
+                .collect::<PyResult<_>>()
+                .map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "isin values must have a consistent type",
+                    )
+                })?;
+            functions::isin_i64(&self.inner, &vals)
         } else {
+            let first_type = first.get_type();
+            if expanded
+                .iter()
+                .any(|v| !v.bind(py).is_exact_instance(first_type.as_any()))
+            {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "isin values must have a consistent type",
+                ));
+            }
             let vals: Vec<String> = expanded.iter().map(|v| v.bind(py).to_string()).collect();
             let refs: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
             functions::isin_str(&self.inner, &refs)
@@ -8759,9 +8777,9 @@ fn lit(value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
             }
         }
     }
-    Ok(PyColumn {
-        inner: robin_sparkless::functions::lit_str(&value.repr()?.to_string()),
-    })
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "lit supports scalar values and datetime/date objects; list and map literals are not supported",
+    ))
 }
 
 fn coerce_to_column(v: &Bound<'_, PyAny>) -> PyResult<Column> {

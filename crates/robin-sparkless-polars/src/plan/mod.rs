@@ -493,7 +493,10 @@ fn apply_op(
             let n = payload.get("n").and_then(Value::as_u64).ok_or_else(|| {
                 PlanError::InvalidPlan("limit payload must have 'n' number".into())
             })?;
-            df.limit(n as usize).map_err(PlanError::Session)
+            let n = usize::try_from(n).map_err(|_| {
+                PlanError::InvalidPlan("limit n is too large for this platform".into())
+            })?;
+            df.limit(n).map_err(PlanError::Session)
         }
         "offset" => {
             let n = payload.get("n").and_then(Value::as_u64).unwrap_or(0);
