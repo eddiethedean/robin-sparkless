@@ -1,8 +1,9 @@
 use polars::prelude::{
     DataType, Expr, Field, LiteralValue, PolarsError, PolarsResult, RankMethod, RankOptions,
-    RollingOptionsFixedWindow, SortOptions, TimeUnit, UnknownKind, WindowMapping, col, lit,
+    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, col, lit,
 };
 use polars_plan::dsl::AggExpr;
+use polars_plan::prelude::DynLiteralValue;
 use std::ops::Neg;
 
 /// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
@@ -299,25 +300,7 @@ impl Column {
                 } => {
                     let value = find_value_preserving_literal(inner.as_ref())?;
                     let target = dtype.as_literal()?;
-                    let source = value.get_datatype();
-                    let annotation_only = matches!(
-                        (&source, target),
-                        (
-                            DataType::Unknown(UnknownKind::Int(_)),
-                            DataType::Int8
-                                | DataType::Int16
-                                | DataType::Int32
-                                | DataType::Int64
-                                | DataType::UInt8
-                                | DataType::UInt16
-                                | DataType::UInt32
-                                | DataType::UInt64
-                        ) | (
-                            DataType::Unknown(UnknownKind::Float),
-                            DataType::Float32 | DataType::Float64
-                        )
-                    );
-                    (source == *target || annotation_only).then_some(value)
+                    literal_cast_preserves_value(value, target).then_some(value)
                 }
                 _ => None,
             }
@@ -4015,6 +3998,46 @@ impl Column {
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
         );
         Self::from_expr(expr, None)
+    }
+}
+
+/// Whether peeling a cast would retain the literal's evaluated value. Inferred
+/// integers must fit the requested type: their `Unknown` source type alone is
+/// not proof that a narrowing cast is only a type annotation.
+fn literal_cast_preserves_value(value: &LiteralValue, target: &DataType) -> bool {
+    if value.get_datatype() == *target {
+        return true;
+    }
+
+    match (value, target) {
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int8) => {
+            i8::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int16) => {
+            i16::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int32) => {
+            i32::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int64) => {
+            i64::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt8) => {
+            u8::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt16) => {
+            u16::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt32) => {
+            u32::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt64) => {
+            u64::try_from(*value).is_ok()
+        }
+        // Polars represents inferred floats as f64. Float64 is therefore an
+        // annotation; Float32 can change precision and must be evaluated.
+        (LiteralValue::Dyn(DynLiteralValue::Float(_)), DataType::Float64) => true,
+        _ => false,
     }
 }
 
