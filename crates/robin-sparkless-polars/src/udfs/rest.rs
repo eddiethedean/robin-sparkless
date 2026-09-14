@@ -158,12 +158,22 @@ pub fn apply_repeat_dynamic(columns: &mut [Column]) -> PolarsResult<Option<Colum
         .cast(&DataType::Int64)?;
     let values = value.str().map_err(|e| compute_err("repeat", e))?;
     let counts = counts.i64().map_err(|e| compute_err("repeat", e))?;
+    let out_len = values.len().max(counts.len());
+    if (values.len() != 1 && values.len() != out_len)
+        || (counts.len() != 1 && counts.len() != out_len)
+    {
+        return Err(PolarsError::ShapeMismatch(
+            "repeat: inputs must have equal lengths or be scalars".into(),
+        ));
+    }
     let value_at = |idx: usize| values.get(if values.len() == 1 { 0 } else { idx });
     let count_at = |idx: usize| counts.get(if counts.len() == 1 { 0 } else { idx });
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
-        (0..value.len()).map(|idx| match (value_at(idx), count_at(idx)) {
-            (Some(s), Some(n)) if n > 0 => Some(s.repeat(n as usize)),
+        (0..out_len).map(|idx| match (value_at(idx), count_at(idx)) {
+            (Some(s), Some(n)) if n > 0 => usize::try_from(n)
+                .ok()
+                .map(|count| s.repeat(count)),
             (Some(_), Some(_)) => Some(String::new()),
             _ => None,
         }),
@@ -2246,15 +2256,25 @@ pub fn apply_add_months_dynamic(columns: &mut [Column]) -> PolarsResult<Option<C
         .cast(&DataType::Int64)?;
     let days = date_series_to_days(&dates)?;
     let counts = counts.i64().map_err(|e| compute_err("add_months", e))?;
+    let out_len = days.len().max(counts.len());
+    if (days.len() != 1 && days.len() != out_len)
+        || (counts.len() != 1 && counts.len() != out_len)
+    {
+        return Err(PolarsError::ShapeMismatch(
+            "add_months: inputs must have equal lengths or be scalars".into(),
+        ));
+    }
     let count_at = |idx: usize| counts.get(if counts.len() == 1 { 0 } else { idx });
-    let out = days.into_iter().enumerate().map(|(idx, opt_days)| {
+    let day_at = |idx: usize| days.get(if days.len() == 1 { 0 } else { idx });
+    let out = (0..out_len).map(|idx| {
+        let opt_days = day_at(idx);
         opt_days.and_then(|day| {
             let months = count_at(idx)?;
             let date = days_to_naive_date(day)?;
             let next = if months >= 0 {
-                date.checked_add_months(Months::new(months as u32))?
+                date.checked_add_months(Months::new(u32::try_from(months).ok()?))?
             } else {
-                date.checked_sub_months(Months::new(months.unsigned_abs() as u32))?
+                date.checked_sub_months(Months::new(u32::try_from(months.unsigned_abs()).ok()?))?
             };
             Some(naivedate_to_days(next))
         })
