@@ -2,7 +2,7 @@ use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
 use crate::jdbc::sql_ident::{self, JdbcDialect};
 
-use oracle_rs::{Connection, Value};
+use oracle_rs::{ColumnInfo, Connection, OracleType, Value};
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
 
 fn parse_oracle_jdbc_url(url: &str) -> Result<String, EngineError> {
@@ -98,14 +98,11 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
             .await
             .map_err(|e| EngineError::Sql(format!("JDBC read (Oracle): query failed: {e}")))?;
 
-        // Best-effort column naming: fall back to c0..cN. Empty results have no row
-        // metadata in oracle-rs, so return an empty frame rather than indexing row 0.
-        let Some(first) = result.rows.first() else {
-            return Ok(PlDataFrame::empty());
-        };
-        let n = first.len();
-        let names: Vec<String> = (0..n).map(|i| format!("c{i}")).collect();
-
+        let names: Vec<String> = result
+            .columns
+            .iter()
+            .map(|column| column.name.clone())
+            .collect();
         let ncols = names.len();
         let mut columns: Vec<Vec<Option<Value>>> = (0..ncols).map(|_| Vec::new()).collect();
         for row in &result.rows {
@@ -116,8 +113,9 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         }
 
         let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
-        for (name, vals) in names.iter().zip(columns.iter()) {
-            series_vec.push(oracle_values_to_series(name, vals));
+        for ((name, vals), metadata) in names.iter().zip(columns.iter()).zip(result.columns.iter())
+        {
+            series_vec.push(oracle_values_to_series(name, vals, metadata));
         }
         let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
         PlDataFrame::new_infer_height(cols)
@@ -125,7 +123,10 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     })
 }
 
-fn oracle_values_to_series(name: &str, values: &[Option<Value>]) -> Series {
+fn oracle_values_to_series(name: &str, values: &[Option<Value>], metadata: &ColumnInfo) -> Series {
+    if values.is_empty() {
+        return oracle_empty_series(name, metadata);
+    }
     let mut has_i64 = false;
     let mut has_f64 = false;
     let mut has_bool = false;
@@ -173,6 +174,19 @@ fn oracle_values_to_series(name: &str, values: &[Option<Value>]) -> Series {
         })
         .collect();
     Series::new(name.into(), vals)
+}
+
+fn oracle_empty_series(name: &str, metadata: &ColumnInfo) -> Series {
+    match metadata.oracle_type {
+        OracleType::Boolean => Series::new(name.into(), Vec::<Option<bool>>::new()),
+        OracleType::Number | OracleType::BinaryInteger if metadata.scale == 0 => {
+            Series::new(name.into(), Vec::<Option<i64>>::new())
+        }
+        OracleType::Number | OracleType::BinaryFloat | OracleType::BinaryDouble => {
+            Series::new(name.into(), Vec::<Option<f64>>::new())
+        }
+        _ => Series::new(name.into(), Vec::<Option<String>>::new()),
+    }
 }
 
 pub(crate) fn write_jdbc_oracle(
@@ -332,6 +346,22 @@ pub(crate) fn write_jdbc_oracle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_result_uses_oracle_column_metadata() {
+        let mut number = ColumnInfo::new("ID", OracleType::Number);
+        number.scale = 0;
+        let varchar = ColumnInfo::new("NAME", OracleType::Varchar);
+
+        assert_eq!(
+            oracle_empty_series("ID", &number).dtype(),
+            &polars::prelude::DataType::Int64
+        );
+        assert_eq!(
+            oracle_empty_series("NAME", &varchar).dtype(),
+            &polars::prelude::DataType::String
+        );
+    }
 
     #[test]
     fn oracle_smoke_if_env() {

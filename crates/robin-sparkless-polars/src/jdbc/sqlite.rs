@@ -211,7 +211,9 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     } else {
         Vec::new()
     };
-    let query_sources = sqlite_query_column_sources(opts.query.as_deref().unwrap_or_default());
+    let query = opts.query.as_deref().unwrap_or_default();
+    let query_sources = sqlite_query_column_sources(query);
+    let query_selects_wildcard = sqlite_query_selects_wildcard(query);
     let declared_types: Vec<Option<String>> = column_names
         .iter()
         .map(|name| {
@@ -224,6 +226,10 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
                     .iter()
                     .find(|(output, _)| output == name)
                     .map(|(_, source)| source.as_str())
+                    // `SELECT *` expands directly to source columns. It is safe to
+                    // use the output name for this specific projection shape, while
+                    // computed aliases remain deliberately unmapped.
+                    .or_else(|| query_selects_wildcard.then_some(name.as_str()))
             } else {
                 Some(name.as_str())
             };
@@ -313,6 +319,23 @@ fn sqlite_query_column_sources(query: &str) -> Vec<(String, String)> {
             ))
         })
         .collect()
+}
+
+/// Whether a simple SELECT projection contains `*` or `table.*`. This is kept
+/// separate from source-name parsing because a wildcard expands to multiple
+/// output columns whose names are only available after statement preparation.
+fn sqlite_query_selects_wildcard(query: &str) -> bool {
+    let lower = query.to_ascii_lowercase();
+    let Some(select) = lower.find("select") else {
+        return false;
+    };
+    let Some(from) = lower[select + 6..].find("from") else {
+        return false;
+    };
+    query[select + 6..select + 6 + from]
+        .split(',')
+        .map(str::trim)
+        .any(|item| item == "*" || item.ends_with(".*"))
 }
 
 fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {
