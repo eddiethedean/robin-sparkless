@@ -9271,15 +9271,15 @@ fn percent_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyRe
             "percent_rank_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
-    } else {
-        (first.clone(), false)
-    };
-    let order_col = Column::new(name);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = order_col.percent_rank(&parts[..], descending);
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
+    } else {
+        Column::new(first.trim_start_matches('-').trim().to_string())
+    };
+    let windowed = order_col.percent_rank_over(&parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9290,29 +9290,20 @@ fn rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyC
             "rank_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
-    } else {
-        (first.clone(), false)
-    };
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
     // Window.orderBy(F.lit(1)) encodes the literal as a synthetic "<expr>" sort key.
     // PySpark accepts this (order is arbitrary but defined); we must not try to resolve
     // "<expr>" as an input column, which would fail with "not found: <expr>".
     // To mirror PySpark behavior, when the sort key is the synthetic "<expr>" name,
     // fall back to ordering by the first partition column (if any).
-    let order_col = if name == "<expr>" {
-        if let Some(first_part) = partition_by.first() {
-            Column::new(first_part.clone())
-        } else {
-            Column::new(name)
-        }
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
     } else {
-        Column::new(name)
+        Column::new(first.trim_start_matches('-').trim().to_string())
     };
-    let base = order_col.rank(descending);
-    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = base.over(&parts[..]);
+    let windowed = order_col.rank_over(&parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9323,16 +9314,15 @@ fn dense_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResu
             "dense_rank_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
     } else {
-        (first.clone(), false)
+        Column::new(first.trim_start_matches('-').trim().to_string())
     };
-    let order_col = Column::new(name);
-    let base = order_col.dense_rank(descending);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = base.over(&parts[..]);
+    let windowed = order_col.dense_rank_over(&parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9343,15 +9333,15 @@ fn cume_dist_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResul
             "cume_dist_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
     } else {
-        (first.clone(), false)
+        Column::new(first.trim_start_matches('-').trim().to_string())
     };
-    let order_col = Column::new(name);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = order_col.cume_dist(&parts[..], descending);
+    let windowed = order_col.cume_dist_over(&parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9362,15 +9352,15 @@ fn ntile_window(n: u32, partition_by: Vec<String>, order_by: Vec<String>) -> PyR
             "ntile_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
     } else {
-        (first.clone(), false)
+        Column::new(first.trim_start_matches('-').trim().to_string())
     };
-    let order_col = Column::new(name);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = order_col.ntile(n, &parts[..], descending);
+    let windowed = order_col.ntile_over(n, &parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
