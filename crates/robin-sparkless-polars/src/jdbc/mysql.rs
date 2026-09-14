@@ -19,7 +19,8 @@ fn normalize_mysql_url(url: &str) -> Result<String, EngineError> {
         Ok(format!("mysql://{}", u.trim_start_matches("mariadb://")))
     } else {
         Err(EngineError::User(format!(
-            "JDBC MySQL: URL must start with jdbc:mysql: or mysql:// (got '{url}')"
+            "JDBC MySQL: URL must start with jdbc:mysql: or mysql:// (got '{}')",
+            sql_ident::redact_jdbc_url(url)
         )))
     }
 }
@@ -29,8 +30,12 @@ fn connect(opts: &JdbcOptions) -> Result<Conn, EngineError> {
 
     // Prefer explicit user/password properties when provided; otherwise rely on URL.
     // The mysql crate supports `mysql://user:pass@host:port/db`.
-    let base = Opts::from_url(&url)
-        .map_err(|e| EngineError::User(format!("JDBC MySQL: invalid url: {e}")))?;
+    let base = Opts::from_url(&url).map_err(|e| {
+        EngineError::User(format!(
+            "JDBC MySQL: invalid url '{}': {e}",
+            sql_ident::redact_jdbc_url(&url)
+        ))
+    })?;
     let mut builder = OptsBuilder::from_opts(base);
     if let Some(user) = &opts.user {
         if !user.is_empty() {
@@ -43,7 +48,12 @@ fn connect(opts: &JdbcOptions) -> Result<Conn, EngineError> {
         }
     }
 
-    Conn::new(builder).map_err(|e| EngineError::Io(format!("JDBC MySQL: connect failed: {e}")))
+    Conn::new(builder).map_err(|e| {
+        EngineError::Io(format!(
+            "JDBC MySQL: connect failed for {}: {e}",
+            sql_ident::redact_jdbc_url(&url)
+        ))
+    })
 }
 
 pub(crate) fn write_jdbc_mysql(
@@ -245,10 +255,6 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
             let v: Option<Value> = row.get(idx);
             col_data.push(v);
         }
-    }
-
-    if columns_data.iter().all(|c| c.is_empty()) {
-        return Ok(PlDataFrame::empty());
     }
 
     let cfg = crate::udf_context::get_thread_runtime_config();

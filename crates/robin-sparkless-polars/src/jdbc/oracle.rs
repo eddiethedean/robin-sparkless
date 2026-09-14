@@ -98,10 +98,6 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
             .await
             .map_err(|e| EngineError::Sql(format!("JDBC read (Oracle): query failed: {e}")))?;
 
-        if result.rows.is_empty() || (result.rows.len() == 1 && result.rows[0].is_empty()) {
-            return Ok(PlDataFrame::empty());
-        }
-
         // Best-effort column naming: fall back to c0..cN (oracle-rs Row doesn't expose
         // column names directly in query results at the moment).
         let first = &result.rows[0];

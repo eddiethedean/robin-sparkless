@@ -222,10 +222,6 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
             }
         }
 
-        if columns_data.iter().all(|c| c.is_empty()) {
-            return Ok(PlDataFrame::empty());
-        }
-
         let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
         for (idx, name) in column_names.iter().enumerate() {
             series_vec.push(cells_to_series(name, &columns_data[idx]));

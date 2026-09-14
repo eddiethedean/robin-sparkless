@@ -31,6 +31,19 @@ fn normalize_db2_dsn(url: &str, opts: &JdbcOptions) -> Result<String, EngineErro
     ))
 }
 
+fn redact_db2_dsn(dsn: &str) -> String {
+    dsn.split(';')
+        .map(|part| {
+            if part.trim_start().to_ascii_lowercase().starts_with("pwd=") {
+                "PWD=***"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
     let dsn = normalize_db2_dsn(&opts.url, opts)?;
 
@@ -49,7 +62,12 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
         .map_err(|e| EngineError::Internal(format!("JDBC DB2: ODBC env: {e}")))?;
     let conn = env
         .connect_with_connection_string(&dsn, ConnectionOptions::default())
-        .map_err(|e| EngineError::Io(format!("JDBC DB2: connect failed: {e}")))?;
+        .map_err(|e| {
+            EngineError::Io(format!(
+                "JDBC DB2: connect failed for {}: {e}",
+                redact_db2_dsn(&dsn)
+            ))
+        })?;
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
@@ -111,10 +129,6 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
                 col.push(v);
             }
         }
-    }
-
-    if columns.iter().all(|c| c.is_empty()) {
-        return Ok(PlDataFrame::empty());
     }
 
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);

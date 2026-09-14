@@ -211,10 +211,6 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         }
     }
 
-    if columns_data.iter().all(|c| c.is_empty()) {
-        return Ok(PlDataFrame::empty());
-    }
-
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
     for (name, col_data) in column_names.iter().zip(columns_data.iter()) {
         let s = sqlite_values_to_series(name, col_data)?;
