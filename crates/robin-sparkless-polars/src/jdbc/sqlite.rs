@@ -244,11 +244,17 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
             } else {
                 None
             };
-            let source_name = source.map(|source| source.column.as_str()).or_else(|| {
-                // A wildcard expands directly to source columns. Computed aliases
-                // remain deliberately unmapped.
-                query_selects_wildcard.then_some(name.as_str())
-            })?;
+            let source_name = if opts.query.is_some() {
+                source.map(|source| source.column.as_str()).or_else(|| {
+                    // A wildcard expands directly to source columns. Computed aliases
+                    // remain deliberately unmapped.
+                    query_selects_wildcard.then_some(name.as_str())
+                })?
+            } else {
+                // A dbtable read exposes the table's columns directly. Unlike a
+                // query projection, its output name is always its source name.
+                name.as_str()
+            };
             let source_table = if opts.query.is_some() {
                 source
                     .and_then(|source| source.table.as_deref())
