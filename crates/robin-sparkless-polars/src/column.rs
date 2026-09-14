@@ -2916,9 +2916,9 @@ impl Column {
                 .clone()
                 .cast(DataType::Int64)
                 .sum()
-                .over(partition_exprs.to_vec());
+                .over(partition_exprs);
             let non_null_count = polars::prelude::len()
-                .over(partition_exprs.to_vec())
+                .over(partition_exprs)
                 .cast(DataType::Int64)
                 - null_count.clone();
             let null_rank = if descending {
@@ -2928,7 +2928,7 @@ impl Column {
                             .clone()
                             .cast(DataType::Int64)
                             .cum_sum(false)
-                            .over(partition_exprs.to_vec())
+                            .over(partition_exprs)
                 } else if method == RankMethod::Max {
                     non_null_count + null_count.clone()
                 } else if method == RankMethod::Dense {
@@ -2936,24 +2936,22 @@ impl Column {
                         .clone()
                         .cast(DataType::Int64)
                         .max()
-                        .over(partition_exprs.to_vec())
+                        .over(partition_exprs)
                         .fill_null(lit(0i64))
                         + lit(1i64)
                 } else {
                     non_null_count + lit(1i64)
                 }
+            } else if method == RankMethod::Ordinal {
+                nulls
+                    .clone()
+                    .cast(DataType::Int64)
+                    .cum_sum(false)
+                    .over(partition_exprs)
+            } else if method == RankMethod::Max {
+                null_count.clone()
             } else {
-                if method == RankMethod::Ordinal {
-                    nulls
-                        .clone()
-                        .cast(DataType::Int64)
-                        .cum_sum(false)
-                        .over(partition_exprs.to_vec())
-                } else if method == RankMethod::Max {
-                    null_count.clone()
-                } else {
-                    lit(1i64)
-                }
+                lit(1i64)
             };
             let offset = if descending {
                 lit(0i64)
@@ -2983,7 +2981,7 @@ impl Column {
                             },
                             None,
                         )
-                        .over(partition_exprs.to_vec())
+                        .over(partition_exprs)
                         .cast(DataType::Int64)
                         .fill_null(lit(if is_desc { i64::MAX } else { 0i64 }))
                 })
@@ -3085,14 +3083,21 @@ impl Column {
         } else {
             partition_by.iter().map(|s| col(*s)).collect()
         };
-        let row_num = self
-            .ordered_rank_expr(
+        // A literal ORDER BY makes every row a tie. Polars ranks a scalar literal
+        // as a single value, so explicitly broadcast the tied maximum rank.
+        let row_num = if order_by_encoded.len() == 1
+            && order_by_encoded[0].trim().trim_start_matches('-').trim() == "<expr>"
+        {
+            polars::prelude::len().over(partition_exprs.clone())
+        } else {
+            self.ordered_rank_expr(
                 order_by_encoded,
                 RankMethod::Max,
                 descending,
                 &partition_exprs,
             )
-            .over(partition_exprs.clone());
+            .over(partition_exprs.clone())
+        };
         let count_f = polars::prelude::len()
             .over(partition_exprs)
             .cast(DataType::Float64);
@@ -3116,14 +3121,40 @@ impl Column {
         } else {
             partition_by.iter().map(|s| col(*s)).collect()
         };
-        let rank_expr = self
-            .ordered_rank_expr(
+        // `ORDER BY lit(...)` has no meaningful value order, but NTILE still
+        // assigns sequential row positions in the partition.
+        let rank_expr = if order_by_encoded.len() == 1
+            && order_by_encoded[0].trim().trim_start_matches('-').trim() == "<expr>"
+        {
+            if partition_by.is_empty() {
+                // Materialize one non-null value for every frame row before
+                // counting. The ORDER BY literal itself is scalar.
+                lit(1u32)
+                    .repeat_by(polars::prelude::len())
+                    .explode(polars::prelude::ExplodeOptions {
+                        empty_as_null: true,
+                        keep_nulls: true,
+                    })
+                    .cum_count(false)
+            } else {
+                // Construct a per-row non-null value from a partition column, then
+                // count it within each partition. This remains valid for NULL
+                // partition keys as both branches produce a value.
+                polars::prelude::when(col(partition_by[0]).is_not_null())
+                    .then(lit(1u32))
+                    .otherwise(lit(1u32))
+                    .cum_count(false)
+                    .over(partition_exprs.clone())
+            }
+        } else {
+            self.ordered_rank_expr(
                 order_by_encoded,
                 RankMethod::Ordinal,
                 descending,
                 &partition_exprs,
             )
-            .over(partition_exprs.clone());
+            .over(partition_exprs.clone())
+        };
         let count_f = polars::prelude::len()
             .over(partition_exprs)
             .cast(DataType::Float64);
