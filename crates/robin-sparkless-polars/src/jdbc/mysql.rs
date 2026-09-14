@@ -298,6 +298,11 @@ fn mysql_values_to_series(
             ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => {
                 Series::new(name.into(), Vec::<Option<f64>>::new())
             }
+            ColumnType::MYSQL_TYPE_SHORT => Series::new(name.into(), Vec::<Option<i16>>::new()),
+            ColumnType::MYSQL_TYPE_BIT => Series::new(name.into(), Vec::<Option<Vec<u8>>>::new()),
+            ColumnType::MYSQL_TYPE_TIMESTAMP | ColumnType::MYSQL_TYPE_DATETIME => {
+                Series::new(name.into(), Vec::<Option<chrono::NaiveDateTime>>::new())
+            }
             _ => Series::new(name.into(), Vec::<Option<i64>>::new()),
         });
     }

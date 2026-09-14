@@ -2,6 +2,7 @@ use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
 use crate::jdbc::sql_ident::{self, JdbcDialect};
 
+use odbc_api::DataType as OdbcDataType;
 use odbc_api::{
     ConnectionOptions, Cursor, Environment, IntoParameter, ResultSetMetadata, buffers::TextRowSet,
 };
@@ -107,6 +108,10 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
             .map_err(|e| EngineError::Other(format!("JDBC DB2: col_name: {e}")))?;
         column_names.push(desc);
     }
+    let column_types: Vec<OdbcDataType> = (1..=ncols as u16)
+        .map(|idx| cursor.col_data_type(idx))
+        .collect::<Result<_, _>>()
+        .map_err(|e| EngineError::Other(format!("JDBC DB2: col_data_type: {e}")))?;
 
     const BATCH_SIZE: usize = 1024;
     let buffers = TextRowSet::for_cursor(BATCH_SIZE, &mut cursor, Some(4096))
@@ -132,15 +137,31 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
     }
 
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
-    for (name, col_data) in column_names.iter().zip(columns.iter()) {
-        series_vec.push(db2_values_to_series(name, col_data));
+    for (idx, (name, col_data)) in column_names.iter().zip(columns.iter()).enumerate() {
+        series_vec.push(db2_values_to_series(name, col_data, column_types[idx]));
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
         .map_err(|e| EngineError::Internal(format!("JDBC read (DB2): build DataFrame: {e}")))
 }
 
-fn db2_values_to_series(name: &str, values: &[Option<String>]) -> Series {
+fn db2_values_to_series(name: &str, values: &[Option<String>], data_type: OdbcDataType) -> Series {
+    if values.is_empty() {
+        return match data_type {
+            OdbcDataType::SmallInt | OdbcDataType::TinyInt => {
+                Series::new(name.into(), Vec::<Option<i16>>::new())
+            }
+            OdbcDataType::Integer | OdbcDataType::BigInt => {
+                Series::new(name.into(), Vec::<Option<i64>>::new())
+            }
+            OdbcDataType::Float { .. }
+            | OdbcDataType::Real
+            | OdbcDataType::Double
+            | OdbcDataType::Numeric { .. }
+            | OdbcDataType::Decimal { .. } => Series::new(name.into(), Vec::<Option<f64>>::new()),
+            _ => Series::new(name.into(), Vec::<Option<String>>::new()),
+        };
+    }
     let mut has_int = true;
     let mut has_float = false;
     for v in values.iter().filter_map(|v| v.as_ref()) {

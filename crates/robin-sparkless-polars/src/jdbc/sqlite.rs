@@ -190,6 +190,31 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         .map(|s| (*s).to_string())
         .collect();
     let ncols = column_names.len();
+    // SQLite does not expose declared types through rusqlite's Statement API. For
+    // table reads, obtain them from the schema so empty columns retain their type.
+    let table_types = if let Some(table) = opts.dbtable.as_deref() {
+        let mut type_stmt = conn
+            .prepare("SELECT name, type FROM pragma_table_info(?1)")
+            .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): schema query: {e}")))?;
+        type_stmt
+            .query_map([table], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): schema rows: {e}")))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): schema row: {e}")))?
+    } else {
+        Vec::new()
+    };
+    let declared_types: Vec<Option<String>> = column_names
+        .iter()
+        .map(|name| {
+            table_types
+                .iter()
+                .find(|(column, _)| column == name)
+                .map(|(_, dtype)| dtype.to_ascii_uppercase())
+        })
+        .collect();
     let mut columns_data: Vec<Vec<Option<Value>>> = (0..ncols).map(|_| Vec::new()).collect();
 
     let mut rows = stmt
@@ -212,8 +237,8 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     }
 
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
-    for (name, col_data) in column_names.iter().zip(columns_data.iter()) {
-        let s = sqlite_values_to_series(name, col_data)?;
+    for (idx, (name, col_data)) in column_names.iter().zip(columns_data.iter()).enumerate() {
+        let s = sqlite_values_to_series(name, col_data, declared_types[idx].as_deref())?;
         series_vec.push(s);
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
@@ -265,10 +290,21 @@ fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {
 fn sqlite_values_to_series(
     name: &str,
     values: &[Option<rusqlite::types::Value>],
+    declared_type: Option<&str>,
 ) -> Result<Series, EngineError> {
     use rusqlite::types::Value;
 
     if values.is_empty() {
+        let dtype = declared_type.unwrap_or_default();
+        if dtype.contains("CHAR") || dtype.contains("CLOB") || dtype.contains("TEXT") {
+            return Ok(Series::new(name.into(), Vec::<Option<String>>::new()));
+        }
+        if dtype.contains("REAL") || dtype.contains("FLOA") || dtype.contains("DOUB") {
+            return Ok(Series::new(name.into(), Vec::<Option<f64>>::new()));
+        }
+        if dtype.contains("BLOB") {
+            return Ok(Series::new(name.into(), Vec::<Option<Vec<u8>>>::new()));
+        }
         return Ok(Series::new(name.into(), Vec::<Option<i64>>::new()));
     }
     let mut has_int = false;

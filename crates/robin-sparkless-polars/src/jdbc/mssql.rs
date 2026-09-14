@@ -224,7 +224,7 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
 
         let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
         for (idx, name) in column_names.iter().enumerate() {
-            series_vec.push(cells_to_series(name, &columns_data[idx]));
+            series_vec.push(cells_to_series(name, &columns_data[idx], column_kinds[idx]));
         }
         let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
         PlDataFrame::new_infer_height(cols).map_err(|e| {
@@ -233,7 +233,17 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     })
 }
 
-fn cells_to_series(name: &str, cells: &[Cell]) -> Series {
+fn cells_to_series(name: &str, cells: &[Cell], kind: ColKind) -> Series {
+    if cells.is_empty() {
+        return match kind {
+            ColKind::I16 => Series::new(name.into(), Vec::<Option<i16>>::new()),
+            ColKind::I64 => Series::new(name.into(), Vec::<Option<i64>>::new()),
+            ColKind::F64 => Series::new(name.into(), Vec::<Option<f64>>::new()),
+            ColKind::F32 => Series::new(name.into(), Vec::<Option<f32>>::new()),
+            ColKind::Bool => Series::new(name.into(), Vec::<Option<bool>>::new()),
+            ColKind::Str => Series::new(name.into(), Vec::<Option<String>>::new()),
+        };
+    }
     if cells.iter().any(|c| matches!(c, Cell::Str(_))) {
         let vals: Vec<Option<String>> = cells
             .iter()
