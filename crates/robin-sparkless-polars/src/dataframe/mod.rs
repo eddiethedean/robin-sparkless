@@ -584,14 +584,22 @@ impl DataFrame {
             }
         }
 
-        /// Peel `Alias` wrappers (e.g. from `Column::into_expr()` on literals) so nested comparisons
-        /// under logical NOT / map UDFs still match column-vs-literal coercion (#1571).
-        fn peel_expr_alias(expr: &Expr) -> &Expr {
+        /// Peel aliases and casts around literals so comparisons recognize explicitly
+        /// typed literals as well as the historical bare-literal form. Casts around
+        /// non-literal expressions stay intact: their type conversion is observable.
+        fn peel_expr_wrappers(expr: &Expr) -> &Expr {
             let mut e = expr;
-            while let Expr::Alias(inner, _) = e {
-                e = inner.as_ref();
+            loop {
+                match e {
+                    Expr::Alias(inner, _) => e = inner.as_ref(),
+                    Expr::Cast { expr: inner, .. }
+                        if matches!(peel_expr_wrappers(inner.as_ref()), Expr::Literal(_)) =>
+                    {
+                        e = inner.as_ref()
+                    }
+                    _ => return e,
+                }
             }
-            e
         }
 
         // Apply root-level coercion first so the top-level filter condition (e.g. col("str_col") == lit(123))
@@ -626,15 +634,8 @@ impl DataFrame {
         }
         let expr = {
             if let Expr::BinaryExpr { left, op, right } = &expr_to_coerce {
-                // Unwrap one Alias so we recognize col/lit when wrapped (e.g. lit(123).into_expr() -> Alias(Literal)).
-                let left_inner: &Expr = match left.as_ref() {
-                    Expr::Alias(inner, _) => inner.as_ref(),
-                    _ => left,
-                };
-                let right_inner: &Expr = match right.as_ref() {
-                    Expr::Alias(inner, _) => inner.as_ref(),
-                    _ => right,
-                };
+                let left_inner = peel_expr_wrappers(left);
+                let right_inner = peel_expr_wrappers(right);
                 let is_comparison_op = matches!(
                     op,
                     Operator::Eq
@@ -882,8 +883,8 @@ impl DataFrame {
                     return Ok(Expr::BinaryExpr { left, op, right });
                 }
 
-                let left_peeled = peel_expr_alias(left.as_ref());
-                let right_peeled = peel_expr_alias(right.as_ref());
+                let left_peeled = peel_expr_wrappers(left.as_ref());
+                let right_peeled = peel_expr_wrappers(right.as_ref());
                 let left_is_col = matches!(left_peeled, Expr::Column(_));
                 let right_is_col = matches!(right_peeled, Expr::Column(_));
                 let left_is_lit = matches!(left_peeled, Expr::Literal(_));

@@ -34,13 +34,13 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         return Ok(lit(polars::prelude::NULL));
     }
     if let Some(n) = v.as_i64() {
-        return Ok(lit(n));
+        return Ok(lit(n).cast(DataType::Int64));
     }
     if let Some(n) = v.as_f64() {
-        return Ok(lit(n));
+        return Ok(lit(n).cast(DataType::Float64));
     }
     if let Some(b) = v.as_bool() {
-        return Ok(lit(b));
+        return Ok(lit(b).cast(DataType::Boolean));
     }
 
     let obj = v.as_object().ok_or_else(|| {
@@ -796,16 +796,16 @@ fn lit_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         return Ok(lit(NULL));
     }
     if let Some(n) = v.as_i64() {
-        return Ok(lit(n));
+        return Ok(lit(n).cast(DataType::Int64));
     }
     if let Some(n) = v.as_f64() {
-        return Ok(lit(n));
+        return Ok(lit(n).cast(DataType::Float64));
     }
     if let Some(b) = v.as_bool() {
-        return Ok(lit(b));
+        return Ok(lit(b).cast(DataType::Boolean));
     }
     if let Some(s) = v.as_str() {
-        return Ok(lit(s));
+        return Ok(lit(s).cast(DataType::String));
     }
     Err(PlanExprError("unsupported literal type".to_string()))
 }
