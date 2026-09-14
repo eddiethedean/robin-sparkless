@@ -3,16 +3,16 @@
 //! replace, cross_join, describe, subtract, intersect,
 //! sample, random_split, first, head, take, tail, is_empty, to_df.
 
-use super::{resolve_column_with_schema, DataFrame};
-use crate::column::expect_col;
+use super::{DataFrame, resolve_column_with_schema};
 use crate::column::RangeWindowAgg;
+use crate::column::expect_col;
 use crate::functions::SortOrder;
 use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public};
 use crate::udfs;
 use polars::prelude::{
-    col, len, lit, repeat, DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom,
-    PlSmallStr, PolarsError, SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions,
-    UniqueKeepStrategy,
+    DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
+    SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions, UniqueKeepStrategy, col, len, lit,
+    repeat,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -2521,11 +2521,9 @@ pub fn approx_quantile(
     use polars::prelude::{ChunkQuantile, QuantileMethod};
     if probabilities.is_empty() {
         return Ok(super::DataFrame::from_polars_with_options(
-            polars::prelude::DataFrame::new_infer_height(vec![Series::new(
-                "quantile".into(),
-                Vec::<f64>::new(),
-            )
-            .into()])?,
+            polars::prelude::DataFrame::new_infer_height(vec![
+                Series::new("quantile".into(), Vec::<f64>::new()).into(),
+            ])?,
             case_sensitive,
         ));
     }
@@ -2542,11 +2540,9 @@ pub fn approx_quantile(
         let q = ca.quantile(p, QuantileMethod::Linear)?;
         quantiles.push(q.unwrap_or(f64::NAN));
     }
-    let out_df = polars::prelude::DataFrame::new_infer_height(vec![Series::new(
-        "quantile".into(),
-        quantiles,
-    )
-    .into()])?;
+    let out_df = polars::prelude::DataFrame::new_infer_height(vec![
+        Series::new("quantile".into(), quantiles).into(),
+    ])?;
     Ok(super::DataFrame::from_polars_with_options(
         out_df,
         case_sensitive,
@@ -2654,8 +2650,8 @@ pub fn intersect_all(
 #[cfg(test)]
 mod tests {
     use super::{
-        distinct, drop, drop_specs, dropna, filter, first, head, limit, offset, order_by,
-        select_items, union, union_by_name, with_column, DropColumnSpec, SelectItem,
+        DropColumnSpec, SelectItem, distinct, drop, drop_specs, dropna, filter, first, head, limit,
+        offset, order_by, select_items, union, union_by_name, with_column,
     };
     use crate::column::Column;
     use crate::functions;
