@@ -3,7 +3,6 @@ use polars::prelude::{
     RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, as_struct, col, lit,
 };
 use polars_plan::dsl::AggExpr;
-use std::ops::Neg;
 
 /// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
 #[inline]
@@ -2827,63 +2826,41 @@ impl Column {
             };
             (name, descending)
         }
-        let all_asc = order_by_encoded.iter().all(|s| !s.trim().starts_with('-'));
-        // Row number = ordinal rank of the order key within partition. For multi-column mixed asc/desc, use struct with negated desc columns (#1241).
-        let rank_expr = if order_by_encoded.len() == 1 {
-            let (first_name, first_desc) = parse_order_key(order_by_encoded[0].trim());
-            // For descending, rank by -col so ascending rank gives high values rank 1 (#1241).
-            let order_col = col(first_name)
-                .cast(DataType::Float64)
-                .fill_null(lit(if first_desc {
-                    f64::NEG_INFINITY
-                } else {
-                    f64::INFINITY
-                }));
-            let rank_input = if first_desc {
-                order_col.neg()
+        if order_by_encoded.len() == 1 && parse_order_key(&order_by_encoded[0]).0 == "<expr>" {
+            // A literal ordering key ties every row. Materialize a non-null value per
+            // row and count it instead of attempting to resolve the synthetic marker.
+            let expr = if partition_by.is_empty() {
+                lit(1u32)
+                    .repeat_by(polars::prelude::len())
+                    .explode(ExplodeOptions {
+                        empty_as_null: true,
+                        keep_nulls: true,
+                    })
+                    .cum_count(false)
             } else {
-                order_col
+                polars::prelude::when(col(partition_by[0]).is_not_null())
+                    .then(lit(1u32))
+                    .otherwise(lit(1u32))
+                    .cum_count(false)
+                    .over(partition_exprs)
             };
-            let opts = RankOptions {
-                method: RankMethod::Ordinal,
-                descending: false,
-            };
-            rank_input.rank(opts, None)
-        } else if all_asc {
-            let struct_fields: Vec<Expr> = order_by_encoded
-                .iter()
-                .map(|s| col(parse_order_key(s).0))
-                .collect();
-            let opts = RankOptions {
-                method: RankMethod::Ordinal,
-                descending: false,
-            };
-            as_struct(struct_fields).rank(opts, None)
-        } else {
-            // Mixed asc/desc: rank by struct with desc columns negated so ascending struct sort gives correct order (#1241).
-            let struct_fields: Vec<Expr> = order_by_encoded
-                .iter()
-                .map(|s| {
-                    let (name, desc) = parse_order_key(s);
-                    if desc {
-                        (col(name)
-                            .cast(DataType::Float64)
-                            .fill_null(lit(f64::NEG_INFINITY)))
-                        .neg()
-                    } else {
-                        col(name)
-                            .cast(DataType::Float64)
-                            .fill_null(lit(f64::INFINITY))
-                    }
-                })
-                .collect();
-            let opts = RankOptions {
-                method: RankMethod::Ordinal,
-                descending: false,
-            };
-            as_struct(struct_fields).rank(opts, None)
-        };
-        let expr = rank_expr.over(partition_exprs);
+            return Ok(Self::from_expr(expr, None));
+        }
+
+        // Use the same datatype-aware, per-key ordinal ranking path as the other
+        // rank-like windows. The prior implementation negated Float64 casts for
+        // descending keys, which made string tiebreakers NULL and silently ignored
+        // them.
+        let first_name = parse_order_key(&order_by_encoded[0]).0;
+        let order_col = Self::new(first_name.to_string());
+        let expr = order_col
+            .ordered_rank_expr(
+                order_by_encoded,
+                RankMethod::Ordinal,
+                false,
+                &partition_exprs,
+            )
+            .over(partition_exprs);
         Ok(Self::from_expr(expr, None))
     }
 
