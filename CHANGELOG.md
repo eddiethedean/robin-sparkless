@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sessions and readers** — Restore outer session UDF/configuration context after stopping an inner session; unify catalog/view session resolution; bound schema JSON; prefer catalog names over Delta paths; validate later JSON rows when verifySchema is enabled (#1674).
 - **JDBC** — Redact MySQL/MariaDB and brace-escaped DB2 credentials; preserve metadata-compatible schemas for empty JDBC results, including SQLite projection provenance and Oracle output metadata; keep SQLite-specific tests optional (#1675).
 - **Python API** — Validate suffixed Row membership, accept Column or integer counts in repeat/add_months, and reject conflicting or incomplete join key arguments (#1676, #1677).
+- **Release quality gate** — Propagate nested failures from make check-full rather than printing a false success and skipping Rust tests.
+- **Dependency security** — Update compatible h2, rustls, event-listener, and memmap2 patches to address RUSTSEC-2026-0258, RUSTSEC-2026-0285, RUSTSEC-2026-0221, and RUSTSEC-2026-0186. The rustls advisory was published on the release-preparation date.
 
 ### Changed
 

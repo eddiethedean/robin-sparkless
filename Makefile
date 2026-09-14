@@ -17,19 +17,19 @@ build:
 	cargo build
 
 build-release:
-	cargo build --release
+	cargo build --locked --release
 
 # Build with all optional features (sql, delta) so feature-gated code is compiled and checked
 build-all-features:
-	cargo build --workspace --all-features
+	cargo build --locked --workspace --all-features
 
 # Run Rust tests only (default features)
 test-rust:
-	cargo test --workspace
+	cargo test --locked --workspace
 
 # Run Rust tests with all features (sql, delta) - used by check
 test-rust-all-features:
-	cargo test --workspace --all-features
+	cargo test --locked --workspace --all-features
 
 # Run all tests (Rust only)
 test: test-rust
@@ -59,8 +59,8 @@ check-crate:
 	$(MAKE) fmt-check
 	$(MAKE) audit
 	$(MAKE) deny
-	cargo clippy -p $(CRATE) --all-features --all-targets -- -D warnings
-	cargo test -p $(CRATE) --all-features
+	cargo clippy --locked -p $(CRATE) --all-features --all-targets -- -D warnings
+	cargo test --locked -p $(CRATE) --all-features
 	@echo "check-crate ($(CRATE)): format, clippy, audit, deny, tests passed"
 
 # Python lint and type-check: ruff format (check), ruff check, mypy. No Java/PySpark required.
@@ -76,7 +76,7 @@ lint-python:
 # With CRATE set, runs checks for that package only (faster when editing one crate).
 # Usage: make check-full  OR  make check-full CRATE=spark-sql-parser
 check-full:
-	@if [ -n "$(CRATE)" ]; then \
+	@set -e; if [ -n "$(CRATE)" ]; then \
 	  $(MAKE) check-crate CRATE=$(CRATE); \
 	  echo "check-full (crate $(CRATE)): format, clippy, audit, deny, tests"; \
 	else \
@@ -96,7 +96,7 @@ fmt-check:
 
 # Lint with Clippy. Use --workspace to match CI and include Python Rust code (sparkless-native).
 clippy:
-	cargo clippy --workspace --all-features --all-targets -- -D warnings
+	cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
 # Security: scan for known vulnerabilities
 audit:
@@ -156,4 +156,3 @@ bench-window:
 # Run everything: format, lint, security, deny, tests
 all: check
 	@echo "All updates and checks complete"
-
