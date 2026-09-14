@@ -33,16 +33,42 @@ fn normalize_db2_dsn(url: &str, opts: &JdbcOptions) -> Result<String, EngineErro
 }
 
 fn redact_db2_dsn(dsn: &str) -> String {
-    dsn.split(';')
-        .map(|part| {
-            if part.trim_start().to_ascii_lowercase().starts_with("pwd=") {
-                "PWD=***"
-            } else {
-                part
+    // DB2 accepts semicolons inside a braced value (`PWD={...}`), so a simple
+    // split would leak the suffix of a password in connection errors.
+    let mut redacted = String::with_capacity(dsn.len());
+    let bytes = dsn.as_bytes();
+    let mut start = 0;
+    while start < bytes.len() {
+        let mut end = start;
+        let mut in_braces = false;
+        while end < bytes.len() {
+            match bytes[end] {
+                b'{' => in_braces = true,
+                b'}' => in_braces = false,
+                b';' if !in_braces => break,
+                _ => {}
             }
-        })
-        .collect::<Vec<_>>()
-        .join(";")
+            end += 1;
+        }
+        let part = &dsn[start..end];
+        if let Some((key, _)) = part.split_once('=') {
+            if key.trim().eq_ignore_ascii_case("pwd") {
+                redacted.push_str(key);
+                redacted.push_str("=***");
+            } else {
+                redacted.push_str(part);
+            }
+        } else {
+            redacted.push_str(part);
+        }
+        if end < bytes.len() {
+            redacted.push(';');
+            start = end + 1;
+        } else {
+            break;
+        }
+    }
+    redacted
 }
 
 pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
@@ -161,6 +187,40 @@ fn db2_values_to_series(name: &str, values: &[Option<String>], data_type: OdbcDa
             | OdbcDataType::Decimal { .. } => Series::new(name.into(), Vec::<Option<f64>>::new()),
             _ => Series::new(name.into(), Vec::<Option<String>>::new()),
         };
+    }
+    match data_type {
+        OdbcDataType::SmallInt | OdbcDataType::TinyInt => {
+            return Series::new(
+                name.into(),
+                values
+                    .iter()
+                    .map(|v| v.as_ref().and_then(|s| s.parse::<i16>().ok()))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        OdbcDataType::Integer | OdbcDataType::BigInt => {
+            return Series::new(
+                name.into(),
+                values
+                    .iter()
+                    .map(|v| v.as_ref().and_then(|s| s.parse::<i64>().ok()))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        OdbcDataType::Float { .. }
+        | OdbcDataType::Real
+        | OdbcDataType::Double
+        | OdbcDataType::Numeric { .. }
+        | OdbcDataType::Decimal { .. } => {
+            return Series::new(
+                name.into(),
+                values
+                    .iter()
+                    .map(|v| v.as_ref().and_then(|s| s.parse::<f64>().ok()))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        _ => {}
     }
     let mut has_int = true;
     let mut has_float = false;

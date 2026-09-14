@@ -191,8 +191,13 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         .collect();
     let ncols = column_names.len();
     // SQLite does not expose declared types through rusqlite's Statement API. For
-    // table reads, obtain them from the schema so empty columns retain their type.
-    let table_types = if let Some(table) = opts.dbtable.as_deref() {
+    // table reads and simple SELECT queries, obtain them from the source table so
+    // empty columns retain their type.
+    let schema_table = opts
+        .dbtable
+        .as_deref()
+        .or_else(|| sqlite_query_source_table(opts.query.as_deref().unwrap_or_default()));
+    let table_types = if let Some(table) = schema_table {
         let mut type_stmt = conn
             .prepare("SELECT name, type FROM pragma_table_info(?1)")
             .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): schema query: {e}")))?;
@@ -244,6 +249,18 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
         .map_err(|e| EngineError::Internal(format!("JDBC read (SQLite): build DataFrame: {e}")))
+}
+
+/// Return the unqualified source table for a simple SELECT query. More complex
+/// queries intentionally fall back to SQLite's runtime value inference.
+fn sqlite_query_source_table(query: &str) -> Option<&str> {
+    let from = query.to_ascii_lowercase().find("from")?;
+    let rest = query[from + 4..].trim_start();
+    let table = rest.split_whitespace().next()?;
+    if table.starts_with('(') || table.contains(',') || table.contains(' ') {
+        return None;
+    }
+    Some(table.trim_matches(|c| c == '`' || c == '\"' || c == '[' || c == ']'))
 }
 
 fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {

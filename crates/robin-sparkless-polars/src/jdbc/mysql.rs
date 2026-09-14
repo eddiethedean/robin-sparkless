@@ -298,10 +298,21 @@ fn mysql_values_to_series(
             ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => {
                 Series::new(name.into(), Vec::<Option<f64>>::new())
             }
-            ColumnType::MYSQL_TYPE_SHORT => Series::new(name.into(), Vec::<Option<i16>>::new()),
-            ColumnType::MYSQL_TYPE_BIT => Series::new(name.into(), Vec::<Option<Vec<u8>>>::new()),
-            ColumnType::MYSQL_TYPE_TIMESTAMP | ColumnType::MYSQL_TYPE_DATETIME => {
+            ColumnType::MYSQL_TYPE_SHORT if use_v4 => {
+                Series::new(name.into(), Vec::<Option<i16>>::new())
+            }
+            ColumnType::MYSQL_TYPE_BIT if use_v4 => {
+                Series::new(name.into(), Vec::<Option<Vec<u8>>>::new())
+            }
+            ColumnType::MYSQL_TYPE_TIMESTAMP | ColumnType::MYSQL_TYPE_DATETIME if use_v4 => {
                 Series::new(name.into(), Vec::<Option<chrono::NaiveDateTime>>::new())
+            }
+            // Legacy mapping represents BIT and temporal values as strings, matching
+            // the populated-result path below.
+            ColumnType::MYSQL_TYPE_BIT
+            | ColumnType::MYSQL_TYPE_TIMESTAMP
+            | ColumnType::MYSQL_TYPE_DATETIME => {
+                Series::new(name.into(), Vec::<Option<String>>::new())
             }
             _ => Series::new(name.into(), Vec::<Option<i64>>::new()),
         });
