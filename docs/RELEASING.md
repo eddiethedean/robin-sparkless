@@ -16,10 +16,14 @@ So that local development and CI use the same toolchains and tools:
 
 ## Pre-release checklist (e.g. X.Y.Z)
 
+- [ ] **Integrated candidate** — Combine the intended, reviewed fixes on a `codex/release-X.Y.Z` branch and validate the combined result, not only individual PR heads. Preserve merge ancestry when merging the candidate so incorporated PRs are recognized as merged.
 - [ ] **Versions** — Root, robin-sparkless-core, and robin-sparkless-polars `Cargo.toml` have the same `version` (e.g. `4.x.y`). Root `Cargo.toml` path deps use matching `version = "4"` (or `"4.x"`). Python `python/pyproject.toml` and `python/Cargo.toml` version match if releasing Python.
+- [ ] **Runtime and lockfile** — Update `sparkless.__version__`, keep exact internal Rust dependency versions aligned, and commit Cargo.lock. Do not unintentionally upgrade external dependencies during a patch release. Keep the alloc Git workarounds pinned to their tested revision.
+- [ ] **Metadata gate** — Run `python3 scripts/check_release_versions.py --tag vX.Y.Z` and `python3 -m unittest discover -s scripts -p 'test_*release*.py'`. Use Python 3.11+ (or install tomli for Python 3.8–3.10). `spark-sql-parser` has its own version and need not change when its sources are unchanged.
 - [ ] **CHANGELOG** — Add `[X.Y.Z] - YYYY-MM-DD` section with Added/Changed/Fixed; move Unreleased items or leave Unreleased for next.
 - [ ] **README** — Rust install examples use the major version or the new release version (e.g. `robin-sparkless = "4"` or `robin-sparkless = "4.x.y"`).
 - [ ] **CI** — `make check-full` passes (format, clippy, audit, deny, Rust tests, Python lint). Push to a branch and confirm CI green.
+- [ ] **Release validation** — Push the `codex/release-X.Y.Z` branch to run the Release workflow's non-publishing Rust/Python checks, including Linux/macOS/Windows wheels and Python 3.8–3.12 tests. Confirm these checks pass before merging/tagging. Candidate pushes never run crates.io/PyPI publish jobs; only `v*` tag pushes can publish, after metadata and Rust/Python checks pass.
 - [ ] **Secrets** — GitHub repo has `CARGO_REGISTRY_TOKEN` (crates.io) and `PYPI_API_TOKEN` (PyPI) if publishing Python.
 - [ ] **Tag** — After merge to `main`, `git tag vX.Y.Z` and `git push origin vX.Y.Z`; release workflow runs automatically.
 

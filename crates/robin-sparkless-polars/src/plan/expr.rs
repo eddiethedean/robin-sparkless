@@ -34,13 +34,13 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         return Ok(lit(polars::prelude::NULL));
     }
     if let Some(n) = v.as_i64() {
-        return Ok(lit(n));
+        return Ok(lit(n).cast(DataType::Int64));
     }
     if let Some(n) = v.as_f64() {
-        return Ok(lit(n));
+        return Ok(lit(n).cast(DataType::Float64));
     }
     if let Some(b) = v.as_bool() {
-        return Ok(lit(b));
+        return Ok(lit(b).cast(DataType::Boolean));
     }
 
     let obj = v.as_object().ok_or_else(|| {
@@ -670,12 +670,14 @@ fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
     }
     let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
     let effective_order = window_order_cols(&order_cols, &part_cols);
-    let order_col = if effective_order.is_empty() {
+    let rn = if effective_order.is_empty() {
         crate::Column::from_expr(lit(1i32), None)
+            .row_number(false)
+            .over(&part_refs)
     } else {
-        crate::Column::new(effective_order[0].clone())
+        crate::Column::row_number_over(&part_refs, &effective_order)
+            .map_err(|e| PlanExprError(e.to_string()))?
     };
-    let rn = order_col.row_number(false).over(&part_refs);
     Ok(rn.into_expr())
 }
 
@@ -697,24 +699,42 @@ fn expr_from_window_fn(
     let effective_order = window_order_cols(&order_cols, &part_cols);
     let empty: &[Value] = &[];
     let args: &[Value] = args.map_or(empty, |v| v);
-    let order_col = if effective_order.is_empty() {
-        Column::from_expr(lit(1i32), None)
-    } else {
-        Column::new(effective_order[0].clone())
-    };
-
     match fn_name {
         "row_number" => expr_from_row_number_window(window_val),
         "rank" => {
-            let c = order_col.rank(false).over(&part_refs);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.trim_start_matches('-').to_string()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.rank_over(
+                &part_refs,
+                &effective_order,
+                effective_order.first().is_some_and(|s| s.starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         "dense_rank" => {
-            let c = order_col.dense_rank(false).over(&part_refs);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.trim_start_matches('-').to_string()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.dense_rank_over(
+                &part_refs,
+                &effective_order,
+                effective_order.first().is_some_and(|s| s.starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         "percent_rank" => {
-            let c = order_col.percent_rank(&part_refs, false);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.trim_start_matches('-').to_string()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.percent_rank_over(
+                &part_refs,
+                &effective_order,
+                effective_order.first().is_some_and(|s| s.starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         "ntile" => {
@@ -725,7 +745,16 @@ fn expr_from_window_fn(
                 .ok_or_else(|| {
                     PlanExprError("ntile window requires n (number of buckets)".to_string())
                 })? as u32;
-            let c = order_col.ntile(n.max(1), &part_refs, false);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.trim_start_matches('-').to_string()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.ntile_over(
+                n.max(1),
+                &part_refs,
+                &effective_order,
+                effective_order.first().is_some_and(|s| s.starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         "lag" => {
@@ -781,7 +810,17 @@ fn expr_from_window_fn(
             Ok(n_unique_expr.over(partition_exprs))
         }
         "cume_dist" => {
-            let c = order_col.cume_dist(&part_refs, false);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.trim_start_matches('-').trim().to_string()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.cume_dist_over(
+                &part_refs,
+                &effective_order,
+                effective_order
+                    .first()
+                    .is_some_and(|s| s.trim().starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         _ => Err(PlanExprError(format!(
@@ -796,16 +835,16 @@ fn lit_from_value(v: &Value) -> Result<Expr, PlanExprError> {
         return Ok(lit(NULL));
     }
     if let Some(n) = v.as_i64() {
-        return Ok(lit(n));
+        return Ok(lit(n).cast(DataType::Int64));
     }
     if let Some(n) = v.as_f64() {
-        return Ok(lit(n));
+        return Ok(lit(n).cast(DataType::Float64));
     }
     if let Some(b) = v.as_bool() {
-        return Ok(lit(b));
+        return Ok(lit(b).cast(DataType::Boolean));
     }
     if let Some(s) = v.as_str() {
-        return Ok(lit(s));
+        return Ok(lit(s).cast(DataType::String));
     }
     Err(PlanExprError("unsupported literal type".to_string()))
 }

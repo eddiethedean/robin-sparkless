@@ -30,7 +30,6 @@ wheels/
 # Rust (includes target/doc from cargo doc)
 target/
 .cargo-home/
-Cargo.lock
 **/*.rs.bk
 
 # IDE

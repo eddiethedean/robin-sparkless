@@ -144,6 +144,55 @@ pub fn apply_literal_string_repeat(column: Column, value: &str) -> PolarsResult<
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Repeat each string by a per-row integer count (PySpark repeat).
+pub fn apply_repeat_dynamic(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "repeat needs a string column and count column".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let value = std::mem::take(&mut columns[0]).take_materialized_series();
+    let counts = std::mem::take(&mut columns[1])
+        .take_materialized_series()
+        .cast(&DataType::Int64)?;
+    let values = value.str().map_err(|e| compute_err("repeat", e))?;
+    let counts = counts.i64().map_err(|e| compute_err("repeat", e))?;
+    let out_len =
+        if (values.is_empty() && counts.len() <= 1) || (counts.is_empty() && values.len() <= 1) {
+            0
+        } else {
+            values.len().max(counts.len())
+        };
+    if (values.len() != 1 && values.len() != out_len)
+        || (counts.len() != 1 && counts.len() != out_len)
+    {
+        return Err(PolarsError::ShapeMismatch(
+            "repeat: inputs must have equal lengths or be scalars".into(),
+        ));
+    }
+    let value_at = |idx: usize| values.get(if values.len() == 1 { 0 } else { idx });
+    let count_at = |idx: usize| counts.get(if counts.len() == 1 { 0 } else { idx });
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        (0..out_len).map(|idx| match (value_at(idx), count_at(idx)) {
+            (Some(s), Some(n)) if n > 0 => usize::try_from(n).ok().and_then(|count| {
+                // `String::repeat` rejects lengths above `isize::MAX`, which can be
+                // smaller than `usize::MAX` on 64-bit targets. Check that limit here
+                // so an untrusted count produces Spark's NULL rather than panicking.
+                if !s.is_empty() && count > isize::MAX as usize / s.len() {
+                    None
+                } else {
+                    Some(s.repeat(count))
+                }
+            }),
+            (Some(_), Some(_)) => Some(String::new()),
+            _ => None,
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// American Soundex code (4 chars). Matches PySpark soundex semantics.
 /// Null/empty: PySpark returns null for null, '' for empty string (Phase 7 / test_soundex_null_and_empty).
 fn soundex_one(s: &str) -> Cow<'_, str> {
@@ -2204,6 +2253,54 @@ pub fn apply_add_months(column: Column, n: i32) -> PolarsResult<Option<Column>> 
     Ok(Some(Column::new(name, out_series)))
 }
 
+/// Add a per-row integer number of months to a date column.
+pub fn apply_add_months_dynamic(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "add_months needs a date column and month-count column".into(),
+        ));
+    }
+    use chrono::Months;
+    let name = columns[0].field().into_owned().name;
+    let dates = std::mem::take(&mut columns[0]).take_materialized_series();
+    let counts = std::mem::take(&mut columns[1])
+        .take_materialized_series()
+        .cast(&DataType::Int64)?;
+    let days = date_series_to_days(&dates)?;
+    let counts = counts.i64().map_err(|e| compute_err("add_months", e))?;
+    let out_len =
+        if (days.is_empty() && counts.len() <= 1) || (counts.is_empty() && days.len() <= 1) {
+            0
+        } else {
+            days.len().max(counts.len())
+        };
+    if (days.len() != 1 && days.len() != out_len) || (counts.len() != 1 && counts.len() != out_len)
+    {
+        return Err(PolarsError::ShapeMismatch(
+            "add_months: inputs must have equal lengths or be scalars".into(),
+        ));
+    }
+    let count_at = |idx: usize| counts.get(if counts.len() == 1 { 0 } else { idx });
+    let day_at = |idx: usize| days.get(if days.len() == 1 { 0 } else { idx });
+    let out = (0..out_len).map(|idx| {
+        let opt_days = day_at(idx);
+        opt_days.and_then(|day| {
+            let months = count_at(idx)?;
+            let date = days_to_naive_date(day)?;
+            let next = if months >= 0 {
+                date.checked_add_months(Months::new(u32::try_from(months).ok()?))?
+            } else {
+                date.checked_sub_months(Months::new(u32::try_from(months.unsigned_abs()).ok()?))?
+            };
+            Some(naivedate_to_days(next))
+        })
+    });
+    let out = Int32Chunked::from_iter_options(name.as_str().into(), out)
+        .into_series()
+        .cast(&DataType::Date)?;
+    Ok(Some(Column::new(name, out)))
+}
+
 /// next_day(date_column, "Mon") - next occurrence of weekday (Sun=1..Sat=7; "Mon","Tue",...).
 fn parse_day_of_week(s: &str) -> Option<u32> {
     let s = s.trim().to_lowercase();
@@ -3628,6 +3725,31 @@ fn binary_series_f64(
     Ok((ca_a, ca_b))
 }
 
+fn broadcast_binary_inputs(a: Series, b: Series, ctx: &str) -> PolarsResult<(Series, Series)> {
+    // A scalar broadcasts to an empty input as an empty result. Treating the scalar
+    // as a one-row frame would incorrectly turn an empty DataFrame into one row.
+    if (a.is_empty() && b.len() <= 1) || (b.is_empty() && a.len() <= 1) {
+        return Ok((a.slice(0, 0), b.slice(0, 0)));
+    }
+    let len = a.len().max(b.len());
+    if (a.len() != 1 && a.len() != len) || (b.len() != 1 && b.len() != len) {
+        return Err(PolarsError::ShapeMismatch(
+            format!("{ctx}: inputs must have equal lengths or be scalars").into(),
+        ));
+    }
+    let a = if a.len() == 1 && len > 1 {
+        a.new_from_index(0, len)
+    } else {
+        a
+    };
+    let b = if b.len() == 1 && len > 1 {
+        b.new_from_index(0, len)
+    } else {
+        b
+    };
+    Ok((a, b))
+}
+
 /// Helper: convert any numeric-or-string series to Float64Chunked with PySpark-like semantics.
 ///
 /// - Numeric types are cast to Float64.
@@ -3807,9 +3929,51 @@ pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_add")?;
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Datetime(_, _), DataType::Duration(_))
+    ) {
+        return Ok(Some(Column::new(name, (&a_s + &b_s)?)));
+    }
+    if matches!(a_s.dtype(), DataType::Date)
+        && matches!(b_s.dtype(), DataType::Int32 | DataType::Int64)
+    {
+        let dates = a_s.cast(&DataType::Int32)?;
+        let days = b_s.cast(&DataType::Int32)?;
+        let (dates, days) = binary_series_i32(&dates, &days, "try_add")?;
+        let out = Int32Chunked::from_iter_options(
+            name.as_str().into(),
+            dates.into_iter().zip(&days).map(|(date, days)| {
+                date.and_then(|date| days.and_then(|days| date.checked_add(days)))
+            }),
+        )
+        .into_series()
+        .cast(&DataType::Date)?;
+        return Ok(Some(Column::new(name, out)));
+    }
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Float32, DataType::Float32)
+    ) {
+        let a = a_s.f32().map_err(|e| compute_err("try_add", e))?;
+        let b = b_s.f32().map_err(|e| compute_err("try_add", e))?;
+        let out = Float32Chunked::from_iter_options(
+            name.as_str().into(),
+            a.into_iter()
+                .zip(b)
+                .map(|(a, b)| a.zip(b).map(|(a, b)| a + b)),
+        )
+        .into_series();
+        return Ok(Some(Column::new(name, out)));
+    }
     let out = match (a_s.dtype(), b_s.dtype()) {
-        (DataType::Int64, DataType::Int64) => {
-            let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, "try_add")?;
+        (DataType::Int64, DataType::Int64)
+        | (DataType::Int32, DataType::Int64)
+        | (DataType::Int64, DataType::Int32) => {
+            let a64 = a_s.cast(&DataType::Int64)?;
+            let b64 = b_s.cast(&DataType::Int64)?;
+            let (ca_a, ca_b) = binary_series_i64(&a64, &b64, "try_add")?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -3852,9 +4016,51 @@ pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_subtract")?;
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Datetime(_, _), DataType::Duration(_))
+    ) {
+        return Ok(Some(Column::new(name, (&a_s - &b_s)?)));
+    }
+    if matches!(a_s.dtype(), DataType::Date)
+        && matches!(b_s.dtype(), DataType::Int32 | DataType::Int64)
+    {
+        let dates = a_s.cast(&DataType::Int32)?;
+        let days = b_s.cast(&DataType::Int32)?;
+        let (dates, days) = binary_series_i32(&dates, &days, "try_subtract")?;
+        let out = Int32Chunked::from_iter_options(
+            name.as_str().into(),
+            dates.into_iter().zip(&days).map(|(date, days)| {
+                date.and_then(|date| days.and_then(|days| date.checked_sub(days)))
+            }),
+        )
+        .into_series()
+        .cast(&DataType::Date)?;
+        return Ok(Some(Column::new(name, out)));
+    }
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Float32, DataType::Float32)
+    ) {
+        let a = a_s.f32().map_err(|e| compute_err("try_subtract", e))?;
+        let b = b_s.f32().map_err(|e| compute_err("try_subtract", e))?;
+        let out = Float32Chunked::from_iter_options(
+            name.as_str().into(),
+            a.into_iter()
+                .zip(b)
+                .map(|(a, b)| a.zip(b).map(|(a, b)| a - b)),
+        )
+        .into_series();
+        return Ok(Some(Column::new(name, out)));
+    }
     let out = match (a_s.dtype(), b_s.dtype()) {
-        (DataType::Int64, DataType::Int64) => {
-            let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, "try_subtract")?;
+        (DataType::Int64, DataType::Int64)
+        | (DataType::Int32, DataType::Int64)
+        | (DataType::Int64, DataType::Int32) => {
+            let a64 = a_s.cast(&DataType::Int64)?;
+            let b64 = b_s.cast(&DataType::Int64)?;
+            let (ca_a, ca_b) = binary_series_i64(&a64, &b64, "try_subtract")?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -3897,9 +4103,29 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_multiply")?;
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Float32, DataType::Float32)
+    ) {
+        let a = a_s.f32().map_err(|e| compute_err("try_multiply", e))?;
+        let b = b_s.f32().map_err(|e| compute_err("try_multiply", e))?;
+        let out = Float32Chunked::from_iter_options(
+            name.as_str().into(),
+            a.into_iter()
+                .zip(b)
+                .map(|(a, b)| a.zip(b).map(|(a, b)| a * b)),
+        )
+        .into_series();
+        return Ok(Some(Column::new(name, out)));
+    }
     let out = match (a_s.dtype(), b_s.dtype()) {
-        (DataType::Int64, DataType::Int64) => {
-            let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, "try_multiply")?;
+        (DataType::Int64, DataType::Int64)
+        | (DataType::Int32, DataType::Int64)
+        | (DataType::Int64, DataType::Int32) => {
+            let a64 = a_s.cast(&DataType::Int64)?;
+            let b64 = b_s.cast(&DataType::Int64)?;
+            let (ca_a, ca_b) = binary_series_i64(&a64, &b64, "try_multiply")?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -3974,21 +4200,39 @@ fn ansi_checked_i64_op(
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
-    let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, op_name)?;
-    let mut values = Vec::with_capacity(ca_a.len());
-    for (oa, ob) in ca_a.into_iter().zip(&ca_b) {
-        match (oa, ob) {
-            (Some(a), Some(b)) => match f(a, b) {
-                Some(v) => values.push(Some(v)),
-                None => {
-                    return Err(PolarsError::ComputeError(err_msg.to_string().into()));
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, op_name)?;
+    let out = if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Int32, DataType::Int32)
+    ) {
+        let (ca_a, ca_b) = binary_series_i32(&a_s, &b_s, op_name)?;
+        let mut values = Vec::with_capacity(ca_a.len());
+        for (oa, ob) in ca_a.into_iter().zip(&ca_b) {
+            match (oa, ob) {
+                (Some(a), Some(b)) => {
+                    match f(a as i64, b as i64).and_then(|v| i32::try_from(v).ok()) {
+                        Some(v) => values.push(Some(v)),
+                        None => return Err(PolarsError::ComputeError(err_msg.to_string().into())),
+                    }
                 }
-            },
-            _ => values.push(None),
+                _ => values.push(None),
+            }
         }
-    }
-    let out =
-        Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series();
+        Int32Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+    } else {
+        let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, op_name)?;
+        let mut values = Vec::with_capacity(ca_a.len());
+        for (oa, ob) in ca_a.into_iter().zip(&ca_b) {
+            match (oa, ob) {
+                (Some(a), Some(b)) => match f(a, b) {
+                    Some(v) => values.push(Some(v)),
+                    None => return Err(PolarsError::ComputeError(err_msg.to_string().into())),
+                },
+                _ => values.push(None),
+            }
+        }
+        Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+    };
     Ok(Some(Column::new(name, out)))
 }
 

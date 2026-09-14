@@ -554,26 +554,21 @@ impl DataFrame {
     /// PySpark (string values parsed to numbers where possible, invalid strings treated
     /// as null/non-matching).
     pub fn coerce_string_numeric_comparisons(&self, expr: Expr) -> Result<Expr, PolarsError> {
-        use polars::prelude::{DataType, LiteralValue, Operator};
+        use polars::prelude::{DataType, Operator};
         use std::sync::Arc;
 
-        fn is_numeric_literal(expr: &Expr) -> bool {
+        fn literal_dtype(expr: &Expr) -> Option<DataType> {
             match expr {
-                Expr::Literal(lv) => {
-                    let dt = lv.get_datatype();
-                    dt.is_numeric()
-                        || matches!(
-                            dt,
-                            DataType::Unknown(UnknownKind::Int(_))
-                                | DataType::Unknown(UnknownKind::Float)
-                        )
-                }
-                _ => false,
+                Expr::Literal(lv) => Some(lv.get_datatype()),
+                Expr::Alias(inner, _) => literal_dtype(inner.as_ref()),
+                Expr::Cast {
+                    expr: inner, dtype, ..
+                } => literal_dtype(inner.as_ref()).and_then(|_| dtype.as_literal().cloned()),
+                _ => None,
             }
         }
 
-        fn literal_dtype(lv: &LiteralValue) -> DataType {
-            let dt = lv.get_datatype();
+        fn comparison_literal_dtype(dt: DataType) -> DataType {
             if matches!(
                 dt,
                 DataType::Unknown(UnknownKind::Int(_)) | DataType::Unknown(UnknownKind::Float)
@@ -584,14 +579,27 @@ impl DataFrame {
             }
         }
 
-        /// Peel `Alias` wrappers (e.g. from `Column::into_expr()` on literals) so nested comparisons
-        /// under logical NOT / map UDFs still match column-vs-literal coercion (#1571).
-        fn peel_expr_alias(expr: &Expr) -> &Expr {
+        fn is_numeric_literal(expr: &Expr) -> bool {
+            literal_dtype(expr).is_some_and(|dt| {
+                dt.is_numeric()
+                    || matches!(
+                        dt,
+                        DataType::Unknown(UnknownKind::Int(_))
+                            | DataType::Unknown(UnknownKind::Float)
+                    )
+            })
+        }
+
+        /// Aliases do not alter evaluation.  Casts do, so keep them in the
+        /// comparison expression even when they annotate a literal.
+        fn peel_aliases(expr: &Expr) -> &Expr {
             let mut e = expr;
-            while let Expr::Alias(inner, _) = e {
-                e = inner.as_ref();
+            loop {
+                match e {
+                    Expr::Alias(inner, _) => e = inner.as_ref(),
+                    _ => return e,
+                }
             }
-            e
         }
 
         // Apply root-level coercion first so the top-level filter condition (e.g. col("str_col") == lit(123))
@@ -626,15 +634,8 @@ impl DataFrame {
         }
         let expr = {
             if let Expr::BinaryExpr { left, op, right } = &expr_to_coerce {
-                // Unwrap one Alias so we recognize col/lit when wrapped (e.g. lit(123).into_expr() -> Alias(Literal)).
-                let left_inner: &Expr = match left.as_ref() {
-                    Expr::Alias(inner, _) => inner.as_ref(),
-                    _ => left,
-                };
-                let right_inner: &Expr = match right.as_ref() {
-                    Expr::Alias(inner, _) => inner.as_ref(),
-                    _ => right,
-                };
+                let left_inner = peel_aliases(left);
+                let right_inner = peel_aliases(right);
                 let is_comparison_op = matches!(
                     op,
                     Operator::Eq
@@ -646,18 +647,10 @@ impl DataFrame {
                 );
                 let left_is_col = matches!(left_inner, Expr::Column(_));
                 let right_is_col = matches!(right_inner, Expr::Column(_));
-                let left_is_numeric_lit =
-                    matches!(left_inner, Expr::Literal(_)) && is_numeric_literal(left_inner);
-                let right_is_numeric_lit =
-                    matches!(right_inner, Expr::Literal(_)) && is_numeric_literal(right_inner);
-                let left_is_string_lit = matches!(
-                    left_inner,
-                    Expr::Literal(lv) if lv.get_datatype() == DataType::String
-                );
-                let right_is_string_lit = matches!(
-                    right_inner,
-                    Expr::Literal(lv) if lv.get_datatype() == DataType::String
-                );
+                let left_is_numeric_lit = is_numeric_literal(left_inner);
+                let right_is_numeric_lit = is_numeric_literal(right_inner);
+                let left_is_string_lit = literal_dtype(left_inner) == Some(DataType::String);
+                let right_is_string_lit = literal_dtype(right_inner) == Some(DataType::String);
                 let root_is_col_vs_numeric = is_comparison_op
                     && ((left_is_col && right_is_numeric_lit)
                         || (right_is_col && left_is_numeric_lit));
@@ -690,14 +683,13 @@ impl DataFrame {
                     // Use column dtype so numeric columns compare numerically; String (or unknown) uses coercion (try_to_number).
                     let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
                         let col_ty = self.get_column_dtype(col_name);
-                        let lit_ty = match right_inner {
-                            Expr::Literal(lv) => literal_dtype(lv),
-                            _ => DataType::Float64,
-                        };
+                        let lit_ty = literal_dtype(right_inner)
+                            .map(comparison_literal_dtype)
+                            .unwrap_or(DataType::Float64);
                         let left_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                         coerce_for_pyspark_comparison(
                             left_inner.clone(),
-                            right_inner.clone(),
+                            (**right).clone(),
                             &left_ty,
                             &lit_ty,
                             op,
@@ -705,13 +697,12 @@ impl DataFrame {
                         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
                     } else {
                         let col_ty = self.get_column_dtype(col_name);
-                        let lit_ty = match left_inner {
-                            Expr::Literal(lv) => literal_dtype(lv),
-                            _ => DataType::Float64,
-                        };
+                        let lit_ty = literal_dtype(left_inner)
+                            .map(comparison_literal_dtype)
+                            .unwrap_or(DataType::Float64);
                         let right_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                         coerce_for_pyspark_comparison(
-                            left_inner.clone(),
+                            (**left).clone(),
                             right_inner.clone(),
                             &lit_ty,
                             &right_ty,
@@ -882,23 +873,15 @@ impl DataFrame {
                     return Ok(Expr::BinaryExpr { left, op, right });
                 }
 
-                let left_peeled = peel_expr_alias(left.as_ref());
-                let right_peeled = peel_expr_alias(right.as_ref());
+                let left_peeled = peel_aliases(left.as_ref());
+                let right_peeled = peel_aliases(right.as_ref());
                 let left_is_col = matches!(left_peeled, Expr::Column(_));
                 let right_is_col = matches!(right_peeled, Expr::Column(_));
-                let left_is_lit = matches!(left_peeled, Expr::Literal(_));
-                let right_is_lit = matches!(right_peeled, Expr::Literal(_));
-                let left_is_string_lit = matches!(
-                    left_peeled,
-                    Expr::Literal(lv) if lv.get_datatype() == DataType::String
-                );
-                let right_is_string_lit = matches!(
-                    right_peeled,
-                    Expr::Literal(lv) if lv.get_datatype() == DataType::String
-                );
+                let left_is_string_lit = literal_dtype(left_peeled) == Some(DataType::String);
+                let right_is_string_lit = literal_dtype(right_peeled) == Some(DataType::String);
 
-                let left_is_numeric_lit = left_is_lit && is_numeric_literal(left_peeled);
-                let right_is_numeric_lit = right_is_lit && is_numeric_literal(right_peeled);
+                let left_is_numeric_lit = is_numeric_literal(left_peeled);
+                let right_is_numeric_lit = is_numeric_literal(right_peeled);
 
                 // Column-vs-numeric-literal: use column dtype; String (or unknown) -> try_to_number then compare (PySpark #235, #602).
                 let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
@@ -907,10 +890,9 @@ impl DataFrame {
                     } else {
                         None
                     };
-                    let lit_ty = match right_peeled {
-                        Expr::Literal(lv) => literal_dtype(lv),
-                        _ => DataType::Float64,
-                    };
+                    let lit_ty = literal_dtype(right_peeled)
+                        .map(comparison_literal_dtype)
+                        .unwrap_or(DataType::Float64);
                     let left_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                     coerce_for_pyspark_comparison(
                         (*left).clone(),
@@ -926,10 +908,9 @@ impl DataFrame {
                     } else {
                         None
                     };
-                    let lit_ty = match left_peeled {
-                        Expr::Literal(lv) => literal_dtype(lv),
-                        _ => DataType::Float64,
-                    };
+                    let lit_ty = literal_dtype(left_peeled)
+                        .map(comparison_literal_dtype)
+                        .unwrap_or(DataType::Float64);
                     let right_ty = col_ty.filter(is_numeric_public).unwrap_or(DataType::String);
                     coerce_for_pyspark_comparison(
                         (*left).clone(),

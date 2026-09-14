@@ -190,6 +190,92 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         .map(|s| (*s).to_string())
         .collect();
     let ncols = column_names.len();
+    // SQLite does not expose declared types through rusqlite's Statement API. For
+    // table reads and simple SELECT queries, obtain them from the source table so
+    // empty columns retain their type.
+    let schema_table = opts
+        .dbtable
+        .as_deref()
+        .or_else(|| sqlite_query_source_table(opts.query.as_deref().unwrap_or_default()))
+        .map(str::to_string);
+    let query = opts.query.as_deref().unwrap_or_default();
+    let query_sources = sqlite_query_column_sources(query);
+    let query_selects_wildcard = sqlite_query_selects_wildcard(query);
+    let wildcard_table = sqlite_query_wildcard_table(query);
+    let mut metadata_tables = Vec::new();
+    for table in schema_table
+        .iter()
+        .chain(
+            query_sources
+                .iter()
+                .filter_map(|source| source.table.as_ref()),
+        )
+        .chain(wildcard_table.iter())
+    {
+        if !metadata_tables
+            .iter()
+            .any(|known: &String| known.eq_ignore_ascii_case(table))
+        {
+            metadata_tables.push(table.clone());
+        }
+    }
+    let table_types = metadata_tables
+        .iter()
+        .map(|table| {
+            let mut type_stmt = conn.prepare("SELECT name, type FROM pragma_table_info(?1)")?;
+            let types = type_stmt
+                .query_map([table], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok::<_, rusqlite::Error>((table.clone(), types))
+        })
+        .collect::<Result<Vec<(String, Vec<(String, String)>)>, _>>()
+        .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): schema query: {e}")))?;
+    let declared_types: Vec<Option<String>> = column_names
+        .iter()
+        .map(|name| {
+            // Output names are not source names for expressions (`length(name) AS
+            // name`). For a query, use table metadata only when the lightweight
+            // parser positively identified a source column. A dbtable read maps
+            // output names directly to its columns.
+            let source = if opts.query.is_some() {
+                query_sources.iter().find(|source| source.output == *name)
+            } else {
+                None
+            };
+            let source_name = if opts.query.is_some() {
+                source.map(|source| source.column.as_str()).or_else(|| {
+                    // A wildcard expands directly to source columns. Computed aliases
+                    // remain deliberately unmapped.
+                    query_selects_wildcard.then_some(name.as_str())
+                })?
+            } else {
+                // A dbtable read exposes the table's columns directly. Unlike a
+                // query projection, its output name is always its source name.
+                name.as_str()
+            };
+            let source_table = if opts.query.is_some() {
+                source
+                    .and_then(|source| source.table.as_deref())
+                    .or(wildcard_table.as_deref())
+                    .or(schema_table.as_deref())
+            } else {
+                schema_table.as_deref()
+            };
+            source_table.and_then(|source_table| {
+                table_types
+                    .iter()
+                    .find(|(table, _)| table.eq_ignore_ascii_case(source_table))
+                    .and_then(|(_, types)| {
+                        types
+                            .iter()
+                            .find(|(column, _)| column == source_name)
+                            .map(|(_, dtype)| dtype.to_ascii_uppercase())
+                    })
+            })
+        })
+        .collect();
     let mut columns_data: Vec<Vec<Option<Value>>> = (0..ncols).map(|_| Vec::new()).collect();
 
     let mut rows = stmt
@@ -211,18 +297,157 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         }
     }
 
-    if columns_data.iter().all(|c| c.is_empty()) {
-        return Ok(PlDataFrame::empty());
-    }
-
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
-    for (name, col_data) in column_names.iter().zip(columns_data.iter()) {
-        let s = sqlite_values_to_series(name, col_data)?;
+    for (idx, (name, col_data)) in column_names.iter().zip(columns_data.iter()).enumerate() {
+        let s = sqlite_values_to_series(name, col_data, declared_types[idx].as_deref())?;
         series_vec.push(s);
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
         .map_err(|e| EngineError::Internal(format!("JDBC read (SQLite): build DataFrame: {e}")))
+}
+
+/// Return the source table for a simple SELECT query.  A qualified projection
+/// (`alias.column` or `alias.*`) takes precedence over the first FROM table so
+/// empty-result metadata follows the selected relation.
+fn sqlite_query_source_table(query: &str) -> Option<&str> {
+    let lower = query.to_ascii_lowercase();
+    let select = lower.find("select")?;
+    let from = lower[select + 6..].find("from")? + select + 6;
+    let projection = query[select + 6..from].split(',').next()?.trim();
+    let source = projection.split_whitespace().next()?;
+    if let Some((alias, _)) = source.split_once('.') {
+        if let Some(table) = sqlite_query_table_for_alias(query, alias) {
+            return Some(table);
+        }
+    }
+    let rest = query[from + 4..].trim_start();
+    let table = rest.split_whitespace().next()?;
+    if table.starts_with('(') || table.contains(',') || table.contains(' ') {
+        return None;
+    }
+    Some(table.trim_matches(|c| c == '`' || c == '\"' || c == '[' || c == ']'))
+}
+
+/// Resolve a FROM/JOIN alias without attempting to parse SQL expressions.  The
+/// metadata fallback only needs relation names, and intentionally declines
+/// subqueries and other non-table relation forms.
+fn sqlite_query_table_for_alias<'a>(query: &'a str, alias: &str) -> Option<&'a str> {
+    let words: Vec<&str> = query.split_whitespace().collect();
+    for (index, word) in words.iter().enumerate() {
+        if !(word.eq_ignore_ascii_case("from") || word.eq_ignore_ascii_case("join")) {
+            continue;
+        }
+        let table = *words.get(index + 1)?;
+        if table.starts_with('(') {
+            continue;
+        }
+        let table_name = table.trim_matches(|c| c == '`' || c == '\"' || c == '[' || c == ']');
+        if table_name.eq_ignore_ascii_case(alias) {
+            return Some(table_name);
+        }
+        let alias_index = if words
+            .get(index + 2)
+            .is_some_and(|word| word.eq_ignore_ascii_case("as"))
+        {
+            index + 3
+        } else {
+            index + 2
+        };
+        let candidate = words
+            .get(alias_index)
+            .copied()
+            .unwrap_or(table)
+            .trim_matches(|c: char| c == '`' || c == '\"' || c == '[' || c == ']' || c == ';');
+        if candidate.eq_ignore_ascii_case(alias) {
+            return Some(table_name);
+        }
+    }
+    None
+}
+
+struct SqliteQueryColumnSource {
+    output: String,
+    table: Option<String>,
+    column: String,
+}
+
+/// Return output/source-table/source-column triples for simple SELECT column
+/// references. Keeping the qualifier is essential when a query selects columns
+/// with the same name from multiple relations.
+fn sqlite_query_column_sources(query: &str) -> Vec<SqliteQueryColumnSource> {
+    let lower = query.to_ascii_lowercase();
+    let Some(select) = lower.find("select") else {
+        return Vec::new();
+    };
+    let Some(from) = lower[select + 6..].find("from") else {
+        return Vec::new();
+    };
+    let list = &query[select + 6..select + 6 + from];
+    list.split(',')
+        .filter_map(|item| {
+            let words: Vec<&str> = item.split_whitespace().collect();
+            let source = words
+                .first()?
+                .trim_matches(|c| c == '`' || c == '"' || c == '[' || c == ']');
+            if source == "*" || source.contains('(') {
+                return None;
+            }
+            let output = if words.len() >= 3 && words[words.len() - 2].eq_ignore_ascii_case("as") {
+                words[words.len() - 1]
+            } else if words.len() == 2 {
+                words[1]
+            } else {
+                source.rsplit('.').next().unwrap_or(source)
+            };
+            let (qualifier, column) = source
+                .rsplit_once('.')
+                .map_or((None, source), |(qualifier, column)| {
+                    (Some(qualifier), column)
+                });
+            Some(SqliteQueryColumnSource {
+                output: output
+                    .trim_matches(|c| c == '`' || c == '"' || c == '[' || c == ']')
+                    .to_string(),
+                table: qualifier
+                    .and_then(|qualifier| sqlite_query_table_for_alias(query, qualifier))
+                    .map(str::to_string),
+                column: column.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// For a qualified wildcard, return the relation which supplied its output
+/// columns. Unqualified stars retain the simple-query fallback behavior.
+fn sqlite_query_wildcard_table(query: &str) -> Option<String> {
+    let lower = query.to_ascii_lowercase();
+    let select = lower.find("select")?;
+    let from = lower[select + 6..].find("from")? + select + 6;
+    query[select + 6..from]
+        .split(',')
+        .map(str::trim)
+        .find_map(|item| {
+            let qualifier = item.strip_suffix(".*")?;
+            sqlite_query_table_for_alias(query, qualifier).map(str::to_string)
+        })
+}
+
+/// Whether a simple SELECT projection contains `*` or `table.*`. This is kept
+/// separate from source-name parsing because a wildcard expands to multiple
+/// output columns whose names are only available after statement preparation.
+fn sqlite_query_selects_wildcard(query: &str) -> bool {
+    let lower = query.to_ascii_lowercase();
+    let Some(select) = lower.find("select") else {
+        return false;
+    };
+    let Some(from) = lower[select + 6..].find("from") else {
+        return false;
+    };
+    query[select + 6..select + 6 + from]
+        .split(',')
+        .map(str::trim)
+        .any(|item| item == "*" || item.ends_with(".*"))
 }
 
 fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {
@@ -269,10 +494,21 @@ fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {
 fn sqlite_values_to_series(
     name: &str,
     values: &[Option<rusqlite::types::Value>],
+    declared_type: Option<&str>,
 ) -> Result<Series, EngineError> {
     use rusqlite::types::Value;
 
     if values.is_empty() {
+        let dtype = declared_type.unwrap_or_default();
+        if dtype.contains("CHAR") || dtype.contains("CLOB") || dtype.contains("TEXT") {
+            return Ok(Series::new(name.into(), Vec::<Option<String>>::new()));
+        }
+        if dtype.contains("REAL") || dtype.contains("FLOA") || dtype.contains("DOUB") {
+            return Ok(Series::new(name.into(), Vec::<Option<f64>>::new()));
+        }
+        if dtype.contains("BLOB") {
+            return Ok(Series::new(name.into(), Vec::<Option<Vec<u8>>>::new()));
+        }
         return Ok(Series::new(name.into(), Vec::<Option<i64>>::new()));
     }
     let mut has_int = false;

@@ -1,9 +1,9 @@
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions,
-    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, col, lit,
+    DataType, Expr, Field, LiteralValue, PolarsError, PolarsResult, RankMethod, RankOptions,
+    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, as_struct, col, lit,
 };
 use polars_plan::dsl::AggExpr;
-use std::ops::Neg;
+use polars_plan::prelude::DynLiteralValue;
 
 /// Unwrap UDF result to Column (map() expects Result<Column>, UDFs return Result<Option<Column>>).
 #[inline]
@@ -76,6 +76,23 @@ pub struct FirstLastValue {
     pub value_expr: Expr,
     /// false = first in order, true = last in order.
     pub is_last: bool,
+}
+
+/// Parse the encoded window order keys and their independent sort directions.
+fn window_order_exprs(order_by_encoded: &[String]) -> (Vec<Expr>, Vec<bool>) {
+    let mut names = Vec::with_capacity(order_by_encoded.len());
+    let mut descending = Vec::with_capacity(order_by_encoded.len());
+    for encoded in order_by_encoded {
+        let encoded = encoded.trim();
+        if let Some(name) = encoded.strip_prefix('-') {
+            names.push(name.trim());
+            descending.push(true);
+        } else {
+            names.push(encoded);
+            descending.push(false);
+        }
+    }
+    (names.iter().map(|name| col(*name)).collect(), descending)
 }
 
 /// Value-based window frame (RANGE BETWEEN). Evaluated eagerly in with_column.
@@ -280,11 +297,66 @@ impl Column {
 
     /// If this column is a literal expression, return its value as JSON string for Python UDF executor (literal args).
     pub fn literal_as_json_string(&self) -> Option<String> {
-        match &self.expr {
-            Expr::Literal(lv) => crate::dataframe::literal_value_to_serde_value(lv)
-                .and_then(|v| serde_json::to_string(&v).ok()),
-            _ => None,
+        self.value_preserving_literal_value().and_then(|lv| {
+            crate::dataframe::literal_value_to_serde_value(lv)
+                .and_then(|v| serde_json::to_string(&v).ok())
+        })
+    }
+
+    /// Return a literal through aliases and casts which do not alter its value.
+    /// A value-converting cast must remain an executable expression: serializing
+    /// the raw literal for a Python UDF would otherwise bypass that conversion.
+    pub(crate) fn value_preserving_literal_value(&self) -> Option<&LiteralValue> {
+        fn find_value_preserving_literal(expr: &Expr) -> Option<&LiteralValue> {
+            match expr {
+                Expr::Literal(value) => Some(value),
+                Expr::Alias(inner, _) => find_value_preserving_literal(inner.as_ref()),
+                Expr::Cast {
+                    expr: inner, dtype, ..
+                } => {
+                    let value = find_value_preserving_literal(inner.as_ref())?;
+                    let target = dtype.as_literal()?;
+                    literal_cast_preserves_value(value, target).then_some(value)
+                }
+                _ => None,
+            }
         }
+
+        find_value_preserving_literal(&self.expr)
+    }
+
+    /// Whether this expression is made only from a scalar literal and wrappers
+    /// that can be evaluated without input columns. Series and range literals
+    /// can expand to multiple rows and must remain regular expressions for
+    /// aggregations.
+    pub(crate) fn is_scalar_literal_expression(&self) -> bool {
+        fn is_scalar_literal(expr: &Expr) -> bool {
+            match expr {
+                Expr::Literal(LiteralValue::Dyn(_) | LiteralValue::Scalar(_)) => true,
+                Expr::Alias(inner, _) => is_scalar_literal(inner.as_ref()),
+                Expr::Cast { expr: inner, .. } => is_scalar_literal(inner.as_ref()),
+                _ => false,
+            }
+        }
+
+        is_scalar_literal(&self.expr)
+    }
+
+    /// Return the observable type of a literal expression.  A literal Cast has
+    /// the cast target type, rather than the raw literal's inferred type.
+    pub(crate) fn literal_dtype(&self) -> Option<DataType> {
+        fn find_dtype(expr: &Expr) -> Option<DataType> {
+            match expr {
+                Expr::Literal(value) => Some(value.get_datatype()),
+                Expr::Alias(inner, _) => find_dtype(inner.as_ref()),
+                Expr::Cast {
+                    expr: inner, dtype, ..
+                } => find_dtype(inner.as_ref()).and_then(|_| dtype.as_literal().cloned()),
+                _ => None,
+            }
+        }
+
+        find_dtype(&self.expr)
     }
 
     /// If this column is a Python UDF call, return (udf_name, arg_names, arg_literal_json_strings).
@@ -1346,6 +1418,19 @@ impl Column {
         )
     }
 
+    /// Repeat a string column by a per-row integer count.
+    pub fn repeat_dynamic(&self, n: &Column) -> Column {
+        let args = [n.expr().clone()];
+        Self::from_expr(
+            self.expr().clone().map_many(
+                |cols| expect_col(crate::udfs::apply_repeat_dynamic(cols)),
+                &args,
+                |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::String)),
+            ),
+            None,
+        )
+    }
+
     /// Reverse string (PySpark reverse).
     pub fn reverse(&self) -> Column {
         Self::from_expr(self.expr().clone().str().reverse(), None)
@@ -2396,6 +2481,17 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
+    /// Add a per-row integer month count to a date column.
+    pub fn add_months_dynamic(&self, n: &Column) -> Column {
+        let args = [n.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            |cols| expect_col(crate::udfs::apply_add_months_dynamic(cols)),
+            &args,
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Date)),
+        );
+        Self::from_expr(expr, None)
+    }
+
     /// Number of months between end and start dates, as fractional (PySpark months_between).
     /// When round_off is true, rounds to 8 decimal places (PySpark default).
     pub fn months_between(&self, start: &Column, round_off: bool) -> Column {
@@ -2697,31 +2793,47 @@ impl Column {
         let expr = if order_by_encoded.is_empty() {
             base_expr.over(partition_exprs)
         } else {
-            // Build order exprs and sort options. Polars over_with_options uses (order_exprs, sort_options).
-            // Use column as-is (no String cast) so numeric columns sort 80,90,100 (issue #1052).
-            let mut order_exprs: Vec<Expr> = Vec::with_capacity(order_by_encoded.len());
-            let mut descending_multi: Vec<bool> = Vec::with_capacity(order_by_encoded.len());
-            for s in order_by_encoded.iter() {
-                let s = s.trim();
-                let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
-                    (stripped.trim(), true)
-                } else {
-                    (s, false)
+            let (order_exprs, descending) = window_order_exprs(order_by_encoded);
+            if order_exprs.len() > 1 {
+                // Window ordering must be applied *before* a cumulative aggregate is
+                // evaluated. Encode each key as an ordinal so Polars receives one
+                // lexicographic ascending sort key while preserving each key's own
+                // direction and Spark's null order (ASC NULLS FIRST, DESC NULLS LAST).
+                let rank_keys = order_by_encoded
+                    .iter()
+                    .zip(descending.iter())
+                    .map(|(encoded, is_desc)| {
+                        let name = encoded.trim().trim_start_matches('-').trim();
+                        col(name)
+                            .rank(
+                                RankOptions {
+                                    method: RankMethod::Dense,
+                                    descending: *is_desc,
+                                },
+                                None,
+                            )
+                            .over(partition_exprs.clone())
+                            .cast(DataType::Int64)
+                            .fill_null(lit(if *is_desc { i64::MAX } else { 0i64 }))
+                    })
+                    .collect::<Vec<_>>();
+                base_expr.over_with_options(
+                    Some(partition_exprs),
+                    Some((vec![as_struct(rank_keys)], SortOptions::default())),
+                    WindowMapping::default(),
+                )?
+            } else {
+                let default_opts = SortOptions {
+                    descending: descending.first().copied().unwrap_or(false),
+                    nulls_last: descending.first().copied().unwrap_or(false),
+                    ..Default::default()
                 };
-                order_exprs.push(col(name));
-                descending_multi.push(descending);
+                base_expr.over_with_options(
+                    Some(partition_exprs),
+                    Some((order_exprs, default_opts)),
+                    WindowMapping::default(),
+                )?
             }
-            // Single sort_options for the window: use first column's direction. Polars may use this for the whole order.
-            let default_opts = SortOptions {
-                descending: descending_multi.first().copied().unwrap_or(false),
-                nulls_last: descending_multi.first().copied().unwrap_or(false),
-                ..Default::default()
-            };
-            base_expr.over_with_options(
-                Some(partition_exprs),
-                Some((order_exprs, default_opts)),
-                WindowMapping::default(),
-            )?
         };
         Ok(Self::from_expr(expr, None))
     }
@@ -2794,64 +2906,335 @@ impl Column {
             };
             (name, descending)
         }
-        let all_asc = order_by_encoded.iter().all(|s| !s.trim().starts_with('-'));
-        // Row number = ordinal rank of the order key within partition. For multi-column mixed asc/desc, use struct with negated desc columns (#1241).
-        let rank_expr = if order_by_encoded.len() == 1 {
-            let (first_name, first_desc) = parse_order_key(order_by_encoded[0].trim());
-            // For descending, rank by -col so ascending rank gives high values rank 1 (#1241).
-            let order_col = col(first_name)
-                .cast(DataType::Float64)
-                .fill_null(lit(if first_desc {
-                    f64::NEG_INFINITY
-                } else {
-                    f64::INFINITY
-                }));
-            let rank_input = if first_desc {
-                order_col.neg()
+        if order_by_encoded.len() == 1 && parse_order_key(&order_by_encoded[0]).0 == "<expr>" {
+            // A literal ordering key ties every row. Materialize a non-null value per
+            // row and count it instead of attempting to resolve the synthetic marker.
+            let expr = if partition_by.is_empty() {
+                lit(1u32)
+                    .repeat_by(polars::prelude::len())
+                    .explode(ExplodeOptions {
+                        // An empty input must stay empty.  Turning an empty list into
+                        // a null here fabricates one row for a zero-row relation.
+                        empty_as_null: false,
+                        keep_nulls: true,
+                    })
+                    .cum_count(false)
             } else {
-                order_col
+                polars::prelude::when(col(partition_by[0]).is_not_null())
+                    .then(lit(1u32))
+                    .otherwise(lit(1u32))
+                    .cum_count(false)
+                    .over(partition_exprs)
             };
-            let opts = RankOptions {
-                method: RankMethod::Ordinal,
-                descending: false,
+            return Ok(Self::from_expr(expr, None));
+        }
+
+        // Use the same datatype-aware, per-key ordinal ranking path as the other
+        // rank-like windows. The prior implementation negated Float64 casts for
+        // descending keys, which made string tiebreakers NULL and silently ignored
+        // them.
+        let (first_name, first_descending) = parse_order_key(&order_by_encoded[0]);
+        let order_col = Self::new(first_name.to_string());
+        let expr = order_col
+            .ordered_rank_expr(
+                order_by_encoded,
+                RankMethod::Ordinal,
+                first_descending,
+                &partition_exprs,
+            )
+            .over(partition_exprs);
+        Ok(Self::from_expr(expr, None))
+    }
+
+    /// Build the order expression used by rank-like window functions. Polars only accepts one
+    /// sort direction for a window, so mixed directions are represented by a lexicographically
+    /// sortable struct with descending numeric keys negated.
+    fn ordered_rank_expr(
+        &self,
+        order_by_encoded: &[String],
+        method: RankMethod,
+        descending: bool,
+        partition_exprs: &[Expr],
+    ) -> Expr {
+        fn parse_order_key(s: &str) -> (&str, bool) {
+            let s = s.trim();
+            if let Some(stripped) = s.strip_prefix('-') {
+                (stripped.trim(), true)
+            } else {
+                (s, false)
+            }
+        }
+
+        if order_by_encoded.len() <= 1 {
+            let ranked = self
+                .expr()
+                .clone()
+                .rank(RankOptions { method, descending }, None);
+            let nulls = self.expr().clone().is_null();
+            let null_count = nulls
+                .clone()
+                .cast(DataType::Int64)
+                .sum()
+                .over(partition_exprs);
+            let non_null_count = polars::prelude::len()
+                .over(partition_exprs)
+                .cast(DataType::Int64)
+                - null_count.clone();
+            let null_rank = if descending {
+                if method == RankMethod::Ordinal {
+                    non_null_count
+                        + nulls
+                            .clone()
+                            .cast(DataType::Int64)
+                            .cum_sum(false)
+                            .over(partition_exprs)
+                } else if method == RankMethod::Max {
+                    non_null_count + null_count.clone()
+                } else if method == RankMethod::Dense {
+                    ranked
+                        .clone()
+                        .cast(DataType::Int64)
+                        .max()
+                        .over(partition_exprs)
+                        .fill_null(lit(0i64))
+                        + lit(1i64)
+                } else {
+                    non_null_count + lit(1i64)
+                }
+            } else if method == RankMethod::Ordinal {
+                nulls
+                    .clone()
+                    .cast(DataType::Int64)
+                    .cum_sum(false)
+                    .over(partition_exprs)
+            } else if method == RankMethod::Max {
+                null_count.clone()
+            } else {
+                lit(1i64)
             };
-            rank_input.rank(opts, None)
-        } else if all_asc {
-            let struct_fields: Vec<Expr> = order_by_encoded
-                .iter()
-                .map(|s| col(parse_order_key(s).0))
-                .collect();
-            let opts = RankOptions {
-                method: RankMethod::Ordinal,
-                descending: false,
+            let offset = if descending {
+                lit(0i64)
+            } else if method == RankMethod::Dense {
+                polars::prelude::when(null_count.clone().gt(lit(0i64)))
+                    .then(lit(1i64))
+                    .otherwise(lit(0i64))
+            } else {
+                null_count
             };
-            as_struct(struct_fields).rank(opts, None)
-        } else {
-            // Mixed asc/desc: rank by struct with desc columns negated so ascending struct sort gives correct order (#1241).
-            let struct_fields: Vec<Expr> = order_by_encoded
+            return polars::prelude::when(nulls)
+                .then(null_rank)
+                .otherwise(ranked.cast(DataType::Int64) + offset)
+                .cast(DataType::UInt32);
+        }
+
+        let rank_input = polars::prelude::as_struct(
+            order_by_encoded
                 .iter()
                 .map(|s| {
-                    let (name, desc) = parse_order_key(s);
-                    if desc {
-                        (col(name)
-                            .cast(DataType::Float64)
-                            .fill_null(lit(f64::NEG_INFINITY)))
-                        .neg()
-                    } else {
-                        col(name)
-                            .cast(DataType::Float64)
-                            .fill_null(lit(f64::INFINITY))
-                    }
+                    let (name, is_desc) = parse_order_key(s);
+                    col(name)
+                        .rank(
+                            RankOptions {
+                                method: RankMethod::Dense,
+                                descending: is_desc,
+                            },
+                            None,
+                        )
+                        .over(partition_exprs)
+                        .cast(DataType::Int64)
+                        .fill_null(lit(if is_desc { i64::MAX } else { 0i64 }))
                 })
-                .collect();
-            let opts = RankOptions {
-                method: RankMethod::Ordinal,
+                .collect::<Vec<_>>(),
+        );
+        rank_input.rank(
+            RankOptions {
+                method,
                 descending: false,
-            };
-            as_struct(struct_fields).rank(opts, None)
+            },
+            None,
+        )
+    }
+
+    pub fn rank_over(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
         };
-        let expr = rank_expr.over(partition_exprs);
-        Ok(Self::from_expr(expr, None))
+        Self::from_expr(
+            self.ordered_rank_expr(
+                order_by_encoded,
+                RankMethod::Min,
+                descending,
+                &partition_exprs,
+            )
+            .over(partition_exprs),
+            None,
+        )
+    }
+
+    pub fn dense_rank_over(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        Self::from_expr(
+            self.ordered_rank_expr(
+                order_by_encoded,
+                RankMethod::Dense,
+                descending,
+                &partition_exprs,
+            )
+            .over(partition_exprs),
+            None,
+        )
+    }
+
+    pub fn percent_rank_over(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        let rank_expr = self
+            .ordered_rank_expr(
+                order_by_encoded,
+                RankMethod::Min,
+                descending,
+                &partition_exprs,
+            )
+            .over(partition_exprs.clone());
+        let count_expr = polars::prelude::len().over(partition_exprs);
+        let rank_f = (rank_expr - lit(1i64)).cast(DataType::Float64);
+        let count_f = (count_expr - lit(1i64)).cast(DataType::Float64);
+        Self::from_expr(
+            polars::prelude::when(count_f.clone().gt(lit(0.0)))
+                .then(rank_f / count_f)
+                .otherwise(lit(0.0)),
+            None,
+        )
+    }
+
+    pub fn cume_dist_over(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        // A literal ORDER BY makes every row a tie. Polars ranks a scalar literal
+        // as a single value, so explicitly broadcast the tied maximum rank.
+        let row_num = if order_by_encoded.len() == 1
+            && order_by_encoded[0].trim().trim_start_matches('-').trim() == "<expr>"
+        {
+            polars::prelude::len().over(partition_exprs.clone())
+        } else {
+            self.ordered_rank_expr(
+                order_by_encoded,
+                RankMethod::Max,
+                descending,
+                &partition_exprs,
+            )
+            .over(partition_exprs.clone())
+        };
+        let count_f = polars::prelude::len()
+            .over(partition_exprs)
+            .cast(DataType::Float64);
+        Self::from_expr(
+            polars::prelude::when(count_f.clone().eq(lit(0.0)))
+                .then(lit(0.0))
+                .otherwise(row_num.cast(DataType::Float64) / count_f),
+            None,
+        )
+    }
+
+    pub fn ntile_over(
+        &self,
+        n: u32,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        // `ORDER BY lit(...)` has no meaningful value order, but NTILE still
+        // assigns sequential row positions in the partition.
+        let rank_expr = if order_by_encoded.len() == 1
+            && order_by_encoded[0].trim().trim_start_matches('-').trim() == "<expr>"
+        {
+            if partition_by.is_empty() {
+                // Materialize one non-null value for every frame row before
+                // counting. The ORDER BY literal itself is scalar.
+                lit(1u32)
+                    .repeat_by(polars::prelude::len())
+                    .explode(polars::prelude::ExplodeOptions {
+                        empty_as_null: true,
+                        keep_nulls: true,
+                    })
+                    .cum_count(false)
+            } else {
+                // Construct a per-row non-null value from a partition column, then
+                // count it within each partition. This remains valid for NULL
+                // partition keys as both branches produce a value.
+                polars::prelude::when(col(partition_by[0]).is_not_null())
+                    .then(lit(1u32))
+                    .otherwise(lit(1u32))
+                    .cum_count(false)
+                    .over(partition_exprs.clone())
+            }
+        } else {
+            self.ordered_rank_expr(
+                order_by_encoded,
+                RankMethod::Ordinal,
+                descending,
+                &partition_exprs,
+            )
+            .over(partition_exprs.clone())
+        };
+        let count_f = polars::prelude::len()
+            .over(partition_exprs)
+            .cast(DataType::Float64);
+        let row_zero = rank_expr.cast(DataType::Float64) - lit(1.0);
+        let n_f = lit(n as f64);
+        let q = (count_f.clone() / n_f.clone()).floor();
+        let remainder = count_f.clone() - q.clone() * n_f.clone();
+        let first_bucket_rows = (q.clone() + lit(1.0)) * remainder.clone();
+        let bucket = polars::prelude::when(count_f.clone().eq(lit(0.0)))
+            .then(lit(1.0))
+            .when(count_f.clone().lt_eq(n_f.clone()))
+            .then(row_zero.clone() + lit(1.0))
+            .otherwise(
+                polars::prelude::when(row_zero.clone().lt(first_bucket_rows.clone()))
+                    .then((row_zero.clone() / (q.clone() + lit(1.0))).floor() + lit(1.0))
+                    .otherwise(remainder + ((row_zero - first_bucket_rows) / q).floor() + lit(1.0)),
+            );
+        Self::from_expr(
+            bucket.clip(lit(1.0), lit(n as f64)).cast(DataType::Int32),
+            None,
+        )
     }
 
     /// Lag: value from n rows before. Use with `.over(partition_by)`.
@@ -2919,7 +3302,9 @@ impl Column {
             .clone()
             .rank(opts, None)
             .over(partition_exprs.clone());
-        let count_expr = self.expr().clone().count().over(partition_exprs.clone());
+        // The denominator is the number of rows in the partition, not the number of
+        // non-null order keys. Spark includes rows whose ordering key is NULL.
+        let count_expr = polars::prelude::len().over(partition_exprs.clone());
         let rank_f = (rank_expr - lit(1i64)).cast(DataType::Float64);
         let count_f = (count_expr - lit(1i64)).cast(DataType::Float64);
         // Avoid division by zero: single-row partition -> 0.0 (PySpark parity)
@@ -2943,7 +3328,8 @@ impl Column {
             .clone()
             .rank(opts, None)
             .over(partition_exprs.clone());
-        let count_expr = self.expr().clone().count().over(partition_exprs.clone());
+        // Count every row, including rows with a NULL ordering key.
+        let count_expr = polars::prelude::len().over(partition_exprs.clone());
         // Avoid division by zero when partition is empty
         let count_f = count_expr.clone().cast(DataType::Float64);
         let cume = when(count_f.clone().eq(lit(0.0)))
@@ -3962,6 +4348,46 @@ impl Column {
     }
 }
 
+/// Whether peeling a cast would retain the literal's evaluated value. Inferred
+/// integers must fit the requested type: their `Unknown` source type alone is
+/// not proof that a narrowing cast is only a type annotation.
+fn literal_cast_preserves_value(value: &LiteralValue, target: &DataType) -> bool {
+    if value.get_datatype() == *target {
+        return true;
+    }
+
+    match (value, target) {
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int8) => {
+            i8::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int16) => {
+            i16::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int32) => {
+            i32::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::Int64) => {
+            i64::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt8) => {
+            u8::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt16) => {
+            u16::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt32) => {
+            u32::try_from(*value).is_ok()
+        }
+        (LiteralValue::Dyn(DynLiteralValue::Int(value)), DataType::UInt64) => {
+            u64::try_from(*value).is_ok()
+        }
+        // Polars represents inferred floats as f64. Float64 is therefore an
+        // annotation; Float32 can change precision and must be evaluated.
+        (LiteralValue::Dyn(DynLiteralValue::Float(_)), DataType::Float64) => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Column;
@@ -3989,6 +4415,15 @@ mod tests {
     fn test_column_new() {
         let column = Column::new("age".to_string());
         assert_eq!(column.name(), "age");
+    }
+
+    #[test]
+    fn typed_string_literal_is_available_to_literal_consumers() {
+        let column = crate::functions::lit_str(r"\d+");
+        assert_eq!(
+            column.literal_as_json_string().as_deref(),
+            Some(r#""\\d+""#)
+        );
     }
 
     #[test]

@@ -1039,6 +1039,28 @@ fn unregister_active_session_by_ptr(py: Python<'_>, ptr: *mut pyo3::ffi::PyObjec
         }
     }
 
+    // Restore the UDF/config context for the session that is now on top of the
+    // thread-local stack.  Stopping an inner session must not leave the thread
+    // with an empty context while an outer session remains active.
+    let replacement =
+        THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+    if let Some(session) = replacement {
+        if let Ok(session_ref) = session.bind(py).cast::<PySparkSession>() {
+            let session = &session_ref.borrow().inner;
+            robin_sparkless::set_thread_udf_context_full(
+                std::sync::Arc::new(session.udf_registry().clone()),
+                session.is_case_sensitive(),
+                session
+                    .get_config()
+                    .get("spark.sql.session.timeZone")
+                    .cloned(),
+                session.runtime_config().clone(),
+            );
+        }
+    } else {
+        robin_sparkless::clear_thread_udf_context();
+    }
+
     Ok(())
 }
 
@@ -5620,6 +5642,16 @@ impl PyDataFrame {
         right_on: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
         let how_lower = how.to_lowercase();
+        if on.is_some() && (left_on.is_some() || right_on.is_some()) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "join() cannot combine 'on' with 'left_on' or 'right_on'",
+            ));
+        }
+        if left_on.is_some() != right_on.is_some() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "join() requires both 'left_on' and 'right_on' when using separate join keys",
+            ));
+        }
         if how_lower == "cross" {
             return self
                 .inner
@@ -5964,9 +5996,7 @@ impl PyDataFrame {
 
     #[pyo3(name = "createOrReplaceTempView")]
     fn create_or_replace_temp_view_camel(&self, py: Python<'_>, name: &str) -> PyResult<()> {
-        let session = THREAD_ACTIVE_SESSIONS
-            .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
-            .ok_or_else(|| to_py_err("No active SparkSession for createOrReplaceTempView"))?;
+        let session = require_active_session(py)?;
         let session_ref = session
             .bind(py)
             .cast::<PySparkSession>()
@@ -6659,33 +6689,7 @@ impl PyDataFrameWriter {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
             })?;
         let inner = df.borrow();
-        let active = {
-            let ty = py.get_type::<PySparkSession>();
-            if let Ok(singleton) = ty.getattr("_singleton_session") {
-                if !singleton.is_none() {
-                    singleton
-                        .cast::<PySparkSession>()
-                        .map_err(|_| to_py_err("active SparkSession is invalid"))?
-                        .borrow()
-                        .inner
-                        .clone()
-                } else {
-                    let top = THREAD_ACTIVE_SESSIONS
-                        .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-                    match top {
-                        Some(s) => s.bind(py).borrow().inner.clone(),
-                        None => return Err(to_py_err("No active SparkSession")),
-                    }
-                }
-            } else {
-                let top = THREAD_ACTIVE_SESSIONS
-                    .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-                match top {
-                    Some(s) => s.bind(py).borrow().inner.clone(),
-                    None => return Err(to_py_err("No active SparkSession")),
-                }
-            }
-        };
+        let active = require_active_session(py)?.bind(py).borrow().inner.clone();
         let save_mode = save_mode_from_str(mode.unwrap_or(self.mode.as_str()));
         // Thread writer-level options (including format) through to the backend so
         // saveAsTable can make format-aware decisions (e.g. Delta overwrite parity).
@@ -6932,9 +6936,19 @@ fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
         if first.extract::<i64>().is_ok() {
             let vals: Vec<i64> = list
                 .iter()
-                .filter_map(|x| x.extract::<i64>().ok())
-                .collect();
+                .map(|x| x.extract::<i64>())
+                .collect::<PyResult<_>>()
+                .map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "list comparison values must all be integers",
+                    )
+                })?;
             return Ok(robin_sparkless::functions::lit_str(&format!("{:?}", vals)));
+        }
+        if list.iter().any(|x| x.extract::<i64>().is_ok()) {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "list comparison values must have a consistent type",
+            ));
         }
     }
     // datetime.date / datetime.datetime: convert to ISO string so plan gets string literal;
@@ -7460,16 +7474,24 @@ impl PyColumn {
         let base_result = if first.extract::<i64>().is_ok() {
             let vals: Vec<i64> = expanded
                 .iter()
-                .filter_map(|v| v.bind(py).extract::<i64>().ok())
-                .collect();
-            if vals.len() == expanded.len() {
-                functions::isin_i64(&self.inner, &vals)
-            } else {
-                let vals: Vec<String> = expanded.iter().map(|v| v.bind(py).to_string()).collect();
-                let refs: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
-                functions::isin_str(&self.inner, &refs)
-            }
+                .map(|v| v.bind(py).extract::<i64>())
+                .collect::<PyResult<_>>()
+                .map_err(|_| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "isin values must have a consistent type",
+                    )
+                })?;
+            functions::isin_i64(&self.inner, &vals)
         } else {
+            let first_type = first.get_type();
+            if expanded
+                .iter()
+                .any(|v| !v.bind(py).is_exact_instance(first_type.as_any()))
+            {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "isin values must have a consistent type",
+                ));
+            }
             let vals: Vec<String> = expanded.iter().map(|v| v.bind(py).to_string()).collect();
             let refs: Vec<&str> = vals.iter().map(|s| s.as_str()).collect();
             functions::isin_str(&self.inner, &refs)
@@ -7727,10 +7749,11 @@ impl PyColumn {
         }
     }
 
-    fn repeat(&self, n: i32) -> PyColumn {
-        PyColumn {
-            inner: self.inner.repeat(n),
-        }
+    fn repeat(&self, n: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let n = py_any_to_i64_or_column(n)?;
+        Ok(PyColumn {
+            inner: self.inner.repeat_dynamic(&n),
+        })
     }
 
     fn reverse(&self) -> PyColumn {
@@ -8759,9 +8782,9 @@ fn lit(value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
             }
         }
     }
-    Ok(PyColumn {
-        inner: robin_sparkless::functions::lit_str(&value.repr()?.to_string()),
-    })
+    Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+        "lit supports scalar values and datetime/date objects; list and map literals are not supported",
+    ))
 }
 
 fn coerce_to_column(v: &Bound<'_, PyAny>) -> PyResult<Column> {
@@ -9271,15 +9294,15 @@ fn percent_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyRe
             "percent_rank_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
-    } else {
-        (first.clone(), false)
-    };
-    let order_col = Column::new(name);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = order_col.percent_rank(&parts[..], descending);
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
+    } else {
+        Column::new(first.trim_start_matches('-').trim().to_string())
+    };
+    let windowed = order_col.percent_rank_over(&parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9290,29 +9313,20 @@ fn rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyC
             "rank_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
-    } else {
-        (first.clone(), false)
-    };
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
     // Window.orderBy(F.lit(1)) encodes the literal as a synthetic "<expr>" sort key.
     // PySpark accepts this (order is arbitrary but defined); we must not try to resolve
     // "<expr>" as an input column, which would fail with "not found: <expr>".
     // To mirror PySpark behavior, when the sort key is the synthetic "<expr>" name,
     // fall back to ordering by the first partition column (if any).
-    let order_col = if name == "<expr>" {
-        if let Some(first_part) = partition_by.first() {
-            Column::new(first_part.clone())
-        } else {
-            Column::new(name)
-        }
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
     } else {
-        Column::new(name)
+        Column::new(first.trim_start_matches('-').trim().to_string())
     };
-    let base = order_col.rank(descending);
-    let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = base.over(&parts[..]);
+    let windowed = order_col.rank_over(&parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9323,16 +9337,15 @@ fn dense_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResu
             "dense_rank_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
     } else {
-        (first.clone(), false)
+        Column::new(first.trim_start_matches('-').trim().to_string())
     };
-    let order_col = Column::new(name);
-    let base = order_col.dense_rank(descending);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = base.over(&parts[..]);
+    let windowed = order_col.dense_rank_over(&parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9343,15 +9356,15 @@ fn cume_dist_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResul
             "cume_dist_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
     } else {
-        (first.clone(), false)
+        Column::new(first.trim_start_matches('-').trim().to_string())
     };
-    let order_col = Column::new(name);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = order_col.cume_dist(&parts[..], descending);
+    let windowed = order_col.cume_dist_over(&parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9362,15 +9375,15 @@ fn ntile_window(n: u32, partition_by: Vec<String>, order_by: Vec<String>) -> PyR
             "ntile_window: order_by cannot be empty",
         ));
     }
-    let first = &order_by[0];
-    let (name, descending) = if let Some(stripped) = first.strip_prefix('-') {
-        (stripped.to_string(), true)
+    let first = order_by[0].trim();
+    let descending = first.starts_with('-');
+    let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
+        robin_sparkless::functions::lit_i32(1)
     } else {
-        (first.clone(), false)
+        Column::new(first.trim_start_matches('-').trim().to_string())
     };
-    let order_col = Column::new(name);
     let parts: Vec<&str> = partition_by.iter().map(|s| s.as_str()).collect();
-    let windowed = order_col.ntile(n, &parts[..], descending);
+    let windowed = order_col.ntile_over(n, &parts[..], &order_by, descending);
     Ok(PyColumn { inner: windowed })
 }
 
@@ -9798,10 +9811,11 @@ fn ceil(column: &PyColumn) -> PyColumn {
 
 #[pyfunction]
 #[pyo3(name = "native_add_months")]
-fn native_add_months(column: &PyColumn, months: i32) -> PyColumn {
-    PyColumn {
-        inner: functions::add_months(&column.inner, months),
-    }
+fn native_add_months(column: &PyColumn, months: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let months = py_any_to_i64_or_column(months)?;
+    Ok(PyColumn {
+        inner: column.inner.add_months_dynamic(&months),
+    })
 }
 
 #[pyfunction]
@@ -10282,10 +10296,11 @@ fn native_length(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn repeat(column: &PyColumn, n: i32) -> PyColumn {
-    PyColumn {
-        inner: functions::repeat(&column.inner, n),
-    }
+fn repeat(column: &PyColumn, n: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let n = py_any_to_i64_or_column(n)?;
+    Ok(PyColumn {
+        inner: column.inner.repeat_dynamic(&n),
+    })
 }
 
 #[pyfunction]

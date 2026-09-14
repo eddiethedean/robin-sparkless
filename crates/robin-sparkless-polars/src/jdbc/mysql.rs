@@ -19,7 +19,8 @@ fn normalize_mysql_url(url: &str) -> Result<String, EngineError> {
         Ok(format!("mysql://{}", u.trim_start_matches("mariadb://")))
     } else {
         Err(EngineError::User(format!(
-            "JDBC MySQL: URL must start with jdbc:mysql: or mysql:// (got '{url}')"
+            "JDBC MySQL: URL must start with jdbc:mysql: or mysql:// (got '{}')",
+            sql_ident::redact_jdbc_url(url)
         )))
     }
 }
@@ -29,8 +30,12 @@ fn connect(opts: &JdbcOptions) -> Result<Conn, EngineError> {
 
     // Prefer explicit user/password properties when provided; otherwise rely on URL.
     // The mysql crate supports `mysql://user:pass@host:port/db`.
-    let base = Opts::from_url(&url)
-        .map_err(|e| EngineError::User(format!("JDBC MySQL: invalid url: {e}")))?;
+    let base = Opts::from_url(&url).map_err(|e| {
+        EngineError::User(format!(
+            "JDBC MySQL: invalid url '{}': {e}",
+            sql_ident::redact_jdbc_url(&url)
+        ))
+    })?;
     let mut builder = OptsBuilder::from_opts(base);
     if let Some(user) = &opts.user {
         if !user.is_empty() {
@@ -43,7 +48,12 @@ fn connect(opts: &JdbcOptions) -> Result<Conn, EngineError> {
         }
     }
 
-    Conn::new(builder).map_err(|e| EngineError::Io(format!("JDBC MySQL: connect failed: {e}")))
+    Conn::new(builder).map_err(|e| {
+        EngineError::Io(format!(
+            "JDBC MySQL: connect failed for {}: {e}",
+            sql_ident::redact_jdbc_url(&url)
+        ))
+    })
 }
 
 pub(crate) fn write_jdbc_mysql(
@@ -247,10 +257,6 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         }
     }
 
-    if columns_data.iter().all(|c| c.is_empty()) {
-        return Ok(PlDataFrame::empty());
-    }
-
     let cfg = crate::udf_context::get_thread_runtime_config();
     let use_v4 = robin_sparkless_core::mysql_v4_type_mapping(&cfg);
 
@@ -276,7 +282,40 @@ fn mysql_values_to_series(
     use mysql::consts::ColumnType;
 
     if values.is_empty() {
-        return Ok(Series::new(name.into(), Vec::<Option<i64>>::new()));
+        return Ok(match col_type {
+            ColumnType::MYSQL_TYPE_STRING
+            | ColumnType::MYSQL_TYPE_VAR_STRING
+            | ColumnType::MYSQL_TYPE_VARCHAR
+            | ColumnType::MYSQL_TYPE_BLOB
+            | ColumnType::MYSQL_TYPE_TINY_BLOB
+            | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+            | ColumnType::MYSQL_TYPE_LONG_BLOB => {
+                Series::new(name.into(), Vec::<Option<String>>::new())
+            }
+            ColumnType::MYSQL_TYPE_FLOAT if use_v4 => {
+                Series::new(name.into(), Vec::<Option<f32>>::new())
+            }
+            ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => {
+                Series::new(name.into(), Vec::<Option<f64>>::new())
+            }
+            ColumnType::MYSQL_TYPE_SHORT if use_v4 => {
+                Series::new(name.into(), Vec::<Option<i16>>::new())
+            }
+            ColumnType::MYSQL_TYPE_BIT if use_v4 => {
+                Series::new(name.into(), Vec::<Option<Vec<u8>>>::new())
+            }
+            ColumnType::MYSQL_TYPE_TIMESTAMP | ColumnType::MYSQL_TYPE_DATETIME if use_v4 => {
+                Series::new(name.into(), Vec::<Option<chrono::NaiveDateTime>>::new())
+            }
+            // Legacy mapping represents BIT and temporal values as strings, matching
+            // the populated-result path below.
+            ColumnType::MYSQL_TYPE_BIT
+            | ColumnType::MYSQL_TYPE_TIMESTAMP
+            | ColumnType::MYSQL_TYPE_DATETIME => {
+                Series::new(name.into(), Vec::<Option<String>>::new())
+            }
+            _ => Series::new(name.into(), Vec::<Option<i64>>::new()),
+        });
     }
 
     if use_v4 {

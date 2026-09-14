@@ -5,13 +5,37 @@ env:
 
 on:
   push:
+    # Release-candidate branches run the full validation matrix, never publish.
+    branches:
+      - 'codex/release-*'
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 jobs:
+  release-metadata:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check manifests, lockfile, Python version, changelog, and tag
+        run: |
+          python -m unittest discover -s scripts -p 'test_*release*.py'
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            python scripts/check_release_versions.py --tag "$GITHUB_REF_NAME"
+          else
+            python scripts/check_release_versions.py
+          fi
+
   # --- Rust ---
   format:
     name: Format
+    needs: [release-metadata]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +58,7 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: [release-metadata]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,10 +79,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - name: Clippy
-        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
 
   audit:
     name: Audit
+    needs: [release-metadata]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +106,7 @@ jobs:
 
   deny:
     name: Deny
+    needs: [release-metadata]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +129,7 @@ jobs:
 
   build:
     name: Build test binaries
+    needs: [release-metadata]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -122,12 +150,13 @@ jobs:
       - name: Build test binaries
         # Match CI: sql+delta only. --all-features links every JDBC backend and can
         # OOM on ubuntu-latest (ld bus error) when examples/tests link in parallel.
-        run: cargo build --workspace --features sql,delta --tests
+        run: cargo build --locked --workspace --features sql,delta --tests
         env:
           CARGO_BUILD_JOBS: 1
 
   test:
     name: Rust tests
+    needs: [release-metadata]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,15 +177,16 @@ jobs:
       - name: Run Rust tests
         # Skip doctests/examples: linking merged targets with sql+delta can OOM on
         # ubuntu-latest (ld bus error). Examples are exercised under --features sql in CI.
-        run: cargo test --workspace --features sql,delta --lib --tests
+        run: cargo test --locked --workspace --features sql,delta --lib --tests
         timeout-minutes: 25
         env:
           CARGO_BUILD_JOBS: 1
 
   publish:
     name: Build docs and publish to crates.io
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -172,7 +202,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       - name: Build docs
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --locked --workspace --no-deps
       - name: "Publish to crates.io (dependency order: spark-sql-parser, core, polars, main)"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -182,7 +212,7 @@ jobs:
             local out
             local code
             set +e
-            out=$(cargo publish -p "$crate" --token "$CARGO_REGISTRY_TOKEN" 2>&1)
+            out=$(cargo publish --locked -p "$crate" --token "$CARGO_REGISTRY_TOKEN" 2>&1)
             code=$?
             set -e
             printf '%s\n' "$out"
@@ -206,6 +236,7 @@ jobs:
   # --- Python (lint + tests, then PyPI publish for 3.8+) ---
   python-lint:
     name: Python (mypy)
+    needs: [release-metadata]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -220,6 +251,7 @@ jobs:
 
   python-build:
     name: Python build extension - ${{ matrix.os }}
+    needs: [release-metadata]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -257,7 +289,7 @@ jobs:
           rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
           rustup component add rustfmt clippy --toolchain 1.93.1
       - name: Build wheel (abi3, Python 3.8+)
-        run: cd python && maturin build --release -i 3.8
+        run: cd python && maturin build --locked --release -i 3.8
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
@@ -301,7 +333,9 @@ jobs:
           $PY -m pip install dist/*.whl
           $PY -m pip install pytest pytest-xdist hypothesis pytest-timeout
       - name: Smoke test
-        run: $PY -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
+        run: |
+          $PY scripts/test_installed_package_version.py
+          $PY -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
       - name: Run Python tests (same subset as CI)
         run: |
           $PY -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90
@@ -311,6 +345,7 @@ jobs:
   # PyPI: build and publish wheels (Python 3.8+), after all checks pass
   publish-pypi-manylinux-x86_64:
     name: PyPI manylinux x86_64 + sdist
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
@@ -322,12 +357,13 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
           command: publish
-          args: --manifest-path python/Cargo.toml -i 3.8 --zig --skip-existing
+          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --skip-existing
           manylinux: "2_17"
           container: off
 
   publish-pypi-manylinux-aarch64:
     name: PyPI manylinux aarch64
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04-arm
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
@@ -339,12 +375,13 @@ jobs:
         with:
           target: aarch64-unknown-linux-gnu
           command: publish
-          args: --manifest-path python/Cargo.toml -i 3.8 --zig --skip-existing
+          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --skip-existing
           manylinux: "2_28"
           container: off
 
   publish-pypi-mac:
     name: PyPI macOS ${{ matrix.target }}
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     strategy:
@@ -360,10 +397,11 @@ jobs:
         with:
           target: ${{ matrix.target }}
           command: publish
-          args: --manifest-path python/Cargo.toml -i 3.8 --skip-existing
+          args: --locked --manifest-path python/Cargo.toml -i 3.8 --skip-existing
 
   publish-pypi-musllinux-x86_64:
     name: PyPI musllinux x86_64
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
@@ -379,10 +417,11 @@ jobs:
         with:
           target: x86_64-unknown-linux-musl
           command: publish
-          args: --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
+          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
 
   publish-pypi-musllinux-aarch64:
     name: PyPI musllinux aarch64
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04-arm
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
@@ -399,7 +438,7 @@ jobs:
         with:
           target: aarch64-unknown-linux-musl
           command: publish
-          args: --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
+          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
       - name: Retry publish to PyPI (maturin)
         if: failure()
         uses: messense/maturin-action@v1
@@ -408,10 +447,11 @@ jobs:
         with:
           target: aarch64-unknown-linux-musl
           command: publish
-          args: --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
+          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
 
   publish-pypi-windows-x86_64:
     name: PyPI Windows x86_64
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
@@ -423,10 +463,11 @@ jobs:
         with:
           target: x86_64-pc-windows-msvc
           command: publish
-          args: --manifest-path python/Cargo.toml -i 3.8 --skip-existing
+          args: --locked --manifest-path python/Cargo.toml -i 3.8 --skip-existing
 
   publish-pypi-windows-arm64:
     name: PyPI Windows aarch64
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-11-arm
     needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
     steps:
@@ -438,4 +479,4 @@ jobs:
         with:
           target: aarch64-pc-windows-msvc
           command: publish
-          args: --manifest-path python/Cargo.toml -i 3.8 --skip-existing
+          args: --locked --manifest-path python/Cargo.toml -i 3.8 --skip-existing

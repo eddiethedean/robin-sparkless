@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.13.3] - 2026-09-14
+
+### Fixed
+
+- **Windows** — Preserve all ordering keys and independent directions, including string tiebreakers; include NULL ordering rows in rank denominators; literal-order windows retain empty/nonempty input cardinality (#1672).
+- **Arithmetic and literals** — Checked integer overflow returns NULL; Float32 arithmetic and fractional-literal plans retain correct schemas. Literal comparisons, cast evaluation, NULL handling, UDF serialization, and scalar/vector counts preserve their semantics. Reject unsupported/mixed literal inputs and out-of-range limits (#1673).
+- **Sessions and readers** — Restore outer session UDF/configuration context after stopping an inner session; unify catalog/view session resolution; bound schema JSON; prefer catalog names over Delta paths; validate later JSON rows when verifySchema is enabled (#1674).
+- **JDBC** — Redact MySQL/MariaDB and brace-escaped DB2 credentials; preserve metadata-compatible schemas for empty JDBC results, including SQLite projection provenance and Oracle output metadata; keep SQLite-specific tests optional (#1675).
+- **Python API** — Validate suffixed Row membership, accept Column or integer counts in repeat/add_months, and reject conflicting or incomplete join key arguments (#1676, #1677).
+- **Release quality gate** — Propagate nested failures from make check-full rather than printing a false success and skipping Rust tests.
+- **Dependency security** — Update compatible h2, rustls, event-listener, and memmap2 patches to address RUSTSEC-2026-0258, RUSTSEC-2026-0285, RUSTSEC-2026-0221, and RUSTSEC-2026-0186. The rustls advisory was published on the release-preparation date.
+
+### Changed
+
+- **freqItems** — Project requested columns before streaming collection, reducing memory use for wide frames. Selected values are still materialized; bounded-memory aggregation remains separate follow-up work (#1678, #1636).
+- **Delta compatibility** — Pin buoyant_kernel_derive to the compatible 1.0 API used by the current Delta dependencies.
+- **Release reproducibility** — Track the verified workspace lockfile and pin the alloc Git workarounds to their tested revision. Release-candidate branches validate without publishing; tag/version consistency is checked before release jobs.
+
 ## [4.13.2] - 2026-07-13
 
 ### User-facing highlights
