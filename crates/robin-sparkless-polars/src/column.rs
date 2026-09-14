@@ -1,6 +1,7 @@
+use polars::chunked_array::ops::SortMultipleOptions;
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions,
-    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, col, lit,
+    col, lit, DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions,
+    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping,
 };
 use polars_plan::dsl::AggExpr;
 use std::ops::Neg;
@@ -78,10 +79,8 @@ pub struct FirstLastValue {
     pub is_last: bool,
 }
 
-/// Encode a window order with per-column directions. `over_with_options` accepts only one
-/// `SortOptions`, so mixed numeric directions use a struct key whose descending fields are
-/// negated before sorting ascending.
-fn window_order_exprs(order_by_encoded: &[String]) -> (Vec<Expr>, SortOptions) {
+/// Parse the encoded window order keys and their independent sort directions.
+fn window_order_exprs(order_by_encoded: &[String]) -> (Vec<Expr>, Vec<bool>) {
     let mut names = Vec::with_capacity(order_by_encoded.len());
     let mut descending = Vec::with_capacity(order_by_encoded.len());
     for encoded in order_by_encoded {
@@ -94,28 +93,7 @@ fn window_order_exprs(order_by_encoded: &[String]) -> (Vec<Expr>, SortOptions) {
             descending.push(false);
         }
     }
-    if names.len() > 1 && descending.iter().any(|v| *v) {
-        let fields = names
-            .iter()
-            .zip(descending.iter())
-            .map(|(name, is_desc)| {
-                let value = col(*name);
-                if *is_desc { value.neg() } else { value }
-            })
-            .collect::<Vec<_>>();
-        return (
-            vec![polars::prelude::as_struct(fields)],
-            SortOptions::default(),
-        );
-    }
-    (
-        names.iter().map(|name| col(*name)).collect(),
-        SortOptions {
-            descending: descending.first().copied().unwrap_or(false),
-            nulls_last: descending.first().copied().unwrap_or(false),
-            ..Default::default()
-        },
-    )
+    (names.iter().map(|name| col(*name)).collect(), descending)
 }
 
 /// Value-based window frame (RANGE BETWEEN). Evaluated eagerly in with_column.
@@ -531,7 +509,7 @@ impl Column {
     /// See [`crate::functions::parse_type_name`] for supported names.
     /// Returns `Err` on unknown type name so bindings get a clear error.
     pub fn lit_null(dtype: &str) -> Result<Column, String> {
-        use polars::prelude::{NULL, lit};
+        use polars::prelude::{lit, NULL};
         let dt = crate::functions::parse_type_name(dtype)?;
         Ok(Column::from_expr(lit(NULL).cast(dt), None))
     }
@@ -658,7 +636,7 @@ impl Column {
     /// True if column value is between lower and upper (inclusive). PySpark between(low, high).
     /// Applies string–numeric coercion so col("val").between(1, 10) works when val is string (#628).
     pub fn between(&self, lower: &Column, upper: &Column) -> Column {
-        use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
+        use crate::type_coercion::{coerce_for_pyspark_comparison, CompareOp};
         use polars::prelude::*;
 
         let left = self.expr().clone();
@@ -2737,14 +2715,33 @@ impl Column {
         let expr = if order_by_encoded.is_empty() {
             base_expr.over(partition_exprs)
         } else {
-            // Encode mixed directions as a single lexicographic key so every order column's
-            // direction is respected by Polars' single-options window API.
-            let (order_exprs, default_opts) = window_order_exprs(order_by_encoded);
-            base_expr.over_with_options(
-                Some(partition_exprs),
-                Some((order_exprs, default_opts)),
-                WindowMapping::default(),
-            )?
+            let (order_exprs, descending) = window_order_exprs(order_by_encoded);
+            if order_exprs.len() > 1 {
+                // `sort_by` supports an independent direction for every key and keeps the
+                // original value expression untouched, so strings, dates, and unsigned
+                // integers do not need a lossy/overflowing negation.
+                base_expr
+                    .sort_by(
+                        order_exprs,
+                        SortMultipleOptions {
+                            descending: descending.clone(),
+                            nulls_last: descending,
+                            ..Default::default()
+                        },
+                    )
+                    .over(partition_exprs)
+            } else {
+                let default_opts = SortOptions {
+                    descending: descending.first().copied().unwrap_or(false),
+                    nulls_last: descending.first().copied().unwrap_or(false),
+                    ..Default::default()
+                };
+                base_expr.over_with_options(
+                    Some(partition_exprs),
+                    Some((order_exprs, default_opts)),
+                    WindowMapping::default(),
+                )?
+            }
         };
         Ok(Self::from_expr(expr, None))
     }
@@ -2896,7 +2893,7 @@ impl Column {
             }
         }
 
-        let rank_input = if order_by_encoded.len() <= 1 {
+        if order_by_encoded.len() <= 1 {
             let ranked = self
                 .expr()
                 .clone()
@@ -2917,51 +2914,39 @@ impl Column {
                 lit(1i64)
             };
             let offset = if descending || method == RankMethod::Dense {
-                lit(1i64)
+                polars::prelude::when(null_count.clone().gt(lit(0i64)))
+                    .then(lit(1i64))
+                    .otherwise(lit(0i64))
             } else {
                 null_count
             };
-            polars::prelude::when(nulls)
+            return polars::prelude::when(nulls)
                 .then(null_rank)
                 .otherwise(ranked.cast(DataType::Int64) + offset)
-                .cast(DataType::UInt32)
-        } else if order_by_encoded.iter().all(|s| !s.trim().starts_with('-')) {
-            polars::prelude::as_struct(
-                order_by_encoded
-                    .iter()
-                    .map(|s| col(parse_order_key(s).0))
-                    .collect::<Vec<_>>(),
-            )
-        } else {
-            polars::prelude::as_struct(
-                order_by_encoded
-                    .iter()
-                    .map(|s| {
-                        let (name, is_desc) = parse_order_key(s);
-                        let value = col(name)
-                            .rank(
-                                RankOptions {
-                                    method: RankMethod::Ordinal,
-                                    descending: false,
-                                },
-                                None,
-                            )
-                            .over(partition_exprs.to_vec())
-                            .cast(DataType::Int64);
-                        if is_desc { value.neg() } else { value }
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        };
+                .cast(DataType::UInt32);
+        }
 
+        let rank_input = polars::prelude::as_struct(
+            order_by_encoded
+                .iter()
+                .map(|s| {
+                    let (name, is_desc) = parse_order_key(s);
+                    col(name)
+                        .rank(
+                            RankOptions {
+                                method: RankMethod::Dense,
+                                descending: is_desc,
+                            },
+                            None,
+                        )
+                        .over(partition_exprs.to_vec())
+                })
+                .collect::<Vec<_>>(),
+        );
         rank_input.rank(
             RankOptions {
                 method,
-                descending: if order_by_encoded.len() <= 1 {
-                    descending
-                } else {
-                    false
-                },
+                descending: false,
             },
             None,
         )
@@ -3545,7 +3530,7 @@ impl Column {
     ///   which can lead to length mismatches when both position and value are selected
     ///   in the same DataFrame.select call.
     pub fn posexplode_outer(&self) -> (Column, Column) {
-        use polars::prelude::{ExplodeOptions, as_struct};
+        use polars::prelude::{as_struct, ExplodeOptions};
 
         let opts = ExplodeOptions {
             empty_as_null: true,
@@ -3842,7 +3827,7 @@ impl Column {
     ///   call yields a single exploded DataFrame (matching PySpark posexplode semantics)
     ///   instead of attempting two independent explode() calls on the same list column.
     pub fn posexplode(&self) -> (Column, Column) {
-        use polars::prelude::{ExplodeOptions, as_struct};
+        use polars::prelude::{as_struct, ExplodeOptions};
 
         let opts = ExplodeOptions {
             empty_as_null: false,
@@ -4230,7 +4215,7 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use super::Column;
-    use polars::prelude::{IntoLazy, col, df, lit};
+    use polars::prelude::{col, df, lit, IntoLazy};
 
     /// Helper to create a simple DataFrame for testing
     fn test_df() -> polars::prelude::DataFrame {
