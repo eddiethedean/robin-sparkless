@@ -219,14 +219,6 @@ impl DataFrameReader {
                 r = r.with_infer_schema_length(Some(n));
             }
         }
-        if self
-            .options
-            .get("verifySchema")
-            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-            .unwrap_or(false)
-        {
-            r = r.with_infer_schema_length(None);
-        }
         if let Some(sep) = self.options.get("sep") {
             if let Some(b) = sep.bytes().next() {
                 r = r.with_separator(b);
