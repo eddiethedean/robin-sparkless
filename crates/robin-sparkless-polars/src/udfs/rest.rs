@@ -3635,8 +3635,16 @@ fn broadcast_binary_inputs(a: Series, b: Series, ctx: &str) -> PolarsResult<(Ser
             format!("{ctx}: inputs must have equal lengths or be scalars").into(),
         ));
     }
-    let a = if a.len() == 1 && len > 1 { a.new_from_index(0, len) } else { a };
-    let b = if b.len() == 1 && len > 1 { b.new_from_index(0, len) } else { b };
+    let a = if a.len() == 1 && len > 1 {
+        a.new_from_index(0, len)
+    } else {
+        a
+    };
+    let b = if b.len() == 1 && len > 1 {
+        b.new_from_index(0, len)
+    } else {
+        b
+    };
     Ok((a, b))
 }
 
