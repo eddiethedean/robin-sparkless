@@ -1,7 +1,6 @@
-use polars::chunked_array::ops::SortMultipleOptions;
 use polars::prelude::{
-    col, lit, DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions,
-    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping,
+    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions,
+    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, as_struct, col, lit,
 };
 use polars_plan::dsl::AggExpr;
 use std::ops::Neg;
@@ -509,7 +508,7 @@ impl Column {
     /// See [`crate::functions::parse_type_name`] for supported names.
     /// Returns `Err` on unknown type name so bindings get a clear error.
     pub fn lit_null(dtype: &str) -> Result<Column, String> {
-        use polars::prelude::{lit, NULL};
+        use polars::prelude::{NULL, lit};
         let dt = crate::functions::parse_type_name(dtype)?;
         Ok(Column::from_expr(lit(NULL).cast(dt), None))
     }
@@ -636,7 +635,7 @@ impl Column {
     /// True if column value is between lower and upper (inclusive). PySpark between(low, high).
     /// Applies string–numeric coercion so col("val").between(1, 10) works when val is string (#628).
     pub fn between(&self, lower: &Column, upper: &Column) -> Column {
-        use crate::type_coercion::{coerce_for_pyspark_comparison, CompareOp};
+        use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
         use polars::prelude::*;
 
         let left = self.expr().clone();
@@ -2717,19 +2716,33 @@ impl Column {
         } else {
             let (order_exprs, descending) = window_order_exprs(order_by_encoded);
             if order_exprs.len() > 1 {
-                // `sort_by` supports an independent direction for every key and keeps the
-                // original value expression untouched, so strings, dates, and unsigned
-                // integers do not need a lossy/overflowing negation.
-                base_expr
-                    .sort_by(
-                        order_exprs,
-                        SortMultipleOptions {
-                            descending: descending.clone(),
-                            nulls_last: descending,
-                            ..Default::default()
-                        },
-                    )
-                    .over(partition_exprs)
+                // Window ordering must be applied *before* a cumulative aggregate is
+                // evaluated. Encode each key as an ordinal so Polars receives one
+                // lexicographic ascending sort key while preserving each key's own
+                // direction and Spark's null order (ASC NULLS FIRST, DESC NULLS LAST).
+                let rank_keys = order_by_encoded
+                    .iter()
+                    .zip(descending.iter())
+                    .map(|(encoded, is_desc)| {
+                        let name = encoded.trim().trim_start_matches('-').trim();
+                        col(name)
+                            .rank(
+                                RankOptions {
+                                    method: RankMethod::Dense,
+                                    descending: *is_desc,
+                                },
+                                None,
+                            )
+                            .over(partition_exprs.clone())
+                            .cast(DataType::Int64)
+                            .fill_null(lit(if *is_desc { i64::MAX } else { 0i64 }))
+                    })
+                    .collect::<Vec<_>>();
+                base_expr.over_with_options(
+                    Some(partition_exprs),
+                    Some((vec![as_struct(rank_keys)], SortOptions::default())),
+                    WindowMapping::default(),
+                )?
             } else {
                 let default_opts = SortOptions {
                     descending: descending.first().copied().unwrap_or(false),
@@ -2909,11 +2922,29 @@ impl Column {
                 .cast(DataType::Int64)
                 - null_count.clone();
             let null_rank = if descending {
-                non_null_count + lit(1i64)
+                if method == RankMethod::Max {
+                    non_null_count + null_count.clone()
+                } else if method == RankMethod::Dense {
+                    ranked
+                        .clone()
+                        .cast(DataType::Int64)
+                        .max()
+                        .over(partition_exprs.to_vec())
+                        .fill_null(lit(0i64))
+                        + lit(1i64)
+                } else {
+                    non_null_count + lit(1i64)
+                }
             } else {
-                lit(1i64)
+                if method == RankMethod::Max {
+                    null_count.clone()
+                } else {
+                    lit(1i64)
+                }
             };
-            let offset = if descending || method == RankMethod::Dense {
+            let offset = if descending {
+                lit(0i64)
+            } else if method == RankMethod::Dense {
                 polars::prelude::when(null_count.clone().gt(lit(0i64)))
                     .then(lit(1i64))
                     .otherwise(lit(0i64))
@@ -2940,6 +2971,8 @@ impl Column {
                             None,
                         )
                         .over(partition_exprs.to_vec())
+                        .cast(DataType::Int64)
+                        .fill_null(lit(if is_desc { i64::MAX } else { 0i64 }))
                 })
                 .collect::<Vec<_>>(),
         );
@@ -3530,7 +3563,7 @@ impl Column {
     ///   which can lead to length mismatches when both position and value are selected
     ///   in the same DataFrame.select call.
     pub fn posexplode_outer(&self) -> (Column, Column) {
-        use polars::prelude::{as_struct, ExplodeOptions};
+        use polars::prelude::{ExplodeOptions, as_struct};
 
         let opts = ExplodeOptions {
             empty_as_null: true,
@@ -3827,7 +3860,7 @@ impl Column {
     ///   call yields a single exploded DataFrame (matching PySpark posexplode semantics)
     ///   instead of attempting two independent explode() calls on the same list column.
     pub fn posexplode(&self) -> (Column, Column) {
-        use polars::prelude::{as_struct, ExplodeOptions};
+        use polars::prelude::{ExplodeOptions, as_struct};
 
         let opts = ExplodeOptions {
             empty_as_null: false,
@@ -4215,7 +4248,7 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use super::Column;
-    use polars::prelude::{col, df, lit, IntoLazy};
+    use polars::prelude::{IntoLazy, col, df, lit};
 
     /// Helper to create a simple DataFrame for testing
     fn test_df() -> polars::prelude::DataFrame {
