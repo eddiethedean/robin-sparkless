@@ -3110,9 +3110,9 @@ impl SparkSession {
         self.table(name).map_err(polars_to_core_error)
     }
 
-    /// Returns true for an explicitly path-like Delta source.
+    /// Returns true if the string looks like a filesystem path (has separators or path exists).
     fn looks_like_path(s: &str) -> bool {
-        s.starts_with("file://") || Path::new(s).is_absolute()
+        s.contains('/') || s.contains('\\') || Path::new(s).exists()
     }
 
     /// Read a Delta table from path (latest version). Internal; use read_delta(name_or_path: &str) for dispatch.
