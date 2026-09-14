@@ -333,7 +333,9 @@ jobs:
           $PY -m pip install dist/*.whl
           $PY -m pip install pytest pytest-xdist hypothesis pytest-timeout
       - name: Smoke test
-        run: $PY -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
+        run: |
+          $PY scripts/test_installed_package_version.py
+          $PY -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
       - name: Run Python tests (same subset as CI)
         run: |
           $PY -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90

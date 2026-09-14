@@ -216,6 +216,7 @@ jobs:
       - name: Install pytest and run tests (fast subset + parity)
         run: |
           .venv/bin/pip install pytest pytest-xdist hypothesis pytest-timeout
+          .venv/bin/python scripts/test_installed_package_version.py
           .venv/bin/python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short
           .venv/bin/python -m pytest tests/parity/ -v --tb=short
         timeout-minutes: 15
@@ -253,6 +254,7 @@ jobs:
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
           cd python && ../.venv/bin/maturin develop --locked --release
           cd ..
+          .venv/bin/python scripts/test_installed_package_version.py
           SPARKLESS_ENABLE_DELTA=1 .venv/bin/python -m pytest tests -m delta -v --tb=short
 
   pyspark-smoke:
