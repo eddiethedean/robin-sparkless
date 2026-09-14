@@ -47,6 +47,12 @@ fn redact_db2_dsn(dsn: &str) -> String {
         while end < bytes.len() {
             match bytes[end] {
                 b'{' => in_braces = true,
+                // ODBC escapes a right brace in a braced value as `}}`. It is
+                // still part of the password, rather than the end of the value.
+                b'}' if in_braces && bytes.get(end + 1) == Some(&b'}') => {
+                    end += 2;
+                    continue;
+                }
                 b'}' => in_braces = false,
                 b';' if !in_braces => break,
                 _ => {}
@@ -448,6 +454,13 @@ pub(crate) fn write_jdbc_db2(
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn redacts_a_password_with_an_escaped_closing_brace() {
+        let dsn = "DRIVER={IBM DB2 ODBC DRIVER};PWD={first}};SECRET_SUFFIX};";
+        let redacted = redact_db2_dsn(dsn);
+        assert_eq!(redacted, "DRIVER={IBM DB2 ODBC DRIVER};PWD=***;");
+    }
 
     #[test]
     fn db2_smoke_if_env() {

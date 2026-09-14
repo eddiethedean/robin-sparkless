@@ -215,15 +215,24 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     let declared_types: Vec<Option<String>> = column_names
         .iter()
         .map(|name| {
-            let source_name = query_sources
-                .iter()
-                .find(|(output, _)| output == name)
-                .map(|(_, source)| source.as_str())
-                .unwrap_or(name.as_str());
-            table_types
-                .iter()
-                .find(|(column, _)| column == source_name)
-                .map(|(_, dtype)| dtype.to_ascii_uppercase())
+            // Output names are not source names for expressions (`length(name) AS
+            // name`). For a query, use table metadata only when the lightweight
+            // parser positively identified a source column. A dbtable read maps
+            // output names directly to its columns.
+            let source_name = if opts.query.is_some() {
+                query_sources
+                    .iter()
+                    .find(|(output, _)| output == name)
+                    .map(|(_, source)| source.as_str())
+            } else {
+                Some(name.as_str())
+            };
+            source_name.and_then(|source_name| {
+                table_types
+                    .iter()
+                    .find(|(column, _)| column == source_name)
+                    .map(|(_, dtype)| dtype.to_ascii_uppercase())
+            })
         })
         .collect();
     let mut columns_data: Vec<Vec<Option<Value>>> = (0..ncols).map(|_| Vec::new()).collect();
@@ -295,6 +304,7 @@ fn sqlite_query_column_sources(query: &str) -> Vec<(String, String)> {
             } else {
                 source
             };
+            let source = source.rsplit('.').next().unwrap_or(source);
             Some((
                 output
                     .trim_matches(|c| c == '`' || c == '"' || c == '[' || c == ']')
