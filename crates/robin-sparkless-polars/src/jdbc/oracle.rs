@@ -98,9 +98,11 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
             .await
             .map_err(|e| EngineError::Sql(format!("JDBC read (Oracle): query failed: {e}")))?;
 
-        // Best-effort column naming: fall back to c0..cN (oracle-rs Row doesn't expose
-        // column names directly in query results at the moment).
-        let first = &result.rows[0];
+        // Best-effort column naming: fall back to c0..cN. Empty results have no row
+        // metadata in oracle-rs, so return an empty frame rather than indexing row 0.
+        let Some(first) = result.rows.first() else {
+            return Ok(PlDataFrame::empty());
+        };
         let n = first.len();
         let names: Vec<String> = (0..n).map(|i| format!("c{i}")).collect();
 

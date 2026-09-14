@@ -64,7 +64,7 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
         .connect_with_connection_string(&dsn, ConnectionOptions::default())
         .map_err(|e| {
             EngineError::Io(format!(
-                "JDBC DB2: connect failed for {}: {e}",
+                "JDBC DB2: connect failed for {}",
                 redact_db2_dsn(&dsn)
             ))
         })?;

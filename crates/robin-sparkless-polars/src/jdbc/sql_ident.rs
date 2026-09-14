@@ -117,14 +117,27 @@ pub fn quoted_columns(dialect: JdbcDialect, names: &[String]) -> Result<Vec<Stri
 
 /// Redact credentials from JDBC URLs in error messages.
 pub fn redact_jdbc_url(url: &str) -> String {
-    if let Some(at) = url.find('@') {
-        if let Some(scheme_end) = url.find("://") {
-            let scheme = &url[..scheme_end + 3];
-            let rest = &url[at + 1..];
-            return format!("{scheme}***:***@{rest}");
-        }
+    let mut out = url.to_string();
+    if let (Some(at), Some(scheme_end)) = (out.find('@'), out.find("://")) {
+        out = format!("{}***:***@{}", &out[..scheme_end + 3], &out[at + 1..]);
     }
-    url.to_string()
+    if let Some(query_start) = out.find('?') {
+        let (prefix, query) = out.split_at(query_start + 1);
+        let query = query
+            .split('&')
+            .map(|part| {
+                let Some((key, _)) = part.split_once('=') else { return part.to_string(); };
+                if matches!(key.to_ascii_lowercase().as_str(), "password" | "passwd" | "pwd") {
+                    format!("{key}=***")
+                } else {
+                    part.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("&");
+        out = format!("{prefix}{query}");
+    }
+    out
 }
 
 #[cfg(test)]

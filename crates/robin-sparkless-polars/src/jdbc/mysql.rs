@@ -282,7 +282,24 @@ fn mysql_values_to_series(
     use mysql::consts::ColumnType;
 
     if values.is_empty() {
-        return Ok(Series::new(name.into(), Vec::<Option<i64>>::new()));
+        return Ok(match col_type {
+            ColumnType::MYSQL_TYPE_STRING
+            | ColumnType::MYSQL_TYPE_VAR_STRING
+            | ColumnType::MYSQL_TYPE_VARCHAR
+            | ColumnType::MYSQL_TYPE_BLOB
+            | ColumnType::MYSQL_TYPE_TINY_BLOB
+            | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+            | ColumnType::MYSQL_TYPE_LONG_BLOB => {
+                Series::new(name.into(), Vec::<Option<String>>::new())
+            }
+            ColumnType::MYSQL_TYPE_FLOAT if use_v4 => {
+                Series::new(name.into(), Vec::<Option<f32>>::new())
+            }
+            ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => {
+                Series::new(name.into(), Vec::<Option<f64>>::new())
+            }
+            _ => Series::new(name.into(), Vec::<Option<i64>>::new()),
+        });
     }
 
     if use_v4 {
