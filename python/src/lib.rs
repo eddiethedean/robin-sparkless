@@ -9275,7 +9275,7 @@ fn percent_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyRe
     let first = order_by[0].trim();
     let descending = first.starts_with('-');
     let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
-            robin_sparkless::functions::lit_i32(1)
+        robin_sparkless::functions::lit_i32(1)
     } else {
         Column::new(first.trim_start_matches('-').trim().to_string())
     };
@@ -9299,7 +9299,7 @@ fn rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResult<PyC
     // To mirror PySpark behavior, when the sort key is the synthetic "<expr>" name,
     // fall back to ordering by the first partition column (if any).
     let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
-            robin_sparkless::functions::lit_i32(1)
+        robin_sparkless::functions::lit_i32(1)
     } else {
         Column::new(first.trim_start_matches('-').trim().to_string())
     };
@@ -9317,7 +9317,7 @@ fn dense_rank_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResu
     let first = order_by[0].trim();
     let descending = first.starts_with('-');
     let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
-            robin_sparkless::functions::lit_i32(1)
+        robin_sparkless::functions::lit_i32(1)
     } else {
         Column::new(first.trim_start_matches('-').trim().to_string())
     };
@@ -9336,7 +9336,7 @@ fn cume_dist_window(partition_by: Vec<String>, order_by: Vec<String>) -> PyResul
     let first = order_by[0].trim();
     let descending = first.starts_with('-');
     let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
-            robin_sparkless::functions::lit_i32(1)
+        robin_sparkless::functions::lit_i32(1)
     } else {
         Column::new(first.trim_start_matches('-').trim().to_string())
     };
@@ -9355,7 +9355,7 @@ fn ntile_window(n: u32, partition_by: Vec<String>, order_by: Vec<String>) -> PyR
     let first = order_by[0].trim();
     let descending = first.starts_with('-');
     let order_col = if first.trim_start_matches('-').trim() == "<expr>" {
-            robin_sparkless::functions::lit_i32(1)
+        robin_sparkless::functions::lit_i32(1)
     } else {
         Column::new(first.trim_start_matches('-').trim().to_string())
     };

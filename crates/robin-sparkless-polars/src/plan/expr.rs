@@ -812,9 +812,15 @@ fn expr_from_window_fn(
         "cume_dist" => {
             let order_col = effective_order
                 .first()
-                .map(|s| Column::new(s.clone()))
+                .map(|s| Column::new(s.trim_start_matches('-').trim().to_string()))
                 .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
-            let c = order_col.cume_dist_over(&part_refs, &effective_order, false);
+            let c = order_col.cume_dist_over(
+                &part_refs,
+                &effective_order,
+                effective_order
+                    .first()
+                    .is_some_and(|s| s.trim().starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         _ => Err(PlanExprError(format!(

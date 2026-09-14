@@ -2922,7 +2922,14 @@ impl Column {
                 .cast(DataType::Int64)
                 - null_count.clone();
             let null_rank = if descending {
-                if method == RankMethod::Max {
+                if method == RankMethod::Ordinal {
+                    non_null_count
+                        + nulls
+                            .clone()
+                            .cast(DataType::Int64)
+                            .cum_sum(false)
+                            .over(partition_exprs.to_vec())
+                } else if method == RankMethod::Max {
                     non_null_count + null_count.clone()
                 } else if method == RankMethod::Dense {
                     ranked
@@ -2936,7 +2943,13 @@ impl Column {
                     non_null_count + lit(1i64)
                 }
             } else {
-                if method == RankMethod::Max {
+                if method == RankMethod::Ordinal {
+                    nulls
+                        .clone()
+                        .cast(DataType::Int64)
+                        .cum_sum(false)
+                        .over(partition_exprs.to_vec())
+                } else if method == RankMethod::Max {
                     null_count.clone()
                 } else {
                     lit(1i64)
