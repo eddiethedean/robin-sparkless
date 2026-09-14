@@ -3,7 +3,7 @@ members = ["crates/robin-sparkless-core", "crates/robin-sparkless-polars", "crat
 
 [package]
 name = "robin-sparkless"
-version = "4.13.2"
+version = "4.13.3"
 edition = "2024"
 rust-version = "1.93"
 description = "PySpark-like DataFrame API in Rust on Polars; no JVM."
@@ -48,8 +48,8 @@ jdbc_db2 = ["robin-sparkless-polars/jdbc_db2"]
 sqlite = ["robin-sparkless-polars/sqlite"]
 
 [dependencies]
-robin-sparkless-core = { version = "4.13.2", path = "crates/robin-sparkless-core" }
-robin-sparkless-polars = { version = "4.13.2", path = "crates/robin-sparkless-polars" }
+robin-sparkless-core = { version = "4.13.3", path = "crates/robin-sparkless-core" }
+robin-sparkless-polars = { version = "4.13.3", path = "crates/robin-sparkless-polars" }
 serde_json = "1.0"
 
 # Use git sources when crates.io/cache is broken (e.g. "no targets specified" in manifest,
@@ -57,8 +57,8 @@ serde_json = "1.0"
 [patch.crates-io]
 aead = { git = "https://github.com/RustCrypto/traits", tag = "aead-v0.5.2" }
 aes = { git = "https://github.com/RustCrypto/block-ciphers", tag = "aes-v0.8.4" }
-alloc-no-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", branch = "master" }
-alloc-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", branch = "master" }
+alloc-no-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", rev = "6032b6a9b20e03737135c55a0270ccffcc1438ef" }
+alloc-stdlib = { git = "https://github.com/dropbox/rust-alloc-no-stdlib", rev = "6032b6a9b20e03737135c55a0270ccffcc1438ef" }
 anes = { git = "https://github.com/zrzka/anes-rs", tag = "v0.1.6" }
 
 [dev-dependencies]
