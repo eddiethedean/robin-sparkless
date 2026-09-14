@@ -62,7 +62,7 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
         .map_err(|e| EngineError::Internal(format!("JDBC DB2: ODBC env: {e}")))?;
     let conn = env
         .connect_with_connection_string(&dsn, ConnectionOptions::default())
-        .map_err(|e| {
+        .map_err(|_e| {
             EngineError::Io(format!(
                 "JDBC DB2: connect failed for {}",
                 redact_db2_dsn(&dsn)
