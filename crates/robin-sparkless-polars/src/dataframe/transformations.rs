@@ -2438,7 +2438,7 @@ pub fn freq_items(
         .collect::<Result<_, _>>()?;
     let selected_refs: Vec<&str> = resolved_columns.iter().map(String::as_str).collect();
     let selected = df.select(selected_refs)?;
-    let collected = selected.collect_inner()?;
+    let collected = selected.collect_with_engine(polars::prelude::Engine::Streaming)?;
     let pl_df = collected.as_ref();
     let n_total = pl_df.height() as f64;
     if n_total == 0.0 {
