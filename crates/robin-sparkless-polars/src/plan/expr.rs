@@ -706,7 +706,11 @@ fn expr_from_window_fn(
                 .first()
                 .map(|s| Column::new(s.trim_start_matches('-').to_string()))
                 .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
-            let c = order_col.rank_over(&part_refs, &effective_order, effective_order.first().is_some_and(|s| s.starts_with('-')));
+            let c = order_col.rank_over(
+                &part_refs,
+                &effective_order,
+                effective_order.first().is_some_and(|s| s.starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         "dense_rank" => {
@@ -714,7 +718,11 @@ fn expr_from_window_fn(
                 .first()
                 .map(|s| Column::new(s.trim_start_matches('-').to_string()))
                 .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
-            let c = order_col.dense_rank_over(&part_refs, &effective_order, effective_order.first().is_some_and(|s| s.starts_with('-')));
+            let c = order_col.dense_rank_over(
+                &part_refs,
+                &effective_order,
+                effective_order.first().is_some_and(|s| s.starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         "percent_rank" => {
@@ -722,7 +730,11 @@ fn expr_from_window_fn(
                 .first()
                 .map(|s| Column::new(s.trim_start_matches('-').to_string()))
                 .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
-            let c = order_col.percent_rank_over(&part_refs, &effective_order, effective_order.first().is_some_and(|s| s.starts_with('-')));
+            let c = order_col.percent_rank_over(
+                &part_refs,
+                &effective_order,
+                effective_order.first().is_some_and(|s| s.starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         "ntile" => {
@@ -737,7 +749,12 @@ fn expr_from_window_fn(
                 .first()
                 .map(|s| Column::new(s.trim_start_matches('-').to_string()))
                 .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
-            let c = order_col.ntile_over(n.max(1), &part_refs, &effective_order, effective_order.first().is_some_and(|s| s.starts_with('-')));
+            let c = order_col.ntile_over(
+                n.max(1),
+                &part_refs,
+                &effective_order,
+                effective_order.first().is_some_and(|s| s.starts_with('-')),
+            );
             Ok(c.into_expr())
         }
         "lag" => {
