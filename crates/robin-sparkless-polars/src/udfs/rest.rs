@@ -3942,6 +3942,21 @@ pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>
         .cast(&DataType::Date)?;
         return Ok(Some(Column::new(name, out)));
     }
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Float32, DataType::Float32)
+    ) {
+        let a = a_s.f32().map_err(|e| compute_err("try_subtract", e))?;
+        let b = b_s.f32().map_err(|e| compute_err("try_subtract", e))?;
+        let out = Float32Chunked::from_iter_options(
+            name.as_str().into(),
+            a.into_iter()
+                .zip(b)
+                .map(|(a, b)| a.zip(b).map(|(a, b)| a - b)),
+        )
+        .into_series();
+        return Ok(Some(Column::new(name, out)));
+    }
     let out = match (a_s.dtype(), b_s.dtype()) {
         (DataType::Int64, DataType::Int64)
         | (DataType::Int32, DataType::Int64)

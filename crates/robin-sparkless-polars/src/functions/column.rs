@@ -1,7 +1,7 @@
 //! Column reference and literal builders.
 
 use crate::column::Column;
-use polars::prelude::{Expr, NULL, lit};
+use polars::prelude::{DataType, Expr, NULL, lit};
 
 /// Get a column by name
 pub fn col(name: &str) -> Column {
@@ -21,27 +21,27 @@ pub fn grouping_id(_columns: &[Column]) -> Column {
 
 /// Create a literal column from a value
 pub fn lit_i32(value: i32) -> Column {
-    let expr: Expr = lit(value);
+    let expr: Expr = lit(value).cast(DataType::Int32);
     Column::from_expr(expr, None)
 }
 
 pub fn lit_i64(value: i64) -> Column {
-    let expr: Expr = lit(value);
+    let expr: Expr = lit(value).cast(DataType::Int64);
     Column::from_expr(expr, None)
 }
 
 pub fn lit_f64(value: f64) -> Column {
-    let expr: Expr = lit(value);
+    let expr: Expr = lit(value).cast(DataType::Float64);
     Column::from_expr(expr, None)
 }
 
 pub fn lit_bool(value: bool) -> Column {
-    let expr: Expr = lit(value);
+    let expr: Expr = lit(value).cast(DataType::Boolean);
     Column::from_expr(expr, None)
 }
 
 pub fn lit_str(value: &str) -> Column {
-    let expr: Expr = lit(value);
+    let expr: Expr = lit(value).cast(DataType::String);
     Column::from_expr(expr, None)
 }
 
