@@ -126,8 +126,13 @@ pub fn redact_jdbc_url(url: &str) -> String {
         let query = query
             .split('&')
             .map(|part| {
-                let Some((key, _)) = part.split_once('=') else { return part.to_string(); };
-                if matches!(key.to_ascii_lowercase().as_str(), "password" | "passwd" | "pwd") {
+                let Some((key, _)) = part.split_once('=') else {
+                    return part.to_string();
+                };
+                if matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "password" | "passwd" | "pwd"
+                ) {
                     format!("{key}=***")
                 } else {
                     part.to_string()
