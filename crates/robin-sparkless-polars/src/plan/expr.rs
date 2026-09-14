@@ -670,12 +670,14 @@ fn expr_from_row_number_window(v: &Value) -> Result<Expr, PlanExprError> {
     }
     let part_refs: Vec<&str> = part_cols.iter().map(|s| s.as_str()).collect();
     let effective_order = window_order_cols(&order_cols, &part_cols);
-    let order_col = if effective_order.is_empty() {
+    let rn = if effective_order.is_empty() {
         crate::Column::from_expr(lit(1i32), None)
+            .row_number(false)
+            .over(&part_refs)
     } else {
-        crate::Column::new(effective_order[0].clone())
+        crate::Column::row_number_over(&part_refs, &effective_order)
+            .map_err(|e| PlanExprError(e.to_string()))?
     };
-    let rn = order_col.row_number(false).over(&part_refs);
     Ok(rn.into_expr())
 }
 
@@ -697,24 +699,30 @@ fn expr_from_window_fn(
     let effective_order = window_order_cols(&order_cols, &part_cols);
     let empty: &[Value] = &[];
     let args: &[Value] = args.map_or(empty, |v| v);
-    let order_col = if effective_order.is_empty() {
-        Column::from_expr(lit(1i32), None)
-    } else {
-        Column::new(effective_order[0].clone())
-    };
-
     match fn_name {
         "row_number" => expr_from_row_number_window(window_val),
         "rank" => {
-            let c = order_col.rank(false).over(&part_refs);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.clone()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.rank_over(&part_refs, &effective_order, false);
             Ok(c.into_expr())
         }
         "dense_rank" => {
-            let c = order_col.dense_rank(false).over(&part_refs);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.clone()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.dense_rank_over(&part_refs, &effective_order, false);
             Ok(c.into_expr())
         }
         "percent_rank" => {
-            let c = order_col.percent_rank(&part_refs, false);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.clone()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.percent_rank_over(&part_refs, &effective_order, false);
             Ok(c.into_expr())
         }
         "ntile" => {
@@ -725,7 +733,11 @@ fn expr_from_window_fn(
                 .ok_or_else(|| {
                     PlanExprError("ntile window requires n (number of buckets)".to_string())
                 })? as u32;
-            let c = order_col.ntile(n.max(1), &part_refs, false);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.clone()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.ntile_over(n.max(1), &part_refs, &effective_order, false);
             Ok(c.into_expr())
         }
         "lag" => {
@@ -781,7 +793,11 @@ fn expr_from_window_fn(
             Ok(n_unique_expr.over(partition_exprs))
         }
         "cume_dist" => {
-            let c = order_col.cume_dist(&part_refs, false);
+            let order_col = effective_order
+                .first()
+                .map(|s| Column::new(s.clone()))
+                .unwrap_or_else(|| Column::from_expr(lit(1i32), None));
+            let c = order_col.cume_dist_over(&part_refs, &effective_order, false);
             Ok(c.into_expr())
         }
         _ => Err(PlanExprError(format!(

@@ -78,6 +78,52 @@ pub struct FirstLastValue {
     pub is_last: bool,
 }
 
+/// Encode a window order with per-column directions. `over_with_options` accepts only one
+/// `SortOptions`, so mixed numeric directions use a struct key whose descending fields are
+/// negated before sorting ascending.
+fn window_order_exprs(order_by_encoded: &[String]) -> (Vec<Expr>, SortOptions) {
+    let mut names = Vec::with_capacity(order_by_encoded.len());
+    let mut descending = Vec::with_capacity(order_by_encoded.len());
+    for encoded in order_by_encoded {
+        let encoded = encoded.trim();
+        if let Some(name) = encoded.strip_prefix('-') {
+            names.push(name.trim());
+            descending.push(true);
+        } else {
+            names.push(encoded);
+            descending.push(false);
+        }
+    }
+    if names.len() > 1 && descending.iter().any(|v| *v) {
+        let fields = names
+            .iter()
+            .zip(descending.iter())
+            .map(|(name, is_desc)| {
+                let value = col(*name)
+                    .cast(DataType::Float64)
+                    .fill_null(lit(if *is_desc {
+                        f64::NEG_INFINITY
+                    } else {
+                        f64::INFINITY
+                    }));
+                if *is_desc { value.neg() } else { value }
+            })
+            .collect::<Vec<_>>();
+        return (
+            vec![polars::prelude::as_struct(fields)],
+            SortOptions::default(),
+        );
+    }
+    (
+        names.iter().map(|name| col(*name)).collect(),
+        SortOptions {
+            descending: descending.first().copied().unwrap_or(false),
+            nulls_last: descending.first().copied().unwrap_or(false),
+            ..Default::default()
+        },
+    )
+}
+
 /// Value-based window frame (RANGE BETWEEN). Evaluated eagerly in with_column.
 #[derive(Debug, Clone)]
 pub struct RangeWindowSpec {
@@ -2697,26 +2743,9 @@ impl Column {
         let expr = if order_by_encoded.is_empty() {
             base_expr.over(partition_exprs)
         } else {
-            // Build order exprs and sort options. Polars over_with_options uses (order_exprs, sort_options).
-            // Use column as-is (no String cast) so numeric columns sort 80,90,100 (issue #1052).
-            let mut order_exprs: Vec<Expr> = Vec::with_capacity(order_by_encoded.len());
-            let mut descending_multi: Vec<bool> = Vec::with_capacity(order_by_encoded.len());
-            for s in order_by_encoded.iter() {
-                let s = s.trim();
-                let (name, descending) = if let Some(stripped) = s.strip_prefix('-') {
-                    (stripped.trim(), true)
-                } else {
-                    (s, false)
-                };
-                order_exprs.push(col(name));
-                descending_multi.push(descending);
-            }
-            // Single sort_options for the window: use first column's direction. Polars may use this for the whole order.
-            let default_opts = SortOptions {
-                descending: descending_multi.first().copied().unwrap_or(false),
-                nulls_last: descending_multi.first().copied().unwrap_or(false),
-                ..Default::default()
-            };
+            // Encode mixed directions as a single lexicographic key so every order column's
+            // direction is respected by Polars' single-options window API.
+            let (order_exprs, default_opts) = window_order_exprs(order_by_encoded);
             base_expr.over_with_options(
                 Some(partition_exprs),
                 Some((order_exprs, default_opts)),
@@ -2854,6 +2883,179 @@ impl Column {
         Ok(Self::from_expr(expr, None))
     }
 
+    /// Build the order expression used by rank-like window functions. Polars only accepts one
+    /// sort direction for a window, so mixed directions are represented by a lexicographically
+    /// sortable struct with descending numeric keys negated.
+    fn ordered_rank_expr(
+        &self,
+        order_by_encoded: &[String],
+        method: RankMethod,
+        descending: bool,
+    ) -> Expr {
+        fn parse_order_key(s: &str) -> (&str, bool) {
+            let s = s.trim();
+            if let Some(stripped) = s.strip_prefix('-') {
+                (stripped.trim(), true)
+            } else {
+                (s, false)
+            }
+        }
+
+        let rank_input = if order_by_encoded.len() <= 1 {
+            self.expr().clone()
+        } else if order_by_encoded.iter().all(|s| !s.trim().starts_with('-')) {
+            polars::prelude::as_struct(
+                order_by_encoded
+                    .iter()
+                    .map(|s| col(parse_order_key(s).0))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            polars::prelude::as_struct(
+                order_by_encoded
+                    .iter()
+                    .map(|s| {
+                        let (name, is_desc) = parse_order_key(s);
+                        let value = col(name).cast(DataType::Float64).fill_null(lit(if is_desc {
+                            f64::NEG_INFINITY
+                        } else {
+                            f64::INFINITY
+                        }));
+                        if is_desc { value.neg() } else { value }
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        rank_input.rank(
+            RankOptions {
+                method,
+                descending: if order_by_encoded.len() <= 1 {
+                    descending
+                } else {
+                    false
+                },
+            },
+            None,
+        )
+    }
+
+    pub fn rank_over(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        Self::from_expr(
+            self.ordered_rank_expr(order_by_encoded, RankMethod::Min, descending)
+                .over(partition_exprs),
+            None,
+        )
+    }
+
+    pub fn dense_rank_over(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        Self::from_expr(
+            self.ordered_rank_expr(order_by_encoded, RankMethod::Dense, descending)
+                .over(partition_exprs),
+            None,
+        )
+    }
+
+    pub fn percent_rank_over(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        let rank_expr = self
+            .ordered_rank_expr(order_by_encoded, RankMethod::Min, descending)
+            .over(partition_exprs.clone());
+        let count_expr = polars::prelude::len().over(partition_exprs);
+        let rank_f = (rank_expr - lit(1i64)).cast(DataType::Float64);
+        let count_f = (count_expr - lit(1i64)).cast(DataType::Float64);
+        Self::from_expr(
+            polars::prelude::when(count_f.clone().gt(lit(0.0)))
+                .then(rank_f / count_f)
+                .otherwise(lit(0.0)),
+            None,
+        )
+    }
+
+    pub fn cume_dist_over(
+        &self,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        let row_num = self
+            .ordered_rank_expr(order_by_encoded, RankMethod::Ordinal, descending)
+            .over(partition_exprs.clone());
+        let count_f = polars::prelude::len()
+            .over(partition_exprs)
+            .cast(DataType::Float64);
+        Self::from_expr(
+            polars::prelude::when(count_f.clone().eq(lit(0.0)))
+                .then(lit(0.0))
+                .otherwise(row_num.cast(DataType::Float64) / count_f),
+            None,
+        )
+    }
+
+    pub fn ntile_over(
+        &self,
+        n: u32,
+        partition_by: &[&str],
+        order_by_encoded: &[String],
+        descending: bool,
+    ) -> Column {
+        let partition_exprs: Vec<Expr> = if partition_by.is_empty() {
+            vec![lit(1i32)]
+        } else {
+            partition_by.iter().map(|s| col(*s)).collect()
+        };
+        let rank_expr = self
+            .ordered_rank_expr(order_by_encoded, RankMethod::Ordinal, descending)
+            .over(partition_exprs.clone());
+        let count_f = polars::prelude::len()
+            .over(partition_exprs)
+            .cast(DataType::Float64);
+        let bucket = polars::prelude::when(count_f.clone().eq(lit(0.0)))
+            .then(lit(1.0))
+            .otherwise(
+                ((rank_expr.cast(DataType::Float64) - lit(1.0)) * lit(n as f64) / count_f).floor()
+                    + lit(1.0),
+            );
+        Self::from_expr(
+            bucket.clip(lit(1.0), lit(n as f64)).cast(DataType::Int32),
+            None,
+        )
+    }
+
     /// Lag: value from n rows before. Use with `.over(partition_by)`.
     pub fn lag(&self, n: i64) -> Column {
         Self::from_expr(self.expr().clone().shift(polars::prelude::lit(n)), None)
@@ -2919,7 +3121,9 @@ impl Column {
             .clone()
             .rank(opts, None)
             .over(partition_exprs.clone());
-        let count_expr = self.expr().clone().count().over(partition_exprs.clone());
+        // The denominator is the number of rows in the partition, not the number of
+        // non-null order keys. Spark includes rows whose ordering key is NULL.
+        let count_expr = polars::prelude::len().over(partition_exprs.clone());
         let rank_f = (rank_expr - lit(1i64)).cast(DataType::Float64);
         let count_f = (count_expr - lit(1i64)).cast(DataType::Float64);
         // Avoid division by zero: single-row partition -> 0.0 (PySpark parity)
@@ -2943,7 +3147,8 @@ impl Column {
             .clone()
             .rank(opts, None)
             .over(partition_exprs.clone());
-        let count_expr = self.expr().clone().count().over(partition_exprs.clone());
+        // Count every row, including rows with a NULL ordering key.
+        let count_expr = polars::prelude::len().over(partition_exprs.clone());
         // Avoid division by zero when partition is empty
         let count_f = count_expr.clone().cast(DataType::Float64);
         let cume = when(count_f.clone().eq(lit(0.0)))
