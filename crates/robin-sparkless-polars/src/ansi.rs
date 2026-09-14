@@ -7,12 +7,15 @@ use crate::udf_context::get_thread_ansi_enabled;
 
 pub(crate) fn arithmetic_field(fields: &[Field]) -> PolarsResult<Field> {
     let dtype = match (&fields[0].dtype, &fields[1].dtype) {
+        (left, DataType::Unknown(_)) => left.clone(),
+        (DataType::Unknown(_), right) => right.clone(),
         (DataType::Date, DataType::Int32 | DataType::Int64) => DataType::Date,
         (DataType::Datetime(unit, time_zone), DataType::Duration(_)) => {
             DataType::Datetime(*unit, time_zone.clone())
         }
         (DataType::Int32, DataType::Int32) => DataType::Int32,
         (DataType::Int32 | DataType::Int64, DataType::Int32 | DataType::Int64) => DataType::Int64,
+        (DataType::Float32, DataType::Float32) => DataType::Float32,
         _ => DataType::Float64,
     };
     Ok(Field::new(fields[0].name().clone(), dtype))

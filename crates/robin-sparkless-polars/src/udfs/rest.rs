@@ -3855,6 +3855,21 @@ pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
         .cast(&DataType::Date)?;
         return Ok(Some(Column::new(name, out)));
     }
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Float32, DataType::Float32)
+    ) {
+        let a = a_s.f32().map_err(|e| compute_err("try_add", e))?;
+        let b = b_s.f32().map_err(|e| compute_err("try_add", e))?;
+        let out = Float32Chunked::from_iter_options(
+            name.as_str().into(),
+            a.into_iter()
+                .zip(b)
+                .map(|(a, b)| a.zip(b).map(|(a, b)| a + b)),
+        )
+        .into_series();
+        return Ok(Some(Column::new(name, out)));
+    }
     let out = match (a_s.dtype(), b_s.dtype()) {
         (DataType::Int64, DataType::Int64)
         | (DataType::Int32, DataType::Int64)
@@ -3905,6 +3920,28 @@ pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_subtract")?;
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Datetime(_, _), DataType::Duration(_))
+    ) {
+        return Ok(Some(Column::new(name, (&a_s - &b_s)?)));
+    }
+    if matches!(a_s.dtype(), DataType::Date)
+        && matches!(b_s.dtype(), DataType::Int32 | DataType::Int64)
+    {
+        let dates = a_s.cast(&DataType::Int32)?;
+        let days = b_s.cast(&DataType::Int32)?;
+        let (dates, days) = binary_series_i32(&dates, &days, "try_subtract")?;
+        let out = Int32Chunked::from_iter_options(
+            name.as_str().into(),
+            dates.into_iter().zip(&days).map(|(date, days)| {
+                date.and_then(|date| days.and_then(|days| date.checked_sub(days)))
+            }),
+        )
+        .into_series()
+        .cast(&DataType::Date)?;
+        return Ok(Some(Column::new(name, out)));
+    }
     let out = match (a_s.dtype(), b_s.dtype()) {
         (DataType::Int64, DataType::Int64)
         | (DataType::Int32, DataType::Int64)
@@ -3955,6 +3992,21 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_multiply")?;
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Float32, DataType::Float32)
+    ) {
+        let a = a_s.f32().map_err(|e| compute_err("try_multiply", e))?;
+        let b = b_s.f32().map_err(|e| compute_err("try_multiply", e))?;
+        let out = Float32Chunked::from_iter_options(
+            name.as_str().into(),
+            a.into_iter()
+                .zip(b)
+                .map(|(a, b)| a.zip(b).map(|(a, b)| a * b)),
+        )
+        .into_series();
+        return Ok(Some(Column::new(name, out)));
+    }
     let out = match (a_s.dtype(), b_s.dtype()) {
         (DataType::Int64, DataType::Int64)
         | (DataType::Int32, DataType::Int64)
