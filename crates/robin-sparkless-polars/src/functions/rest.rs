@@ -32,7 +32,7 @@ pub fn count(col: &Column) -> Column {
     });
 
     let is_literal_with_evaluated_nullness =
-        col.is_literal_expression() && !is_literal_numeric_or_bool && !is_star;
+        col.is_scalar_literal_expression() && !is_literal_numeric_or_bool && !is_star;
     let (expr, name) = if is_star || is_literal_numeric_or_bool {
         (len().cast(DataType::Int64), "count(1)".to_string())
     } else if is_literal_with_evaluated_nullness {

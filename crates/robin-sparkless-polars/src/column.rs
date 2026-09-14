@@ -309,20 +309,21 @@ impl Column {
         find_value_preserving_literal(&self.expr)
     }
 
-    /// Whether this expression is made only from a literal and wrappers that
-    /// can be evaluated without input columns. Consumers such as aggregations
-    /// may still need to evaluate the wrappers rather than use the raw value.
-    pub(crate) fn is_literal_expression(&self) -> bool {
-        fn is_literal(expr: &Expr) -> bool {
+    /// Whether this expression is made only from a scalar literal and wrappers
+    /// that can be evaluated without input columns. Series and range literals
+    /// can expand to multiple rows and must remain regular expressions for
+    /// aggregations.
+    pub(crate) fn is_scalar_literal_expression(&self) -> bool {
+        fn is_scalar_literal(expr: &Expr) -> bool {
             match expr {
-                Expr::Literal(_) => true,
-                Expr::Alias(inner, _) => is_literal(inner.as_ref()),
-                Expr::Cast { expr: inner, .. } => is_literal(inner.as_ref()),
+                Expr::Literal(LiteralValue::Dyn(_) | LiteralValue::Scalar(_)) => true,
+                Expr::Alias(inner, _) => is_scalar_literal(inner.as_ref()),
+                Expr::Cast { expr: inner, .. } => is_scalar_literal(inner.as_ref()),
                 _ => false,
             }
         }
 
-        is_literal(&self.expr)
+        is_scalar_literal(&self.expr)
     }
 
     /// Return the observable type of a literal expression.  A literal Cast has
