@@ -1,6 +1,6 @@
 use polars::prelude::{
     DataType, Expr, Field, LiteralValue, PolarsError, PolarsResult, RankMethod, RankOptions,
-    RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, col, lit,
+    RollingOptionsFixedWindow, SortOptions, TimeUnit, UnknownKind, WindowMapping, col, lit,
 };
 use polars_plan::dsl::AggExpr;
 use std::ops::Neg;
@@ -280,27 +280,50 @@ impl Column {
 
     /// If this column is a literal expression, return its value as JSON string for Python UDF executor (literal args).
     pub fn literal_as_json_string(&self) -> Option<String> {
-        self.literal_value().and_then(|lv| {
+        self.value_preserving_literal_value().and_then(|lv| {
             crate::dataframe::literal_value_to_serde_value(lv)
                 .and_then(|v| serde_json::to_string(&v).ok())
         })
     }
 
-    /// Return a literal value through aliases and type annotations.  A Cast on a
-    /// literal is still a literal for API classification, even though the Cast
-    /// remains observable when the expression is evaluated.
-    pub(crate) fn literal_value(&self) -> Option<&LiteralValue> {
-        fn find_literal(expr: &Expr) -> Option<&LiteralValue> {
+    /// Return a literal through aliases and casts which do not alter its value.
+    /// A value-converting cast must remain an executable expression: serializing
+    /// the raw literal for a Python UDF would otherwise bypass that conversion.
+    pub(crate) fn value_preserving_literal_value(&self) -> Option<&LiteralValue> {
+        fn find_value_preserving_literal(expr: &Expr) -> Option<&LiteralValue> {
             match expr {
                 Expr::Literal(value) => Some(value),
-                Expr::Alias(inner, _) | Expr::Cast { expr: inner, .. } => {
-                    find_literal(inner.as_ref())
+                Expr::Alias(inner, _) => find_value_preserving_literal(inner.as_ref()),
+                Expr::Cast {
+                    expr: inner, dtype, ..
+                } => {
+                    let value = find_value_preserving_literal(inner.as_ref())?;
+                    let target = dtype.as_literal()?;
+                    let source = value.get_datatype();
+                    let annotation_only = matches!(
+                        (&source, target),
+                        (
+                            DataType::Unknown(UnknownKind::Int(_)),
+                            DataType::Int8
+                                | DataType::Int16
+                                | DataType::Int32
+                                | DataType::Int64
+                                | DataType::UInt8
+                                | DataType::UInt16
+                                | DataType::UInt32
+                                | DataType::UInt64
+                        ) | (
+                            DataType::Unknown(UnknownKind::Float),
+                            DataType::Float32 | DataType::Float64
+                        )
+                    );
+                    (source == *target || annotation_only).then_some(value)
                 }
                 _ => None,
             }
         }
 
-        find_literal(&self.expr)
+        find_value_preserving_literal(&self.expr)
     }
 
     /// Return the observable type of a literal expression.  A literal Cast has

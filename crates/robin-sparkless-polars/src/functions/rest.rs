@@ -13,20 +13,23 @@ pub fn count(col: &Column) -> Column {
     // Treat count("*") and count(lit(1)) (and similar numeric/bool literals) as
     // "count all rows", matching PySpark's count(lit(1)) / count("*") semantics.
     let is_star = col.name() == "*";
-    let is_literal_numeric_or_bool = matches!(col.literal_dtype(), Some(dtype) if matches!(
-        dtype,
-        DataType::Int8
-            | DataType::Int16
-            | DataType::Int32
-            | DataType::Int64
-            | DataType::UInt8
-            | DataType::UInt16
-            | DataType::UInt32
-            | DataType::UInt64
-            | DataType::Float32
-            | DataType::Float64
-            | DataType::Boolean
-    ));
+    let is_literal_numeric_or_bool = col.value_preserving_literal_value().is_some_and(|value| {
+        !matches!(value.to_any_value().as_ref(), Some(AnyValue::Null))
+            && matches!(col.literal_dtype(), Some(dtype) if matches!(
+                dtype,
+                DataType::Int8
+                    | DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::UInt8
+                    | DataType::UInt16
+                    | DataType::UInt32
+                    | DataType::UInt64
+                    | DataType::Float32
+                    | DataType::Float64
+                    | DataType::Boolean
+            ))
+    });
 
     let (expr, name) = if is_star || is_literal_numeric_or_bool {
         (len().cast(DataType::Int64), "count(1)".to_string())
