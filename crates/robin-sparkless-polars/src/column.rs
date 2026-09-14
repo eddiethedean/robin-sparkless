@@ -99,13 +99,7 @@ fn window_order_exprs(order_by_encoded: &[String]) -> (Vec<Expr>, SortOptions) {
             .iter()
             .zip(descending.iter())
             .map(|(name, is_desc)| {
-                let value = col(*name)
-                    .cast(DataType::Float64)
-                    .fill_null(lit(if *is_desc {
-                        f64::NEG_INFINITY
-                    } else {
-                        f64::INFINITY
-                    }));
+                let value = col(*name);
                 if *is_desc { value.neg() } else { value }
             })
             .collect::<Vec<_>>();
@@ -2891,6 +2885,7 @@ impl Column {
         order_by_encoded: &[String],
         method: RankMethod,
         descending: bool,
+        partition_exprs: &[Expr],
     ) -> Expr {
         fn parse_order_key(s: &str) -> (&str, bool) {
             let s = s.trim();
@@ -2902,7 +2897,19 @@ impl Column {
         }
 
         let rank_input = if order_by_encoded.len() <= 1 {
-            self.expr().clone()
+            let ranked = self.expr().clone().rank(
+                RankOptions { method, descending },
+                None,
+            );
+            let nulls = self.expr().clone().is_null();
+            let null_count = nulls.clone().cast(DataType::Int64).sum().over(partition_exprs.to_vec());
+            let non_null_count = polars::prelude::len().over(partition_exprs.to_vec()).cast(DataType::Int64) - null_count.clone();
+            let null_rank = if descending { non_null_count + lit(1i64) } else { lit(1i64) };
+            let offset = if descending || method == RankMethod::Dense { lit(1i64) } else { null_count };
+            polars::prelude::when(nulls)
+                .then(null_rank)
+                .otherwise(ranked.cast(DataType::Int64) + offset)
+                .cast(DataType::UInt32)
         } else if order_by_encoded.iter().all(|s| !s.trim().starts_with('-')) {
             polars::prelude::as_struct(
                 order_by_encoded
@@ -2916,11 +2923,13 @@ impl Column {
                     .iter()
                     .map(|s| {
                         let (name, is_desc) = parse_order_key(s);
-                        let value = col(name).cast(DataType::Float64).fill_null(lit(if is_desc {
-                            f64::NEG_INFINITY
-                        } else {
-                            f64::INFINITY
-                        }));
+                        let value = col(name).rank(
+                            RankOptions {
+                                method: RankMethod::Ordinal,
+                                descending: false,
+                            },
+                            None,
+                        ).over(partition_exprs.to_vec()).cast(DataType::Int64);
                         if is_desc { value.neg() } else { value }
                     })
                     .collect::<Vec<_>>(),
@@ -2952,7 +2961,7 @@ impl Column {
             partition_by.iter().map(|s| col(*s)).collect()
         };
         Self::from_expr(
-            self.ordered_rank_expr(order_by_encoded, RankMethod::Min, descending)
+            self.ordered_rank_expr(order_by_encoded, RankMethod::Min, descending, &partition_exprs)
                 .over(partition_exprs),
             None,
         )
@@ -2970,7 +2979,7 @@ impl Column {
             partition_by.iter().map(|s| col(*s)).collect()
         };
         Self::from_expr(
-            self.ordered_rank_expr(order_by_encoded, RankMethod::Dense, descending)
+            self.ordered_rank_expr(order_by_encoded, RankMethod::Dense, descending, &partition_exprs)
                 .over(partition_exprs),
             None,
         )
@@ -2988,7 +2997,7 @@ impl Column {
             partition_by.iter().map(|s| col(*s)).collect()
         };
         let rank_expr = self
-            .ordered_rank_expr(order_by_encoded, RankMethod::Min, descending)
+            .ordered_rank_expr(order_by_encoded, RankMethod::Min, descending, &partition_exprs)
             .over(partition_exprs.clone());
         let count_expr = polars::prelude::len().over(partition_exprs);
         let rank_f = (rank_expr - lit(1i64)).cast(DataType::Float64);
@@ -3013,7 +3022,7 @@ impl Column {
             partition_by.iter().map(|s| col(*s)).collect()
         };
         let row_num = self
-            .ordered_rank_expr(order_by_encoded, RankMethod::Ordinal, descending)
+            .ordered_rank_expr(order_by_encoded, RankMethod::Max, descending, &partition_exprs)
             .over(partition_exprs.clone());
         let count_f = polars::prelude::len()
             .over(partition_exprs)
@@ -3039,17 +3048,27 @@ impl Column {
             partition_by.iter().map(|s| col(*s)).collect()
         };
         let rank_expr = self
-            .ordered_rank_expr(order_by_encoded, RankMethod::Ordinal, descending)
+            .ordered_rank_expr(order_by_encoded, RankMethod::Ordinal, descending, &partition_exprs)
             .over(partition_exprs.clone());
         let count_f = polars::prelude::len()
             .over(partition_exprs)
             .cast(DataType::Float64);
+        let row_zero = rank_expr.cast(DataType::Float64) - lit(1.0);
+        let n_f = lit(n as f64);
+        let q = (count_f.clone() / n_f.clone()).floor();
+        let remainder = count_f.clone() - q.clone() * n_f.clone();
+        let first_bucket_rows = (q.clone() + lit(1.0)) * remainder.clone();
         let bucket = polars::prelude::when(count_f.clone().eq(lit(0.0)))
             .then(lit(1.0))
-            .otherwise(
-                ((rank_expr.cast(DataType::Float64) - lit(1.0)) * lit(n as f64) / count_f).floor()
-                    + lit(1.0),
-            );
+            .when(count_f.clone().lt_eq(n_f.clone()))
+            .then(row_zero.clone() + lit(1.0))
+            .otherwise(polars::prelude::when(row_zero.clone().lt(first_bucket_rows.clone()))
+                .then((row_zero.clone() / (q.clone() + lit(1.0))).floor() + lit(1.0))
+                .otherwise(
+                    remainder
+                        + ((row_zero - first_bucket_rows) / q).floor()
+                        + lit(1.0),
+                ));
         Self::from_expr(
             bucket.clip(lit(1.0), lit(n as f64)).cast(DataType::Int32),
             None,
