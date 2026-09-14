@@ -3833,6 +3833,28 @@ pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_add")?;
+    if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Datetime(_, _), DataType::Duration(_))
+    ) {
+        return Ok(Some(Column::new(name, (&a_s + &b_s)?)));
+    }
+    if matches!(a_s.dtype(), DataType::Date)
+        && matches!(b_s.dtype(), DataType::Int32 | DataType::Int64)
+    {
+        let dates = a_s.cast(&DataType::Int32)?;
+        let days = b_s.cast(&DataType::Int32)?;
+        let (dates, days) = binary_series_i32(&dates, &days, "try_add")?;
+        let out = Int32Chunked::from_iter_options(
+            name.as_str().into(),
+            dates.into_iter().zip(&days).map(|(date, days)| {
+                date.and_then(|date| days.and_then(|days| date.checked_add(days)))
+            }),
+        )
+        .into_series()
+        .cast(&DataType::Date)?;
+        return Ok(Some(Column::new(name, out)));
+    }
     let out = match (a_s.dtype(), b_s.dtype()) {
         (DataType::Int64, DataType::Int64)
         | (DataType::Int32, DataType::Int64)
@@ -4014,6 +4036,7 @@ fn ansi_checked_i64_op(
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, op_name)?;
     let out = if matches!(
         (a_s.dtype(), b_s.dtype()),
         (DataType::Int32, DataType::Int32)
