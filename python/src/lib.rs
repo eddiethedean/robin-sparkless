@@ -5642,6 +5642,16 @@ impl PyDataFrame {
         right_on: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyDataFrame> {
         let how_lower = how.to_lowercase();
+        if on.is_some() && (left_on.is_some() || right_on.is_some()) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "join() cannot combine 'on' with 'left_on' or 'right_on'",
+            ));
+        }
+        if left_on.is_some() != right_on.is_some() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "join() requires both 'left_on' and 'right_on' when using separate join keys",
+            ));
+        }
         if how_lower == "cross" {
             return self
                 .inner
