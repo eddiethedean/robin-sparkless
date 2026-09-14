@@ -144,6 +144,33 @@ pub fn apply_literal_string_repeat(column: Column, value: &str) -> PolarsResult<
     Ok(Some(Column::new(name, out.into_series())))
 }
 
+/// Repeat each string by a per-row integer count (PySpark repeat).
+pub fn apply_repeat_dynamic(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "repeat needs a string column and count column".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let value = std::mem::take(&mut columns[0]).take_materialized_series();
+    let counts = std::mem::take(&mut columns[1])
+        .take_materialized_series()
+        .cast(&DataType::Int64)?;
+    let values = value.str().map_err(|e| compute_err("repeat", e))?;
+    let counts = counts.i64().map_err(|e| compute_err("repeat", e))?;
+    let value_at = |idx: usize| values.get(if values.len() == 1 { 0 } else { idx });
+    let count_at = |idx: usize| counts.get(if counts.len() == 1 { 0 } else { idx });
+    let out = StringChunked::from_iter_options(
+        name.as_str().into(),
+        (0..value.len()).map(|idx| match (value_at(idx), count_at(idx)) {
+            (Some(s), Some(n)) if n > 0 => Some(s.repeat(n as usize)),
+            (Some(_), Some(_)) => Some(String::new()),
+            _ => None,
+        }),
+    );
+    Ok(Some(Column::new(name, out.into_series())))
+}
+
 /// American Soundex code (4 chars). Matches PySpark soundex semantics.
 /// Null/empty: PySpark returns null for null, '' for empty string (Phase 7 / test_soundex_null_and_empty).
 fn soundex_one(s: &str) -> Cow<'_, str> {
@@ -2202,6 +2229,40 @@ pub fn apply_add_months(column: Column, n: i32) -> PolarsResult<Option<Column>> 
     let out = Int32Chunked::from_iter_options(name.as_str().into(), out);
     let out_series = out.into_series().cast(&DataType::Date)?;
     Ok(Some(Column::new(name, out_series)))
+}
+
+/// Add a per-row integer number of months to a date column.
+pub fn apply_add_months_dynamic(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "add_months needs a date column and month-count column".into(),
+        ));
+    }
+    use chrono::Months;
+    let name = columns[0].field().into_owned().name;
+    let dates = std::mem::take(&mut columns[0]).take_materialized_series();
+    let counts = std::mem::take(&mut columns[1])
+        .take_materialized_series()
+        .cast(&DataType::Int64)?;
+    let days = date_series_to_days(&dates)?;
+    let counts = counts.i64().map_err(|e| compute_err("add_months", e))?;
+    let count_at = |idx: usize| counts.get(if counts.len() == 1 { 0 } else { idx });
+    let out = days.into_iter().enumerate().map(|(idx, opt_days)| {
+        opt_days.and_then(|day| {
+            let months = count_at(idx)?;
+            let date = days_to_naive_date(day)?;
+            let next = if months >= 0 {
+                date.checked_add_months(Months::new(months as u32))?
+            } else {
+                date.checked_sub_months(Months::new(months.unsigned_abs() as u32))?
+            };
+            Some(naivedate_to_days(next))
+        })
+    });
+    let out = Int32Chunked::from_iter_options(name.as_str().into(), out)
+        .into_series()
+        .cast(&DataType::Date)?;
+    Ok(Some(Column::new(name, out)))
 }
 
 /// next_day(date_column, "Mon") - next occurrence of weekday (Sun=1..Sat=7; "Mon","Tue",...).

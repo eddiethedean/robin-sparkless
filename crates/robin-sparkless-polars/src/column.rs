@@ -1346,6 +1346,19 @@ impl Column {
         )
     }
 
+    /// Repeat a string column by a per-row integer count.
+    pub fn repeat_dynamic(&self, n: &Column) -> Column {
+        let args = [n.expr().clone()];
+        Self::from_expr(
+            self.expr().clone().map_many(
+                |cols| expect_col(crate::udfs::apply_repeat_dynamic(cols)),
+                &args,
+                |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::String)),
+            ),
+            None,
+        )
+    }
+
     /// Reverse string (PySpark reverse).
     pub fn reverse(&self) -> Column {
         Self::from_expr(self.expr().clone().str().reverse(), None)
@@ -2392,6 +2405,17 @@ impl Column {
         let expr = self.expr().clone().map(
             move |col| expect_col(crate::udfs::apply_add_months(col, n)),
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::Date)),
+        );
+        Self::from_expr(expr, None)
+    }
+
+    /// Add a per-row integer month count to a date column.
+    pub fn add_months_dynamic(&self, n: &Column) -> Column {
+        let args = [n.expr().clone()];
+        let expr = self.expr().clone().map_many(
+            |cols| expect_col(crate::udfs::apply_add_months_dynamic(cols)),
+            &args,
+            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Date)),
         );
         Self::from_expr(expr, None)
     }

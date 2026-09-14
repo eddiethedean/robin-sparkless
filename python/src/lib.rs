@@ -7727,10 +7727,11 @@ impl PyColumn {
         }
     }
 
-    fn repeat(&self, n: i32) -> PyColumn {
-        PyColumn {
-            inner: self.inner.repeat(n),
-        }
+    fn repeat(&self, n: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+        let n = py_any_to_i64_or_column(n)?;
+        Ok(PyColumn {
+            inner: self.inner.repeat_dynamic(&n),
+        })
     }
 
     fn reverse(&self) -> PyColumn {
@@ -9798,10 +9799,11 @@ fn ceil(column: &PyColumn) -> PyColumn {
 
 #[pyfunction]
 #[pyo3(name = "native_add_months")]
-fn native_add_months(column: &PyColumn, months: i32) -> PyColumn {
-    PyColumn {
-        inner: functions::add_months(&column.inner, months),
-    }
+fn native_add_months(column: &PyColumn, months: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let months = py_any_to_i64_or_column(months)?;
+    Ok(PyColumn {
+        inner: column.inner.add_months_dynamic(&months),
+    })
 }
 
 #[pyfunction]
@@ -10282,10 +10284,11 @@ fn native_length(column: &PyColumn) -> PyColumn {
 }
 
 #[pyfunction]
-fn repeat(column: &PyColumn, n: i32) -> PyColumn {
-    PyColumn {
-        inner: functions::repeat(&column.inner, n),
-    }
+fn repeat(column: &PyColumn, n: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
+    let n = py_any_to_i64_or_column(n)?;
+    Ok(PyColumn {
+        inner: column.inner.repeat_dynamic(&n),
+    })
 }
 
 #[pyfunction]
