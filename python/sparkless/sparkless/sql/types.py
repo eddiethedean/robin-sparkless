@@ -519,7 +519,7 @@ class Row(tuple):
                 base, _, idx_str = item.rpartition("_")
                 if base and idx_str.isdigit():
                     idx = int(idx_str)
-                    if 0 <= idx < len(self):
+                    if base.lower() in lowered_fields and 0 <= idx < len(self):
                         return True
             # CAST wrapper aliases: "x" / "x_1" for "CAST(x AS ...)".
             key = item
