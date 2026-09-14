@@ -272,16 +272,59 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         .map_err(|e| EngineError::Internal(format!("JDBC read (SQLite): build DataFrame: {e}")))
 }
 
-/// Return the unqualified source table for a simple SELECT query. More complex
-/// queries intentionally fall back to SQLite's runtime value inference.
+/// Return the source table for a simple SELECT query.  A qualified projection
+/// (`alias.column` or `alias.*`) takes precedence over the first FROM table so
+/// empty-result metadata follows the selected relation.
 fn sqlite_query_source_table(query: &str) -> Option<&str> {
-    let from = query.to_ascii_lowercase().find("from")?;
+    let lower = query.to_ascii_lowercase();
+    let select = lower.find("select")?;
+    let from = lower[select + 6..].find("from")? + select + 6;
+    let projection = query[select + 6..from].split(',').next()?.trim();
+    let source = projection.split_whitespace().next()?;
+    if let Some((alias, _)) = source.split_once('.') {
+        if let Some(table) = sqlite_query_table_for_alias(query, alias) {
+            return Some(table);
+        }
+    }
     let rest = query[from + 4..].trim_start();
     let table = rest.split_whitespace().next()?;
     if table.starts_with('(') || table.contains(',') || table.contains(' ') {
         return None;
     }
     Some(table.trim_matches(|c| c == '`' || c == '\"' || c == '[' || c == ']'))
+}
+
+/// Resolve a FROM/JOIN alias without attempting to parse SQL expressions.  The
+/// metadata fallback only needs relation names, and intentionally declines
+/// subqueries and other non-table relation forms.
+fn sqlite_query_table_for_alias<'a>(query: &'a str, alias: &str) -> Option<&'a str> {
+    let words: Vec<&str> = query.split_whitespace().collect();
+    for (index, word) in words.iter().enumerate() {
+        if !(word.eq_ignore_ascii_case("from") || word.eq_ignore_ascii_case("join")) {
+            continue;
+        }
+        let table = *words.get(index + 1)?;
+        if table.starts_with('(') {
+            continue;
+        }
+        let alias_index = if words
+            .get(index + 2)
+            .is_some_and(|word| word.eq_ignore_ascii_case("as"))
+        {
+            index + 3
+        } else {
+            index + 2
+        };
+        let candidate = words
+            .get(alias_index)
+            .copied()
+            .unwrap_or(table)
+            .trim_matches(|c: char| c == '`' || c == '\"' || c == '[' || c == ']' || c == ';');
+        if candidate.eq_ignore_ascii_case(alias) {
+            return Some(table.trim_matches(|c| c == '`' || c == '\"' || c == '[' || c == ']'));
+        }
+    }
+    None
 }
 
 /// Return output-name/source-name pairs for simple SELECT column references.
