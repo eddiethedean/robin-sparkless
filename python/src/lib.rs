@@ -7480,7 +7480,10 @@ impl PyColumn {
             functions::isin_i64(&self.inner, &vals)
         } else {
             let first_type = first.get_type();
-            if expanded.iter().any(|v| v.bind(py).get_type() != first_type) {
+            if expanded
+                .iter()
+                .any(|v| !v.bind(py).is_exact_instance(first_type.as_any()))
+            {
                 return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                     "isin values must have a consistent type",
                 ));

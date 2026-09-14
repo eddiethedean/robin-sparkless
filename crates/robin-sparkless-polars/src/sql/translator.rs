@@ -1379,7 +1379,7 @@ fn sql_expr_to_polars(
         } => {
             let col_expr = sql_expr_to_polars(left.as_ref(), session, df, having_agg_map, having_agg_list)?;
             if list.is_empty() {
-                return Ok(lit(!*negated));
+                return Ok(lit(*negated));
             }
 
             // Build IN as a disjunction of equality comparisons so we can reuse

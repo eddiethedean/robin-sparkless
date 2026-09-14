@@ -1796,7 +1796,7 @@ pub fn try_add(left: &Column, right: &Column) -> Column {
     let expr = left.expr().clone().map_many(
         |cols| crate::column::expect_col(crate::udfs::apply_try_add(cols)),
         &args,
-        |_schema, fields| Ok(fields[0].clone()),
+        |_schema, fields| crate::ansi::arithmetic_field(fields),
     );
     Column::from_expr(expr, None)
 }
@@ -1807,7 +1807,7 @@ pub fn try_subtract(left: &Column, right: &Column) -> Column {
     let expr = left.expr().clone().map_many(
         |cols| crate::column::expect_col(crate::udfs::apply_try_subtract(cols)),
         &args,
-        |_schema, fields| Ok(fields[0].clone()),
+        |_schema, fields| crate::ansi::arithmetic_field(fields),
     );
     Column::from_expr(expr, None)
 }
@@ -1818,7 +1818,7 @@ pub fn try_multiply(left: &Column, right: &Column) -> Column {
     let expr = left.expr().clone().map_many(
         |cols| crate::column::expect_col(crate::udfs::apply_try_multiply(cols)),
         &args,
-        |_schema, fields| Ok(fields[0].clone()),
+        |_schema, fields| crate::ansi::arithmetic_field(fields),
     );
     Column::from_expr(expr, None)
 }

@@ -3628,6 +3628,18 @@ fn binary_series_f64(
     Ok((ca_a, ca_b))
 }
 
+fn broadcast_binary_inputs(a: Series, b: Series, ctx: &str) -> PolarsResult<(Series, Series)> {
+    let len = a.len().max(b.len());
+    if (a.len() != 1 && a.len() != len) || (b.len() != 1 && b.len() != len) {
+        return Err(PolarsError::ShapeMismatch(
+            format!("{ctx}: inputs must have equal lengths or be scalars").into(),
+        ));
+    }
+    let a = if a.len() == 1 && len > 1 { a.new_from_index(0, len) } else { a };
+    let b = if b.len() == 1 && len > 1 { b.new_from_index(0, len) } else { b };
+    Ok((a, b))
+}
+
 /// Helper: convert any numeric-or-string series to Float64Chunked with PySpark-like semantics.
 ///
 /// - Numeric types are cast to Float64.
@@ -3807,9 +3819,14 @@ pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_add")?;
     let out = match (a_s.dtype(), b_s.dtype()) {
-        (DataType::Int64, DataType::Int64) => {
-            let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, "try_add")?;
+        (DataType::Int64, DataType::Int64)
+        | (DataType::Int32, DataType::Int64)
+        | (DataType::Int64, DataType::Int32) => {
+            let a64 = a_s.cast(&DataType::Int64)?;
+            let b64 = b_s.cast(&DataType::Int64)?;
+            let (ca_a, ca_b) = binary_series_i64(&a64, &b64, "try_add")?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -3852,9 +3869,14 @@ pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_subtract")?;
     let out = match (a_s.dtype(), b_s.dtype()) {
-        (DataType::Int64, DataType::Int64) => {
-            let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, "try_subtract")?;
+        (DataType::Int64, DataType::Int64)
+        | (DataType::Int32, DataType::Int64)
+        | (DataType::Int64, DataType::Int32) => {
+            let a64 = a_s.cast(&DataType::Int64)?;
+            let b64 = b_s.cast(&DataType::Int64)?;
+            let (ca_a, ca_b) = binary_series_i64(&a64, &b64, "try_subtract")?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
@@ -3897,9 +3919,14 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_multiply")?;
     let out = match (a_s.dtype(), b_s.dtype()) {
-        (DataType::Int64, DataType::Int64) => {
-            let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, "try_multiply")?;
+        (DataType::Int64, DataType::Int64)
+        | (DataType::Int32, DataType::Int64)
+        | (DataType::Int64, DataType::Int32) => {
+            let a64 = a_s.cast(&DataType::Int64)?;
+            let b64 = b_s.cast(&DataType::Int64)?;
+            let (ca_a, ca_b) = binary_series_i64(&a64, &b64, "try_multiply")?;
             Int64Chunked::from_iter_options(
                 name.as_str().into(),
                 ca_a.into_iter()
