@@ -241,6 +241,14 @@ impl DataFrameReader {
                 r = r.with_infer_schema_length(NonZeroUsize::new(n));
             }
         }
+        if self
+            .options
+            .get("verifySchema")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false)
+        {
+            r = r.with_infer_schema_length(None);
+        }
         r
     }
 

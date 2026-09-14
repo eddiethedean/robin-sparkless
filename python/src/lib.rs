@@ -1039,6 +1039,28 @@ fn unregister_active_session_by_ptr(py: Python<'_>, ptr: *mut pyo3::ffi::PyObjec
         }
     }
 
+    // Restore the UDF/config context for the session that is now on top of the
+    // thread-local stack.  Stopping an inner session must not leave the thread
+    // with an empty context while an outer session remains active.
+    let replacement =
+        THREAD_ACTIVE_SESSIONS.with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
+    if let Some(session) = replacement {
+        if let Ok(session_ref) = session.bind(py).cast::<PySparkSession>() {
+            let session = &session_ref.borrow().inner;
+            robin_sparkless::set_thread_udf_context_full(
+                std::sync::Arc::new(session.udf_registry().clone()),
+                session.is_case_sensitive(),
+                session
+                    .get_config()
+                    .get("spark.sql.session.timeZone")
+                    .cloned(),
+                session.runtime_config().clone(),
+            );
+        }
+    } else {
+        robin_sparkless::clear_thread_udf_context();
+    }
+
     Ok(())
 }
 
@@ -5964,9 +5986,7 @@ impl PyDataFrame {
 
     #[pyo3(name = "createOrReplaceTempView")]
     fn create_or_replace_temp_view_camel(&self, py: Python<'_>, name: &str) -> PyResult<()> {
-        let session = THREAD_ACTIVE_SESSIONS
-            .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)))
-            .ok_or_else(|| to_py_err("No active SparkSession for createOrReplaceTempView"))?;
+        let session = require_active_session(py)?;
         let session_ref = session
             .bind(py)
             .cast::<PySparkSession>()
@@ -6659,33 +6679,7 @@ impl PyDataFrameWriter {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
             })?;
         let inner = df.borrow();
-        let active = {
-            let ty = py.get_type::<PySparkSession>();
-            if let Ok(singleton) = ty.getattr("_singleton_session") {
-                if !singleton.is_none() {
-                    singleton
-                        .cast::<PySparkSession>()
-                        .map_err(|_| to_py_err("active SparkSession is invalid"))?
-                        .borrow()
-                        .inner
-                        .clone()
-                } else {
-                    let top = THREAD_ACTIVE_SESSIONS
-                        .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-                    match top {
-                        Some(s) => s.bind(py).borrow().inner.clone(),
-                        None => return Err(to_py_err("No active SparkSession")),
-                    }
-                }
-            } else {
-                let top = THREAD_ACTIVE_SESSIONS
-                    .with(|cell| cell.borrow().last().map(|s| s.clone_ref(py)));
-                match top {
-                    Some(s) => s.bind(py).borrow().inner.clone(),
-                    None => return Err(to_py_err("No active SparkSession")),
-                }
-            }
-        };
+        let active = require_active_session(py)?.bind(py).borrow().inner.clone();
         let save_mode = save_mode_from_str(mode.unwrap_or(self.mode.as_str()));
         // Thread writer-level options (including format) through to the backend so
         // saveAsTable can make format-aware decisions (e.g. Delta overwrite parity).
