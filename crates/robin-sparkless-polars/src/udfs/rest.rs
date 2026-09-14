@@ -3629,6 +3629,11 @@ fn binary_series_f64(
 }
 
 fn broadcast_binary_inputs(a: Series, b: Series, ctx: &str) -> PolarsResult<(Series, Series)> {
+    // A scalar broadcasts to an empty input as an empty result. Treating the scalar
+    // as a one-row frame would incorrectly turn an empty DataFrame into one row.
+    if (a.is_empty() && b.len() <= 1) || (b.is_empty() && a.len() <= 1) {
+        return Ok((a.slice(0, 0), b.slice(0, 0)));
+    }
     let len = a.len().max(b.len());
     if (a.len() != 1 && a.len() != len) || (b.len() != 1 && b.len() != len) {
         return Err(PolarsError::ShapeMismatch(

@@ -83,7 +83,7 @@ pub fn mul_expr(left: Expr, right: Expr) -> Expr {
         left.map_many(
             |cols| crate::column::expect_col(crate::udfs::apply_try_multiply(cols)),
             &args,
-            |_schema, fields| Ok(fields[0].clone()),
+            |_schema, fields| arithmetic_field(fields),
         )
     }
 }
