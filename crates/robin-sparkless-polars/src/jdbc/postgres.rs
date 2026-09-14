@@ -207,18 +207,17 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
             .map_err(|e| EngineError::Sql(format!("JDBC read: prepareQuery failed: {e}")))?;
     }
 
+    let statement = client
+        .prepare(&sql)
+        .map_err(|e| EngineError::Sql(format!("JDBC read: prepare query failed: {e}")))?;
+    let columns = statement.columns();
     let rows = client
-        .query(&sql, &[])
+        .query(&statement, &[])
         .map_err(|e| EngineError::Sql(format!("JDBC read: query failed: {e}")))?;
-
-    if rows.is_empty() {
-        return Ok(PlDataFrame::empty());
-    }
 
     let cfg = crate::udf_context::get_thread_runtime_config();
     let use_v4_datetime = robin_sparkless_core::postgres_v4_datetime_mapping(&cfg);
 
-    let columns = rows[0].columns();
     let mut series_vec: Vec<Series> = Vec::with_capacity(columns.len());
     for (idx, col) in columns.iter().enumerate() {
         let name = col.name().to_string();

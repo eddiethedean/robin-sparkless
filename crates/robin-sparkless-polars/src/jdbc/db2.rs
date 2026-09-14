@@ -2,6 +2,7 @@ use crate::error::EngineError;
 use crate::jdbc::JdbcOptions;
 use crate::jdbc::sql_ident::{self, JdbcDialect};
 
+use odbc_api::DataType as OdbcDataType;
 use odbc_api::{
     ConnectionOptions, Cursor, Environment, IntoParameter, ResultSetMetadata, buffers::TextRowSet,
 };
@@ -26,9 +27,57 @@ fn normalize_db2_dsn(url: &str, opts: &JdbcOptions) -> Result<String, EngineErro
     let user = opts.user.clone().unwrap_or_default();
     let password = opts.password.clone().unwrap_or_default();
 
+    let escape_value = |value: &str| format!("{{{}}}", value.replace('}', "}}"));
     Ok(format!(
-        "DRIVER={{IBM DB2 ODBC DRIVER}};SERVER={host};PORT={port};DATABASE={db_name};UID={user};PWD={password};"
+        "DRIVER={{IBM DB2 ODBC DRIVER}};SERVER={host};PORT={port};DATABASE={db_name};UID={};PWD={};",
+        escape_value(&user),
+        escape_value(&password),
     ))
+}
+
+fn redact_db2_dsn(dsn: &str) -> String {
+    // DB2 accepts semicolons inside a braced value (`PWD={...}`), so a simple
+    // split would leak the suffix of a password in connection errors.
+    let mut redacted = String::with_capacity(dsn.len());
+    let bytes = dsn.as_bytes();
+    let mut start = 0;
+    while start < bytes.len() {
+        let mut end = start;
+        let mut in_braces = false;
+        while end < bytes.len() {
+            match bytes[end] {
+                b'{' => in_braces = true,
+                // ODBC escapes a right brace in a braced value as `}}`. It is
+                // still part of the password, rather than the end of the value.
+                b'}' if in_braces && bytes.get(end + 1) == Some(&b'}') => {
+                    end += 2;
+                    continue;
+                }
+                b'}' => in_braces = false,
+                b';' if !in_braces => break,
+                _ => {}
+            }
+            end += 1;
+        }
+        let part = &dsn[start..end];
+        if let Some((key, _)) = part.split_once('=') {
+            if key.trim().eq_ignore_ascii_case("pwd") {
+                redacted.push_str(key);
+                redacted.push_str("=***");
+            } else {
+                redacted.push_str(part);
+            }
+        } else {
+            redacted.push_str(part);
+        }
+        if end < bytes.len() {
+            redacted.push(';');
+            start = end + 1;
+        } else {
+            break;
+        }
+    }
+    redacted
 }
 
 pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
@@ -49,7 +98,12 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
         .map_err(|e| EngineError::Internal(format!("JDBC DB2: ODBC env: {e}")))?;
     let conn = env
         .connect_with_connection_string(&dsn, ConnectionOptions::default())
-        .map_err(|e| EngineError::Io(format!("JDBC DB2: connect failed: {e}")))?;
+        .map_err(|_e| {
+            EngineError::Io(format!(
+                "JDBC DB2: connect failed for {}",
+                redact_db2_dsn(&dsn)
+            ))
+        })?;
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
@@ -89,6 +143,10 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
             .map_err(|e| EngineError::Other(format!("JDBC DB2: col_name: {e}")))?;
         column_names.push(desc);
     }
+    let column_types: Vec<OdbcDataType> = (1..=ncols as u16)
+        .map(|idx| cursor.col_data_type(idx))
+        .collect::<Result<_, _>>()
+        .map_err(|e| EngineError::Other(format!("JDBC DB2: col_data_type: {e}")))?;
 
     const BATCH_SIZE: usize = 1024;
     let buffers = TextRowSet::for_cursor(BATCH_SIZE, &mut cursor, Some(4096))
@@ -113,20 +171,78 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
         }
     }
 
-    if columns.iter().all(|c| c.is_empty()) {
-        return Ok(PlDataFrame::empty());
-    }
-
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
-    for (name, col_data) in column_names.iter().zip(columns.iter()) {
-        series_vec.push(db2_values_to_series(name, col_data));
+    for (idx, (name, col_data)) in column_names.iter().zip(columns.iter()).enumerate() {
+        series_vec.push(db2_values_to_series(name, col_data, column_types[idx]));
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
         .map_err(|e| EngineError::Internal(format!("JDBC read (DB2): build DataFrame: {e}")))
 }
 
-fn db2_values_to_series(name: &str, values: &[Option<String>]) -> Series {
+fn db2_values_to_series(name: &str, values: &[Option<String>], data_type: OdbcDataType) -> Series {
+    if values.is_empty() {
+        return match data_type {
+            OdbcDataType::SmallInt | OdbcDataType::TinyInt => {
+                Series::new(name.into(), Vec::<Option<i16>>::new())
+            }
+            OdbcDataType::Integer | OdbcDataType::BigInt => {
+                Series::new(name.into(), Vec::<Option<i64>>::new())
+            }
+            OdbcDataType::Float { .. }
+            | OdbcDataType::Real
+            | OdbcDataType::Double
+            | OdbcDataType::Numeric { .. }
+            | OdbcDataType::Decimal { .. } => Series::new(name.into(), Vec::<Option<f64>>::new()),
+            _ => Series::new(name.into(), Vec::<Option<String>>::new()),
+        };
+    }
+    match data_type {
+        OdbcDataType::Char { .. }
+        | OdbcDataType::WChar { .. }
+        | OdbcDataType::Varchar { .. }
+        | OdbcDataType::WVarchar { .. }
+        | OdbcDataType::LongVarchar { .. }
+        | OdbcDataType::WLongVarchar { .. }
+        | OdbcDataType::Bit
+        | OdbcDataType::Varbinary { .. }
+        | OdbcDataType::Binary { .. }
+        | OdbcDataType::LongVarbinary { .. } => {
+            return Series::new(name.into(), values.to_vec());
+        }
+        OdbcDataType::SmallInt | OdbcDataType::TinyInt => {
+            return Series::new(
+                name.into(),
+                values
+                    .iter()
+                    .map(|v| v.as_ref().and_then(|s| s.parse::<i16>().ok()))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        OdbcDataType::Integer | OdbcDataType::BigInt => {
+            return Series::new(
+                name.into(),
+                values
+                    .iter()
+                    .map(|v| v.as_ref().and_then(|s| s.parse::<i64>().ok()))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        OdbcDataType::Float { .. }
+        | OdbcDataType::Real
+        | OdbcDataType::Double
+        | OdbcDataType::Numeric { .. }
+        | OdbcDataType::Decimal { .. } => {
+            return Series::new(
+                name.into(),
+                values
+                    .iter()
+                    .map(|v| v.as_ref().and_then(|s| s.parse::<f64>().ok()))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        _ => {}
+    }
     let mut has_int = true;
     let mut has_float = false;
     for v in values.iter().filter_map(|v| v.as_ref()) {
@@ -338,6 +454,13 @@ pub(crate) fn write_jdbc_db2(
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn redacts_a_password_with_an_escaped_closing_brace() {
+        let dsn = "DRIVER={IBM DB2 ODBC DRIVER};PWD={first}};SECRET_SUFFIX};";
+        let redacted = redact_db2_dsn(dsn);
+        assert_eq!(redacted, "DRIVER={IBM DB2 ODBC DRIVER};PWD=***;");
+    }
 
     #[test]
     fn db2_smoke_if_env() {
