@@ -171,9 +171,7 @@ pub fn apply_repeat_dynamic(columns: &mut [Column]) -> PolarsResult<Option<Colum
     let out = StringChunked::from_iter_options(
         name.as_str().into(),
         (0..out_len).map(|idx| match (value_at(idx), count_at(idx)) {
-            (Some(s), Some(n)) if n > 0 => usize::try_from(n)
-                .ok()
-                .map(|count| s.repeat(count)),
+            (Some(s), Some(n)) if n > 0 => usize::try_from(n).ok().map(|count| s.repeat(count)),
             (Some(_), Some(_)) => Some(String::new()),
             _ => None,
         }),
@@ -2257,8 +2255,7 @@ pub fn apply_add_months_dynamic(columns: &mut [Column]) -> PolarsResult<Option<C
     let days = date_series_to_days(&dates)?;
     let counts = counts.i64().map_err(|e| compute_err("add_months", e))?;
     let out_len = days.len().max(counts.len());
-    if (days.len() != 1 && days.len() != out_len)
-        || (counts.len() != 1 && counts.len() != out_len)
+    if (days.len() != 1 && days.len() != out_len) || (counts.len() != 1 && counts.len() != out_len)
     {
         return Err(PolarsError::ShapeMismatch(
             "add_months: inputs must have equal lengths or be scalars".into(),
