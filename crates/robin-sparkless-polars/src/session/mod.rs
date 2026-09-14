@@ -3110,9 +3110,9 @@ impl SparkSession {
         self.table(name).map_err(polars_to_core_error)
     }
 
-    /// Returns true if the string looks like a filesystem path (has separators or path exists).
+    /// Returns true for an explicitly path-like Delta source.
     fn looks_like_path(s: &str) -> bool {
-        s.contains('/') || s.contains('\\') || Path::new(s).exists()
+        s.starts_with("file://") || Path::new(s).is_absolute()
     }
 
     /// Read a Delta table from path (latest version). Internal; use read_delta(name_or_path: &str) for dispatch.
@@ -3136,11 +3136,14 @@ impl SparkSession {
     /// Read a Delta table or in-memory table by name/path. If name_or_path looks like a path, reads from Delta on disk; else resolves as table name (temp view then saved table).
     #[cfg(feature = "delta")]
     pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
-        if Self::looks_like_path(name_or_path) {
-            self.read_delta_path(Path::new(name_or_path))
-        } else {
-            self.table(name_or_path)
+        if let Ok(table) = self.table(name_or_path) {
+            return Ok(table);
         }
+        if Self::looks_like_path(name_or_path) {
+            let path = name_or_path.strip_prefix("file://").unwrap_or(name_or_path);
+            return self.read_delta_path(Path::new(path));
+        }
+        self.table(name_or_path)
     }
 
     #[cfg(feature = "delta")]
@@ -3149,24 +3152,29 @@ impl SparkSession {
         name_or_path: &str,
         version: Option<i64>,
     ) -> Result<DataFrame, PolarsError> {
-        if Self::looks_like_path(name_or_path) {
-            self.read_delta_path_with_version(Path::new(name_or_path), version)
-        } else {
-            // In-memory tables have no version; ignore version and return table
-            self.table(name_or_path)
+        if let Ok(table) = self.table(name_or_path) {
+            return Ok(table);
         }
+        if Self::looks_like_path(name_or_path) {
+            let path = name_or_path.strip_prefix("file://").unwrap_or(name_or_path);
+            return self.read_delta_path_with_version(Path::new(path), version);
+        }
+        // In-memory tables have no version; ignore version and return table.
+        self.table(name_or_path)
     }
 
     /// Stub when `delta` feature is disabled. Still supports reading by table name.
     #[cfg(not(feature = "delta"))]
     pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
-        if Self::looks_like_path(name_or_path) {
-            Err(PolarsError::InvalidOperation(
-                "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
-            ))
-        } else {
-            self.table(name_or_path)
+        if let Ok(table) = self.table(name_or_path) {
+            return Ok(table);
         }
+        if Self::looks_like_path(name_or_path) {
+            return Err(PolarsError::InvalidOperation(
+                "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+            ));
+        }
+        self.table(name_or_path)
     }
 
     #[cfg(not(feature = "delta"))]

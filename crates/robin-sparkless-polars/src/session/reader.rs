@@ -198,6 +198,14 @@ impl DataFrameReader {
     ) -> polars::prelude::LazyCsvReader {
         use polars::prelude::NullValues;
         let mut r = reader;
+        let verify_schema = self
+            .options
+            .get("verifySchema")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+        if verify_schema {
+            r = r.with_infer_schema_length(None);
+        }
         if let Some(v) = self.options.get("header") {
             let has_header = v.eq_ignore_ascii_case("true") || v == "1";
             r = r.with_has_header(has_header);
@@ -236,6 +244,14 @@ impl DataFrameReader {
     ) -> polars::prelude::LazyJsonLineReader {
         use std::num::NonZeroUsize;
         let mut r = reader;
+        let verify_schema = self
+            .options
+            .get("verifySchema")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+        if verify_schema {
+            r = r.with_infer_schema_length(None);
+        }
         if let Some(v) = self.options.get("inferSchemaLength") {
             if let Ok(n) = v.parse::<usize>() {
                 r = r.with_infer_schema_length(NonZeroUsize::new(n));
