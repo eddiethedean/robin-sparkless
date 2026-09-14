@@ -3974,21 +3974,38 @@ fn ansi_checked_i64_op(
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
-    let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, op_name)?;
-    let mut values = Vec::with_capacity(ca_a.len());
-    for (oa, ob) in ca_a.into_iter().zip(&ca_b) {
-        match (oa, ob) {
-            (Some(a), Some(b)) => match f(a, b) {
-                Some(v) => values.push(Some(v)),
-                None => {
-                    return Err(PolarsError::ComputeError(err_msg.to_string().into()));
+    let out = if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Int32, DataType::Int32)
+    ) {
+        let (ca_a, ca_b) = binary_series_i32(&a_s, &b_s, op_name)?;
+        let mut values = Vec::with_capacity(ca_a.len());
+        for (oa, ob) in ca_a.into_iter().zip(&ca_b) {
+            match (oa, ob) {
+                (Some(a), Some(b)) => {
+                    match f(a as i64, b as i64).and_then(|v| i32::try_from(v).ok()) {
+                        Some(v) => values.push(Some(v)),
+                        None => return Err(PolarsError::ComputeError(err_msg.to_string().into())),
+                    }
                 }
-            },
-            _ => values.push(None),
+                _ => values.push(None),
+            }
         }
-    }
-    let out =
-        Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series();
+        Int32Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+    } else {
+        let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, op_name)?;
+        let mut values = Vec::with_capacity(ca_a.len());
+        for (oa, ob) in ca_a.into_iter().zip(&ca_b) {
+            match (oa, ob) {
+                (Some(a), Some(b)) => match f(a, b) {
+                    Some(v) => values.push(Some(v)),
+                    None => return Err(PolarsError::ComputeError(err_msg.to_string().into())),
+                },
+                _ => values.push(None),
+            }
+        }
+        Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+    };
     Ok(Some(Column::new(name, out)))
 }
 

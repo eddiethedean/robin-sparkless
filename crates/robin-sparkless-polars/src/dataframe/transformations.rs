@@ -1601,6 +1601,11 @@ pub fn fillna(
 
 /// Limit: return first n rows.
 pub fn limit(df: &DataFrame, n: usize, case_sensitive: bool) -> Result<DataFrame, PolarsError> {
+    if n > u32::MAX as usize {
+        return Err(PolarsError::InvalidOperation(
+            "limit n exceeds the maximum supported row count".into(),
+        ));
+    }
     // limit is a transformation: slice(0, n) on lazy
     let lf = df.lazy_frame().slice(0, n as u32);
     Ok(super::DataFrame::from_lazy_with_options(lf, case_sensitive))

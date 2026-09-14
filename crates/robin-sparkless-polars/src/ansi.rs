@@ -34,7 +34,12 @@ pub fn add_expr(left: Expr, right: Expr) -> Expr {
             |_schema, fields| Ok(fields[0].clone()),
         )
     } else {
-        left + right
+        let args = [right.clone()];
+        left.map_many(
+            |cols| crate::column::expect_col(crate::udfs::apply_try_add(cols)),
+            &args,
+            |_schema, fields| Ok(fields[0].clone()),
+        )
     }
 }
 
@@ -47,7 +52,12 @@ pub fn sub_expr(left: Expr, right: Expr) -> Expr {
             |_schema, fields| Ok(fields[0].clone()),
         )
     } else {
-        left - right
+        let args = [right.clone()];
+        left.map_many(
+            |cols| crate::column::expect_col(crate::udfs::apply_try_subtract(cols)),
+            &args,
+            |_schema, fields| Ok(fields[0].clone()),
+        )
     }
 }
 
@@ -60,7 +70,12 @@ pub fn mul_expr(left: Expr, right: Expr) -> Expr {
             |_schema, fields| Ok(fields[0].clone()),
         )
     } else {
-        left * right
+        let args = [right.clone()];
+        left.map_many(
+            |cols| crate::column::expect_col(crate::udfs::apply_try_multiply(cols)),
+            &args,
+            |_schema, fields| Ok(fields[0].clone()),
+        )
     }
 }
 
