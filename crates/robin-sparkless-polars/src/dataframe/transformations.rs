@@ -3,16 +3,16 @@
 //! replace, cross_join, describe, subtract, intersect,
 //! sample, random_split, first, head, take, tail, is_empty, to_df.
 
-use super::{DataFrame, resolve_column_with_schema};
-use crate::column::RangeWindowAgg;
+use super::{resolve_column_with_schema, DataFrame};
 use crate::column::expect_col;
+use crate::column::RangeWindowAgg;
 use crate::functions::SortOrder;
 use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public};
 use crate::udfs;
 use polars::prelude::{
-    DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
-    SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions, UniqueKeepStrategy, col, len, lit,
-    repeat,
+    col, len, lit, repeat, DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom,
+    PlSmallStr, PolarsError, SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions,
+    UniqueKeepStrategy,
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -2438,8 +2438,10 @@ pub fn freq_items(
         .collect::<Result<_, _>>()?;
     let selected_refs: Vec<&str> = resolved_columns.iter().map(String::as_str).collect();
     let selected = df.select(selected_refs)?;
-    let collected = selected.collect_with_engine(polars::prelude::Engine::Streaming)?;
-    let pl_df = collected.as_ref();
+    let collected = selected
+        .lazy_frame()
+        .collect_with_engine(polars::prelude::Engine::Streaming)?;
+    let pl_df = &collected;
     let n_total = pl_df.height() as f64;
     if n_total == 0.0 {
         let mut out = Vec::with_capacity(columns.len());
@@ -2519,9 +2521,11 @@ pub fn approx_quantile(
     use polars::prelude::{ChunkQuantile, QuantileMethod};
     if probabilities.is_empty() {
         return Ok(super::DataFrame::from_polars_with_options(
-            polars::prelude::DataFrame::new_infer_height(vec![
-                Series::new("quantile".into(), Vec::<f64>::new()).into(),
-            ])?,
+            polars::prelude::DataFrame::new_infer_height(vec![Series::new(
+                "quantile".into(),
+                Vec::<f64>::new(),
+            )
+            .into()])?,
             case_sensitive,
         ));
     }
@@ -2538,9 +2542,11 @@ pub fn approx_quantile(
         let q = ca.quantile(p, QuantileMethod::Linear)?;
         quantiles.push(q.unwrap_or(f64::NAN));
     }
-    let out_df = polars::prelude::DataFrame::new_infer_height(vec![
-        Series::new("quantile".into(), quantiles).into(),
-    ])?;
+    let out_df = polars::prelude::DataFrame::new_infer_height(vec![Series::new(
+        "quantile".into(),
+        quantiles,
+    )
+    .into()])?;
     Ok(super::DataFrame::from_polars_with_options(
         out_df,
         case_sensitive,
@@ -2648,8 +2654,8 @@ pub fn intersect_all(
 #[cfg(test)]
 mod tests {
     use super::{
-        DropColumnSpec, SelectItem, distinct, drop, drop_specs, dropna, filter, first, head, limit,
-        offset, order_by, select_items, union, union_by_name, with_column,
+        distinct, drop, drop_specs, dropna, filter, first, head, limit, offset, order_by,
+        select_items, union, union_by_name, with_column, DropColumnSpec, SelectItem,
     };
     use crate::column::Column;
     use crate::functions;
