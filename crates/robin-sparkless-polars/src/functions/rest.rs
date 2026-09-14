@@ -31,8 +31,21 @@ pub fn count(col: &Column) -> Column {
             ))
     });
 
+    let is_literal_with_evaluated_nullness =
+        col.is_literal_expression() && !is_literal_numeric_or_bool && !is_star;
     let (expr, name) = if is_star || is_literal_numeric_or_bool {
         (len().cast(DataType::Int64), "count(1)".to_string())
+    } else if is_literal_with_evaluated_nullness {
+        // A cast-wrapped literal may change value or become NULL. Evaluate its
+        // nullness, then use the input cardinality for non-null values instead
+        // of counting the scalar expression itself (which would always produce
+        // one value).
+        (
+            polars::prelude::when(col.expr().clone().is_null())
+                .then(lit(0i64))
+                .otherwise(len().cast(DataType::Int64)),
+            "count(1)".to_string(),
+        )
     } else {
         (
             col.expr().clone().count().cast(DataType::Int64),

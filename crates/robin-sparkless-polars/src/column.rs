@@ -309,6 +309,22 @@ impl Column {
         find_value_preserving_literal(&self.expr)
     }
 
+    /// Whether this expression is made only from a literal and wrappers that
+    /// can be evaluated without input columns. Consumers such as aggregations
+    /// may still need to evaluate the wrappers rather than use the raw value.
+    pub(crate) fn is_literal_expression(&self) -> bool {
+        fn is_literal(expr: &Expr) -> bool {
+            match expr {
+                Expr::Literal(_) => true,
+                Expr::Alias(inner, _) => is_literal(inner.as_ref()),
+                Expr::Cast { expr: inner, .. } => is_literal(inner.as_ref()),
+                _ => false,
+            }
+        }
+
+        is_literal(&self.expr)
+    }
+
     /// Return the observable type of a literal expression.  A literal Cast has
     /// the cast target type, rather than the raw literal's inferred type.
     pub(crate) fn literal_dtype(&self) -> Option<DataType> {
