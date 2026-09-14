@@ -13,8 +13,8 @@ pub fn count(col: &Column) -> Column {
     // Treat count("*") and count(lit(1)) (and similar numeric/bool literals) as
     // "count all rows", matching PySpark's count(lit(1)) / count("*") semantics.
     let is_star = col.name() == "*";
-    let is_literal_numeric_or_bool = matches!(col.expr(), Expr::Literal(lv) if matches!(
-        lv.get_datatype(),
+    let is_literal_numeric_or_bool = matches!(col.literal_dtype(), Some(dtype) if matches!(
+        dtype,
         DataType::Int8
             | DataType::Int16
             | DataType::Int32
@@ -3303,6 +3303,20 @@ mod tests {
     fn test_lit_i64() {
         let column = lit_i64(123456789012345i64);
         assert_eq!(column.name(), "<expr>");
+    }
+
+    #[test]
+    fn count_typed_literal_counts_every_row() {
+        let input = df!("value" => [Some(1i64), None, Some(3), None]).unwrap();
+        let out = input
+            .lazy()
+            .select([count(&lit_i64(1)).into_expr().alias("count_all")])
+            .collect()
+            .unwrap();
+        assert_eq!(
+            out.column("count_all").unwrap().i64().unwrap().get(0),
+            Some(4)
+        );
     }
 
     #[test]

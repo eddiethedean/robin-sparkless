@@ -1,5 +1,5 @@
 use polars::prelude::{
-    DataType, Expr, Field, PolarsError, PolarsResult, RankMethod, RankOptions,
+    DataType, Expr, Field, LiteralValue, PolarsError, PolarsResult, RankMethod, RankOptions,
     RollingOptionsFixedWindow, SortOptions, TimeUnit, WindowMapping, col, lit,
 };
 use polars_plan::dsl::AggExpr;
@@ -280,11 +280,44 @@ impl Column {
 
     /// If this column is a literal expression, return its value as JSON string for Python UDF executor (literal args).
     pub fn literal_as_json_string(&self) -> Option<String> {
-        match &self.expr {
-            Expr::Literal(lv) => crate::dataframe::literal_value_to_serde_value(lv)
-                .and_then(|v| serde_json::to_string(&v).ok()),
-            _ => None,
+        self.literal_value().and_then(|lv| {
+            crate::dataframe::literal_value_to_serde_value(lv)
+                .and_then(|v| serde_json::to_string(&v).ok())
+        })
+    }
+
+    /// Return a literal value through aliases and type annotations.  A Cast on a
+    /// literal is still a literal for API classification, even though the Cast
+    /// remains observable when the expression is evaluated.
+    pub(crate) fn literal_value(&self) -> Option<&LiteralValue> {
+        fn find_literal(expr: &Expr) -> Option<&LiteralValue> {
+            match expr {
+                Expr::Literal(value) => Some(value),
+                Expr::Alias(inner, _) | Expr::Cast { expr: inner, .. } => {
+                    find_literal(inner.as_ref())
+                }
+                _ => None,
+            }
         }
+
+        find_literal(&self.expr)
+    }
+
+    /// Return the observable type of a literal expression.  A literal Cast has
+    /// the cast target type, rather than the raw literal's inferred type.
+    pub(crate) fn literal_dtype(&self) -> Option<DataType> {
+        fn find_dtype(expr: &Expr) -> Option<DataType> {
+            match expr {
+                Expr::Literal(value) => Some(value.get_datatype()),
+                Expr::Alias(inner, _) => find_dtype(inner.as_ref()),
+                Expr::Cast {
+                    expr: inner, dtype, ..
+                } => find_dtype(inner.as_ref()).and_then(|_| dtype.as_literal().cloned()),
+                _ => None,
+            }
+        }
+
+        find_dtype(&self.expr)
     }
 
     /// If this column is a Python UDF call, return (udf_name, arg_names, arg_literal_json_strings).
@@ -3989,6 +4022,15 @@ mod tests {
     fn test_column_new() {
         let column = Column::new("age".to_string());
         assert_eq!(column.name(), "age");
+    }
+
+    #[test]
+    fn typed_string_literal_is_available_to_literal_consumers() {
+        let column = crate::functions::lit_str(r"\d+");
+        assert_eq!(
+            column.literal_as_json_string().as_deref(),
+            Some(r#""\\d+""#)
+        );
     }
 
     #[test]
