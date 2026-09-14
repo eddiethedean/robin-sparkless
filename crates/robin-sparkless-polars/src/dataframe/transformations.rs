@@ -2429,13 +2429,21 @@ pub fn freq_items(
         ));
     }
     let support = support.clamp(1e-4, 1.0);
-    let collected = df.collect_inner()?;
+    // Materialize only the requested columns.  The previous implementation
+    // collected every column in the frame before computing per-column counts,
+    // needlessly multiplying memory use for wide/lazy inputs.
+    let resolved_columns: Vec<String> = columns
+        .iter()
+        .map(|name| df.resolve_column_name(name))
+        .collect::<Result<_, _>>()?;
+    let selected_refs: Vec<&str> = resolved_columns.iter().map(String::as_str).collect();
+    let selected = df.select(selected_refs)?;
+    let collected = selected.collect_inner()?;
     let pl_df = collected.as_ref();
     let n_total = pl_df.height() as f64;
     if n_total == 0.0 {
         let mut out = Vec::with_capacity(columns.len());
-        for col_name in columns {
-            let resolved = df.resolve_column_name(col_name)?;
+        for resolved in &resolved_columns {
             let s = pl_df
                 .column(resolved.as_str())?
                 .as_series()
@@ -2452,8 +2460,7 @@ pub fn freq_items(
         ));
     }
     let mut out_series = Vec::with_capacity(columns.len());
-    for col_name in columns {
-        let resolved = df.resolve_column_name(col_name)?;
+    for resolved in &resolved_columns {
         let s = pl_df
             .column(resolved.as_str())?
             .as_series()
