@@ -10,7 +10,7 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 [features]
 default = []
 sql = ["dep:spark-sql-parser"]
-delta = ["dep:deltalake", "dep:tokio", "dep:futures", "dep:parquet", "dep:indexmap"]
+delta = ["dep:deltalake", "dep:tokio", "dep:futures", "dep:parquet", "dep:indexmap", "dep:delta_kernel_derive"]
 jdbc = ["dep:postgres"]
 jdbc_mysql = ["dep:mysql"]
 jdbc_mariadb = ["dep:mysql"]
@@ -47,6 +47,7 @@ md5 = "0.7"
 aes-gcm = "0.10"
 spark-sql-parser = { version = "0.5", path = "../spark-sql-parser", optional = true }
 deltalake = { version = "0.32", optional = true }
+delta_kernel_derive = { package = "buoyant_kernel_derive", version = "=1.0.0", optional = true }
 futures = { version = "0.3", optional = true }
 parquet = { version = "57", optional = true }
 indexmap = { version = "2", optional = true }
