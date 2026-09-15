@@ -7,6 +7,10 @@ This document describes how to cut a release and publish:
 
 The repository is a **Cargo workspace** with members: `robin-sparkless` (root, main facade), `crates/robin-sparkless-core`, `crates/robin-sparkless-polars`, `crates/spark-sql-parser`, and the Python extension crate under `python/`. The primary Rust dependency for users is **robin-sparkless**; the subcrates may be published for advanced or minimal-use cases. `make check` and CI build the whole workspace (`cargo build --workspace --all-features`, `cargo test --workspace --all-features`).
 
+## Released versions
+
+**4.13.3** was tagged on 2026-09-14 at commit `55d27019`. The [release workflow](https://github.com/eddiethedean/robin-sparkless/actions/runs/34905423487) completed successfully across all 36 jobs, including Rust checks, multiplatform wheel builds and tests, crates.io publication, and PyPI publication.
+
 ## Version pinning (CI and local)
 
 So that local development and CI use the same toolchains and tools:
