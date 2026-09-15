@@ -454,14 +454,15 @@ Align crate (`robin-sparkless`, `robin-sparkless-core`, `robin-sparkless-polars`
 
 | Version | When | Default compat | PyPI / notes |
 |---------|------|----------------|--------------|
-| **4.8.0** (current) | Baseline before plan execution | Tier A (3.5-like) | `sparkless>=4,<5` |
+| **4.13.3** (current) | Current released line after the plan's completed work | Tier A (3.5-like) | `sparkless>=4,<5` |
+| **4.8.0** (historical baseline) | Baseline before plan execution | Tier A (3.5-like) | `sparkless>=4,<5` |
 | **4.9.0** | Plan **implemented**: opt-in PySpark 4 (`compat=4.0`), ANSI/maps/JDBC/PyArrow, parity oracles; **defaults unchanged** | Tier A | Still `>=4,<5`; market as “PySpark 4 ready (opt-in)” |
 | **4.9.x** | Patches: parity fixes, docs, non-breaking API additions | Tier A | Patch releases only |
 | **4.10.0+** (optional) | Further minors if needed before default flip (large API tranches) | Tier A | Minor only while Tier A remains default |
 | **5.0.0** | Phase **4D**: default `sparkless.pyspark.compat=4.0`; migration guide; `compat=3.5` retained ≥ 12 months with deprecation warning | Tier C | `sparkless>=5,<6`; **major** = behavioral cutover, not “plan checklist done” |
 
 ```text
-4.8.0 (today) → 4.9.0   plan complete, opt-in PySpark 4
+Historical sequence: 4.8.0 (baseline) → 4.9.0   plan complete, opt-in PySpark 4
               → 4.9.x   patches
               → 4.10+   optional extra minors (still Tier A default)
               → 5.0.0   default compat=4.0 (+ deprecation period for 3.5 default)
