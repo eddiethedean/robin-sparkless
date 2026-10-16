@@ -247,6 +247,43 @@ pub fn coerce_for_pyspark_comparison(
 ) -> Result<(Expr, Expr), PolarsError> {
     use crate::column::Column;
 
+    fn decimal_scale_of_literal(expr: &Expr) -> Option<usize> {
+        fn float_scale(value: f64) -> Option<usize> {
+            let value = value.to_string();
+            let (mantissa, exponent) = value
+                .split_once(['e', 'E'])
+                .map(|(mantissa, exponent)| Some((mantissa, exponent.parse::<i32>().ok()?)))
+                .unwrap_or(Some((value.as_str(), 0)))?;
+            let fractional_digits = mantissa.split_once('.').map_or(0, |(_, frac)| frac.len());
+            usize::try_from((fractional_digits as i32 - exponent).max(0)).ok()
+        }
+
+        match expr {
+            Expr::Alias(inner, _) => decimal_scale_of_literal(inner),
+            Expr::Cast { expr, dtype, .. } => dtype.as_literal().and_then(|dtype| match dtype {
+                DataType::Decimal(_, scale) => Some(*scale),
+                _ => decimal_scale_of_literal(expr),
+            }),
+            Expr::Literal(value) => match value.get_datatype() {
+                DataType::Decimal(_, scale) => Some(scale),
+                _ => match value.to_any_value()? {
+                    AnyValue::Float64(value) => float_scale(value),
+                    AnyValue::Float32(value) => float_scale(f64::from(value)),
+                    AnyValue::Int8(_)
+                    | AnyValue::Int16(_)
+                    | AnyValue::Int32(_)
+                    | AnyValue::Int64(_)
+                    | AnyValue::UInt8(_)
+                    | AnyValue::UInt16(_)
+                    | AnyValue::UInt32(_)
+                    | AnyValue::UInt64(_) => Some(0),
+                    _ => None,
+                },
+            },
+            _ => None,
+        }
+    }
+
     // Keep decimal comparisons in decimal arithmetic. Promoting a Decimal column
     // and a numeric literal to Float64 loses integer precision above 2^53.
     if is_numeric(left_type) && is_numeric(right_type) {
@@ -254,7 +291,12 @@ pub fn coerce_for_pyspark_comparison(
             (DataType::Decimal(_, left_scale), DataType::Decimal(_, right_scale)) => {
                 Some((*left_scale).max(*right_scale))
             }
-            (DataType::Decimal(_, scale), _) | (_, DataType::Decimal(_, scale)) => Some(*scale),
+            (DataType::Decimal(_, scale), _) => {
+                decimal_scale_of_literal(&right).map(|literal_scale| (*scale).max(literal_scale))
+            }
+            (_, DataType::Decimal(_, scale)) => {
+                decimal_scale_of_literal(&left).map(|literal_scale| (*scale).max(literal_scale))
+            }
             _ => None,
         };
         if let Some(scale) = decimal_scale {

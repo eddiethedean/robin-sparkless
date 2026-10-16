@@ -1328,6 +1328,8 @@ impl PySparkSession {
         // authoritative source for precision and scale. Feed it through the same schema path.
         let arrow_schema = if schema.is_none() {
             data.getattr("schema").ok().and_then(|arrow_schema| {
+                let arrow_rows_obj = data.call_method0("to_pylist").ok()?;
+                let arrow_rows = arrow_rows_obj.cast::<PyList>().ok()?;
                 let out = PyList::empty(py);
                 for field in arrow_schema.try_iter().ok()? {
                     let field = field.ok()?;
@@ -1351,7 +1353,22 @@ impl PySparkSession {
                             "date32[day]" | "date64[ms]" => "date".to_string(),
                             "binary" | "large_binary" => "binary".to_string(),
                             ty if ty.starts_with("timestamp[") => "timestamp".to_string(),
-                            _ => return None,
+                            _ => {
+                                let mut inferred: Option<String> = None;
+                                for row in arrow_rows.iter() {
+                                    let value = row.get_item(name.as_str()).ok()?;
+                                    if !value.is_none() {
+                                        let inferred_type = infer_type_from_py_value(&value);
+                                        inferred = Some(match inferred {
+                                            Some(existing) => {
+                                                merge_spark_type_names(&existing, &inferred_type)
+                                            }
+                                            None => inferred_type,
+                                        });
+                                    }
+                                }
+                                inferred.unwrap_or_else(|| "string".to_string())
+                            }
                         }
                     };
                     out.append((name, spark_type)).ok()?;
@@ -2091,6 +2108,9 @@ fn parse_schema_from_py(
 fn infer_type_from_json_value(v: &JsonValue) -> String {
     match v {
         JsonValue::Null => "string".to_string(),
+        JsonValue::String(s) if s.starts_with("__sparkless_decimal__:__sparkless_decimal__:") => {
+            "string".to_string()
+        }
         JsonValue::String(s) if s.starts_with("__sparkless_decimal__:") => {
             let decimal = s.strip_prefix("__sparkless_decimal__:").unwrap_or(s);
             let (mantissa, exponent) = decimal
@@ -2100,11 +2120,11 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
                 })
                 .unwrap_or((decimal, 0));
             let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-            let scale = (fraction.len() as i32 - exponent).clamp(0, 38) as usize;
+            let scale = (fraction.len() as i32 - exponent).max(0) as usize;
             let significant_digits = format!("{whole}{fraction}").trim_start_matches('0').len();
             let precision = (significant_digits as i32 + exponent.max(0))
                 .max(scale as i32)
-                .clamp(1, 38) as usize;
+                .max(1) as usize;
             format!("decimal({precision},{scale})")
         }
         JsonValue::Bool(_) => "boolean".to_string(),
@@ -3010,7 +3030,14 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
     // Try String before i64/f64 so createDataFrame([{"key": "3"}]) keeps "3" as string (Issue #1262).
     // PyO3 can extract str "3" as i64, which would wrongly infer key as long and break union type coercion.
     if let Ok(s) = v.extract::<String>() {
-        return Ok(JsonValue::String(s));
+        const DECIMAL_TRANSPORT_PREFIX: &str = "__sparkless_decimal__:";
+        return Ok(JsonValue::String(
+            if s.starts_with(DECIMAL_TRANSPORT_PREFIX) {
+                format!("{DECIMAL_TRANSPORT_PREFIX}{s}")
+            } else {
+                s
+            },
+        ));
     }
     if let Ok(i) = v.extract::<i64>() {
         return Ok(JsonValue::Number(serde_json::Number::from(i)));
@@ -3138,12 +3165,12 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
     let decimal_a = parse_decimal_type_name(&a);
     let decimal_b = parse_decimal_type_name(&b);
     if let (Some((precision_a, scale_a)), Some((precision_b, scale_b))) = (decimal_a, decimal_b) {
-        let scale = scale_a.max(scale_b).min(38);
+        let scale = scale_a.max(scale_b);
         let integral_digits = precision_a
             .saturating_sub(scale_a)
             .max(precision_b.saturating_sub(scale_b));
-        let precision = integral_digits.saturating_add(scale).clamp(1, 38);
-        return format!("decimal({precision},{})", scale.min(precision));
+        let precision = integral_digits.saturating_add(scale).max(1);
+        return format!("decimal({precision},{scale})");
     }
     if let (Some(ea), Some(eb)) = (
         parse_array_element_type_name(&a),
@@ -3245,19 +3272,15 @@ fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
         return "string".to_string();
     }
     if v.get_type().name().is_ok_and(|name| name == "Decimal") {
-        if let Ok(formatted) = v.call_method1("__format__", ("f",)) {
-            if let Ok(value) = formatted.extract::<String>() {
-                let scale = value
-                    .split_once('.')
-                    .map(|(_, fraction)| fraction.len())
-                    .unwrap_or(0);
-                let significant_digits = value
-                    .chars()
-                    .filter(|character| character.is_ascii_digit())
-                    .skip_while(|character| *character == '0')
-                    .count();
-                let precision = significant_digits.max(scale).max(1).min(38);
-                let scale = scale.min(precision);
+        if let Ok(tuple) = v.call_method0("as_tuple") {
+            let digits = tuple.get_item(1).ok().and_then(|value| value.len().ok());
+            let exponent = tuple
+                .get_item(2)
+                .ok()
+                .and_then(|value| value.extract::<i32>().ok());
+            if let (Some(digits), Some(exponent)) = (digits, exponent) {
+                let scale = exponent.saturating_neg().max(0) as usize;
+                let precision = (digits as i32 + exponent.max(0)).max(scale as i32).max(1);
                 return format!("decimal({precision},{scale})");
             }
         }

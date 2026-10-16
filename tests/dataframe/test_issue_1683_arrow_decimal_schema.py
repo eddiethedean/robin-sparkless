@@ -113,3 +113,45 @@ def test_decimal_filter_keeps_large_integral_values_exact(spark) -> None:
     ).collect()
 
     assert [row["amount"] for row in rows] == [Decimal("9007199254740993")]
+
+
+def test_decimal_filter_keeps_literal_scale(spark) -> None:
+    df = spark.createDataFrame(
+        [{"amount": Decimal("2.00")}], schema="amount decimal(12,2)"
+    )
+
+    assert len(df.filter("amount < 2.001").collect()) == 1
+    assert df.filter("amount = 2.001").collect() == []
+
+
+def test_arrow_decimal_schema_survives_other_arrow_types(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    table = pa.Table.from_pylist(
+        [{"amount": Decimal("10.50"), "items": [1, 2]}],
+        schema=pa.schema(
+            [
+                ("amount", pa.decimal128(12, 2)),
+                ("items", pa.list_(pa.int64())),
+            ]
+        ),
+    )
+
+    df = spark.createDataFrame(table)
+
+    assert df.schema["amount"].dataType.simpleString() == "decimal(12,2)"
+    assert df.collect()[0]["items"] == [1, 2]
+
+
+def test_decimal_inference_does_not_silently_reduce_scale(spark) -> None:
+    with pytest.raises(Exception, match="decimal|precision|scale"):
+        spark.createDataFrame([{"amount": Decimal("1E-39")}])
+
+
+def test_decimal_transport_marker_does_not_change_string_values(spark) -> None:
+    marker_value = "__sparkless_decimal__:1.25"
+
+    df = spark.createDataFrame(
+        [{"amount": marker_value}], schema="amount string"
+    )
+
+    assert df.collect()[0]["amount"] == marker_value

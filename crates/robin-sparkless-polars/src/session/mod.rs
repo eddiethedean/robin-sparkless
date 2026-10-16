@@ -1022,7 +1022,7 @@ fn json_value_to_series_single(
                 .map(|series| series.into_series())
         }
         (JsonValue::String(s), "string" | "str" | "varchar") => {
-            Ok(Series::new(name.into(), vec![s.as_str()]))
+            Ok(Series::new(name.into(), vec![decimal_transport_value(s)]))
         }
         (JsonValue::Number(n), "string" | "str" | "varchar") => {
             // #971: map<string,*> values may be numbers when Python sends dict with mixed types; coerce to string.
