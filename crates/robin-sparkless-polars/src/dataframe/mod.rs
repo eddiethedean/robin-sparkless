@@ -3509,7 +3509,7 @@ fn any_value_to_json_with_array_struct_override(
         AnyValue::Decimal(value, _precision, scale) => {
             let negative = *value < 0;
             let digits = value.unsigned_abs().to_string();
-            let scale = *scale as usize;
+            let scale = *scale;
             let mut decimal = if scale == 0 {
                 digits
             } else if digits.len() <= scale {

@@ -3292,7 +3292,7 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
     if type_name == "Decimal" {
         return Ok(JsonValue::String(format!(
             "__sparkless_decimal__:{}",
-            v.str()?.to_string()
+            v.str()?
         )));
     }
     // Try String before i64/f64 so createDataFrame([{"key": "3"}]) keeps "3" as string (Issue #1262).

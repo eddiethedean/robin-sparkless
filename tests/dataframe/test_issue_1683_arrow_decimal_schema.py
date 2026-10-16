@@ -33,7 +33,10 @@ def test_pyarrow_decimal_values_with_exponent_notation(spark) -> None:
 
     rows = spark.createDataFrame(table).collect()
 
-    assert [row["amount"] for row in rows] == [Decimal("0.0000001"), Decimal("1000.0000000")]
+    assert [row["amount"] for row in rows] == [
+        Decimal("0.0000001"),
+        Decimal("1000.0000000"),
+    ]
 
 
 def test_python_decimal_inference_and_decimal_string_schema(spark) -> None:
@@ -42,7 +45,10 @@ def test_python_decimal_inference_and_decimal_string_schema(spark) -> None:
     )
 
     assert df.schema["amount"].dataType.simpleString() == "decimal(4,2)"
-    assert [row["amount"] for row in df.collect()] == [Decimal("0.10"), Decimal("10.50")]
+    assert [row["amount"] for row in df.collect()] == [
+        Decimal("0.10"),
+        Decimal("10.50"),
+    ]
 
     as_string = spark.createDataFrame(
         [{"amount": Decimal("1.50")}], schema=[("amount", "string")]
@@ -109,9 +115,7 @@ def test_decimal_filter_keeps_large_integral_values_exact(spark) -> None:
         schema=pa.schema([("amount", pa.decimal128(20, 0))]),
     )
 
-    rows = spark.createDataFrame(table).filter(
-        "amount = 9007199254740993"
-    ).collect()
+    rows = spark.createDataFrame(table).filter("amount = 9007199254740993").collect()
 
     assert [row["amount"] for row in rows] == [Decimal("9007199254740993")]
 
@@ -190,15 +194,17 @@ def test_decimal_average_keeps_large_values_and_rounds_exactly(spark) -> None:
         schema="kind string, amount decimal(20,2)",
     )
 
-    assert large.agg(F.avg("amount").alias("average")).collect()[0]["average"] == Decimal(
-        "9007199254740993.020000"
-    )
-    assert repeating.agg(F.avg("amount").alias("average")).collect()[0]["average"] == Decimal(
-        "0.666667"
-    )
+    assert large.agg(F.avg("amount").alias("average")).collect()[0][
+        "average"
+    ] == Decimal("9007199254740993.020000")
+    assert repeating.agg(F.avg("amount").alias("average")).collect()[0][
+        "average"
+    ] == Decimal("0.666667")
     grouped_averages = {
         row["kind"]: row["average"]
-        for row in grouped.groupBy("kind").agg(F.avg("amount").alias("average")).collect()
+        for row in grouped.groupBy("kind")
+        .agg(F.avg("amount").alias("average"))
+        .collect()
     }
     assert grouped_averages == {
         "first": Decimal("0.666667"),
@@ -249,9 +255,7 @@ def test_decimal_join_and_union_do_not_collapse_adjacent_large_values(spark) -> 
 
 def test_decimal38_comparison_does_not_overflow_valid_values(spark) -> None:
     largest = Decimal("9" * 38)
-    df = spark.createDataFrame(
-        [{"amount": largest}], schema="amount decimal(38,0)"
-    )
+    df = spark.createDataFrame([{"amount": largest}], schema="amount decimal(38,0)")
 
     assert [row["amount"] for row in df.filter("amount > 0.1").collect()] == [largest]
 
@@ -320,9 +324,7 @@ def test_arrow_empty_and_nested_decimal_types_survive_round_trip(spark) -> None:
     assert empty_arrow.schema == schema
 
     populated = spark.createDataFrame(
-        pa.Table.from_pylist(
-            [{"id": 1, "amounts": [Decimal("10.25")]}], schema=schema
-        )
+        pa.Table.from_pylist([{"id": 1, "amounts": [Decimal("10.25")]}], schema=schema)
     )
     round_trip = populated.toArrow()
     assert round_trip.schema.field("amounts").type == pa.list_(pa.decimal128(12, 2))
@@ -355,8 +357,6 @@ def test_decimal_inference_does_not_silently_reduce_scale(spark) -> None:
 def test_decimal_transport_marker_does_not_change_string_values(spark) -> None:
     marker_value = "__sparkless_decimal__:1.25"
 
-    df = spark.createDataFrame(
-        [{"amount": marker_value}], schema="amount string"
-    )
+    df = spark.createDataFrame([{"amount": marker_value}], schema="amount string")
 
     assert df.collect()[0]["amount"] == marker_value

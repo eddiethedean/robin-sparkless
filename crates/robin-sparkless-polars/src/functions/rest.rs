@@ -126,7 +126,7 @@ pub fn avg(col: &Column) -> Column {
             };
             let groups = series.list()?;
             if let DataType::Decimal(precision, scale) = input_type.as_ref() {
-                let output_precision = precision.saturating_add(4).min(38).max(1);
+                let output_precision = precision.saturating_add(4).clamp(1, 38);
                 let output_scale = scale.saturating_add(4).min(output_precision);
                 let factor = BigInt::from(10).pow(output_scale.saturating_sub(*scale) as u32);
                 let mut averages = Vec::with_capacity(series.len());
@@ -187,7 +187,7 @@ pub fn avg(col: &Column) -> Column {
             let dtype = match field.dtype() {
                 DataType::List(input_type) => match input_type.as_ref() {
                     DataType::Decimal(precision, scale) => {
-                        let output_precision = precision.saturating_add(4).min(38).max(1);
+                        let output_precision = precision.saturating_add(4).clamp(1, 38);
                         let output_scale = scale.saturating_add(4).min(output_precision);
                         DataType::Decimal(output_precision, output_scale)
                     }
