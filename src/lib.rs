@@ -150,7 +150,7 @@ pub mod sql {
     use crate::session::SparkSession;
     use robin_sparkless_polars::PolarsError;
 
-    pub use robin_sparkless_polars::sql::{Statement, execute_sql, parse_sql};
+    pub use robin_sparkless_polars::sql::{Statement, execute_sql, parse_sql, select_expr_source};
 
     /// Parse a single SQL expression string to Polars Expr using the session and DataFrame for resolution.
     pub fn expr_string_to_polars(

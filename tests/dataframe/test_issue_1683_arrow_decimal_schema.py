@@ -659,3 +659,261 @@ def test_decimal_sum_overflow_obeys_ansi_mode_for_global_and_grouped_sums(
             df.groupBy("kind").sum("amount").collect()
     finally:
         spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
+
+
+@pytest.mark.parametrize(
+    ("expression", "value", "dtype"),
+    [
+        ("0.1 * 0.2", "0.02", "decimal(3,2)"),
+        ("1.0 / 3.0", "0.333333", "decimal(8,6)"),
+        ("1.0 + 2.0", "3.0", "decimal(3,1)"),
+        ("2.0 - 0.5", "1.5", "decimal(3,1)"),
+        ("1.0 + 2", "3.0", "decimal(3,1)"),
+        ("1.0 * 2", "2.0", "decimal(4,1)"),
+        ("1.0 / 2", "0.500000", "decimal(7,6)"),
+        ("1.0 + CAST(2 AS BIGINT)", "3.0", "decimal(22,1)"),
+        ("(0.0 - 1.0) / 6.0", "-0.166667", "decimal(9,6)"),
+    ],
+)
+def test_sql_decimal_arithmetic_precision_and_scale(spark, expression, value, dtype):
+    result = spark.sql(f"SELECT {expression} AS amount")
+
+    assert result.collect()[0]["amount"] == Decimal(value)
+    assert result.schema["amount"].dataType.simpleString() == dtype
+
+
+def test_sql_decimal_arithmetic_broadcasts_literals_and_preserves_nulls(spark):
+    df = spark.createDataFrame(
+        [{"amount": Decimal("1.25")}, {"amount": None}, {"amount": Decimal("2.50")}],
+        "amount decimal(12,2)",
+    )
+
+    result = df.selectExpr("amount * 0.2 AS product", "amount / 2.0 AS quotient")
+
+    assert [row["product"] for row in result.collect()] == [
+        Decimal("0.250"),
+        None,
+        Decimal("0.500"),
+    ]
+    assert [row["quotient"] for row in result.collect()] == [
+        Decimal("0.625000"),
+        None,
+        Decimal("1.250000"),
+    ]
+
+
+def test_grouped_integer_sum_preserves_large_values_and_long_type(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame(
+        [{"kind": "a", "amount": 9007199254740993}, {"kind": "a", "amount": 2}],
+        "kind string, amount long",
+    )
+    grouped = df.groupBy("kind").sum("amount")
+
+    assert grouped.collect()[0]["sum(amount)"] == 9007199254740995
+    assert grouped.schema["sum(amount)"].dataType.simpleString() == "bigint"
+    assert (
+        df.agg(F.sum("amount").alias("total")).collect()[0]["total"] == 9007199254740995
+    )
+
+
+def _arrow_duplicate_entries_frame(spark, name="entries"):
+    pa = pytest.importorskip("pyarrow")
+    entry = pa.struct([("key", pa.string()), ("value", pa.decimal128(12, 2))])
+    values = [
+        {"key": "same", "value": Decimal("1.25")},
+        {"key": "same", "value": Decimal("2.50")},
+    ]
+    table = pa.Table.from_pylist(
+        [{name: values}], schema=pa.schema([(name, pa.list_(entry))])
+    )
+    return spark.createDataFrame(table), values
+
+
+def test_arrow_array_metadata_follows_positional_union(spark):
+    left, expected = _arrow_duplicate_entries_frame(spark)
+    right, _ = _arrow_duplicate_entries_frame(spark, "different_name")
+
+    result = left.union(right)
+
+    assert [row["entries"] for row in result.collect()] == [expected, expected]
+    assert result.toArrow().to_pylist() == [{"entries": expected}] * 2
+
+
+@pytest.mark.parametrize("array_on_left", [True, False])
+def test_arrow_array_metadata_survives_union_missing_columns(spark, array_on_left):
+    array, expected = _arrow_duplicate_entries_frame(spark)
+    other = spark.createDataFrame([{"id": 1}], "id long")
+    left, right = (array, other) if array_on_left else (other, array)
+
+    result = left.unionByName(right, allowMissingColumns=True)
+
+    expected_rows = [expected, None] if array_on_left else [None, expected]
+    assert [row["entries"] for row in result.collect()] == expected_rows
+    assert result.toPandas()["entries"].tolist() == expected_rows
+
+
+def test_arrow_array_metadata_uses_resolved_renames_and_column_sources(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df, expected = _arrow_duplicate_entries_frame(spark)
+    outputs = [
+        (df.withColumnsRenamed({"missing": "entries"}), "entries"),
+        (df.withColumnsRenamed({"ENTRIES": "renamed"}), "renamed"),
+        (df.withColumnRenamed("ENTRIES", "renamed"), "renamed"),
+        (df.withColumn("entries", F.col("ENTRIES")), "entries"),
+        (df.withColumns({"entries": F.col("ENTRIES")}), "entries"),
+        (df.select(F.col("ENTRIES").alias("renamed")), "renamed"),
+    ]
+
+    for result, column in outputs:
+        assert result.collect()[0][column] == expected
+
+
+@pytest.mark.parametrize(
+    ("expression", "name"),
+    [
+        ("entries renamed", "renamed"),
+        ("entries AS `renamed field`", "renamed field"),
+        ("ENTRIES AS renamed", "renamed"),
+        ("(entries) AS renamed", "renamed"),
+    ],
+)
+def test_select_expr_preserves_arrow_array_with_sql_aliases(spark, expression, name):
+    df, expected = _arrow_duplicate_entries_frame(spark)
+
+    assert df.selectExpr(expression).collect()[0][name] == expected
+
+
+@pytest.mark.parametrize("value", [1.05, 2.55, -1.05, -2.55])
+def test_float32_decimal_cast_preserves_binary_value(spark, value):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame([{"amount": value}], "amount double")
+    result = df.select(F.col("amount").cast("float").cast("decimal(3,1)"))
+
+    expected = Decimal("1.0" if abs(value) < 2 else "2.5")
+    assert result.collect()[0]["amount"] == (expected if value > 0 else -expected)
+
+
+@pytest.mark.parametrize("ansi", ["true", "false"])
+def test_nonfinite_float_decimal_casts_return_null_in_both_ansi_modes(spark, ansi):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    previous = spark.conf.get("spark.sql.ansi.enabled", "true")
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", ansi)
+        df = spark.createDataFrame(
+            [
+                {"amount": value}
+                for value in [float("nan"), float("inf"), float("-inf")]
+            ],
+            "amount double",
+        )
+        for source_type in ["float", "double"]:
+            result = df.select(F.col("amount").cast(source_type).cast("decimal(3,1)"))
+            assert [row["amount"] for row in result.collect()] == [None, None, None]
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous)
+
+
+def test_reused_sum_expression_uses_plan_ansi_mode(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    previous = spark.conf.get("spark.sql.ansi.enabled", "true")
+    df = spark.createDataFrame(
+        [{"kind": "a", "amount": Decimal("9" * 38)}] * 2,
+        "kind string, amount decimal(38,0)",
+    )
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", "false")
+        expression = F.sum("amount").alias("total")
+        assert df.agg(expression).collect()[0]["total"] is None
+        non_ansi_plan = df.select(expression)
+        spark.conf.set("spark.sql.ansi.enabled", "true")
+        assert non_ansi_plan.collect()[0]["total"] is None
+        with pytest.raises(Exception, match="overflow|OVERFLOW|precision"):
+            df.agg(expression).collect()
+        with pytest.raises(Exception, match="overflow|OVERFLOW|precision"):
+            df.groupBy("kind").agg(expression).collect()
+        spark.conf.set("spark.sql.ansi.enabled", "false")
+        assert df.agg(expression).collect()[0]["total"] is None
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous)
+
+
+def test_nested_arrow_paths_distinguish_literal_dots_from_struct_fields(spark):
+    pa = pytest.importorskip("pyarrow")
+    entry = pa.struct([("key", pa.string()), ("value", pa.decimal128(12, 2))])
+    array_value = [{"key": "x", "value": Decimal("1.25")}]
+    table = pa.Table.from_pylist(
+        [{"a.b": array_value, "a": {"b": [("m", Decimal("3.50"))]}}],
+        schema=pa.schema(
+            [
+                ("a.b", pa.list_(entry)),
+                ("a", pa.struct([("b", pa.map_(pa.string(), pa.decimal128(12, 2)))])),
+            ]
+        ),
+    )
+    df = spark.createDataFrame(table)
+    row = df.collect()[0]
+    nested = row["a"]
+    if hasattr(nested, "asDict"):
+        nested = nested.asDict(recursive=True)
+
+    assert row["a.b"] == array_value
+    assert nested["b"] == {"m": Decimal("3.50")}
+    assert df.toPandas().iloc[0]["a"]["b"] == {"m": Decimal("3.50")}
+
+
+@pytest.mark.parametrize(
+    ("allow_loss", "value", "dtype"),
+    [
+        ("true", "1.395556", "decimal(38,6)"),
+        ("false", "1.395555555555555556", "decimal(38,18)"),
+    ],
+)
+def test_sql_decimal_division_adjusts_large_result_precision(
+    spark, allow_loss, value, dtype
+):
+    key = "spark.sql.decimalOperations.allowPrecisionLoss"
+    previous = spark.conf.get(key, "true")
+    try:
+        spark.conf.set(key, allow_loss)
+        df = spark.createDataFrame(
+            [{"a": Decimal("3.14"), "b": Decimal("2.25")}],
+            "a decimal(38,20), b decimal(38,20)",
+        )
+        result = df.selectExpr("a / b AS quotient")
+        assert result.schema["quotient"].dataType.simpleString() == dtype
+        assert result.collect()[0]["quotient"] == Decimal(value)
+    finally:
+        spark.conf.set(key, previous)
+
+
+@pytest.mark.parametrize("ansi", ["true", "false"])
+@pytest.mark.parametrize("expression", ["amount * 2.0", "amount / 0.0"])
+def test_sql_decimal_arithmetic_errors_obey_ansi_mode(spark, ansi, expression):
+    previous = spark.conf.get("spark.sql.ansi.enabled", "true")
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", ansi)
+        df = spark.createDataFrame(
+            [{"amount": Decimal("9" * 38)}], "amount decimal(38,0)"
+        )
+        if ansi == "true":
+            with pytest.raises(
+                Exception, match="overflow|OVERFLOW|zero|ZERO|precision"
+            ):
+                df.selectExpr(f"{expression} AS result").collect()
+        else:
+            assert (
+                df.selectExpr(f"{expression} AS result").collect()[0]["result"] is None
+            )
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous)

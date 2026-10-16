@@ -326,6 +326,7 @@ impl DataFrame {
     /// as input columns, so select(col("x").substr(1, 3).alias("partial")),
     /// when().then().otherwise().alias("result"), and col("x").rank().over([]).alias("rank") work (issues #200, #212).
     pub fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
+        let expr = crate::functions::bind_sum_runtime_config(expr)?;
         let df = self;
         let mut alias_output_names: HashSet<String> = HashSet::new();
         let _ = expr.clone().try_map_expr(|e| {
@@ -1469,7 +1470,8 @@ impl DataFrame {
     /// Collect rows while preserving paths whose logical type is Arrow
     /// `list<struct<...>>`. Polars represents maps and these arrays with the same
     /// physical `List(Struct)` dtype, so callers with the source schema must tell
-    /// the serializer which nested paths are arrays of structs.
+    /// the serializer which nested paths are arrays of structs. Field segments
+    /// are JSON-quoted, separated by dots; [] and {value} denote container children.
     #[allow(clippy::type_complexity)]
     pub fn collect_as_json_rows_with_names_and_array_struct_columns(
         &self,
@@ -1608,7 +1610,7 @@ impl DataFrame {
                     &av,
                     dtype,
                     array_struct_paths,
-                    name,
+                    &serde_json::to_string(name).expect("field names serialize as JSON strings"),
                 )?;
                 row.insert(name.clone(), jv);
             }
@@ -3752,7 +3754,11 @@ fn any_value_to_json_with_array_struct_override(
                     &fld_av,
                     &fld.dtype,
                     array_struct_paths,
-                    &format!("{path}.{}", fld.name),
+                    &format!(
+                        "{path}.{}",
+                        serde_json::to_string(fld.name.as_str())
+                            .expect("field names serialize as JSON strings")
+                    ),
                 )?);
             }
             if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
@@ -3775,7 +3781,11 @@ fn any_value_to_json_with_array_struct_override(
                         fld_av,
                         &fld.dtype,
                         array_struct_paths,
-                        &format!("{path}.{}", fld.name),
+                        &format!(
+                            "{path}.{}",
+                            serde_json::to_string(fld.name.as_str())
+                                .expect("field names serialize as JSON strings")
+                        ),
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;

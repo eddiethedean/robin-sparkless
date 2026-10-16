@@ -63,9 +63,7 @@ pub fn count(col: &Column) -> Column {
     c
 }
 
-/// Sum aggregation. Carries source column for running-window conversion when orderBy differs from partitionBy.
-/// Output name PySpark-style sum(column_name) so row["sum(salary)"] works.
-/// Decimal inputs retain their exact dtype; other inputs are cast to Float64 for PySpark parity.
+/// Normalize AVG input: preserve decimal coefficients and cast other inputs to Double.
 fn numeric_aggregate_input(
     col: &Column,
     source_type: Option<std::sync::Arc<std::sync::Mutex<Option<DataType>>>>,
@@ -104,97 +102,124 @@ fn numeric_aggregate_input(
 /// String columns are cast to Float64 before sum (PySpark parity, issue #393).
 pub fn sum(col: &Column) -> Column {
     let name = format!("sum({})", col.name());
-    let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
-    // Spark widens decimal SUM results by ten integral digits (up to precision 38).
-    // Accumulate decimal coefficients with BigInt: Polars' native decimal sum wraps
-    // its i128 accumulator when the result exceeds the declared precision.
-    let expr = numeric_aggregate_input(col, None, 0)
-        .implode()
-        .map_with_fmt_str(
-            move |series| {
-                let DataType::List(input_type) = series.dtype() else {
-                    return Err(PolarsError::ComputeError(
-                        "sum aggregation expected a list input".into(),
-                    ));
-                };
-                let groups = series.list()?;
-                match input_type.as_ref() {
-                    DataType::Decimal(precision, scale) => {
-                        let output_precision = precision.saturating_add(10).min(38);
-                        let maximum =
-                            BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
-                        let mut sums = Vec::with_capacity(series.len());
-                        for group_idx in 0..series.len() {
-                            let Some(group) = groups.get_as_series(group_idx) else {
-                                sums.push(None);
-                                continue;
-                            };
-                            let mut total = BigInt::zero();
-                            let mut found_value = false;
-                            for idx in 0..group.len() {
-                                match group.get(idx)? {
-                                    AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
-                                        found_value = true;
-                                        total += value;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            if !found_value {
-                                sums.push(None);
-                                continue;
-                            }
-                            if total.abs() > maximum {
-                                if ansi_enabled {
-                                    return Err(PolarsError::ComputeError(
-                                        "[ARITHMETIC_OVERFLOW] decimal sum exceeds supported precision".into(),
-                                    ));
-                                }
-                                sums.push(None);
-                                continue;
-                            }
-                            sums.push(total.to_i128());
-                        }
-                        Series::new(series.name().clone(), sums)
-                            .into_decimal(output_precision, *scale)
-                            .map(|series| series.into_series().into())
-                    }
-                    _ => {
-                        let mut sums = Vec::with_capacity(series.len());
-                        for group_idx in 0..series.len() {
-                            let Some(group) = groups.get_as_series(group_idx) else {
-                                sums.push(AnyValue::Null);
-                                continue;
-                            };
-                            sums.push(group.sum_reduce()?.value().clone());
-                        }
-                        Series::from_any_values_and_dtype(
-                            series.name().clone(),
-                            &sums,
-                            &DataType::Float64,
-                            true,
-                        )
-                        .map(Into::into)
-                    }
-                }
-            },
-            |_schema, field| {
-                let dtype = match field.dtype() {
-                    DataType::List(input_type) => match input_type.as_ref() {
-                        DataType::Decimal(precision, scale) => {
-                            DataType::Decimal(precision.saturating_add(10).min(38), *scale)
-                        }
-                        _ => DataType::Float64,
-                    },
-                    _ => DataType::Float64,
-                };
-                Ok(Field::new(field.name().clone(), dtype))
-            },
-            "sum",
-        );
+    let expr = sum_expr(
+        col.expr().clone(),
+        crate::udf_context::get_thread_ansi_enabled(),
+    );
     let mut c = Column::from_expr(expr, Some(name));
     c.source_for_running = Some(col.name().to_string());
     c
+}
+
+/// Bind each use of a SUM to the configuration of the plan being analyzed.
+/// Rebuilding the UDF gives reused Column expressions independent plan state.
+pub(crate) fn bind_sum_runtime_config(expr: Expr) -> PolarsResult<Expr> {
+    let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
+    expr.try_map_expr(|expr| {
+        if let Expr::AnonymousFunction { input, fmt_str, .. } = &expr {
+            if fmt_str.as_str() == "sum" {
+                if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
+                    return Ok(sum_expr(input.as_ref().clone(), ansi_enabled));
+                }
+            }
+        }
+        Ok(expr)
+    })
+}
+
+fn sum_expr(input: Expr, ansi_enabled: bool) -> Expr {
+    // Spark widens decimal SUM results by ten integral digits (up to precision 38).
+    // Accumulate decimal coefficients with BigInt: Polars' native decimal sum wraps
+    // its i128 accumulator when the result exceeds the declared precision.
+    input.implode().map_with_fmt_str(
+        move |series| {
+            let DataType::List(input_type) = series.dtype() else {
+                return Err(PolarsError::ComputeError(
+                    "sum aggregation expected a list input".into(),
+                ));
+            };
+            let groups = series.list()?;
+            match input_type.as_ref() {
+                DataType::Decimal(precision, scale) => {
+                    let output_precision = precision.saturating_add(10).min(38);
+                    let maximum = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+                    let mut sums = Vec::with_capacity(series.len());
+                    for group_idx in 0..series.len() {
+                        let Some(group) = groups.get_as_series(group_idx) else {
+                            sums.push(None);
+                            continue;
+                        };
+                        let mut total = BigInt::zero();
+                        let mut found_value = false;
+                        for idx in 0..group.len() {
+                            match group.get(idx)? {
+                                AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
+                                    found_value = true;
+                                    total += value;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if !found_value {
+                            sums.push(None);
+                            continue;
+                        }
+                        if total.abs() > maximum {
+                            if ansi_enabled {
+                                return Err(PolarsError::ComputeError(
+                                    "[ARITHMETIC_OVERFLOW] decimal sum exceeds supported precision"
+                                        .into(),
+                                ));
+                            }
+                            sums.push(None);
+                            continue;
+                        }
+                        sums.push(total.to_i128());
+                    }
+                    Series::new(series.name().clone(), sums)
+                        .into_decimal(output_precision, *scale)
+                        .map(|series| series.into_series().into())
+                }
+                _ => {
+                    let output_type = if input_type.is_integer() {
+                        DataType::Int64
+                    } else {
+                        DataType::Float64
+                    };
+                    let mut sums = Vec::with_capacity(series.len());
+                    for group_idx in 0..series.len() {
+                        let Some(group) = groups.get_as_series(group_idx) else {
+                            sums.push(AnyValue::Null);
+                            continue;
+                        };
+                        let group = group.cast(&output_type)?;
+                        sums.push(group.sum_reduce()?.value().clone());
+                    }
+                    Series::from_any_values_and_dtype(
+                        series.name().clone(),
+                        &sums,
+                        &output_type,
+                        true,
+                    )
+                    .map(Into::into)
+                }
+            }
+        },
+        |_schema, field| {
+            let dtype = match field.dtype() {
+                DataType::List(input_type) => match input_type.as_ref() {
+                    DataType::Decimal(precision, scale) => {
+                        DataType::Decimal(precision.saturating_add(10).min(38), *scale)
+                    }
+                    dtype if dtype.is_integer() => DataType::Int64,
+                    _ => DataType::Float64,
+                },
+                _ => DataType::Float64,
+            };
+            Ok(Field::new(field.name().clone(), dtype))
+        },
+        "sum",
+    )
 }
 
 /// Average aggregation. Output name PySpark-style avg(column_name).
@@ -1829,8 +1854,11 @@ fn decimal_value_to_scaled(
         AnyValue::UInt16(value) => parse(&value.to_string(), target_scale),
         AnyValue::UInt32(value) => parse(&value.to_string(), target_scale),
         AnyValue::UInt64(value) => parse(&value.to_string(), target_scale),
-        AnyValue::Float32(value) => parse(&value.to_string(), target_scale),
-        AnyValue::Float64(value) => parse(&value.to_string(), target_scale),
+        AnyValue::Float32(value) if value.is_finite() => {
+            parse(&f64::from(*value).to_string(), target_scale)
+        }
+        AnyValue::Float64(value) if value.is_finite() => parse(&value.to_string(), target_scale),
+        AnyValue::Float32(_) | AnyValue::Float64(_) => Ok(None),
         AnyValue::String(value) => parse(value, target_scale),
         AnyValue::StringOwned(value) => parse(value.as_ref(), target_scale),
         AnyValue::Boolean(value) => parse(if *value { "1" } else { "0" }, target_scale),

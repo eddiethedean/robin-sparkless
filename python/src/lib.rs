@@ -1122,6 +1122,16 @@ fn normalize_arrow_value(
     Ok(value.clone().unbind())
 }
 
+// JSON-quoted field segments distinguish literal dots/brackets from nesting.
+fn arrow_field_path(parent: &str, name: &str) -> String {
+    let field = serde_json::to_string(name).expect("field names serialize as JSON strings");
+    if parent.is_empty() {
+        field
+    } else {
+        format!("{parent}.{field}")
+    }
+}
+
 fn arrow_array_struct_paths(
     arrow_schema: &Bound<'_, PyAny>,
 ) -> PyResult<std::collections::HashSet<String>> {
@@ -1157,7 +1167,12 @@ fn arrow_array_struct_paths(
                 let field = field?;
                 let name: String = field.getattr("name")?.extract()?;
                 let child_type = field.getattr("type")?;
-                visit_type(&child_type, &format!("{path}.{name}"), arrow_types, paths)?;
+                visit_type(
+                    &child_type,
+                    &arrow_field_path(path, &name),
+                    arrow_types,
+                    paths,
+                )?;
             }
         } else if pyarrow_is_type(arrow_types, arrow_type, "is_map")? {
             let key_type = arrow_type.getattr("key_type")?;
@@ -1176,7 +1191,12 @@ fn arrow_array_struct_paths(
         let field = field?;
         let arrow_type = field.getattr("type")?;
         let name: String = field.getattr("name")?.extract()?;
-        visit_type(&arrow_type, &name, &arrow_types, &mut paths)?;
+        visit_type(
+            &arrow_type,
+            &arrow_field_path("", &name),
+            &arrow_types,
+            &mut paths,
+        )?;
     }
     Ok(paths)
 }
@@ -1737,7 +1757,7 @@ impl PySparkSession {
         for (name, type_name) in &schema_pairs {
             let type_name = type_name.trim().to_ascii_lowercase();
             if type_name.starts_with("array<struct<") {
-                arrow_array_struct_paths.insert(name.clone());
+                arrow_array_struct_paths.insert(arrow_field_path("", name));
             } else if type_name.starts_with("map<") {
                 logical_map_columns.insert(name.clone());
             }
@@ -4803,13 +4823,14 @@ struct PyDataFrame {
 
 impl PyDataFrame {
     fn remove_metadata_root(target: &mut Self, root: &str) {
+        target.logical_map_columns.remove(root);
+        let root = arrow_field_path("", root);
         target.arrow_array_struct_paths.retain(|path| {
-            path != root
+            path != &root
                 && !path
-                    .strip_prefix(root)
+                    .strip_prefix(root.as_str())
                     .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
         });
-        target.logical_map_columns.remove(root);
     }
 
     fn column_source(expr: &robin_sparkless::Expr) -> Option<String> {
@@ -4842,9 +4863,10 @@ impl PyDataFrame {
                 .iter()
                 .filter(|path| {
                     output_names.iter().any(|name| {
-                        path.as_str() == *name
+                        let root = arrow_field_path("", name);
+                        path.as_str() == root.as_str()
                             || path
-                                .strip_prefix(name)
+                                .strip_prefix(root.as_str())
                                 .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
                     })
                 })
@@ -4866,17 +4888,38 @@ impl PyDataFrame {
         wrapped
     }
 
-    fn copy_array_struct_paths(&self, source: &str, output: &str, target: &mut Self) {
+    fn copy_column_metadata(&self, source: &str, output: &str, target: &mut Self) {
+        let resolved = self.inner.resolve_column_name(source).ok();
+        let source_path = if let Some(source) = &resolved {
+            arrow_field_path("", source)
+        } else {
+            let mut parts = source.split('.');
+            let root = parts.next().unwrap_or(source);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        let output_path = arrow_field_path("", output);
         for path in &self.arrow_array_struct_paths {
-            if path == source {
-                target.arrow_array_struct_paths.insert(output.to_string());
-            } else if let Some(tail) = path.strip_prefix(source) {
+            if path == &source_path {
+                target.arrow_array_struct_paths.insert(output_path.clone());
+            } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
                 if tail.starts_with(['.', '[', '{']) {
                     target
                         .arrow_array_struct_paths
-                        .insert(format!("{output}{tail}"));
+                        .insert(format!("{output_path}{tail}"));
                 }
             }
+        }
+        if self
+            .logical_map_columns
+            .contains(resolved.as_deref().unwrap_or(source))
+        {
+            target.logical_map_columns.insert(output.to_string());
         }
     }
 
@@ -4889,10 +4932,7 @@ impl PyDataFrame {
         let mut wrapped = self.wrap_derived(df);
         Self::remove_metadata_root(&mut wrapped, name);
         if let Some(source) = Self::column_source(expr) {
-            self.copy_array_struct_paths(&source, name, &mut wrapped);
-            if self.logical_map_columns.contains(&source) {
-                wrapped.logical_map_columns.insert(name.to_string());
-            }
+            self.copy_column_metadata(&source, name, &mut wrapped);
         }
         wrapped
     }
@@ -4902,10 +4942,7 @@ impl PyDataFrame {
         for (name, column) in expressions {
             Self::remove_metadata_root(&mut wrapped, name);
             if let Some(source) = Self::column_source(column.expr()) {
-                self.copy_array_struct_paths(&source, name, &mut wrapped);
-                if self.logical_map_columns.contains(&source) {
-                    wrapped.logical_map_columns.insert(name.clone());
-                }
+                self.copy_column_metadata(&source, name, &mut wrapped);
             }
         }
         wrapped
@@ -4913,29 +4950,57 @@ impl PyDataFrame {
 
     fn wrap_renamed_columns_derived(&self, df: DataFrame, renames: &[(String, String)]) -> Self {
         let mut wrapped = self.wrap_derived(df);
-        for (old_name, new_name) in renames {
-            Self::remove_metadata_root(&mut wrapped, old_name);
-            Self::remove_metadata_root(&mut wrapped, new_name);
-            self.copy_array_struct_paths(old_name, new_name, &mut wrapped);
-            if self.logical_map_columns.contains(old_name) {
-                wrapped.logical_map_columns.insert(new_name.clone());
-            }
+        let applied = renames
+            .iter()
+            .filter_map(|(old, new)| {
+                self.inner
+                    .resolve_column_name(old)
+                    .ok()
+                    .map(|old| (old, new))
+            })
+            .collect::<Vec<_>>();
+        for (old, new) in &applied {
+            Self::remove_metadata_root(&mut wrapped, old);
+            Self::remove_metadata_root(&mut wrapped, new);
+        }
+        for (old, new) in applied {
+            self.copy_column_metadata(&old, new, &mut wrapped);
         }
         wrapped
     }
 
-    fn wrap_union_derived(&self, other: Option<&PyDataFrame>, df: DataFrame) -> Self {
+    fn wrap_union_derived(
+        &self,
+        other: Option<&PyDataFrame>,
+        df: DataFrame,
+        by_name: bool,
+    ) -> Self {
         let mut wrapped = self.wrap_derived(df);
-        if let Some(other) = other {
-            wrapped
-                .arrow_array_struct_paths
-                .retain(|path| other.arrow_array_struct_paths.contains(path));
-            wrapped
-                .logical_map_columns
-                .retain(|name| other.logical_map_columns.contains(name));
-        } else {
-            wrapped.arrow_array_struct_paths.clear();
-            wrapped.logical_map_columns.clear();
+        let Some(other) = other else {
+            return wrapped;
+        };
+        let left_names = self.inner.columns().unwrap_or_default();
+        let right_names = other.inner.columns().unwrap_or_default();
+        let align_by_name = by_name
+            || (left_names.len() == right_names.len()
+                && left_names
+                    .iter()
+                    .all(|name| other.inner.resolve_column_name(name).is_ok()));
+        for (index, output) in wrapped
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            let source = if align_by_name {
+                other.inner.resolve_column_name(output).ok()
+            } else {
+                right_names.get(index).cloned()
+            };
+            if let Some(source) = source {
+                other.copy_column_metadata(&source, output, &mut wrapped);
+            }
         }
         wrapped
     }
@@ -4957,9 +5022,10 @@ impl PyDataFrame {
         let right_names = other.inner.columns().unwrap_or_default();
         for source in &right_names {
             let has_metadata = other.arrow_array_struct_paths.iter().any(|path| {
-                path == source
+                let root = arrow_field_path("", source);
+                path.as_str() == root.as_str()
                     || path
-                        .strip_prefix(source.as_str())
+                        .strip_prefix(root.as_str())
                         .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
             });
             if !has_metadata {
@@ -4974,7 +5040,7 @@ impl PyDataFrame {
                 None
             };
             if let Some(output) = output {
-                other.copy_array_struct_paths(source, &output, &mut wrapped);
+                other.copy_column_metadata(source, &output, &mut wrapped);
             }
         }
         for name in &other.logical_map_columns {
@@ -5023,55 +5089,25 @@ impl PyDataFrame {
             let Some((source, output)) = source_and_output_names(expr) else {
                 continue;
             };
-            self.copy_array_struct_paths(&source, &output, &mut wrapped);
-            if self.logical_map_columns.contains(&source) {
-                wrapped.logical_map_columns.insert(output);
-            }
+            self.copy_column_metadata(&source, &output, &mut wrapped);
         }
         wrapped
     }
 
     fn wrap_select_expr_derived(&self, df: DataFrame, expressions: &[String]) -> Self {
-        fn identifier(value: &str) -> Option<String> {
-            let value = value.trim();
-            let value = value
-                .strip_prefix('`')
-                .and_then(|value| value.strip_suffix('`'))
-                .unwrap_or(value);
-            (!value.is_empty()
-                && value
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'))
-            .then(|| value.to_string())
-        }
-
         let mut wrapped = self.wrap_derived(df);
         for expression in expressions {
-            let lower = expression.to_ascii_lowercase();
-            let Some(alias_at) = lower.rfind(" as ") else {
-                continue;
-            };
-            let Some(source) = identifier(&expression[..alias_at]) else {
-                continue;
-            };
-            let Some(output) = identifier(&expression[alias_at + 4..]) else {
-                continue;
-            };
-            self.copy_array_struct_paths(&source, &output, &mut wrapped);
-            if self.logical_map_columns.contains(&source) {
-                wrapped.logical_map_columns.insert(output);
+            if let Ok(Some((source, output))) = robin_sparkless::sql::select_expr_source(expression)
+            {
+                Self::remove_metadata_root(&mut wrapped, &output);
+                self.copy_column_metadata(&source, &output, &mut wrapped);
             }
         }
         wrapped
     }
 
     fn wrap_renamed_derived(&self, df: DataFrame, old_name: &str, new_name: &str) -> Self {
-        let mut wrapped = self.wrap_derived(df);
-        self.copy_array_struct_paths(old_name, new_name, &mut wrapped);
-        if self.logical_map_columns.contains(old_name) {
-            wrapped.logical_map_columns.insert(new_name.to_string());
-        }
-        wrapped
+        self.wrap_renamed_columns_derived(df, &[(old_name.to_string(), new_name.to_string())])
     }
 
     fn check_mixed_row_shape(&self) -> PyResult<()> {
@@ -6722,8 +6758,8 @@ impl PyDataFrame {
         let df = self.inner.union(&other_inner).map_err(to_py_err)?;
         let other_wrapper = other.cast::<PyDataFrame>().ok();
         Ok(match other_wrapper {
-            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df),
-            None => self.wrap_union_derived(None, df),
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, false),
+            None => self.wrap_union_derived(None, df, false),
         })
     }
 
@@ -6732,8 +6768,8 @@ impl PyDataFrame {
         let df = self.inner.union_all(&other_inner).map_err(to_py_err)?;
         let other_wrapper = other.cast::<PyDataFrame>().ok();
         Ok(match other_wrapper {
-            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df),
-            None => self.wrap_union_derived(None, df),
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, false),
+            None => self.wrap_union_derived(None, df, false),
         })
     }
 
@@ -6756,8 +6792,8 @@ impl PyDataFrame {
             .map_err(to_py_err)?;
         let other_wrapper = other.cast::<PyDataFrame>().ok();
         Ok(match other_wrapper {
-            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df),
-            None => self.wrap_union_derived(None, df),
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, true),
+            None => self.wrap_union_derived(None, df, true),
         })
     }
 

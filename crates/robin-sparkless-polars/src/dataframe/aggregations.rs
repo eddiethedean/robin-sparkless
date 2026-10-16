@@ -143,6 +143,7 @@ impl GroupedData {
         expr: Expr,
         schema: &Schema,
     ) -> Result<Expr, PolarsError> {
+        let expr = crate::functions::bind_sum_runtime_config(expr)?;
         use std::collections::HashSet;
         let mut alias_output_names: HashSet<String> = HashSet::new();
         let _ = expr.clone().try_map_expr(|e| {

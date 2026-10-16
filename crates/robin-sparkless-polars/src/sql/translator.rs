@@ -1300,6 +1300,26 @@ fn sql_expr_to_polars(
         SqlExpr::BinaryOp { left, op, right } => {
             let l = sql_expr_to_polars(left, session, df, having_agg_map, having_agg_list)?;
             let r = sql_expr_to_polars(right, session, df, having_agg_map, having_agg_list)?;
+            if matches!(
+                op,
+                BinaryOperator::Plus | BinaryOperator::Minus
+                    | BinaryOperator::Multiply | BinaryOperator::Divide
+            ) {
+                let schema = df
+                    .map(|df| df.lazy_frame().collect_schema())
+                    .transpose()?
+                    .unwrap_or_default();
+                let allow_precision_loss = session
+                    .get_config()
+                    .get("spark.sql.decimalOperations.allowPrecisionLoss")
+                    .is_none_or(|value| value != "false");
+                if let Some(expr) = super::decimal::binary_expr(
+                    l.clone(), r.clone(), op, &schema,
+                    session.runtime_config().ansi_enabled, allow_precision_loss,
+                )? {
+                    return Ok(expr);
+                }
+            }
             match op {
                 BinaryOperator::Eq => Ok(l.eq(r)),
                 BinaryOperator::NotEq => Ok(l.neq(r)),

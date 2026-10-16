@@ -2,6 +2,7 @@
 //! Parsing is provided by the `spark-sql-parser` crate; this module translates AST to DataFrame ops.
 //! Compiled only when the `sql` feature is enabled.
 
+mod decimal;
 mod translator;
 
 use crate::dataframe::DataFrame;
@@ -197,6 +198,34 @@ pub fn parse_select_exprs(
 }
 
 pub use translator::{expr_string_to_polars, translate};
+
+/// Source and output names for a SQL projection that selects an existing column.
+/// Uses the same parser as selectExpr, including implicit and quoted aliases.
+pub fn select_expr_source(expression: &str) -> Result<Option<(String, String)>, PolarsError> {
+    use spark_sql_parser::ast::Expr;
+    let (expr, alias) = spark_sql_parser::parse_select_expr(expression)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    fn source(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Identifier(name) => Some(name.value.clone()),
+            Expr::CompoundIdentifier(parts) => Some(
+                parts
+                    .iter()
+                    .map(|part| part.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            ),
+            Expr::Nested(expr) | Expr::Cast { expr, .. } => source(expr),
+            _ => None,
+        }
+    }
+    Ok(source(&expr).map(|source| {
+        let output = alias
+            .map(|alias| alias.value)
+            .unwrap_or_else(|| expression.to_string());
+        (source, output)
+    }))
+}
 
 #[cfg(test)]
 mod tests {
