@@ -222,6 +222,278 @@ fn sum_expr(input: Expr, ansi_enabled: bool) -> Expr {
     )
 }
 
+/// Build the ordered-window form of SUM/AVG. Polars' cumulative and rolling
+/// numeric operators convert decimals and large integers to `f64` in the
+/// window path, so keep their coefficients in `BigInt` until each output row
+/// has been checked and materialized.
+pub(crate) fn running_sum_expr(input: Expr, ansi_enabled: bool, frame: Option<(i64, i64)>) -> Expr {
+    input.apply(
+        move |column| {
+            running_numeric_series(
+                column.as_materialized_series().clone(),
+                false,
+                ansi_enabled,
+                frame,
+            )
+            .map(Into::into)
+        },
+        |_schema, field| {
+            let dtype = match field.dtype() {
+                DataType::Decimal(precision, scale) => {
+                    DataType::Decimal(precision.saturating_add(10).min(38), *scale)
+                }
+                dtype if dtype.is_integer() => DataType::Int64,
+                _ => DataType::Float64,
+            };
+            Ok(Field::new(field.name().clone(), dtype))
+        },
+    )
+}
+
+pub(crate) fn running_avg_expr(input: Expr, frame: Option<(i64, i64)>) -> Expr {
+    input.apply(
+        move |column| {
+            running_numeric_series(column.as_materialized_series().clone(), true, false, frame)
+                .map(Into::into)
+        },
+        |_schema, field| {
+            let dtype = match field.dtype() {
+                DataType::Decimal(precision, scale) => {
+                    let output_precision = precision.saturating_add(4).clamp(1, 38);
+                    DataType::Decimal(
+                        output_precision,
+                        scale.saturating_add(4).min(output_precision),
+                    )
+                }
+                _ => DataType::Float64,
+            };
+            Ok(Field::new(field.name().clone(), dtype))
+        },
+    )
+}
+
+fn running_numeric_series(
+    series: Series,
+    average: bool,
+    ansi_enabled: bool,
+    frame: Option<(i64, i64)>,
+) -> PolarsResult<Series> {
+    match series.dtype() {
+        DataType::Decimal(precision, scale) => {
+            let input_precision = *precision;
+            let input_scale = *scale;
+            let (output_precision, output_scale) = if average {
+                let output_precision = input_precision.saturating_add(4).clamp(1, 38);
+                (
+                    output_precision,
+                    input_scale.saturating_add(4).min(output_precision),
+                )
+            } else {
+                (input_precision.saturating_add(10).min(38), input_scale)
+            };
+            let factor = BigInt::from(10).pow(output_scale.saturating_sub(input_scale) as u32);
+            let max_decimal = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+            let coefficients = (0..series.len())
+                .map(|idx| match series.get(idx)? {
+                    AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
+                        Ok(Some(BigInt::from(value)))
+                    }
+                    AnyValue::Null => Ok(None),
+                    _ => Err(PolarsError::ComputeError(
+                        "decimal window sum received a non-decimal value".into(),
+                    )),
+                })
+                .collect::<PolarsResult<Vec<_>>>()?;
+            let mut sums: Vec<BigInt> = Vec::with_capacity(series.len());
+            let mut counts: Vec<usize> = Vec::with_capacity(series.len());
+            let mut total = BigInt::zero();
+            let mut count = 0usize;
+            for coefficient in &coefficients {
+                if let Some(value) = coefficient {
+                    total += value;
+                    count += 1;
+                }
+                sums.push(total.clone());
+                counts.push(count);
+            }
+            let mut values = Vec::with_capacity(series.len());
+            for idx in 0..series.len() {
+                let Some((left, right)) = window_bounds(idx, series.len(), frame) else {
+                    values.push(None);
+                    continue;
+                };
+                let prev_sum = if left == 0 {
+                    BigInt::zero()
+                } else {
+                    sums[left - 1].clone()
+                };
+                let prev_count = if left == 0 { 0 } else { counts[left - 1] };
+                let sum = sums[right].clone() - prev_sum;
+                let count = counts[right] - prev_count;
+                if count == 0 {
+                    values.push(None);
+                    continue;
+                }
+                if average {
+                    let scaled_sum = sum * &factor;
+                    let divisor = BigInt::from(count);
+                    let mut rounded = &scaled_sum / &divisor;
+                    let remainder = &scaled_sum % &divisor;
+                    if remainder.abs() * 2 >= divisor {
+                        rounded += if remainder.is_negative() { -1 } else { 1 };
+                    }
+                    values.push(rounded.to_i128());
+                } else if sum.abs() > max_decimal {
+                    if ansi_enabled {
+                        return Err(PolarsError::ComputeError(
+                            "[ARITHMETIC_OVERFLOW] decimal window sum exceeds supported precision"
+                                .into(),
+                        ));
+                    }
+                    values.push(None);
+                } else {
+                    values.push(sum.to_i128());
+                }
+            }
+            Series::new(series.name().clone(), values)
+                .into_decimal(output_precision, output_scale)
+                .map(|series| series.into_series())
+        }
+        dtype if dtype.is_integer() => {
+            if average {
+                let floats = series.cast(&DataType::Float64)?;
+                running_float_series(floats, true, frame)
+            } else {
+                let ints = series.cast(&DataType::Int128)?;
+                let ints = ints.i128()?;
+                let mut sums = Vec::with_capacity(series.len());
+                let mut counts = Vec::with_capacity(series.len());
+                let mut total = BigInt::zero();
+                let mut count = 0usize;
+                for idx in 0..series.len() {
+                    if let Some(value) = ints.get(idx) {
+                        total += value;
+                        count += 1;
+                    }
+                    sums.push(total.clone());
+                    counts.push(count);
+                }
+                let mut values = Vec::with_capacity(series.len());
+                for idx in 0..series.len() {
+                    let Some((left, right)) = window_bounds(idx, series.len(), frame) else {
+                        values.push(None);
+                        continue;
+                    };
+                    let prev_sum = if left == 0 {
+                        BigInt::zero()
+                    } else {
+                        sums[left - 1].clone()
+                    };
+                    let sum = sums[right].clone() - prev_sum;
+                    let prev_count = if left == 0 { 0 } else { counts[left - 1] };
+                    if counts[right] == prev_count {
+                        values.push(None);
+                        continue;
+                    }
+                    if sum < BigInt::from(i64::MIN) || sum > BigInt::from(i64::MAX) {
+                        if ansi_enabled {
+                            return Err(PolarsError::ComputeError(
+                                "[ARITHMETIC_OVERFLOW] integer window sum exceeds BIGINT".into(),
+                            ));
+                        }
+                    }
+                    let modulus = BigInt::from(1u8) << 64usize;
+                    let wrapped = ((&sum % &modulus) + &modulus) % &modulus;
+                    values.push(wrapped.to_u64().map(|value| value as i64));
+                }
+                Ok(Series::new(series.name().clone(), values))
+            }
+        }
+        _ => {
+            let floats = series.cast(&DataType::Float64)?;
+            running_float_series(floats, average, frame)
+        }
+    }
+}
+
+fn window_bounds(index: usize, len: usize, frame: Option<(i64, i64)>) -> Option<(usize, usize)> {
+    let Some((start, end)) = frame else {
+        return Some((0, index));
+    };
+    let left = (index as i64).saturating_add(start);
+    let right = (index as i64).saturating_add(end);
+    if right < 0 || left >= len as i64 || left > right {
+        return None;
+    }
+    let left = left.max(0) as usize;
+    let right = right.min(len.saturating_sub(1) as i64) as usize;
+    Some((left, right))
+}
+
+fn running_float_series(
+    series: Series,
+    average: bool,
+    frame: Option<(i64, i64)>,
+) -> PolarsResult<Series> {
+    let values = series.f64()?;
+    let mut output = Vec::with_capacity(series.len());
+    if frame.is_some() {
+        for idx in 0..series.len() {
+            let Some((left, right)) = window_bounds(idx, series.len(), frame) else {
+                output.push(None);
+                continue;
+            };
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            for row in left..=right {
+                if let Some(value) = values.get(row) {
+                    sum += value;
+                    count += 1;
+                }
+            }
+            output.push(if count == 0 {
+                None
+            } else if average {
+                Some(sum / count as f64)
+            } else {
+                Some(sum)
+            });
+        }
+        return Ok(Series::new(series.name().clone(), output));
+    }
+
+    let mut sums = Vec::with_capacity(series.len());
+    let mut counts = Vec::with_capacity(series.len());
+    let mut total = 0.0;
+    let mut count = 0usize;
+    for idx in 0..series.len() {
+        if let Some(value) = values.get(idx) {
+            total += value;
+            count += 1;
+        }
+        sums.push(total);
+        counts.push(count);
+    }
+    for idx in 0..series.len() {
+        let Some((left, right)) = window_bounds(idx, series.len(), frame) else {
+            output.push(None);
+            continue;
+        };
+        let previous_sum = if left == 0 { 0.0 } else { sums[left - 1] };
+        let previous_count = if left == 0 { 0 } else { counts[left - 1] };
+        let sum = sums[right] - previous_sum;
+        let count = counts[right] - previous_count;
+        output.push(if count == 0 {
+            None
+        } else if average {
+            Some(sum / count as f64)
+        } else {
+            Some(sum)
+        });
+    }
+    Ok(Series::new(series.name().clone(), output))
+}
+
 /// Average aggregation. Output name PySpark-style avg(column_name).
 /// String columns are cast to Float64 before mean (PySpark parity, issue #437).
 /// Carries source column for running-window conversion when orderBy differs from partitionBy (#1241).

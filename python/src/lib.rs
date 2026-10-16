@@ -1201,6 +1201,63 @@ fn arrow_array_struct_paths(
     Ok(paths)
 }
 
+fn arrow_logical_map_paths(
+    arrow_schema: &Bound<'_, PyAny>,
+) -> PyResult<std::collections::HashSet<String>> {
+    let arrow_types = PyModule::import(arrow_schema.py(), "pyarrow.types")?;
+
+    fn visit_type(
+        arrow_type: &Bound<'_, PyAny>,
+        path: &str,
+        arrow_types: &Bound<'_, PyModule>,
+        paths: &mut std::collections::HashSet<String>,
+    ) -> PyResult<()> {
+        if pyarrow_is_type(arrow_types, arrow_type, "is_map")? {
+            paths.insert(path.to_string());
+            let key_type = arrow_type.getattr("key_type")?;
+            let item_type = arrow_type.getattr("item_type")?;
+            visit_type(&key_type, &format!("{path}{{key}}"), arrow_types, paths)?;
+            visit_type(&item_type, &format!("{path}{{value}}"), arrow_types, paths)?;
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_struct")? {
+            for field in arrow_type.try_iter()? {
+                let field = field?;
+                let name: String = field.getattr("name")?.extract()?;
+                let child_type = field.getattr("type")?;
+                visit_type(
+                    &child_type,
+                    &arrow_field_path(path, &name),
+                    arrow_types,
+                    paths,
+                )?;
+            }
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_list")?
+            || pyarrow_is_type(arrow_types, arrow_type, "is_large_list")?
+            || pyarrow_is_type(arrow_types, arrow_type, "is_fixed_size_list")?
+        {
+            let value_type = arrow_type.getattr("value_type")?;
+            visit_type(&value_type, &format!("{path}[]"), arrow_types, paths)?;
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_dictionary")? {
+            let value_type = arrow_type.getattr("value_type")?;
+            visit_type(&value_type, path, arrow_types, paths)?;
+        }
+        Ok(())
+    }
+
+    let mut paths = std::collections::HashSet::new();
+    for field in arrow_schema.try_iter()? {
+        let field = field?;
+        let name: String = field.getattr("name")?.extract()?;
+        let arrow_type = field.getattr("type")?;
+        visit_type(
+            &arrow_type,
+            &arrow_field_path("", &name),
+            &arrow_types,
+            &mut paths,
+        )?;
+    }
+    Ok(paths)
+}
+
 fn spark_type_to_arrow_type(
     py: Python<'_>,
     pa: &Bound<'_, PyModule>,
@@ -1248,32 +1305,231 @@ fn spark_type_to_arrow_type(
     pa.getattr(name)?.call1(args)?.into_py_any(py)
 }
 
-fn spark_map_type_to_arrow_type(
+fn spark_type_to_arrow_type_with_maps(
     py: Python<'_>,
     pa: &Bound<'_, PyModule>,
     data_type: &DataType,
+    path: &str,
+    map_paths: &std::collections::HashSet<String>,
 ) -> PyResult<PyObject> {
-    let (key_type, value_type) = match data_type {
-        DataType::Map(key_type, value_type) => (key_type.as_ref(), value_type.as_ref()),
+    if map_paths.contains(path) {
+        let (key_type, value_type) = match data_type {
+            DataType::Map(key_type, value_type) => (key_type.as_ref(), value_type.as_ref()),
+            DataType::Array(element_type) => {
+                let DataType::Struct(fields) = element_type.as_ref() else {
+                    return spark_type_to_arrow_type(py, pa, data_type);
+                };
+                let (Some(key_type), Some(value_type)) = (
+                    fields.iter().find(|field| field.name == "key"),
+                    fields.iter().find(|field| field.name == "value"),
+                ) else {
+                    return spark_type_to_arrow_type(py, pa, data_type);
+                };
+                (&key_type.data_type, &value_type.data_type)
+            }
+            _ => return spark_type_to_arrow_type(py, pa, data_type),
+        };
+        let key_type = spark_type_to_arrow_type_with_maps(
+            py,
+            pa,
+            key_type,
+            &format!("{path}{{key}}"),
+            map_paths,
+        )?;
+        let value_type = spark_type_to_arrow_type_with_maps(
+            py,
+            pa,
+            value_type,
+            &format!("{path}{{value}}"),
+            map_paths,
+        )?;
+        return pa
+            .getattr("map_")?
+            .call1((key_type, value_type))?
+            .into_py_any(py);
+    }
+
+    match data_type {
         DataType::Array(element_type) => {
-            let DataType::Struct(fields) = element_type.as_ref() else {
-                return spark_type_to_arrow_type(py, pa, data_type);
-            };
-            let (Some(key_type), Some(value_type)) = (
-                fields.iter().find(|field| field.name == "key"),
-                fields.iter().find(|field| field.name == "value"),
-            ) else {
-                return spark_type_to_arrow_type(py, pa, data_type);
-            };
-            (&key_type.data_type, &value_type.data_type)
+            let element_type = spark_type_to_arrow_type_with_maps(
+                py,
+                pa,
+                element_type,
+                &format!("{path}[]"),
+                map_paths,
+            )?;
+            pa.getattr("list_")?.call1((element_type,))?.into_py_any(py)
         }
-        _ => return spark_type_to_arrow_type(py, pa, data_type),
-    };
-    let key_type = spark_type_to_arrow_type(py, pa, key_type)?;
-    let value_type = spark_type_to_arrow_type(py, pa, value_type)?;
-    pa.getattr("map_")?
-        .call1((key_type, value_type))?
-        .into_py_any(py)
+        DataType::Struct(fields) => {
+            let py_fields = PyList::empty(py);
+            for field in fields {
+                let field_type = spark_type_to_arrow_type_with_maps(
+                    py,
+                    pa,
+                    &field.data_type,
+                    &arrow_field_path(path, &field.name),
+                    map_paths,
+                )?;
+                py_fields.append((field.name.as_str(), field_type))?;
+            }
+            pa.getattr("struct")?.call1((py_fields,))?.into_py_any(py)
+        }
+        DataType::Map(key_type, value_type) => {
+            let key_type = spark_type_to_arrow_type_with_maps(
+                py,
+                pa,
+                key_type,
+                &format!("{path}{{key}}"),
+                map_paths,
+            )?;
+            let value_type = spark_type_to_arrow_type_with_maps(
+                py,
+                pa,
+                value_type,
+                &format!("{path}{{value}}"),
+                map_paths,
+            )?;
+            pa.getattr("map_")?
+                .call1((key_type, value_type))?
+                .into_py_any(py)
+        }
+        _ => spark_type_to_arrow_type(py, pa, data_type),
+    }
+}
+
+fn normalize_arrow_value_with_maps(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+    data_type: &DataType,
+    path: &str,
+    map_paths: &std::collections::HashSet<String>,
+) -> PyResult<PyObject> {
+    if value.is_none() {
+        return value.clone().unbind().into_py_any(py);
+    }
+
+    if map_paths.contains(path) {
+        let (key_type, value_type) = match data_type {
+            DataType::Map(key_type, value_type) => (key_type.as_ref(), value_type.as_ref()),
+            DataType::Array(element_type) => {
+                let DataType::Struct(fields) = element_type.as_ref() else {
+                    return value.clone().unbind().into_py_any(py);
+                };
+                let (Some(key), Some(item)) = (
+                    fields.iter().find(|field| field.name == "key"),
+                    fields.iter().find(|field| field.name == "value"),
+                ) else {
+                    return value.clone().unbind().into_py_any(py);
+                };
+                (&key.data_type, &item.data_type)
+            }
+            _ => return value.clone().unbind().into_py_any(py),
+        };
+        let items = PyList::empty(py);
+        if let Ok(dict) = value.cast::<PyDict>() {
+            for (key, item) in dict.iter() {
+                let key = normalize_arrow_value_with_maps(
+                    py,
+                    &key,
+                    key_type,
+                    &format!("{path}{{key}}"),
+                    map_paths,
+                )?;
+                let item = normalize_arrow_value_with_maps(
+                    py,
+                    &item,
+                    value_type,
+                    &format!("{path}{{value}}"),
+                    map_paths,
+                )?;
+                items.append(PyTuple::new(py, [key, item])?)?;
+            }
+        } else {
+            for entry in value.try_iter()? {
+                let entry = entry?;
+                let entry_dict = if entry.is_instance_of::<PyDict>() {
+                    entry.clone()
+                } else if entry.hasattr("asDict")? {
+                    entry.call_method0("asDict")?
+                } else {
+                    entry.clone()
+                };
+                let (key, item) = if entry_dict.is_instance_of::<PyDict>() {
+                    (entry_dict.get_item("key")?, entry_dict.get_item("value")?)
+                } else {
+                    (entry.get_item(0)?, entry.get_item(1)?)
+                };
+                let key = normalize_arrow_value_with_maps(
+                    py,
+                    &key,
+                    key_type,
+                    &format!("{path}{{key}}"),
+                    map_paths,
+                )?;
+                let item = normalize_arrow_value_with_maps(
+                    py,
+                    &item,
+                    value_type,
+                    &format!("{path}{{value}}"),
+                    map_paths,
+                )?;
+                items.append(PyTuple::new(py, [key, item])?)?;
+            }
+        }
+        return items.into_py_any(py);
+    }
+
+    match data_type {
+        DataType::Struct(fields) => {
+            let source = if value.is_instance_of::<PyDict>() {
+                value.clone()
+            } else if value.hasattr("asDict")? {
+                value.call_method0("asDict")?
+            } else {
+                return value.clone().unbind().into_py_any(py);
+            };
+            let output = PyDict::new(py);
+            for field in fields {
+                let child = source.get_item(field.name.as_str())?;
+                let child = normalize_arrow_value_with_maps(
+                    py,
+                    &child,
+                    &field.data_type,
+                    &arrow_field_path(path, &field.name),
+                    map_paths,
+                )?;
+                output.set_item(field.name.as_str(), child.bind(py))?;
+            }
+            output.into_py_any(py)
+        }
+        DataType::Array(element_type) => {
+            let output = PyList::empty(py);
+            for item in value.try_iter()? {
+                let item = item?;
+                let item = normalize_arrow_value_with_maps(
+                    py,
+                    &item,
+                    element_type,
+                    &format!("{path}[]"),
+                    map_paths,
+                )?;
+                output.append(item.bind(py))?;
+            }
+            output.into_py_any(py)
+        }
+        DataType::Map(key_type, value_type) => {
+            let mut nested_map_paths = map_paths.clone();
+            nested_map_paths.insert(path.to_string());
+            normalize_arrow_value_with_maps(
+                py,
+                value,
+                &DataType::Map(key_type.clone(), value_type.clone()),
+                path,
+                &nested_map_paths,
+            )
+        }
+        _ => value.clone().unbind().into_py_any(py),
+    }
 }
 
 impl PySparkSession {
@@ -1692,6 +1948,7 @@ impl PySparkSession {
                                 arrow_schema_cache: None,
                                 arrow_array_struct_paths: Default::default(),
                                 logical_map_columns: Default::default(),
+                                logical_map_paths: Default::default(),
                             });
                         }
                     }
@@ -1708,6 +1965,11 @@ impl PySparkSession {
         let mut arrow_array_struct_paths = arrow_schema_source
             .as_ref()
             .map(arrow_array_struct_paths)
+            .transpose()?
+            .unwrap_or_default();
+        let mut logical_map_paths = arrow_schema_source
+            .as_ref()
+            .map(arrow_logical_map_paths)
             .transpose()?
             .unwrap_or_default();
         let arrow_schema_cache = arrow_schema_source.as_ref().map(|s| s.clone().unbind());
@@ -1760,6 +2022,7 @@ impl PySparkSession {
                 arrow_array_struct_paths.insert(arrow_field_path("", name));
             } else if type_name.starts_with("map<") {
                 logical_map_columns.insert(name.clone());
+                logical_map_paths.insert(arrow_field_path("", name));
             }
         }
         let df = self
@@ -1773,6 +2036,7 @@ impl PySparkSession {
             arrow_schema_cache,
             arrow_array_struct_paths,
             logical_map_columns,
+            logical_map_paths,
         })
     }
 
@@ -4819,12 +5083,19 @@ struct PyDataFrame {
     arrow_schema_cache: Option<Py<PyAny>>,
     arrow_array_struct_paths: std::collections::HashSet<String>,
     logical_map_columns: std::collections::HashSet<String>,
+    logical_map_paths: std::collections::HashSet<String>,
 }
 
 impl PyDataFrame {
     fn remove_metadata_root(target: &mut Self, root: &str) {
         target.logical_map_columns.remove(root);
         let root = arrow_field_path("", root);
+        target.logical_map_paths.retain(|path| {
+            path != &root
+                && !path
+                    .strip_prefix(root.as_str())
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        });
         target.arrow_array_struct_paths.retain(|path| {
             path != &root
                 && !path
@@ -4850,6 +5121,7 @@ impl PyDataFrame {
             arrow_schema_cache: None,
             arrow_array_struct_paths: Default::default(),
             logical_map_columns: Default::default(),
+            logical_map_paths: Default::default(),
         }
     }
 
@@ -4876,6 +5148,20 @@ impl PyDataFrame {
                 .logical_map_columns
                 .iter()
                 .filter(|name| output_names.contains(name.as_str()))
+                .cloned()
+                .collect();
+            wrapped.logical_map_paths = self
+                .logical_map_paths
+                .iter()
+                .filter(|path| {
+                    output_names.iter().any(|name| {
+                        let root = arrow_field_path("", name);
+                        path.as_str() == root.as_str()
+                            || path
+                                .strip_prefix(root.as_str())
+                                .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+                    })
+                })
                 .cloned()
                 .collect();
         }
@@ -4915,11 +5201,25 @@ impl PyDataFrame {
                 }
             }
         }
+        for path in &self.logical_map_paths {
+            if path == &source_path {
+                target.logical_map_paths.insert(output_path.clone());
+            } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
+                if tail.starts_with(['.', '[', '{']) {
+                    target
+                        .logical_map_paths
+                        .insert(format!("{output_path}{tail}"));
+                }
+            }
+        }
         if self
             .logical_map_columns
             .contains(resolved.as_deref().unwrap_or(source))
         {
             target.logical_map_columns.insert(output.to_string());
+            target
+                .logical_map_paths
+                .insert(arrow_field_path("", output));
         }
     }
 
@@ -5027,6 +5327,12 @@ impl PyDataFrame {
                     || path
                         .strip_prefix(root.as_str())
                         .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+            }) || other.logical_map_paths.iter().any(|path| {
+                let root = arrow_field_path("", source);
+                path.as_str() == root.as_str()
+                    || path
+                        .strip_prefix(root.as_str())
+                        .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
             });
             if !has_metadata {
                 continue;
@@ -5089,6 +5395,7 @@ impl PyDataFrame {
             let Some((source, output)) = source_and_output_names(expr) else {
                 continue;
             };
+            Self::remove_metadata_root(&mut wrapped, &output);
             self.copy_column_metadata(&source, &output, &mut wrapped);
         }
         wrapped
@@ -5790,6 +6097,8 @@ impl PyDataFrame {
             py: Python<'_>,
             types_mod: &Bound<'_, PyModule>,
             dt: &DataType,
+            path: &str,
+            map_paths: &std::collections::HashSet<String>,
         ) -> PyResult<PyObject> {
             let mk0 = |name: &str| -> PyResult<PyObject> {
                 types_mod.getattr(name)?.call0()?.into_py_any(py)
@@ -5807,8 +6116,39 @@ impl PyDataFrame {
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
                 DataType::Binary => mk0("BinaryType"),
+                DataType::Array(elem)
+                    if map_paths.contains(path)
+                        && matches!(elem.as_ref(), DataType::Struct(fields)
+                            if fields.iter().any(|field| field.name == "key")
+                                && fields.iter().any(|field| field.name == "value")) =>
+                {
+                    let DataType::Struct(fields) = elem.as_ref() else {
+                        unreachable!()
+                    };
+                    let key = fields.iter().find(|field| field.name == "key").unwrap();
+                    let value = fields.iter().find(|field| field.name == "value").unwrap();
+                    let key_py = dtype_to_py(
+                        py,
+                        types_mod,
+                        &key.data_type,
+                        &format!("{path}{{key}}"),
+                        map_paths,
+                    )?;
+                    let value_py = dtype_to_py(
+                        py,
+                        types_mod,
+                        &value.data_type,
+                        &format!("{path}{{value}}"),
+                        map_paths,
+                    )?;
+                    Ok(types_mod
+                        .getattr("MapType")?
+                        .call1((key_py, value_py, true))?
+                        .into_py_any(py)?)
+                }
                 DataType::Array(elem) => {
-                    let elem_py = dtype_to_py(py, types_mod, elem)?;
+                    let elem_py =
+                        dtype_to_py(py, types_mod, elem, &format!("{path}[]"), map_paths)?;
                     Ok(types_mod
                         .getattr("ArrayType")?
                         // PySpark: many array-returning functions (including split) use
@@ -5819,8 +6159,9 @@ impl PyDataFrame {
                         .into_py_any(py)?)
                 }
                 DataType::Map(k, v) => {
-                    let k_py = dtype_to_py(py, types_mod, k)?;
-                    let v_py = dtype_to_py(py, types_mod, v)?;
+                    let k_py = dtype_to_py(py, types_mod, k, &format!("{path}{{key}}"), map_paths)?;
+                    let v_py =
+                        dtype_to_py(py, types_mod, v, &format!("{path}{{value}}"), map_paths)?;
                     Ok(types_mod
                         .getattr("MapType")?
                         .call1((k_py, v_py, true))?
@@ -5829,7 +6170,13 @@ impl PyDataFrame {
                 DataType::Struct(fields) => {
                     let mut py_fields: Vec<PyObject> = Vec::with_capacity(fields.len());
                     for f in fields {
-                        let dt_obj = dtype_to_py(py, types_mod, &f.data_type)?;
+                        let dt_obj = dtype_to_py(
+                            py,
+                            types_mod,
+                            &f.data_type,
+                            &arrow_field_path(path, &f.name),
+                            map_paths,
+                        )?;
                         let sf = types_mod.getattr("StructField")?.call1((
                             f.name.clone(),
                             dt_obj,
@@ -5848,7 +6195,13 @@ impl PyDataFrame {
 
         let mut py_fields: Vec<PyObject> = Vec::with_capacity(schema.fields().len());
         for f in schema.fields() {
-            let dt_obj = dtype_to_py(py, &types_mod, &f.data_type)?;
+            let dt_obj = dtype_to_py(
+                py,
+                &types_mod,
+                &f.data_type,
+                &arrow_field_path("", &f.name),
+                &self.logical_map_paths,
+            )?;
             let sf = struct_field_cls.call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
             py_fields.push(sf.into_py_any(py)?);
         }
@@ -7306,6 +7659,7 @@ impl PyDataFrame {
         let names = PyList::empty(py);
         for field in schema.fields() {
             let values = PyList::empty(py);
+            let field_path = arrow_field_path("", &field.name);
             let map_shaped_dtype = matches!(
                 &field.data_type,
                 DataType::Array(element_type)
@@ -7327,37 +7681,37 @@ impl PyDataFrame {
             } else {
                 false
             };
-            let source_type_is_map = match source_arrow_types.get(&field.name) {
-                Some(source_type) => pa
-                    .getattr("types")?
-                    .getattr("is_map")?
-                    .call1((source_type.bind(py),))?
-                    .extract::<bool>()?,
-                None => false,
-            };
-            let is_map = map_shaped_dtype
-                && (source_type_is_map
-                    || self.logical_map_columns.contains(&field.name)
-                    || map_value_present);
+            // The cached source schema can be stale after withColumn replaces a
+            // map with an array that has the same physical key/value shape.
+            // Derived logical paths are authoritative; infer only for uncached,
+            // dictionary-shaped values.
+            let is_map = self.logical_map_paths.contains(&field_path)
+                || self.logical_map_columns.contains(&field.name)
+                || (map_shaped_dtype && map_value_present);
+            let mut field_map_paths = self.logical_map_paths.clone();
+            if is_map {
+                field_map_paths.insert(field_path.clone());
+            }
             for row in &rows {
                 let row = row.bind(py);
                 let dict = row.call_method0("asDict")?;
                 let value = dict.get_item(field.name.as_str())?;
-                if is_map && !value.is_none() {
-                    let entries = PyList::empty(py);
-                    for entry in value.call_method0("items")?.try_iter()? {
-                        entries.append(entry?)?;
-                    }
-                    values.append(entries)?;
-                } else {
-                    values.append(value)?;
-                }
+                let value = normalize_arrow_value_with_maps(
+                    py,
+                    &value,
+                    &field.data_type,
+                    &field_path,
+                    &field_map_paths,
+                )?;
+                values.append(value.bind(py))?;
             }
-            let current_arrow_type = if is_map {
-                spark_map_type_to_arrow_type(py, &pa, &field.data_type)?
-            } else {
-                spark_type_to_arrow_type(py, &pa, &field.data_type)?
-            };
+            let current_arrow_type = spark_type_to_arrow_type_with_maps(
+                py,
+                &pa,
+                &field.data_type,
+                &field_path,
+                &field_map_paths,
+            )?;
             let arrow_type = match source_arrow_types.get(&field.name) {
                 Some(source_type) if source_type.bind(py).eq(current_arrow_type.bind(py))? => {
                     source_type.clone_ref(py)

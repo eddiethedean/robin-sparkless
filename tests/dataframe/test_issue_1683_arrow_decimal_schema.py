@@ -289,6 +289,8 @@ def test_wide_decimal_comparison_keeps_adjacent_scales_exact(spark) -> None:
 
 def test_decimal_map_values_are_decimal_after_collection(spark) -> None:
     pa = pytest.importorskip("pyarrow")
+    from sparkless.testing import get_imports
+
     arrow_map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
     table = pa.Table.from_pylist(
         [{"balances": [("checking", Decimal("10.25"))]}],
@@ -298,6 +300,7 @@ def test_decimal_map_values_are_decimal_after_collection(spark) -> None:
     df = spark.createDataFrame(table)
     row = df.collect()[0]
 
+    assert isinstance(df.schema["balances"].dataType, get_imports().MapType)
     assert row["balances"] == {"checking": Decimal("10.25")}
     exported = df.toArrow()
     assert exported.schema.field("balances").type == arrow_map_type
@@ -452,6 +455,181 @@ def test_decimal_inference_counts_digits_before_positive_exponent(spark) -> None
 
     assert df.schema["amount"].dataType.simpleString() == "decimal(38,0)"
     assert df.collect()[0]["amount"] == value
+
+
+def test_ordered_decimal_windows_keep_running_sum_and_average_exact(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    Window = get_imports().Window
+    df = spark.createDataFrame(
+        [
+            {"seq": 2, "amount": Decimal("2.00")},
+            {"seq": 1, "amount": Decimal("9007199254740993.01")},
+            {"seq": 3, "amount": None},
+        ],
+        schema="seq int, amount decimal(20,2)",
+    )
+    window = Window.orderBy("seq").rowsBetween(
+        Window.unboundedPreceding, Window.currentRow
+    )
+    result = df.withColumn("running_sum", F.sum("amount").over(window)).withColumn(
+        "running_avg", F.avg("amount").over(window)
+    )
+    rows = sorted(result.collect(), key=lambda row: row["seq"])
+
+    assert result.schema["running_sum"].dataType.simpleString() == "decimal(30,2)"
+    assert result.schema["running_avg"].dataType.simpleString() == "decimal(24,6)"
+    assert [row["running_sum"] for row in rows] == [
+        Decimal("9007199254740993.01"),
+        Decimal("9007199254740995.01"),
+        Decimal("9007199254740995.01"),
+    ]
+    assert [row["running_avg"] for row in rows] == [
+        Decimal("9007199254740993.010000"),
+        Decimal("4503599627370497.505000"),
+        Decimal("4503599627370497.505000"),
+    ]
+
+    range_window = Window.orderBy("seq").rangeBetween(
+        Window.unboundedPreceding, Window.currentRow
+    )
+    range_result = df.withColumn(
+        "running_sum", F.sum("amount").over(range_window)
+    ).withColumn("running_avg", F.avg("amount").over(range_window))
+    range_rows = sorted(range_result.collect(), key=lambda row: row["seq"])
+    assert [row["running_sum"] for row in range_rows] == [
+        Decimal("9007199254740993.01"),
+        Decimal("9007199254740995.01"),
+        Decimal("9007199254740995.01"),
+    ]
+    assert [row["running_avg"] for row in range_rows] == [
+        Decimal("9007199254740993.010000"),
+        Decimal("4503599627370497.505000"),
+        Decimal("4503599627370497.505000"),
+    ]
+
+
+def test_ordered_integer_window_sum_keeps_bits_above_float_precision(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    Window = get_imports().Window
+    df = spark.createDataFrame(
+        [(1, 9_007_199_254_740_992), (2, 1)],
+        schema="seq int, amount bigint",
+    )
+    window = Window.orderBy("seq").rowsBetween(
+        Window.unboundedPreceding, Window.currentRow
+    )
+
+    result = df.withColumn("running_sum", F.sum("amount").over(window))
+    rows = sorted(result.collect(), key=lambda row: row["seq"])
+
+    assert result.schema["running_sum"].dataType.simpleString() == "bigint"
+    assert [row["running_sum"] for row in rows] == [
+        9_007_199_254_740_992,
+        9_007_199_254_740_993,
+    ]
+
+
+def test_arrow_map_schema_and_nested_map_round_trip(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.testing import get_imports
+
+    map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
+    schema = pa.schema(
+        [
+            (
+                "details",
+                pa.struct([("balances", map_type)]),
+            )
+        ]
+    )
+    table = pa.Table.from_pylist(
+        [{"details": {"balances": [("checking", Decimal("10.25"))]}}],
+        schema=schema,
+    )
+
+    df = spark.createDataFrame(table)
+    exported = df.toArrow()
+
+    assert isinstance(
+        df.schema["details"].dataType["balances"].dataType,
+        get_imports().MapType,
+    )
+    assert exported.schema.field("details").type == schema.field("details").type
+    assert exported.to_pylist() == [
+        {"details": {"balances": [("checking", Decimal("10.25"))]}}
+    ]
+
+
+def test_overwriting_arrow_map_with_array_does_not_reuse_stale_map_type(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    entries_type = pa.list_(pa.struct([("key", pa.string()), ("value", pa.int64())]))
+    schema = pa.schema(
+        [
+            ("m", pa.map_(pa.string(), pa.int64())),
+            ("entries", entries_type),
+        ]
+    )
+    table = pa.Table.from_pylist(
+        [
+            {
+                "m": [("old", 1)],
+                "entries": [{"key": "new", "value": 2}],
+            }
+        ],
+        schema=schema,
+    )
+
+    replaced = spark.createDataFrame(table).withColumn("m", F.col("entries"))
+    exported = replaced.toArrow()
+    projected = spark.createDataFrame(table).select(F.col("entries").alias("m"))
+
+    assert exported.schema.field("m").type == entries_type
+    assert exported.to_pylist()[0]["m"] == [{"key": "new", "value": 2}]
+    assert projected.toArrow().schema.field("m").type == entries_type
+
+
+def test_decimal_pivot_sum_and_average_keep_spark_types(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    table = pa.Table.from_pylist(
+        [
+            {"grp": "g", "kind": "a", "amount": Decimal("9007199254740993.01")},
+            {"grp": "g", "kind": "a", "amount": Decimal("2.00")},
+        ],
+        schema=pa.schema(
+            [
+                ("grp", pa.string()),
+                ("kind", pa.string()),
+                ("amount", pa.decimal128(20, 2)),
+            ]
+        ),
+    )
+    df = spark.createDataFrame(table)
+
+    convenience_sum = df.groupBy("grp").pivot("kind", ["a"]).sum("amount")
+    convenience_avg = df.groupBy("grp").pivot("kind", ["a"]).avg("amount")
+    aggregate = (
+        df.groupBy("grp")
+        .pivot("kind", ["a"])
+        .agg(F.sum("amount").alias("total"), F.avg("amount").alias("average"))
+    )
+
+    assert convenience_sum.schema["a"].dataType.simpleString() == "decimal(30,2)"
+    assert convenience_sum.collect()[0]["a"] == Decimal("9007199254740995.01")
+    assert convenience_avg.schema["a"].dataType.simpleString() == "decimal(24,6)"
+    assert convenience_avg.collect()[0]["a"] == Decimal("4503599627370497.505000")
+    row = aggregate.collect()[0]
+    assert row["a_total"] == Decimal("9007199254740995.01")
+    assert row["a_average"] == Decimal("4503599627370497.505000")
 
 
 def test_decimal_transport_marker_does_not_change_string_values(spark) -> None:

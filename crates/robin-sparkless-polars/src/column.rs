@@ -107,7 +107,7 @@ pub struct RangeWindowSpec {
     pub agg: RangeWindowAgg,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RangeWindowAgg {
     Sum,
     Mean,
@@ -2711,25 +2711,30 @@ impl Column {
                 Some(partition_exprs.clone()),
                 Some((order_exprs, default_opts)),
             );
-            let expr = if let Some(ref src) = self.source_for_running_mean {
-                col(src)
-                    .cast(DataType::Float64)
-                    .rolling_mean(rolling_opts.clone())
-                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
-            } else if let Some(ref src) = self.source_for_running {
-                col(src)
-                    .cast(DataType::Float64)
-                    .rolling_sum(rolling_opts.clone())
-                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
-            } else if let Some(ref src) = self.source_for_running_count {
-                col(src)
-                    .is_not_null()
-                    .cast(DataType::Int64)
-                    .rolling_sum(rolling_opts)
-                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
-            } else {
-                unreachable!("use_rolling requires has_rolling_source")
-            };
+            let expr =
+                if let Some(ref src) = self.source_for_running_mean {
+                    crate::functions::running_avg_expr(col(src), Some((start, end)))
+                        .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
+                } else if let Some(ref src) = self.source_for_running {
+                    crate::functions::running_sum_expr(
+                        col(src),
+                        crate::udf_context::get_thread_ansi_enabled(),
+                        Some((start, end)),
+                    )
+                    .over_with_options(
+                        over_opts.0,
+                        over_opts.1,
+                        WindowMapping::default(),
+                    )?
+                } else if let Some(ref src) = self.source_for_running_count {
+                    col(src)
+                        .is_not_null()
+                        .cast(DataType::Int64)
+                        .rolling_sum(rolling_opts)
+                        .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
+                } else {
+                    unreachable!("use_rolling requires has_rolling_source")
+                };
             return Ok(Self::from_expr(expr, None));
         }
 
@@ -2769,14 +2774,13 @@ impl Column {
 
         let base_expr = if use_running_aggregate {
             if let Some(ref src) = self.source_for_running_mean {
-                // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
-                let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
-                let count_expr = col(src).cum_count(false).cast(DataType::Float64);
-                sum_expr / count_expr
+                crate::functions::running_avg_expr(col(src), None)
             } else if let Some(ref src) = self.source_for_running {
-                // Running sum in window order. Cast to Float64 so string columns work
-                // (PySpark parity, issue #393). Non-running sums still use native dtype.
-                col(src).cast(DataType::Float64).cum_sum(false)
+                crate::functions::running_sum_expr(
+                    col(src),
+                    crate::udf_context::get_thread_ansi_enabled(),
+                    None,
+                )
             } else if let Some(ref src) = self.source_for_running_count {
                 // Running count in window order (PySpark count().over(order); #1218).
                 col(src).cum_count(false).cast(DataType::Int64)

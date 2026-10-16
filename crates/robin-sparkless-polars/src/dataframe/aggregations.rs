@@ -926,8 +926,8 @@ fn parse_pivot_literal_expr(expr: &Expr) -> Option<(String, Expr)> {
 /// Apply agg kind to a per-row filtered value expression (multi-agg pivot path).
 fn pivot_filtered_agg_expr(expr: Expr, agg_kind: &str) -> Result<Expr, PolarsError> {
     Ok(match agg_kind {
-        "sum" => expr.sum(),
-        "avg" => expr.mean(),
+        "sum" => pivot_sum_expr(expr),
+        "avg" => pivot_avg_expr(expr),
         "min" => expr.min(),
         "max" => expr.max(),
         "first" => expr.first_non_null(),
@@ -941,6 +941,16 @@ fn pivot_filtered_agg_expr(expr: Expr, agg_kind: &str) -> Result<Expr, PolarsErr
             ));
         }
     })
+}
+
+fn pivot_sum_expr(expr: Expr) -> Expr {
+    let input = Column::from_expr(expr, None);
+    crate::functions::sum(&input).expr().clone()
+}
+
+fn pivot_avg_expr(expr: Expr) -> Expr {
+    let input = Column::from_expr(expr, None);
+    crate::functions::avg(&input).expr().clone()
 }
 
 /// Parse a simple pivot agg expr: Alias(Agg(...), alias) or bare Agg(...) or Cast(Agg(...), _) -> (alias, agg_kind, value_col).
@@ -1179,12 +1189,12 @@ impl PivotedGroupedData {
 
     /// Pivot then sum (PySpark: groupBy(...).pivot(...).sum(column)).
     pub fn sum(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.pivot_agg(value_col, polars::prelude::Expr::sum)
+        self.pivot_agg(value_col, pivot_sum_expr)
     }
 
     /// Pivot then mean (PySpark: groupBy(...).pivot(...).avg(column)).
     pub fn avg(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.pivot_agg(value_col, polars::prelude::Expr::mean)
+        self.pivot_agg(value_col, pivot_avg_expr)
     }
 
     /// Pivot then min (PySpark: groupBy(...).pivot(...).min(column)).

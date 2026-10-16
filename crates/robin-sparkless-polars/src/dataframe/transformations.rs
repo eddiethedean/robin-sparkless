@@ -9,6 +9,8 @@ use crate::column::expect_col;
 use crate::functions::SortOrder;
 use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public};
 use crate::udfs;
+use num_bigint::BigInt;
+use num_traits::{Signed, ToPrimitive, Zero};
 use polars::prelude::{
     DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions, UniqueKeepStrategy, col, len, lit,
@@ -721,12 +723,10 @@ fn compute_range_window_series(
         .as_materialized_series()
         .cast(&DataType::Float64)?;
     let value_s = sorted_df.column(value_col)?.as_materialized_series();
-    let value_f64 = value_s.cast(&DataType::Float64)?;
     let order_ca = order_s.f64()?;
-    let value_ca = value_f64.f64()?;
 
     let n = sorted_df.height();
-    let mut result = Vec::with_capacity(n);
+    let mut windows = vec![None; n];
     let mut idx = 0usize;
 
     let part_series: Vec<Series> = if partition_by.is_empty() {
@@ -763,79 +763,177 @@ fn compute_range_window_series(
         let part_len = part_end - part_start;
         let order_slice: Vec<Option<f64>> =
             (part_start..part_end).map(|i| order_ca.get(i)).collect();
-        let value_slice: Vec<Option<f64>> =
-            (part_start..part_end).map(|i| value_ca.get(i)).collect();
-
         let start_f = start as f64;
         let end_f = end as f64;
-
-        let mut prefix_sum: Vec<f64> = Vec::with_capacity(part_len + 1);
-        prefix_sum.push(0.0);
-        let mut prefix_count: Vec<usize> = Vec::with_capacity(part_len + 1);
-        prefix_count.push(0);
-        for (i, v) in value_slice.iter().enumerate() {
-            let prev_s = prefix_sum[i];
-            let prev_c = prefix_count[i];
-            match v {
-                Some(x) => {
-                    prefix_sum.push(prev_s + x);
-                    prefix_count.push(prev_c + 1);
-                }
-                None => {
-                    prefix_sum.push(prev_s);
-                    prefix_count.push(prev_c);
-                }
-            }
-        }
-
         for i in 0..part_len {
-            let order_val = order_slice[i];
-            let (sum_val, count_val) = match order_val {
-                None => (None, None),
-                Some(v) => {
-                    let low = if start == UNBOUNDED_PRECEDING {
-                        0.0
-                    } else {
-                        v + start_f
-                    };
-                    let high = if end == UNBOUNDED_FOLLOWING {
-                        f64::INFINITY
-                    } else {
-                        v + end_f
-                    };
-                    // Leftmost index where order >= low (inclusive start of range).
-                    let left = order_slice[..=i]
-                        .iter()
-                        .position(|x: &Option<f64>| x.is_some_and(|o| o >= low))
-                        .unwrap_or(0);
-                    let right = order_slice[i..]
-                        .iter()
-                        .position(|x: &Option<f64>| x.is_none_or(|o| o > high))
-                        .map(|p| i + p - 1)
-                        .unwrap_or(part_len - 1);
-                    let left = left.min(i);
-                    let right = right.max(i);
-                    let sum_r = prefix_sum[right + 1] - prefix_sum[left];
-                    let count_r = prefix_count[right + 1] - prefix_count[left];
-                    (Some(sum_r), Some(count_r))
-                }
+            let Some(v) = order_slice[i] else {
+                continue;
             };
-            let out: Option<f64> = match agg {
-                RangeWindowAgg::Sum => sum_val,
-                RangeWindowAgg::Count => count_val.map(|c| c as f64),
-                RangeWindowAgg::Mean => match (sum_val, count_val) {
-                    (Some(s), Some(c)) if c > 0 => Some(s / c as f64),
-                    _ => None,
-                },
+            let low = if start == UNBOUNDED_PRECEDING {
+                f64::NEG_INFINITY
+            } else {
+                v + start_f
             };
-            result.push(out);
+            let high = if end == UNBOUNDED_FOLLOWING {
+                f64::INFINITY
+            } else {
+                v + end_f
+            };
+            let left = order_slice
+                .iter()
+                .position(|x| x.is_some_and(|order| order >= low));
+            let right = order_slice
+                .iter()
+                .rposition(|x| x.is_some_and(|order| order <= high));
+            if let (Some(left), Some(right)) = (left, right)
+                && left <= right
+            {
+                windows[part_start + i] = Some((part_start + left, part_start + right));
+            }
         }
 
         idx = part_end;
     }
 
-    let ca = Float64Chunked::from_iter(result);
-    Ok(Series::new(value_col.into(), ca))
+    let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
+    if agg == RangeWindowAgg::Count {
+        let mut result = Vec::with_capacity(n);
+        for window in &windows {
+            let count = match window {
+                Some((left, right)) => (*left..=*right)
+                    .filter(|idx| !value_s.get(*idx).is_ok_and(|value| value.is_null()))
+                    .count(),
+                None => 0,
+            };
+            result.push(window.map(|_| count as f64));
+        }
+        return Ok(Series::new(value_col.into(), result));
+    }
+
+    match value_s.dtype() {
+        DataType::Decimal(precision, scale) => {
+            let (output_precision, output_scale) = if agg == RangeWindowAgg::Mean {
+                let output_precision = precision.saturating_add(4).clamp(1, 38);
+                (
+                    output_precision,
+                    scale.saturating_add(4).min(output_precision),
+                )
+            } else {
+                (precision.saturating_add(10).min(38), *scale)
+            };
+            let factor = BigInt::from(10).pow(output_scale.saturating_sub(*scale) as u32);
+            let maximum = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+            let coefficients = (0..n)
+                .map(|idx| match value_s.get(idx)? {
+                    AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
+                        Ok(Some(BigInt::from(value)))
+                    }
+                    AnyValue::Null => Ok(None),
+                    _ => Err(PolarsError::ComputeError(
+                        "decimal range window received a non-decimal value".into(),
+                    )),
+                })
+                .collect::<PolarsResult<Vec<_>>>()?;
+            let mut result = Vec::with_capacity(n);
+            for window in &windows {
+                let Some((left, right)) = window else {
+                    result.push(None);
+                    continue;
+                };
+                let mut total = BigInt::zero();
+                let mut count = 0usize;
+                for value in coefficients.iter().take(*right + 1).skip(*left).flatten() {
+                    total += value;
+                    count += 1;
+                }
+                if count == 0 {
+                    result.push(None);
+                } else if agg == RangeWindowAgg::Mean {
+                    let scaled = total * &factor;
+                    let divisor = BigInt::from(count);
+                    let mut average = &scaled / &divisor;
+                    let remainder = scaled % &divisor;
+                    if remainder.abs() * 2 >= divisor {
+                        average += if remainder.is_negative() { -1 } else { 1 };
+                    }
+                    result.push(average.to_i128());
+                } else if total.abs() > maximum {
+                    if ansi_enabled {
+                        return Err(PolarsError::ComputeError(
+                            "[ARITHMETIC_OVERFLOW] decimal range window sum exceeds supported precision".into(),
+                        ));
+                    }
+                    result.push(None);
+                } else {
+                    result.push(total.to_i128());
+                }
+            }
+            Series::new(value_col.into(), result)
+                .into_decimal(output_precision, output_scale)
+                .map(|series| series.into_series())
+        }
+        dtype if dtype.is_integer() && agg == RangeWindowAgg::Sum => {
+            let values = value_s.cast(&DataType::Int128)?;
+            let values = values.i128()?;
+            let modulus = BigInt::from(1u8) << 64usize;
+            let mut result = Vec::with_capacity(n);
+            for window in &windows {
+                let Some((left, right)) = window else {
+                    result.push(None);
+                    continue;
+                };
+                let mut total = BigInt::zero();
+                let mut count = 0usize;
+                for row in *left..=*right {
+                    if let Some(value) = values.get(row) {
+                        total += value;
+                        count += 1;
+                    }
+                }
+                if count == 0 {
+                    result.push(None);
+                    continue;
+                }
+                if (total < BigInt::from(i64::MIN) || total > BigInt::from(i64::MAX))
+                    && ansi_enabled
+                {
+                    return Err(PolarsError::ComputeError(
+                        "[ARITHMETIC_OVERFLOW] integer range window sum exceeds BIGINT".into(),
+                    ));
+                }
+                let wrapped = ((&total % &modulus) + &modulus) % &modulus;
+                result.push(wrapped.to_u64().map(|value| value as i64));
+            }
+            Ok(Series::new(value_col.into(), result))
+        }
+        _ => {
+            let values = value_s.cast(&DataType::Float64)?;
+            let values = values.f64()?;
+            let mut result = Vec::with_capacity(n);
+            for window in &windows {
+                let Some((left, right)) = window else {
+                    result.push(None);
+                    continue;
+                };
+                let mut total = 0.0;
+                let mut count = 0usize;
+                for row in *left..=*right {
+                    if let Some(value) = values.get(row) {
+                        total += value;
+                        count += 1;
+                    }
+                }
+                result.push(if count == 0 {
+                    None
+                } else if agg == RangeWindowAgg::Mean {
+                    Some(total / count as f64)
+                } else {
+                    Some(total)
+                });
+            }
+            Ok(Series::new(value_col.into(), result))
+        }
+    }
 }
 
 /// Add or replace a column. Handles deferred rand/randn and Python UDF (UdfCall).
