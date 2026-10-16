@@ -47,6 +47,10 @@ fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
         PlDataType::UInt32 => DataType::Integer,
         PlDataType::UInt64 => DataType::Long,
         PlDataType::Float32 | PlDataType::Float64 => DataType::Double,
+        PlDataType::Decimal(precision, scale) => DataType::Decimal(
+            (*precision).min(u8::MAX as usize) as u8,
+            (*scale).min(u8::MAX as usize) as u8,
+        ),
         PlDataType::Boolean => DataType::Boolean,
         PlDataType::Date => DataType::Date,
         PlDataType::Datetime(_, _) => DataType::Timestamp,
@@ -74,6 +78,9 @@ pub(crate) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
         DataType::Integer => PlDataType::Int32,
         DataType::Long => PlDataType::Int64,
         DataType::Double => PlDataType::Float64,
+        DataType::Decimal(precision, scale) => {
+            PlDataType::Decimal(*precision as usize, *scale as usize)
+        }
         DataType::Boolean => PlDataType::Boolean,
         DataType::Date => PlDataType::Date,
         DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, None),

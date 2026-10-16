@@ -97,6 +97,37 @@ fn is_decimal_type_str(type_str: &str) -> bool {
     s.starts_with("decimal(") && s.contains(')')
 }
 
+fn parse_decimal_precision_scale(type_str: &str) -> Option<(usize, usize)> {
+    let args = type_str.trim().to_ascii_lowercase();
+    let args = args.strip_prefix("decimal(")?.strip_suffix(')')?;
+    let (precision, scale) = args.split_once(',')?;
+    Some((precision.trim().parse().ok()?, scale.trim().parse().ok()?))
+}
+
+fn decimal_to_scaled(value: &str, scale: usize) -> Option<i128> {
+    let value = value
+        .strip_prefix("__sparkless_decimal__:")
+        .unwrap_or(value);
+    let negative = value.starts_with('-');
+    let value = value.strip_prefix(['-', '+']).unwrap_or(value);
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    if (whole.is_empty() && fraction.is_empty())
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let mut digits = String::with_capacity(whole.len() + scale);
+    digits.push_str(if whole.is_empty() { "0" } else { whole });
+    digits.push_str(&fraction[..fraction.len().min(scale)]);
+    digits.extend(std::iter::repeat_n(
+        '0',
+        scale.saturating_sub(fraction.len()),
+    ));
+    let scaled = digits.parse::<i128>().ok()?;
+    Some(if negative { -scaled } else { scaled })
+}
+
 /// Try to parse a string as Python dict repr (e.g. `"{'E1': 1, 'E2': 'A'}"`) into JSON Value.
 /// PR-F / #691: Sparkless can send struct/map values as single-quoted Python repr.
 fn python_dict_repr_to_json(s: &str) -> Option<JsonValue> {
@@ -129,7 +160,7 @@ fn string_to_json_object(s: &str) -> Option<serde_json::Map<String, JsonValue>> 
 }
 
 /// Map schema type string to Polars DataType (primitives and list for nested use).
-/// Decimal(p,s) is mapped to Float64 (Polars dtype-decimal feature not enabled).
+/// Decimal(p,s) uses Polars' fixed-precision decimal dtype.
 /// PR-G/#710: array<element_type> and nested array<array<...>> supported.
 /// #976: Nested array (e.g. array<array<long>>) recurses; elem_type "array<long>" maps to List(Int64).
 /// Array element types timestamp, date, struct<...>, map<...> supported for create_dataframe_from_rows parity.
@@ -137,7 +168,8 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     let trimmed = type_str.trim();
     let s = trimmed.to_lowercase();
     if is_decimal_type_str(&s) {
-        return Some(DataType::Float64);
+        let (precision, scale) = parse_decimal_precision_scale(&s)?;
+        return Some(DataType::Decimal(precision, scale));
     }
     if let Some(elem_type) = parse_array_element_type(&s) {
         // Special case: array<map<key_type,value_type>> – represented as
@@ -607,17 +639,23 @@ fn json_values_to_series(
 
     // #978: Support integer/smallint/tinyint, double_precision, and decimal(...,...) so json_value_to_series doesn't hit "unsupported type".
     if is_decimal_type_str(&type_lower) {
-        let vals: Vec<Option<f64>> = values
+        let (precision, scale) = parse_decimal_precision_scale(&type_lower).ok_or_else(|| {
+            PolarsError::ComputeError(format!("invalid decimal type {type_lower}").into())
+        })?;
+        let vals: Vec<Option<i128>> = values
             .iter()
             .map(|ov| {
                 ov.as_ref().and_then(|v| match v {
-                    JsonValue::Number(n) => n.as_f64(),
+                    JsonValue::Number(n) => decimal_to_scaled(&n.to_string(), scale),
+                    JsonValue::String(s) => decimal_to_scaled(s, scale),
                     JsonValue::Null => None,
                     _ => None,
                 })
             })
             .collect();
-        return Ok(Series::new(name.into(), vals));
+        return Series::new(name.into(), vals)
+            .into_decimal(precision, scale)
+            .map(|series| series.into_series());
     }
 
     match type_lower.as_str() {
@@ -887,7 +925,20 @@ fn json_value_to_series_single(
             Ok(Series::new(name.into(), vec![Some(f)]))
         }
         (JsonValue::Number(n), t) if is_decimal_type_str(t) => {
-            Ok(Series::new(name.into(), vec![n.as_f64()]))
+            let (precision, scale) = parse_decimal_precision_scale(t).ok_or_else(|| {
+                PolarsError::ComputeError(format!("invalid decimal type {t}").into())
+            })?;
+            Series::new(name.into(), vec![decimal_to_scaled(&n.to_string(), scale)])
+                .into_decimal(precision, scale)
+                .map(|series| series.into_series())
+        }
+        (JsonValue::String(s), t) if is_decimal_type_str(t) => {
+            let (precision, scale) = parse_decimal_precision_scale(t).ok_or_else(|| {
+                PolarsError::ComputeError(format!("invalid decimal type {t}").into())
+            })?;
+            Series::new(name.into(), vec![decimal_to_scaled(s, scale)])
+                .into_decimal(precision, scale)
+                .map(|series| series.into_series())
         }
         (JsonValue::String(s), "string" | "str" | "varchar") => {
             Ok(Series::new(name.into(), vec![s.as_str()]))
@@ -2493,18 +2544,27 @@ impl SparkSession {
                     Series::new(name.as_str().into(), vals)
                 }
                 _ if is_decimal_type_str(&type_lower) => {
-                    let vals: Vec<Option<f64>> = rows
+                    let (precision, scale) = parse_decimal_precision_scale(&type_lower)
+                        .ok_or_else(|| {
+                            PolarsError::ComputeError(
+                                format!("invalid decimal type {type_lower}").into(),
+                            )
+                        })?;
+                    let vals: Vec<Option<i128>> = rows
                         .iter()
                         .map(|row| {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
-                                JsonValue::Number(n) => n.as_f64(),
+                                JsonValue::Number(n) => decimal_to_scaled(&n.to_string(), scale),
+                                JsonValue::String(s) => decimal_to_scaled(&s, scale),
                                 JsonValue::Null => None,
                                 _ => None,
                             }
                         })
                         .collect();
                     Series::new(name.as_str().into(), vals)
+                        .into_decimal(precision, scale)?
+                        .into_series()
                 }
                 "string" | "str" | "varchar" => {
                     let vals: Vec<Option<String>> = rows

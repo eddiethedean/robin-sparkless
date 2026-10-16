@@ -2197,6 +2197,7 @@ pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
             crate::schema::DataType::Integer => "int",
             crate::schema::DataType::Long => "bigint",
             crate::schema::DataType::Double => "double",
+            crate::schema::DataType::Decimal(_, _) => "decimal",
             crate::schema::DataType::Boolean => "boolean",
             crate::schema::DataType::Date => "date",
             crate::schema::DataType::Timestamp => "timestamp",

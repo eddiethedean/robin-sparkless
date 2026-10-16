@@ -3482,6 +3482,26 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
     }
     Ok(match av {
         AnyValue::Null => JsonValue::Null,
+        AnyValue::Decimal(value, _precision, scale) => {
+            let negative = *value < 0;
+            let digits = value.unsigned_abs().to_string();
+            let scale = *scale as usize;
+            let mut decimal = if scale == 0 {
+                digits
+            } else if digits.len() <= scale {
+                format!("0.{}{}", "0".repeat(scale - digits.len()), digits)
+            } else {
+                format!(
+                    "{}.{}",
+                    &digits[..digits.len() - scale],
+                    &digits[digits.len() - scale..]
+                )
+            };
+            if negative {
+                decimal.insert(0, '-');
+            }
+            JsonValue::String(decimal)
+        }
         AnyValue::Boolean(b) => JsonValue::Bool(*b),
         // Date/Datetime columns may appear as Int32/Int64 from plan; serialize as ISO strings (#849, #841, #840, #839).
         AnyValue::Int32(i) if matches!(dtype, DataType::Date) => date_days_to_json(*i),

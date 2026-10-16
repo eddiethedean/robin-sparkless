@@ -448,6 +448,7 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
         CoreDataType::Integer => "int".to_string(),
         CoreDataType::Long => "bigint".to_string(), // PySpark parity: simpleString uses "bigint"
         CoreDataType::Double => "double".to_string(),
+        CoreDataType::Decimal(precision, scale) => format!("decimal({precision},{scale})"),
         CoreDataType::Boolean => "boolean".to_string(),
         CoreDataType::Date => "date".to_string(),
         CoreDataType::Timestamp => "timestamp".to_string(),

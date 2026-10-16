@@ -629,6 +629,10 @@ fn json_value_to_py_with_schema(
                 s.to_string().into_py_any(py)?
             }
         }
+        (Some(DataType::Decimal(_, _)), JsonValue::String(s)) => PyModule::import(py, "decimal")?
+            .getattr("Decimal")?
+            .call1((s.as_str(),))?
+            .into_py_any(py)?,
         (Some(DataType::Boolean), JsonValue::String(s)) => {
             let lower = s.trim().to_lowercase();
             if lower == "true" || lower == "1" {
@@ -1320,14 +1324,52 @@ impl PySparkSession {
                 }
             }
         }
+        // PyArrow's Python rows contain Decimal values, but the table schema is the
+        // authoritative source for precision and scale. Feed it through the same schema path.
+        let arrow_schema = if schema.is_none() {
+            data.getattr("schema").ok().and_then(|arrow_schema| {
+                let fields = arrow_schema
+                    .getattr("fields")
+                    .ok()?
+                    .cast::<PyList>()
+                    .ok()?
+                    .clone();
+                let out = PyList::empty(py);
+                for field in fields.iter() {
+                    let name = field.getattr("name").ok()?.extract::<String>().ok()?;
+                    let arrow_type = field.getattr("type").ok()?;
+                    let type_name = arrow_type.str().ok()?.to_string();
+                    let spark_type = if type_name.starts_with("decimal") {
+                        let precision: usize =
+                            arrow_type.getattr("precision").ok()?.extract().ok()?;
+                        let scale: usize = arrow_type.getattr("scale").ok()?.extract().ok()?;
+                        format!("decimal({precision},{scale})")
+                    } else {
+                        match type_name.as_str() {
+                            "bool" => "boolean".to_string(),
+                            "int8" | "int16" | "int32" => "int".to_string(),
+                            "int64" => "bigint".to_string(),
+                            "float" | "double" => "double".to_string(),
+                            "string" | "large_string" => "string".to_string(),
+                            _ => continue,
+                        }
+                    };
+                    out.append((name, spark_type)).ok()?;
+                }
+                Some(out.into_any())
+            })
+        } else {
+            None
+        };
+        let effective_schema = schema.or(arrow_schema.as_ref());
         let (data, from_pandas, pandas_column_order) =
-            normalize_create_dataframe_input(py, data, schema)?;
+            normalize_create_dataframe_input(py, data, effective_schema)?;
         let schema_cache =
             schema.and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
         let (rows, schema_pairs, schema_was_inferred, mixed_row_kinds) = python_data_and_schema(
             py,
             &data,
-            schema,
+            effective_schema,
             from_pandas,
             pandas_column_order.as_deref(),
         )?;
@@ -1338,7 +1380,7 @@ impl PySparkSession {
         Ok(PyDataFrame {
             inner: df,
             schema_cache,
-            mixed_row_shape_error_on_collect: mixed_row_kinds && schema.is_none(),
+            mixed_row_shape_error_on_collect: mixed_row_kinds && effective_schema.is_none(),
         })
     }
 
@@ -2049,6 +2091,16 @@ fn parse_schema_from_py(
 fn infer_type_from_json_value(v: &JsonValue) -> String {
     match v {
         JsonValue::Null => "string".to_string(),
+        JsonValue::String(s) if s.starts_with("__sparkless_decimal__:") => {
+            let decimal = s.strip_prefix("__sparkless_decimal__:").unwrap_or(s);
+            let scale = decimal.split_once('.').map(|(_, f)| f.len()).unwrap_or(0);
+            let precision = decimal
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .count()
+                .max(scale + 1);
+            format!("decimal({precision},{scale})")
+        }
         JsonValue::Bool(_) => "boolean".to_string(),
         JsonValue::Number(n) => {
             if n.is_i64() || n.is_u64() {
@@ -2935,6 +2987,12 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
     if type_name == "NAType" || type_name == "NaTType" {
         return Ok(JsonValue::Null);
     }
+    if type_name == "Decimal" {
+        return Ok(JsonValue::String(format!(
+            "__sparkless_decimal__:{}",
+            v.str()?.to_string()
+        )));
+    }
     if let Ok(b) = v.extract::<bool>() {
         return Ok(JsonValue::Bool(b));
     }
@@ -2959,17 +3017,6 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
         }
         if let Some(n) = serde_json::Number::from_f64(f) {
             return Ok(JsonValue::Number(n));
-        }
-    }
-    // decimal.Decimal -> number for createDataFrame tuple/list rows (#1544).
-    if let Ok(dec_mod) = _py.import("decimal") {
-        if let Ok(dec_type) = dec_mod.getattr("Decimal") {
-            if v.is_instance(&dec_type)? {
-                let f: f64 = v.call_method0("__float__")?.extract()?;
-                if let Some(n) = serde_json::Number::from_f64(f) {
-                    return Ok(JsonValue::Number(n));
-                }
-            }
         }
     }
     if let Ok(bytes) = v.cast::<PyBytes>() {
@@ -4993,6 +5040,10 @@ impl PyDataFrame {
                 DataType::Integer => mk0("IntegerType"),
                 DataType::Long => mk0("LongType"),
                 DataType::Double => mk0("DoubleType"),
+                DataType::Decimal(precision, scale) => Ok(types_mod
+                    .getattr("DecimalType")?
+                    .call1((*precision, *scale))?
+                    .into_py_any(py)?),
                 DataType::Boolean => mk0("BooleanType"),
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
@@ -5089,6 +5140,10 @@ impl PyDataFrame {
                 DataType::Integer => mk0("IntegerType"),
                 DataType::Long => mk0("LongType"),
                 DataType::Double => mk0("DoubleType"),
+                DataType::Decimal(precision, scale) => Ok(types_mod
+                    .getattr("DecimalType")?
+                    .call1((*precision, *scale))?
+                    .into_py_any(py)?),
                 DataType::Boolean => mk0("BooleanType"),
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
@@ -6420,17 +6475,70 @@ impl PyDataFrame {
         let pd = PyModule::import(py, "pandas")?;
         let rows = self.inner.collect_as_json_rows().map_err(to_py_err)?;
         let cols = self.inner.columns().map_err(to_py_err)?;
+        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        let dtype_by_name: std::collections::HashMap<String, DataType> = schema
+            .fields()
+            .iter()
+            .map(|field| (field.name.clone(), field.data_type.clone()))
+            .collect();
+        let datetime_cls = PyModule::import(py, "datetime")?.getattr("datetime")?;
+        let date_cls = PyModule::import(py, "datetime")?.getattr("date")?;
         let data_dict = PyDict::new(py);
         for col_name in &cols {
             let vals = PyList::empty(py);
             for row in &rows {
                 let v = row.get(col_name).unwrap_or(&JsonValue::Null);
-                vals.append(json_to_py(v, py)?)?;
+                vals.append(json_value_to_py_with_schema(
+                    py,
+                    v,
+                    dtype_by_name.get(col_name),
+                    &datetime_cls,
+                    &date_cls,
+                    Some(col_name),
+                    Some(&cols),
+                )?)?;
             }
             data_dict.set_item(col_name, vals)?;
         }
         let df = pd.call_method1("DataFrame", (data_dict,))?;
         df.into_py_any(py)
+    }
+
+    /// Export collected values to a PyArrow Table, retaining decimal precision and scale.
+    #[pyo3(name = "toArrow")]
+    fn to_arrow(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.check_mixed_row_shape()?;
+        let rows = self.collect(py)?;
+        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        let pa = PyModule::import(py, "pyarrow")?;
+        let arrays = PyList::empty(py);
+        let names = PyList::empty(py);
+        for field in schema.fields() {
+            let values = PyList::empty(py);
+            for row in &rows {
+                let row = row.bind(py);
+                let dict = row.call_method0("asDict")?;
+                values.append(dict.get_item(field.name.as_str())?)?;
+            }
+            let arrow_type = match &field.data_type {
+                DataType::Decimal(precision, scale) => {
+                    Some(pa.getattr("decimal128")?.call1((*precision, *scale))?)
+                }
+                _ => None,
+            };
+            let array = if let Some(arrow_type) = arrow_type {
+                pa.getattr("array")?.call1((values, arrow_type))?
+            } else {
+                pa.getattr("array")?.call1((values,))?
+            };
+            arrays.append(array)?;
+            names.append(field.name.as_str())?;
+        }
+        pa.getattr("Table")?
+            .getattr("from_arrays")?
+            .call1((arrays,))?
+            .call_method1("rename_columns", (names,))?
+            .into_py_any(py)
     }
 
     #[getter]
@@ -6445,6 +6553,7 @@ impl PyDataFrame {
                     DataType::Integer => "int",
                     DataType::Long => "long",
                     DataType::Double => "double",
+                    DataType::Decimal(_, _) => "decimal",
                     DataType::Boolean => "boolean",
                     DataType::Date => "date",
                     DataType::Timestamp => "timestamp",
@@ -10345,11 +10454,22 @@ fn native_array_except(a: &PyColumn, b: &PyColumn) -> PyColumn {
 
 /// Map simple type string (from DDL) to core DataType for from_json schema.
 fn py_type_str_to_core_data_type(s: &str) -> CoreDataType {
-    match simple_string_to_type(s).as_str() {
+    let type_str = simple_string_to_type(s);
+    match type_str.as_str() {
         "long" => CoreDataType::Long,
         "int" => CoreDataType::Integer,
         "double" => CoreDataType::Double,
         "float" => CoreDataType::Double,
+        _ if type_str.starts_with("decimal(") => {
+            let args = type_str
+                .trim_start_matches("decimal(")
+                .trim_end_matches(')');
+            let (precision, scale) = args.split_once(',').unwrap_or(("10", "0"));
+            CoreDataType::Decimal(
+                precision.trim().parse().unwrap_or(10),
+                scale.trim().parse().unwrap_or(0),
+            )
+        }
         "boolean" => CoreDataType::Boolean,
         "date" => CoreDataType::Date,
         "timestamp" => CoreDataType::Timestamp,

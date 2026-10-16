@@ -6,6 +6,7 @@ pub enum DataType {
     Integer,
     Long,
     Double,
+    Decimal(u8, u8),
     Boolean,
     Date,
     Timestamp,
