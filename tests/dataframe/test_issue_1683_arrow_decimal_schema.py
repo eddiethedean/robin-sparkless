@@ -125,6 +125,15 @@ def test_decimal_filter_keeps_literal_scale(spark) -> None:
     assert df.filter("amount = 2.001").collect() == []
 
 
+def test_decimal_filter_literal_wider_than_column_precision(spark) -> None:
+    df = spark.createDataFrame(
+        [{"amount": Decimal("2.00")}], schema="amount decimal(3,2)"
+    )
+
+    assert len(df.filter("amount < 10").collect()) == 1
+    assert len(df.filter("amount < 10.001").collect()) == 1
+
+
 def test_decimal_sum_and_casts_keep_decimal_values(spark) -> None:
     from sparkless.testing import get_imports
 
@@ -149,6 +158,52 @@ def test_decimal_sum_and_casts_keep_decimal_values(spark) -> None:
         Decimal("0.10"),
         Decimal("0.20"),
     ]
+
+
+def test_decimal_average_keeps_large_values_and_rounds_exactly(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    large = spark.createDataFrame(
+        [
+            {"amount": Decimal("9007199254740993.01")},
+            {"amount": Decimal("9007199254740993.03")},
+        ],
+        schema="amount decimal(20,2)",
+    )
+    repeating = spark.createDataFrame(
+        [
+            {"amount": Decimal("1.00")},
+            {"amount": Decimal("1.00")},
+            {"amount": Decimal("0.00")},
+        ],
+        schema="amount decimal(12,2)",
+    )
+    grouped = spark.createDataFrame(
+        [
+            {"kind": "first", "amount": Decimal("1.00")},
+            {"kind": "first", "amount": Decimal("1.00")},
+            {"kind": "first", "amount": Decimal("0.00")},
+            {"kind": "second", "amount": Decimal("9007199254740993.01")},
+            {"kind": "second", "amount": Decimal("9007199254740993.03")},
+        ],
+        schema="kind string, amount decimal(20,2)",
+    )
+
+    assert large.agg(F.avg("amount").alias("average")).collect()[0]["average"] == Decimal(
+        "9007199254740993.020000"
+    )
+    assert repeating.agg(F.avg("amount").alias("average")).collect()[0]["average"] == Decimal(
+        "0.666667"
+    )
+    grouped_averages = {
+        row["kind"]: row["average"]
+        for row in grouped.groupBy("kind").agg(F.avg("amount").alias("average")).collect()
+    }
+    assert grouped_averages == {
+        "first": Decimal("0.666667"),
+        "second": Decimal("9007199254740993.020000"),
+    }
 
 
 def test_decimal_sum_widens_precision_for_results(spark) -> None:
@@ -209,9 +264,46 @@ def test_decimal_map_values_are_decimal_after_collection(spark) -> None:
         schema=pa.schema([("balances", arrow_map_type)]),
     )
 
-    row = spark.createDataFrame(table).collect()[0]
+    df = spark.createDataFrame(table)
+    row = df.collect()[0]
 
     assert row["balances"] == {"checking": Decimal("10.25")}
+    exported = df.toArrow()
+    assert exported.schema.field("balances").type == arrow_map_type
+    assert exported.to_pylist() == [{"balances": [("checking", Decimal("10.25"))]}]
+
+
+def test_arrow_nested_decimal_and_int32_types_survive_import(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    schema = pa.schema(
+        [
+            ("details", pa.struct([("amount", pa.decimal128(12, 2))])),
+            ("ids", pa.list_(pa.int32())),
+        ]
+    )
+    table = pa.Table.from_pylist(
+        [
+            {
+                "details": {"amount": Decimal("10.25")},
+                "ids": [1, 2],
+            }
+        ],
+        schema=schema,
+    )
+
+    row = spark.createDataFrame(table).collect()[0]
+
+    assert row["details"]["amount"] == Decimal("10.25")
+    assert row["ids"] == [1, 2]
+
+
+def test_negative_decimal_inference_keeps_precision_within_38(spark) -> None:
+    value = Decimal("-" + "9" * 38)
+
+    df = spark.createDataFrame([{"amount": value}])
+
+    assert df.schema["amount"].dataType.simpleString() == "decimal(38,0)"
+    assert df.collect()[0]["amount"] == value
 
 
 def test_arrow_empty_and_nested_decimal_types_survive_round_trip(spark) -> None:

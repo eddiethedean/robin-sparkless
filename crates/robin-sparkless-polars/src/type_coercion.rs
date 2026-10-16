@@ -293,36 +293,43 @@ pub fn coerce_for_pyspark_comparison(
 ) -> Result<(Expr, Expr), PolarsError> {
     use crate::column::Column;
 
-    fn decimal_scale_of_literal(expr: &Expr) -> Option<usize> {
-        fn float_scale(value: f64) -> Option<usize> {
-            let value = value.to_string();
-            let (mantissa, exponent) = value
-                .split_once(['e', 'E'])
-                .map(|(mantissa, exponent)| Some((mantissa, exponent.parse::<i32>().ok()?)))
-                .unwrap_or(Some((value.as_str(), 0)))?;
-            let fractional_digits = mantissa.split_once('.').map_or(0, |(_, frac)| frac.len());
-            usize::try_from((fractional_digits as i32 - exponent).max(0)).ok()
+    fn decimal_shape_of_literal(expr: &Expr) -> Option<(usize, usize)> {
+        fn shape_from_str(value: &str) -> Option<(usize, usize)> {
+            let (mantissa, exponent) = match value.split_once(['e', 'E']) {
+                Some((mantissa, exponent)) => (mantissa, exponent.parse::<i32>().ok()?),
+                None => (value, 0),
+            };
+            let unsigned_mantissa = mantissa.trim_start_matches(['-', '+']);
+            let (whole, fraction) = unsigned_mantissa
+                .split_once('.')
+                .unwrap_or((unsigned_mantissa, ""));
+            let scale = (fraction.len() as i32 - exponent).max(0) as usize;
+            let significant_digits = format!("{whole}{fraction}").trim_start_matches('0').len();
+            let precision = (significant_digits as i32 + exponent.max(0))
+                .max(scale as i32)
+                .max(1) as usize;
+            Some((precision, scale))
         }
 
         match expr {
-            Expr::Alias(inner, _) => decimal_scale_of_literal(inner),
+            Expr::Alias(inner, _) => decimal_shape_of_literal(inner),
             Expr::Cast { expr, dtype, .. } => dtype.as_literal().and_then(|dtype| match dtype {
-                DataType::Decimal(_, scale) => Some(*scale),
-                _ => decimal_scale_of_literal(expr),
+                DataType::Decimal(precision, scale) => Some((*precision, *scale)),
+                _ => decimal_shape_of_literal(expr),
             }),
             Expr::Literal(value) => match value.get_datatype() {
-                DataType::Decimal(_, scale) => Some(scale),
+                DataType::Decimal(precision, scale) => Some((precision, scale)),
                 _ => match value.to_any_value()? {
-                    AnyValue::Float64(value) => float_scale(value),
-                    AnyValue::Float32(value) => float_scale(f64::from(value)),
-                    AnyValue::Int8(_)
-                    | AnyValue::Int16(_)
-                    | AnyValue::Int32(_)
-                    | AnyValue::Int64(_)
-                    | AnyValue::UInt8(_)
-                    | AnyValue::UInt16(_)
-                    | AnyValue::UInt32(_)
-                    | AnyValue::UInt64(_) => Some(0),
+                    AnyValue::Float64(value) => shape_from_str(&value.to_string()),
+                    AnyValue::Float32(value) => shape_from_str(&value.to_string()),
+                    AnyValue::Int8(value) => shape_from_str(&value.to_string()),
+                    AnyValue::Int16(value) => shape_from_str(&value.to_string()),
+                    AnyValue::Int32(value) => shape_from_str(&value.to_string()),
+                    AnyValue::Int64(value) => shape_from_str(&value.to_string()),
+                    AnyValue::UInt8(value) => shape_from_str(&value.to_string()),
+                    AnyValue::UInt16(value) => shape_from_str(&value.to_string()),
+                    AnyValue::UInt32(value) => shape_from_str(&value.to_string()),
+                    AnyValue::UInt64(value) => shape_from_str(&value.to_string()),
                     _ => None,
                 },
             },
@@ -333,26 +340,23 @@ pub fn coerce_for_pyspark_comparison(
     // Keep decimal comparisons in decimal arithmetic. Promoting a Decimal column
     // and a numeric literal to Float64 loses integer precision above 2^53.
     if is_numeric(left_type) && is_numeric(right_type) {
-        let decimal_scale = match (left_type, right_type) {
-            (DataType::Decimal(_, left_scale), DataType::Decimal(_, right_scale)) => {
-                Some((*left_scale).max(*right_scale))
+        let decimal_shape = match (left_type, right_type) {
+            (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
+                Some(((*lp - *ls).max(*rp - *rs), (*ls).max(*rs)))
             }
-            (DataType::Decimal(_, scale), _) => {
-                decimal_scale_of_literal(&right).map(|literal_scale| (*scale).max(literal_scale))
+            (DataType::Decimal(p, s), _) => {
+                decimal_shape_of_literal(&right).map(|(literal_p, literal_s)| {
+                    ((*p - *s).max(literal_p - literal_s), (*s).max(literal_s))
+                })
             }
-            (_, DataType::Decimal(_, scale)) => {
-                decimal_scale_of_literal(&left).map(|literal_scale| (*scale).max(literal_scale))
+            (_, DataType::Decimal(p, s)) => {
+                decimal_shape_of_literal(&left).map(|(literal_p, literal_s)| {
+                    ((*p - *s).max(literal_p - literal_s), (*s).max(literal_s))
+                })
             }
             _ => None,
         };
-        if let Some(scale) = decimal_scale {
-            let integral_digits = match (left_type, right_type) {
-                (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
-                    (*lp - *ls).max(*rp - *rs)
-                }
-                (DataType::Decimal(p, s), _) | (_, DataType::Decimal(p, s)) => p - s,
-                _ => 0,
-            };
+        if let Some((integral_digits, scale)) = decimal_shape {
             let precision = integral_digits.saturating_add(scale);
             if precision <= 38 {
                 let common_decimal = DataType::Decimal(precision.max(1), scale);

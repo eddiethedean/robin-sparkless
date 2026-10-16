@@ -115,35 +115,111 @@ pub fn sum(col: &Column) -> Column {
 /// Carries source column for running-window conversion when orderBy differs from partitionBy (#1241).
 pub fn avg(col: &Column) -> Column {
     let name = format!("avg({})", col.name());
-    let source_type = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let input = numeric_aggregate_input(col, Some(source_type.clone()), 0).mean();
-    let result_type = source_type.clone();
-    let expr = input.map(
+    let expr = numeric_aggregate_input(col, None, 0).implode().map(
         move |series| {
-            let dtype = result_type
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            if let Some(DataType::Decimal(precision, scale)) = dtype {
+            let DataType::List(input_type) = series.dtype() else {
+                return Err(PolarsError::ComputeError(
+                    "average aggregation expected a list input".into(),
+                ));
+            };
+            let groups = series.list()?;
+            if let DataType::Decimal(precision, scale) = input_type.as_ref() {
                 let output_precision = precision.saturating_add(4).min(38).max(1);
                 let output_scale = scale.saturating_add(4).min(output_precision);
-                series.cast(&DataType::Decimal(output_precision, output_scale))
+                let factor = 10_i128.pow(output_scale.saturating_sub(*scale) as u32);
+                let mut averages = Vec::with_capacity(series.len());
+                for group_idx in 0..series.len() {
+                    let Some(group) = groups.get_as_series(group_idx) else {
+                        averages.push(None);
+                        continue;
+                    };
+                    let scaled = group.cast(&DataType::Int128)?;
+                    let values = scaled.i128()?;
+                    let mut sum = 0_i128;
+                    let mut count = 0_i128;
+                    for idx in 0..values.len() {
+                        if let Some(value) = values.get(idx) {
+                            sum = sum.checked_add(value).ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "decimal average sum exceeds supported precision".into(),
+                                )
+                            })?;
+                            count += 1;
+                        }
+                    }
+                    if count == 0 {
+                        averages.push(None);
+                        continue;
+                    }
+                    let quotient = sum / count;
+                    let remainder = sum % count;
+                    let mut scaled_average = quotient.checked_mul(factor).ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            "decimal average exceeds supported precision".into(),
+                        )
+                    })?;
+                    let remainder_scaled = remainder.unsigned_abs().checked_mul(factor as u128);
+                    let Some(remainder_scaled) = remainder_scaled else {
+                        return Err(PolarsError::ComputeError(
+                            "decimal average exceeds supported precision".into(),
+                        ));
+                    };
+                    let count_unsigned = count as u128;
+                    let rounded_remainder =
+                        (remainder_scaled + count_unsigned / 2) / count_unsigned;
+                    let rounded_remainder = i128::try_from(rounded_remainder).map_err(|_| {
+                        PolarsError::ComputeError(
+                            "decimal average exceeds supported precision".into(),
+                        )
+                    })?;
+                    scaled_average = if remainder < 0 {
+                        scaled_average.checked_sub(rounded_remainder)
+                    } else {
+                        scaled_average.checked_add(rounded_remainder)
+                    }
+                    .ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            "decimal average exceeds supported precision".into(),
+                        )
+                    })?;
+                    averages.push(Some(scaled_average));
+                }
+                Series::new(series.name().clone(), averages)
+                    .into_decimal(output_precision, output_scale)
+                    .map(|series| series.into_series().into())
             } else {
-                Ok(series)
+                let mut averages = Vec::with_capacity(series.len());
+                for group_idx in 0..series.len() {
+                    let Some(group) = groups.get_as_series(group_idx) else {
+                        averages.push(None);
+                        continue;
+                    };
+                    let values = group.cast(&DataType::Float64)?;
+                    let values = values.f64()?;
+                    let mut sum = 0.0;
+                    let mut count = 0_u64;
+                    for idx in 0..values.len() {
+                        if let Some(value) = values.get(idx) {
+                            sum += value;
+                            count += 1;
+                        }
+                    }
+                    averages.push((count > 0).then_some(sum / count as f64));
+                }
+                Ok(Series::new(series.name().clone(), averages).into())
             }
         },
-        move |_schema, field| {
-            let dtype = match source_type
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .as_ref()
-            {
-                Some(DataType::Decimal(precision, scale)) => {
-                    let output_precision = precision.saturating_add(4).min(38).max(1);
-                    let output_scale = scale.saturating_add(4).min(output_precision);
-                    DataType::Decimal(output_precision, output_scale)
-                }
-                _ => field.dtype().clone(),
+        |_schema, field| {
+            let dtype = match field.dtype() {
+                DataType::List(input_type) => match input_type.as_ref() {
+                    DataType::Decimal(precision, scale) => {
+                        let output_precision = precision.saturating_add(4).min(38).max(1);
+                        let output_scale = scale.saturating_add(4).min(output_precision);
+                        DataType::Decimal(output_precision, output_scale)
+                    }
+                    _ => DataType::Float64,
+                },
+                _ => DataType::Float64,
             };
             Ok(Field::new(field.name().clone(), dtype))
         },

@@ -1053,6 +1053,18 @@ fn spark_type_to_arrow_type(
         }
         DataType::Binary => ("binary", Vec::new()),
         DataType::Array(element_type) => {
+            if let DataType::Struct(fields) = element_type.as_ref() {
+                let key_type = fields.iter().find(|field| field.name == "key");
+                let value_type = fields.iter().find(|field| field.name == "value");
+                if let (Some(key_type), Some(value_type)) = (key_type, value_type) {
+                    let key_type = spark_type_to_arrow_type(py, pa, &key_type.data_type)?;
+                    let value_type = spark_type_to_arrow_type(py, pa, &value_type.data_type)?;
+                    return pa
+                        .getattr("map_")?
+                        .call1((key_type, value_type))?
+                        .into_py_any(py);
+                }
+            }
             let element_type = spark_type_to_arrow_type(py, pa, element_type)?;
             return pa.getattr("list_")?.call1((element_type,))?.into_py_any(py);
         }
@@ -2276,7 +2288,10 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
                     exponent.parse::<i32>().ok().map(|e| (mantissa, e))
                 })
                 .unwrap_or((decimal, 0));
-            let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+            let unsigned_mantissa = mantissa.trim_start_matches(['-', '+']);
+            let (whole, fraction) = unsigned_mantissa
+                .split_once('.')
+                .unwrap_or((unsigned_mantissa, ""));
             let scale = (fraction.len() as i32 - exponent).max(0) as usize;
             let significant_digits = format!("{whole}{fraction}").trim_start_matches('0').len();
             let precision = (significant_digits as i32 + exponent.max(0))
@@ -6782,7 +6797,23 @@ impl PyDataFrame {
             for row in &rows {
                 let row = row.bind(py);
                 let dict = row.call_method0("asDict")?;
-                values.append(dict.get_item(field.name.as_str())?)?;
+                let value = dict.get_item(field.name.as_str())?;
+                let is_map = matches!(
+                    &field.data_type,
+                    DataType::Array(element_type)
+                        if matches!(element_type.as_ref(), DataType::Struct(fields)
+                            if fields.iter().any(|field| field.name == "key")
+                                && fields.iter().any(|field| field.name == "value"))
+                );
+                if is_map && !value.is_none() {
+                    let entries = PyList::empty(py);
+                    for entry in value.call_method0("items")?.try_iter()? {
+                        entries.append(entry?)?;
+                    }
+                    values.append(entries)?;
+                } else {
+                    values.append(value)?;
+                }
             }
             let arrow_type = spark_type_to_arrow_type(py, &pa, &field.data_type)?;
             let array = pa.getattr("array")?.call1((values, arrow_type))?;

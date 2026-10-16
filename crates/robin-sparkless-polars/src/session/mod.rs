@@ -36,13 +36,16 @@ fn parse_array_element_type(type_str: &str) -> Option<String> {
 /// Split by commas only at top level (not inside < >). Used for struct<...> and map<...>.
 fn split_at_top_level_commas(s: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let mut depth = 0i32;
+    let mut angle_depth = 0i32;
+    let mut paren_depth = 0i32;
     let mut start = 0;
     for (i, c) in s.char_indices() {
         match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
-            ',' if depth == 0 => {
+            '<' => angle_depth += 1,
+            '>' => angle_depth -= 1,
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            ',' if angle_depth == 0 && paren_depth == 0 => {
                 out.push(s[start..i].trim().to_string());
                 start = i + 1;
             }
@@ -85,9 +88,12 @@ fn parse_map_key_value_types(type_str: &str) -> Option<(String, String)> {
         return None;
     }
     let inner = s[4..s.len() - 1].trim();
-    let comma = inner.find(',')?;
-    let key_type = inner[..comma].trim().to_string();
-    let value_type = inner[comma + 1..].trim().to_string();
+    let mut parts = split_at_top_level_commas(inner).into_iter();
+    let key_type = parts.next()?;
+    let value_type = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
     Some((key_type, value_type))
 }
 
@@ -291,7 +297,7 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     }
     match s.as_str() {
         // Preserve distinction between IntegerType (32-bit) and LongType (64-bit) for explicit schemas.
-        "int" | "integer" => Some(DataType::Int32),
+        "int" | "integer" | "int32" => Some(DataType::Int32),
         "bigint" | "long" => Some(DataType::Int64),
         "double" | "float" | "double_precision" => Some(DataType::Float64),
         "string" | "str" | "varchar" => Some(DataType::String),
@@ -737,6 +743,23 @@ fn json_values_to_series(
     }
 
     match type_lower.as_str() {
+        "int32" => {
+            let vals: Vec<Option<i32>> = values
+                .iter()
+                .map(|value| {
+                    value.as_ref().and_then(|value| match value {
+                        JsonValue::Number(number) => {
+                            number.as_i64().and_then(|value| i32::try_from(value).ok())
+                        }
+                        JsonValue::String(value) => {
+                            decimal_transport_value(value).parse::<i32>().ok()
+                        }
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
+        }
         "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
             let vals: Vec<Option<i64>> = values
                 .iter()
@@ -982,6 +1005,17 @@ fn json_value_to_series_single(
     }
     match (value, type_lower.as_str()) {
         (JsonValue::Null, _) => Ok(Series::new_null(name.into(), 1)),
+        (JsonValue::Number(n), "int32") => Ok(Series::new(
+            name.into(),
+            vec![n.as_i64().and_then(|value| i32::try_from(value).ok())],
+        )),
+        (JsonValue::String(s), "int32") => {
+            let value = decimal_transport_value(s)
+                .trim()
+                .parse::<i32>()
+                .map_err(|error| PolarsError::ComputeError(format!("int parse: {error}").into()))?;
+            Ok(Series::new(name.into(), vec![Some(value)]))
+        }
         (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
             Ok(Series::new(name.into(), vec![n.as_i64()]))
         }
