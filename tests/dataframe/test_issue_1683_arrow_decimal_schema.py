@@ -151,6 +151,24 @@ def test_decimal_sum_and_casts_keep_decimal_values(spark) -> None:
     ]
 
 
+def test_decimal_sum_widens_precision_for_results(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame(
+        [
+            {"amount": Decimal("9999999999.99")},
+            {"amount": Decimal("9999999999.99")},
+        ],
+        schema="amount decimal(12,2)",
+    )
+
+    total = df.agg(F.sum("amount").alias("total"))
+
+    assert total.schema["total"].dataType.simpleString() == "decimal(22,2)"
+    assert total.collect()[0]["total"] == Decimal("19999999999.98")
+
+
 def test_decimal_join_and_union_do_not_collapse_adjacent_large_values(spark) -> None:
     pa = pytest.importorskip("pyarrow")
     left = spark.createDataFrame(

@@ -67,11 +67,17 @@ pub fn count(col: &Column) -> Column {
 fn numeric_aggregate_input(
     col: &Column,
     source_type: Option<std::sync::Arc<std::sync::Mutex<Option<DataType>>>>,
+    decimal_precision_add: usize,
 ) -> Expr {
     col.expr().clone().map(
-        |series| {
-            if matches!(series.dtype(), DataType::Decimal(_, _)) {
-                Ok(series)
+        move |series| {
+            if let DataType::Decimal(precision, scale) = series.dtype() {
+                let precision = precision.saturating_add(decimal_precision_add).min(38);
+                if decimal_precision_add > 0 {
+                    series.cast(&DataType::Decimal(precision, *scale))
+                } else {
+                    Ok(series)
+                }
             } else {
                 series.cast(&DataType::Float64)
             }
@@ -81,10 +87,12 @@ fn numeric_aggregate_input(
                 *source_type.lock().unwrap_or_else(|e| e.into_inner()) =
                     Some(field.dtype().clone());
             }
-            let dtype = if matches!(field.dtype(), DataType::Decimal(_, _)) {
-                field.dtype().clone()
-            } else {
-                DataType::Float64
+            let dtype = match field.dtype() {
+                DataType::Decimal(precision, scale) => DataType::Decimal(
+                    precision.saturating_add(decimal_precision_add).min(38),
+                    *scale,
+                ),
+                _ => DataType::Float64,
             };
             Ok(Field::new(field.name().clone(), dtype))
         },
@@ -94,7 +102,9 @@ fn numeric_aggregate_input(
 /// String columns are cast to Float64 before sum (PySpark parity, issue #393).
 pub fn sum(col: &Column) -> Column {
     let name = format!("sum({})", col.name());
-    let expr = numeric_aggregate_input(col, None).sum();
+    // Spark widens decimal SUM results by ten integral digits (up to precision 38).
+    // Widen before aggregation so Polars can accumulate valid results without overflow.
+    let expr = numeric_aggregate_input(col, None, 10).sum();
     let mut c = Column::from_expr(expr, Some(name));
     c.source_for_running = Some(col.name().to_string());
     c
@@ -106,7 +116,7 @@ pub fn sum(col: &Column) -> Column {
 pub fn avg(col: &Column) -> Column {
     let name = format!("avg({})", col.name());
     let source_type = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let input = numeric_aggregate_input(col, Some(source_type.clone())).mean();
+    let input = numeric_aggregate_input(col, Some(source_type.clone()), 0).mean();
     let result_type = source_type.clone();
     let expr = input.map(
         move |series| {
