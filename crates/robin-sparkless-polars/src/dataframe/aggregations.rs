@@ -957,15 +957,21 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
         other => other,
     };
     let (agg_kind, input_expr) = match inner {
-        // avg() uses a Series map over the imploded group so it can preserve
-        // Polars' numerically stable mean implementation. The map's input is
-        // still an Implode aggregate, which pivot can express as mean on the
-        // original value column.
-        Expr::AnonymousFunction { input, .. } => {
+        // avg() and sum() use a Series map over the imploded group. The map's
+        // input is still an Implode aggregate, which pivot can express as the
+        // corresponding native aggregate on the original value column.
+        Expr::AnonymousFunction { input, fmt_str, .. } => {
             let Expr::Agg(AggExpr::Implode(e)) = input.first()? else {
                 return None;
             };
-            ("avg", e.as_ref())
+            (
+                if fmt_str.as_str() == "sum" {
+                    "sum"
+                } else {
+                    "avg"
+                },
+                e.as_ref(),
+            )
         }
         Expr::Agg(agg) => match agg {
             AggExpr::Sum(e) => ("sum", e.as_ref()),

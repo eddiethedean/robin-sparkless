@@ -1,4 +1,145 @@
+use num_bigint::BigInt;
+use num_traits::{Signed, Zero};
 use polars::prelude::*;
+
+fn decimal_ordering_key_expr(expr: Expr, scale: usize, integral_width: usize) -> Expr {
+    expr.map(
+        move |column| {
+            let series = column.as_materialized_series();
+            let values = if let DataType::Decimal(_, source_scale) = series.dtype() {
+                let multiplier = BigInt::from(10).pow(scale.saturating_sub(*source_scale) as u32);
+                let mut values = Vec::with_capacity(series.len());
+                for idx in 0..series.len() {
+                    values.push(match series.get(idx)? {
+                        AnyValue::Decimal(value, _, _) => Some(BigInt::from(value) * &multiplier),
+                        AnyValue::Null => None,
+                        _ => {
+                            return Err(PolarsError::ComputeError(
+                                "expected a decimal value for decimal comparison".into(),
+                            ));
+                        }
+                    });
+                }
+                values
+            } else {
+                let mut values = Vec::with_capacity(series.len());
+                let integer_factor = BigInt::from(10).pow(scale as u32);
+                for idx in 0..series.len() {
+                    let value = series.get(idx)?;
+                    let value = match value {
+                        AnyValue::Null => None,
+                        AnyValue::Int8(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::Int16(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::Int32(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::Int64(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::UInt8(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::UInt16(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::UInt32(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::UInt64(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::Float32(value) => {
+                            decimal_string_to_scaled(&value.to_string(), scale)?
+                        }
+                        AnyValue::Float64(value) => {
+                            decimal_string_to_scaled(&value.to_string(), scale)?
+                        }
+                        _ => {
+                            return Err(PolarsError::ComputeError(
+                                "expected a numeric value for decimal comparison".into(),
+                            ));
+                        }
+                    };
+                    values.push(value);
+                }
+                values
+            };
+
+            let factor = BigInt::from(10).pow(scale as u32);
+            let mut keys = Vec::with_capacity(values.len());
+            for value in values {
+                let Some(value) = value else {
+                    keys.push(None);
+                    continue;
+                };
+                let absolute = value.abs();
+                let integer = (&absolute / &factor).to_string();
+                if integer.len() > integral_width {
+                    return Err(PolarsError::ComputeError(
+                        "decimal comparison value exceeds supported precision".into(),
+                    ));
+                }
+                let fraction = (&absolute % &factor).to_string();
+                let digits = format!(
+                    "{}{}{}{}",
+                    "0".repeat(integral_width - integer.len()),
+                    integer,
+                    "0".repeat(scale.saturating_sub(fraction.len())),
+                    fraction
+                );
+                if value.is_negative() {
+                    let digits: String = digits
+                        .bytes()
+                        .map(|digit| (b'9' - (digit - b'0')) as char)
+                        .collect();
+                    keys.push(Some(format!("0{digits}")));
+                } else {
+                    keys.push(Some(format!("1{digits}")));
+                }
+            }
+            Ok(Series::new(series.name().clone(), keys).into())
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+    )
+}
+
+fn decimal_string_to_scaled(value: &str, scale: usize) -> PolarsResult<Option<BigInt>> {
+    let (mantissa, exponent) = match value.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (
+            mantissa,
+            exponent.parse::<i32>().map_err(|_| {
+                PolarsError::ComputeError("invalid exponent in decimal comparison".into())
+            })?,
+        ),
+        None => (value, 0),
+    };
+    let negative = mantissa.starts_with('-');
+    let unsigned = mantissa.trim_start_matches(['-', '+']);
+    let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    if (whole.is_empty() && fraction.is_empty())
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Ok(None);
+    }
+    let digits = format!("{whole}{fraction}");
+    let mut scaled = BigInt::parse_bytes(digits.as_bytes(), 10).ok_or_else(|| {
+        PolarsError::ComputeError("invalid numeric literal in decimal comparison".into())
+    })?;
+    let shift = scale as i64 - fraction.len() as i64 + i64::from(exponent);
+    if shift >= 0 {
+        if shift > 4096 {
+            return Err(PolarsError::ComputeError(
+                "decimal comparison exponent exceeds supported precision".into(),
+            ));
+        }
+        scaled *= BigInt::from(10).pow(shift as u32);
+    } else {
+        let discarded = shift.unsigned_abs();
+        if discarded > 4096 {
+            scaled = BigInt::zero();
+        } else {
+            let divisor = BigInt::from(10).pow(discarded as u32);
+            let remainder = &scaled % &divisor;
+            scaled /= &divisor;
+            if remainder.abs() * 2 >= divisor {
+                scaled += 1;
+            }
+        }
+    }
+    if negative {
+        scaled = -scaled;
+    }
+    Ok(Some(scaled))
+}
 
 /// Comparison operators of interest for PySpark-style coercion.
 ///
@@ -305,7 +446,7 @@ pub fn coerce_for_pyspark_comparison(
                 .unwrap_or((unsigned_mantissa, ""));
             let scale = (fraction.len() as i32 - exponent).max(0) as usize;
             let significant_digits = format!("{whole}{fraction}").trim_start_matches('0').len();
-            let precision = (significant_digits as i32 + exponent.max(0))
+            let precision = (significant_digits as i32 + (exponent - fraction.len() as i32).max(0))
                 .max(scale as i32)
                 .max(1) as usize;
             Some((precision, scale))
@@ -366,10 +507,11 @@ pub fn coerce_for_pyspark_comparison(
                 ));
             }
             // No fixed-precision decimal can represent both operands at this scale.
-            // Keep the comparison executable instead of overflowing valid wide decimals to null.
+            // Encode both as lexicographically sortable decimal strings so large
+            // values remain comparable without rounding through Float64.
             return Ok((
-                coerce_to_type(left, DataType::Float64),
-                coerce_to_type(right, DataType::Float64),
+                decimal_ordering_key_expr(left, scale, integral_digits),
+                decimal_ordering_key_expr(right, scale, integral_digits),
             ));
         }
         return coerce_for_comparison(left, right, left_type, right_type);

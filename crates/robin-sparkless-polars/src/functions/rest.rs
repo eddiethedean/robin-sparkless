@@ -105,8 +105,92 @@ fn numeric_aggregate_input(
 pub fn sum(col: &Column) -> Column {
     let name = format!("sum({})", col.name());
     // Spark widens decimal SUM results by ten integral digits (up to precision 38).
-    // Widen before aggregation so Polars can accumulate valid results without overflow.
-    let expr = numeric_aggregate_input(col, None, 10).sum();
+    // Accumulate decimal coefficients with BigInt: Polars' native decimal sum wraps
+    // its i128 accumulator when the result exceeds the declared precision.
+    let expr = numeric_aggregate_input(col, None, 0)
+        .implode()
+        .map_with_fmt_str(
+            move |series| {
+                let DataType::List(input_type) = series.dtype() else {
+                    return Err(PolarsError::ComputeError(
+                        "sum aggregation expected a list input".into(),
+                    ));
+                };
+                let groups = series.list()?;
+                match input_type.as_ref() {
+                    DataType::Decimal(precision, scale) => {
+                        let output_precision = precision.saturating_add(10).min(38);
+                        let maximum =
+                            BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+                        let mut sums = Vec::with_capacity(series.len());
+                        for group_idx in 0..series.len() {
+                            let Some(group) = groups.get_as_series(group_idx) else {
+                                sums.push(None);
+                                continue;
+                            };
+                            let mut total = BigInt::zero();
+                            let mut found_value = false;
+                            for idx in 0..group.len() {
+                                match group.get(idx)? {
+                                    AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
+                                        found_value = true;
+                                        total += value;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if !found_value {
+                                sums.push(None);
+                                continue;
+                            }
+                            if total.abs() > maximum {
+                                return Err(PolarsError::ComputeError(
+                                    "decimal sum exceeds supported precision".into(),
+                                ));
+                            }
+                            sums.push(Some(total.to_i128().ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "decimal sum exceeds supported precision".into(),
+                                )
+                            })?));
+                        }
+                        Series::new(series.name().clone(), sums)
+                            .into_decimal(output_precision, *scale)
+                            .map(|series| series.into_series().into())
+                    }
+                    _ => {
+                        let mut sums = Vec::with_capacity(series.len());
+                        for group_idx in 0..series.len() {
+                            let Some(group) = groups.get_as_series(group_idx) else {
+                                sums.push(AnyValue::Null);
+                                continue;
+                            };
+                            sums.push(group.sum_reduce()?.value().clone());
+                        }
+                        Series::from_any_values_and_dtype(
+                            series.name().clone(),
+                            &sums,
+                            &DataType::Float64,
+                            true,
+                        )
+                        .map(Into::into)
+                    }
+                }
+            },
+            |_schema, field| {
+                let dtype = match field.dtype() {
+                    DataType::List(input_type) => match input_type.as_ref() {
+                        DataType::Decimal(precision, scale) => {
+                            DataType::Decimal(precision.saturating_add(10).min(38), *scale)
+                        }
+                        _ => DataType::Float64,
+                    },
+                    _ => DataType::Float64,
+                };
+                Ok(Field::new(field.name().clone(), dtype))
+            },
+            "sum",
+        );
     let mut c = Column::from_expr(expr, Some(name));
     c.source_for_running = Some(col.name().to_string());
     c
@@ -1607,6 +1691,60 @@ pub fn expr_coerce_to_boolean(expr: Expr) -> Expr {
     }
 }
 
+fn cast_decimal_series(
+    series: Series,
+    precision: usize,
+    target_scale: usize,
+    strict: bool,
+) -> PolarsResult<Series> {
+    let DataType::Decimal(_, source_scale) = series.dtype() else {
+        return series.cast(&DataType::Decimal(precision, target_scale));
+    };
+    let source_scale = *source_scale;
+    let maximum = BigInt::from(10).pow(precision as u32) - BigInt::from(1);
+    let mut output = Vec::with_capacity(series.len());
+    for idx in 0..series.len() {
+        let coefficient = match series.get(idx)? {
+            AnyValue::Decimal(coefficient, _, _) => coefficient,
+            AnyValue::Null => {
+                output.push(None);
+                continue;
+            }
+            value => {
+                return Err(PolarsError::ComputeError(
+                    format!("expected a decimal value, got {value:?}").into(),
+                ));
+            }
+        };
+        let mut scaled = BigInt::from(coefficient);
+        if target_scale >= source_scale {
+            scaled *= BigInt::from(10).pow((target_scale - source_scale) as u32);
+        } else {
+            let divisor = BigInt::from(10).pow((source_scale - target_scale) as u32);
+            let remainder = &scaled % &divisor;
+            scaled /= &divisor;
+            if remainder.abs() * 2 >= divisor {
+                scaled += if coefficient < 0 { -1 } else { 1 };
+            }
+        }
+        if scaled.abs() > maximum {
+            if strict {
+                return Err(PolarsError::ComputeError(
+                    "decimal cast exceeds target precision".into(),
+                ));
+            }
+            output.push(None);
+            continue;
+        }
+        output.push(Some(scaled.to_i128().ok_or_else(|| {
+            PolarsError::ComputeError("decimal cast exceeds supported precision".into())
+        })?));
+    }
+    Series::new(series.name().clone(), output)
+        .into_decimal(precision, target_scale)
+        .map(|series| series.into_series())
+}
+
 fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, String> {
     if type_name.trim().eq_ignore_ascii_case("variant") {
         return Ok(column.clone().parse_json_variant());
@@ -1615,6 +1753,29 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
     let base_name = column.name().to_string();
     // ANSI cast: invalid conversions throw (PySpark 4.0); non-ANSI returns null (3.5).
     let ansi_strict = strict && crate::udf_context::get_thread_ansi_enabled();
+
+    if let DataType::Decimal(precision, scale) = dtype {
+        let name = base_name.clone();
+        let expr = column.expr().clone().map(
+            move |column| {
+                let series = column.as_materialized_series().clone();
+                if matches!(series.dtype(), DataType::Decimal(_, _)) {
+                    cast_decimal_series(series, precision, scale, ansi_strict).map(Into::into)
+                } else {
+                    series
+                        .cast(&DataType::Decimal(precision, scale))
+                        .map(Into::into)
+                }
+            },
+            move |_schema, field| {
+                Ok(Field::new(
+                    field.name().clone(),
+                    DataType::Decimal(precision, scale),
+                ))
+            },
+        );
+        return Ok(Column::from_expr(expr.alias(&name), Some(name)));
+    }
 
     if dtype == DataType::Boolean {
         let out_name = base_name.clone();

@@ -63,6 +63,19 @@ def test_decimal_overflow_raises_instead_of_becoming_null(spark) -> None:
         )
 
 
+def test_decimal_sum_overflow_does_not_wrap(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    largest = Decimal("9" * 38)
+    df = spark.createDataFrame(
+        [{"amount": largest}, {"amount": largest}], schema="amount decimal(38,0)"
+    )
+
+    with pytest.raises(Exception, match="decimal sum|precision"):
+        df.agg(F.sum("amount").alias("total")).collect()
+
+
 def test_to_arrow_preserves_decimal_schema(spark) -> None:
     pa = pytest.importorskip("pyarrow")
     df = spark.createDataFrame(
@@ -164,6 +177,17 @@ def test_decimal_sum_and_casts_keep_decimal_values(spark) -> None:
     ]
 
 
+def test_decimal_cast_rescales_with_spark_half_up_rounding(spark) -> None:
+    df = spark.createDataFrame(
+        [{"amount": Decimal("1.25")}, {"amount": Decimal("-1.25")}],
+        schema="amount decimal(12,2)",
+    )
+
+    rounded = df.select(df.amount.cast("decimal(12,1)").alias("amount")).collect()
+
+    assert [row["amount"] for row in rounded] == [Decimal("1.3"), Decimal("-1.3")]
+
+
 def test_decimal_average_keeps_large_values_and_rounds_exactly(spark) -> None:
     from sparkless.testing import get_imports
 
@@ -260,6 +284,22 @@ def test_decimal38_comparison_does_not_overflow_valid_values(spark) -> None:
     assert [row["amount"] for row in df.filter("amount > 0.1").collect()] == [largest]
 
 
+def test_wide_decimal_comparison_keeps_adjacent_scales_exact(spark) -> None:
+    df = spark.createDataFrame(
+        [
+            {
+                "whole": Decimal("10000000000000000"),
+                "fractional": Decimal("10000000000000000.1"),
+            }
+        ],
+        schema="whole decimal(38,0), fractional decimal(38,1)",
+    )
+
+    assert len(df.filter("whole < fractional").collect()) == 1
+    assert df.filter("whole = fractional").collect() == []
+    assert df.filter("whole > fractional").collect() == []
+
+
 def test_decimal_map_values_are_decimal_after_collection(spark) -> None:
     pa = pytest.importorskip("pyarrow")
     arrow_map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
@@ -349,9 +389,82 @@ def test_arrow_decimal_schema_survives_other_arrow_types(spark) -> None:
     assert df.collect()[0]["items"] == [1, 2]
 
 
+def test_decimal_arrow_export_uses_the_transformed_column_type(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    df = spark.createDataFrame(
+        pa.Table.from_pylist(
+            [{"amount": Decimal("10.50")}],
+            schema=pa.schema([("amount", pa.decimal128(12, 2))]),
+        )
+    )
+
+    as_float = df.select(df.amount.cast("double").alias("amount")).toArrow()
+    assert as_float.schema.field("amount").type == pa.float64()
+    assert as_float.to_pylist() == [{"amount": 10.5}]
+
+    with_new_scale = df.select(
+        df.amount.cast("decimal(12,3)").alias("amount")
+    ).toArrow()
+    assert with_new_scale.schema.field("amount").type == pa.decimal128(12, 3)
+    assert with_new_scale.to_pylist() == [{"amount": Decimal("10.500")}]
+
+
+def test_arrow_array_of_key_value_structs_stays_an_array_after_projection(
+    spark,
+) -> None:
+    pa = pytest.importorskip("pyarrow")
+    schema = pa.schema(
+        [
+            (
+                "entries",
+                pa.list_(
+                    pa.struct(
+                        [
+                            ("key", pa.string()),
+                            ("value", pa.decimal128(12, 2)),
+                        ]
+                    )
+                ),
+            )
+        ]
+    )
+    table = pa.Table.from_pylist(
+        [
+            {
+                "entries": [
+                    {"key": "same", "value": Decimal("1.25")},
+                    {"key": "same", "value": Decimal("2.50")},
+                ]
+            }
+        ],
+        schema=schema,
+    )
+    df = spark.createDataFrame(table)
+    expected = [
+        {"key": "same", "value": Decimal("1.25")},
+        {"key": "same", "value": Decimal("2.50")},
+    ]
+
+    projected = df.select(df.entries.alias("renamed"))
+    assert projected.collect()[0]["renamed"] == expected
+    assert (
+        df.withColumnRenamed("entries", "renamed").collect()[0]["renamed"] == expected
+    )
+    assert df.toPandas().iloc[0]["entries"] == expected
+
+
 def test_decimal_inference_does_not_silently_reduce_scale(spark) -> None:
     with pytest.raises(Exception, match="decimal|precision|scale"):
         spark.createDataFrame([{"amount": Decimal("1E-39")}])
+
+
+def test_decimal_inference_counts_digits_before_positive_exponent(spark) -> None:
+    value = Decimal("9.99E+37")
+
+    df = spark.createDataFrame([{"amount": value}])
+
+    assert df.schema["amount"].dataType.simpleString() == "decimal(38,0)"
+    assert df.collect()[0]["amount"] == value
 
 
 def test_decimal_transport_marker_does_not_change_string_values(spark) -> None:

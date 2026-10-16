@@ -2355,7 +2355,7 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
                 .unwrap_or((unsigned_mantissa, ""));
             let scale = (fraction.len() as i32 - exponent).max(0) as usize;
             let significant_digits = format!("{whole}{fraction}").trim_start_matches('0').len();
-            let precision = (significant_digits as i32 + exponent.max(0))
+            let precision = (significant_digits as i32 + (exponent - fraction.len() as i32).max(0))
                 .max(scale as i32)
                 .max(1) as usize;
             format!("decimal({precision},{scale})")
@@ -4701,14 +4701,81 @@ impl PyDataFrame {
 
     fn wrap_derived(&self, df: DataFrame) -> Self {
         let mut wrapped = Self::wrap(df);
-        wrapped.arrow_array_struct_columns = self.arrow_array_struct_columns.clone();
-        wrapped.logical_map_columns = self.logical_map_columns.clone();
+        if let Ok(columns) = wrapped.inner.columns() {
+            let output_names: std::collections::HashSet<&str> =
+                columns.iter().map(String::as_str).collect();
+            wrapped.arrow_array_struct_columns = self
+                .arrow_array_struct_columns
+                .iter()
+                .filter(|name| output_names.contains(name.as_str()))
+                .cloned()
+                .collect();
+            wrapped.logical_map_columns = self
+                .logical_map_columns
+                .iter()
+                .filter(|name| output_names.contains(name.as_str()))
+                .cloned()
+                .collect();
+        }
         Python::attach(|py| {
             wrapped.arrow_schema_cache = self
                 .arrow_schema_cache
                 .as_ref()
                 .map(|schema| schema.clone_ref(py));
         });
+        wrapped
+    }
+
+    fn wrap_select_derived(&self, df: DataFrame, items: &[SelectItem<'_>]) -> Self {
+        fn source_and_output_names(expr: &robin_sparkless::Expr) -> Option<(String, String)> {
+            let mut current = expr;
+            let mut output = None;
+            loop {
+                match current {
+                    robin_sparkless::Expr::Alias(inner, name) => {
+                        output.get_or_insert_with(|| name.to_string());
+                        current = inner.as_ref();
+                    }
+                    robin_sparkless::Expr::Cast { expr, .. } => current = expr.as_ref(),
+                    robin_sparkless::Expr::Column(name) => {
+                        return Some((
+                            name.to_string(),
+                            output.unwrap_or_else(|| name.to_string()),
+                        ));
+                    }
+                    _ => return None,
+                }
+            }
+        }
+
+        let mut wrapped = self.wrap_derived(df);
+        for item in items {
+            let SelectItem::Expr(expr) = item else {
+                continue;
+            };
+            let Some((source, output)) = source_and_output_names(expr) else {
+                continue;
+            };
+            if self.arrow_array_struct_columns.contains(&source) {
+                wrapped.arrow_array_struct_columns.insert(output.clone());
+            }
+            if self.logical_map_columns.contains(&source) {
+                wrapped.logical_map_columns.insert(output);
+            }
+        }
+        wrapped
+    }
+
+    fn wrap_renamed_derived(&self, df: DataFrame, old_name: &str, new_name: &str) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        if self.arrow_array_struct_columns.contains(old_name) {
+            wrapped
+                .arrow_array_struct_columns
+                .insert(new_name.to_string());
+        }
+        if self.logical_map_columns.contains(old_name) {
+            wrapped.logical_map_columns.insert(new_name.to_string());
+        }
         wrapped
     }
 
@@ -5129,7 +5196,7 @@ impl PyDataFrame {
             }
         }
 
-        let df = self.inner.select_items(items).map_err(to_py_err)?;
+        let df = self.inner.select_items(items.clone()).map_err(to_py_err)?;
         let out = WINDOW_ORDER_SORT_HINT.with(|cell| {
             if let Some((cols, desc)) = cell.borrow_mut().take() {
                 // Only apply sort if this select's result has the hint columns (from row_number with no partition).
@@ -5144,12 +5211,12 @@ impl PyDataFrame {
                 if all_present {
                     let ascending: Vec<bool> = desc.iter().map(|&d| !d).collect();
                     df.order_by(col_refs, ascending)
-                        .map(|df| self.wrap_derived(df))
+                        .map(|df| self.wrap_select_derived(df, &items))
                 } else {
-                    Ok(self.wrap_derived(df))
+                    Ok(self.wrap_select_derived(df, &items))
                 }
             } else {
-                Ok(self.wrap_derived(df))
+                Ok(self.wrap_select_derived(df, &items))
             }
         });
         out.map_err(to_py_err)
@@ -5307,7 +5374,7 @@ impl PyDataFrame {
     fn with_column_renamed(&self, old_name: &str, new_name: &str) -> PyResult<PyDataFrame> {
         self.inner
             .with_column_renamed(old_name, new_name)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_renamed_derived(df, old_name, new_name))
             .map_err(to_py_err)
     }
 
@@ -6836,7 +6903,12 @@ impl PyDataFrame {
     fn to_pandas(&self, py: Python<'_>) -> PyResult<PyObject> {
         self.check_mixed_row_shape()?;
         let pd = PyModule::import(py, "pandas")?;
-        let rows = self.inner.collect_as_json_rows().map_err(to_py_err)?;
+        let (_, rows, _) = self
+            .inner
+            .collect_as_json_rows_with_names_and_array_struct_columns(
+                &self.arrow_array_struct_columns,
+            )
+            .map_err(to_py_err)?;
         let cols = self.inner.columns().map_err(to_py_err)?;
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
         let dtype_by_name: std::collections::HashMap<String, DataType> = schema
@@ -6907,14 +6979,18 @@ impl PyDataFrame {
             } else {
                 false
             };
-            let is_map = if let Some(source_type) = source_arrow_types.get(&field.name) {
-                pa.getattr("types")?
+            let source_type_is_map = match source_arrow_types.get(&field.name) {
+                Some(source_type) => pa
+                    .getattr("types")?
                     .getattr("is_map")?
                     .call1((source_type.bind(py),))?
-                    .extract::<bool>()?
-            } else {
-                self.logical_map_columns.contains(&field.name) || map_value_present
+                    .extract::<bool>()?,
+                None => false,
             };
+            let is_map = map_shaped_dtype
+                && (source_type_is_map
+                    || self.logical_map_columns.contains(&field.name)
+                    || map_value_present);
             for row in &rows {
                 let row = row.bind(py);
                 let dict = row.call_method0("asDict")?;
@@ -6929,10 +7005,16 @@ impl PyDataFrame {
                     values.append(value)?;
                 }
             }
+            let current_arrow_type = if is_map {
+                spark_map_type_to_arrow_type(py, &pa, &field.data_type)?
+            } else {
+                spark_type_to_arrow_type(py, &pa, &field.data_type)?
+            };
             let arrow_type = match source_arrow_types.get(&field.name) {
-                Some(arrow_type) => arrow_type.clone_ref(py),
-                None if is_map => spark_map_type_to_arrow_type(py, &pa, &field.data_type)?,
-                None => spark_type_to_arrow_type(py, &pa, &field.data_type)?,
+                Some(source_type) if source_type.bind(py).eq(current_arrow_type.bind(py))? => {
+                    source_type.clone_ref(py)
+                }
+                _ => current_arrow_type,
             };
             let array = pa.getattr("array")?.call1((values, arrow_type))?;
             arrays.append(array)?;
