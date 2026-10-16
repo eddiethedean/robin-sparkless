@@ -2193,15 +2193,17 @@ pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
     let mut s = "root\n".to_string();
     for f in schema.fields() {
         let dt = match &f.data_type {
-            crate::schema::DataType::String => "string",
-            crate::schema::DataType::Integer => "int",
-            crate::schema::DataType::Long => "bigint",
-            crate::schema::DataType::Double => "double",
-            crate::schema::DataType::Decimal(_, _) => "decimal",
-            crate::schema::DataType::Boolean => "boolean",
-            crate::schema::DataType::Date => "date",
-            crate::schema::DataType::Timestamp => "timestamp",
-            _ => "string",
+            crate::schema::DataType::String => "string".to_string(),
+            crate::schema::DataType::Integer => "int".to_string(),
+            crate::schema::DataType::Long => "bigint".to_string(),
+            crate::schema::DataType::Double => "double".to_string(),
+            crate::schema::DataType::Decimal(precision, scale) => {
+                format!("decimal({precision},{scale})")
+            }
+            crate::schema::DataType::Boolean => "boolean".to_string(),
+            crate::schema::DataType::Date => "date".to_string(),
+            crate::schema::DataType::Timestamp => "timestamp".to_string(),
+            _ => "string".to_string(),
         };
         s.push_str(&format!(" |-- {}: {}\n", f.name, dt));
     }

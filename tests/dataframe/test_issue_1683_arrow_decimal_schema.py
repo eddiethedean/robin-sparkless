@@ -18,6 +18,7 @@ def test_pyarrow_decimal_schema_precision_values_and_nulls(spark) -> None:
     df = spark.createDataFrame(table)
 
     assert df.schema["amount"].dataType.simpleString() == "decimal(12,2)"
+    assert "amount: decimal(12,2)" in df.printSchema()
     rows = df.collect()
     assert rows[0]["amount"] == Decimal("10.50")
     assert rows[1]["amount"] is None
