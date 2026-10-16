@@ -1463,6 +1463,18 @@ impl DataFrame {
     pub fn collect_as_json_rows_with_names(
         &self,
     ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
+        self.collect_as_json_rows_with_names_and_array_struct_columns(&HashSet::new())
+    }
+
+    /// Collect rows while preserving named columns whose logical type is Arrow
+    /// `list<struct<...>>`. Polars represents maps and these arrays with the same
+    /// physical `List(Struct)` dtype, so callers with the source schema must tell
+    /// the serializer which columns are arrays of structs.
+    #[allow(clippy::type_complexity)]
+    pub fn collect_as_json_rows_with_names_and_array_struct_columns(
+        &self,
+        array_struct_columns: &HashSet<String>,
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
         let (collected, plan_schema) = match &self.inner {
             DataFrameInner::Eager(df) => (df.as_ref().clone(), df.schema().as_ref().clone()),
             DataFrameInner::Lazy(lf) => {
@@ -1592,7 +1604,11 @@ impl DataFrame {
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
-                let jv = any_value_to_json(&av, dtype)?;
+                let jv = any_value_to_json_with_array_struct_override(
+                    &av,
+                    dtype,
+                    array_struct_columns.contains(name),
+                )?;
                 row.insert(name.clone(), jv);
             }
             rows.push(row);
@@ -3457,6 +3473,14 @@ fn struct_string_to_json_object(s: &str, fields: &[Field]) -> Option<JsonValue> 
 /// Date and Datetime output ISO strings so Python bindings get date/datetime (#842, #843, #849).
 /// Returns Err when map has null key (PySpark NULL_MAP_KEY parity, #1140).
 fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, PolarsError> {
+    any_value_to_json_with_array_struct_override(av, dtype, false)
+}
+
+fn any_value_to_json_with_array_struct_override(
+    av: &AnyValue<'_>,
+    dtype: &DataType,
+    force_array_struct: bool,
+) -> Result<JsonValue, PolarsError> {
     use serde_json::Map;
     // Plan says String but execution may yield numeric (e.g. get_json_object; #1146): emit string.
     if matches!(dtype, DataType::String) {
@@ -3587,7 +3611,7 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
             }
         }
         AnyValue::List(s) => {
-            if is_map_format(dtype) {
+            if !force_array_struct && is_map_format(dtype) {
                 // List(Struct{key, value}) -> JSON object {} (PySpark empty map #578).
                 // For mixed string + numeric/boolean map values, coerce numeric/boolean values to strings
                 // so collected maps match PySpark behavior (issue #1140).

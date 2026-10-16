@@ -228,6 +228,15 @@ impl DataFrame {
         self.0.collect_as_json_rows_with_names()
     }
 
+    #[allow(clippy::type_complexity)]
+    pub fn collect_as_json_rows_with_names_and_array_struct_columns(
+        &self,
+        array_struct_columns: &std::collections::HashSet<String>,
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
+        self.0
+            .collect_as_json_rows_with_names_and_array_struct_columns(array_struct_columns)
+    }
+
     pub fn to_json_rows(&self) -> Result<String, EngineError> {
         self.0.to_json_rows()
     }

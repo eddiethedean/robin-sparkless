@@ -1,6 +1,8 @@
 //! Remaining expression builders: agg, when, string, bit, datetime, struct/map/array, cast, hash, misc.
 use super::types::parse_type_name;
 use crate::column::Column;
+use num_bigint::BigInt;
+use num_traits::{Signed, ToPrimitive, Zero};
 use polars::prelude::*;
 
 /// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
@@ -126,7 +128,7 @@ pub fn avg(col: &Column) -> Column {
             if let DataType::Decimal(precision, scale) = input_type.as_ref() {
                 let output_precision = precision.saturating_add(4).min(38).max(1);
                 let output_scale = scale.saturating_add(4).min(output_precision);
-                let factor = 10_i128.pow(output_scale.saturating_sub(*scale) as u32);
+                let factor = BigInt::from(10).pow(output_scale.saturating_sub(*scale) as u32);
                 let mut averages = Vec::with_capacity(series.len());
                 for group_idx in 0..series.len() {
                     let Some(group) = groups.get_as_series(group_idx) else {
@@ -135,15 +137,11 @@ pub fn avg(col: &Column) -> Column {
                     };
                     let scaled = group.cast(&DataType::Int128)?;
                     let values = scaled.i128()?;
-                    let mut sum = 0_i128;
-                    let mut count = 0_i128;
+                    let mut sum = BigInt::zero();
+                    let mut count = 0_usize;
                     for idx in 0..values.len() {
                         if let Some(value) = values.get(idx) {
-                            sum = sum.checked_add(value).ok_or_else(|| {
-                                PolarsError::ComputeError(
-                                    "decimal average sum exceeds supported precision".into(),
-                                )
-                            })?;
+                            sum += value;
                             count += 1;
                         }
                     }
@@ -151,33 +149,17 @@ pub fn avg(col: &Column) -> Column {
                         averages.push(None);
                         continue;
                     }
-                    let quotient = sum / count;
-                    let remainder = sum % count;
-                    let mut scaled_average = quotient.checked_mul(factor).ok_or_else(|| {
-                        PolarsError::ComputeError(
-                            "decimal average exceeds supported precision".into(),
-                        )
-                    })?;
-                    let remainder_scaled = remainder.unsigned_abs().checked_mul(factor as u128);
-                    let Some(remainder_scaled) = remainder_scaled else {
-                        return Err(PolarsError::ComputeError(
-                            "decimal average exceeds supported precision".into(),
-                        ));
-                    };
-                    let count_unsigned = count as u128;
-                    let rounded_remainder =
-                        (remainder_scaled + count_unsigned / 2) / count_unsigned;
-                    let rounded_remainder = i128::try_from(rounded_remainder).map_err(|_| {
-                        PolarsError::ComputeError(
-                            "decimal average exceeds supported precision".into(),
-                        )
-                    })?;
-                    scaled_average = if remainder < 0 {
-                        scaled_average.checked_sub(rounded_remainder)
-                    } else {
-                        scaled_average.checked_add(rounded_remainder)
+                    // Accumulate and scale with arbitrary precision. Decimal(38, 38)
+                    // values can overflow i128 during the sum even when cancellation
+                    // leaves a representable average.
+                    let count = BigInt::from(count);
+                    let scaled_sum = sum * &factor;
+                    let mut scaled_average = &scaled_sum / &count;
+                    let remainder = scaled_sum % &count;
+                    if remainder.abs() * 2 >= count {
+                        scaled_average += if remainder.is_negative() { -1 } else { 1 };
                     }
-                    .ok_or_else(|| {
+                    let scaled_average = scaled_average.to_i128().ok_or_else(|| {
                         PolarsError::ComputeError(
                             "decimal average exceeds supported precision".into(),
                         )
@@ -194,17 +176,9 @@ pub fn avg(col: &Column) -> Column {
                         averages.push(None);
                         continue;
                     };
-                    let values = group.cast(&DataType::Float64)?;
-                    let values = values.f64()?;
-                    let mut sum = 0.0;
-                    let mut count = 0_u64;
-                    for idx in 0..values.len() {
-                        if let Some(value) = values.get(idx) {
-                            sum += value;
-                            count += 1;
-                        }
-                    }
-                    averages.push((count > 0).then_some(sum / count as f64));
+                    // Use Polars' mean implementation to retain its pairwise
+                    // floating-point summation and avoid cancellation regressions.
+                    averages.push(group.mean());
                 }
                 Ok(Series::new(series.name().clone(), averages).into())
             }

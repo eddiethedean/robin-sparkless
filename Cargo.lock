@@ -5154,6 +5154,8 @@ dependencies = [
  "md5",
  "murmur3",
  "mysql",
+ "num-bigint",
+ "num-traits",
  "odbc-api",
  "oracle-rs",
  "parquet 57.2.0",
