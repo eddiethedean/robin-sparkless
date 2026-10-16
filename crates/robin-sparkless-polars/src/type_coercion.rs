@@ -181,6 +181,7 @@ fn is_numeric(dtype: &DataType) -> bool {
             | DataType::UInt64
             | DataType::Float32
             | DataType::Float64
+            | DataType::Decimal(_, _)
     )
 }
 
@@ -246,8 +247,23 @@ pub fn coerce_for_pyspark_comparison(
 ) -> Result<(Expr, Expr), PolarsError> {
     use crate::column::Column;
 
-    // Fast-path: both numeric -> existing numeric coercion.
+    // Keep decimal comparisons in decimal arithmetic. Promoting a Decimal column
+    // and a numeric literal to Float64 loses integer precision above 2^53.
     if is_numeric(left_type) && is_numeric(right_type) {
+        let decimal_scale = match (left_type, right_type) {
+            (DataType::Decimal(_, left_scale), DataType::Decimal(_, right_scale)) => {
+                Some((*left_scale).max(*right_scale))
+            }
+            (DataType::Decimal(_, scale), _) | (_, DataType::Decimal(_, scale)) => Some(*scale),
+            _ => None,
+        };
+        if let Some(scale) = decimal_scale {
+            let common_decimal = DataType::Decimal(38, scale);
+            return Ok((
+                coerce_to_type(left, common_decimal.clone()),
+                coerce_to_type(right, common_decimal),
+            ));
+        }
         return coerce_for_comparison(left, right, left_type, right_type);
     }
 

@@ -1328,14 +1328,9 @@ impl PySparkSession {
         // authoritative source for precision and scale. Feed it through the same schema path.
         let arrow_schema = if schema.is_none() {
             data.getattr("schema").ok().and_then(|arrow_schema| {
-                let fields = arrow_schema
-                    .getattr("fields")
-                    .ok()?
-                    .cast::<PyList>()
-                    .ok()?
-                    .clone();
                 let out = PyList::empty(py);
-                for field in fields.iter() {
+                for field in arrow_schema.try_iter().ok()? {
+                    let field = field.ok()?;
                     let name = field.getattr("name").ok()?.extract::<String>().ok()?;
                     let arrow_type = field.getattr("type").ok()?;
                     let type_name = arrow_type.str().ok()?.to_string();
@@ -1348,10 +1343,15 @@ impl PySparkSession {
                         match type_name.as_str() {
                             "bool" => "boolean".to_string(),
                             "int8" | "int16" | "int32" => "int".to_string(),
+                            "uint8" | "uint16" | "uint32" => "bigint".to_string(),
                             "int64" => "bigint".to_string(),
+                            "uint64" => "decimal(20,0)".to_string(),
                             "float" | "double" => "double".to_string(),
                             "string" | "large_string" => "string".to_string(),
-                            _ => continue,
+                            "date32[day]" | "date64[ms]" => "date".to_string(),
+                            "binary" | "large_binary" => "binary".to_string(),
+                            ty if ty.starts_with("timestamp[") => "timestamp".to_string(),
+                            _ => return None,
                         }
                     };
                     out.append((name, spark_type)).ok()?;
@@ -2093,12 +2093,18 @@ fn infer_type_from_json_value(v: &JsonValue) -> String {
         JsonValue::Null => "string".to_string(),
         JsonValue::String(s) if s.starts_with("__sparkless_decimal__:") => {
             let decimal = s.strip_prefix("__sparkless_decimal__:").unwrap_or(s);
-            let scale = decimal.split_once('.').map(|(_, f)| f.len()).unwrap_or(0);
-            let precision = decimal
-                .chars()
-                .filter(|c| c.is_ascii_digit())
-                .count()
-                .max(scale + 1);
+            let (mantissa, exponent) = decimal
+                .split_once(['e', 'E'])
+                .and_then(|(mantissa, exponent)| {
+                    exponent.parse::<i32>().ok().map(|e| (mantissa, e))
+                })
+                .unwrap_or((decimal, 0));
+            let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+            let scale = (fraction.len() as i32 - exponent).clamp(0, 38) as usize;
+            let significant_digits = format!("{whole}{fraction}").trim_start_matches('0').len();
+            let precision = (significant_digits as i32 + exponent.max(0))
+                .max(scale as i32)
+                .clamp(1, 38) as usize;
             format!("decimal({precision},{scale})")
         }
         JsonValue::Bool(_) => "boolean".to_string(),
@@ -2705,7 +2711,12 @@ fn python_data_and_schema(
                 // Refine string-like and untyped array/list columns by merging types across all rows.
                 let is_untyped_container =
                     typ.eq_ignore_ascii_case("array") || typ.eq_ignore_ascii_case("list");
-                let final_typ = if typ.eq_ignore_ascii_case("string")
+                let is_decimal = typ.starts_with("decimal(");
+                let final_typ = if is_decimal {
+                    better
+                        .filter(|inferred| inferred.starts_with("decimal("))
+                        .unwrap_or_else(|| typ.clone())
+                } else if typ.eq_ignore_ascii_case("string")
                     || typ.eq_ignore_ascii_case("str")
                     || typ.eq_ignore_ascii_case("varchar")
                     || is_untyped_container
@@ -2987,14 +2998,14 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
     if type_name == "NAType" || type_name == "NaTType" {
         return Ok(JsonValue::Null);
     }
+    if let Ok(b) = v.extract::<bool>() {
+        return Ok(JsonValue::Bool(b));
+    }
     if type_name == "Decimal" {
         return Ok(JsonValue::String(format!(
             "__sparkless_decimal__:{}",
             v.str()?.to_string()
         )));
-    }
-    if let Ok(b) = v.extract::<bool>() {
-        return Ok(JsonValue::Bool(b));
     }
     // Try String before i64/f64 so createDataFrame([{"key": "3"}]) keeps "3" as string (Issue #1262).
     // PyO3 can extract str "3" as i64, which would wrongly infer key as long and break union type coercion.
@@ -3124,6 +3135,16 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
     if a == b {
         return a;
     }
+    let decimal_a = parse_decimal_type_name(&a);
+    let decimal_b = parse_decimal_type_name(&b);
+    if let (Some((precision_a, scale_a)), Some((precision_b, scale_b))) = (decimal_a, decimal_b) {
+        let scale = scale_a.max(scale_b).min(38);
+        let integral_digits = precision_a
+            .saturating_sub(scale_a)
+            .max(precision_b.saturating_sub(scale_b));
+        let precision = integral_digits.saturating_add(scale).clamp(1, 38);
+        return format!("decimal({precision},{})", scale.min(precision));
+    }
     if let (Some(ea), Some(eb)) = (
         parse_array_element_type_name(&a),
         parse_array_element_type_name(&b),
@@ -3163,6 +3184,15 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
         return "long".to_string();
     }
     "string".to_string()
+}
+
+fn parse_decimal_type_name(type_name: &str) -> Option<(usize, usize)> {
+    let args = type_name
+        .trim()
+        .strip_prefix("decimal(")?
+        .strip_suffix(')')?;
+    let (precision, scale) = args.split_once(',')?;
+    Some((precision.trim().parse().ok()?, scale.trim().parse().ok()?))
 }
 
 fn merge_inferred_types<I>(types: I) -> String
@@ -3213,6 +3243,25 @@ fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
     let cfg = robin_sparkless::get_thread_runtime_config();
     if v.is_none() {
         return "string".to_string();
+    }
+    if v.get_type().name().is_ok_and(|name| name == "Decimal") {
+        if let Ok(formatted) = v.call_method1("__format__", ("f",)) {
+            if let Ok(value) = formatted.extract::<String>() {
+                let scale = value
+                    .split_once('.')
+                    .map(|(_, fraction)| fraction.len())
+                    .unwrap_or(0);
+                let significant_digits = value
+                    .chars()
+                    .filter(|character| character.is_ascii_digit())
+                    .skip_while(|character| *character == '0')
+                    .count();
+                let precision = significant_digits.max(scale).max(1).min(38);
+                let scale = scale.min(precision);
+                return format!("decimal({precision},{scale})");
+            }
+        }
+        return "decimal(38,18)".to_string();
     }
     if v.extract::<bool>().is_ok() {
         return "boolean".to_string();
@@ -6536,8 +6585,7 @@ impl PyDataFrame {
         }
         pa.getattr("Table")?
             .getattr("from_arrays")?
-            .call1((arrays,))?
-            .call_method1("rename_columns", (names,))?
+            .call1((arrays, names))?
             .into_py_any(py)
     }
 

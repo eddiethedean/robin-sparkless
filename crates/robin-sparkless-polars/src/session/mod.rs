@@ -97,6 +97,12 @@ fn is_decimal_type_str(type_str: &str) -> bool {
     s.starts_with("decimal(") && s.contains(')')
 }
 
+fn decimal_transport_value(value: &str) -> &str {
+    value
+        .strip_prefix("__sparkless_decimal__:")
+        .unwrap_or(value)
+}
+
 fn parse_decimal_precision_scale(type_str: &str) -> Option<(usize, usize)> {
     let args = type_str.trim().to_ascii_lowercase();
     let args = args.strip_prefix("decimal(")?.strip_suffix(')')?;
@@ -104,28 +110,103 @@ fn parse_decimal_precision_scale(type_str: &str) -> Option<(usize, usize)> {
     Some((precision.trim().parse().ok()?, scale.trim().parse().ok()?))
 }
 
-fn decimal_to_scaled(value: &str, scale: usize) -> Option<i128> {
-    let value = value
-        .strip_prefix("__sparkless_decimal__:")
-        .unwrap_or(value);
-    let negative = value.starts_with('-');
-    let value = value.strip_prefix(['-', '+']).unwrap_or(value);
-    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+fn decimal_to_scaled(value: &str, scale: usize) -> Result<i128, PolarsError> {
+    if scale > 38 {
+        return Err(PolarsError::ComputeError(
+            "decimal scale exceeds supported precision".into(),
+        ));
+    }
+    let value = decimal_transport_value(value);
+    let (mantissa, exponent) = value
+        .split_once(['e', 'E'])
+        .map(|(mantissa, exponent)| {
+            exponent
+                .parse::<i32>()
+                .map(|exponent| (mantissa, exponent))
+                .map_err(|_| "invalid decimal exponent")
+        })
+        .transpose()
+        .map_err(|message| PolarsError::ComputeError(message.into()))?
+        .unwrap_or((value, 0));
+    let negative = mantissa.starts_with('-');
+    let mantissa = mantissa.strip_prefix(['-', '+']).unwrap_or(mantissa);
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
     if (whole.is_empty() && fraction.is_empty())
         || !whole.bytes().all(|b| b.is_ascii_digit())
         || !fraction.bytes().all(|b| b.is_ascii_digit())
     {
-        return None;
+        return Err(PolarsError::ComputeError(
+            format!("invalid decimal value {value}").into(),
+        ));
     }
-    let mut digits = String::with_capacity(whole.len() + scale);
-    digits.push_str(if whole.is_empty() { "0" } else { whole });
-    digits.push_str(&fraction[..fraction.len().min(scale)]);
-    digits.extend(std::iter::repeat_n(
-        '0',
-        scale.saturating_sub(fraction.len()),
-    ));
-    let scaled = digits.parse::<i128>().ok()?;
-    Some(if negative { -scaled } else { scaled })
+    let mut digits = format!("{whole}{fraction}");
+    let significant = digits.trim_start_matches('0');
+    if significant.is_empty() {
+        return Ok(0);
+    }
+    digits = significant.to_string();
+    let shift = scale as i64 - fraction.len() as i64 + i64::from(exponent);
+    if shift >= 0 {
+        let shift = usize::try_from(shift).map_err(|_| {
+            PolarsError::ComputeError("decimal value exceeds supported precision".into())
+        })?;
+        if digits.len().saturating_add(shift) > 39 {
+            return Err(PolarsError::ComputeError(
+                "decimal value exceeds supported precision".into(),
+            ));
+        }
+        digits.extend(std::iter::repeat_n('0', shift));
+    } else {
+        let discarded = usize::try_from(shift.unsigned_abs()).map_err(|_| {
+            PolarsError::ComputeError("decimal value exceeds supported precision".into())
+        })?;
+        let retained_len = digits.len().saturating_sub(discarded);
+        let round_up = discarded <= digits.len()
+            && digits
+                .as_bytes()
+                .get(retained_len)
+                .is_some_and(|digit| *digit >= b'5');
+        digits.truncate(retained_len);
+        if digits.is_empty() {
+            digits.push('0');
+        }
+        if round_up {
+            let mut carry = true;
+            let mut digit_bytes = digits.into_bytes();
+            for digit in digit_bytes.iter_mut().rev() {
+                if *digit == b'9' {
+                    *digit = b'0';
+                } else {
+                    *digit += 1;
+                    carry = false;
+                    break;
+                }
+            }
+            if carry {
+                digit_bytes.insert(0, b'1');
+            }
+            digits = String::from_utf8(digit_bytes)
+                .expect("decimal digit conversion only contains ASCII digits");
+        }
+    }
+    let scaled = digits.parse::<i128>().map_err(|_| {
+        PolarsError::ComputeError("decimal value exceeds supported precision".into())
+    })?;
+    Ok(if negative { -scaled } else { scaled })
+}
+
+fn json_value_to_decimal_scaled(
+    value: &JsonValue,
+    scale: usize,
+) -> Result<Option<i128>, PolarsError> {
+    match value {
+        JsonValue::Null => Ok(None),
+        JsonValue::Number(number) => decimal_to_scaled(&number.to_string(), scale).map(Some),
+        JsonValue::String(text) => decimal_to_scaled(text, scale).map(Some),
+        other => Err(PolarsError::ComputeError(
+            format!("cannot convert {other} to decimal").into(),
+        )),
+    }
 }
 
 /// Try to parse a string as Python dict repr (e.g. `"{'E1': 1, 'E2': 'A'}"`) into JSON Value.
@@ -233,7 +314,7 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
     match t.as_str() {
         "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => match v {
             JsonValue::Number(_) => Ok(()), // #1265: accept any number (e.g. 10^18 from UDF); build uses i64 or f64
-            JsonValue::String(s) if s.parse::<i64>().is_ok() => Ok(()),
+            JsonValue::String(s) if decimal_transport_value(s).parse::<i64>().is_ok() => Ok(()),
             _ => Err(format!(
                 "expected bigint/number, got {}",
                 value_type_name(v)
@@ -241,7 +322,7 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
         },
         "double" | "float" | "double_precision" => match v {
             JsonValue::Number(_) => Ok(()),
-            JsonValue::String(s) if s.parse::<f64>().is_ok() => Ok(()),
+            JsonValue::String(s) if decimal_transport_value(s).parse::<f64>().is_ok() => Ok(()),
             _ => Err(format!(
                 "expected double/number, got {}",
                 value_type_name(v)
@@ -644,15 +725,12 @@ fn json_values_to_series(
         })?;
         let vals: Vec<Option<i128>> = values
             .iter()
-            .map(|ov| {
-                ov.as_ref().and_then(|v| match v {
-                    JsonValue::Number(n) => decimal_to_scaled(&n.to_string(), scale),
-                    JsonValue::String(s) => decimal_to_scaled(s, scale),
-                    JsonValue::Null => None,
-                    _ => None,
-                })
+            .map(|value| {
+                value
+                    .as_ref()
+                    .map_or(Ok(None), |value| json_value_to_decimal_scaled(value, scale))
             })
-            .collect();
+            .collect::<Result<_, PolarsError>>()?;
         return Series::new(name.into(), vals)
             .into_decimal(precision, scale)
             .map(|series| series.into_series());
@@ -665,7 +743,7 @@ fn json_values_to_series(
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::Number(n) => n.as_i64(),
-                        JsonValue::String(s) => s.parse::<i64>().ok(),
+                        JsonValue::String(s) => decimal_transport_value(s).parse::<i64>().ok(),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -679,7 +757,7 @@ fn json_values_to_series(
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::Number(n) => n.as_f64(),
-                        JsonValue::String(s) => s.parse::<f64>().ok(),
+                        JsonValue::String(s) => decimal_transport_value(s).parse::<f64>().ok(),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -692,7 +770,7 @@ fn json_values_to_series(
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
-                        JsonValue::String(s) => Some(s.as_str()),
+                        JsonValue::String(s) => Some(decimal_transport_value(s)),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -908,7 +986,7 @@ fn json_value_to_series_single(
             Ok(Series::new(name.into(), vec![n.as_i64()]))
         }
         (JsonValue::String(s), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
-            let i = s
+            let i = decimal_transport_value(s)
                 .trim()
                 .parse::<i64>()
                 .map_err(|e| PolarsError::ComputeError(format!("int parse: {e}").into()))?;
@@ -918,7 +996,7 @@ fn json_value_to_series_single(
             Ok(Series::new(name.into(), vec![n.as_f64()]))
         }
         (JsonValue::String(s), "double" | "float" | "double_precision") => {
-            let f = s
+            let f = decimal_transport_value(s)
                 .trim()
                 .parse::<f64>()
                 .map_err(|e| PolarsError::ComputeError(format!("float parse: {e}").into()))?;
@@ -928,15 +1006,18 @@ fn json_value_to_series_single(
             let (precision, scale) = parse_decimal_precision_scale(t).ok_or_else(|| {
                 PolarsError::ComputeError(format!("invalid decimal type {t}").into())
             })?;
-            Series::new(name.into(), vec![decimal_to_scaled(&n.to_string(), scale)])
-                .into_decimal(precision, scale)
-                .map(|series| series.into_series())
+            Series::new(
+                name.into(),
+                vec![Some(decimal_to_scaled(&n.to_string(), scale)?)],
+            )
+            .into_decimal(precision, scale)
+            .map(|series| series.into_series())
         }
         (JsonValue::String(s), t) if is_decimal_type_str(t) => {
             let (precision, scale) = parse_decimal_precision_scale(t).ok_or_else(|| {
                 PolarsError::ComputeError(format!("invalid decimal type {t}").into())
             })?;
-            Series::new(name.into(), vec![decimal_to_scaled(s, scale)])
+            Series::new(name.into(), vec![Some(decimal_to_scaled(s, scale)?)])
                 .into_decimal(precision, scale)
                 .map(|series| series.into_series())
         }
@@ -2502,7 +2583,9 @@ impl SparkSession {
                                         n.as_f64().map(|f| f as i64) // placeholder; we'll use f64 column
                                     }
                                 }
-                                JsonValue::String(s) => s.parse::<i64>().ok(),
+                                JsonValue::String(s) => {
+                                    decimal_transport_value(&s).parse::<i64>().ok()
+                                }
                                 JsonValue::Null => None,
                                 _ => None,
                             }
@@ -2517,7 +2600,10 @@ impl SparkSession {
                                     JsonValue::Number(n) => {
                                         n.as_i64().map(|i| i as f64).or_else(|| n.as_f64())
                                     }
-                                    JsonValue::String(s) => s.parse::<i64>().ok().map(|i| i as f64),
+                                    JsonValue::String(s) => decimal_transport_value(&s)
+                                        .parse::<i64>()
+                                        .ok()
+                                        .map(|i| i as f64),
                                     JsonValue::Null => None,
                                     _ => None,
                                 }
@@ -2535,7 +2621,9 @@ impl SparkSession {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
                                 JsonValue::Number(n) => n.as_f64(),
-                                JsonValue::String(s) => s.parse::<f64>().ok(),
+                                JsonValue::String(s) => {
+                                    decimal_transport_value(&s).parse::<f64>().ok()
+                                }
                                 JsonValue::Null => None,
                                 _ => None,
                             }
@@ -2553,15 +2641,12 @@ impl SparkSession {
                     let vals: Vec<Option<i128>> = rows
                         .iter()
                         .map(|row| {
-                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
-                            match v {
-                                JsonValue::Number(n) => decimal_to_scaled(&n.to_string(), scale),
-                                JsonValue::String(s) => decimal_to_scaled(&s, scale),
-                                JsonValue::Null => None,
-                                _ => None,
-                            }
+                            json_value_to_decimal_scaled(
+                                row.get(col_idx).unwrap_or(&JsonValue::Null),
+                                scale,
+                            )
                         })
-                        .collect();
+                        .collect::<Result<_, PolarsError>>()?;
                     Series::new(name.as_str().into(), vals)
                         .into_decimal(precision, scale)?
                         .into_series()
@@ -2572,7 +2657,9 @@ impl SparkSession {
                         .map(|row| {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
-                                JsonValue::String(s) => Some(s),
+                                JsonValue::String(s) => {
+                                    Some(decimal_transport_value(&s).to_string())
+                                }
                                 JsonValue::Null => None,
                                 other => Some(other.to_string()),
                             }
