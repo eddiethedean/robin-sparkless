@@ -1030,29 +1030,155 @@ fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<St
     }))
 }
 
-fn arrow_array_struct_columns(
+fn is_pyarrow_table_or_batch(data: &Bound<'_, PyAny>) -> bool {
+    let ty = data.get_type();
+    let module = ty
+        .getattr("__module__")
+        .and_then(|value| value.extract::<String>())
+        .unwrap_or_default();
+    let name = ty
+        .getattr("__name__")
+        .and_then(|value| value.extract::<String>())
+        .unwrap_or_default();
+    module.starts_with("pyarrow") && (name == "Table" || name == "RecordBatch")
+}
+
+fn pyarrow_is_type(
+    arrow_types: &Bound<'_, PyModule>,
+    arrow_type: &Bound<'_, PyAny>,
+    predicate: &str,
+) -> PyResult<bool> {
+    arrow_types
+        .getattr(predicate)?
+        .call1((arrow_type,))?
+        .extract()
+}
+
+fn normalize_arrow_value(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+    arrow_type: &Bound<'_, PyAny>,
+    arrow_types: &Bound<'_, PyModule>,
+) -> PyResult<Py<PyAny>> {
+    if value.is_none() {
+        return Ok(value.clone().unbind());
+    }
+    if pyarrow_is_type(arrow_types, arrow_type, "is_dictionary")? {
+        let value_type = arrow_type.getattr("value_type")?;
+        return normalize_arrow_value(py, value, &value_type, arrow_types);
+    }
+    if pyarrow_is_type(arrow_types, arrow_type, "is_map")? {
+        let key_type = arrow_type.getattr("key_type")?;
+        let item_type = arrow_type.getattr("item_type")?;
+        let entries = if value.cast::<PyDict>().is_ok() {
+            value.call_method0("items")?
+        } else {
+            value.clone()
+        };
+        let mapped = PyDict::new(py);
+        for entry in entries.try_iter()? {
+            let entry = entry?;
+            let pair = entry.cast::<PyTuple>()?;
+            if pair.len() != 2 {
+                continue;
+            }
+            let key = pair.get_item(0)?;
+            let item = pair.get_item(1)?;
+            let key = normalize_arrow_value(py, &key, &key_type, arrow_types)?;
+            let item = normalize_arrow_value(py, &item, &item_type, arrow_types)?;
+            mapped.set_item(key.bind(py), item.bind(py))?;
+        }
+        return mapped.into_py_any(py);
+    }
+    if pyarrow_is_type(arrow_types, arrow_type, "is_list")?
+        || pyarrow_is_type(arrow_types, arrow_type, "is_large_list")?
+        || pyarrow_is_type(arrow_types, arrow_type, "is_fixed_size_list")?
+    {
+        let item_type = arrow_type.getattr("value_type")?;
+        let items = PyList::empty(py);
+        for item in value.try_iter()? {
+            let item = item?;
+            let normalized = normalize_arrow_value(py, &item, &item_type, arrow_types)?;
+            items.append(normalized.bind(py))?;
+        }
+        return items.into_py_any(py);
+    }
+    if pyarrow_is_type(arrow_types, arrow_type, "is_struct")? {
+        if let Ok(object) = value.cast::<PyDict>() {
+            let normalized = PyDict::new(py);
+            for field in arrow_type.try_iter()? {
+                let field = field?;
+                let name: String = field.getattr("name")?.extract()?;
+                let field_type = field.getattr("type")?;
+                if let Some(field_value) = object.get_item(name.as_str())? {
+                    let field_value =
+                        normalize_arrow_value(py, &field_value, &field_type, arrow_types)?;
+                    normalized.set_item(name, field_value.bind(py))?;
+                }
+            }
+            return normalized.into_py_any(py);
+        }
+    }
+    Ok(value.clone().unbind())
+}
+
+fn arrow_array_struct_paths(
     arrow_schema: &Bound<'_, PyAny>,
 ) -> PyResult<std::collections::HashSet<String>> {
     let arrow_types = PyModule::import(arrow_schema.py(), "pyarrow.types")?;
-    let is_type = |arrow_type: &Bound<'_, PyAny>, predicate: &str| -> PyResult<bool> {
-        arrow_types
-            .getattr(predicate)?
-            .call1((arrow_type,))?
-            .extract()
-    };
 
-    let mut columns = std::collections::HashSet::new();
+    fn visit_type(
+        arrow_type: &Bound<'_, PyAny>,
+        path: &str,
+        arrow_types: &Bound<'_, PyModule>,
+        paths: &mut std::collections::HashSet<String>,
+    ) -> PyResult<()> {
+        let is_list = pyarrow_is_type(arrow_types, arrow_type, "is_list")?
+            || pyarrow_is_type(arrow_types, arrow_type, "is_large_list")?
+            || pyarrow_is_type(arrow_types, arrow_type, "is_fixed_size_list")?;
+        if is_list {
+            let value_type = arrow_type.getattr("value_type")?;
+            if pyarrow_is_type(arrow_types, &value_type, "is_struct")? {
+                let mut has_key = false;
+                let mut has_value = false;
+                for field in value_type.try_iter()? {
+                    let field = field?;
+                    let name: String = field.getattr("name")?.extract()?;
+                    has_key |= name == "key";
+                    has_value |= name == "value";
+                }
+                if has_key && has_value {
+                    paths.insert(path.to_string());
+                }
+            }
+            visit_type(&value_type, &format!("{path}[]"), arrow_types, paths)?;
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_struct")? {
+            for field in arrow_type.try_iter()? {
+                let field = field?;
+                let name: String = field.getattr("name")?.extract()?;
+                let child_type = field.getattr("type")?;
+                visit_type(&child_type, &format!("{path}.{name}"), arrow_types, paths)?;
+            }
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_map")? {
+            let key_type = arrow_type.getattr("key_type")?;
+            let item_type = arrow_type.getattr("item_type")?;
+            visit_type(&key_type, &format!("{path}{{key}}"), arrow_types, paths)?;
+            visit_type(&item_type, &format!("{path}{{value}}"), arrow_types, paths)?;
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_dictionary")? {
+            let value_type = arrow_type.getattr("value_type")?;
+            visit_type(&value_type, path, arrow_types, paths)?;
+        }
+        Ok(())
+    }
+
+    let mut paths = std::collections::HashSet::new();
     for field in arrow_schema.try_iter()? {
         let field = field?;
         let arrow_type = field.getattr("type")?;
-        let is_list = is_type(&arrow_type, "is_list")?
-            || is_type(&arrow_type, "is_large_list")?
-            || is_type(&arrow_type, "is_fixed_size_list")?;
-        if is_list && is_type(&arrow_type.getattr("value_type")?, "is_struct")? {
-            columns.insert(field.getattr("name")?.extract::<String>()?);
-        }
+        let name: String = field.getattr("name")?.extract()?;
+        visit_type(&arrow_type, &name, &arrow_types, &mut paths)?;
     }
-    Ok(columns)
+    Ok(paths)
 }
 
 fn spark_type_to_arrow_type(
@@ -1544,7 +1670,7 @@ impl PySparkSession {
                                 }),
                                 mixed_row_shape_error_on_collect: false,
                                 arrow_schema_cache: None,
-                                arrow_array_struct_columns: Default::default(),
+                                arrow_array_struct_paths: Default::default(),
                                 logical_map_columns: Default::default(),
                             });
                         }
@@ -1554,14 +1680,14 @@ impl PySparkSession {
         }
         // PyArrow's Python rows contain Decimal values, but the table schema is the
         // authoritative source for precision and scale. Feed it through the same schema path.
-        let arrow_schema_source = if schema.is_none() {
+        let arrow_schema_source = if schema.is_none() && is_pyarrow_table_or_batch(data) {
             data.getattr("schema").ok()
         } else {
             None
         };
-        let mut arrow_array_struct_columns = arrow_schema_source
+        let mut arrow_array_struct_paths = arrow_schema_source
             .as_ref()
-            .map(arrow_array_struct_columns)
+            .map(arrow_array_struct_paths)
             .transpose()?
             .unwrap_or_default();
         let arrow_schema_cache = arrow_schema_source.as_ref().map(|s| s.clone().unbind());
@@ -1611,7 +1737,7 @@ impl PySparkSession {
         for (name, type_name) in &schema_pairs {
             let type_name = type_name.trim().to_ascii_lowercase();
             if type_name.starts_with("array<struct<") {
-                arrow_array_struct_columns.insert(name.clone());
+                arrow_array_struct_paths.insert(name.clone());
             } else if type_name.starts_with("map<") {
                 logical_map_columns.insert(name.clone());
             }
@@ -1625,7 +1751,7 @@ impl PySparkSession {
             schema_cache,
             mixed_row_shape_error_on_collect: mixed_row_kinds && effective_schema.is_none(),
             arrow_schema_cache,
-            arrow_array_struct_columns,
+            arrow_array_struct_paths,
             logical_map_columns,
         })
     }
@@ -2414,38 +2540,26 @@ fn normalize_create_dataframe_input<'py>(
         if to_pylist.is_callable() {
             let list = to_pylist.call0()?;
             if let Ok(rows) = list.cast::<PyList>() {
-                // PyArrow represents map entries as a list of (key, value) pairs,
-                // while Spark's MapType input contract is a Python dict.
-                if let Ok(arrow_schema) = data.getattr("schema") {
+                // PyArrow represents map entries as lists of pairs at every nesting
+                // level; Spark's MapType input contract is a Python dict.
+                if is_pyarrow_table_or_batch(data) {
+                    let arrow_schema = data.getattr("schema")?;
                     let arrow_types = PyModule::import(py, "pyarrow.types")?;
                     for field in arrow_schema.try_iter()? {
                         let field = field?;
                         let name: String = field.getattr("name")?.extract()?;
                         let field_type = field.getattr("type")?;
-                        if !arrow_types
-                            .getattr("is_map")?
-                            .call1((&field_type,))?
-                            .extract::<bool>()?
-                        {
-                            continue;
-                        }
                         for row in rows.iter() {
                             let row = row.cast::<PyDict>()?;
-                            let Some(entries) = row.get_item(name.as_str())? else {
+                            let Some(value) = row.get_item(name.as_str())? else {
                                 continue;
                             };
-                            if entries.is_none() || entries.cast::<PyDict>().is_ok() {
+                            if value.is_none() {
                                 continue;
                             }
-                            let mapped = PyDict::new(py);
-                            for entry in entries.try_iter()? {
-                                let entry = entry?;
-                                let pair = entry.cast::<PyTuple>()?;
-                                if pair.len() == 2 {
-                                    mapped.set_item(pair.get_item(0)?, pair.get_item(1)?)?;
-                                }
-                            }
-                            row.set_item(name.as_str(), mapped)?;
+                            let normalized =
+                                normalize_arrow_value(py, &value, &field_type, &arrow_types)?;
+                            row.set_item(name.as_str(), normalized.bind(py))?;
                         }
                     }
                 }
@@ -4683,18 +4797,37 @@ struct PyDataFrame {
     mixed_row_shape_error_on_collect: bool,
     /// Original PyArrow schema: Polars maps and arrays of key/value structs share a physical dtype.
     arrow_schema_cache: Option<Py<PyAny>>,
-    arrow_array_struct_columns: std::collections::HashSet<String>,
+    arrow_array_struct_paths: std::collections::HashSet<String>,
     logical_map_columns: std::collections::HashSet<String>,
 }
 
 impl PyDataFrame {
+    fn remove_metadata_root(target: &mut Self, root: &str) {
+        target.arrow_array_struct_paths.retain(|path| {
+            path != root
+                && !path
+                    .strip_prefix(root)
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        });
+        target.logical_map_columns.remove(root);
+    }
+
+    fn column_source(expr: &robin_sparkless::Expr) -> Option<String> {
+        match expr {
+            robin_sparkless::Expr::Alias(inner, _) => Self::column_source(inner),
+            robin_sparkless::Expr::Cast { expr, .. } => Self::column_source(expr),
+            robin_sparkless::Expr::Column(column) => Some(column.to_string()),
+            _ => None,
+        }
+    }
+
     fn wrap(df: DataFrame) -> Self {
         PyDataFrame {
             inner: df,
             schema_cache: None,
             mixed_row_shape_error_on_collect: false,
             arrow_schema_cache: None,
-            arrow_array_struct_columns: Default::default(),
+            arrow_array_struct_paths: Default::default(),
             logical_map_columns: Default::default(),
         }
     }
@@ -4704,10 +4837,17 @@ impl PyDataFrame {
         if let Ok(columns) = wrapped.inner.columns() {
             let output_names: std::collections::HashSet<&str> =
                 columns.iter().map(String::as_str).collect();
-            wrapped.arrow_array_struct_columns = self
-                .arrow_array_struct_columns
+            wrapped.arrow_array_struct_paths = self
+                .arrow_array_struct_paths
                 .iter()
-                .filter(|name| output_names.contains(name.as_str()))
+                .filter(|path| {
+                    output_names.iter().any(|name| {
+                        path.as_str() == *name
+                            || path
+                                .strip_prefix(name)
+                                .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+                    })
+                })
                 .cloned()
                 .collect();
             wrapped.logical_map_columns = self
@@ -4723,6 +4863,133 @@ impl PyDataFrame {
                 .as_ref()
                 .map(|schema| schema.clone_ref(py));
         });
+        wrapped
+    }
+
+    fn copy_array_struct_paths(&self, source: &str, output: &str, target: &mut Self) {
+        for path in &self.arrow_array_struct_paths {
+            if path == source {
+                target.arrow_array_struct_paths.insert(output.to_string());
+            } else if let Some(tail) = path.strip_prefix(source) {
+                if tail.starts_with(['.', '[', '{']) {
+                    target
+                        .arrow_array_struct_paths
+                        .insert(format!("{output}{tail}"));
+                }
+            }
+        }
+    }
+
+    fn wrap_with_column_derived(
+        &self,
+        df: DataFrame,
+        name: &str,
+        expr: &robin_sparkless::Expr,
+    ) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        Self::remove_metadata_root(&mut wrapped, name);
+        if let Some(source) = Self::column_source(expr) {
+            self.copy_array_struct_paths(&source, name, &mut wrapped);
+            if self.logical_map_columns.contains(&source) {
+                wrapped.logical_map_columns.insert(name.to_string());
+            }
+        }
+        wrapped
+    }
+
+    fn wrap_with_columns_derived(&self, df: DataFrame, expressions: &[(String, Column)]) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        for (name, column) in expressions {
+            Self::remove_metadata_root(&mut wrapped, name);
+            if let Some(source) = Self::column_source(column.expr()) {
+                self.copy_array_struct_paths(&source, name, &mut wrapped);
+                if self.logical_map_columns.contains(&source) {
+                    wrapped.logical_map_columns.insert(name.clone());
+                }
+            }
+        }
+        wrapped
+    }
+
+    fn wrap_renamed_columns_derived(&self, df: DataFrame, renames: &[(String, String)]) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        for (old_name, new_name) in renames {
+            Self::remove_metadata_root(&mut wrapped, old_name);
+            Self::remove_metadata_root(&mut wrapped, new_name);
+            self.copy_array_struct_paths(old_name, new_name, &mut wrapped);
+            if self.logical_map_columns.contains(old_name) {
+                wrapped.logical_map_columns.insert(new_name.clone());
+            }
+        }
+        wrapped
+    }
+
+    fn wrap_union_derived(&self, other: Option<&PyDataFrame>, df: DataFrame) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        if let Some(other) = other {
+            wrapped
+                .arrow_array_struct_paths
+                .retain(|path| other.arrow_array_struct_paths.contains(path));
+            wrapped
+                .logical_map_columns
+                .retain(|name| other.logical_map_columns.contains(name));
+        } else {
+            wrapped.arrow_array_struct_paths.clear();
+            wrapped.logical_map_columns.clear();
+        }
+        wrapped
+    }
+
+    fn wrap_join_derived(&self, other: &PyDataFrame, df: DataFrame) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        let output_names = wrapped
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let left_names = self
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let right_names = other.inner.columns().unwrap_or_default();
+        for source in &right_names {
+            let has_metadata = other.arrow_array_struct_paths.iter().any(|path| {
+                path == source
+                    || path
+                        .strip_prefix(source.as_str())
+                        .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+            });
+            if !has_metadata {
+                continue;
+            }
+            let renamed = format!("{source}_right");
+            let output = if left_names.contains(source) && output_names.contains(&renamed) {
+                Some(renamed)
+            } else if output_names.contains(source) {
+                Some(source.clone())
+            } else {
+                None
+            };
+            if let Some(output) = output {
+                other.copy_array_struct_paths(source, &output, &mut wrapped);
+            }
+        }
+        for name in &other.logical_map_columns {
+            let right_name = format!("{name}_right");
+            let output_name = if left_names.contains(name) && output_names.contains(&right_name) {
+                Some(right_name)
+            } else if output_names.contains(name) {
+                Some(name.clone())
+            } else {
+                None
+            };
+            if let Some(output_name) = output_name {
+                wrapped.logical_map_columns.insert(output_name);
+            }
+        }
         wrapped
     }
 
@@ -4756,9 +5023,41 @@ impl PyDataFrame {
             let Some((source, output)) = source_and_output_names(expr) else {
                 continue;
             };
-            if self.arrow_array_struct_columns.contains(&source) {
-                wrapped.arrow_array_struct_columns.insert(output.clone());
+            self.copy_array_struct_paths(&source, &output, &mut wrapped);
+            if self.logical_map_columns.contains(&source) {
+                wrapped.logical_map_columns.insert(output);
             }
+        }
+        wrapped
+    }
+
+    fn wrap_select_expr_derived(&self, df: DataFrame, expressions: &[String]) -> Self {
+        fn identifier(value: &str) -> Option<String> {
+            let value = value.trim();
+            let value = value
+                .strip_prefix('`')
+                .and_then(|value| value.strip_suffix('`'))
+                .unwrap_or(value);
+            (!value.is_empty()
+                && value
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'))
+            .then(|| value.to_string())
+        }
+
+        let mut wrapped = self.wrap_derived(df);
+        for expression in expressions {
+            let lower = expression.to_ascii_lowercase();
+            let Some(alias_at) = lower.rfind(" as ") else {
+                continue;
+            };
+            let Some(source) = identifier(&expression[..alias_at]) else {
+                continue;
+            };
+            let Some(output) = identifier(&expression[alias_at + 4..]) else {
+                continue;
+            };
+            self.copy_array_struct_paths(&source, &output, &mut wrapped);
             if self.logical_map_columns.contains(&source) {
                 wrapped.logical_map_columns.insert(output);
             }
@@ -4768,11 +5067,7 @@ impl PyDataFrame {
 
     fn wrap_renamed_derived(&self, df: DataFrame, old_name: &str, new_name: &str) -> Self {
         let mut wrapped = self.wrap_derived(df);
-        if self.arrow_array_struct_columns.contains(old_name) {
-            wrapped
-                .arrow_array_struct_columns
-                .insert(new_name.to_string());
-        }
+        self.copy_array_struct_paths(old_name, new_name, &mut wrapped);
         if self.logical_map_columns.contains(old_name) {
             wrapped.logical_map_columns.insert(new_name.to_string());
         }
@@ -5304,7 +5599,7 @@ impl PyDataFrame {
                     to_py_err(msg)
                 }
             })?;
-            return Ok(PyDataFrame::wrap(df));
+            return Ok(slf.wrap_with_column_derived(df, name, col.expr()));
         }
 
         // Case 2: expr-string from F.expr(...)
@@ -5352,7 +5647,7 @@ impl PyDataFrame {
                     to_py_err(msg)
                 }
             })?;
-            return Ok(PyDataFrame::wrap(df));
+            return Ok(slf.wrap_with_column_derived(df, name, col.expr()));
         }
 
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -5543,7 +5838,7 @@ impl PyDataFrame {
         let (output_names, rows, schema) = self
             .inner
             .collect_as_json_rows_with_names_and_array_struct_columns(
-                &self.arrow_array_struct_columns,
+                &self.arrow_array_struct_paths,
             )
             .map_err(to_py_err)?;
         let mut dtype_by_name: std::collections::HashMap<String, DataType> =
@@ -5756,7 +6051,10 @@ impl PyDataFrame {
     }
 
     fn cache(&self) -> PyResult<PyDataFrame> {
-        self.inner.cache().map(PyDataFrame::wrap).map_err(to_py_err)
+        self.inner
+            .cache()
+            .map(|df| self.wrap_derived(df))
+            .map_err(to_py_err)
     }
 
     #[pyo3(signature = (*cols))]
@@ -6094,7 +6392,7 @@ impl PyDataFrame {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .distinct(sub)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6141,7 +6439,7 @@ impl PyDataFrame {
             return self
                 .inner
                 .cross_join(&other.inner)
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_join_derived(other, df))
                 .map_err(to_py_err);
         }
         let join_type = match how_lower.as_str() {
@@ -6171,7 +6469,7 @@ impl PyDataFrame {
                     join_type,
                     false, // left_on/right_on: do not mark join keys ambiguous
                 )
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_join_derived(other, df))
                 .map_err(to_py_err)
         } else if let Some(on_arg) = on {
             // Try to use normal join when on is simple column name(s) (PySpark parity: one key column in result).
@@ -6183,7 +6481,7 @@ impl PyDataFrame {
                     return self
                         .inner
                         .join(&other.inner, on_refs, join_type)
-                        .map(PyDataFrame::wrap)
+                        .map(|df| self.wrap_join_derived(other, df))
                         .map_err(to_py_err);
                 }
             }
@@ -6327,7 +6625,7 @@ impl PyDataFrame {
                             }
                         }
 
-                        return Ok(PyDataFrame::wrap(joined));
+                        return Ok(self.wrap_join_derived(other, joined));
                     }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
@@ -6378,16 +6676,16 @@ impl PyDataFrame {
                     let all_refs: Vec<&str> = all_cols.iter().map(|s| s.as_str()).collect();
                     let augmented = augmented.select(all_refs).map_err(to_py_err)?;
                     let all = filtered.union(&augmented).map_err(to_py_err)?;
-                    return Ok(PyDataFrame::wrap(all));
+                    return Ok(self.wrap_join_derived(other, all));
                 }
-                return Ok(PyDataFrame::wrap(filtered));
+                return Ok(self.wrap_join_derived(other, filtered));
             }
             // Column-name list/tuple (no complex expressions): join on those keys.
             let on_vec = py_join_on_to_vec(on_arg)?;
             let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
             self.inner
                 .join(&other.inner, on_refs, join_type)
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_join_derived(other, df))
                 .map_err(to_py_err)
         } else {
             Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
@@ -6400,14 +6698,14 @@ impl PyDataFrame {
     fn cross_join(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .cross_join(&other.inner)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_join_derived(other, df))
             .map_err(to_py_err)
     }
 
     fn intersect(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .intersect(&other.inner)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6415,24 +6713,28 @@ impl PyDataFrame {
     fn except_all(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .except_all(&other.inner)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn union(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let other_inner = py_any_to_dataframe_inner(other)?;
-        self.inner
-            .union(&other_inner)
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        let df = self.inner.union(&other_inner).map_err(to_py_err)?;
+        let other_wrapper = other.cast::<PyDataFrame>().ok();
+        Ok(match other_wrapper {
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df),
+            None => self.wrap_union_derived(None, df),
+        })
     }
 
     fn union_all(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let other_inner = py_any_to_dataframe_inner(other)?;
-        self.inner
-            .union_all(&other_inner)
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        let df = self.inner.union_all(&other_inner).map_err(to_py_err)?;
+        let other_wrapper = other.cast::<PyDataFrame>().ok();
+        Ok(match other_wrapper {
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df),
+            None => self.wrap_union_derived(None, df),
+        })
     }
 
     #[pyo3(name = "unionAll")]
@@ -6448,10 +6750,15 @@ impl PyDataFrame {
     ) -> PyResult<PyDataFrame> {
         let allow = extract_allow_missing_columns(kwargs)?;
         let other_inner = py_any_to_dataframe_inner(other)?;
-        self.inner
+        let df = self
+            .inner
             .union_by_name(&other_inner, allow)
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        let other_wrapper = other.cast::<PyDataFrame>().ok();
+        Ok(match other_wrapper {
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df),
+            None => self.wrap_union_derived(None, df),
+        })
     }
 
     #[pyo3(name = "selectExpr", signature = (*exprs))]
@@ -6469,13 +6776,13 @@ impl PyDataFrame {
                     .inner
                     .select_expr_with_session(&session_ref.borrow().inner, &exprs_vec)
                 {
-                    return Ok(PyDataFrame::wrap(df));
+                    return Ok(self.wrap_select_expr_derived(df, &exprs_vec));
                 }
             }
         }
         self.inner
             .select_expr(&exprs_vec)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_select_expr_derived(df, &exprs_vec))
             .map_err(to_py_err)
     }
 
@@ -6522,7 +6829,7 @@ impl PyDataFrame {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .dropna(sub, how_str, thresh)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6544,7 +6851,7 @@ impl PyDataFrame {
                     .fillna(val_expr, Some(vec![col_name.as_str()]))
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame::wrap(df));
+            return Ok(self.wrap_derived(df));
         }
         let value_expr = py_any_to_column(value)?.into_expr();
         let kind = classify_fill_value_kind(value);
@@ -6571,7 +6878,7 @@ impl PyDataFrame {
         let sub: Option<Vec<&str>> = Some(effective);
         self.inner
             .fillna(value_expr, sub)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6611,7 +6918,7 @@ impl PyDataFrame {
                         .replace(old_expr, new_expr, sub.as_ref().map(|v| v.to_vec()))
                         .map_err(to_py_err)?;
                 }
-                return Ok(PyDataFrame::wrap(current));
+                return Ok(self.wrap_derived(current));
             }
             return Err(to_py_err("value is required when to_replace is not a dict"));
         }
@@ -6631,7 +6938,7 @@ impl PyDataFrame {
                 .inner
                 .na()
                 .replace(old_expr, null_expr, sub.as_ref().map(|v| v.to_vec()))
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_derived(df))
                 .map_err(to_py_err);
         }
         let old_expr = py_any_to_column(to_replace)?.into_expr();
@@ -6639,14 +6946,14 @@ impl PyDataFrame {
         self.inner
             .na()
             .replace(old_expr, new_expr, sub.as_ref().map(|v| v.to_vec()))
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     /// Return the first row as a Row, or None if empty (Phase 7.8 / PySpark first() semantics).
     fn first(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         let one = self.inner.first().map_err(to_py_err)?;
-        let wrapper = PyDataFrame::wrap(one);
+        let wrapper = self.wrap_derived(one);
         let rows = wrapper.collect(py)?;
         Ok(rows.into_iter().next())
     }
@@ -6684,14 +6991,14 @@ impl PyDataFrame {
     fn persist(&self) -> PyResult<PyDataFrame> {
         self.inner
             .persist()
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn subtract(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .subtract(&other.inner)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6716,7 +7023,7 @@ impl PyDataFrame {
         }
         self.inner
             .sample_by(col, &fracs, seed)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6741,7 +7048,7 @@ impl PyDataFrame {
         let vals: Vec<&str> = value_vars.iter().map(|s| s.as_str()).collect();
         self.inner
             .melt(&ids, &vals)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6758,7 +7065,7 @@ impl PyDataFrame {
         let mut df = self
             .inner
             .unpivot(&id_refs, &val_refs)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)?;
         if let Some(ref name) = variableColumnName {
             df = df.with_column_renamed("variable", name)?;
@@ -6818,7 +7125,7 @@ impl PyDataFrame {
         }
         self.inner
             .with_columns_renamed(&renames)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_renamed_columns_derived(df, &renames))
             .map_err(to_py_err)
     }
 
@@ -6842,7 +7149,7 @@ impl PyDataFrame {
         }
         self.inner
             .with_columns(&exprs)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_with_columns_derived(df, &exprs))
             .map_err(to_py_err)
     }
 
@@ -6883,7 +7190,7 @@ impl PyDataFrame {
     #[pyo3(name = "toDF", signature = (*col_names))]
     fn to_df(&self, col_names: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
         if col_names.is_empty() {
-            return Ok(PyDataFrame::wrap(self.inner.clone()));
+            return Ok(self.wrap_derived(self.inner.clone()));
         }
         let mut df = self.inner.clone();
         let current = df.columns().map_err(to_py_err)?;
@@ -6896,7 +7203,12 @@ impl PyDataFrame {
                 .with_column_renamed(&current[i], &new_name)
                 .map_err(to_py_err)?;
         }
-        Ok(PyDataFrame::wrap(df))
+        let renames = current
+            .iter()
+            .zip(col_names.iter())
+            .map(|(old_name, item)| Ok((old_name.clone(), item.extract::<String>()?)))
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(self.wrap_renamed_columns_derived(df, &renames))
     }
 
     #[pyo3(name = "toPandas")]
@@ -6906,7 +7218,7 @@ impl PyDataFrame {
         let (_, rows, _) = self
             .inner
             .collect_as_json_rows_with_names_and_array_struct_columns(
-                &self.arrow_array_struct_columns,
+                &self.arrow_array_struct_paths,
             )
             .map_err(to_py_err)?;
         let cols = self.inner.columns().map_err(to_py_err)?;
@@ -7053,11 +7365,11 @@ impl PyDataFrame {
     }
 
     fn coalesce(&self, _n: usize) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame::wrap(self.inner.clone()))
+        Ok(self.wrap_derived(self.inner.clone()))
     }
 
     fn repartition(&self, _n: usize) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame::wrap(self.inner.clone()))
+        Ok(self.wrap_derived(self.inner.clone()))
     }
 
     #[pyo3(name = "isEmpty")]
@@ -7072,7 +7384,7 @@ impl PyDataFrame {
 
     fn take(&self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
         let limited = self.inner.limit(n).map_err(to_py_err)?;
-        let df = PyDataFrame::wrap(limited);
+        let df = self.wrap_derived(limited);
         df.collect(py)
     }
 

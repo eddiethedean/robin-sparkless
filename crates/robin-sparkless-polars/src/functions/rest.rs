@@ -104,6 +104,7 @@ fn numeric_aggregate_input(
 /// String columns are cast to Float64 before sum (PySpark parity, issue #393).
 pub fn sum(col: &Column) -> Column {
     let name = format!("sum({})", col.name());
+    let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
     // Spark widens decimal SUM results by ten integral digits (up to precision 38).
     // Accumulate decimal coefficients with BigInt: Polars' native decimal sum wraps
     // its i128 accumulator when the result exceeds the declared precision.
@@ -144,15 +145,15 @@ pub fn sum(col: &Column) -> Column {
                                 continue;
                             }
                             if total.abs() > maximum {
-                                return Err(PolarsError::ComputeError(
-                                    "decimal sum exceeds supported precision".into(),
-                                ));
+                                if ansi_enabled {
+                                    return Err(PolarsError::ComputeError(
+                                        "[ARITHMETIC_OVERFLOW] decimal sum exceeds supported precision".into(),
+                                    ));
+                                }
+                                sums.push(None);
+                                continue;
                             }
-                            sums.push(Some(total.to_i128().ok_or_else(|| {
-                                PolarsError::ComputeError(
-                                    "decimal sum exceeds supported precision".into(),
-                                )
-                            })?));
+                            sums.push(total.to_i128());
                         }
                         Series::new(series.name().clone(), sums)
                             .into_decimal(output_precision, *scale)
@@ -1697,36 +1698,29 @@ fn cast_decimal_series(
     target_scale: usize,
     strict: bool,
 ) -> PolarsResult<Series> {
-    let DataType::Decimal(_, source_scale) = series.dtype() else {
-        return series.cast(&DataType::Decimal(precision, target_scale));
-    };
-    let source_scale = *source_scale;
     let maximum = BigInt::from(10).pow(precision as u32) - BigInt::from(1);
     let mut output = Vec::with_capacity(series.len());
     for idx in 0..series.len() {
-        let coefficient = match series.get(idx)? {
-            AnyValue::Decimal(coefficient, _, _) => coefficient,
-            AnyValue::Null => {
+        let value = series.get(idx)?;
+        let scaled = match decimal_value_to_scaled(&value, target_scale) {
+            Ok(Some(value)) => value,
+            Ok(None) => {
                 output.push(None);
                 continue;
             }
-            value => {
+            Err(()) if strict => {
                 return Err(PolarsError::ComputeError(
-                    format!("expected a decimal value, got {value:?}").into(),
+                    format!(
+                        "invalid value for decimal({precision},{target_scale}) cast: {value:?}"
+                    )
+                    .into(),
                 ));
             }
-        };
-        let mut scaled = BigInt::from(coefficient);
-        if target_scale >= source_scale {
-            scaled *= BigInt::from(10).pow((target_scale - source_scale) as u32);
-        } else {
-            let divisor = BigInt::from(10).pow((source_scale - target_scale) as u32);
-            let remainder = &scaled % &divisor;
-            scaled /= &divisor;
-            if remainder.abs() * 2 >= divisor {
-                scaled += if coefficient < 0 { -1 } else { 1 };
+            Err(()) => {
+                output.push(None);
+                continue;
             }
-        }
+        };
         if scaled.abs() > maximum {
             if strict {
                 return Err(PolarsError::ComputeError(
@@ -1745,6 +1739,105 @@ fn cast_decimal_series(
         .map(|series| series.into_series())
 }
 
+fn scale_decimal_coefficient(
+    mut coefficient: BigInt,
+    source_scale: usize,
+    target_scale: usize,
+) -> BigInt {
+    if target_scale >= source_scale {
+        coefficient *= BigInt::from(10).pow((target_scale - source_scale) as u32);
+        return coefficient;
+    }
+    let divisor = BigInt::from(10).pow((source_scale - target_scale) as u32);
+    let remainder = &coefficient % &divisor;
+    coefficient /= &divisor;
+    if remainder.abs() * 2 >= divisor {
+        coefficient += if remainder.is_negative() { -1 } else { 1 };
+    }
+    coefficient
+}
+
+fn decimal_text_to_scaled(value: &str, target_scale: usize) -> Option<BigInt> {
+    let value = value.trim();
+    let (mantissa, exponent) = match value.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, exponent.parse::<i32>().ok()?),
+        None => (value, 0),
+    };
+    if exponent.unsigned_abs() > 1000 {
+        return None;
+    }
+    let (negative, mantissa) = match mantissa.strip_prefix('-') {
+        Some(value) => (true, value),
+        None => (false, mantissa.strip_prefix('+').unwrap_or(mantissa)),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if whole.is_empty() && fraction.is_empty() {
+        return None;
+    }
+    if !whole.chars().all(|character| character.is_ascii_digit())
+        || !fraction.chars().all(|character| character.is_ascii_digit())
+    {
+        return None;
+    }
+    let digits = format!("{whole}{fraction}");
+    let mut coefficient = BigInt::parse_bytes(digits.as_bytes(), 10)?;
+    if negative {
+        coefficient = -coefficient;
+    }
+    let source_scale = fraction.len() as i64 - i64::from(exponent);
+    if source_scale < 0 {
+        let shift = usize::try_from(-source_scale).ok()? + target_scale;
+        coefficient *= BigInt::from(10).pow(u32::try_from(shift).ok()?);
+        Some(coefficient)
+    } else {
+        let source_scale = usize::try_from(source_scale).ok()?;
+        let scale_delta = source_scale.abs_diff(target_scale);
+        if scale_delta > 1000 {
+            return None;
+        }
+        Some(scale_decimal_coefficient(
+            coefficient,
+            source_scale,
+            target_scale,
+        ))
+    }
+}
+
+fn decimal_value_to_scaled(
+    value: &AnyValue<'_>,
+    target_scale: usize,
+) -> Result<Option<BigInt>, ()> {
+    fn parse(value: &str, target_scale: usize) -> Result<Option<BigInt>, ()> {
+        decimal_text_to_scaled(value, target_scale)
+            .map(Some)
+            .ok_or(())
+    }
+
+    match value {
+        AnyValue::Null => Ok(None),
+        AnyValue::Decimal(coefficient, _, source_scale) => Ok(Some(scale_decimal_coefficient(
+            BigInt::from(*coefficient),
+            *source_scale,
+            target_scale,
+        ))),
+        AnyValue::Int8(value) => parse(&value.to_string(), target_scale),
+        AnyValue::Int16(value) => parse(&value.to_string(), target_scale),
+        AnyValue::Int32(value) => parse(&value.to_string(), target_scale),
+        AnyValue::Int64(value) => parse(&value.to_string(), target_scale),
+        AnyValue::Int128(value) => parse(&value.to_string(), target_scale),
+        AnyValue::UInt8(value) => parse(&value.to_string(), target_scale),
+        AnyValue::UInt16(value) => parse(&value.to_string(), target_scale),
+        AnyValue::UInt32(value) => parse(&value.to_string(), target_scale),
+        AnyValue::UInt64(value) => parse(&value.to_string(), target_scale),
+        AnyValue::Float32(value) => parse(&value.to_string(), target_scale),
+        AnyValue::Float64(value) => parse(&value.to_string(), target_scale),
+        AnyValue::String(value) => parse(value, target_scale),
+        AnyValue::StringOwned(value) => parse(value.as_ref(), target_scale),
+        AnyValue::Boolean(value) => parse(if *value { "1" } else { "0" }, target_scale),
+        _ => Err(()),
+    }
+}
+
 fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, String> {
     if type_name.trim().eq_ignore_ascii_case("variant") {
         return Ok(column.clone().parse_json_variant());
@@ -1759,13 +1852,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
         let expr = column.expr().clone().map(
             move |column| {
                 let series = column.as_materialized_series().clone();
-                if matches!(series.dtype(), DataType::Decimal(_, _)) {
-                    cast_decimal_series(series, precision, scale, ansi_strict).map(Into::into)
-                } else {
-                    series
-                        .cast(&DataType::Decimal(precision, scale))
-                        .map(Into::into)
-                }
+                cast_decimal_series(series, precision, scale, ansi_strict).map(Into::into)
             },
             move |_schema, field| {
                 Ok(Field::new(

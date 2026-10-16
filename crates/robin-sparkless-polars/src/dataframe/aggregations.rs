@@ -205,9 +205,12 @@ impl GroupedData {
 
     /// Sum a column in each group
     pub fn sum(&self, column: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str()).sum().alias(format!("sum({column})"))];
+        let agg_expr = vec![
+            crate::functions::sum(&Column::new(c))
+                .into_expr()
+                .alias(format!("sum({column})")),
+        ];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -224,12 +227,13 @@ impl GroupedData {
                 "avg requires at least one column".into(),
             ));
         }
-        use polars::prelude::*;
         let agg_expr: Vec<Expr> = columns
             .iter()
             .map(|c| {
                 let resolved = self.resolve_column(c)?;
-                Ok(col(resolved.as_str()).mean().alias(format!("avg({c})")))
+                Ok(crate::functions::avg(&Column::new(resolved))
+                    .into_expr()
+                    .alias(format!("avg({c})")))
             })
             .collect::<Result<Vec<_>, PolarsError>>()?;
         let lf = self.lazy_grouped.clone().agg(agg_expr);

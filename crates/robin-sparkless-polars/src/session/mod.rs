@@ -290,10 +290,10 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     if let Some((key_type, value_type)) = parse_map_key_value_types(&s) {
         let key_dtype = json_type_str_to_polars(key_type.trim())?;
         let value_dtype = json_type_str_to_polars(value_type.trim())?;
-        return Some(DataType::Struct(vec![
+        return Some(DataType::List(Box::new(DataType::Struct(vec![
             Field::new("key".into(), key_dtype),
             Field::new("value".into(), value_dtype),
-        ]));
+        ]))));
     }
     match s.as_str() {
         // Preserve distinction between IntegerType (32-bit) and LongType (64-bit) for explicit schemas.
@@ -613,6 +613,24 @@ fn json_values_to_series(
             }
         }
         return Ok(builder.finish().into_series());
+    }
+
+    if parse_map_key_value_types(&type_lower).is_some() {
+        let dtype = json_type_str_to_polars(type_str).ok_or_else(|| {
+            PolarsError::ComputeError(format!("map type '{type_str}' not supported").into())
+        })?;
+        let null_value = JsonValue::Null;
+        let values = values
+            .iter()
+            .map(
+                |value| -> Result<polars::prelude::AnyValue<'static>, PolarsError> {
+                    let value = value.as_ref().unwrap_or(&null_value);
+                    let series = json_value_to_series_single(value, type_str, name)?;
+                    Ok(series.get(0)?.into_static())
+                },
+            )
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        return Series::from_any_values_and_dtype(name.into(), &values, &dtype, true);
     }
 
     // Use type_str (not type_lower) so struct field names preserve case (e.g. E1, E2); col("StructValue.E1") then resolves when case_sensitive.

@@ -8,7 +8,9 @@ use crate::dataframe::{DataFrame, JoinOptions, JoinType, disambiguate_agg_output
 use crate::functions;
 use crate::schema::{DataType as CoreDataType, StructType};
 use crate::session::{SparkSession, set_thread_udf_session};
-use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
+use polars::prelude::{
+    AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, Scalar, col, lit, when,
+};
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
@@ -41,6 +43,24 @@ fn parse_sql_number_val(s: &str, context: &str) -> Result<SqlNumberVal, PolarsEr
 }
 
 fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
+    // Spark parses fixed-point SQL literals as exact decimals. Keeping the source
+    // text here avoids losing fractional or integral digits through an f64 first.
+    if !s.contains(['e', 'E']) {
+        if let Some((whole, fraction)) = s.split_once('.') {
+            let digits = format!("{}{}", if whole.is_empty() { "0" } else { whole }, fraction);
+            if let Ok(coefficient) = digits.parse::<i128>() {
+                let precision = digits
+                    .trim_start_matches('0')
+                    .len()
+                    .max(fraction.len())
+                    .max(1);
+                let scale = fraction.len();
+                if precision <= 38 && scale <= 38 {
+                    return Ok(lit(Scalar::new_decimal(coefficient, precision, scale)));
+                }
+            }
+        }
+    }
     match parse_sql_number_val(s, "literal")? {
         SqlNumberVal::Int(i) => Ok(lit(i)),
         SqlNumberVal::Float(f) => Ok(lit(f)),

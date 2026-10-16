@@ -1466,14 +1466,14 @@ impl DataFrame {
         self.collect_as_json_rows_with_names_and_array_struct_columns(&HashSet::new())
     }
 
-    /// Collect rows while preserving named columns whose logical type is Arrow
+    /// Collect rows while preserving paths whose logical type is Arrow
     /// `list<struct<...>>`. Polars represents maps and these arrays with the same
     /// physical `List(Struct)` dtype, so callers with the source schema must tell
-    /// the serializer which columns are arrays of structs.
+    /// the serializer which nested paths are arrays of structs.
     #[allow(clippy::type_complexity)]
     pub fn collect_as_json_rows_with_names_and_array_struct_columns(
         &self,
-        array_struct_columns: &HashSet<String>,
+        array_struct_paths: &HashSet<String>,
     ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
         let (collected, plan_schema) = match &self.inner {
             DataFrameInner::Eager(df) => (df.as_ref().clone(), df.schema().as_ref().clone()),
@@ -1607,7 +1607,8 @@ impl DataFrame {
                 let jv = any_value_to_json_with_array_struct_override(
                     &av,
                     dtype,
-                    array_struct_columns.contains(name),
+                    array_struct_paths,
+                    name,
                 )?;
                 row.insert(name.clone(), jv);
             }
@@ -3472,14 +3473,11 @@ fn struct_string_to_json_object(s: &str, fields: &[Field]) -> Option<JsonValue> 
 /// Float values close to integers are rounded for collect parity (#747, #748).
 /// Date and Datetime output ISO strings so Python bindings get date/datetime (#842, #843, #849).
 /// Returns Err when map has null key (PySpark NULL_MAP_KEY parity, #1140).
-fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, PolarsError> {
-    any_value_to_json_with_array_struct_override(av, dtype, false)
-}
-
 fn any_value_to_json_with_array_struct_override(
     av: &AnyValue<'_>,
     dtype: &DataType,
-    force_array_struct: bool,
+    array_struct_paths: &HashSet<String>,
+    path: &str,
 ) -> Result<JsonValue, PolarsError> {
     use serde_json::Map;
     // Plan says String but execution may yield numeric (e.g. get_json_object; #1146): emit string.
@@ -3611,7 +3609,7 @@ fn any_value_to_json_with_array_struct_override(
             }
         }
         AnyValue::List(s) => {
-            if !force_array_struct && is_map_format(dtype) {
+            if !array_struct_paths.contains(path) && is_map_format(dtype) {
                 // List(Struct{key, value}) -> JSON object {} (PySpark empty map #578).
                 // For mixed string + numeric/boolean map values, coerce numeric/boolean values to strings
                 // so collected maps match PySpark behavior (issue #1140).
@@ -3640,10 +3638,20 @@ fn any_value_to_json_with_array_struct_override(
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json(&fld_av, &fld.dtype)?
+                                                any_value_to_json_with_array_struct_override(
+                                                    &fld_av,
+                                                    &fld.dtype,
+                                                    array_struct_paths,
+                                                    &format!("{path}{{value}}"),
+                                                )?
                                             }
                                         } else {
-                                            any_value_to_json(&fld_av, &fld.dtype)?
+                                            any_value_to_json_with_array_struct_override(
+                                                &fld_av,
+                                                &fld.dtype,
+                                                array_struct_paths,
+                                                &format!("{path}{{value}}"),
+                                            )?
                                         });
                                     }
                                 }
@@ -3669,10 +3677,20 @@ fn any_value_to_json_with_array_struct_override(
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json(fld_av, &fld.dtype)?
+                                                any_value_to_json_with_array_struct_override(
+                                                    fld_av,
+                                                    &fld.dtype,
+                                                    array_struct_paths,
+                                                    &format!("{path}{{value}}"),
+                                                )?
                                             }
                                         } else {
-                                            any_value_to_json(fld_av, &fld.dtype)?
+                                            any_value_to_json_with_array_struct_override(
+                                                fld_av,
+                                                &fld.dtype,
+                                                array_struct_paths,
+                                                &format!("{path}{{value}}"),
+                                            )?
                                         });
                                     }
                                 }
@@ -3715,7 +3733,14 @@ fn any_value_to_json_with_array_struct_override(
                 };
                 let arr: Vec<JsonValue> = (0..s.len())
                     .filter_map(|i| s.get(i).ok())
-                    .map(|a| any_value_to_json(&a, inner_dtype))
+                    .map(|a| {
+                        any_value_to_json_with_array_struct_override(
+                            &a,
+                            inner_dtype,
+                            array_struct_paths,
+                            &format!("{path}[]"),
+                        )
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 JsonValue::Array(arr)
             }
@@ -3723,7 +3748,12 @@ fn any_value_to_json_with_array_struct_override(
         AnyValue::Struct(_, _, fields) => {
             let mut vals: Vec<JsonValue> = Vec::with_capacity(fields.len());
             for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
-                vals.push(any_value_to_json(&fld_av, &fld.dtype)?);
+                vals.push(any_value_to_json_with_array_struct_override(
+                    &fld_av,
+                    &fld.dtype,
+                    array_struct_paths,
+                    &format!("{path}.{}", fld.name),
+                )?);
             }
             if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
                 JsonValue::Null
@@ -3740,7 +3770,14 @@ fn any_value_to_json_with_array_struct_override(
             let vals: Vec<JsonValue> = values
                 .iter()
                 .zip(fields.iter())
-                .map(|(fld_av, fld)| any_value_to_json(fld_av, &fld.dtype))
+                .map(|(fld_av, fld)| {
+                    any_value_to_json_with_array_struct_override(
+                        fld_av,
+                        &fld.dtype,
+                        array_struct_paths,
+                        &format!("{path}.{}", fld.name),
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
                 JsonValue::Null

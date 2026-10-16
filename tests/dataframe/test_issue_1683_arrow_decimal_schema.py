@@ -63,19 +63,6 @@ def test_decimal_overflow_raises_instead_of_becoming_null(spark) -> None:
         )
 
 
-def test_decimal_sum_overflow_does_not_wrap(spark) -> None:
-    from sparkless.testing import get_imports
-
-    F = get_imports().F
-    largest = Decimal("9" * 38)
-    df = spark.createDataFrame(
-        [{"amount": largest}, {"amount": largest}], schema="amount decimal(38,0)"
-    )
-
-    with pytest.raises(Exception, match="decimal sum|precision"):
-        df.agg(F.sum("amount").alias("total")).collect()
-
-
 def test_to_arrow_preserves_decimal_schema(spark) -> None:
     pa = pytest.importorskip("pyarrow")
     df = spark.createDataFrame(
@@ -473,3 +460,202 @@ def test_decimal_transport_marker_does_not_change_string_values(spark) -> None:
     df = spark.createDataFrame([{"amount": marker_value}], schema="amount string")
 
     assert df.collect()[0]["amount"] == marker_value
+
+
+def test_arrow_array_of_key_value_structs_survives_transformations(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    entry_type = pa.struct([("key", pa.string()), ("value", pa.decimal128(12, 2))])
+    table = pa.Table.from_pylist(
+        [
+            {
+                "entries": [
+                    {"key": "same", "value": Decimal("1.25")},
+                    {"key": "same", "value": Decimal("2.50")},
+                ]
+            }
+        ],
+        schema=pa.schema([("entries", pa.list_(entry_type))]),
+    )
+    df = spark.createDataFrame(table)
+    expected = [
+        {"key": "same", "value": Decimal("1.25")},
+        {"key": "same", "value": Decimal("2.50")},
+    ]
+
+    outputs = [
+        (df.withColumn("id", F.lit(1)), "entries"),
+        (df.withColumn("entries", F.col("entries")), "entries"),
+        (df.withColumns({"entries": F.col("entries"), "id": F.lit(1)}), "entries"),
+        (df.cache(), "entries"),
+        (df.persist(), "entries"),
+        (df.distinct(), "entries"),
+        (df.dropna(), "entries"),
+        (df.repartition(1), "entries"),
+        (df.union(df), "entries"),
+        (df.unionByName(df), "entries"),
+        (df.selectExpr("entries AS renamed"), "renamed"),
+        (df.withColumnRenamed("entries", "renamed"), "renamed"),
+        (df.withColumnsRenamed({"entries": "renamed"}), "renamed"),
+        (df.toDF("renamed"), "renamed"),
+    ]
+    for output, name in outputs:
+        assert output.collect()[0][name] == expected
+
+
+def test_arrow_array_of_key_value_structs_inside_struct_stays_an_array(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    entry_type = pa.struct([("key", pa.string()), ("value", pa.decimal128(12, 2))])
+    table = pa.Table.from_pylist(
+        [
+            {
+                "payload": {
+                    "items": [
+                        {"key": "same", "value": Decimal("1.25")},
+                        {"key": "same", "value": Decimal("2.50")},
+                    ]
+                }
+            }
+        ],
+        schema=pa.schema([("payload", pa.struct([("items", pa.list_(entry_type))]))]),
+    )
+
+    df = spark.createDataFrame(table)
+    value = df.collect()[0]["payload"]
+    if hasattr(value, "asDict"):
+        value = value.asDict(recursive=True)
+
+    assert value["items"] == [
+        {"key": "same", "value": Decimal("1.25")},
+        {"key": "same", "value": Decimal("2.50")},
+    ]
+    pandas_value = df.toPandas().iloc[0]["payload"]
+    assert pandas_value["items"] == value["items"]
+
+
+def test_nested_arrow_maps_are_normalized_inside_structs_and_arrays(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
+    table = pa.Table.from_pylist(
+        [
+            {
+                "payload": {"amounts": [("a", Decimal("1.25"))]},
+                "maps": [[("b", Decimal("2.50"))]],
+            }
+        ],
+        schema=pa.schema(
+            [
+                ("payload", pa.struct([("amounts", map_type)])),
+                ("maps", pa.list_(map_type)),
+            ]
+        ),
+    )
+
+    row = spark.createDataFrame(table).collect()[0]
+
+    payload = row["payload"]
+    if hasattr(payload, "asDict"):
+        payload = payload.asDict(recursive=True)
+    assert payload == {"amounts": {"a": Decimal("1.25")}}
+    assert row["maps"] == [{"b": Decimal("2.50")}]
+    pandas_row = spark.createDataFrame(table).toPandas().iloc[0]
+    assert pandas_row["payload"]["amounts"] == {"a": Decimal("1.25")}
+    assert pandas_row["maps"] == [{"b": Decimal("2.50")}]
+
+
+def test_pandas_column_named_schema_is_not_treated_as_arrow_schema(spark) -> None:
+    pd = pytest.importorskip("pandas")
+    data = pd.DataFrame({"schema": ["ordinary value"], "value": [1]})
+
+    rows = spark.createDataFrame(data).collect()
+
+    assert rows[0]["schema"] == "ordinary value"
+    assert rows[0]["value"] == 1
+
+
+@pytest.mark.parametrize(
+    ("schema", "value", "literal"),
+    [
+        (
+            "amount decimal(20,18)",
+            Decimal("0.123456789012345678"),
+            "0.123456789012345678",
+        ),
+        (
+            "amount decimal(20,2)",
+            Decimal("9007199254740993.01"),
+            "9007199254740993.01",
+        ),
+    ],
+)
+def test_sql_decimal_literals_keep_all_digits(spark, schema, value, literal) -> None:
+    df = spark.createDataFrame([{"amount": value}], schema=schema)
+
+    assert [row["amount"] for row in df.filter(f"amount = {literal}").collect()] == [
+        value
+    ]
+
+
+def test_string_and_float_decimal_casts_use_half_up_rounding(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame(
+        [{"text": "1.25", "number": 1.25}], schema="text string, number double"
+    )
+
+    row = df.select(
+        F.col("text").cast("decimal(3,1)").alias("from_text"),
+        F.col("number").cast("decimal(3,1)").alias("from_number"),
+    ).collect()[0]
+
+    assert row["from_text"] == Decimal("1.3")
+    assert row["from_number"] == Decimal("1.3")
+
+
+def test_grouped_decimal_sum_and_average_keep_decimal_semantics(spark) -> None:
+    df = spark.createDataFrame(
+        [
+            {"kind": "first", "amount": Decimal("0.10")},
+            {"kind": "first", "amount": Decimal("0.20")},
+        ],
+        schema="kind string, amount decimal(12,2)",
+    )
+
+    total = df.groupBy("kind").sum("amount")
+    average = df.groupBy("kind").avg("amount")
+
+    assert total.collect()[0]["sum(amount)"] == Decimal("0.30")
+    assert average.schema["avg(amount)"].dataType.simpleString() == "decimal(16,6)"
+    assert average.collect()[0]["avg(amount)"] == Decimal("0.150000")
+
+
+def test_decimal_sum_overflow_obeys_ansi_mode_for_global_and_grouped_sums(
+    spark,
+) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    largest = Decimal("9" * 38)
+    df = spark.createDataFrame(
+        [
+            {"kind": "large", "amount": largest},
+            {"kind": "large", "amount": largest},
+        ],
+        schema="kind string, amount decimal(38,0)",
+    )
+    previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "true")
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", "false")
+        assert df.agg(F.sum("amount").alias("total")).collect()[0]["total"] is None
+        assert df.groupBy("kind").sum("amount").collect()[0]["sum(amount)"] is None
+
+        spark.conf.set("spark.sql.ansi.enabled", "true")
+        with pytest.raises(Exception, match="decimal sum|precision|overflow"):
+            df.agg(F.sum("amount").alias("total")).collect()
+        with pytest.raises(Exception, match="decimal sum|precision|overflow"):
+            df.groupBy("kind").sum("amount").collect()
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
