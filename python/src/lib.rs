@@ -643,6 +643,65 @@ fn json_value_to_py_with_schema(
                 s.clone().into_py_any(py)?
             }
         }
+        // Polars represents maps as list<struct<key, value>> internally, but JSON
+        // serialization exposes them as objects. Decode both schema forms recursively
+        // so decimal (and other typed) map values keep their Python types.
+        (Some(DataType::Map(key_type, value_type)), JsonValue::Object(obj)) => {
+            let dict = PyDict::new(py);
+            for (key, value) in obj {
+                let py_key = json_value_to_py_with_schema(
+                    py,
+                    &JsonValue::String(key.clone()),
+                    Some(key_type),
+                    datetime_cls,
+                    date_cls,
+                    None,
+                    None,
+                )?;
+                let py_value = json_value_to_py_with_schema(
+                    py,
+                    value,
+                    Some(value_type),
+                    datetime_cls,
+                    date_cls,
+                    None,
+                    None,
+                )?;
+                dict.set_item(py_key, py_value)?;
+            }
+            dict.into_py_any(py)?
+        }
+        (Some(DataType::Array(elem_type)), JsonValue::Object(obj)) if matches!(elem_type.as_ref(), DataType::Struct(fields) if fields.iter().any(|f| f.name == "key") && fields.iter().any(|f| f.name == "value")) =>
+        {
+            let DataType::Struct(fields) = elem_type.as_ref() else {
+                unreachable!()
+            };
+            let key_type = &fields.iter().find(|f| f.name == "key").unwrap().data_type;
+            let value_type = &fields.iter().find(|f| f.name == "value").unwrap().data_type;
+            let dict = PyDict::new(py);
+            for (key, value) in obj {
+                let py_key = json_value_to_py_with_schema(
+                    py,
+                    &JsonValue::String(key.clone()),
+                    Some(key_type),
+                    datetime_cls,
+                    date_cls,
+                    None,
+                    None,
+                )?;
+                let py_value = json_value_to_py_with_schema(
+                    py,
+                    value,
+                    Some(value_type),
+                    datetime_cls,
+                    date_cls,
+                    None,
+                    None,
+                )?;
+                dict.set_item(py_key, py_value)?;
+            }
+            dict.into_py_any(py)?
+        }
         // Schema says String: preserve string (PySpark parity). Do not coerce to int/float by column name.
         // Tests that expect numeric from inferred String schema are skipped; see GitHub #1274.
         (Some(DataType::String), JsonValue::String(s)) => {
@@ -903,6 +962,119 @@ struct PySparkSession {
     backend_type: RefCell<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
     stopped: std::sync::atomic::AtomicBool,
+}
+
+fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let py = arrow_type.py();
+    let type_name = arrow_type.str()?.to_string();
+    let arrow_types = PyModule::import(py, "pyarrow.types")?;
+    let is_type = |predicate: &str| -> PyResult<bool> {
+        arrow_types
+            .getattr(predicate)?
+            .call1((arrow_type,))?
+            .extract()
+    };
+
+    if is_type("is_decimal")? {
+        let precision: usize = arrow_type.getattr("precision")?.extract()?;
+        let scale: usize = arrow_type.getattr("scale")?.extract()?;
+        return Ok(Some(format!("decimal({precision},{scale})")));
+    }
+    if is_type("is_list")? || is_type("is_large_list")? || is_type("is_fixed_size_list")? {
+        let value_type = arrow_type.getattr("value_type")?;
+        return Ok(
+            arrow_type_to_spark_type(&value_type)?.map(|value_type| format!("array<{value_type}>"))
+        );
+    }
+    if is_type("is_struct")? {
+        let mut fields = Vec::new();
+        for field in arrow_type.try_iter()? {
+            let field = field?;
+            let name: String = field.getattr("name")?.extract()?;
+            let field_type = field.getattr("type")?;
+            let Some(field_type) = arrow_type_to_spark_type(&field_type)? else {
+                return Ok(None);
+            };
+            fields.push(format!("{name}:{field_type}"));
+        }
+        return Ok(Some(format!("struct<{}>", fields.join(","))));
+    }
+    if is_type("is_map")? {
+        let key_type = arrow_type.getattr("key_type")?;
+        let item_type = arrow_type.getattr("item_type")?;
+        let (Some(key_type), Some(item_type)) = (
+            arrow_type_to_spark_type(&key_type)?,
+            arrow_type_to_spark_type(&item_type)?,
+        ) else {
+            return Ok(None);
+        };
+        return Ok(Some(format!("map<{key_type},{item_type}>")));
+    }
+    if is_type("is_dictionary")? {
+        let value_type = arrow_type.getattr("value_type")?;
+        return arrow_type_to_spark_type(&value_type);
+    }
+
+    Ok(Some(match type_name.as_str() {
+        "bool" => "boolean".to_string(),
+        "int8" | "int16" => "int".to_string(),
+        "int32" => "int32".to_string(),
+        "uint8" | "uint16" | "uint32" | "int64" => "bigint".to_string(),
+        "uint64" => "decimal(20,0)".to_string(),
+        "float" | "double" => "double".to_string(),
+        "string" | "large_string" => "string".to_string(),
+        "date32[day]" | "date64[ms]" => "date".to_string(),
+        "binary" | "large_binary" => "binary".to_string(),
+        ty if ty.starts_with("timestamp[") => "timestamp".to_string(),
+        _ => return Ok(None),
+    }))
+}
+
+fn spark_type_to_arrow_type(
+    py: Python<'_>,
+    pa: &Bound<'_, PyModule>,
+    data_type: &DataType,
+) -> PyResult<PyObject> {
+    let (name, args): (&str, Vec<PyObject>) = match data_type {
+        DataType::String => ("string", Vec::new()),
+        DataType::Integer => ("int32", Vec::new()),
+        DataType::Long => ("int64", Vec::new()),
+        DataType::Double => ("float64", Vec::new()),
+        DataType::Decimal(precision, scale) => {
+            return pa
+                .getattr("decimal128")?
+                .call1((*precision, *scale))?
+                .into_py_any(py);
+        }
+        DataType::Boolean => ("bool_", Vec::new()),
+        DataType::Date => ("date32", Vec::new()),
+        DataType::Timestamp => {
+            return pa.getattr("timestamp")?.call1(("us",))?.into_py_any(py);
+        }
+        DataType::Binary => ("binary", Vec::new()),
+        DataType::Array(element_type) => {
+            let element_type = spark_type_to_arrow_type(py, pa, element_type)?;
+            return pa.getattr("list_")?.call1((element_type,))?.into_py_any(py);
+        }
+        DataType::Map(key_type, value_type) => {
+            let key_type = spark_type_to_arrow_type(py, pa, key_type)?;
+            let value_type = spark_type_to_arrow_type(py, pa, value_type)?;
+            return pa
+                .getattr("map_")?
+                .call1((key_type, value_type))?
+                .into_py_any(py);
+        }
+        DataType::Struct(fields) => {
+            let py_fields = PyList::empty(py);
+            for field in fields {
+                let field_type = spark_type_to_arrow_type(py, pa, &field.data_type)?;
+                py_fields.append((field.name.as_str(), field_type))?;
+            }
+            return pa.getattr("struct")?.call1((py_fields,))?.into_py_any(py);
+        }
+    };
+    let args = PyTuple::new(py, args)?;
+    pa.getattr(name)?.call1(args)?.into_py_any(py)
 }
 
 impl PySparkSession {
@@ -1335,41 +1507,25 @@ impl PySparkSession {
                     let field = field.ok()?;
                     let name = field.getattr("name").ok()?.extract::<String>().ok()?;
                     let arrow_type = field.getattr("type").ok()?;
-                    let type_name = arrow_type.str().ok()?.to_string();
-                    let spark_type = if type_name.starts_with("decimal") {
-                        let precision: usize =
-                            arrow_type.getattr("precision").ok()?.extract().ok()?;
-                        let scale: usize = arrow_type.getattr("scale").ok()?.extract().ok()?;
-                        format!("decimal({precision},{scale})")
+                    let spark_type = if let Some(spark_type) =
+                        arrow_type_to_spark_type(&arrow_type).ok().flatten()
+                    {
+                        spark_type
                     } else {
-                        match type_name.as_str() {
-                            "bool" => "boolean".to_string(),
-                            "int8" | "int16" | "int32" => "int".to_string(),
-                            "uint8" | "uint16" | "uint32" => "bigint".to_string(),
-                            "int64" => "bigint".to_string(),
-                            "uint64" => "decimal(20,0)".to_string(),
-                            "float" | "double" => "double".to_string(),
-                            "string" | "large_string" => "string".to_string(),
-                            "date32[day]" | "date64[ms]" => "date".to_string(),
-                            "binary" | "large_binary" => "binary".to_string(),
-                            ty if ty.starts_with("timestamp[") => "timestamp".to_string(),
-                            _ => {
-                                let mut inferred: Option<String> = None;
-                                for row in arrow_rows.iter() {
-                                    let value = row.get_item(name.as_str()).ok()?;
-                                    if !value.is_none() {
-                                        let inferred_type = infer_type_from_py_value(&value);
-                                        inferred = Some(match inferred {
-                                            Some(existing) => {
-                                                merge_spark_type_names(&existing, &inferred_type)
-                                            }
-                                            None => inferred_type,
-                                        });
+                        let mut inferred: Option<String> = None;
+                        for row in arrow_rows.iter() {
+                            let value = row.get_item(name.as_str()).ok()?;
+                            if !value.is_none() {
+                                let inferred_type = infer_type_from_py_value(&value);
+                                inferred = Some(match inferred {
+                                    Some(existing) => {
+                                        merge_spark_type_names(&existing, &inferred_type)
                                     }
-                                }
-                                inferred.unwrap_or_else(|| "string".to_string())
+                                    None => inferred_type,
+                                });
                             }
                         }
+                        inferred.unwrap_or_else(|| "string".to_string())
                     };
                     out.append((name, spark_type)).ok()?;
                 }
@@ -1880,7 +2036,8 @@ fn simple_string_to_type(s: &str) -> String {
     }
     match lower.as_str() {
         "string" | "str" => "string".to_string(),
-        "int" | "integer" | "int32" => "int".to_string(),
+        "int" | "integer" => "int".to_string(),
+        "int32" => "int32".to_string(),
         "bigint" | "long" | "int64" => "long".to_string(),
         "double" | "float64" => "double".to_string(),
         "float" | "float32" => "float".to_string(),
@@ -2180,7 +2337,42 @@ fn normalize_create_dataframe_input<'py>(
     if let Ok(to_pylist) = data.getattr("to_pylist") {
         if to_pylist.is_callable() {
             let list = to_pylist.call0()?;
-            if list.cast::<PyList>().is_ok() {
+            if let Ok(rows) = list.cast::<PyList>() {
+                // PyArrow represents map entries as a list of (key, value) pairs,
+                // while Spark's MapType input contract is a Python dict.
+                if let Ok(arrow_schema) = data.getattr("schema") {
+                    let arrow_types = PyModule::import(py, "pyarrow.types")?;
+                    for field in arrow_schema.try_iter()? {
+                        let field = field?;
+                        let name: String = field.getattr("name")?.extract()?;
+                        let field_type = field.getattr("type")?;
+                        if !arrow_types
+                            .getattr("is_map")?
+                            .call1((&field_type,))?
+                            .extract::<bool>()?
+                        {
+                            continue;
+                        }
+                        for row in rows.iter() {
+                            let row = row.cast::<PyDict>()?;
+                            let Some(entries) = row.get_item(name.as_str())? else {
+                                continue;
+                            };
+                            if entries.is_none() || entries.cast::<PyDict>().is_ok() {
+                                continue;
+                            }
+                            let mapped = PyDict::new(py);
+                            for entry in entries.try_iter()? {
+                                let entry = entry?;
+                                let pair = entry.cast::<PyTuple>()?;
+                                if pair.len() == 2 {
+                                    mapped.set_item(pair.get_item(0)?, pair.get_item(1)?)?;
+                                }
+                            }
+                            row.set_item(name.as_str(), mapped)?;
+                        }
+                    }
+                }
                 return Ok((list, true, None));
             }
         }
@@ -6592,17 +6784,8 @@ impl PyDataFrame {
                 let dict = row.call_method0("asDict")?;
                 values.append(dict.get_item(field.name.as_str())?)?;
             }
-            let arrow_type = match &field.data_type {
-                DataType::Decimal(precision, scale) => {
-                    Some(pa.getattr("decimal128")?.call1((*precision, *scale))?)
-                }
-                _ => None,
-            };
-            let array = if let Some(arrow_type) = arrow_type {
-                pa.getattr("array")?.call1((values, arrow_type))?
-            } else {
-                pa.getattr("array")?.call1((values,))?
-            };
+            let arrow_type = spark_type_to_arrow_type(py, &pa, &field.data_type)?;
+            let array = pa.getattr("array")?.call1((values, arrow_type))?;
             arrays.append(array)?;
             names.append(field.name.as_str())?;
         }

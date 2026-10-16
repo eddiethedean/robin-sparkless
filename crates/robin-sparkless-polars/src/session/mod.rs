@@ -2567,6 +2567,24 @@ impl SparkSession {
         for (col_idx, (name, type_str)) in schema.iter().enumerate() {
             let type_lower = type_str.trim().to_lowercase();
             let s = match type_lower.as_str() {
+                "int32" => {
+                    let vals: Vec<Option<i32>> = rows
+                        .iter()
+                        .map(
+                            |row| match row.get(col_idx).cloned().unwrap_or(JsonValue::Null) {
+                                JsonValue::Number(n) => {
+                                    n.as_i64().and_then(|i| i32::try_from(i).ok())
+                                }
+                                JsonValue::String(s) => {
+                                    decimal_transport_value(&s).parse::<i32>().ok()
+                                }
+                                JsonValue::Null => None,
+                                _ => None,
+                            },
+                        )
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
                 "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
                     // #1265: values may exceed i64 (e.g. UDF returns 10^18); use Float64 when any value doesn't fit.
                     let mut needs_f64 = false;

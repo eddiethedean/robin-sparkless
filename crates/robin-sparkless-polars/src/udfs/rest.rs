@@ -5946,7 +5946,7 @@ pub fn apply_string_to_int(
                 _ => unreachable!("target is Int32 or Int64"),
             }
         }
-        DataType::Int32 | DataType::Int64 => series.cast(&target)?,
+        DataType::Int32 | DataType::Int64 | DataType::Decimal(_, _) => series.cast(&target)?,
         DataType::Float32 | DataType::Float64 => {
             // #649: f64/f32 -> i32/i64 with truncation; NaN/inf -> null (try_cast) or error (cast).
             let casted = series.cast(&DataType::Float64)?;
@@ -6228,7 +6228,9 @@ pub fn apply_string_to_double(column: Column, strict: bool) -> PolarsResult<Opti
             Float64Chunked::from_iter_options(name.as_str().into(), results.into_iter())
                 .into_series()
         }
-        DataType::Float32 | DataType::Float64 => series.cast(&DataType::Float64)?,
+        DataType::Float32 | DataType::Float64 | DataType::Decimal(_, _) => {
+            series.cast(&DataType::Float64)?
+        }
         DataType::Int32 | DataType::Int64 | DataType::UInt32 | DataType::UInt64 => {
             series.cast(&DataType::Float64)?
         }

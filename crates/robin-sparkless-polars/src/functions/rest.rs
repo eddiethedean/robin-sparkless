@@ -63,10 +63,38 @@ pub fn count(col: &Column) -> Column {
 
 /// Sum aggregation. Carries source column for running-window conversion when orderBy differs from partitionBy.
 /// Output name PySpark-style sum(column_name) so row["sum(salary)"] works.
+/// Decimal inputs retain their exact dtype; other inputs are cast to Float64 for PySpark parity.
+fn numeric_aggregate_input(
+    col: &Column,
+    source_type: Option<std::sync::Arc<std::sync::Mutex<Option<DataType>>>>,
+) -> Expr {
+    col.expr().clone().map(
+        |series| {
+            if matches!(series.dtype(), DataType::Decimal(_, _)) {
+                Ok(series)
+            } else {
+                series.cast(&DataType::Float64)
+            }
+        },
+        move |_schema, field| {
+            if let Some(source_type) = &source_type {
+                *source_type.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(field.dtype().clone());
+            }
+            let dtype = if matches!(field.dtype(), DataType::Decimal(_, _)) {
+                field.dtype().clone()
+            } else {
+                DataType::Float64
+            };
+            Ok(Field::new(field.name().clone(), dtype))
+        },
+    )
+}
+
 /// String columns are cast to Float64 before sum (PySpark parity, issue #393).
 pub fn sum(col: &Column) -> Column {
     let name = format!("sum({})", col.name());
-    let expr = col.expr().clone().cast(DataType::Float64).sum();
+    let expr = numeric_aggregate_input(col, None).sum();
     let mut c = Column::from_expr(expr, Some(name));
     c.source_for_running = Some(col.name().to_string());
     c
@@ -77,10 +105,40 @@ pub fn sum(col: &Column) -> Column {
 /// Carries source column for running-window conversion when orderBy differs from partitionBy (#1241).
 pub fn avg(col: &Column) -> Column {
     let name = format!("avg({})", col.name());
-    let mut c = Column::from_expr(
-        col.expr().clone().cast(DataType::Float64).mean(),
-        Some(name),
+    let source_type = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let input = numeric_aggregate_input(col, Some(source_type.clone())).mean();
+    let result_type = source_type.clone();
+    let expr = input.map(
+        move |series| {
+            let dtype = result_type
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            if let Some(DataType::Decimal(precision, scale)) = dtype {
+                let output_precision = precision.saturating_add(4).min(38).max(1);
+                let output_scale = scale.saturating_add(4).min(output_precision);
+                series.cast(&DataType::Decimal(output_precision, output_scale))
+            } else {
+                Ok(series)
+            }
+        },
+        move |_schema, field| {
+            let dtype = match source_type
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+            {
+                Some(DataType::Decimal(precision, scale)) => {
+                    let output_precision = precision.saturating_add(4).min(38).max(1);
+                    let output_scale = scale.saturating_add(4).min(output_precision);
+                    DataType::Decimal(output_precision, output_scale)
+                }
+                _ => field.dtype().clone(),
+            };
+            Ok(Field::new(field.name().clone(), dtype))
+        },
     );
+    let mut c = Column::from_expr(expr, Some(name));
     c.source_for_running_mean = Some(col.name().to_string());
     c
 }

@@ -124,6 +124,100 @@ def test_decimal_filter_keeps_literal_scale(spark) -> None:
     assert df.filter("amount = 2.001").collect() == []
 
 
+def test_decimal_sum_and_casts_keep_decimal_values(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame(
+        [{"amount": Decimal("0.10")}, {"amount": Decimal("0.20")}],
+        schema="amount decimal(12,2)",
+    )
+
+    total = df.agg(F.sum("amount").alias("total")).collect()[0]["total"]
+    assert total == Decimal("0.30")
+    average_df = df.agg(F.avg("amount").alias("average"))
+    assert average_df.schema["average"].dataType.simpleString() == "decimal(16,6)"
+    assert average_df.collect()[0]["average"] == Decimal("0.150000")
+    assert df.select(df.amount.cast("double").alias("amount")).collect() == [
+        {"amount": 0.1},
+        {"amount": 0.2},
+    ]
+    cast_back = df.select(df.amount.cast("decimal(12,2)").alias("amount"))
+    assert cast_back.schema["amount"].dataType.simpleString() == "decimal(12,2)"
+    assert [row["amount"] for row in cast_back.collect()] == [
+        Decimal("0.10"),
+        Decimal("0.20"),
+    ]
+
+
+def test_decimal_join_and_union_do_not_collapse_adjacent_large_values(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    left = spark.createDataFrame(
+        pa.Table.from_pylist(
+            [{"id": Decimal("9007199254740992")}],
+            schema=pa.schema([("id", pa.decimal128(20, 0))]),
+        )
+    )
+    right = spark.createDataFrame(
+        pa.Table.from_pylist(
+            [{"id": Decimal("9007199254740993")}],
+            schema=pa.schema([("id", pa.decimal128(21, 0))]),
+        )
+    )
+
+    assert left.join(right, "id").collect() == []
+    unioned = left.unionByName(right).collect()
+    assert [row["id"] for row in unioned] == [
+        Decimal("9007199254740992"),
+        Decimal("9007199254740993"),
+    ]
+
+
+def test_decimal38_comparison_does_not_overflow_valid_values(spark) -> None:
+    largest = Decimal("9" * 38)
+    df = spark.createDataFrame(
+        [{"amount": largest}], schema="amount decimal(38,0)"
+    )
+
+    assert [row["amount"] for row in df.filter("amount > 0.1").collect()] == [largest]
+
+
+def test_decimal_map_values_are_decimal_after_collection(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    arrow_map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
+    table = pa.Table.from_pylist(
+        [{"balances": [("checking", Decimal("10.25"))]}],
+        schema=pa.schema([("balances", arrow_map_type)]),
+    )
+
+    row = spark.createDataFrame(table).collect()[0]
+
+    assert row["balances"] == {"checking": Decimal("10.25")}
+
+
+def test_arrow_empty_and_nested_decimal_types_survive_round_trip(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    schema = pa.schema(
+        [
+            ("id", pa.int32()),
+            ("amounts", pa.list_(pa.decimal128(12, 2))),
+        ]
+    )
+    empty = spark.createDataFrame(pa.Table.from_pylist([], schema=schema))
+
+    empty_arrow = empty.toArrow()
+    assert empty_arrow.schema == schema
+
+    populated = spark.createDataFrame(
+        pa.Table.from_pylist(
+            [{"id": 1, "amounts": [Decimal("10.25")]}], schema=schema
+        )
+    )
+    round_trip = populated.toArrow()
+    assert round_trip.schema.field("amounts").type == pa.list_(pa.decimal128(12, 2))
+    assert round_trip.to_pylist() == [{"id": 1, "amounts": [Decimal("10.25")]}]
+
+
 def test_arrow_decimal_schema_survives_other_arrow_types(spark) -> None:
     pa = pytest.importorskip("pyarrow")
     table = pa.Table.from_pylist(

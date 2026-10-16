@@ -43,6 +43,52 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
         return Ok(left.clone());
     }
 
+    fn decimal_common_type(
+        left_precision: usize,
+        left_scale: usize,
+        right_precision: usize,
+        right_scale: usize,
+    ) -> DataType {
+        let integral_digits = left_precision
+            .saturating_sub(left_scale)
+            .max(right_precision.saturating_sub(right_scale));
+        let scale = left_scale
+            .max(right_scale)
+            .min(38usize.saturating_sub(integral_digits));
+        let precision = integral_digits.saturating_add(scale).clamp(1, 38);
+        DataType::Decimal(precision, scale.min(precision))
+    }
+
+    match (left, right) {
+        (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
+            return Ok(decimal_common_type(*lp, *ls, *rp, *rs));
+        }
+        (DataType::Decimal(p, s), integer) | (integer, DataType::Decimal(p, s))
+            if matches!(
+                integer,
+                DataType::Int8
+                    | DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::UInt8
+                    | DataType::UInt16
+                    | DataType::UInt32
+                    | DataType::UInt64
+            ) =>
+        {
+            let integer_precision = match integer {
+                DataType::Int8 | DataType::UInt8 => 3,
+                DataType::Int16 | DataType::UInt16 => 5,
+                DataType::Int32 | DataType::UInt32 => 10,
+                DataType::Int64 => 19,
+                DataType::UInt64 => 20,
+                _ => unreachable!(),
+            };
+            return Ok(decimal_common_type(*p, *s, integer_precision, 0));
+        }
+        _ => {}
+    }
+
     // #615 / #1596: Date vs Datetime — cast date to datetime (start-of-day) for join/compare parity.
     let date_vs_datetime = (left == &DataType::Date && matches!(right, DataType::Datetime(_, _)))
         || (matches!(left, DataType::Datetime(_, _)) && right == &DataType::Date);
@@ -300,10 +346,26 @@ pub fn coerce_for_pyspark_comparison(
             _ => None,
         };
         if let Some(scale) = decimal_scale {
-            let common_decimal = DataType::Decimal(38, scale);
+            let integral_digits = match (left_type, right_type) {
+                (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
+                    (*lp - *ls).max(*rp - *rs)
+                }
+                (DataType::Decimal(p, s), _) | (_, DataType::Decimal(p, s)) => p - s,
+                _ => 0,
+            };
+            let precision = integral_digits.saturating_add(scale);
+            if precision <= 38 {
+                let common_decimal = DataType::Decimal(precision.max(1), scale);
+                return Ok((
+                    coerce_to_type(left, common_decimal.clone()),
+                    coerce_to_type(right, common_decimal),
+                ));
+            }
+            // No fixed-precision decimal can represent both operands at this scale.
+            // Keep the comparison executable instead of overflowing valid wide decimals to null.
             return Ok((
-                coerce_to_type(left, common_decimal.clone()),
-                coerce_to_type(right, common_decimal),
+                coerce_to_type(left, DataType::Float64),
+                coerce_to_type(right, DataType::Float64),
             ));
         }
         return coerce_for_comparison(left, right, left_type, right_type);
