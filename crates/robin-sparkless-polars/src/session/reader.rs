@@ -405,6 +405,7 @@ fn spark_type_token_to_data_type(token: &str) -> Option<DataType> {
     match token.to_ascii_lowercase().as_str() {
         "string" | "str" | "varchar" | "text" => Some(DataType::String),
         "int" | "integer" => Some(DataType::Integer),
+        "short" | "smallint" => Some(DataType::Short),
         "long" | "bigint" => Some(DataType::Long),
         "double" | "float" | "real" => Some(DataType::Double),
         "boolean" | "bool" => Some(DataType::Boolean),

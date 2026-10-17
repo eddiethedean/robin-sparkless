@@ -2307,6 +2307,7 @@ pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
     for f in schema.fields() {
         let dt = match &f.data_type {
             crate::schema::DataType::String => "string".to_string(),
+            crate::schema::DataType::Short => "smallint".to_string(),
             crate::schema::DataType::Integer => "int".to_string(),
             crate::schema::DataType::Long => "bigint".to_string(),
             crate::schema::DataType::Double => "double".to_string(),

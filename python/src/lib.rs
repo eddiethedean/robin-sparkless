@@ -457,7 +457,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
     if fields.len() == 1 {
         let f = &fields[0];
         let val = match &f.data_type {
-            DataType::Integer | DataType::Long => inner
+            DataType::Short | DataType::Integer | DataType::Long => inner
                 .parse::<i64>()
                 .ok()
                 .map(serde_json::Number::from)
@@ -502,7 +502,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
                         .and_then(|t| t.strip_suffix('"'))
                         .unwrap_or(v);
                     let val = match &f.data_type {
-                        DataType::Integer | DataType::Long => v
+                        DataType::Short | DataType::Integer | DataType::Long => v
                             .parse::<i64>()
                             .ok()
                             .map(serde_json::Number::from)
@@ -558,7 +558,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
                 .and_then(|t| t.strip_suffix('"'))
                 .unwrap_or(part);
             let matched = match &f.data_type {
-                DataType::Integer | DataType::Long => part
+                DataType::Short | DataType::Integer | DataType::Long => part
                     .parse::<i64>()
                     .ok()
                     .map(serde_json::Number::from)
@@ -613,7 +613,10 @@ fn json_value_to_py_with_schema(
             .call_method1("fromisoformat", (s.as_str(),))
             .and_then(|o| o.into_py_any(py))
             .or_else(|_| into_py_object(py, s.clone()))?,
-        (Some(DataType::Integer) | Some(DataType::Long), JsonValue::String(s)) => {
+        (
+            Some(DataType::Short) | Some(DataType::Integer) | Some(DataType::Long),
+            JsonValue::String(s),
+        ) => {
             let s = s.trim();
             if let Ok(i) = s.parse::<i64>() {
                 i.into_py_any(py)?
@@ -1265,6 +1268,7 @@ fn spark_type_to_arrow_type(
 ) -> PyResult<PyObject> {
     let (name, args): (&str, Vec<PyObject>) = match data_type {
         DataType::String => ("string", Vec::new()),
+        DataType::Short => ("int16", Vec::new()),
         DataType::Integer => ("int32", Vec::new()),
         DataType::Long => ("int64", Vec::new()),
         DataType::Double => ("float64", Vec::new()),
@@ -4373,7 +4377,10 @@ fn is_fill_compatible_with_schema_dtype(
         // Integers and floats can fill numeric columns (int/long/double).
         FillValueKind::Int | FillValueKind::Float => matches!(
             dt,
-            SchemaDataType::Integer | SchemaDataType::Long | SchemaDataType::Double
+            SchemaDataType::Short
+                | SchemaDataType::Integer
+                | SchemaDataType::Long
+                | SchemaDataType::Double
         ),
         // Strings fill string-like columns only.
         FillValueKind::String => matches!(dt, SchemaDataType::String),
@@ -5567,9 +5574,9 @@ impl PyDataFrame {
                 continue;
             };
             let Some((source, projected_output)) = source_projection else {
-                let Some(output) = alias else {
-                    continue;
-                };
+                // The SQL expression translator aliases unaliased projections with the original
+                // expression string, so use the same output name for metadata propagation.
+                let output = alias.unwrap_or_else(|| expression.to_string());
                 Self::remove_metadata_root(&mut wrapped, &output);
                 if references
                     .iter()
@@ -6278,6 +6285,7 @@ impl PyDataFrame {
             };
             match dt {
                 DataType::String => mk0("StringType"),
+                DataType::Short => mk0("ShortType"),
                 DataType::Integer => mk0("IntegerType"),
                 DataType::Long => mk0("LongType"),
                 DataType::Double => mk0("DoubleType"),
@@ -6424,6 +6432,7 @@ impl PyDataFrame {
             };
             match dt {
                 DataType::String => mk0("StringType"),
+                DataType::Short => mk0("ShortType"),
                 DataType::Integer => mk0("IntegerType"),
                 DataType::Long => mk0("LongType"),
                 DataType::Double => mk0("DoubleType"),
@@ -7910,6 +7919,7 @@ impl PyDataFrame {
             .map(|f| {
                 let ty = match &f.data_type {
                     DataType::String => "string",
+                    DataType::Short => "smallint",
                     DataType::Integer => "int",
                     DataType::Long => "long",
                     DataType::Double => "double",
@@ -11818,6 +11828,7 @@ fn py_type_str_to_core_data_type(s: &str) -> CoreDataType {
     match type_str.as_str() {
         "long" => CoreDataType::Long,
         "int" => CoreDataType::Integer,
+        "short" | "smallint" => CoreDataType::Short,
         "double" => CoreDataType::Double,
         "float" => CoreDataType::Double,
         _ if type_str.starts_with("decimal(") => {

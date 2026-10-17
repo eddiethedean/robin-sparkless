@@ -5901,9 +5901,10 @@ fn cast_decimal_to_integer(
         unreachable!("decimal cast helper requires a decimal input")
     };
     let (bits, target_name) = match target {
+        DataType::Int16 => (16usize, "SMALLINT"),
         DataType::Int32 => (32usize, "INT"),
         DataType::Int64 => (64usize, "BIGINT"),
-        _ => unreachable!("target is Int32 or Int64"),
+        _ => unreachable!("target is Int16, Int32, or Int64"),
     };
     let divisor = BigInt::from(10).pow(*scale as u32);
     let modulus = BigInt::from(1) << bits;
@@ -5947,6 +5948,12 @@ fn cast_decimal_to_integer(
     }
 
     match target {
+        DataType::Int16 => {
+            let values = cast_values
+                .into_iter()
+                .map(|value| value.map(|value| value.to_i16().expect("wrapped value fits i16")));
+            Ok(Int16Chunked::from_iter_options(series.name().clone(), values).into_series())
+        }
         DataType::Int32 => {
             let values = cast_values
                 .into_iter()
@@ -5959,7 +5966,7 @@ fn cast_decimal_to_integer(
                 .map(|value| value.map(|value| value.to_i64().expect("wrapped value fits i64")));
             Ok(Int64Chunked::from_iter_options(series.name().clone(), values).into_series())
         }
-        _ => unreachable!("target is Int32 or Int64"),
+        _ => unreachable!("target is Int16, Int32, or Int64"),
     }
 }
 

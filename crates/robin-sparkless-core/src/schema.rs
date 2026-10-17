@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub enum DataType {
     String,
     Integer,
+    Short,
     Long,
     Double,
     Decimal(u8, u8),

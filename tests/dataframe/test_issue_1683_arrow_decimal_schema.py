@@ -1235,6 +1235,7 @@ def test_bounded_float_rows_recover_after_finite_sum_overflow(spark):
 @pytest.mark.parametrize(
     ("target", "value", "expected"),
     [
+        ("smallint", Decimal("32768"), -32768),
         ("int", Decimal("2147483648"), -2147483648),
         ("bigint", Decimal("9223372036854775808"), -9223372036854775808),
     ],
@@ -1250,6 +1251,8 @@ def test_decimal_to_integer_cast_obeys_ansi_overflow_mode(
     try:
         spark.conf.set("spark.sql.ansi.enabled", "false")
         casted = df.select(F.col("amount").cast(target).alias("value"))
+        if target == "smallint":
+            assert casted.schema["value"].dataType.simpleString() == "smallint"
         assert casted.collect()[0]["value"] == expected
         try_casted = df.select(F.try_cast(F.col("amount"), target).alias("value"))
         assert try_casted.collect()[0]["value"] is None
@@ -1291,7 +1294,16 @@ def test_decimal_average_overflow_obeys_ansi_mode_for_global_and_grouped_aggrega
         spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
 
 
-def test_select_expr_computed_projection_replaces_stale_arrow_map_metadata(spark):
+@pytest.mark.parametrize(
+    ("projection", "output"),
+    [
+        ("coalesce(entries, entries) AS m", "m"),
+        ("coalesce(entries, entries)", "coalesce(entries, entries)"),
+    ],
+)
+def test_select_expr_computed_projection_preserves_arrow_metadata(
+    spark, projection, output
+):
     pa = pytest.importorskip("pyarrow")
     entry_type = pa.list_(pa.struct([("key", pa.string()), ("value", pa.int32())]))
     entries = [{"key": "a", "value": 1}, {"key": "a", "value": 2}]
@@ -1305,12 +1317,12 @@ def test_select_expr_computed_projection_replaces_stale_arrow_map_metadata(spark
         ),
     )
 
-    result = spark.createDataFrame(table).selectExpr("coalesce(entries, entries) AS m")
+    result = spark.createDataFrame(table).selectExpr(projection)
 
-    assert result.collect()[0]["m"] == entries
+    assert result.collect()[0][output] == entries
     exported = result.toArrow()
-    assert exported.schema.field("m").type == entry_type
-    assert exported.to_pylist() == [{"m": entries}]
+    assert exported.schema.field(output).type == entry_type
+    assert exported.to_pylist() == [{output: entries}]
 
 
 def test_arrow_array_metadata_survives_struct_construction(spark):

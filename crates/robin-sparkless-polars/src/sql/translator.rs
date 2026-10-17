@@ -466,6 +466,7 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
     match dt {
         CoreDataType::String => "string".to_string(),
         CoreDataType::Integer => "int".to_string(),
+        CoreDataType::Short => "smallint".to_string(),
         CoreDataType::Long => "bigint".to_string(), // PySpark parity: simpleString uses "bigint"
         CoreDataType::Double => "double".to_string(),
         CoreDataType::Decimal(precision, scale) => format!("decimal({precision},{scale})"),

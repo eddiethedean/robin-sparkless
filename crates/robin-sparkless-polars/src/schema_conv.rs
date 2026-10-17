@@ -41,6 +41,7 @@ impl StructTypePolarsExt for StructType {
 fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
     match polars_type {
         PlDataType::String => DataType::String,
+        PlDataType::Int16 => DataType::Short,
         PlDataType::Int32 => DataType::Integer,
         PlDataType::Int64 => DataType::Long,
         // Polars rank(), row_number(), dense_rank() return UInt32; map to Integer for PySpark parity (int not str).
@@ -75,6 +76,7 @@ fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
 pub(crate) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
     match data_type {
         DataType::String => PlDataType::String,
+        DataType::Short => PlDataType::Int16,
         DataType::Integer => PlDataType::Int32,
         DataType::Long => PlDataType::Int64,
         DataType::Double => PlDataType::Float64,
