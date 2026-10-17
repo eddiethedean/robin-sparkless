@@ -5087,33 +5087,33 @@ struct PyDataFrame {
 }
 
 impl PyDataFrame {
+    fn column_uses_arrow_array_struct(&self, name: &str) -> bool {
+        let source_path = if let Ok(resolved) = self.inner.resolve_column_name(name) {
+            arrow_field_path("", &resolved)
+        } else {
+            let mut parts = name.split('.');
+            let root = parts.next().unwrap_or(name);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        self.arrow_array_struct_paths.iter().any(|path| {
+            path == &source_path
+                || path
+                    .strip_prefix(source_path.as_str())
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        })
+    }
+
     fn expr_uses_arrow_array_struct(&self, expr: &robin_sparkless::Expr) -> bool {
         use robin_sparkless::Expr;
 
-        fn column_is_arrow_array_struct(dataframe: &PyDataFrame, name: &str) -> bool {
-            let source_path = if let Ok(resolved) = dataframe.inner.resolve_column_name(name) {
-                arrow_field_path("", &resolved)
-            } else {
-                let mut parts = name.split('.');
-                let root = parts.next().unwrap_or(name);
-                let root = dataframe
-                    .inner
-                    .resolve_column_name(root)
-                    .unwrap_or_else(|_| root.to_string());
-                parts.fold(arrow_field_path("", &root), |path, field| {
-                    arrow_field_path(&path, field)
-                })
-            };
-            dataframe.arrow_array_struct_paths.iter().any(|path| {
-                path == &source_path
-                    || path
-                        .strip_prefix(source_path.as_str())
-                        .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
-            })
-        }
-
         match expr {
-            Expr::Column(name) => column_is_arrow_array_struct(self, name.as_str()),
+            Expr::Column(name) => self.column_uses_arrow_array_struct(name.as_str()),
             Expr::Alias(inner, _)
             | Expr::Cast { expr: inner, .. }
             | Expr::Sort { expr: inner, .. }
@@ -5177,30 +5177,50 @@ impl PyDataFrame {
     }
 
     fn mark_array_struct_path(target: &mut Self, output: &str) {
-        let is_key_value_array = target
-            .inner
-            .schema_engine()
-            .ok()
-            .and_then(|schema| {
-                schema
-                    .fields()
-                    .iter()
-                    .find(|field| field.name == output)
-                    .map(|field| field.data_type.clone())
-            })
-            .is_some_and(|data_type| {
-                matches!(
-                    data_type,
-                    DataType::Array(element_type)
-                        if matches!(element_type.as_ref(), DataType::Struct(fields)
+        fn visit(data_type: &DataType, path: &str, paths: &mut std::collections::HashSet<String>) {
+            match data_type {
+                DataType::Array(element_type) => {
+                    let is_key_value_struct = matches!(
+                        element_type.as_ref(),
+                        DataType::Struct(fields)
                             if fields.iter().any(|field| field.name == "key")
-                                && fields.iter().any(|field| field.name == "value"))
-                )
-            });
-        if is_key_value_array {
-            target
-                .arrow_array_struct_paths
-                .insert(arrow_field_path("", output));
+                                && fields.iter().any(|field| field.name == "value")
+                    );
+                    if is_key_value_struct {
+                        paths.insert(path.to_string());
+                    }
+                    visit(element_type, &format!("{path}[]"), paths);
+                }
+                DataType::Struct(fields) => {
+                    for field in fields {
+                        visit(
+                            &field.data_type,
+                            &arrow_field_path(path, &field.name),
+                            paths,
+                        );
+                    }
+                }
+                DataType::Map(key_type, value_type) => {
+                    visit(key_type, &format!("{path}{{key}}"), paths);
+                    visit(value_type, &format!("{path}{{value}}"), paths);
+                }
+                _ => {}
+            }
+        }
+
+        let output_type = target.inner.schema_engine().ok().and_then(|schema| {
+            schema
+                .fields()
+                .iter()
+                .find(|field| field.name == output)
+                .map(|field| field.data_type.clone())
+        });
+        if let Some(output_type) = output_type {
+            visit(
+                &output_type,
+                &arrow_field_path("", output),
+                &mut target.arrow_array_struct_paths,
+            );
         }
     }
 
@@ -5539,11 +5559,29 @@ impl PyDataFrame {
     fn wrap_select_expr_derived(&self, df: DataFrame, expressions: &[String]) -> Self {
         let mut wrapped = self.wrap_derived(df);
         for expression in expressions {
-            if let Ok(Some((source, output))) = robin_sparkless::sql::select_expr_source(expression)
-            {
+            let source_projection = robin_sparkless::sql::select_expr_source(expression)
+                .ok()
+                .flatten();
+            let Ok((alias, references)) = robin_sparkless::sql::select_expr_metadata(expression)
+            else {
+                continue;
+            };
+            let Some((source, projected_output)) = source_projection else {
+                let Some(output) = alias else {
+                    continue;
+                };
                 Self::remove_metadata_root(&mut wrapped, &output);
-                self.copy_column_metadata(&source, &output, &mut wrapped);
-            }
+                if references
+                    .iter()
+                    .any(|name| self.column_uses_arrow_array_struct(name))
+                {
+                    Self::mark_array_struct_path(&mut wrapped, &output);
+                }
+                continue;
+            };
+            let output = alias.unwrap_or(projected_output);
+            Self::remove_metadata_root(&mut wrapped, &output);
+            self.copy_column_metadata(&source, &output, &mut wrapped);
         }
         wrapped
     }

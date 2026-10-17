@@ -227,6 +227,35 @@ pub fn select_expr_source(expression: &str) -> Result<Option<(String, String)>, 
     }))
 }
 
+/// Return an explicit alias and all column references in a SQL projection.
+/// The references let Python-side metadata follow computed expressions such as COALESCE.
+pub fn select_expr_metadata(
+    expression: &str,
+) -> Result<(Option<String>, Vec<String>), PolarsError> {
+    use std::ops::ControlFlow;
+
+    use spark_sql_parser::ast::{self, Expr};
+    let (expr, alias) = spark_sql_parser::parse_select_expr(expression)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    let alias = alias.map(|alias| alias.value);
+    let mut references = Vec::new();
+    let _: ControlFlow<()> = ast::visit_expressions(&expr, |expr| {
+        match expr {
+            Expr::Identifier(name) => references.push(name.value.clone()),
+            Expr::CompoundIdentifier(parts) => references.push(
+                parts
+                    .iter()
+                    .map(|part| part.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            ),
+            _ => {}
+        }
+        ControlFlow::Continue(())
+    });
+    Ok((alias, references))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::SparkSession;

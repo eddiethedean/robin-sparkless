@@ -112,15 +112,20 @@ pub fn sum(col: &Column) -> Column {
     c
 }
 
-/// Bind each use of a SUM to the configuration of the plan being analyzed.
+/// Bind each use of SUM or AVG to the configuration of the plan being analyzed.
 /// Rebuilding the UDF gives reused Column expressions independent plan state.
-pub(crate) fn bind_sum_runtime_config(expr: Expr) -> PolarsResult<Expr> {
+pub(crate) fn bind_aggregate_runtime_config(expr: Expr) -> PolarsResult<Expr> {
     let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
     expr.try_map_expr(|expr| {
         if let Expr::AnonymousFunction { input, fmt_str, .. } = &expr {
             if fmt_str.as_str() == "sum" {
                 if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
                     return Ok(sum_expr(input.as_ref().clone(), ansi_enabled));
+                }
+            }
+            if fmt_str.as_str() == "avg" {
+                if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
+                    return Ok(avg_expr(input.as_ref().clone(), ansi_enabled));
                 }
             }
         }
@@ -512,6 +517,146 @@ fn window_bounds(index: usize, len: usize, frame: Option<(i64, i64)>) -> Option<
     Some((left, right))
 }
 
+#[derive(Default)]
+struct FloatWindowAccumulator {
+    finite_sum: f64,
+    finite_compensation: f64,
+    exact_finite_sum: Option<BigInt>,
+    count: usize,
+    nan_count: usize,
+    positive_infinity_count: usize,
+    negative_infinity_count: usize,
+}
+
+fn finite_float_as_scaled_integer(value: f64) -> BigInt {
+    let bits = value.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as usize;
+    let fraction = bits & ((1_u64 << 52) - 1);
+    let (significand, shift) = if exponent == 0 {
+        (fraction, 0)
+    } else {
+        ((1_u64 << 52) | fraction, exponent - 1)
+    };
+    let value = BigInt::from(significand) << shift;
+    if bits >> 63 == 1 { -value } else { value }
+}
+
+fn scaled_integer_as_finite_float(value: &BigInt) -> f64 {
+    if value.is_zero() {
+        return 0.0;
+    }
+
+    let negative = value.is_negative();
+    let absolute = value.abs();
+    let mut shift = (absolute.bits() as usize).saturating_sub(53);
+    let mut significand = &absolute >> shift;
+    if shift > 0 {
+        let remainder = &absolute - (&significand << shift);
+        let halfway = BigInt::from(1) << (shift - 1);
+        let round_up = remainder > halfway
+            || (remainder == halfway && significand.to_u64().is_some_and(|value| value & 1 == 1));
+        if round_up {
+            significand += 1;
+        }
+        if significand.bits() > 53 {
+            significand >>= 1;
+            shift += 1;
+        }
+    }
+
+    let exponent = shift as i32 - 1074;
+    let magnitude = if exponent > 971 {
+        f64::INFINITY
+    } else {
+        significand.to_u64().unwrap_or(0) as f64 * 2.0_f64.powi(exponent)
+    };
+    if negative { -magnitude } else { magnitude }
+}
+
+impl FloatWindowAccumulator {
+    fn update_finite(&mut self, value: f64) {
+        if let Some(exact_sum) = &mut self.exact_finite_sum {
+            *exact_sum += finite_float_as_scaled_integer(value);
+        }
+        let adjusted = value - self.finite_compensation;
+        let next = self.finite_sum + adjusted;
+        if self.finite_sum.is_finite() && next.is_finite() {
+            self.finite_compensation = (next - self.finite_sum) - adjusted;
+        } else {
+            self.finite_compensation = 0.0;
+        }
+        self.finite_sum = next;
+    }
+
+    fn add(&mut self, value: Option<f64>) {
+        self.update(value, 1.0);
+    }
+
+    fn remove(&mut self, value: Option<f64>) {
+        self.update(value, -1.0);
+    }
+
+    fn recover_overflowed_finite_sum(&mut self, values: &Float64Chunked, start: usize, end: usize) {
+        if self.exact_finite_sum.is_none() && !self.finite_sum.is_finite() {
+            let mut exact_sum = BigInt::zero();
+            for idx in start..end {
+                if let Some(value) = values.get(idx).filter(|value| value.is_finite()) {
+                    exact_sum += finite_float_as_scaled_integer(value);
+                }
+            }
+            self.exact_finite_sum = Some(exact_sum);
+        }
+    }
+
+    fn update(&mut self, value: Option<f64>, sign: f64) {
+        let Some(value) = value else {
+            return;
+        };
+        if sign > 0.0 {
+            self.count += 1;
+        } else {
+            self.count -= 1;
+        }
+        if value.is_nan() {
+            if sign > 0.0 {
+                self.nan_count += 1;
+            } else {
+                self.nan_count -= 1;
+            }
+        } else if value == f64::INFINITY {
+            if sign > 0.0 {
+                self.positive_infinity_count += 1;
+            } else {
+                self.positive_infinity_count -= 1;
+            }
+        } else if value == f64::NEG_INFINITY {
+            if sign > 0.0 {
+                self.negative_infinity_count += 1;
+            } else {
+                self.negative_infinity_count -= 1;
+            }
+        } else {
+            self.update_finite(value * sign);
+        }
+    }
+
+    fn sum(&self) -> f64 {
+        if self.nan_count > 0
+            || (self.positive_infinity_count > 0 && self.negative_infinity_count > 0)
+        {
+            f64::NAN
+        } else if self.positive_infinity_count > 0 {
+            f64::INFINITY
+        } else if self.negative_infinity_count > 0 {
+            f64::NEG_INFINITY
+        } else if let Some(exact_sum) = &self.exact_finite_sum {
+            scaled_integer_as_finite_float(exact_sum)
+        } else {
+            self.finite_sum
+        }
+    }
+}
+
 fn running_float_series(
     series: Series,
     average: bool,
@@ -520,23 +665,34 @@ fn running_float_series(
     let values = series.f64()?;
     let mut output = Vec::with_capacity(series.len());
     if frame.is_some() {
+        let mut accumulator = FloatWindowAccumulator::default();
+        let mut active_start = 0usize;
+        let mut active_end = 0usize;
+        let mut has_active_window = false;
         for idx in 0..series.len() {
             let Some((left, right)) = window_bounds(idx, series.len(), frame) else {
                 output.push(None);
                 continue;
             };
-            let mut sum = 0.0;
-            let mut count = 0usize;
-            for row in left..=right {
-                if let Some(value) = values.get(row) {
-                    sum += value;
-                    count += 1;
-                }
+            if !has_active_window {
+                active_start = left;
+                active_end = left;
+                has_active_window = true;
             }
-            output.push(if count == 0 {
+            while active_start < left {
+                accumulator.remove(values.get(active_start));
+                active_start += 1;
+            }
+            while active_end <= right {
+                accumulator.add(values.get(active_end));
+                active_end += 1;
+            }
+            accumulator.recover_overflowed_finite_sum(values, active_start, active_end);
+            let sum = accumulator.sum();
+            output.push(if accumulator.count == 0 {
                 None
             } else if average {
-                Some(sum / count as f64)
+                Some(sum / accumulator.count as f64)
             } else {
                 Some(sum)
             });
@@ -576,12 +732,8 @@ fn running_float_series(
     Ok(Series::new(series.name().clone(), output))
 }
 
-/// Average aggregation. Output name PySpark-style avg(column_name).
-/// String columns are cast to Float64 before mean (PySpark parity, issue #437).
-/// Carries source column for running-window conversion when orderBy differs from partitionBy (#1241).
-pub fn avg(col: &Column) -> Column {
-    let name = format!("avg({})", col.name());
-    let expr = numeric_aggregate_input(col, None, 0).implode().map(
+fn avg_expr(input: Expr, ansi_enabled: bool) -> Expr {
+    input.implode().map_with_fmt_str(
         move |series| {
             let DataType::List(input_type) = series.dtype() else {
                 return Err(PolarsError::ComputeError(
@@ -593,6 +745,7 @@ pub fn avg(col: &Column) -> Column {
                 let output_precision = precision.saturating_add(4).clamp(1, 38);
                 let output_scale = scale.saturating_add(4).min(output_precision);
                 let factor = BigInt::from(10).pow(output_scale.saturating_sub(*scale) as u32);
+                let maximum = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
                 let mut averages = Vec::with_capacity(series.len());
                 for group_idx in 0..series.len() {
                     let Some(group) = groups.get_as_series(group_idx) else {
@@ -623,9 +776,20 @@ pub fn avg(col: &Column) -> Column {
                     if remainder.abs() * 2 >= count {
                         scaled_average += if remainder.is_negative() { -1 } else { 1 };
                     }
+                    if scaled_average.abs() > maximum {
+                        if ansi_enabled {
+                            return Err(PolarsError::ComputeError(
+                                "[ARITHMETIC_OVERFLOW] decimal average exceeds supported precision"
+                                    .into(),
+                            ));
+                        }
+                        averages.push(None);
+                        continue;
+                    }
                     let scaled_average = scaled_average.to_i128().ok_or_else(|| {
                         PolarsError::ComputeError(
-                            "decimal average exceeds supported precision".into(),
+                            "[ARITHMETIC_OVERFLOW] decimal average exceeds supported precision"
+                                .into(),
                         )
                     })?;
                     averages.push(Some(scaled_average));
@@ -661,6 +825,18 @@ pub fn avg(col: &Column) -> Column {
             };
             Ok(Field::new(field.name().clone(), dtype))
         },
+        "avg",
+    )
+}
+
+/// Average aggregation. Output name PySpark-style avg(column_name).
+/// String columns are cast to Float64 before mean (PySpark parity, issue #437).
+/// Carries source column for running-window conversion when orderBy differs from partitionBy (#1241).
+pub fn avg(col: &Column) -> Column {
+    let name = format!("avg({})", col.name());
+    let expr = avg_expr(
+        numeric_aggregate_input(col, None, 0),
+        crate::udf_context::get_thread_ansi_enabled(),
     );
     let mut c = Column::from_expr(expr, Some(name));
     c.source_for_running_mean = Some(col.name().to_string());
@@ -2220,7 +2396,12 @@ fn decimal_value_to_scaled(
     }
 }
 
-fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, String> {
+fn cast_impl(
+    column: &Column,
+    type_name: &str,
+    strict: bool,
+    try_cast: bool,
+) -> Result<Column, String> {
     if type_name.trim().eq_ignore_ascii_case("variant") {
         return Ok(column.clone().parse_json_variant());
     }
@@ -2299,6 +2480,7 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
                     col,
                     ansi_strict,
                     target.clone(),
+                    try_cast,
                 ))
             },
             move |_schema, field| Ok(Field::new(field.name().clone(), dtype.clone())),
@@ -2345,14 +2527,14 @@ fn cast_impl(column: &Column, type_name: &str, strict: bool) -> Result<Column, S
 /// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
 /// String-to-date accepts date and datetime strings (e.g. "2025-01-01 10:30:00" truncates to date) for Spark parity.
 pub fn cast(column: &Column, type_name: &str) -> Result<Column, String> {
-    cast_impl(column, type_name, true)
+    cast_impl(column, type_name, true, false)
 }
 
 /// Cast column to the given type, returning null on invalid conversion (PySpark try_cast).
 /// String-to-boolean uses custom parsing ("true"/"false"/"1"/"0") since Polars does not support Utf8->Boolean.
 /// String-to-date accepts date and datetime strings; invalid strings become null.
 pub fn try_cast(column: &Column, type_name: &str) -> Result<Column, String> {
-    cast_impl(column, type_name, false)
+    cast_impl(column, type_name, false, true)
 }
 
 /// Cast to string, optionally with format for datetime (PySpark to_char, to_varchar).
@@ -4113,12 +4295,13 @@ mod tests {
 
         // Cast via the lower-level helper to be explicit about the target type.
         let col_i32 =
-            crate::udfs::apply_string_to_int(s.clone().into_column(), true, DataType::Int32)
+            crate::udfs::apply_string_to_int(s.clone().into_column(), true, DataType::Int32, false)
                 .expect("cast to Int32 should succeed")
                 .expect("column should be present");
-        let col_i64 = crate::udfs::apply_string_to_int(s.into_column(), true, DataType::Int64)
-            .expect("cast to Int64 should succeed")
-            .expect("column should be present");
+        let col_i64 =
+            crate::udfs::apply_string_to_int(s.into_column(), true, DataType::Int64, false)
+                .expect("cast to Int64 should succeed")
+                .expect("column should be present");
 
         assert_eq!(col_i32.dtype(), &DataType::Int32);
         assert_eq!(col_i64.dtype(), &DataType::Int64);

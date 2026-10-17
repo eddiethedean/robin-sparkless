@@ -1153,3 +1153,183 @@ def test_sql_decimal_arithmetic_errors_obey_ansi_mode(spark, ansi, expression):
             )
     finally:
         spark.conf.set("spark.sql.ansi.enabled", previous)
+
+
+def test_float_range_aggregates_reset_at_partition_boundaries(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    Window = get_imports().Window
+    df = spark.createDataFrame(
+        [("a", 0, 1e20), ("b", 0, 1.0)], "kind string, seq int, value double"
+    )
+    window = (
+        Window.partitionBy("kind")
+        .orderBy("seq")
+        .rangeBetween(Window.unboundedPreceding, Window.currentRow)
+    )
+
+    rows = sorted(
+        df.withColumn("total", F.sum("value").over(window))
+        .withColumn("average", F.avg("value").over(window))
+        .collect(),
+        key=lambda row: row["kind"],
+    )
+
+    assert [row["total"] for row in rows] == [1e20, 1.0]
+    assert [row["average"] for row in rows] == [1e20, 1.0]
+
+
+def test_bounded_float_rows_aggregates_slide_and_recover_after_infinity(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    Window = get_imports().Window
+    df = spark.createDataFrame(
+        [(0, float("inf")), (1, 1.0), (2, 2.0), (3, None)],
+        "seq int, value double",
+    )
+    window = Window.orderBy("seq").rowsBetween(-1, Window.currentRow)
+
+    rows = [
+        row
+        for row in df.withColumn("total", F.sum("value").over(window))
+        .withColumn("average", F.avg("value").over(window))
+        .orderBy("seq")
+        .collect()
+    ]
+
+    # Non-finite values are exposed as null through the JSON row transport.
+    assert rows[0]["total"] is None
+    assert rows[1]["total"] is None
+    assert rows[2]["total"] == 3.0
+    assert rows[3]["total"] == 2.0
+    assert rows[2]["average"] == 1.5
+    assert rows[3]["average"] == 2.0
+
+
+def test_bounded_float_rows_recover_after_finite_sum_overflow(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    Window = get_imports().Window
+    largest_float = float.fromhex("0x1.fffffffffffffp+1023")
+    df = spark.createDataFrame(
+        [(0, largest_float), (1, largest_float), (2, 1.0)],
+        "seq int, value double",
+    )
+    window = Window.orderBy("seq").rowsBetween(-1, Window.currentRow)
+
+    rows = [
+        row
+        for row in df.withColumn("total", F.sum("value").over(window))
+        .orderBy("seq")
+        .collect()
+    ]
+
+    assert rows[0]["total"] == largest_float
+    assert rows[1]["total"] is None
+    assert rows[2]["total"] == largest_float
+
+
+@pytest.mark.parametrize(
+    ("target", "value", "expected"),
+    [
+        ("int", Decimal("2147483648"), -2147483648),
+        ("bigint", Decimal("9223372036854775808"), -9223372036854775808),
+    ],
+)
+def test_decimal_to_integer_cast_obeys_ansi_overflow_mode(
+    spark, target, value, expected
+):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "true")
+    df = spark.createDataFrame([(value,)], "amount decimal(38,0)")
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", "false")
+        casted = df.select(F.col("amount").cast(target).alias("value"))
+        assert casted.collect()[0]["value"] == expected
+        try_casted = df.select(F.try_cast(F.col("amount"), target).alias("value"))
+        assert try_casted.collect()[0]["value"] is None
+
+        spark.conf.set("spark.sql.ansi.enabled", "true")
+        with pytest.raises(Exception, match="CAST_OVERFLOW|overflow|OVERFLOW"):
+            df.select(F.col("amount").cast(target).alias("value")).collect()
+        try_casted = df.select(F.try_cast(F.col("amount"), target).alias("value"))
+        assert try_casted.collect()[0]["value"] is None
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
+
+
+def test_decimal_average_overflow_obeys_ansi_mode_for_global_and_grouped_aggregates(
+    spark,
+):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "true")
+    df = spark.createDataFrame(
+        [("large", Decimal("1E+34"))], "kind string, amount decimal(38,0)"
+    )
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", "false")
+        expression = F.avg("amount").alias("average")
+        non_ansi_plan = df.agg(expression)
+        assert non_ansi_plan.collect()[0]["average"] is None
+        assert df.groupBy("kind").agg(expression).collect()[0]["average"] is None
+
+        spark.conf.set("spark.sql.ansi.enabled", "true")
+        # The already analyzed non-ANSI plan retains the setting it was built with.
+        assert non_ansi_plan.collect()[0]["average"] is None
+        with pytest.raises(Exception, match="overflow|OVERFLOW|precision"):
+            df.agg(expression).collect()
+        with pytest.raises(Exception, match="overflow|OVERFLOW|precision"):
+            df.groupBy("kind").agg(expression).collect()
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
+
+
+def test_select_expr_computed_projection_replaces_stale_arrow_map_metadata(spark):
+    pa = pytest.importorskip("pyarrow")
+    entry_type = pa.list_(pa.struct([("key", pa.string()), ("value", pa.int32())]))
+    entries = [{"key": "a", "value": 1}, {"key": "a", "value": 2}]
+    table = pa.Table.from_pylist(
+        [{"m": [("old", 1)], "entries": entries}],
+        schema=pa.schema(
+            [
+                ("m", pa.map_(pa.string(), pa.int32())),
+                ("entries", entry_type),
+            ]
+        ),
+    )
+
+    result = spark.createDataFrame(table).selectExpr("coalesce(entries, entries) AS m")
+
+    assert result.collect()[0]["m"] == entries
+    exported = result.toArrow()
+    assert exported.schema.field("m").type == entry_type
+    assert exported.to_pylist() == [{"m": entries}]
+
+
+def test_arrow_array_metadata_survives_struct_construction(spark):
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    entry_type = pa.list_(pa.struct([("key", pa.string()), ("value", pa.int32())]))
+    entries = [{"key": "a", "value": 1}, {"key": "a", "value": 2}]
+    table = pa.Table.from_pylist(
+        [{"entries": entries}], schema=pa.schema([("entries", entry_type)])
+    )
+
+    result = spark.createDataFrame(table).select(F.struct("entries").alias("outer"))
+
+    outer = result.collect()[0]["outer"]
+    if hasattr(outer, "asDict"):
+        outer = outer.asDict(recursive=True)
+    assert outer["entries"] == entries
+    exported = result.toArrow()
+    assert exported.schema.field("outer").type == pa.struct([("entries", entry_type)])
+    assert exported.to_pylist() == [{"outer": {"entries": entries}}]

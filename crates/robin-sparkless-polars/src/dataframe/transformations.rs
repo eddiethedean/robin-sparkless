@@ -741,9 +741,11 @@ fn compute_range_window_series(
             })
             .collect::<Result<Vec<_>, PolarsError>>()?
     };
+    let mut partition_starts = Vec::new();
 
     while idx < n {
         let part_start = idx;
+        partition_starts.push(part_start);
         let part_end = if part_series.is_empty() {
             n
         } else {
@@ -908,13 +910,23 @@ fn compute_range_window_series(
         _ => {
             let values = value_s.cast(&DataType::Float64)?;
             let values = values.f64()?;
-            let mut prefix_sums = Vec::with_capacity(n + 1);
+            let mut prefix_sums = Vec::with_capacity(n);
             let mut prefix_counts = Vec::with_capacity(n + 1);
-            prefix_sums.push(0.0);
             prefix_counts.push(0usize);
+            let mut partition_idx = 0usize;
+            let mut partition_sum = 0.0;
             for idx in 0..n {
+                while partition_idx + 1 < partition_starts.len()
+                    && partition_starts[partition_idx + 1] <= idx
+                {
+                    partition_idx += 1;
+                }
+                if partition_starts.get(partition_idx) == Some(&idx) {
+                    partition_sum = 0.0;
+                }
+                prefix_sums.push(partition_sum);
                 let value = values.get(idx);
-                prefix_sums.push(prefix_sums[idx] + value.unwrap_or(0.0));
+                partition_sum += value.unwrap_or(0.0);
                 prefix_counts.push(prefix_counts[idx] + usize::from(value.is_some()));
             }
             let mut result = Vec::with_capacity(n);
@@ -923,7 +935,8 @@ fn compute_range_window_series(
                     result.push(None);
                     continue;
                 };
-                let total = prefix_sums[right + 1] - prefix_sums[*left];
+                let total =
+                    prefix_sums[*right] + values.get(*right).unwrap_or(0.0) - prefix_sums[*left];
                 let count = prefix_counts[right + 1] - prefix_counts[*left];
                 result.push(if count == 0 {
                     None

@@ -8,5 +8,5 @@ license = "MIT"
 repository = "https://github.com/eddiethedean/robin-sparkless"
 
 [dependencies]
-sqlparser = "0.61"
+sqlparser = { version = "0.61", features = ["visitor"] }
 thiserror = "2.0"

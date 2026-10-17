@@ -2,6 +2,8 @@
 use super::compute_err;
 use chrono::{Datelike, TimeZone};
 use chrono_tz::Tz;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 use polars::prelude::*;
 use regex::Regex;
 use std::borrow::Cow;
@@ -5889,11 +5891,84 @@ fn f64_to_int_trunc(f: f64) -> Option<i64> {
     }
 }
 
+fn cast_decimal_to_integer(
+    series: &Series,
+    target: &DataType,
+    strict: bool,
+    try_cast: bool,
+) -> PolarsResult<Series> {
+    let DataType::Decimal(_, scale) = series.dtype() else {
+        unreachable!("decimal cast helper requires a decimal input")
+    };
+    let (bits, target_name) = match target {
+        DataType::Int32 => (32usize, "INT"),
+        DataType::Int64 => (64usize, "BIGINT"),
+        _ => unreachable!("target is Int32 or Int64"),
+    };
+    let divisor = BigInt::from(10).pow(*scale as u32);
+    let modulus = BigInt::from(1) << bits;
+    let sign_bit = BigInt::from(1) << (bits - 1);
+    let minimum = -&sign_bit;
+    let maximum = &sign_bit - BigInt::from(1);
+    let mut cast_values = Vec::with_capacity(series.len());
+
+    for idx in 0..series.len() {
+        let value = match series.get(idx)? {
+            AnyValue::Null => None,
+            AnyValue::Decimal(coefficient, _, _) | AnyValue::Int128(coefficient) => {
+                Some(BigInt::from(coefficient) / &divisor)
+            }
+            other => {
+                return Err(PolarsError::ComputeError(
+                    format!("decimal to integer received unexpected value {other:?}").into(),
+                ));
+            }
+        };
+        let Some(value) = value else {
+            cast_values.push(None);
+            continue;
+        };
+        if strict && (value < minimum || value > maximum) {
+            return Err(PolarsError::ComputeError(
+                format!("[CAST_OVERFLOW] decimal value {value} overflows {target_name}").into(),
+            ));
+        }
+        if try_cast && (value < minimum || value > maximum) {
+            cast_values.push(None);
+            continue;
+        }
+        let wrapped = ((&value % &modulus) + &modulus) % &modulus;
+        let signed = if wrapped >= sign_bit {
+            wrapped - &modulus
+        } else {
+            wrapped
+        };
+        cast_values.push(Some(signed));
+    }
+
+    match target {
+        DataType::Int32 => {
+            let values = cast_values
+                .into_iter()
+                .map(|value| value.map(|value| value.to_i32().expect("wrapped value fits i32")));
+            Ok(Int32Chunked::from_iter_options(series.name().clone(), values).into_series())
+        }
+        DataType::Int64 => {
+            let values = cast_values
+                .into_iter()
+                .map(|value| value.map(|value| value.to_i64().expect("wrapped value fits i64")));
+            Ok(Int64Chunked::from_iter_options(series.name().clone(), values).into_series())
+        }
+        _ => unreachable!("target is Int32 or Int64"),
+    }
+}
+
 /// Apply string-to-int cast. Handles string columns: empty/invalid -> null (Spark parity); passes through int columns; others error (strict) or null.
 pub fn apply_string_to_int(
     column: Column,
     strict: bool,
     target: DataType,
+    try_cast: bool,
 ) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -5946,7 +6021,8 @@ pub fn apply_string_to_int(
                 _ => unreachable!("target is Int32 or Int64"),
             }
         }
-        DataType::Int32 | DataType::Int64 | DataType::Decimal(_, _) => series.cast(&target)?,
+        DataType::Int32 | DataType::Int64 => series.cast(&target)?,
+        DataType::Decimal(_, _) => cast_decimal_to_integer(&series, &target, strict, try_cast)?,
         DataType::Float32 | DataType::Float64 => {
             // #649: f64/f32 -> i32/i64 with truncation; NaN/inf -> null (try_cast) or error (cast).
             let casted = series.cast(&DataType::Float64)?;
