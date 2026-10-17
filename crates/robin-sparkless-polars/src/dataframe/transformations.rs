@@ -763,8 +763,15 @@ fn compute_range_window_series(
         let part_len = part_end - part_start;
         let order_slice: Vec<Option<f64>> =
             (part_start..part_end).map(|i| order_ca.get(i)).collect();
+        let ordered_values: Vec<(usize, f64)> = order_slice
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, value)| value.map(|value| (idx, value)))
+            .collect();
         let start_f = start as f64;
         let end_f = end as f64;
+        let mut left = 0usize;
+        let mut right = 0usize;
         for i in 0..part_len {
             let Some(v) = order_slice[i] else {
                 continue;
@@ -779,16 +786,17 @@ fn compute_range_window_series(
             } else {
                 v + end_f
             };
-            let left = order_slice
-                .iter()
-                .position(|x| x.is_some_and(|order| order >= low));
-            let right = order_slice
-                .iter()
-                .rposition(|x| x.is_some_and(|order| order <= high));
-            if let (Some(left), Some(right)) = (left, right)
-                && left <= right
-            {
-                windows[part_start + i] = Some((part_start + left, part_start + right));
+            while left < ordered_values.len() && ordered_values[left].1 < low {
+                left += 1;
+            }
+            right = right.max(left);
+            while right < ordered_values.len() && ordered_values[right].1 <= high {
+                right += 1;
+            }
+            if left < right {
+                let first = ordered_values[left].0;
+                let last = ordered_values[right - 1].0;
+                windows[part_start + i] = Some((part_start + first, part_start + last));
             }
         }
 
@@ -797,12 +805,15 @@ fn compute_range_window_series(
 
     let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
     if agg == RangeWindowAgg::Count {
+        let mut counts = Vec::with_capacity(n + 1);
+        counts.push(0usize);
+        for idx in 0..n {
+            counts.push(counts[idx] + usize::from(!value_s.get(idx)?.is_null()));
+        }
         let mut result = Vec::with_capacity(n);
         for window in &windows {
             let count = match window {
-                Some((left, right)) => (*left..=*right)
-                    .filter(|idx| !value_s.get(*idx).is_ok_and(|value| value.is_null()))
-                    .count(),
+                Some((left, right)) => counts[right + 1] - counts[*left],
                 None => 0,
             };
             result.push(window.map(|_| count as f64));
@@ -834,18 +845,27 @@ fn compute_range_window_series(
                     )),
                 })
                 .collect::<PolarsResult<Vec<_>>>()?;
+            let mut prefix_sums = Vec::with_capacity(n + 1);
+            let mut prefix_counts = Vec::with_capacity(n + 1);
+            prefix_sums.push(BigInt::zero());
+            prefix_counts.push(0usize);
+            for coefficient in &coefficients {
+                prefix_sums.push(
+                    prefix_sums.last().unwrap().clone()
+                        + coefficient.as_ref().cloned().unwrap_or_else(BigInt::zero),
+                );
+                prefix_counts.push(
+                    prefix_counts.last().copied().unwrap() + usize::from(coefficient.is_some()),
+                );
+            }
             let mut result = Vec::with_capacity(n);
             for window in &windows {
                 let Some((left, right)) = window else {
                     result.push(None);
                     continue;
                 };
-                let mut total = BigInt::zero();
-                let mut count = 0usize;
-                for value in coefficients.iter().take(*right + 1).skip(*left).flatten() {
-                    total += value;
-                    count += 1;
-                }
+                let total = &prefix_sums[right + 1] - &prefix_sums[*left];
+                let count = prefix_counts[right + 1] - prefix_counts[*left];
                 if count == 0 {
                     result.push(None);
                 } else if agg == RangeWindowAgg::Mean {
@@ -856,7 +876,17 @@ fn compute_range_window_series(
                     if remainder.abs() * 2 >= divisor {
                         average += if remainder.is_negative() { -1 } else { 1 };
                     }
-                    result.push(average.to_i128());
+                    if average.abs() > maximum {
+                        if ansi_enabled {
+                            return Err(PolarsError::ComputeError(
+                                "[ARITHMETIC_OVERFLOW] decimal range window average exceeds supported precision"
+                                    .into(),
+                            ));
+                        }
+                        result.push(None);
+                    } else {
+                        result.push(average.to_i128());
+                    }
                 } else if total.abs() > maximum {
                     if ansi_enabled {
                         return Err(PolarsError::ComputeError(
@@ -873,56 +903,28 @@ fn compute_range_window_series(
                 .map(|series| series.into_series())
         }
         dtype if dtype.is_integer() && agg == RangeWindowAgg::Sum => {
-            let values = value_s.cast(&DataType::Int128)?;
-            let values = values.i128()?;
-            let modulus = BigInt::from(1u8) << 64usize;
-            let mut result = Vec::with_capacity(n);
-            for window in &windows {
-                let Some((left, right)) = window else {
-                    result.push(None);
-                    continue;
-                };
-                let mut total = BigInt::zero();
-                let mut count = 0usize;
-                for row in *left..=*right {
-                    if let Some(value) = values.get(row) {
-                        total += value;
-                        count += 1;
-                    }
-                }
-                if count == 0 {
-                    result.push(None);
-                    continue;
-                }
-                if (total < BigInt::from(i64::MIN) || total > BigInt::from(i64::MAX))
-                    && ansi_enabled
-                {
-                    return Err(PolarsError::ComputeError(
-                        "[ARITHMETIC_OVERFLOW] integer range window sum exceeds BIGINT".into(),
-                    ));
-                }
-                let wrapped = ((&total % &modulus) + &modulus) % &modulus;
-                result.push(wrapped.to_u64().map(|value| value as i64));
-            }
-            Ok(Series::new(value_col.into(), result))
+            crate::functions::integer_window_sum_series(value_s, &windows, ansi_enabled)
         }
         _ => {
             let values = value_s.cast(&DataType::Float64)?;
             let values = values.f64()?;
+            let mut prefix_sums = Vec::with_capacity(n + 1);
+            let mut prefix_counts = Vec::with_capacity(n + 1);
+            prefix_sums.push(0.0);
+            prefix_counts.push(0usize);
+            for idx in 0..n {
+                let value = values.get(idx);
+                prefix_sums.push(prefix_sums[idx] + value.unwrap_or(0.0));
+                prefix_counts.push(prefix_counts[idx] + usize::from(value.is_some()));
+            }
             let mut result = Vec::with_capacity(n);
             for window in &windows {
                 let Some((left, right)) = window else {
                     result.push(None);
                     continue;
                 };
-                let mut total = 0.0;
-                let mut count = 0usize;
-                for row in *left..=*right {
-                    if let Some(value) = values.get(row) {
-                        total += value;
-                        count += 1;
-                    }
-                }
+                let total = prefix_sums[right + 1] - prefix_sums[*left];
+                let count = prefix_counts[right + 1] - prefix_counts[*left];
                 result.push(if count == 0 {
                     None
                 } else if agg == RangeWindowAgg::Mean {

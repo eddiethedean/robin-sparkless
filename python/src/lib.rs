@@ -5087,6 +5087,123 @@ struct PyDataFrame {
 }
 
 impl PyDataFrame {
+    fn expr_uses_arrow_array_struct(&self, expr: &robin_sparkless::Expr) -> bool {
+        use robin_sparkless::Expr;
+
+        fn column_is_arrow_array_struct(dataframe: &PyDataFrame, name: &str) -> bool {
+            let source_path = if let Ok(resolved) = dataframe.inner.resolve_column_name(name) {
+                arrow_field_path("", &resolved)
+            } else {
+                let mut parts = name.split('.');
+                let root = parts.next().unwrap_or(name);
+                let root = dataframe
+                    .inner
+                    .resolve_column_name(root)
+                    .unwrap_or_else(|_| root.to_string());
+                parts.fold(arrow_field_path("", &root), |path, field| {
+                    arrow_field_path(&path, field)
+                })
+            };
+            dataframe.arrow_array_struct_paths.iter().any(|path| {
+                path == &source_path
+                    || path
+                        .strip_prefix(source_path.as_str())
+                        .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+            })
+        }
+
+        match expr {
+            Expr::Column(name) => column_is_arrow_array_struct(self, name.as_str()),
+            Expr::Alias(inner, _)
+            | Expr::Cast { expr: inner, .. }
+            | Expr::Sort { expr: inner, .. }
+            | Expr::Explode { input: inner, .. }
+            | Expr::KeepName(inner)
+            | Expr::RenameAlias { expr: inner, .. } => self.expr_uses_arrow_array_struct(inner),
+            Expr::BinaryExpr { left, right, .. } => {
+                self.expr_uses_arrow_array_struct(left) || self.expr_uses_arrow_array_struct(right)
+            }
+            Expr::Ternary {
+                predicate,
+                truthy,
+                falsy,
+            } => {
+                self.expr_uses_arrow_array_struct(predicate)
+                    || self.expr_uses_arrow_array_struct(truthy)
+                    || self.expr_uses_arrow_array_struct(falsy)
+            }
+            Expr::Function { input, .. }
+            | Expr::AnonymousFunction { input, .. }
+            | Expr::Display { inputs: input, .. } => input
+                .iter()
+                .any(|input| self.expr_uses_arrow_array_struct(input)),
+            Expr::Gather { expr, idx, .. } => {
+                self.expr_uses_arrow_array_struct(expr) || self.expr_uses_arrow_array_struct(idx)
+            }
+            Expr::SortBy { expr, by, .. } => {
+                self.expr_uses_arrow_array_struct(expr)
+                    || by
+                        .iter()
+                        .any(|by_expr| self.expr_uses_arrow_array_struct(by_expr))
+            }
+            Expr::Filter { input, by } => {
+                self.expr_uses_arrow_array_struct(input) || self.expr_uses_arrow_array_struct(by)
+            }
+            Expr::Over {
+                function,
+                partition_by,
+                order_by,
+                ..
+            } => {
+                self.expr_uses_arrow_array_struct(function)
+                    || partition_by
+                        .iter()
+                        .any(|expr| self.expr_uses_arrow_array_struct(expr))
+                    || order_by
+                        .as_ref()
+                        .is_some_and(|(expr, _)| self.expr_uses_arrow_array_struct(expr))
+            }
+            Expr::Slice {
+                input,
+                offset,
+                length,
+            } => {
+                self.expr_uses_arrow_array_struct(input)
+                    || self.expr_uses_arrow_array_struct(offset)
+                    || self.expr_uses_arrow_array_struct(length)
+            }
+            _ => false,
+        }
+    }
+
+    fn mark_array_struct_path(target: &mut Self, output: &str) {
+        let is_key_value_array = target
+            .inner
+            .schema_engine()
+            .ok()
+            .and_then(|schema| {
+                schema
+                    .fields()
+                    .iter()
+                    .find(|field| field.name == output)
+                    .map(|field| field.data_type.clone())
+            })
+            .is_some_and(|data_type| {
+                matches!(
+                    data_type,
+                    DataType::Array(element_type)
+                        if matches!(element_type.as_ref(), DataType::Struct(fields)
+                            if fields.iter().any(|field| field.name == "key")
+                                && fields.iter().any(|field| field.name == "value"))
+                )
+            });
+        if is_key_value_array {
+            target
+                .arrow_array_struct_paths
+                .insert(arrow_field_path("", output));
+        }
+    }
+
     fn remove_metadata_root(target: &mut Self, root: &str) {
         target.logical_map_columns.remove(root);
         let root = arrow_field_path("", root);
@@ -5233,6 +5350,8 @@ impl PyDataFrame {
         Self::remove_metadata_root(&mut wrapped, name);
         if let Some(source) = Self::column_source(expr) {
             self.copy_column_metadata(&source, name, &mut wrapped);
+        } else if self.expr_uses_arrow_array_struct(expr) {
+            Self::mark_array_struct_path(&mut wrapped, name);
         }
         wrapped
     }
@@ -5243,6 +5362,8 @@ impl PyDataFrame {
             Self::remove_metadata_root(&mut wrapped, name);
             if let Some(source) = Self::column_source(column.expr()) {
                 self.copy_column_metadata(&source, name, &mut wrapped);
+            } else if self.expr_uses_arrow_array_struct(column.expr()) {
+                Self::mark_array_struct_path(&mut wrapped, name);
             }
         }
         wrapped
@@ -5388,14 +5509,28 @@ impl PyDataFrame {
         }
 
         let mut wrapped = self.wrap_derived(df);
-        for item in items {
-            let SelectItem::Expr(expr) = item else {
-                continue;
+        let output_names = wrapped.inner.columns().unwrap_or_default();
+        for output in &output_names {
+            Self::remove_metadata_root(&mut wrapped, output);
+        }
+        for (item_idx, item) in items.iter().enumerate() {
+            let (source, output) = match item {
+                SelectItem::ColumnName(source) => (
+                    source.to_string(),
+                    source.split('.').next_back().unwrap_or(source).to_string(),
+                ),
+                SelectItem::Expr(expr) => {
+                    let Some(names) = source_and_output_names(expr) else {
+                        if self.expr_uses_arrow_array_struct(expr) {
+                            if let Some(output) = output_names.get(item_idx) {
+                                Self::mark_array_struct_path(&mut wrapped, output);
+                            }
+                        }
+                        continue;
+                    };
+                    names
+                }
             };
-            let Some((source, output)) = source_and_output_names(expr) else {
-                continue;
-            };
-            Self::remove_metadata_root(&mut wrapped, &output);
             self.copy_column_metadata(&source, &output, &mut wrapped);
         }
         wrapped

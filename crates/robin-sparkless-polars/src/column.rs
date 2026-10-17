@@ -2711,30 +2711,37 @@ impl Column {
                 Some(partition_exprs.clone()),
                 Some((order_exprs, default_opts)),
             );
-            let expr =
-                if let Some(ref src) = self.source_for_running_mean {
-                    crate::functions::running_avg_expr(col(src), Some((start, end)))
-                        .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
-                } else if let Some(ref src) = self.source_for_running {
-                    crate::functions::running_sum_expr(
-                        col(src),
-                        crate::udf_context::get_thread_ansi_enabled(),
-                        Some((start, end)),
-                    )
-                    .over_with_options(
-                        over_opts.0,
-                        over_opts.1,
-                        WindowMapping::default(),
-                    )?
-                } else if let Some(ref src) = self.source_for_running_count {
-                    col(src)
-                        .is_not_null()
-                        .cast(DataType::Int64)
-                        .rolling_sum(rolling_opts)
-                        .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
-                } else {
-                    unreachable!("use_rolling requires has_rolling_source")
-                };
+            let expr = if let Some(ref src) = self.source_for_running_mean {
+                crate::functions::running_avg_expr(
+                    col(src),
+                    crate::udf_context::get_thread_ansi_enabled(),
+                    Some((start, end)),
+                )
+                .over_with_options(
+                    over_opts.0,
+                    over_opts.1,
+                    WindowMapping::default(),
+                )?
+            } else if let Some(ref src) = self.source_for_running {
+                crate::functions::running_sum_expr(
+                    col(src),
+                    crate::udf_context::get_thread_ansi_enabled(),
+                    Some((start, end)),
+                )
+                .over_with_options(
+                    over_opts.0,
+                    over_opts.1,
+                    WindowMapping::default(),
+                )?
+            } else if let Some(ref src) = self.source_for_running_count {
+                col(src)
+                    .is_not_null()
+                    .cast(DataType::Int64)
+                    .rolling_sum(rolling_opts)
+                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
+            } else {
+                unreachable!("use_rolling requires has_rolling_source")
+            };
             return Ok(Self::from_expr(expr, None));
         }
 
@@ -2774,7 +2781,11 @@ impl Column {
 
         let base_expr = if use_running_aggregate {
             if let Some(ref src) = self.source_for_running_mean {
-                crate::functions::running_avg_expr(col(src), None)
+                crate::functions::running_avg_expr(
+                    col(src),
+                    crate::udf_context::get_thread_ansi_enabled(),
+                    None,
+                )
             } else if let Some(ref src) = self.source_for_running {
                 crate::functions::running_sum_expr(
                     col(src),

@@ -4,6 +4,7 @@ use crate::column::Column;
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
 use polars::prelude::*;
+use std::collections::VecDeque;
 
 /// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
 /// count(column): count non-null values in that column (PySpark parity, #1209).
@@ -250,11 +251,121 @@ pub(crate) fn running_sum_expr(input: Expr, ansi_enabled: bool, frame: Option<(i
     )
 }
 
-pub(crate) fn running_avg_expr(input: Expr, frame: Option<(i64, i64)>) -> Expr {
+pub(crate) fn integer_window_sum_series(
+    series: &Series,
+    windows: &[Option<(usize, usize)>],
+    ansi_enabled: bool,
+) -> PolarsResult<Series> {
+    let ints = series.cast(&DataType::Int128)?;
+    let ints = ints.i128()?;
+    let mut sums = Vec::with_capacity(series.len());
+    let mut counts = Vec::with_capacity(series.len());
+    let mut total = BigInt::zero();
+    let mut count = 0usize;
+    for idx in 0..series.len() {
+        if let Some(value) = ints.get(idx) {
+            total += value;
+            count += 1;
+        }
+        sums.push(total.clone());
+        counts.push(count);
+    }
+
+    let overflow = if ansi_enabled {
+        integer_window_overflow_flags(&sums, windows)
+    } else {
+        vec![false; series.len()]
+    };
+    let modulus = BigInt::from(1u8) << 64usize;
+    let mut values = Vec::with_capacity(series.len());
+    for (idx, window) in windows.iter().enumerate() {
+        let Some((left, right)) = window else {
+            values.push(None);
+            continue;
+        };
+        let previous_sum = if *left == 0 {
+            BigInt::zero()
+        } else {
+            sums[*left - 1].clone()
+        };
+        let previous_count = if *left == 0 { 0 } else { counts[*left - 1] };
+        if counts[*right] == previous_count {
+            values.push(None);
+            continue;
+        }
+        if overflow[idx] {
+            return Err(PolarsError::ComputeError(
+                "[ARITHMETIC_OVERFLOW] integer window sum exceeds BIGINT".into(),
+            ));
+        }
+        let sum = sums[*right].clone() - previous_sum;
+        let wrapped = ((&sum % &modulus) + &modulus) % &modulus;
+        values.push(wrapped.to_u64().map(|value| value as i64));
+    }
+    Ok(Series::new(series.name().clone(), values))
+}
+
+fn integer_window_overflow_flags(
+    prefix_sums: &[BigInt],
+    windows: &[Option<(usize, usize)>],
+) -> Vec<bool> {
+    let mut overflow = vec![false; windows.len()];
+    let mut min_indices = VecDeque::new();
+    let mut max_indices = VecDeque::new();
+    let mut next_index = 0usize;
+    let minimum = BigInt::from(i64::MIN);
+    let maximum = BigInt::from(i64::MAX);
+
+    for (window_idx, window) in windows.iter().enumerate() {
+        let Some((left, right)) = window else {
+            continue;
+        };
+        while next_index <= *right {
+            while min_indices
+                .back()
+                .is_some_and(|&idx| prefix_sums[idx] >= prefix_sums[next_index])
+            {
+                min_indices.pop_back();
+            }
+            min_indices.push_back(next_index);
+            while max_indices
+                .back()
+                .is_some_and(|&idx| prefix_sums[idx] <= prefix_sums[next_index])
+            {
+                max_indices.pop_back();
+            }
+            max_indices.push_back(next_index);
+            next_index += 1;
+        }
+        while min_indices.front().is_some_and(|&idx| idx < *left) {
+            min_indices.pop_front();
+        }
+        while max_indices.front().is_some_and(|&idx| idx < *left) {
+            max_indices.pop_front();
+        }
+
+        let base = if *left == 0 {
+            BigInt::zero()
+        } else {
+            prefix_sums[left - 1].clone()
+        };
+        let min_partial = &prefix_sums[*min_indices.front().unwrap()] - &base;
+        let max_partial = &prefix_sums[*max_indices.front().unwrap()] - &base;
+        overflow[window_idx] = min_partial < minimum || max_partial > maximum;
+    }
+    overflow
+}
+
+pub(crate) fn running_avg_expr(input: Expr, ansi_enabled: bool, frame: Option<(i64, i64)>) -> Expr {
     input.apply(
         move |column| {
-            running_numeric_series(column.as_materialized_series().clone(), true, false, frame)
-                .map(Into::into)
+            running_numeric_series(
+                column.as_materialized_series().clone(),
+                true,
+                ansi_enabled,
+                frame,
+            )
+            .map(Into::into)
         },
         |_schema, field| {
             let dtype = match field.dtype() {
@@ -342,7 +453,17 @@ fn running_numeric_series(
                     if remainder.abs() * 2 >= divisor {
                         rounded += if remainder.is_negative() { -1 } else { 1 };
                     }
-                    values.push(rounded.to_i128());
+                    if rounded.abs() > max_decimal {
+                        if ansi_enabled {
+                            return Err(PolarsError::ComputeError(
+                                "[ARITHMETIC_OVERFLOW] decimal window average exceeds supported precision"
+                                    .into(),
+                            ));
+                        }
+                        values.push(None);
+                    } else {
+                        values.push(rounded.to_i128());
+                    }
                 } else if sum.abs() > max_decimal {
                     if ansi_enabled {
                         return Err(PolarsError::ComputeError(
@@ -364,49 +485,10 @@ fn running_numeric_series(
                 let floats = series.cast(&DataType::Float64)?;
                 running_float_series(floats, true, frame)
             } else {
-                let ints = series.cast(&DataType::Int128)?;
-                let ints = ints.i128()?;
-                let mut sums = Vec::with_capacity(series.len());
-                let mut counts = Vec::with_capacity(series.len());
-                let mut total = BigInt::zero();
-                let mut count = 0usize;
-                for idx in 0..series.len() {
-                    if let Some(value) = ints.get(idx) {
-                        total += value;
-                        count += 1;
-                    }
-                    sums.push(total.clone());
-                    counts.push(count);
-                }
-                let mut values = Vec::with_capacity(series.len());
-                for idx in 0..series.len() {
-                    let Some((left, right)) = window_bounds(idx, series.len(), frame) else {
-                        values.push(None);
-                        continue;
-                    };
-                    let prev_sum = if left == 0 {
-                        BigInt::zero()
-                    } else {
-                        sums[left - 1].clone()
-                    };
-                    let sum = sums[right].clone() - prev_sum;
-                    let prev_count = if left == 0 { 0 } else { counts[left - 1] };
-                    if counts[right] == prev_count {
-                        values.push(None);
-                        continue;
-                    }
-                    if sum < BigInt::from(i64::MIN) || sum > BigInt::from(i64::MAX) {
-                        if ansi_enabled {
-                            return Err(PolarsError::ComputeError(
-                                "[ARITHMETIC_OVERFLOW] integer window sum exceeds BIGINT".into(),
-                            ));
-                        }
-                    }
-                    let modulus = BigInt::from(1u8) << 64usize;
-                    let wrapped = ((&sum % &modulus) + &modulus) % &modulus;
-                    values.push(wrapped.to_u64().map(|value| value as i64));
-                }
-                Ok(Series::new(series.name().clone(), values))
+                let windows = (0..series.len())
+                    .map(|idx| window_bounds(idx, series.len(), frame))
+                    .collect::<Vec<_>>();
+                integer_window_sum_series(&series, &windows, ansi_enabled)
             }
         }
         _ => {

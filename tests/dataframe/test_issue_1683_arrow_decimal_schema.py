@@ -533,6 +533,59 @@ def test_ordered_integer_window_sum_keeps_bits_above_float_precision(spark) -> N
     ]
 
 
+@pytest.mark.parametrize("frame_kind", ["rows", "range"])
+def test_decimal_window_average_overflow_obeys_ansi_mode(spark, frame_kind) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    Window = get_imports().Window
+    df = spark.createDataFrame([(1, Decimal("1E+34"))], "seq int, amount decimal(38,0)")
+    window = Window.orderBy("seq")
+    if frame_kind == "rows":
+        window = window.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+    else:
+        window = window.rangeBetween(Window.unboundedPreceding, Window.currentRow)
+
+    previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "true")
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", "false")
+        result = df.withColumn("average", F.avg("amount").over(window))
+        assert result.collect()[0]["average"] is None
+
+        spark.conf.set("spark.sql.ansi.enabled", "true")
+        with pytest.raises(Exception, match="overflow|OVERFLOW|precision"):
+            df.withColumn("average", F.avg("amount").over(window)).collect()
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
+
+
+@pytest.mark.parametrize("frame_kind", ["rows", "range"])
+def test_ansi_integer_window_sum_detects_intermediate_overflow(
+    spark, frame_kind
+) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    Window = get_imports().Window
+    df = spark.createDataFrame(
+        [(1, 9_223_372_036_854_775_807), (2, 1), (3, -1)],
+        "seq int, amount bigint",
+    )
+    window = Window.orderBy("seq")
+    if frame_kind == "rows":
+        window = window.rowsBetween(0, 2)
+    else:
+        window = window.rangeBetween(0, 2)
+
+    previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "true")
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", "true")
+        with pytest.raises(Exception, match="overflow|OVERFLOW|BIGINT"):
+            df.withColumn("total", F.sum("amount").over(window)).collect()
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
+
+
 def test_arrow_map_schema_and_nested_map_round_trip(spark) -> None:
     pa = pytest.importorskip("pyarrow")
     from sparkless.testing import get_imports
@@ -589,10 +642,15 @@ def test_overwriting_arrow_map_with_array_does_not_reuse_stale_map_type(spark) -
     replaced = spark.createDataFrame(table).withColumn("m", F.col("entries"))
     exported = replaced.toArrow()
     projected = spark.createDataFrame(table).select(F.col("entries").alias("m"))
+    computed = spark.createDataFrame(table).select(
+        F.coalesce(F.col("entries"), F.col("entries")).alias("m")
+    )
 
     assert exported.schema.field("m").type == entries_type
     assert exported.to_pylist()[0]["m"] == [{"key": "new", "value": 2}]
     assert projected.toArrow().schema.field("m").type == entries_type
+    assert isinstance(computed.schema["m"].dataType, get_imports().ArrayType)
+    assert computed.toArrow().schema.field("m").type == entries_type
 
 
 def test_decimal_pivot_sum_and_average_keep_spark_types(spark) -> None:
