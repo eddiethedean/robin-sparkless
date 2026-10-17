@@ -1,6 +1,6 @@
 //! Thread-local UDF context for call_udf. Set by the main crate's SparkSession.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use robin_sparkless_core::SessionRuntimeConfig;
@@ -9,6 +9,7 @@ use crate::udf_registry::UdfRegistry;
 
 thread_local! {
     static THREAD_UDF_CONTEXT: RefCell<Option<UdfContext>> = const { RefCell::new(None) };
+    static THREAD_DECIMAL_ALLOW_PRECISION_LOSS: Cell<bool> = const { Cell::new(true) };
 }
 
 /// Context set per thread when executing with a SparkSession (registry, case_sensitive, session timezone, runtime config).
@@ -55,6 +56,7 @@ pub fn set_thread_udf_context_full(
             runtime_config,
         })
     });
+    set_thread_decimal_allow_precision_loss(true);
 }
 
 /// Get the thread-local UDF context for call_udf.
@@ -74,6 +76,16 @@ pub fn get_thread_runtime_config() -> SessionRuntimeConfig {
             .map(|ctx| ctx.runtime_config.clone())
             .unwrap_or_default()
     })
+}
+
+/// Whether decimal arithmetic may reduce scale to fit Spark's maximum precision.
+pub fn get_thread_decimal_allow_precision_loss() -> bool {
+    THREAD_DECIMAL_ALLOW_PRECISION_LOSS.with(Cell::get)
+}
+
+/// Update decimal precision behavior independently of `SessionRuntimeConfig`'s public fields.
+pub fn set_thread_decimal_allow_precision_loss(allow: bool) {
+    THREAD_DECIMAL_ALLOW_PRECISION_LOSS.with(|cell| cell.set(allow));
 }
 
 /// Whether ANSI SQL mode is enabled for the current thread.
@@ -113,4 +125,5 @@ pub fn update_thread_runtime_config(runtime_config: SessionRuntimeConfig) {
 /// Clear the thread-local UDF context. Called when session.stop() is invoked.
 pub fn clear_thread_udf_context() {
     THREAD_UDF_CONTEXT.with(|cell| *cell.borrow_mut() = None);
+    set_thread_decimal_allow_precision_loss(true);
 }

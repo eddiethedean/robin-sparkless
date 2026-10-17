@@ -14,7 +14,10 @@ use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
-use robin_sparkless_core::{PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils};
+use robin_sparkless_core::{
+    PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils,
+    decimal_allow_precision_loss_from_session_map,
+};
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -2115,6 +2118,9 @@ impl SparkSession {
             self.is_case_sensitive(),
             session_tz,
             self.runtime_config.clone(),
+        );
+        crate::set_thread_decimal_allow_precision_loss(
+            decimal_allow_precision_loss_from_session_map(&self.config),
         );
     }
 

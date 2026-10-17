@@ -1330,7 +1330,9 @@ fn sql_expr_to_polars(
                 if let Some(expr) = super::decimal::binary_expr(
                     l.clone(), r.clone(), op, &schema,
                     session.runtime_config().ansi_enabled,
-                    session.runtime_config().decimal_allow_precision_loss,
+                    robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                        session.get_config(),
+                    ),
                 )? {
                     return Ok(expr);
                 }

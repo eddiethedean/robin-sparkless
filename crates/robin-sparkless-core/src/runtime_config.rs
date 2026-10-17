@@ -34,8 +34,6 @@ impl PysparkCompat {
 pub struct SessionRuntimeConfig {
     pub pyspark_compat: PysparkCompat,
     pub ansi_enabled: bool,
-    /// Spark decimal arithmetic should retain precision up to the maximum by default.
-    pub decimal_allow_precision_loss: bool,
     pub disable_map_key_normalization: bool,
     pub infer_map_type_from_first_pair: bool,
     pub infer_array_type_from_first_element: bool,
@@ -49,6 +47,16 @@ pub struct SessionRuntimeConfig {
     pub legacy_mssqlserver_datetime_mapping: bool,
     /// PySpark 3.5 JDBC type mapping for DB2 (legacy restore).
     pub legacy_db2_datetime_mapping: bool,
+}
+
+/// Whether decimal arithmetic may reduce scale to fit Spark's maximum precision.
+///
+/// Kept separate from [`SessionRuntimeConfig`] so adding this setting does not break
+/// downstream struct literals for that public type.
+pub fn decimal_allow_precision_loss_from_session_map(map: &HashMap<String, String>) -> bool {
+    map.get("spark.sql.decimalOperations.allowPrecisionLoss")
+        .map(|value| parse_bool(value))
+        .unwrap_or(true)
 }
 
 impl Default for SessionRuntimeConfig {
@@ -76,7 +84,6 @@ impl SessionRuntimeConfig {
             PysparkCompat::V3_5 => Self {
                 pyspark_compat: PysparkCompat::V3_5,
                 ansi_enabled: false,
-                decimal_allow_precision_loss: true,
                 disable_map_key_normalization: true,
                 infer_map_type_from_first_pair: true,
                 infer_array_type_from_first_element: true,
@@ -89,7 +96,6 @@ impl SessionRuntimeConfig {
             PysparkCompat::V4_0 => Self {
                 pyspark_compat: PysparkCompat::V4_0,
                 ansi_enabled: true,
-                decimal_allow_precision_loss: true,
                 disable_map_key_normalization: false,
                 infer_map_type_from_first_pair: false,
                 infer_array_type_from_first_element: false,
@@ -111,9 +117,6 @@ impl SessionRuntimeConfig {
 
         if let Some(v) = map.get("spark.sql.ansi.enabled") {
             cfg.ansi_enabled = parse_bool(v);
-        }
-        if let Some(v) = map.get("spark.sql.decimalOperations.allowPrecisionLoss") {
-            cfg.decimal_allow_precision_loss = parse_bool(v);
         }
         if let Some(v) = map.get("spark.sql.legacy.disableMapKeyNormalization") {
             cfg.disable_map_key_normalization = parse_bool(v);
@@ -240,15 +243,13 @@ mod tests {
 
     #[test]
     fn decimal_precision_loss_defaults_to_true_and_can_be_disabled() {
-        assert!(SessionRuntimeConfig::default().decimal_allow_precision_loss);
-
         let mut m = HashMap::new();
+        assert!(decimal_allow_precision_loss_from_session_map(&m));
         m.insert(
             "spark.sql.decimalOperations.allowPrecisionLoss".to_string(),
             "false".to_string(),
         );
-        let c = SessionRuntimeConfig::from_session_map(&m);
-        assert!(!c.decimal_allow_precision_loss);
+        assert!(!decimal_allow_precision_loss_from_session_map(&m));
     }
 
     #[test]

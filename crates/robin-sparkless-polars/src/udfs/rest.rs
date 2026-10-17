@@ -3881,7 +3881,7 @@ fn pyspark_decimal_binary_arith(
 pub fn apply_pyspark_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     apply_pyspark_add_with_precision_loss(
         columns,
-        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
     )
 }
 
@@ -3905,7 +3905,7 @@ pub(crate) fn apply_pyspark_add_with_precision_loss(
 pub fn apply_pyspark_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     apply_pyspark_subtract_with_precision_loss(
         columns,
-        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
     )
 }
 
@@ -3929,7 +3929,7 @@ pub(crate) fn apply_pyspark_subtract_with_precision_loss(
 pub fn apply_pyspark_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     apply_pyspark_multiply_with_precision_loss(
         columns,
-        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
     )
 }
 
@@ -3954,7 +3954,7 @@ pub(crate) fn apply_pyspark_multiply_with_precision_loss(
 pub fn apply_pyspark_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     apply_pyspark_divide_with_precision_loss(
         columns,
-        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
     )
 }
 
@@ -4270,7 +4270,7 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
 pub fn apply_ansi_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     apply_ansi_divide_with_precision_loss(
         columns,
-        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
     )
 }
 

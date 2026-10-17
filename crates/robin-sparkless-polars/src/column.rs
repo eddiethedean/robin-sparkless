@@ -1794,8 +1794,7 @@ impl Column {
     pub fn multiply_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let op = crate::decimal_arithmetic::BinaryOp::Multiply;
-        let allow_precision_loss =
-            crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss;
+        let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
         let expr = self.expr().clone().map_many(
             move |cols| {
                 expect_col(crate::udfs::apply_pyspark_multiply_with_precision_loss(
@@ -1823,8 +1822,7 @@ impl Column {
     pub fn add_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let op = crate::decimal_arithmetic::BinaryOp::Add;
-        let allow_precision_loss =
-            crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss;
+        let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
         let expr = self.expr().clone().map_many(
             move |cols| {
                 expect_col(crate::udfs::apply_pyspark_add_with_precision_loss(
@@ -1851,8 +1849,7 @@ impl Column {
     pub fn subtract_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let op = crate::decimal_arithmetic::BinaryOp::Subtract;
-        let allow_precision_loss =
-            crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss;
+        let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
         let expr = self.expr().clone().map_many(
             move |cols| {
                 expect_col(crate::udfs::apply_pyspark_subtract_with_precision_loss(
@@ -1879,8 +1876,7 @@ impl Column {
     pub fn divide_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
-        let allow_precision_loss =
-            crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss;
+        let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
         let op = crate::decimal_arithmetic::BinaryOp::Divide;
         let expr = self.expr().clone().map_many(
             move |cols| {

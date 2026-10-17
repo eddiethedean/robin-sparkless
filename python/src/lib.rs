@@ -921,6 +921,11 @@ impl PySparkSessionBuilder {
                                 .cloned(),
                             sess_guard.inner.runtime_config().clone(),
                         );
+                        robin_sparkless::set_thread_decimal_allow_precision_loss(
+                            robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                                sess_guard.inner.get_config(),
+                            ),
+                        );
                         // Reset builder to avoid config pollution between tests
                         slf.inner = SparkSessionBuilder::new();
                         ensure_thread_active_session(py, sess.clone_ref(py));
@@ -1699,6 +1704,11 @@ fn unregister_active_session_by_ptr(py: Python<'_>, ptr: *mut pyo3::ffi::PyObjec
                     .cloned(),
                 session.runtime_config().clone(),
             );
+            robin_sparkless::set_thread_decimal_allow_precision_loss(
+                robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                    session.get_config(),
+                ),
+            );
         }
     } else {
         robin_sparkless::clear_thread_udf_context();
@@ -1804,6 +1814,11 @@ impl PySparkSession {
                 .get("spark.sql.session.timeZone")
                 .cloned(),
             session.runtime_config().clone(),
+        );
+        robin_sparkless::set_thread_decimal_allow_precision_loss(
+            robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                session.get_config(),
+            ),
         );
         let backend_type = slf.backend_type.borrow().clone();
         let obj = Py::new(
