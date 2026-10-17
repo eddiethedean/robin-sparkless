@@ -6162,7 +6162,7 @@ pub fn apply_string_to_int(
                 _ => unreachable!("target is Int16, Int32, or Int64"),
             }
         }
-        DataType::Int32 | DataType::Int64 => series.cast(&target)?,
+        DataType::Int16 | DataType::Int32 | DataType::Int64 => series.cast(&target)?,
         DataType::Decimal(_, _) => cast_decimal_to_integer(&series, &target, strict, try_cast)?,
         DataType::Float32 | DataType::Float64 => {
             // #649: f64/f32 -> i32/i64 with truncation; NaN/inf -> null (try_cast) or error (cast).

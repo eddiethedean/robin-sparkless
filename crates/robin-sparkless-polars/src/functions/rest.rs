@@ -4383,6 +4383,39 @@ mod tests {
     }
 
     #[test]
+    fn cast_smallint_column_to_integer_types() {
+        let input = Series::new("x".into(), vec![Some(12_i16), None, Some(-7)]);
+
+        for target in [DataType::Int16, DataType::Int32, DataType::Int64] {
+            let cast = crate::udfs::apply_string_to_int(
+                input.clone().into_column(),
+                true,
+                target.clone(),
+                false,
+            )
+            .unwrap()
+            .unwrap();
+
+            assert_eq!(cast.dtype(), &target);
+            match target {
+                DataType::Int16 => assert_eq!(
+                    cast.i16().unwrap().into_iter().collect::<Vec<_>>(),
+                    vec![Some(12), None, Some(-7)]
+                ),
+                DataType::Int32 => assert_eq!(
+                    cast.i32().unwrap().into_iter().collect::<Vec<_>>(),
+                    vec![Some(12), None, Some(-7)]
+                ),
+                DataType::Int64 => assert_eq!(
+                    cast.i64().unwrap().into_iter().collect::<Vec<_>>(),
+                    vec![Some(12), None, Some(-7)]
+                ),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
     fn test_create_map_empty() {
         // PySpark F.create_map() with no args: column of empty maps (#275).
         let empty_col = create_map(&[]).unwrap();
