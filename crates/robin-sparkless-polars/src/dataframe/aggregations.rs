@@ -1536,8 +1536,11 @@ impl CubeRollupData {
 
     /// Sum of a column per grouping set (PySpark cube/rollup .sum(col)).
     pub fn sum(&self, column: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
-        self.agg(vec![col(column).sum().alias(format!("sum({column})"))])
+        self.agg(vec![
+            crate::functions::sum(&Column::new(column.to_string()))
+                .into_expr()
+                .alias(format!("sum({column})")),
+        ])
     }
 
     /// Average of one or more columns per grouping set (PySpark cube/rollup .avg(...)).
@@ -1547,10 +1550,13 @@ impl CubeRollupData {
                 "avg requires at least one column".into(),
             ));
         }
-        use polars::prelude::*;
         let agg_exprs: Vec<Expr> = columns
             .iter()
-            .map(|c| col(*c).mean().alias(format!("avg({c})")))
+            .map(|c| {
+                crate::functions::avg(&Column::new((*c).to_string()))
+                    .into_expr()
+                    .alias(format!("avg({c})"))
+            })
             .collect();
         self.agg(agg_exprs)
     }
