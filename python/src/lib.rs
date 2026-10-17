@@ -8141,21 +8141,23 @@ impl PyDataFrame {
             .iter()
             .map(|f| {
                 let ty = match &f.data_type {
-                    DataType::String => "string",
-                    DataType::Short => "smallint",
-                    DataType::Integer => "int",
-                    DataType::Long => "long",
-                    DataType::Double => "double",
-                    DataType::Decimal(_, _) => "decimal",
-                    DataType::Boolean => "boolean",
-                    DataType::Date => "date",
-                    DataType::Timestamp => "timestamp",
-                    DataType::Binary => "binary",
-                    DataType::Array(_) => "array",
-                    DataType::Map(_, _) => "map",
-                    DataType::Struct(_) => "struct",
+                    DataType::String => "string".to_string(),
+                    DataType::Short => "smallint".to_string(),
+                    DataType::Integer => "int".to_string(),
+                    DataType::Long => "long".to_string(),
+                    DataType::Double => "double".to_string(),
+                    DataType::Decimal(precision, scale) => {
+                        format!("decimal({precision},{scale})")
+                    }
+                    DataType::Boolean => "boolean".to_string(),
+                    DataType::Date => "date".to_string(),
+                    DataType::Timestamp => "timestamp".to_string(),
+                    DataType::Binary => "binary".to_string(),
+                    DataType::Array(_) => "array".to_string(),
+                    DataType::Map(_, _) => "map".to_string(),
+                    DataType::Struct(_) => "struct".to_string(),
                 };
-                (f.name.clone(), ty.to_string())
+                (f.name.clone(), ty)
             })
             .collect())
     }

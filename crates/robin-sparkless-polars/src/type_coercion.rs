@@ -478,6 +478,26 @@ pub fn coerce_for_pyspark_comparison(
         }
     }
 
+    fn decimal_shape_of_integral_column(expr: &Expr, dtype: &DataType) -> Option<(usize, usize)> {
+        // Preserve the tighter value-based shapes above for literals. For a column,
+        // use its declared integral width so comparisons never round through a
+        // clamped decimal common type.
+        if matches!(expr, Expr::Literal(_)) {
+            return None;
+        }
+        Some(match dtype {
+            DataType::Int8 | DataType::UInt8 => (3, 0),
+            DataType::Int16 | DataType::UInt16 => (5, 0),
+            DataType::Int32 | DataType::UInt32 => (10, 0),
+            DataType::Int64 | DataType::UInt64 => (20, 0),
+            _ => return None,
+        })
+    }
+
+    fn decimal_shape_of_numeric(expr: &Expr, dtype: &DataType) -> Option<(usize, usize)> {
+        decimal_shape_of_literal(expr).or_else(|| decimal_shape_of_integral_column(expr, dtype))
+    }
+
     // Keep decimal comparisons in decimal arithmetic. Promoting a Decimal column
     // and a numeric literal to Float64 loses integer precision above 2^53.
     if is_numeric(left_type) && is_numeric(right_type) {
@@ -486,12 +506,12 @@ pub fn coerce_for_pyspark_comparison(
                 Some(((*lp - *ls).max(*rp - *rs), (*ls).max(*rs)))
             }
             (DataType::Decimal(p, s), _) => {
-                decimal_shape_of_literal(&right).map(|(literal_p, literal_s)| {
+                decimal_shape_of_numeric(&right, right_type).map(|(literal_p, literal_s)| {
                     ((*p - *s).max(literal_p - literal_s), (*s).max(literal_s))
                 })
             }
             (_, DataType::Decimal(p, s)) => {
-                decimal_shape_of_literal(&left).map(|(literal_p, literal_s)| {
+                decimal_shape_of_numeric(&left, left_type).map(|(literal_p, literal_s)| {
                     ((*p - *s).max(literal_p - literal_s), (*s).max(literal_s))
                 })
             }

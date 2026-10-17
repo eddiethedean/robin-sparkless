@@ -5,6 +5,7 @@
 
 pub mod column;
 pub mod dataframe;
+pub(crate) mod decimal_arithmetic;
 pub mod engine_backend;
 pub mod error;
 pub mod expr_ir;

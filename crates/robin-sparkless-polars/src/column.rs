@@ -1789,26 +1789,46 @@ impl Column {
 
     /// Multiply with PySpark-style string/number coercion (used by Python Column operators).
     ///
-    /// Both operands are coerced to Double when used from Python; string columns are parsed
-    /// as doubles where possible, invalid strings become null.
+    /// Decimal operands use exact decimal arithmetic. Other operands use PySpark-style
+    /// Double coercion; string columns are parsed where possible and invalid strings become null.
     pub fn multiply_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
+        let op = crate::decimal_arithmetic::BinaryOp::Multiply;
         let expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_pyspark_multiply(cols)),
             &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+            move |_schema, fields| {
+                let dtype = crate::decimal_arithmetic::result_type(
+                    fields[0].dtype(),
+                    fields[1].dtype(),
+                    op,
+                    true,
+                )
+                .unwrap_or(DataType::Float64);
+                Ok(Field::new(fields[0].name().clone(), dtype))
+            },
         );
         Self::from_expr(expr, None)
     }
 
     /// Add with PySpark-style string/number coercion (used by Python Column operators).
-    /// For string columns, + attempts numeric addition so non-numeric strings become null (issue #1138).
+    /// Decimal operands use exact decimal arithmetic; strings still become null when non-numeric.
     pub fn add_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
+        let op = crate::decimal_arithmetic::BinaryOp::Add;
         let expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_pyspark_add(cols)),
             &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+            move |_schema, fields| {
+                let dtype = crate::decimal_arithmetic::result_type(
+                    fields[0].dtype(),
+                    fields[1].dtype(),
+                    op,
+                    true,
+                )
+                .unwrap_or(DataType::Float64);
+                Ok(Field::new(fields[0].name().clone(), dtype))
+            },
         );
         Self::from_expr(expr, None)
     }
@@ -1816,10 +1836,20 @@ impl Column {
     /// Subtract with PySpark-style string/number coercion (used by Python Column operators).
     pub fn subtract_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
+        let op = crate::decimal_arithmetic::BinaryOp::Subtract;
         let expr = self.expr().clone().map_many(
             |cols| expect_col(crate::udfs::apply_pyspark_subtract(cols)),
             &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+            move |_schema, fields| {
+                let dtype = crate::decimal_arithmetic::result_type(
+                    fields[0].dtype(),
+                    fields[1].dtype(),
+                    op,
+                    true,
+                )
+                .unwrap_or(DataType::Float64);
+                Ok(Field::new(fields[0].name().clone(), dtype))
+            },
         );
         Self::from_expr(expr, None)
     }
@@ -1828,6 +1858,7 @@ impl Column {
     pub fn divide_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
+        let op = crate::decimal_arithmetic::BinaryOp::Divide;
         let expr = self.expr().clone().map_many(
             move |cols| {
                 if ansi_enabled {
@@ -1837,7 +1868,16 @@ impl Column {
                 }
             },
             &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+            move |_schema, fields| {
+                let dtype = crate::decimal_arithmetic::result_type(
+                    fields[0].dtype(),
+                    fields[1].dtype(),
+                    op,
+                    true,
+                )
+                .unwrap_or(DataType::Float64);
+                Ok(Field::new(fields[0].name().clone(), dtype))
+            },
         );
         Self::from_expr(expr, None)
     }

@@ -3845,21 +3845,73 @@ fn pyspark_binary_arith(
     Ok(Some(Column::new(name, out)))
 }
 
+/// Keep decimal and integral Column arithmetic in exact decimal coefficients.
+/// Returns `None` for inputs that should use the regular Float64 coercion path.
+fn pyspark_decimal_binary_arith(
+    columns: &mut [Column],
+    ctx: &str,
+    op: crate::decimal_arithmetic::BinaryOp,
+    ansi_enabled: bool,
+) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            format!("{ctx} needs two columns").into(),
+        ));
+    }
+    let left_type = columns[0].dtype().clone();
+    let right_type = columns[1].dtype().clone();
+    let Some(output_type) =
+        crate::decimal_arithmetic::result_type(&left_type, &right_type, op, true)
+    else {
+        return Ok(None);
+    };
+
+    let name = columns[0].field().into_owned().name;
+    let left = std::mem::take(&mut columns[0]).take_materialized_series();
+    let right = std::mem::take(&mut columns[1]).take_materialized_series();
+    let output =
+        crate::decimal_arithmetic::evaluate(&left, &right, op, &output_type, ansi_enabled)?;
+    Ok(Some(Column::new(name, output)))
+}
+
 /// PySpark-style addition for Python Column + operator.
 /// For string inputs, PySpark treats + as numeric addition: non-numeric strings become null.
-/// We implement this via pyspark_binary_arith so that all operands are coerced to f64 and
-/// invalid parses become null, matching PySpark behavior from issue #1138.
+/// Decimal and integral inputs take the exact decimal path; other values use Float64 parsing.
 pub fn apply_pyspark_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_add",
+        crate::decimal_arithmetic::BinaryOp::Add,
+        crate::udf_context::get_thread_ansi_enabled(),
+    )? {
+        return Ok(Some(output));
+    }
     pyspark_binary_arith(columns, "pyspark_add", |a, b| a + b)
 }
 
 /// PySpark-style subtraction with string/number coercion for Python Column operators.
 pub fn apply_pyspark_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_subtract",
+        crate::decimal_arithmetic::BinaryOp::Subtract,
+        crate::udf_context::get_thread_ansi_enabled(),
+    )? {
+        return Ok(Some(output));
+    }
     pyspark_binary_arith(columns, "pyspark_subtract", |a, b| a - b)
 }
 
 /// PySpark-style multiplication with string/number coercion for Python Column operators.
 pub fn apply_pyspark_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_multiply",
+        crate::decimal_arithmetic::BinaryOp::Multiply,
+        crate::udf_context::get_thread_ansi_enabled(),
+    )? {
+        return Ok(Some(output));
+    }
     pyspark_binary_arith(columns, "pyspark_multiply", |a, b| a * b)
 }
 
@@ -3871,6 +3923,15 @@ pub fn apply_pyspark_divide(columns: &mut [Column]) -> PolarsResult<Option<Colum
         return Err(PolarsError::ComputeError(
             "pyspark_divide needs two columns".into(),
         ));
+    }
+
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_divide",
+        crate::decimal_arithmetic::BinaryOp::Divide,
+        crate::udf_context::get_thread_ansi_enabled(),
+    )? {
+        return Ok(Some(output));
     }
 
     let name = columns[0].field().into_owned().name;
@@ -4166,6 +4227,14 @@ pub fn apply_ansi_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>>
         return Err(PolarsError::ComputeError(
             "ansi_divide needs two columns".into(),
         ));
+    }
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "ansi_divide",
+        crate::decimal_arithmetic::BinaryOp::Divide,
+        true,
+    )? {
+        return Ok(Some(output));
     }
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();

@@ -198,8 +198,48 @@ fn sum_expr(input: Expr, ansi_enabled: bool) -> Expr {
                             sums.push(AnyValue::Null);
                             continue;
                         };
-                        let group = group.cast(&output_type)?;
-                        sums.push(group.sum_reduce()?.value().clone());
+                        if input_type.is_integer() {
+                            let group = group.cast(&DataType::Int64)?;
+                            let mut total = BigInt::zero();
+                            let mut found_value = false;
+                            for idx in 0..group.len() {
+                                if let AnyValue::Int64(value) = group.get(idx)? {
+                                    found_value = true;
+                                    total += value;
+                                    if ansi_enabled
+                                        && (total < BigInt::from(i64::MIN)
+                                            || total > BigInt::from(i64::MAX))
+                                    {
+                                        return Err(PolarsError::ComputeError(
+                                            "[ARITHMETIC_OVERFLOW] long overflow".into(),
+                                        ));
+                                    }
+                                }
+                            }
+                            if !found_value {
+                                sums.push(AnyValue::Null);
+                            } else if ansi_enabled {
+                                sums.push(AnyValue::Int64(total.to_i64().ok_or_else(|| {
+                                    PolarsError::ComputeError(
+                                        "[ARITHMETIC_OVERFLOW] long overflow".into(),
+                                    )
+                                })?));
+                            } else {
+                                // Match JVM Long addition when ANSI mode is disabled.
+                                let modulus = BigInt::from(1u8) << 64usize;
+                                let wrapped = ((&total % &modulus) + &modulus) % &modulus;
+                                let sign_bit = BigInt::from(1u8) << 63usize;
+                                let signed = if wrapped >= sign_bit {
+                                    wrapped - modulus
+                                } else {
+                                    wrapped
+                                };
+                                sums.push(AnyValue::Int64(signed.to_i64().expect("wrapped i64")));
+                            }
+                        } else {
+                            let group = group.cast(&output_type)?;
+                            sums.push(group.sum_reduce()?.value().clone());
+                        }
                     }
                     Series::from_any_values_and_dtype(
                         series.name().clone(),

@@ -1394,3 +1394,76 @@ def test_arrow_array_metadata_survives_struct_construction(spark):
     exported = result.toArrow()
     assert exported.schema.field("outer").type == pa.struct([("entries", entry_type)])
     assert exported.to_pylist() == [{"outer": {"entries": entries}}]
+
+
+def test_decimal_column_arithmetic_keeps_exact_values(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame(
+        [{"left": Decimal("9007199254740993.01"), "right": Decimal("0.01")}],
+        "left decimal(20,2), right decimal(20,2)",
+    )
+    result = df.select(
+        (F.col("left") + F.col("right")).alias("added"),
+        (F.col("left") - F.col("right")).alias("subtracted"),
+        (F.col("left") * F.col("right")).alias("multiplied"),
+    )
+
+    assert result.collect()[0] == {
+        "added": Decimal("9007199254740993.02"),
+        "subtracted": Decimal("9007199254740993.00"),
+        "multiplied": Decimal("90071992547409.9301"),
+    }
+    assert result.schema["added"].dataType.simpleString() == "decimal(21,2)"
+
+
+def test_decimal_column_division_keeps_exact_values(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame(
+        [{"amount": Decimal("9007199254740993.01"), "divisor": Decimal("0.01")}],
+        "amount decimal(20,2), divisor decimal(20,2)",
+    )
+
+    value = df.select((F.col("amount") / F.col("divisor")).alias("quotient")).collect()[
+        0
+    ]["quotient"]
+
+    assert value == Decimal("900719925474099301.000000000000000000")
+
+
+def test_ansi_integer_sum_raises_on_int64_overflow(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "false")
+    df = spark.createDataFrame(
+        [{"value": 9223372036854775807}, {"value": 1}], "value long"
+    )
+    try:
+        spark.conf.set("spark.sql.ansi.enabled", "true")
+        with pytest.raises(Exception, match="overflow|OVERFLOW"):
+            df.agg(F.sum("value").alias("total")).collect()
+    finally:
+        spark.conf.set("spark.sql.ansi.enabled", previous_ansi)
+
+
+def test_decimal_column_comparison_preserves_sub_precision_values(spark):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame(
+        [{"fraction": Decimal("1E-38"), "zero": 0}],
+        "fraction decimal(38,38), zero int",
+    )
+
+    assert len(df.filter(F.col("fraction") > F.col("zero")).collect()) == 1
+    assert df.filter(F.col("fraction") == F.col("zero")).collect() == []
+
+
+def test_dtypes_reports_decimal_precision_and_scale(spark):
+    df = spark.createDataFrame([{"amount": Decimal("10.50")}], "amount decimal(12,2)")
+
+    assert df.dtypes == [("amount", "decimal(12,2)")]
