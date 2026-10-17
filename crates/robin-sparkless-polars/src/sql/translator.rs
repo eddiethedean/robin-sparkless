@@ -1327,13 +1327,10 @@ fn sql_expr_to_polars(
                     .map(|df| df.lazy_frame().collect_schema())
                     .transpose()?
                     .unwrap_or_default();
-                let allow_precision_loss = session
-                    .get_config()
-                    .get("spark.sql.decimalOperations.allowPrecisionLoss")
-                    .is_none_or(|value| value != "false");
                 if let Some(expr) = super::decimal::binary_expr(
                     l.clone(), r.clone(), op, &schema,
-                    session.runtime_config().ansi_enabled, allow_precision_loss,
+                    session.runtime_config().ansi_enabled,
+                    session.runtime_config().decimal_allow_precision_loss,
                 )? {
                     return Ok(expr);
                 }

@@ -151,17 +151,19 @@ pub type CompareOp = polars::prelude::Operator;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code)] // Decimal reserved for future use
 enum TypePrecedence {
-    Int = 1,
-    Long = 2,
-    Decimal = 3,
-    Float = 4,
-    Double = 5,
-    String = 6,
+    Short = 1,
+    Int = 2,
+    Long = 3,
+    Decimal = 4,
+    Float = 5,
+    Double = 6,
+    String = 7,
 }
 
 /// Convert Polars DataType to TypePrecedence
 fn dtype_to_precedence(dtype: &DataType) -> Option<TypePrecedence> {
     match dtype {
+        DataType::Int16 => Some(TypePrecedence::Short),
         DataType::Int32 => Some(TypePrecedence::Int),
         DataType::Int64 => Some(TypePrecedence::Long),
         DataType::Float32 => Some(TypePrecedence::Float),
@@ -261,6 +263,7 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
             // Return the type with higher precedence
             let target_prec = if l > r { l } else { r };
             match target_prec {
+                TypePrecedence::Short => Ok(DataType::Int16),
                 TypePrecedence::Int => Ok(DataType::Int32),
                 TypePrecedence::Long => Ok(DataType::Int64),
                 TypePrecedence::Float => Ok(DataType::Float32),
@@ -268,7 +271,7 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
                 TypePrecedence::String => Ok(DataType::String),
                 _ => Err(PolarsError::ComputeError(
                     format!(
-                        "Type coercion: unsupported type precedence {target_prec:?}. Supported: Int32, Int64, Float32, Float64, String."
+                        "Type coercion: unsupported type precedence {target_prec:?}. Supported: Int16, Int32, Int64, Float32, Float64, String."
                     )
                     .into(),
                 )),
@@ -804,6 +807,19 @@ mod tests {
         let ts = DataType::Datetime(TimeUnit::Microseconds, None);
         assert_eq!(find_common_type(&DataType::Date, &ts)?, ts);
         assert_eq!(find_common_type(&ts, &DataType::Date)?, ts);
+        Ok(())
+    }
+
+    #[test]
+    fn find_common_type_short_promotes_to_integer() -> Result<(), PolarsError> {
+        assert_eq!(
+            find_common_type(&DataType::Int16, &DataType::Int32)?,
+            DataType::Int32
+        );
+        assert_eq!(
+            find_common_type(&DataType::Int16, &DataType::Int16)?,
+            DataType::Int16
+        );
         Ok(())
     }
 

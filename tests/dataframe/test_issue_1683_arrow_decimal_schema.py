@@ -364,6 +364,19 @@ def test_arrow_int16_and_smallint_schemas_use_short_type(spark) -> None:
     assert explicitly_typed.collect()[0]["value"] == 32767
 
 
+def test_union_smallint_and_integer_uses_integer_type(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    short_df = spark.createDataFrame(
+        pa.table({"value": pa.array([1], type=pa.int16())})
+    )
+    int_df = spark.createDataFrame(pa.table({"value": pa.array([2], type=pa.int32())}))
+
+    result = short_df.unionByName(int_df)
+
+    assert result.schema["value"].dataType.simpleString() == "int"
+    assert [row["value"] for row in result.collect()] == [1, 2]
+
+
 @pytest.mark.parametrize("value", ["not-an-int", 2**31])
 def test_int32_schema_verification_rejects_invalid_values(spark, value) -> None:
     with pytest.raises(TypeError, match="Row 0: column 'value' expected type int32"):
@@ -1180,6 +1193,50 @@ def test_sql_decimal_division_adjusts_large_result_precision(
         assert result.collect()[0]["quotient"] == Decimal(value)
     finally:
         spark.conf.set(key, previous)
+
+
+@pytest.mark.parametrize(
+    ("allow_loss", "value", "dtype"),
+    [
+        ("true", "1.395556", "decimal(38,6)"),
+        ("false", "1.395555555555555556", "decimal(38,18)"),
+    ],
+)
+def test_column_decimal_division_respects_precision_loss_config(
+    spark, allow_loss, value, dtype
+):
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    key = "spark.sql.decimalOperations.allowPrecisionLoss"
+    previous = spark.conf.get(key, "true")
+    try:
+        spark.conf.set(key, allow_loss)
+        df = spark.createDataFrame(
+            [{"a": Decimal("3.14"), "b": Decimal("2.25")}],
+            "a decimal(38,20), b decimal(38,20)",
+        )
+        result = df.select((F.col("a") / F.col("b")).alias("quotient"))
+
+        assert result.schema["quotient"].dataType.simpleString() == dtype
+        assert result.collect()[0]["quotient"] == Decimal(value)
+    finally:
+        spark.conf.set(key, previous)
+
+
+@pytest.mark.parametrize("use_na_fill", [False, True])
+def test_scalar_numeric_fill_includes_decimal_columns(spark, use_na_fill):
+    df = spark.createDataFrame(
+        [{"amount": None}, {"amount": Decimal("1.25")}],
+        "amount decimal(5,2)",
+    )
+
+    result = df.na.fill(0) if use_na_fill else df.fillna(0)
+
+    assert [row["amount"] for row in result.collect()] == [
+        Decimal("0.00"),
+        Decimal("1.25"),
+    ]
 
 
 @pytest.mark.parametrize("ansi", ["true", "false"])

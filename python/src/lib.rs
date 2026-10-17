@@ -4390,6 +4390,7 @@ fn is_fill_compatible_with_schema_dtype(
                 | SchemaDataType::Integer
                 | SchemaDataType::Long
                 | SchemaDataType::Double
+                | SchemaDataType::Decimal(_, _)
         ),
         // Strings fill string-like columns only.
         FillValueKind::String => matches!(dt, SchemaDataType::String),

@@ -1794,15 +1794,22 @@ impl Column {
     pub fn multiply_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let op = crate::decimal_arithmetic::BinaryOp::Multiply;
+        let allow_precision_loss =
+            crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss;
         let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pyspark_multiply(cols)),
+            move |cols| {
+                expect_col(crate::udfs::apply_pyspark_multiply_with_precision_loss(
+                    cols,
+                    allow_precision_loss,
+                ))
+            },
             &args,
             move |_schema, fields| {
                 let dtype = crate::decimal_arithmetic::result_type(
                     fields[0].dtype(),
                     fields[1].dtype(),
                     op,
-                    true,
+                    allow_precision_loss,
                 )
                 .unwrap_or(DataType::Float64);
                 Ok(Field::new(fields[0].name().clone(), dtype))
@@ -1816,15 +1823,22 @@ impl Column {
     pub fn add_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let op = crate::decimal_arithmetic::BinaryOp::Add;
+        let allow_precision_loss =
+            crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss;
         let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pyspark_add(cols)),
+            move |cols| {
+                expect_col(crate::udfs::apply_pyspark_add_with_precision_loss(
+                    cols,
+                    allow_precision_loss,
+                ))
+            },
             &args,
             move |_schema, fields| {
                 let dtype = crate::decimal_arithmetic::result_type(
                     fields[0].dtype(),
                     fields[1].dtype(),
                     op,
-                    true,
+                    allow_precision_loss,
                 )
                 .unwrap_or(DataType::Float64);
                 Ok(Field::new(fields[0].name().clone(), dtype))
@@ -1837,15 +1851,22 @@ impl Column {
     pub fn subtract_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let op = crate::decimal_arithmetic::BinaryOp::Subtract;
+        let allow_precision_loss =
+            crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss;
         let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pyspark_subtract(cols)),
+            move |cols| {
+                expect_col(crate::udfs::apply_pyspark_subtract_with_precision_loss(
+                    cols,
+                    allow_precision_loss,
+                ))
+            },
             &args,
             move |_schema, fields| {
                 let dtype = crate::decimal_arithmetic::result_type(
                     fields[0].dtype(),
                     fields[1].dtype(),
                     op,
-                    true,
+                    allow_precision_loss,
                 )
                 .unwrap_or(DataType::Float64);
                 Ok(Field::new(fields[0].name().clone(), dtype))
@@ -1858,13 +1879,21 @@ impl Column {
     pub fn divide_pyspark(&self, other: &Column) -> Column {
         let args = [other.expr().clone()];
         let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
+        let allow_precision_loss =
+            crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss;
         let op = crate::decimal_arithmetic::BinaryOp::Divide;
         let expr = self.expr().clone().map_many(
             move |cols| {
                 if ansi_enabled {
-                    expect_col(crate::udfs::apply_ansi_divide(cols))
+                    expect_col(crate::udfs::apply_ansi_divide_with_precision_loss(
+                        cols,
+                        allow_precision_loss,
+                    ))
                 } else {
-                    expect_col(crate::udfs::apply_pyspark_divide(cols))
+                    expect_col(crate::udfs::apply_pyspark_divide_with_precision_loss(
+                        cols,
+                        allow_precision_loss,
+                    ))
                 }
             },
             &args,
@@ -1873,7 +1902,7 @@ impl Column {
                     fields[0].dtype(),
                     fields[1].dtype(),
                     op,
-                    true,
+                    allow_precision_loss,
                 )
                 .unwrap_or(DataType::Float64);
                 Ok(Field::new(fields[0].name().clone(), dtype))

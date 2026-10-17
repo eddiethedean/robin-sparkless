@@ -3852,6 +3852,7 @@ fn pyspark_decimal_binary_arith(
     ctx: &str,
     op: crate::decimal_arithmetic::BinaryOp,
     ansi_enabled: bool,
+    allow_precision_loss: bool,
 ) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
@@ -3861,7 +3862,7 @@ fn pyspark_decimal_binary_arith(
     let left_type = columns[0].dtype().clone();
     let right_type = columns[1].dtype().clone();
     let Some(output_type) =
-        crate::decimal_arithmetic::result_type(&left_type, &right_type, op, true)
+        crate::decimal_arithmetic::result_type(&left_type, &right_type, op, allow_precision_loss)
     else {
         return Ok(None);
     };
@@ -3878,11 +3879,22 @@ fn pyspark_decimal_binary_arith(
 /// For string inputs, PySpark treats + as numeric addition: non-numeric strings become null.
 /// Decimal and integral inputs take the exact decimal path; other values use Float64 parsing.
 pub fn apply_pyspark_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_add_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+    )
+}
+
+pub(crate) fn apply_pyspark_add_with_precision_loss(
+    columns: &mut [Column],
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
     if let Some(output) = pyspark_decimal_binary_arith(
         columns,
         "pyspark_add",
         crate::decimal_arithmetic::BinaryOp::Add,
         crate::udf_context::get_thread_ansi_enabled(),
+        allow_precision_loss,
     )? {
         return Ok(Some(output));
     }
@@ -3891,11 +3903,22 @@ pub fn apply_pyspark_add(columns: &mut [Column]) -> PolarsResult<Option<Column>>
 
 /// PySpark-style subtraction with string/number coercion for Python Column operators.
 pub fn apply_pyspark_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_subtract_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+    )
+}
+
+pub(crate) fn apply_pyspark_subtract_with_precision_loss(
+    columns: &mut [Column],
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
     if let Some(output) = pyspark_decimal_binary_arith(
         columns,
         "pyspark_subtract",
         crate::decimal_arithmetic::BinaryOp::Subtract,
         crate::udf_context::get_thread_ansi_enabled(),
+        allow_precision_loss,
     )? {
         return Ok(Some(output));
     }
@@ -3904,11 +3927,22 @@ pub fn apply_pyspark_subtract(columns: &mut [Column]) -> PolarsResult<Option<Col
 
 /// PySpark-style multiplication with string/number coercion for Python Column operators.
 pub fn apply_pyspark_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_multiply_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+    )
+}
+
+pub(crate) fn apply_pyspark_multiply_with_precision_loss(
+    columns: &mut [Column],
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
     if let Some(output) = pyspark_decimal_binary_arith(
         columns,
         "pyspark_multiply",
         crate::decimal_arithmetic::BinaryOp::Multiply,
         crate::udf_context::get_thread_ansi_enabled(),
+        allow_precision_loss,
     )? {
         return Ok(Some(output));
     }
@@ -3917,8 +3951,18 @@ pub fn apply_pyspark_multiply(columns: &mut [Column]) -> PolarsResult<Option<Col
 
 /// PySpark-style true division with string/number coercion for Python Column operators.
 /// Division by zero yields null (Spark/PySpark parity; issue #218).
-#[allow(clippy::useless_conversion)] // ChunkedArray needs .into_iter() for owned iteration
 pub fn apply_pyspark_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_divide_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+    )
+}
+
+#[allow(clippy::useless_conversion)] // ChunkedArray needs .into_iter() for owned iteration
+pub(crate) fn apply_pyspark_divide_with_precision_loss(
+    columns: &mut [Column],
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
             "pyspark_divide needs two columns".into(),
@@ -3930,6 +3974,7 @@ pub fn apply_pyspark_divide(columns: &mut [Column]) -> PolarsResult<Option<Colum
         "pyspark_divide",
         crate::decimal_arithmetic::BinaryOp::Divide,
         crate::udf_context::get_thread_ansi_enabled(),
+        allow_precision_loss,
     )? {
         return Ok(Some(output));
     }
@@ -4223,6 +4268,16 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
 
 /// ANSI divide: error if any divisor is zero (spark.sql.ansi.enabled=true).
 pub fn apply_ansi_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_ansi_divide_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_runtime_config().decimal_allow_precision_loss,
+    )
+}
+
+pub(crate) fn apply_ansi_divide_with_precision_loss(
+    columns: &mut [Column],
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
             "ansi_divide needs two columns".into(),
@@ -4233,6 +4288,7 @@ pub fn apply_ansi_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>>
         "ansi_divide",
         crate::decimal_arithmetic::BinaryOp::Divide,
         true,
+        allow_precision_loss,
     )? {
         return Ok(Some(output));
     }
