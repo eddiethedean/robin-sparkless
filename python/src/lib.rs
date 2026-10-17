@@ -5125,6 +5125,184 @@ impl PyDataFrame {
         })
     }
 
+    fn column_uses_logical_map(&self, name: &str) -> bool {
+        let source_path = if let Ok(resolved) = self.inner.resolve_column_name(name) {
+            arrow_field_path("", &resolved)
+        } else {
+            let mut parts = name.split('.');
+            let root = parts.next().unwrap_or(name);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        self.logical_map_paths.iter().any(|path| {
+            path == &source_path
+                || path
+                    .strip_prefix(source_path.as_str())
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        })
+    }
+
+    fn column_dtype_for_metadata(&self, name: &str) -> Option<robin_sparkless::polars::PlDataType> {
+        if let Ok(resolved) = self.inner.resolve_column_name(name) {
+            if let Some(dtype) = self.inner.get_column_dtype(&resolved) {
+                return Some(dtype);
+            }
+        }
+
+        let (root, nested_fields) = name.split_once('.')?;
+        let root = self.inner.resolve_column_name(root).ok()?;
+        let mut dtype = self.inner.get_column_dtype(&root)?;
+        for field_name in nested_fields.split('.') {
+            let fields = match &dtype {
+                robin_sparkless::polars::PlDataType::Struct(fields) => fields,
+                _ => return None,
+            };
+            let field = fields.iter().find(|field| {
+                field.name().as_str() == field_name
+                    || field.name().as_str().eq_ignore_ascii_case(field_name)
+            })?;
+            dtype = field.dtype().clone();
+        }
+        Some(dtype)
+    }
+
+    fn expression_column_references(expr: &robin_sparkless::Expr) -> Vec<String> {
+        use robin_sparkless::Expr;
+
+        fn visit(expr: &Expr, references: &mut Vec<String>) {
+            match expr {
+                Expr::Column(name) => references.push(name.to_string()),
+                Expr::Alias(inner, _)
+                | Expr::Cast { expr: inner, .. }
+                | Expr::Sort { expr: inner, .. }
+                | Expr::Explode { input: inner, .. }
+                | Expr::KeepName(inner)
+                | Expr::RenameAlias { expr: inner, .. } => visit(inner, references),
+                Expr::BinaryExpr { left, right, .. } => {
+                    visit(left, references);
+                    visit(right, references);
+                }
+                Expr::Ternary {
+                    predicate,
+                    truthy,
+                    falsy,
+                } => {
+                    visit(predicate, references);
+                    visit(truthy, references);
+                    visit(falsy, references);
+                }
+                Expr::Function { input, .. }
+                | Expr::AnonymousFunction { input, .. }
+                | Expr::Display { inputs: input, .. } => {
+                    for input in input {
+                        visit(input, references);
+                    }
+                }
+                Expr::Gather { expr, idx, .. } => {
+                    visit(expr, references);
+                    visit(idx, references);
+                }
+                Expr::SortBy { expr, by, .. } => {
+                    visit(expr, references);
+                    for by_expr in by {
+                        visit(by_expr, references);
+                    }
+                }
+                Expr::Filter { input, by } => {
+                    visit(input, references);
+                    visit(by, references);
+                }
+                Expr::Over {
+                    function,
+                    partition_by,
+                    order_by,
+                    ..
+                } => {
+                    visit(function, references);
+                    for expr in partition_by {
+                        visit(expr, references);
+                    }
+                    if let Some((expr, _)) = order_by {
+                        visit(expr, references);
+                    }
+                }
+                Expr::Slice {
+                    input,
+                    offset,
+                    length,
+                } => {
+                    visit(input, references);
+                    visit(offset, references);
+                    visit(length, references);
+                }
+                _ => {}
+            }
+        }
+
+        let mut references = Vec::new();
+        visit(expr, &mut references);
+        references
+    }
+
+    fn expression_preserves_map_value(expr: &robin_sparkless::Expr) -> bool {
+        use robin_sparkless::Expr;
+
+        match expr {
+            Expr::Column(_) => true,
+            Expr::Alias(inner, _)
+            | Expr::KeepName(inner)
+            | Expr::RenameAlias { expr: inner, .. } => Self::expression_preserves_map_value(inner),
+            Expr::Ternary { truthy, falsy, .. } => {
+                Self::expression_preserves_map_value(truthy)
+                    && Self::expression_preserves_map_value(falsy)
+            }
+            Expr::Function {
+                input,
+                function: polars::prelude::FunctionExpr::Coalesce,
+            } => !input.is_empty() && input.iter().all(Self::expression_preserves_map_value),
+            Expr::Literal(value) => value.is_null(),
+            _ => false,
+        }
+    }
+
+    fn copy_computed_map_metadata(
+        &self,
+        preserves_map_value: bool,
+        references: &[String],
+        output: &str,
+        target: &mut Self,
+    ) {
+        if !preserves_map_value {
+            return;
+        }
+        let Some(output_dtype) = target.inner.get_column_dtype(output) else {
+            return;
+        };
+        let mut matching_sources = Vec::new();
+        for source in references {
+            let Some(source_dtype) = self.column_dtype_for_metadata(source) else {
+                continue;
+            };
+            if source_dtype == output_dtype {
+                // The physical dtype cannot distinguish Arrow maps from arrays of
+                // key/value structs. Only propagate map intent when every matching
+                // source already carries logical-map metadata.
+                if !self.column_uses_logical_map(source) {
+                    return;
+                }
+                matching_sources.push(source.as_str());
+            }
+        }
+        for source in matching_sources {
+            self.copy_column_metadata(source, output, target);
+        }
+    }
+
     fn expr_uses_arrow_array_struct(&self, expr: &robin_sparkless::Expr) -> bool {
         use robin_sparkless::Expr;
 
@@ -5386,8 +5564,17 @@ impl PyDataFrame {
         Self::remove_metadata_root(&mut wrapped, name);
         if let Some(source) = Self::column_source(expr) {
             self.copy_column_metadata(&source, name, &mut wrapped);
-        } else if self.expr_uses_arrow_array_struct(expr) {
-            Self::mark_array_struct_path(&mut wrapped, name);
+        } else {
+            if self.expr_uses_arrow_array_struct(expr) {
+                Self::mark_array_struct_path(&mut wrapped, name);
+            }
+            let references = Self::expression_column_references(expr);
+            self.copy_computed_map_metadata(
+                Self::expression_preserves_map_value(expr),
+                &references,
+                name,
+                &mut wrapped,
+            );
         }
         wrapped
     }
@@ -5398,8 +5585,17 @@ impl PyDataFrame {
             Self::remove_metadata_root(&mut wrapped, name);
             if let Some(source) = Self::column_source(column.expr()) {
                 self.copy_column_metadata(&source, name, &mut wrapped);
-            } else if self.expr_uses_arrow_array_struct(column.expr()) {
-                Self::mark_array_struct_path(&mut wrapped, name);
+            } else {
+                if self.expr_uses_arrow_array_struct(column.expr()) {
+                    Self::mark_array_struct_path(&mut wrapped, name);
+                }
+                let references = Self::expression_column_references(column.expr());
+                self.copy_computed_map_metadata(
+                    Self::expression_preserves_map_value(column.expr()),
+                    &references,
+                    name,
+                    &mut wrapped,
+                );
             }
         }
         wrapped
@@ -5562,6 +5758,15 @@ impl PyDataFrame {
                                 Self::mark_array_struct_path(&mut wrapped, output);
                             }
                         }
+                        if let Some(output) = output_names.get(item_idx) {
+                            let references = Self::expression_column_references(expr);
+                            self.copy_computed_map_metadata(
+                                Self::expression_preserves_map_value(expr),
+                                &references,
+                                output,
+                                &mut wrapped,
+                            );
+                        }
                         continue;
                     };
                     names
@@ -5593,6 +5798,15 @@ impl PyDataFrame {
                 {
                     Self::mark_array_struct_path(&mut wrapped, &output);
                 }
+                let preserves_map_value =
+                    robin_sparkless::sql::select_expr_preserves_map_value(expression)
+                        .unwrap_or(false);
+                self.copy_computed_map_metadata(
+                    preserves_map_value,
+                    &references,
+                    &output,
+                    &mut wrapped,
+                );
                 continue;
             };
             let output = alias.unwrap_or(projected_output);

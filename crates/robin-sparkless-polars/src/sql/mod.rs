@@ -256,6 +256,65 @@ pub fn select_expr_metadata(
     Ok((alias, references))
 }
 
+/// Return whether a SQL projection only chooses between existing values and NULL.
+/// Python uses this to carry Arrow map intent through map-preserving expressions
+/// without treating map-to-entry-array functions as maps.
+pub fn select_expr_preserves_map_value(expression: &str) -> Result<bool, PolarsError> {
+    use spark_sql_parser::ast::{
+        Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan,
+    };
+
+    fn map_value_expr(expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => true,
+            Expr::Nested(expr) => map_value_expr(expr),
+            Expr::Value(ValueWithSpan {
+                value: Value::Null, ..
+            }) => true,
+            Expr::Case {
+                conditions,
+                else_result,
+                ..
+            } => {
+                !conditions.is_empty()
+                    && conditions
+                        .iter()
+                        .all(|condition| map_value_expr(&condition.result))
+                    && else_result.as_deref().is_none_or(map_value_expr)
+            }
+            Expr::Function(function)
+                if function.name.to_string().eq_ignore_ascii_case("coalesce") =>
+            {
+                let FunctionArguments::List(arguments) = &function.args else {
+                    return false;
+                };
+                !arguments.args.is_empty()
+                    && arguments.clauses.is_empty()
+                    && arguments.args.iter().all(|argument| {
+                        let argument = match argument {
+                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+                            | FunctionArg::Named {
+                                arg: FunctionArgExpr::Expr(expr),
+                                ..
+                            }
+                            | FunctionArg::ExprNamed {
+                                arg: FunctionArgExpr::Expr(expr),
+                                ..
+                            } => expr,
+                            _ => return false,
+                        };
+                        map_value_expr(argument)
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    let (expr, _) = spark_sql_parser::parse_select_expr(expression)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    Ok(map_value_expr(&expr))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::SparkSession;

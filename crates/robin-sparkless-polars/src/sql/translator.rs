@@ -14,10 +14,10 @@ use polars::prelude::{
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
-    BinaryOperator, CastKind, Expr as SqlExpr, FromTable, Function, FunctionArg, FunctionArgExpr,
-    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause, ObjectType,
-    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
-    TableFactor, TableObject, Value, ValueWithSpan,
+    BinaryOperator, CastKind, ExactNumberInfo, Expr as SqlExpr, FromTable, Function, FunctionArg,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
+    ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
+    TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -69,6 +69,23 @@ fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
 
 /// Map SQL AST data types to PySpark-style cast type names.
 fn sql_ast_data_type_to_cast_name(dt: &spark_sql_parser::ast::DataType) -> String {
+    use spark_sql_parser::ast::DataType as SqlDataType;
+
+    let decimal_info = match dt {
+        SqlDataType::Decimal(info) | SqlDataType::Numeric(info) | SqlDataType::Dec(info) => {
+            Some(info)
+        }
+        _ => None,
+    };
+    if let Some(info) = decimal_info {
+        let (precision, scale) = match info {
+            ExactNumberInfo::None => (10, 0),
+            ExactNumberInfo::Precision(precision) => (*precision, 0),
+            ExactNumberInfo::PrecisionAndScale(precision, scale) => (*precision, *scale),
+        };
+        return format!("decimal({precision},{scale})");
+    }
+
     let s = dt.to_string().to_lowercase();
     if s.starts_with("int") || s.starts_with("integer") || s == "int4" {
         "int".to_string()
