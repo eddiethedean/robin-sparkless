@@ -506,6 +506,7 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
                 .collect();
             format!("struct<{}>", parts.join(","))
         }
+        _ => "unknown".to_string(),
     }
 }
 

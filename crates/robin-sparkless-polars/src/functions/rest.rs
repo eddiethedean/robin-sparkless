@@ -4350,6 +4350,39 @@ mod tests {
     }
 
     #[test]
+    fn cast_string_and_float_columns_to_smallint() {
+        let strings = Series::new("x".into(), vec![Some("12"), Some("40000"), None]);
+        let cast_strings =
+            crate::udfs::apply_string_to_int(strings.into_column(), false, DataType::Int16, false)
+                .unwrap()
+                .unwrap();
+        assert_eq!(cast_strings.dtype(), &DataType::Int16);
+        assert_eq!(
+            cast_strings.i16().unwrap().into_iter().collect::<Vec<_>>(),
+            vec![Some(12), None, None]
+        );
+
+        let floats = Series::new("x".into(), vec![Some(12.9f64), Some(40000.0), None]);
+        let cast_floats = crate::udfs::apply_string_to_int(
+            floats.clone().into_column(),
+            false,
+            DataType::Int16,
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(cast_floats.dtype(), &DataType::Int16);
+        assert_eq!(
+            cast_floats.i16().unwrap().into_iter().collect::<Vec<_>>(),
+            vec![Some(12), None, None]
+        );
+        assert!(
+            crate::udfs::apply_string_to_int(floats.into_column(), true, DataType::Int16, false,)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn test_create_map_empty() {
         // PySpark F.create_map() with no args: column of empty maps (#275).
         let empty_col = create_map(&[]).unwrap();

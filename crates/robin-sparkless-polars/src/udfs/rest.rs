@@ -6116,7 +6116,8 @@ pub fn apply_string_to_int(
                 let v = opt_s.and_then(parse_str_to_int);
                 if strict {
                     if let Some(s) = opt_s {
-                        if v.is_none() {
+                        if v.is_none_or(|n| target == DataType::Int16 && i16::try_from(n).is_err())
+                        {
                             return Err(PolarsError::ComputeError(
                                 format!(
                                     "conversion from `str` to `{}` failed in column '{}' for value \"{s}\"",
@@ -6131,6 +6132,14 @@ pub fn apply_string_to_int(
                 results.push(v);
             }
             match &target {
+                DataType::Int16 => {
+                    let vals: Vec<Option<i16>> = results
+                        .into_iter()
+                        .map(|o| o.and_then(|n| i16::try_from(n).ok()))
+                        .collect();
+                    Int16Chunked::from_iter_options(name.as_str().into(), vals.into_iter())
+                        .into_series()
+                }
                 DataType::Int32 => {
                     let vals: Vec<Option<i32>> = results
                         .into_iter()
@@ -6150,7 +6159,7 @@ pub fn apply_string_to_int(
                         Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter());
                     chunked.into_series()
                 }
-                _ => unreachable!("target is Int32 or Int64"),
+                _ => unreachable!("target is Int16, Int32, or Int64"),
             }
         }
         DataType::Int32 | DataType::Int64 => series.cast(&target)?,
@@ -6179,7 +6188,26 @@ pub fn apply_string_to_int(
                             }
                             None
                         } else {
-                            let n = f.trunc() as i64;
+                            let truncated = f.trunc();
+                            if target == DataType::Int16
+                                && (truncated < f64::from(i16::MIN)
+                                    || truncated > f64::from(i16::MAX))
+                            {
+                                if strict {
+                                    return Err(PolarsError::ComputeError(
+                                        format!(
+                                            "casting from {} to {} overflow for value {}",
+                                            series.dtype(),
+                                            target,
+                                            f
+                                        )
+                                        .into(),
+                                    ));
+                                }
+                                results.push(None);
+                                continue;
+                            }
+                            let n = truncated as i64;
                             if target == DataType::Int32
                                 && (n < i64::from(i32::MIN) || n > i64::from(i32::MAX))
                             {
@@ -6204,6 +6232,14 @@ pub fn apply_string_to_int(
                 results.push(v);
             }
             let out_series = match &target {
+                DataType::Int16 => {
+                    let vals: Vec<Option<i16>> = results
+                        .into_iter()
+                        .map(|o| o.and_then(|n| i16::try_from(n).ok()))
+                        .collect();
+                    Int16Chunked::from_iter_options(name.as_str().into(), vals.into_iter())
+                        .into_series()
+                }
                 DataType::Int32 => {
                     let vals: Vec<Option<i32>> = results
                         .into_iter()
@@ -6221,7 +6257,7 @@ pub fn apply_string_to_int(
                     Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter())
                         .into_series()
                 }
-                _ => unreachable!("target is Int32 or Int64"),
+                _ => unreachable!("target is Int16, Int32, or Int64"),
             };
             out_series
         }

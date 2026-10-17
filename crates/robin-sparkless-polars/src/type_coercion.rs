@@ -464,8 +464,8 @@ pub fn coerce_for_pyspark_comparison(
             Expr::Literal(value) => match value.get_datatype() {
                 DataType::Decimal(precision, scale) => Some((precision, scale)),
                 _ => match value.to_any_value()? {
-                    AnyValue::Float64(value) => shape_from_str(&value.to_string()),
-                    AnyValue::Float32(value) => shape_from_str(&value.to_string()),
+                    // Spark promotes Decimal + Float/Double comparisons to Double.
+                    // Keep value-based decimal shaping for integral literals only.
                     AnyValue::Int8(value) => shape_from_str(&value.to_string()),
                     AnyValue::Int16(value) => shape_from_str(&value.to_string()),
                     AnyValue::Int32(value) => shape_from_str(&value.to_string()),
@@ -504,6 +504,29 @@ pub fn coerce_for_pyspark_comparison(
     // Keep decimal comparisons in decimal arithmetic. Promoting a Decimal column
     // and a numeric literal to Float64 loses integer precision above 2^53.
     if is_numeric(left_type) && is_numeric(right_type) {
+        if matches!(
+            (left_type, right_type),
+            (
+                DataType::Decimal(_, _),
+                DataType::Float32 | DataType::Float64
+            ) | (
+                DataType::Float32 | DataType::Float64,
+                DataType::Decimal(_, _)
+            )
+        ) {
+            // Spark promotes Decimal/Float comparisons to Double. Go through the
+            // exact decimal text so the conversion rounds as BigDecimal.doubleValue
+            // does; Polars' direct Decimal-to-Float64 cast can round large values up.
+            let to_double = |expr: Expr, dtype: &DataType| {
+                if matches!(dtype, DataType::Decimal(_, _)) {
+                    expr.cast(DataType::String).cast(DataType::Float64)
+                } else {
+                    expr.cast(DataType::Float64)
+                }
+            };
+            return Ok((to_double(left, left_type), to_double(right, right_type)));
+        }
+
         let decimal_shape = match (left_type, right_type) {
             (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
                 Some(((*lp - *ls).max(*rp - *rs), (*ls).max(*rs)))
@@ -843,6 +866,28 @@ mod tests {
         // After coercion both sides should be comparable without error and all rows match.
         let out = df.lazy().filter(ac.eq(bc)).collect()?;
         assert_eq!(out.height(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn decimal_column_and_float_literal_compare_as_double() -> Result<(), PolarsError> {
+        let decimal = Series::new("amount".into(), vec![Some(900_719_925_474_099_300i128)])
+            .into_decimal(20, 2)?
+            .into_series();
+        let df = DataFrame::new(1, vec![decimal.into()])?;
+        let (left, right) = coerce_for_pyspark_comparison(
+            col("amount"),
+            lit(9_007_199_254_740_992.0f64),
+            &DataType::Decimal(20, 2),
+            &DataType::Float64,
+            &CompareOp::Eq,
+        )?;
+
+        let out = df
+            .lazy()
+            .select([left.eq(right).alias("matches")])
+            .collect()?;
+        assert_eq!(out.column("matches")?.bool()?.get(0), Some(true));
         Ok(())
     }
 

@@ -1317,6 +1317,11 @@ fn spark_type_to_arrow_type(
             }
             return pa.getattr("struct")?.call1((py_fields,))?.into_py_any(py);
         }
+        _ => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unsupported Spark data type {data_type:?}"
+            )));
+        }
     };
     let args = PyTuple::new(py, args)?;
     pa.getattr(name)?.call1(args)?.into_py_any(py)
@@ -6610,6 +6615,9 @@ impl PyDataFrame {
                         .call1((py_fields,))?
                         .into_py_any(py)?)
                 }
+                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unsupported schema data type {dt:?}"
+                ))),
             }
         }
 
@@ -6715,6 +6723,9 @@ impl PyDataFrame {
                         .call1((py_fields,))?
                         .into_py_any(py)?)
                 }
+                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unsupported schema data type {dt:?}"
+                ))),
             }
         }
 
@@ -8172,6 +8183,7 @@ impl PyDataFrame {
                     DataType::Array(_) => "array".to_string(),
                     DataType::Map(_, _) => "map".to_string(),
                     DataType::Struct(_) => "struct".to_string(),
+                    _ => "unknown".to_string(),
                 };
                 (f.name.clone(), ty)
             })

@@ -116,13 +116,17 @@ fn parse_decimal_precision_scale(type_str: &str) -> Option<(usize, usize)> {
     let args = type_str.trim().to_ascii_lowercase();
     let args = args.strip_prefix("decimal(")?.strip_suffix(')')?;
     let (precision, scale) = args.split_once(',')?;
-    Some((precision.trim().parse().ok()?, scale.trim().parse().ok()?))
+    let precision = precision.trim().parse().ok()?;
+    let scale = scale.trim().parse().ok()?;
+    (1..=38).contains(&precision).then_some(())?;
+    (scale <= precision).then_some(())?;
+    Some((precision, scale))
 }
 
-fn decimal_to_scaled(value: &str, scale: usize) -> Result<i128, PolarsError> {
-    if scale > 38 {
+fn decimal_to_scaled(value: &str, precision: usize, scale: usize) -> Result<i128, PolarsError> {
+    if !(1..=38).contains(&precision) || scale > precision {
         return Err(PolarsError::ComputeError(
-            "decimal scale exceeds supported precision".into(),
+            format!("invalid decimal precision/scale decimal({precision},{scale})").into(),
         ));
     }
     let value = decimal_transport_value(value);
@@ -201,17 +205,27 @@ fn decimal_to_scaled(value: &str, scale: usize) -> Result<i128, PolarsError> {
     let scaled = digits.parse::<i128>().map_err(|_| {
         PolarsError::ComputeError("decimal value exceeds supported precision".into())
     })?;
-    Ok(if negative { -scaled } else { scaled })
+    let scaled = if negative { -scaled } else { scaled };
+    let max_abs = 10_i128.pow(precision as u32) - 1;
+    if scaled.unsigned_abs() > max_abs as u128 {
+        return Err(PolarsError::ComputeError(
+            format!("decimal value exceeds declared precision {precision}").into(),
+        ));
+    }
+    Ok(scaled)
 }
 
 fn json_value_to_decimal_scaled(
     value: &JsonValue,
+    precision: usize,
     scale: usize,
 ) -> Result<Option<i128>, PolarsError> {
     match value {
         JsonValue::Null => Ok(None),
-        JsonValue::Number(number) => decimal_to_scaled(&number.to_string(), scale).map(Some),
-        JsonValue::String(text) => decimal_to_scaled(text, scale).map(Some),
+        JsonValue::Number(number) => {
+            decimal_to_scaled(&number.to_string(), precision, scale).map(Some)
+        }
+        JsonValue::String(text) => decimal_to_scaled(text, precision, scale).map(Some),
         other => Err(PolarsError::ComputeError(
             format!("cannot convert {other} to decimal").into(),
         )),
@@ -361,6 +375,18 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
             JsonValue::Bool(_) => Ok(()),
             _ => Err(format!("expected boolean, got {}", value_type_name(v))),
         },
+        _ if is_decimal_type_str(&t) => {
+            let (precision, scale) = parse_decimal_precision_scale(&t)
+                .ok_or_else(|| format!("invalid decimal type {t}"))?;
+            let value = match v {
+                JsonValue::Number(number) => number.to_string(),
+                JsonValue::String(text) => decimal_transport_value(text).to_string(),
+                _ => return Err(format!("expected decimal, got {}", value_type_name(v))),
+            };
+            decimal_to_scaled(&value, precision, scale)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         _ => Ok(()), // date, timestamp, array, struct, etc.: allow and let build fail if needed
     }
 }
@@ -772,9 +798,9 @@ fn json_values_to_series(
         let vals: Vec<Option<i128>> = values
             .iter()
             .map(|value| {
-                value
-                    .as_ref()
-                    .map_or(Ok(None), |value| json_value_to_decimal_scaled(value, scale))
+                value.as_ref().map_or(Ok(None), |value| {
+                    json_value_to_decimal_scaled(value, precision, scale)
+                })
             })
             .collect::<Result<_, PolarsError>>()?;
         return Series::new(name.into(), vals)
@@ -1112,7 +1138,7 @@ fn json_value_to_series_single(
             })?;
             Series::new(
                 name.into(),
-                vec![Some(decimal_to_scaled(&n.to_string(), scale)?)],
+                vec![Some(decimal_to_scaled(&n.to_string(), precision, scale)?)],
             )
             .into_decimal(precision, scale)
             .map(|series| series.into_series())
@@ -1121,9 +1147,12 @@ fn json_value_to_series_single(
             let (precision, scale) = parse_decimal_precision_scale(t).ok_or_else(|| {
                 PolarsError::ComputeError(format!("invalid decimal type {t}").into())
             })?;
-            Series::new(name.into(), vec![Some(decimal_to_scaled(s, scale)?)])
-                .into_decimal(precision, scale)
-                .map(|series| series.into_series())
+            Series::new(
+                name.into(),
+                vec![Some(decimal_to_scaled(s, precision, scale)?)],
+            )
+            .into_decimal(precision, scale)
+            .map(|series| series.into_series())
         }
         (JsonValue::String(s), "string" | "str" | "varchar") => {
             Ok(Series::new(name.into(), vec![decimal_transport_value(s)]))
@@ -2787,6 +2816,7 @@ impl SparkSession {
                         .map(|row| {
                             json_value_to_decimal_scaled(
                                 row.get(col_idx).unwrap_or(&JsonValue::Null),
+                                precision,
                                 scale,
                             )
                         })
@@ -3546,6 +3576,19 @@ impl Default for SparkSession {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn decimal_schema_enforces_declared_precision() {
+        let valid = vec![Some(json!("99.99"))];
+        let series = json_values_to_series(&valid, "decimal(4,2)", "amount")
+            .expect("99.99 fits decimal(4,2)");
+        assert_eq!(series.dtype(), &DataType::Decimal(4, 2));
+
+        let too_large = json!("100.00");
+        assert!(verify_json_value_for_type(&too_large, "decimal(4,2)").is_err());
+        assert!(json_values_to_series(&[Some(too_large)], "decimal(4,2)", "amount").is_err());
+        assert!(parse_decimal_precision_scale("decimal(2,3)").is_none());
+    }
 
     #[test]
     fn test_spark_session_builder_basic() {
