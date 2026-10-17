@@ -331,6 +331,39 @@ def test_arrow_nested_decimal_and_int32_types_survive_import(spark) -> None:
     assert row["ids"] == [1, 2]
 
 
+def test_arrow_uint64_values_remain_exact_after_decimal_import(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    values = [2**63 + 1, 2**64 - 1]
+    table = pa.table({"value": pa.array(values, type=pa.uint64())})
+
+    df = spark.createDataFrame(table)
+
+    assert df.schema["value"].dataType.simpleString() == "decimal(20,0)"
+    expected = [Decimal(str(value)) for value in values]
+    assert [row["value"] for row in df.collect()] == expected
+    exported = df.toArrow()
+    assert exported.schema.field("value").type == pa.decimal128(20, 0)
+    assert exported.to_pylist() == [{"value": value} for value in expected]
+
+
+def test_arrow_int16_and_smallint_schemas_use_short_type(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    values = [-32768, 32767]
+    table = pa.table({"value": pa.array(values, type=pa.int16())})
+
+    df = spark.createDataFrame(table)
+
+    assert df.schema["value"].dataType.simpleString() == "smallint"
+    assert [row["value"] for row in df.collect()] == values
+    assert df.toArrow().schema.field("value").type == pa.int16()
+
+    explicitly_typed = spark.createDataFrame(
+        [{"value": 32767}], schema="value smallint"
+    )
+    assert explicitly_typed.schema["value"].dataType.simpleString() == "smallint"
+    assert explicitly_typed.collect()[0]["value"] == 32767
+
+
 def test_negative_decimal_inference_keeps_precision_within_38(spark) -> None:
     value = Decimal("-" + "9" * 38)
 
@@ -680,6 +713,12 @@ def test_decimal_pivot_sum_and_average_keep_spark_types(spark) -> None:
         .pivot("kind", ["a"])
         .agg(F.sum("amount").alias("total"), F.avg("amount").alias("average"))
     )
+    single_sum = (
+        df.groupBy("grp").pivot("kind", ["a"]).agg(F.sum("amount").alias("total"))
+    )
+    single_avg = (
+        df.groupBy("grp").pivot("kind", ["a"]).agg(F.avg("amount").alias("average"))
+    )
 
     assert convenience_sum.schema["a"].dataType.simpleString() == "decimal(30,2)"
     assert convenience_sum.collect()[0]["a"] == Decimal("9007199254740995.01")
@@ -688,6 +727,10 @@ def test_decimal_pivot_sum_and_average_keep_spark_types(spark) -> None:
     row = aggregate.collect()[0]
     assert row["a_total"] == Decimal("9007199254740995.01")
     assert row["a_average"] == Decimal("4503599627370497.505000")
+    assert single_sum.schema["total"].dataType.simpleString() == "decimal(30,2)"
+    assert single_sum.collect()[0]["total"] == Decimal("9007199254740995.01")
+    assert single_avg.schema["average"].dataType.simpleString() == "decimal(24,6)"
+    assert single_avg.collect()[0]["average"] == Decimal("4503599627370497.505000")
 
 
 def test_decimal_transport_marker_does_not_change_string_values(spark) -> None:

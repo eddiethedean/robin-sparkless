@@ -298,6 +298,7 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     match s.as_str() {
         // Preserve distinction between IntegerType (32-bit) and LongType (64-bit) for explicit schemas.
         "int" | "integer" | "int32" => Some(DataType::Int32),
+        "smallint" | "short" => Some(DataType::Int16),
         "bigint" | "long" => Some(DataType::Int64),
         "double" | "float" | "double_precision" => Some(DataType::Float64),
         "string" | "str" | "varchar" => Some(DataType::String),
@@ -318,7 +319,16 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
         return Ok(());
     }
     match t.as_str() {
-        "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => match v {
+        "smallint" | "short" => match v {
+            JsonValue::Number(n)
+                if n.as_i64().is_some_and(|value| i16::try_from(value).is_ok()) =>
+            {
+                Ok(())
+            }
+            JsonValue::String(s) if decimal_transport_value(s).parse::<i16>().is_ok() => Ok(()),
+            _ => Err(format!("expected smallint, got {}", value_type_name(v))),
+        },
+        "int" | "integer" | "bigint" | "long" | "tinyint" => match v {
             JsonValue::Number(_) => Ok(()), // #1265: accept any number (e.g. 10^18 from UDF); build uses i64 or f64
             JsonValue::String(s) if decimal_transport_value(s).parse::<i64>().is_ok() => Ok(()),
             _ => Err(format!(
@@ -778,7 +788,24 @@ fn json_values_to_series(
                 .collect();
             Ok(Series::new(name.into(), vals))
         }
-        "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
+        "smallint" | "short" => {
+            let vals: Vec<Option<i16>> = values
+                .iter()
+                .map(|value| {
+                    value.as_ref().and_then(|value| match value {
+                        JsonValue::Number(number) => {
+                            number.as_i64().and_then(|value| i16::try_from(value).ok())
+                        }
+                        JsonValue::String(value) => {
+                            decimal_transport_value(value).parse::<i16>().ok()
+                        }
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
+        }
+        "int" | "integer" | "bigint" | "long" | "tinyint" => {
             let vals: Vec<Option<i64>> = values
                 .iter()
                 .map(|ov| {
@@ -1034,10 +1061,23 @@ fn json_value_to_series_single(
                 .map_err(|error| PolarsError::ComputeError(format!("int parse: {error}").into()))?;
             Ok(Series::new(name.into(), vec![Some(value)]))
         }
-        (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
+        (JsonValue::Number(n), "smallint" | "short") => Ok(Series::new(
+            name.into(),
+            vec![n.as_i64().and_then(|value| i16::try_from(value).ok())],
+        )),
+        (JsonValue::String(s), "smallint" | "short") => {
+            let value = decimal_transport_value(s)
+                .trim()
+                .parse::<i16>()
+                .map_err(|error| {
+                    PolarsError::ComputeError(format!("smallint parse: {error}").into())
+                })?;
+            Ok(Series::new(name.into(), vec![Some(value)]))
+        }
+        (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "tinyint") => {
             Ok(Series::new(name.into(), vec![n.as_i64()]))
         }
-        (JsonValue::String(s), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
+        (JsonValue::String(s), "int" | "integer" | "bigint" | "long" | "tinyint") => {
             let i = decimal_transport_value(s)
                 .trim()
                 .parse::<i64>()
@@ -2637,7 +2677,26 @@ impl SparkSession {
                         .collect();
                     Series::new(name.as_str().into(), vals)
                 }
-                "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
+                "smallint" | "short" => {
+                    let vals: Vec<Option<i16>> = rows
+                        .iter()
+                        .map(|row| {
+                            let value = row.get(col_idx).unwrap_or(&JsonValue::Null);
+                            match value {
+                                JsonValue::Number(number) => {
+                                    number.as_i64().and_then(|value| i16::try_from(value).ok())
+                                }
+                                JsonValue::String(value) => {
+                                    decimal_transport_value(value).parse::<i16>().ok()
+                                }
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                "int" | "integer" | "bigint" | "long" | "tinyint" => {
                     // #1265: values may exceed i64 (e.g. UDF returns 10^18); use Float64 when any value doesn't fit.
                     let mut needs_f64 = false;
                     let i64_vals: Vec<Option<i64>> = rows

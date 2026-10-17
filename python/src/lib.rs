@@ -1020,7 +1020,8 @@ fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<St
 
     Ok(Some(match type_name.as_str() {
         "bool" => "boolean".to_string(),
-        "int8" | "int16" => "int".to_string(),
+        "int8" => "int".to_string(),
+        "int16" => "smallint".to_string(),
         "int32" => "int32".to_string(),
         "uint8" | "uint16" | "uint32" | "int64" => "bigint".to_string(),
         "uint64" => "decimal(20,0)".to_string(),
@@ -1065,6 +1066,13 @@ fn normalize_arrow_value(
 ) -> PyResult<Py<PyAny>> {
     if value.is_none() {
         return Ok(value.clone().unbind());
+    }
+    // Python integers above i64::MAX fall through the generic JSON conversion
+    // to f64, which cannot preserve all UInt64 values. Route Arrow UInt64 through
+    // Decimal so the decimal(20,0) schema keeps every source digit.
+    if pyarrow_is_type(arrow_types, arrow_type, "is_uint64")? {
+        let decimal = PyModule::import(py, "decimal")?.getattr("Decimal")?;
+        return decimal.call1((value,))?.into_py_any(py);
     }
     if pyarrow_is_type(arrow_types, arrow_type, "is_dictionary")? {
         let value_type = arrow_type.getattr("value_type")?;
@@ -2524,6 +2532,7 @@ fn simple_string_to_type(s: &str) -> String {
     match lower.as_str() {
         "string" | "str" => "string".to_string(),
         "int" | "integer" => "int".to_string(),
+        "short" | "smallint" => "smallint".to_string(),
         "int32" => "int32".to_string(),
         "bigint" | "long" | "int64" => "long".to_string(),
         "double" | "float64" => "double".to_string(),

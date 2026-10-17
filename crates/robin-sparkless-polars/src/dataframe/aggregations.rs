@@ -1330,8 +1330,8 @@ impl PivotedGroupedData {
                     let value_resolved = self.resolve_column(value_col)?;
                     let col_expr = col(value_resolved.as_str());
                     let agg_expr = match *agg_kind {
-                        "sum" => col_expr.sum().alias(alias.as_str()),
-                        "avg" => col_expr.mean().alias(alias.as_str()),
+                        "sum" => pivot_sum_expr(col_expr).alias(alias.as_str()),
+                        "avg" => pivot_avg_expr(col_expr).alias(alias.as_str()),
                         "min" => col_expr.min().alias(alias.as_str()),
                         "max" => col_expr.max().alias(alias.as_str()),
                         other => {
