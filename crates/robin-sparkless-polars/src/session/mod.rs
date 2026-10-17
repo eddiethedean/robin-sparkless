@@ -328,6 +328,15 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
             JsonValue::String(s) if decimal_transport_value(s).parse::<i16>().is_ok() => Ok(()),
             _ => Err(format!("expected smallint, got {}", value_type_name(v))),
         },
+        "int32" => match v {
+            JsonValue::Number(n)
+                if n.as_i64().is_some_and(|value| i32::try_from(value).is_ok()) =>
+            {
+                Ok(())
+            }
+            JsonValue::String(s) if decimal_transport_value(s).parse::<i32>().is_ok() => Ok(()),
+            _ => Err(format!("expected int32, got {}", value_type_name(v))),
+        },
         "int" | "integer" | "bigint" | "long" | "tinyint" => match v {
             JsonValue::Number(_) => Ok(()), // #1265: accept any number (e.g. 10^18 from UDF); build uses i64 or f64
             JsonValue::String(s) if decimal_transport_value(s).parse::<i64>().is_ok() => Ok(()),

@@ -364,6 +364,12 @@ def test_arrow_int16_and_smallint_schemas_use_short_type(spark) -> None:
     assert explicitly_typed.collect()[0]["value"] == 32767
 
 
+@pytest.mark.parametrize("value", ["not-an-int", 2**31])
+def test_int32_schema_verification_rejects_invalid_values(spark, value) -> None:
+    with pytest.raises(TypeError, match="Row 0: column 'value' expected type int32"):
+        spark.createDataFrame([{"value": value}], schema="value int32")
+
+
 def test_negative_decimal_inference_keeps_precision_within_38(spark) -> None:
     value = Decimal("-" + "9" * 38)
 
