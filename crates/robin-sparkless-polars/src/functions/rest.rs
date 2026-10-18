@@ -570,6 +570,8 @@ fn running_numeric_series(
             };
             let factor = BigInt::from(10).pow(output_scale.saturating_sub(input_scale) as u32);
             let max_decimal = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+            let sum_precision = input_precision.saturating_add(10).min(38);
+            let max_sum_decimal = BigInt::from(10).pow(sum_precision as u32) - BigInt::from(1);
             let coefficients = (0..series.len())
                 .map(|idx| match series.get(idx)? {
                     AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
@@ -612,6 +614,19 @@ fn running_numeric_series(
                     continue;
                 }
                 if average {
+                    // Spark keeps AVG's running sum in Decimal(p + 10, s), capped
+                    // at precision 38. Check that buffer before dividing; the
+                    // average itself can fit even after its sum has overflowed.
+                    if sum.abs() > max_sum_decimal {
+                        if ansi_enabled {
+                            return Err(PolarsError::ComputeError(
+                                "[ARITHMETIC_OVERFLOW] decimal average sum exceeds supported precision"
+                                    .into(),
+                            ));
+                        }
+                        values.push(None);
+                        continue;
+                    }
                     let scaled_sum = sum * &factor;
                     let divisor = BigInt::from(count);
                     let mut rounded = &scaled_sum / &divisor;

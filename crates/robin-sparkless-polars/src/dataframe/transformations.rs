@@ -898,6 +898,8 @@ fn compute_range_window_series(
             };
             let factor = BigInt::from(10).pow(output_scale.saturating_sub(*scale) as u32);
             let maximum = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+            let sum_precision = precision.saturating_add(10).min(38);
+            let maximum_sum = BigInt::from(10).pow(sum_precision as u32) - BigInt::from(1);
             let coefficients = (0..n)
                 .map(|idx| match value_s.get(idx)? {
                     AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
@@ -933,6 +935,19 @@ fn compute_range_window_series(
                 if count == 0 {
                     result.push(None);
                 } else if agg == RangeWindowAgg::Mean {
+                    // AVG accumulates into Decimal(p + 10, s), capped at
+                    // precision 38. Check the accumulator before division so an
+                    // oversized sum cannot yield a seemingly valid average.
+                    if total.abs() > maximum_sum {
+                        if ansi_enabled {
+                            return Err(PolarsError::ComputeError(
+                                "[ARITHMETIC_OVERFLOW] decimal average sum exceeds supported precision"
+                                    .into(),
+                            ));
+                        }
+                        result.push(None);
+                        continue;
+                    }
                     let scaled = total * &factor;
                     let divisor = BigInt::from(count);
                     let mut average = &scaled / &divisor;
