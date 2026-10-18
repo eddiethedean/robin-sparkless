@@ -572,6 +572,34 @@ pub fn coerce_for_pyspark_comparison(
         Ok(coerced.into_expr())
     }
 
+    fn wrap_try_to_decimal(
+        expr: Expr,
+        precision: usize,
+        scale: usize,
+    ) -> Result<Expr, PolarsError> {
+        let col = Column::from_expr(expr, None);
+        let type_name = format!("decimal({precision},{scale})");
+        let coerced = crate::functions::try_cast(&col, &type_name)
+            .map_err(|e| PolarsError::ComputeError(e.into()))?;
+        Ok(coerced.into_expr())
+    }
+
+    // Spark keeps scale-zero Decimal/string comparisons in decimal arithmetic.
+    // Parsing the string as Double here would make adjacent integers above 2^53
+    // compare equal. Decimal values with a positive scale use the Double path below.
+    let scale_zero_decimal_string = match (left_type, right_type) {
+        (DataType::Decimal(precision, 0), DataType::String) => Some((*precision, true)),
+        (DataType::String, DataType::Decimal(precision, 0)) => Some((*precision, false)),
+        _ => None,
+    };
+    if let Some((precision, string_is_left)) = scale_zero_decimal_string {
+        return if string_is_left {
+            Ok((wrap_try_to_decimal(left, precision, 0)?, right))
+        } else {
+            Ok((left, wrap_try_to_decimal(right, precision, 0)?))
+        };
+    }
+
     // String–numeric (or numeric–string): route string side through try_to_number and
     // cast numeric side to Float64 so both sides line up.
     let string_numeric = (left_type == &DataType::String && is_numeric(right_type))

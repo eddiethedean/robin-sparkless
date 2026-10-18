@@ -120,6 +120,26 @@ def test_decimal_filter_keeps_large_integral_values_exact(spark) -> None:
     assert [row["amount"] for row in rows] == [Decimal("9007199254740993")]
 
 
+def test_scale_zero_decimal_string_filter_keeps_large_values_exact(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.testing import get_imports
+
+    table = pa.Table.from_pylist(
+        [
+            {"amount": Decimal("9007199254740992")},
+            {"amount": Decimal("9007199254740993")},
+        ],
+        schema=pa.schema([("amount", pa.decimal128(20, 0))]),
+    )
+    df = spark.createDataFrame(table)
+    F = get_imports().F
+
+    rows = df.filter(F.col("amount") == "9007199254740993").collect()
+
+    assert [row["amount"] for row in rows] == [Decimal("9007199254740993")]
+    assert df.filter(F.col("amount") == "not a number").collect() == []
+
+
 def test_decimal_filter_keeps_literal_scale(spark) -> None:
     df = spark.createDataFrame(
         [{"amount": Decimal("2.00")}], schema="amount decimal(12,2)"
