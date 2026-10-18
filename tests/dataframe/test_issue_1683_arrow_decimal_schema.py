@@ -763,6 +763,29 @@ def test_pyarrow_names_only_schema_preserves_nested_map_and_decimal_metadata(
     ]
 
 
+def test_pyarrow_names_only_schema_renames_columns_by_position(spark) -> None:
+    pa = pytest.importorskip("pyarrow")
+    map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
+    source_schema = pa.schema([("source", pa.struct([("balances", map_type)]))])
+    table = pa.Table.from_pylist(
+        [{"source": {"balances": [("checking", Decimal("10.25"))]}}],
+        schema=source_schema,
+    )
+
+    df = spark.createDataFrame(table, schema=["details"])
+    exported = df.toArrow()
+
+    assert df.columns == ["details"]
+    assert (
+        df.schema["details"].dataType["balances"].dataType.simpleString()
+        == "map<string,decimal(12,2)>"
+    )
+    assert exported.schema.field("details").type == source_schema.field("source").type
+    assert exported.to_pylist() == [
+        {"details": {"balances": [("checking", Decimal("10.25"))]}}
+    ]
+
+
 def test_overwriting_arrow_map_with_array_does_not_reuse_stale_map_type(spark) -> None:
     pa = pytest.importorskip("pyarrow")
     from sparkless.testing import get_imports

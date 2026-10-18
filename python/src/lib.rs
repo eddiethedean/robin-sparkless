@@ -1149,6 +1149,62 @@ fn arrow_field_path(parent: &str, name: &str) -> String {
     }
 }
 
+fn remap_arrow_paths_for_names(
+    paths: &mut std::collections::HashSet<String>,
+    arrow_schema: &Bound<'_, PyAny>,
+    names: &[String],
+) -> PyResult<()> {
+    let source_names = arrow_schema
+        .try_iter()?
+        .map(|field| field?.getattr("name")?.extract::<String>())
+        .collect::<PyResult<Vec<_>>>()?;
+    let source_paths = paths.clone();
+    let mut remapped = std::collections::HashSet::new();
+    for (source, output) in source_names.iter().zip(names) {
+        let source_root = arrow_field_path("", source);
+        let output_root = arrow_field_path("", output);
+        for path in &source_paths {
+            let Some(suffix) = path.strip_prefix(&source_root) else {
+                continue;
+            };
+            if suffix.is_empty()
+                || suffix.starts_with('.')
+                || suffix.starts_with('[')
+                || suffix.starts_with('{')
+            {
+                remapped.insert(format!("{output_root}{suffix}"));
+            }
+        }
+    }
+    *paths = remapped;
+    Ok(())
+}
+
+fn rename_arrow_rows_by_position<'py>(
+    py: Python<'py>,
+    data: &Bound<'py, PyAny>,
+    arrow_schema: &Bound<'py, PyAny>,
+    names: &[String],
+) -> PyResult<Bound<'py, PyAny>> {
+    let source_names = arrow_schema
+        .try_iter()?
+        .map(|field| field?.getattr("name")?.extract::<String>())
+        .collect::<PyResult<Vec<_>>>()?;
+    let rows = data.cast::<PyList>()?;
+    let renamed_rows = PyList::empty(py);
+    for row in rows.iter() {
+        let row = row.cast::<PyDict>()?;
+        let renamed = PyDict::new(py);
+        for (source, output) in source_names.iter().zip(names) {
+            if let Some(value) = row.get_item(source.as_str())? {
+                renamed.set_item(output, value)?;
+            }
+        }
+        renamed_rows.append(renamed)?;
+    }
+    Ok(renamed_rows.into_any())
+}
+
 fn arrow_array_struct_paths(
     arrow_schema: &Bound<'_, PyAny>,
 ) -> PyResult<std::collections::HashSet<String>> {
@@ -2065,13 +2121,8 @@ impl PySparkSession {
             (schema_names_only.as_ref(), arrow_schema.as_ref())
         {
             let source_types = parse_schema_from_py(py, arrow_schema)?.unwrap_or_default();
-            let source_types: std::collections::HashMap<_, _> = source_types.into_iter().collect();
             let pairs = PyList::empty(py);
-            for name in names {
-                let type_name = source_types
-                    .get(name)
-                    .map(String::as_str)
-                    .unwrap_or("string");
+            for (name, (_, type_name)) in names.iter().zip(source_types.iter()) {
                 pairs.append((name.as_str(), type_name))?;
             }
             Some(pairs.into_any())
@@ -2084,6 +2135,15 @@ impl PySparkSession {
             .or(arrow_schema.as_ref());
         let (data, from_pandas, pandas_column_order) =
             normalize_create_dataframe_input(py, data, effective_schema)?;
+        let data = if let (Some(names), Some(source_schema)) =
+            (schema_names_only.as_ref(), arrow_schema_source.as_ref())
+        {
+            remap_arrow_paths_for_names(&mut arrow_array_struct_paths, source_schema, names)?;
+            remap_arrow_paths_for_names(&mut logical_map_paths, source_schema, names)?;
+            rename_arrow_rows_by_position(py, &data, source_schema, names)?
+        } else {
+            data
+        };
         let schema_cache =
             schema.and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
         let (rows, schema_pairs, schema_was_inferred, mixed_row_kinds) = python_data_and_schema(
