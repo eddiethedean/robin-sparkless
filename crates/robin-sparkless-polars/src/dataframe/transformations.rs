@@ -720,12 +720,18 @@ fn compute_range_window_series(
     const UNBOUNDED_PRECEDING: i64 = i64::MIN;
     const UNBOUNDED_FOLLOWING: i64 = i64::MAX;
 
-    let order_s = sorted_df
-        .column(order_by)?
-        .as_materialized_series()
-        .cast(&DataType::Float64)?;
+    let order_s = sorted_df.column(order_by)?.as_materialized_series().clone();
+    let exact_order_scale = match order_s.dtype() {
+        DataType::Decimal(_, scale) => Some(*scale),
+        dtype if dtype.is_integer() => Some(0),
+        _ => None,
+    };
+    let order_f64 = if exact_order_scale.is_none() {
+        Some(order_s.cast(&DataType::Float64)?)
+    } else {
+        None
+    };
     let value_s = sorted_df.column(value_col)?.as_materialized_series();
-    let order_ca = order_s.f64()?;
 
     let n = sorted_df.height();
     let mut windows = vec![None; n];
@@ -766,43 +772,91 @@ fn compute_range_window_series(
         };
 
         let part_len = part_end - part_start;
-        let order_slice: Vec<Option<f64>> =
-            (part_start..part_end).map(|i| order_ca.get(i)).collect();
-        let ordered_values: Vec<(usize, f64)> = order_slice
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, value)| value.map(|value| (idx, value)))
-            .collect();
-        let start_f = start as f64;
-        let end_f = end as f64;
-        let mut left = 0usize;
-        let mut right = 0usize;
-        for i in 0..part_len {
-            let Some(v) = order_slice[i] else {
-                continue;
-            };
-            has_order_value[part_start + i] = true;
-            let low = if start == UNBOUNDED_PRECEDING {
-                f64::NEG_INFINITY
-            } else {
-                v + start_f
-            };
-            let high = if end == UNBOUNDED_FOLLOWING {
-                f64::INFINITY
-            } else {
-                v + end_f
-            };
-            while left < ordered_values.len() && ordered_values[left].1 < low {
-                left += 1;
+        if let Some(scale) = exact_order_scale {
+            let factor = BigInt::from(10).pow(scale as u32);
+            let mut ordered_values = Vec::new();
+            for (relative_idx, absolute_idx) in (part_start..part_end).enumerate() {
+                if let Some(value) = exact_range_order_key(order_s.get(absolute_idx)?)? {
+                    ordered_values.push((relative_idx, value));
+                }
             }
-            right = right.max(left);
-            while right < ordered_values.len() && ordered_values[right].1 <= high {
-                right += 1;
+            let start_offset =
+                (start != UNBOUNDED_PRECEDING).then(|| BigInt::from(start) * &factor);
+            let end_offset = (end != UNBOUNDED_FOLLOWING).then(|| BigInt::from(end) * &factor);
+            let mut left = 0usize;
+            let mut right = 0usize;
+            for i in 0..part_len {
+                let value = exact_range_order_key(order_s.get(part_start + i)?)?;
+                let Some(value) = value else {
+                    continue;
+                };
+                has_order_value[part_start + i] = true;
+                let low = start_offset.as_ref().map(|offset| &value + offset);
+                let high = end_offset.as_ref().map(|offset| &value + offset);
+                while left < ordered_values.len()
+                    && low
+                        .as_ref()
+                        .is_some_and(|low| &ordered_values[left].1 < low)
+                {
+                    left += 1;
+                }
+                right = right.max(left);
+                while right < ordered_values.len()
+                    && high
+                        .as_ref()
+                        .is_none_or(|high| &ordered_values[right].1 <= high)
+                {
+                    right += 1;
+                }
+                if left < right {
+                    let first = ordered_values[left].0;
+                    let last = ordered_values[right - 1].0;
+                    windows[part_start + i] = Some((part_start + first, part_start + last));
+                }
             }
-            if left < right {
-                let first = ordered_values[left].0;
-                let last = ordered_values[right - 1].0;
-                windows[part_start + i] = Some((part_start + first, part_start + last));
+        } else {
+            let order_ca = order_f64
+                .as_ref()
+                .expect("non-integral range order is cast to Float64")
+                .f64()?;
+            let order_slice: Vec<Option<f64>> =
+                (part_start..part_end).map(|i| order_ca.get(i)).collect();
+            let ordered_values: Vec<(usize, f64)> = order_slice
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, value)| value.map(|value| (idx, value)))
+                .collect();
+            let start_f = start as f64;
+            let end_f = end as f64;
+            let mut left = 0usize;
+            let mut right = 0usize;
+            for i in 0..part_len {
+                let Some(v) = order_slice[i] else {
+                    continue;
+                };
+                has_order_value[part_start + i] = true;
+                let low = if start == UNBOUNDED_PRECEDING {
+                    f64::NEG_INFINITY
+                } else {
+                    v + start_f
+                };
+                let high = if end == UNBOUNDED_FOLLOWING {
+                    f64::INFINITY
+                } else {
+                    v + end_f
+                };
+                while left < ordered_values.len() && ordered_values[left].1 < low {
+                    left += 1;
+                }
+                right = right.max(left);
+                while right < ordered_values.len() && ordered_values[right].1 <= high {
+                    right += 1;
+                }
+                if left < right {
+                    let first = ordered_values[left].0;
+                    let last = ordered_values[right - 1].0;
+                    windows[part_start + i] = Some((part_start + first, part_start + last));
+                }
             }
         }
 
@@ -957,6 +1011,30 @@ fn compute_range_window_series(
             Ok(Series::new(value_col.into(), result))
         }
     }
+}
+
+fn exact_range_order_key(
+    value: polars::prelude::AnyValue<'_>,
+) -> Result<Option<BigInt>, PolarsError> {
+    use polars::prelude::AnyValue;
+
+    Ok(match value {
+        AnyValue::Null => None,
+        AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => Some(BigInt::from(value)),
+        AnyValue::Int8(value) => Some(BigInt::from(value)),
+        AnyValue::Int16(value) => Some(BigInt::from(value)),
+        AnyValue::Int32(value) => Some(BigInt::from(value)),
+        AnyValue::Int64(value) => Some(BigInt::from(value)),
+        AnyValue::UInt8(value) => Some(BigInt::from(value)),
+        AnyValue::UInt16(value) => Some(BigInt::from(value)),
+        AnyValue::UInt32(value) => Some(BigInt::from(value)),
+        AnyValue::UInt64(value) => Some(BigInt::from(value)),
+        other => {
+            return Err(PolarsError::ComputeError(
+                format!("expected an integral or decimal RANGE order value, got {other:?}").into(),
+            ));
+        }
+    })
 }
 
 /// Add or replace a column. Handles deferred rand/randn and Python UDF (UdfCall).

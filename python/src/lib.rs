@@ -1149,15 +1149,19 @@ fn arrow_field_path(parent: &str, name: &str) -> String {
     }
 }
 
+fn arrow_schema_field_names(arrow_schema: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    arrow_schema
+        .try_iter()?
+        .map(|field| field?.getattr("name")?.extract::<String>())
+        .collect()
+}
+
 fn remap_arrow_paths_for_names(
     paths: &mut std::collections::HashSet<String>,
     arrow_schema: &Bound<'_, PyAny>,
     names: &[String],
 ) -> PyResult<()> {
-    let source_names = arrow_schema
-        .try_iter()?
-        .map(|field| field?.getattr("name")?.extract::<String>())
-        .collect::<PyResult<Vec<_>>>()?;
+    let source_names = arrow_schema_field_names(arrow_schema)?;
     let source_paths = paths.clone();
     let mut remapped = std::collections::HashSet::new();
     for (source, output) in source_names.iter().zip(names) {
@@ -1186,10 +1190,7 @@ fn rename_arrow_rows_by_position<'py>(
     arrow_schema: &Bound<'py, PyAny>,
     names: &[String],
 ) -> PyResult<Bound<'py, PyAny>> {
-    let source_names = arrow_schema
-        .try_iter()?
-        .map(|field| field?.getattr("name")?.extract::<String>())
-        .collect::<PyResult<Vec<_>>>()?;
+    let source_names = arrow_schema_field_names(arrow_schema)?;
     let rows = data.cast::<PyList>()?;
     let renamed_rows = PyList::empty(py);
     for row in rows.iter() {
@@ -2046,7 +2047,7 @@ impl PySparkSession {
         }
         // PyArrow's Python rows contain Decimal values, but the table schema is the
         // authoritative source for precision and scale. Feed it through the same schema path.
-        let schema_names_only: Option<Vec<String>> = schema.and_then(|schema| {
+        let mut schema_names_only: Option<Vec<String>> = schema.and_then(|schema| {
             let names = schema.cast::<PyList>().ok()?;
             names
                 .iter()
@@ -2058,6 +2059,31 @@ impl PySparkSession {
         } else {
             None
         };
+        // Match the names-only schema behavior for tuple rows: infer names for
+        // extra Arrow fields, and reject a schema that names nonexistent fields.
+        if let (Some(names), Some(source_schema)) =
+            (schema_names_only.as_mut(), arrow_schema_source.as_ref())
+        {
+            let source_names = arrow_schema_field_names(source_schema)?;
+            if names.len() > source_names.len() {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "[AXIS_LENGTH_MISMATCH] schema has {} column names but Arrow input has {} columns",
+                    names.len(),
+                    source_names.len(),
+                )));
+            }
+            let mut fallback_index = names.len() + 1;
+            while names.len() < source_names.len() {
+                let fallback_name = loop {
+                    let candidate = format!("_{fallback_index}");
+                    fallback_index += 1;
+                    if !names.iter().any(|name| name == &candidate) {
+                        break candidate;
+                    }
+                };
+                names.push(fallback_name);
+            }
+        }
         // Keep the Arrow logical shape when schema is omitted or only supplies
         // column names. A typed Spark schema remains authoritative.
         let keep_arrow_logical_shape = schema.is_none() || schema_names_only.is_some();

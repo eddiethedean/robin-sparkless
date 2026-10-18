@@ -4,12 +4,24 @@ use num_traits::{Signed, ToPrimitive, Zero};
 use polars::prelude::*;
 use spark_sql_parser::ast::BinaryOperator;
 
+fn integral_literal_value(expr: &Expr) -> Option<i128> {
+    match expr {
+        Expr::Literal(value) => value.to_any_value()?.extract::<i128>(),
+        Expr::Alias(inner, _) | Expr::KeepName(inner) => integral_literal_value(inner),
+        Expr::Function { input, function }
+            if matches!(function, polars::prelude::FunctionExpr::Negate) && input.len() == 1 =>
+        {
+            integral_literal_value(&input[0])?.checked_neg()
+        }
+        _ => None,
+    }
+}
+
 fn decimal_type(expr: &Expr, dtype: &DataType) -> Option<(usize, usize)> {
     // Spark uses the minimum decimal precision for an integral literal. An
     // explicitly cast integer or an integer column keeps its declared width.
     if dtype.is_integer() {
-        if let Expr::Literal(value) = expr {
-            let value = value.to_any_value()?.extract::<i128>()?;
+        if let Some(value) = integral_literal_value(expr) {
             return Some((value.unsigned_abs().to_string().len(), 0));
         }
     }
