@@ -1990,53 +1990,98 @@ impl PySparkSession {
         }
         // PyArrow's Python rows contain Decimal values, but the table schema is the
         // authoritative source for precision and scale. Feed it through the same schema path.
-        let arrow_schema_source = if schema.is_none() && is_pyarrow_table_or_batch(data) {
+        let schema_names_only: Option<Vec<String>> = schema.and_then(|schema| {
+            let names = schema.cast::<PyList>().ok()?;
+            names
+                .iter()
+                .map(|name| name.extract::<String>().ok())
+                .collect()
+        });
+        let arrow_schema_source = if is_pyarrow_table_or_batch(data) {
             data.getattr("schema").ok()
         } else {
             None
         };
-        let mut arrow_array_struct_paths = arrow_schema_source
-            .as_ref()
-            .map(arrow_array_struct_paths)
-            .transpose()?
-            .unwrap_or_default();
-        let mut logical_map_paths = arrow_schema_source
-            .as_ref()
-            .map(arrow_logical_map_paths)
-            .transpose()?
-            .unwrap_or_default();
+        // Keep the Arrow logical shape when schema is omitted or only supplies
+        // column names. A typed Spark schema remains authoritative.
+        let keep_arrow_logical_shape = schema.is_none() || schema_names_only.is_some();
+        let mut arrow_array_struct_paths = if keep_arrow_logical_shape {
+            arrow_schema_source
+                .as_ref()
+                .map(arrow_array_struct_paths)
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        let mut logical_map_paths = if keep_arrow_logical_shape {
+            arrow_schema_source
+                .as_ref()
+                .map(arrow_logical_map_paths)
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        };
         let arrow_schema_cache = arrow_schema_source.as_ref().map(|s| s.clone().unbind());
-        let arrow_schema = arrow_schema_source.as_ref().and_then(|arrow_schema| {
-            let arrow_rows_obj = data.call_method0("to_pylist").ok()?;
-            let arrow_rows = arrow_rows_obj.cast::<PyList>().ok()?;
-            let out = PyList::empty(py);
-            for field in arrow_schema.try_iter().ok()? {
-                let field = field.ok()?;
-                let name = field.getattr("name").ok()?.extract::<String>().ok()?;
-                let arrow_type = field.getattr("type").ok()?;
-                let spark_type = if let Some(spark_type) =
-                    arrow_type_to_spark_type(&arrow_type).ok().flatten()
-                {
-                    spark_type
-                } else {
-                    let mut inferred: Option<String> = None;
-                    for row in arrow_rows.iter() {
-                        let value = row.get_item(name.as_str()).ok()?;
-                        if !value.is_none() {
-                            let inferred_type = infer_type_from_py_value(&value);
-                            inferred = Some(match inferred {
-                                Some(existing) => merge_spark_type_names(&existing, &inferred_type),
-                                None => inferred_type,
-                            });
+        let arrow_schema = (schema.is_none() || schema_names_only.is_some())
+            .then_some(arrow_schema_source.as_ref())
+            .flatten()
+            .and_then(|arrow_schema| {
+                let arrow_rows_obj = data.call_method0("to_pylist").ok()?;
+                let arrow_rows = arrow_rows_obj.cast::<PyList>().ok()?;
+                let out = PyList::empty(py);
+                for field in arrow_schema.try_iter().ok()? {
+                    let field = field.ok()?;
+                    let name = field.getattr("name").ok()?.extract::<String>().ok()?;
+                    let arrow_type = field.getattr("type").ok()?;
+                    let spark_type = if let Some(spark_type) =
+                        arrow_type_to_spark_type(&arrow_type).ok().flatten()
+                    {
+                        spark_type
+                    } else {
+                        let mut inferred: Option<String> = None;
+                        for row in arrow_rows.iter() {
+                            let value = row.get_item(name.as_str()).ok()?;
+                            if !value.is_none() {
+                                let inferred_type = infer_type_from_py_value(&value);
+                                inferred = Some(match inferred {
+                                    Some(existing) => {
+                                        merge_spark_type_names(&existing, &inferred_type)
+                                    }
+                                    None => inferred_type,
+                                });
+                            }
                         }
-                    }
-                    inferred.unwrap_or_else(|| "string".to_string())
-                };
-                out.append((name, spark_type)).ok()?;
+                        inferred.unwrap_or_else(|| "string".to_string())
+                    };
+                    out.append((name, spark_type)).ok()?;
+                }
+                Some(out.into_any())
+            });
+        // A names-only schema changes order/names but PyArrow still owns the
+        // field types. Rebuild those typed pairs in the requested order.
+        let arrow_name_schema = if let (Some(names), Some(arrow_schema)) =
+            (schema_names_only.as_ref(), arrow_schema.as_ref())
+        {
+            let source_types = parse_schema_from_py(py, arrow_schema)?.unwrap_or_default();
+            let source_types: std::collections::HashMap<_, _> = source_types.into_iter().collect();
+            let pairs = PyList::empty(py);
+            for name in names {
+                let type_name = source_types
+                    .get(name)
+                    .map(String::as_str)
+                    .unwrap_or("string");
+                pairs.append((name.as_str(), type_name))?;
             }
-            Some(out.into_any())
-        });
-        let effective_schema = schema.or(arrow_schema.as_ref());
+            Some(pairs.into_any())
+        } else {
+            None
+        };
+        let effective_schema = arrow_name_schema
+            .as_ref()
+            .or(schema)
+            .or(arrow_schema.as_ref());
         let (data, from_pandas, pandas_column_order) =
             normalize_create_dataframe_input(py, data, effective_schema)?;
         let schema_cache =
@@ -9020,9 +9065,66 @@ fn make_udf_filter_column(
 }
 
 /// Convert Python value (int, float, str, bool, None, list) or PyColumn to robin_sparkless Column.
+fn py_decimal_to_column(value: &Bound<'_, PyAny>) -> PyResult<Option<Column>> {
+    let py = value.py();
+    let decimal_type = PyModule::import(py, "decimal")?.getattr("Decimal")?;
+    if !value.is_instance(&decimal_type)? {
+        return Ok(None);
+    }
+
+    let tuple = value.call_method0("as_tuple")?;
+    let sign: u8 = tuple.get_item(0)?.extract()?;
+    let digits: Vec<u8> = tuple.get_item(1)?.extract()?;
+    let exponent = tuple.get_item(2)?.extract::<i32>().map_err(|_| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Decimal literals must be finite Spark decimal values",
+        )
+    })?;
+    let scale = exponent.unsigned_abs() as usize * usize::from(exponent < 0);
+    let positive_exponent = exponent.max(0) as usize;
+    let precision = digits
+        .len()
+        .saturating_add(positive_exponent)
+        .max(scale)
+        .max(1);
+    if precision > 38 || scale > 38 {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Decimal literal exceeds Spark DecimalType maximum precision 38",
+        ));
+    }
+
+    let mut coefficient = if digits.is_empty() {
+        "0".to_string()
+    } else {
+        digits
+            .iter()
+            .map(|digit| char::from(b'0' + *digit))
+            .collect()
+    };
+    coefficient.extend(std::iter::repeat_n('0', positive_exponent));
+    let mut coefficient = coefficient.parse::<i128>().map_err(|_| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Decimal literal exceeds Spark DecimalType maximum precision 38",
+        )
+    })?;
+    if sign != 0 {
+        coefficient = -coefficient;
+    }
+
+    let expression = polars::prelude::lit(polars::prelude::Scalar::new_decimal(
+        coefficient,
+        precision,
+        scale,
+    ));
+    Ok(Some(Column::from_expr(expression, None)))
+}
+
 fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
     if let Some(py_col) = py_any_to_py_column_ref(other) {
         return Ok(py_col.bind(other.py()).borrow().inner.clone());
+    }
+    if let Some(decimal) = py_decimal_to_column(other)? {
+        return Ok(decimal);
     }
     if other.is_none() {
         return Ok(robin_sparkless::functions::lit_null_untyped());
@@ -10897,6 +10999,9 @@ fn lit_null(dtype: &str) -> PyResult<PyColumn> {
 #[pyfunction]
 fn lit(value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let _py = value.py();
+    if let Some(decimal) = py_decimal_to_column(value)? {
+        return Ok(PyColumn { inner: decimal });
+    }
     if value.is_none() {
         return Ok(PyColumn {
             inner: robin_sparkless::functions::lit_null_untyped(),

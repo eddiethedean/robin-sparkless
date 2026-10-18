@@ -168,6 +168,29 @@ def test_decimal_filter_literal_wider_than_column_precision(spark) -> None:
     assert len(df.filter("amount < 10.001").collect()) == 1
 
 
+def test_decimal_column_arithmetic_keeps_python_decimal_literals_exact(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().F
+    df = spark.createDataFrame(
+        [{"amount": Decimal("9007199254740993.01")}],
+        "amount decimal(20,2)",
+    )
+
+    result = df.select(
+        (F.col("amount") + Decimal("0.01")).alias("added"),
+        (F.lit(Decimal("0.01")) + F.col("amount")).alias("reversed"),
+    )
+
+    assert result.schema["added"].dataType.simpleString() == "decimal(21,2)"
+    assert result.collect() == [
+        {
+            "added": Decimal("9007199254740993.02"),
+            "reversed": Decimal("9007199254740993.02"),
+        }
+    ]
+
+
 def test_decimal_sum_and_casts_keep_decimal_values(spark) -> None:
     from sparkless.testing import get_imports
 
@@ -294,13 +317,13 @@ def test_decimal_join_and_union_do_not_collapse_adjacent_large_values(spark) -> 
     ]
 
 
-def test_decimal_double_coercion_is_correctly_rounded_in_unions_and_joins(spark) -> None:
+def test_decimal_double_coercion_is_correctly_rounded_in_unions_and_joins(
+    spark,
+) -> None:
     decimal_df = spark.createDataFrame(
         [{"id": Decimal("9007199254740992.9")}], "id decimal(18,1)"
     )
-    double_df = spark.createDataFrame(
-        [{"id": 9007199254740992.0}], "id double"
-    )
+    double_df = spark.createDataFrame([{"id": 9007199254740992.0}], "id double")
     expected = 9007199254740992.0
 
     unioned = decimal_df.unionByName(double_df).collect()
@@ -716,6 +739,30 @@ def test_arrow_map_schema_and_nested_map_round_trip(spark) -> None:
     ]
 
 
+def test_pyarrow_names_only_schema_preserves_nested_map_and_decimal_metadata(
+    spark,
+) -> None:
+    pa = pytest.importorskip("pyarrow")
+    map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
+    arrow_schema = pa.schema([("details", pa.struct([("balances", map_type)]))])
+    table = pa.Table.from_pylist(
+        [{"details": {"balances": [("checking", Decimal("10.25"))]}}],
+        schema=arrow_schema,
+    )
+
+    df = spark.createDataFrame(table, schema=["details"])
+    exported = df.toArrow()
+
+    assert (
+        df.schema["details"].dataType["balances"].dataType.simpleString()
+        == "map<string,decimal(12,2)>"
+    )
+    assert exported.schema.field("details").type == arrow_schema.field("details").type
+    assert exported.to_pylist() == [
+        {"details": {"balances": [("checking", Decimal("10.25"))]}}
+    ]
+
+
 def test_overwriting_arrow_map_with_array_does_not_reuse_stale_map_type(spark) -> None:
     pa = pytest.importorskip("pyarrow")
     from sparkless.testing import get_imports
@@ -1044,6 +1091,23 @@ def test_sql_decimal_arithmetic_broadcasts_literals_and_preserves_nulls(spark):
         Decimal("0.625000"),
         None,
         Decimal("1.250000"),
+    ]
+
+
+def test_sql_decimal_unary_minus_and_negative_literals_are_supported(spark):
+    df = spark.createDataFrame(
+        [{"amount": Decimal("9007199254740993.01")}],
+        "amount decimal(20,2)",
+    )
+
+    result = df.selectExpr("-amount AS negative", "amount + -0.01 AS adjusted")
+
+    assert result.schema["negative"].dataType.simpleString() == "decimal(20,2)"
+    assert result.collect() == [
+        {
+            "negative": Decimal("-9007199254740993.01"),
+            "adjusted": Decimal("9007199254740993.00"),
+        }
     ]
 
 

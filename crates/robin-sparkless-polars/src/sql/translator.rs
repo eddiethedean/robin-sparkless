@@ -1368,6 +1368,7 @@ fn sql_expr_to_polars(
         SqlExpr::UnaryOp { op, expr } => {
             let e = sql_expr_to_polars(expr, session, df, having_agg_map, having_agg_list)?;
             match op {
+                spark_sql_parser::ast::UnaryOperator::Minus => Ok(-e),
                 spark_sql_parser::ast::UnaryOperator::Not => Ok(e.not()),
                 spark_sql_parser::ast::UnaryOperator::BitwiseNot => {
                     let col = Column::from_expr(e, None);
