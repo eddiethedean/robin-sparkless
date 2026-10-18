@@ -3780,6 +3780,12 @@ fn series_to_f64_pyspark(s: &Series, ctx: &str) -> PolarsResult<Float64Chunked> 
             // All-null column – return a null Float64Chunked of same length.
             Ok(Float64Chunked::full_null(PlSmallStr::EMPTY, s.len()))
         }
+        DataType::Decimal(..) => {
+            // Polars' direct Decimal-to-Float64 cast can round large values up.
+            // Parsing the exact decimal text gives the correctly rounded f64.
+            let text = s.cast(&DataType::String).map_err(|e| compute_err(ctx, e))?;
+            series_to_f64_pyspark(&text, ctx)
+        }
         // For all other dtypes, rely on Polars cast to Float64.
         _ => {
             let casted = s
@@ -6480,9 +6486,10 @@ pub fn apply_string_to_double(column: Column, strict: bool) -> PolarsResult<Opti
             Float64Chunked::from_iter_options(name.as_str().into(), results.into_iter())
                 .into_series()
         }
-        DataType::Float32 | DataType::Float64 | DataType::Decimal(_, _) => {
-            series.cast(&DataType::Float64)?
+        DataType::Decimal(_, _) => {
+            series_to_f64_pyspark(&series, "string to double")?.into_series()
         }
+        DataType::Float32 | DataType::Float64 => series.cast(&DataType::Float64)?,
         DataType::Int32 | DataType::Int64 | DataType::UInt32 | DataType::UInt64 => {
             series.cast(&DataType::Float64)?
         }

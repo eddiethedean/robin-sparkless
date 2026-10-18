@@ -139,7 +139,14 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                         .ok()
                         .map(|field| field.dtype().clone());
                     if input_dtype.as_ref().is_some_and(DataType::is_integer) {
-                        return Ok(integer_sum_expr(input, ansi_enabled));
+                        // The fixed-size Int128 reduction can only check the final
+                        // total. ANSI SUM must detect overflow at each accumulation
+                        // step, even when later values bring the result back in range.
+                        return Ok(if ansi_enabled {
+                            sum_expr(input, true)
+                        } else {
+                            integer_sum_expr(input, false)
+                        });
                     }
                     if input_dtype
                         .as_ref()

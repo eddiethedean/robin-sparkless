@@ -24,6 +24,37 @@ fn decimal_type(expr: &Expr, dtype: &DataType) -> Option<(usize, usize)> {
     })
 }
 
+/// Spark promotes mixed Decimal/Float arithmetic to Double. Convert the
+/// Decimal through its exact text representation before parsing as Float64;
+/// Polars' direct Decimal-to-Float64 cast can round large values up.
+pub(super) fn coerce_decimal_float_operands(
+    left: Expr,
+    right: Expr,
+    schema: &Schema,
+) -> PolarsResult<Option<(Expr, Expr)>> {
+    let left_type = left.to_field(schema)?.dtype().clone();
+    let right_type = right.to_field(schema)?.dtype().clone();
+    let mixed_decimal_float = matches!(
+        (&left_type, &right_type),
+        (DataType::Decimal(..), DataType::Float32 | DataType::Float64)
+            | (DataType::Float32 | DataType::Float64, DataType::Decimal(..))
+    );
+    if !mixed_decimal_float {
+        return Ok(None);
+    }
+    let to_double = |expr: Expr, dtype: &DataType| {
+        if matches!(dtype, DataType::Decimal(..)) {
+            expr.cast(DataType::String).cast(DataType::Float64)
+        } else {
+            expr.cast(DataType::Float64)
+        }
+    };
+    Ok(Some((
+        to_double(left, &left_type),
+        to_double(right, &right_type),
+    )))
+}
+
 fn coefficient(value: AnyValue<'_>) -> Option<BigInt> {
     match value {
         AnyValue::Null => None,

@@ -1317,8 +1317,8 @@ fn sql_expr_to_polars(
         SqlExpr::Value(ValueWithSpan { value: Value::Boolean(b), .. }) => Ok(lit(*b)),
         SqlExpr::Value(ValueWithSpan { value: Value::Null, .. }) => Ok(lit(polars::prelude::NULL)),
         SqlExpr::BinaryOp { left, op, right } => {
-            let l = sql_expr_to_polars(left, session, df, having_agg_map, having_agg_list)?;
-            let r = sql_expr_to_polars(right, session, df, having_agg_map, having_agg_list)?;
+            let mut l = sql_expr_to_polars(left, session, df, having_agg_map, having_agg_list)?;
+            let mut r = sql_expr_to_polars(right, session, df, having_agg_map, having_agg_list)?;
             if matches!(
                 op,
                 BinaryOperator::Plus | BinaryOperator::Minus
@@ -1336,6 +1336,12 @@ fn sql_expr_to_polars(
                     ),
                 )? {
                     return Ok(expr);
+                }
+                if let Some((coerced_l, coerced_r)) =
+                    super::decimal::coerce_decimal_float_operands(l.clone(), r.clone(), &schema)?
+                {
+                    l = coerced_l;
+                    r = coerced_r;
                 }
             }
             match op {
