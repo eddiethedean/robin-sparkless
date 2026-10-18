@@ -2363,7 +2363,8 @@ fn push_agg_function(
                     SqlExpr::Identifier(ident) => format!("sum({})", ident.value),
                     _ => "sum".to_string(),
                 };
-                (inner.sum(), default)
+                let col = Column::from_expr(inner, None);
+                (functions::sum(&col).expr().clone(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
                     "SQL: SUM requires one expression argument (e.g. SUM(column) or SUM(a * b))."
@@ -2381,7 +2382,8 @@ fn push_agg_function(
                     SqlExpr::Identifier(ident) => format!("avg({})", ident.value),
                     _ => "avg".to_string(),
                 };
-                (inner.mean(), default)
+                let col = Column::from_expr(inner, None);
+                (functions::avg(&col).expr().clone(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
                     "SQL: AVG requires one expression argument (e.g. AVG(column) or AVG(a * b))."

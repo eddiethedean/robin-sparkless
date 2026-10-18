@@ -5527,6 +5527,21 @@ impl PyDataFrame {
     }
 
     fn copy_column_metadata(&self, source: &str, output: &str, target: &mut Self) {
+        self.copy_column_metadata_to_path(
+            source,
+            &arrow_field_path("", output),
+            Some(output),
+            target,
+        );
+    }
+
+    fn copy_column_metadata_to_path(
+        &self,
+        source: &str,
+        output_path: &str,
+        output_root: Option<&str>,
+        target: &mut Self,
+    ) {
         let resolved = self.inner.resolve_column_name(source).ok();
         let source_path = if let Some(source) = &resolved {
             arrow_field_path("", source)
@@ -5541,10 +5556,11 @@ impl PyDataFrame {
                 arrow_field_path(&path, field)
             })
         };
-        let output_path = arrow_field_path("", output);
         for path in &self.arrow_array_struct_paths {
             if path == &source_path {
-                target.arrow_array_struct_paths.insert(output_path.clone());
+                target
+                    .arrow_array_struct_paths
+                    .insert(output_path.to_string());
             } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
                 if tail.starts_with(['.', '[', '{']) {
                     target
@@ -5555,7 +5571,7 @@ impl PyDataFrame {
         }
         for path in &self.logical_map_paths {
             if path == &source_path {
-                target.logical_map_paths.insert(output_path.clone());
+                target.logical_map_paths.insert(output_path.to_string());
             } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
                 if tail.starts_with(['.', '[', '{']) {
                     target
@@ -5568,11 +5584,76 @@ impl PyDataFrame {
             .logical_map_columns
             .contains(resolved.as_deref().unwrap_or(source))
         {
-            target.logical_map_columns.insert(output.to_string());
-            target
-                .logical_map_paths
-                .insert(arrow_field_path("", output));
+            target.logical_map_paths.insert(output_path.to_string());
+            if let Some(output_root) = output_root {
+                target.logical_map_columns.insert(output_root.to_string());
+            }
         }
+    }
+
+    fn copy_struct_map_metadata(
+        &self,
+        expr: &robin_sparkless::Expr,
+        output: &str,
+        target: &mut Self,
+    ) {
+        use robin_sparkless::Expr;
+
+        fn visit(
+            source: &PyDataFrame,
+            expr: &Expr,
+            output_path: &str,
+            output_dtype: &robin_sparkless::polars::PlDataType,
+            target: &mut PyDataFrame,
+        ) {
+            match expr {
+                Expr::Alias(inner, _)
+                | Expr::Cast { expr: inner, .. }
+                | Expr::KeepName(inner)
+                | Expr::RenameAlias { expr: inner, .. } => {
+                    visit(source, inner, output_path, output_dtype, target);
+                }
+                Expr::Column(name) => {
+                    if source.column_dtype_for_metadata(name.as_str()).as_ref()
+                        == Some(output_dtype)
+                    {
+                        source.copy_column_metadata_to_path(
+                            name.as_str(),
+                            output_path,
+                            None,
+                            target,
+                        );
+                    }
+                }
+                Expr::Function {
+                    input,
+                    function: polars::prelude::FunctionExpr::AsStruct,
+                } => {
+                    let robin_sparkless::polars::PlDataType::Struct(fields) = output_dtype else {
+                        return;
+                    };
+                    if input.len() != fields.len() {
+                        return;
+                    }
+                    for (input, field) in input.iter().zip(fields) {
+                        let field_path = arrow_field_path(output_path, &field.name);
+                        visit(source, input, &field_path, field.dtype(), target);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let Some(output_dtype) = target.inner.get_column_dtype(output) else {
+            return;
+        };
+        visit(
+            self,
+            expr,
+            &arrow_field_path("", output),
+            &output_dtype,
+            target,
+        );
     }
 
     fn wrap_with_column_derived(
@@ -5596,6 +5677,7 @@ impl PyDataFrame {
                 name,
                 &mut wrapped,
             );
+            self.copy_struct_map_metadata(expr, name, &mut wrapped);
         }
         wrapped
     }
@@ -5617,6 +5699,7 @@ impl PyDataFrame {
                     name,
                     &mut wrapped,
                 );
+                self.copy_struct_map_metadata(column.expr(), name, &mut wrapped);
             }
         }
         wrapped
@@ -5787,6 +5870,7 @@ impl PyDataFrame {
                                 output,
                                 &mut wrapped,
                             );
+                            self.copy_struct_map_metadata(expr, output, &mut wrapped);
                         }
                         continue;
                     };
