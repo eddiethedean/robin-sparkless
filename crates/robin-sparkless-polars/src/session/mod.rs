@@ -41,8 +41,21 @@ fn split_at_top_level_commas(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut angle_depth = 0i32;
     let mut paren_depth = 0i32;
+    let mut in_backticks = false;
     let mut start = 0;
-    for (i, c) in s.char_indices() {
+    let mut chars = s.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if c == '`' {
+            if in_backticks && chars.peek().is_some_and(|(_, next)| *next == '`') {
+                chars.next();
+                continue;
+            }
+            in_backticks = !in_backticks;
+            continue;
+        }
+        if in_backticks {
+            continue;
+        }
         match c {
             '<' => angle_depth += 1,
             '>' => angle_depth -= 1,
@@ -74,8 +87,31 @@ fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
     let mut out = Vec::new();
     for part in split_at_top_level_commas(inner) {
         let part = part.trim();
-        if let Some(idx) = part.find(':') {
-            let name = part[..idx].trim().to_string();
+        let mut in_backticks = false;
+        let mut chars = part.char_indices().peekable();
+        let mut separator = None;
+        while let Some((idx, c)) = chars.next() {
+            if c == '`' {
+                if in_backticks && chars.peek().is_some_and(|(_, next)| *next == '`') {
+                    chars.next();
+                    continue;
+                }
+                in_backticks = !in_backticks;
+            } else if c == ':' && !in_backticks {
+                separator = Some(idx);
+                break;
+            }
+        }
+        if let Some(idx) = separator {
+            let encoded_name = part[..idx].trim();
+            let name = if let Some(name) = encoded_name
+                .strip_prefix('`')
+                .and_then(|name| name.strip_suffix('`'))
+            {
+                name.replace("``", "`")
+            } else {
+                encoded_name.to_string()
+            };
             let typ = part[idx + 1..].trim().to_string();
             out.push((name, typ));
         }

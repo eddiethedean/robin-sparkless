@@ -59,6 +59,19 @@ fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
                     return Ok(lit(Scalar::new_decimal(coefficient, precision, scale)));
                 }
             }
+        } else if s.parse::<i64>().is_err() {
+            // Spark keeps integer literals outside the Int/Long ranges as exact
+            // decimals when they fit DecimalType's maximum precision.
+            let unsigned = s
+                .strip_prefix('-')
+                .or_else(|| s.strip_prefix('+'))
+                .unwrap_or(s);
+            let precision = unsigned.trim_start_matches('0').len().max(1);
+            if precision <= 38 {
+                if let Ok(coefficient) = s.parse::<i128>() {
+                    return Ok(lit(Scalar::new_decimal(coefficient, precision, 0)));
+                }
+            }
         }
     }
     match parse_sql_number_val(s, "literal")? {

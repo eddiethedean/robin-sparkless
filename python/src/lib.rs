@@ -1004,7 +1004,10 @@ fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<St
             let Some(field_type) = arrow_type_to_spark_type(&field_type)? else {
                 return Ok(None);
             };
-            fields.push(format!("{name}:{field_type}"));
+            // Struct type strings use backtick-quoted identifiers so field names
+            // containing commas, colons, or angle brackets remain unambiguous.
+            let quoted_name = name.replace('`', "``");
+            fields.push(format!("`{quoted_name}`:{field_type}"));
         }
         return Ok(Some(format!("struct<{}>", fields.join(","))));
     }

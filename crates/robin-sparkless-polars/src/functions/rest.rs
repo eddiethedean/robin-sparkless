@@ -166,6 +166,11 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                     });
                 }
             }
+            if fmt_str.as_str() == "sum_distinct" {
+                if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
+                    return Ok(sum_distinct_expr(input.as_ref().clone(), ansi_enabled));
+                }
+            }
             if fmt_str.as_str() == "avg" || fmt_str.as_str() == "try_avg" {
                 let is_try_aggregate = fmt_str.as_str() == "try_avg";
                 if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
@@ -258,11 +263,22 @@ fn sum_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -
                         };
                         let mut total = BigInt::zero();
                         let mut found_value = false;
+                        let mut overflowed = false;
                         for idx in 0..group.len() {
                             match group.get(idx)? {
                                 AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
                                     found_value = true;
                                     total += value;
+                                    if total.abs() > maximum {
+                                        if ansi_enabled {
+                                            return Err(PolarsError::ComputeError(
+                                                "[ARITHMETIC_OVERFLOW] decimal sum exceeds supported precision"
+                                                    .into(),
+                                            ));
+                                        }
+                                        overflowed = true;
+                                        break;
+                                    }
                                 }
                                 _ => {}
                             }
@@ -271,13 +287,7 @@ fn sum_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -
                             sums.push(None);
                             continue;
                         }
-                        if total.abs() > maximum {
-                            if ansi_enabled {
-                                return Err(PolarsError::ComputeError(
-                                    "[ARITHMETIC_OVERFLOW] decimal sum exceeds supported precision"
-                                        .into(),
-                                ));
-                            }
+                        if overflowed {
                             sums.push(None);
                             continue;
                         }
@@ -891,6 +901,8 @@ fn avg_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -
                 let output_scale = scale.saturating_add(4).min(output_precision);
                 let factor = BigInt::from(10).pow(output_scale.saturating_sub(*scale) as u32);
                 let maximum = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+                let sum_precision = precision.saturating_add(10).min(38);
+                let maximum_sum = BigInt::from(10).pow(sum_precision as u32) - BigInt::from(1);
                 let mut averages = Vec::with_capacity(series.len());
                 for group_idx in 0..series.len() {
                     let Some(group) = groups.get_as_series(group_idx) else {
@@ -899,11 +911,22 @@ fn avg_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -
                     };
                     let mut sum = BigInt::zero();
                     let mut count = 0_usize;
+                    let mut overflowed = false;
                     for idx in 0..group.len() {
                         match group.get(idx)? {
                             AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
                                 sum += value;
                                 count += 1;
+                                if sum.abs() > maximum_sum {
+                                    if ansi_enabled {
+                                        return Err(PolarsError::ComputeError(
+                                            "[ARITHMETIC_OVERFLOW] decimal average sum exceeds supported precision"
+                                                .into(),
+                                        ));
+                                    }
+                                    overflowed = true;
+                                    break;
+                                }
                             }
                             AnyValue::Null => {}
                             _ => {
@@ -914,6 +937,10 @@ fn avg_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -
                         }
                     }
                     if count == 0 {
+                        averages.push(None);
+                        continue;
+                    }
+                    if overflowed {
                         averages.push(None);
                         continue;
                     }
@@ -1197,14 +1224,117 @@ pub fn count_distinct(col: &Column) -> Column {
 
 /// Sum of distinct values (PySpark sumDistinct). Output name PySpark-style sum(DISTINCT column_name).
 pub fn sum_distinct(col: &Column) -> Column {
-    use polars::prelude::DataType;
     let name = format!("sum(DISTINCT {})", col.name());
     let mut c = Column::from_expr(
-        col.expr().clone().cast(DataType::Float64).unique().sum(),
+        sum_distinct_expr(
+            col.expr().clone(),
+            crate::udf_context::get_thread_ansi_enabled(),
+        ),
         Some(name),
     );
     c.source_for_running = Some(col.name().to_string());
     c
+}
+
+fn sum_distinct_expr(input: Expr, ansi_enabled: bool) -> Expr {
+    input.implode().map_with_fmt_str(
+            move |series| {
+                let DataType::List(input_type) = series.dtype() else {
+                    return Err(PolarsError::ComputeError(
+                        "sum distinct aggregation expected a list input".into(),
+                    ));
+                };
+                let groups = series.list()?;
+                if let DataType::Decimal(precision, scale) = input_type.as_ref() {
+                    let output_precision = precision.saturating_add(10).min(38);
+                    let maximum = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+                    let mut sums = Vec::with_capacity(series.len());
+                    for group_idx in 0..series.len() {
+                        let Some(group) = groups.get_as_series(group_idx) else {
+                            sums.push(None);
+                            continue;
+                        };
+                        let mut seen = std::collections::HashSet::new();
+                        let mut total = BigInt::zero();
+                        let mut found_value = false;
+                        let mut overflowed = false;
+                        for idx in 0..group.len() {
+                            match group.get(idx)? {
+                                AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
+                                    if !seen.insert(value) {
+                                        continue;
+                                    }
+                                    found_value = true;
+                                    total += value;
+                                    if total.abs() > maximum {
+                                        if ansi_enabled {
+                                            return Err(PolarsError::ComputeError(
+                                                "[ARITHMETIC_OVERFLOW] decimal sum exceeds supported precision"
+                                                    .into(),
+                                            ));
+                                        }
+                                        overflowed = true;
+                                        break;
+                                    }
+                                }
+                                AnyValue::Null => {}
+                                _ => {
+                                    return Err(PolarsError::ComputeError(
+                                        "decimal sum distinct received a non-decimal value".into(),
+                                    ));
+                                }
+                            }
+                        }
+                        if !found_value || overflowed {
+                            sums.push(None);
+                        } else {
+                            sums.push(total.to_i128());
+                        }
+                    }
+                    Series::new(series.name().clone(), sums)
+                        .into_decimal(output_precision, *scale)
+                        .map(|series| series.into_series().into())
+                } else {
+                    let mut sums = Vec::with_capacity(series.len());
+                    for group_idx in 0..series.len() {
+                        let Some(group) = groups.get_as_series(group_idx) else {
+                            sums.push(None);
+                            continue;
+                        };
+                        let values = group.cast(&DataType::Float64)?;
+                        if values.null_count() == values.len() {
+                            sums.push(None);
+                            continue;
+                        }
+                        let values = values.unique()?;
+                        match values.sum_reduce()?.value() {
+                            AnyValue::Float64(value) => sums.push(Some(*value)),
+                            AnyValue::Null => sums.push(None),
+                            value => {
+                                return Err(PolarsError::ComputeError(
+                                    format!("unexpected sum distinct result: {value:?}").into(),
+                                ));
+                            }
+                        }
+                    }
+                    Ok(Series::new(series.name().clone(), sums).into())
+                }
+            },
+            |_schema, field| {
+                let dtype = match field.dtype() {
+                    DataType::List(input_type) => match input_type.as_ref() {
+                        DataType::Decimal(precision, scale) => DataType::Decimal(
+                            precision.saturating_add(10).min(38),
+                            *scale,
+                        ),
+                        _ => DataType::Float64,
+                    },
+                    _ => DataType::Float64,
+                };
+                Ok(Field::new(field.name().clone(), dtype))
+            },
+            "sum_distinct",
+        )
 }
 
 /// Approximate count distinct (PySpark approx_count_distinct). Use in groupBy.agg(). rsd reserved for API compatibility; Polars uses exact n_unique.
