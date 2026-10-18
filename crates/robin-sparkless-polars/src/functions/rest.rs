@@ -131,7 +131,8 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                     allow_precision_loss,
                 ));
             }
-            if fmt_str.as_str() == "sum" {
+            if fmt_str.as_str() == "sum" || fmt_str.as_str() == "try_sum" {
+                let is_try_aggregate = fmt_str.as_str() == "try_sum";
                 if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
                     let input = input.as_ref().clone();
                     let input_dtype = input
@@ -142,7 +143,7 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                         // The fixed-size Int128 reduction can only check the final
                         // total. ANSI SUM must detect overflow at each accumulation
                         // step, even when later values bring the result back in range.
-                        return Ok(if ansi_enabled {
+                        return Ok(if ansi_enabled && !is_try_aggregate {
                             sum_expr(input, true)
                         } else {
                             integer_sum_expr(input, false)
@@ -158,10 +159,15 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                         // checked BigInt path below.
                         return Ok(input.cast(DataType::Float64).sum());
                     }
-                    return Ok(sum_expr(input, ansi_enabled));
+                    return Ok(if is_try_aggregate {
+                        sum_expr_with_marker(input, false, "try_sum")
+                    } else {
+                        sum_expr(input, ansi_enabled)
+                    });
                 }
             }
-            if fmt_str.as_str() == "avg" {
+            if fmt_str.as_str() == "avg" || fmt_str.as_str() == "try_avg" {
+                let is_try_aggregate = fmt_str.as_str() == "try_avg";
                 if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
                     let input = input.as_ref().clone();
                     let input_dtype = input
@@ -177,7 +183,11 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                         // materializing each group's values as a list.
                         return Ok(input.mean());
                     }
-                    return Ok(avg_expr(input, ansi_enabled));
+                    return Ok(if is_try_aggregate {
+                        avg_expr_with_marker(input, false, "try_avg")
+                    } else {
+                        avg_expr(input, ansi_enabled)
+                    });
                 }
             }
         }
@@ -221,6 +231,10 @@ fn integer_sum_expr(input: Expr, ansi_enabled: bool) -> Expr {
 }
 
 fn sum_expr(input: Expr, ansi_enabled: bool) -> Expr {
+    sum_expr_with_marker(input, ansi_enabled, "sum")
+}
+
+fn sum_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -> Expr {
     // Spark widens decimal SUM results by ten integral digits (up to precision 38).
     // Accumulate decimal coefficients with BigInt: Polars' native decimal sum wraps
     // its i128 accumulator when the result exceeds the declared precision.
@@ -351,7 +365,7 @@ fn sum_expr(input: Expr, ansi_enabled: bool) -> Expr {
             };
             Ok(Field::new(field.name().clone(), dtype))
         },
-        "sum",
+        marker,
     )
 }
 
@@ -860,6 +874,10 @@ fn running_float_series(
 }
 
 fn avg_expr(input: Expr, ansi_enabled: bool) -> Expr {
+    avg_expr_with_marker(input, ansi_enabled, "avg")
+}
+
+fn avg_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -> Expr {
     input.implode().map_with_fmt_str(
         move |series| {
             let DataType::List(input_type) = series.dtype() else {
@@ -958,7 +976,7 @@ fn avg_expr(input: Expr, ansi_enabled: bool) -> Expr {
             };
             Ok(Field::new(field.name().clone(), dtype))
         },
-        "avg",
+        marker,
     )
 }
 
@@ -1025,14 +1043,23 @@ pub fn count_if(col: &Column) -> Column {
     )
 }
 
-/// Sum aggregation; null on overflow (PySpark try_sum). Use in groupBy.agg(). Polars sum does not overflow; reserved for API.
+/// Sum aggregation; Decimal results become null on overflow (PySpark try_sum).
+/// Use in groupBy.agg().
 pub fn try_sum(col: &Column) -> Column {
-    Column::from_expr(col.expr().clone().sum(), Some("try_sum".to_string()))
+    Column::from_expr(
+        sum_expr_with_marker(col.expr().clone(), false, "try_sum"),
+        Some("try_sum".to_string()),
+    )
 }
 
-/// Average aggregation; null on invalid (PySpark try_avg). Use in groupBy.agg(). Maps to mean; reserved for API.
+/// Average aggregation; Decimal inputs retain Decimal precision and scale (PySpark try_avg).
+/// Non-decimal inputs map to mean. Use in groupBy.agg().
 pub fn try_avg(col: &Column) -> Column {
-    Column::from_expr(col.expr().clone().mean(), Some("try_avg".to_string()))
+    let input = numeric_aggregate_input(col, None, 0);
+    Column::from_expr(
+        avg_expr_with_marker(input, false, "try_avg"),
+        Some("try_avg".to_string()),
+    )
 }
 
 /// Value of value_col in the row where ord_col is maximum (PySpark max_by). Use in groupBy.agg().

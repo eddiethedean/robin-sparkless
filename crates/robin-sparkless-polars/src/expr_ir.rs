@@ -194,8 +194,14 @@ fn agg_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineE
         ("mean" | "avg", [a]) => Some(expr_ir_to_expr(a)?.mean()),
         ("first", [a]) => Some(expr_ir_to_expr(a)?.first()),
         ("last", [a]) => Some(expr_ir_to_expr(a)?.last()),
-        ("try_sum", [a]) => Some(expr_ir_to_expr(a)?.sum()),
-        ("try_avg", [a]) => Some(expr_ir_to_expr(a)?.mean()),
+        ("try_sum", [a]) => {
+            let input = crate::column::Column::from_expr(expr_ir_to_expr(a)?, None);
+            Some(crate::functions::try_sum(&input).expr().clone())
+        }
+        ("try_avg", [a]) => {
+            let input = crate::column::Column::from_expr(expr_ir_to_expr(a)?, None);
+            Some(crate::functions::try_avg(&input).expr().clone())
+        }
         ("stddev" | "std" | "stddev_samp", [a]) => Some(expr_ir_to_expr(a)?.std(1)),
         ("stddev_pop", [a]) => Some(expr_ir_to_expr(a)?.std(0)),
         ("variance" | "var_samp", [a]) => Some(expr_ir_to_expr(a)?.var(1)),
