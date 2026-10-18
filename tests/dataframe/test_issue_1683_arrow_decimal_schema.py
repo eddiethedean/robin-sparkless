@@ -134,10 +134,20 @@ def test_scale_zero_decimal_string_filter_keeps_large_values_exact(spark) -> Non
     df = spark.createDataFrame(table)
     F = get_imports().F
 
-    rows = df.filter(F.col("amount") == "9007199254740993").collect()
+    expected = [Decimal("9007199254740993")]
+    for value in (
+        "9007199254740993",
+        " 9007199254740993 ",
+        "9.007199254740993e15",
+    ):
+        rows = df.filter(F.col("amount") == value).collect()
+        reverse_rows = df.filter(F.lit(value) == F.col("amount")).collect()
 
-    assert [row["amount"] for row in rows] == [Decimal("9007199254740993")]
+        assert [row["amount"] for row in rows] == expected
+        assert [row["amount"] for row in reverse_rows] == expected
+
     assert df.filter(F.col("amount") == "not a number").collect() == []
+    assert df.filter(F.lit("not a number") == F.col("amount")).collect() == []
 
 
 def test_decimal_filter_keeps_literal_scale(spark) -> None:

@@ -587,17 +587,14 @@ pub fn coerce_for_pyspark_comparison(
     // Spark keeps scale-zero Decimal/string comparisons in decimal arithmetic.
     // Parsing the string as Double here would make adjacent integers above 2^53
     // compare equal. Decimal values with a positive scale use the Double path below.
-    let scale_zero_decimal_string = match (left_type, right_type) {
-        (DataType::Decimal(precision, 0), DataType::String) => Some((*precision, true)),
-        (DataType::String, DataType::Decimal(precision, 0)) => Some((*precision, false)),
-        _ => None,
-    };
-    if let Some((precision, string_is_left)) = scale_zero_decimal_string {
-        return if string_is_left {
-            Ok((wrap_try_to_decimal(left, precision, 0)?, right))
-        } else {
-            Ok((left, wrap_try_to_decimal(right, precision, 0)?))
-        };
+    match (left_type, right_type) {
+        (DataType::Decimal(precision, 0), DataType::String) => {
+            return Ok((left, wrap_try_to_decimal(right, *precision, 0)?));
+        }
+        (DataType::String, DataType::Decimal(precision, 0)) => {
+            return Ok((wrap_try_to_decimal(left, *precision, 0)?, right));
+        }
+        _ => {}
     }
 
     // String–numeric (or numeric–string): route string side through try_to_number and
