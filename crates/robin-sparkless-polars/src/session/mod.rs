@@ -30,7 +30,11 @@ pub use reader::DataFrameReader;
 /// Parse "array<element_type>" to get inner type string. Returns None if not array<>.
 fn parse_array_element_type(type_str: &str) -> Option<String> {
     let s = type_str.trim();
-    if !s.to_lowercase().starts_with("array<") || !s.ends_with('>') {
+    if !s
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("array<"))
+        || !s.ends_with('>')
+    {
         return None;
     }
     Some(s[6..s.len() - 1].trim().to_string())
@@ -122,8 +126,12 @@ fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
 /// Parse "map<key_type,value_type>" to get (key_type, value_type). Returns None if not map<>.
 /// PySpark: MapType(StringType(), StringType()) -> "map<string,string>".
 fn parse_map_key_value_types(type_str: &str) -> Option<(String, String)> {
-    let s = type_str.trim().to_lowercase();
-    if !s.starts_with("map<") || !s.ends_with('>') {
+    let s = type_str.trim();
+    if !s
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("map<"))
+        || !s.ends_with('>')
+    {
         return None;
     }
     let inner = s[4..s.len() - 1].trim();
@@ -311,7 +319,7 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         let (precision, scale) = parse_decimal_precision_scale(&s)?;
         return Some(DataType::Decimal(precision, scale));
     }
-    if let Some(elem_type) = parse_array_element_type(&s) {
+    if let Some(elem_type) = parse_array_element_type(trimmed) {
         // Special case: array<map<key_type,value_type>> – represented as
         // List(List(Struct{key, value})) so each array element is its own map
         // (list-of-{key,value} pairs) and collect() yields a list of dicts.
@@ -340,7 +348,7 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
             .collect::<Option<Vec<_>>>()?;
         return Some(DataType::Struct(polars_fields));
     }
-    if let Some((key_type, value_type)) = parse_map_key_value_types(&s) {
+    if let Some((key_type, value_type)) = parse_map_key_value_types(trimmed) {
         let key_dtype = json_type_str_to_polars(key_type.trim())?;
         let value_dtype = json_type_str_to_polars(value_type.trim())?;
         return Some(DataType::List(Box::new(DataType::Struct(vec![
@@ -640,7 +648,7 @@ fn json_values_to_series(
     let epoch = date_utils::epoch_naive_date();
     let type_lower = type_str.trim().to_lowercase();
 
-    if let Some(elem_type) = parse_array_element_type(&type_lower) {
+    if let Some(elem_type) = parse_array_element_type(type_str) {
         let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
             PolarsError::ComputeError(
                 format!("array element type '{elem_type}' not supported").into(),
@@ -699,7 +707,7 @@ fn json_values_to_series(
         return Ok(builder.finish().into_series());
     }
 
-    if parse_map_key_value_types(&type_lower).is_some() {
+    if parse_map_key_value_types(type_str).is_some() {
         let dtype = json_type_str_to_polars(type_str).ok_or_else(|| {
             PolarsError::ComputeError(format!("map type '{type_str}' not supported").into())
         })?;
@@ -1043,7 +1051,8 @@ fn json_value_to_series_single(
     let type_trimmed = type_str.trim();
     let type_lower = type_trimmed.to_lowercase();
     // #1066: Nested array (e.g. createDataFrame with {"matrix": [[1,2,3],[4,5,6]]}) when type is array<...>.
-    if let (JsonValue::Array(arr), Some(elem_type)) = (value, parse_array_element_type(&type_lower))
+    if let (JsonValue::Array(arr), Some(elem_type)) =
+        (value, parse_array_element_type(type_trimmed))
     {
         let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
             PolarsError::ComputeError(
@@ -1078,7 +1087,7 @@ fn json_value_to_series_single(
         }
     }
     // Map element type (e.g. array<map<string,int>> where elem_type is "map<string,int>")
-    if let Some((key_type, value_type)) = parse_map_key_value_types(&type_lower) {
+    if let Some((key_type, value_type)) = parse_map_key_value_types(type_trimmed) {
         let key_dtype = json_type_str_to_polars(key_type.trim()).ok_or_else(|| {
             PolarsError::ComputeError(
                 format!("array element key type '{key_type}' not supported").into(),
@@ -3027,8 +3036,8 @@ impl SparkSession {
                     }
                     builder.finish().into_series()
                 }
-                _ if parse_array_element_type(&type_lower).is_some() => {
-                    let elem_type = parse_array_element_type(&type_lower).unwrap_or_else(|| {
+                _ if parse_array_element_type(type_str).is_some() => {
+                    let elem_type = parse_array_element_type(type_str).unwrap_or_else(|| {
                         unreachable!("guard above ensures parse_array_element_type returned Some")
                     });
                     // Special case: array<map<k,v>> – inner dtype is List(Struct{key,value})
@@ -3141,8 +3150,8 @@ impl SparkSession {
                     }
                     builder.finish().into_series()
                 }
-                _ if parse_map_key_value_types(&type_lower).is_some() => {
-                    let (key_type, value_type) = parse_map_key_value_types(&type_lower)
+                _ if parse_map_key_value_types(type_str).is_some() => {
+                    let (key_type, value_type) = parse_map_key_value_types(type_str)
                         .unwrap_or_else(|| unreachable!("guard ensures Some"));
                     let key_dtype = json_type_str_to_polars(&key_type).ok_or_else(|| {
                         PolarsError::ComputeError(
