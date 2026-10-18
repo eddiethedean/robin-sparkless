@@ -879,14 +879,20 @@ fn avg_expr(input: Expr, ansi_enabled: bool) -> Expr {
                         averages.push(None);
                         continue;
                     };
-                    let scaled = group.cast(&DataType::Int128)?;
-                    let values = scaled.i128()?;
                     let mut sum = BigInt::zero();
                     let mut count = 0_usize;
-                    for idx in 0..values.len() {
-                        if let Some(value) = values.get(idx) {
-                            sum += value;
-                            count += 1;
+                    for idx in 0..group.len() {
+                        match group.get(idx)? {
+                            AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
+                                sum += value;
+                                count += 1;
+                            }
+                            AnyValue::Null => {}
+                            _ => {
+                                return Err(PolarsError::ComputeError(
+                                    "decimal average received a non-decimal value".into(),
+                                ));
+                            }
                         }
                     }
                     if count == 0 {
