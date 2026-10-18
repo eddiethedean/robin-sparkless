@@ -5,6 +5,7 @@
 #![allow(unexpected_cfgs)] // pyo3 create_exception! uses cfg(gil-refs)
 #![allow(clippy::useless_conversion)] // PyO3 PyResult<T> / PyErr false positives (fixed in pyo3 0.23+)
 
+use polars_plan::dsl::AggExpr;
 use pyo3::class::basic::CompareOp;
 use pyo3::create_exception;
 use pyo3::prelude::*;
@@ -5124,6 +5125,52 @@ struct PyDataFrame {
 }
 
 impl PyDataFrame {
+    fn union_aligns_by_name(
+        &self,
+        left_names: &[String],
+        right_names: &[String],
+        by_name: bool,
+    ) -> bool {
+        if by_name {
+            return true;
+        }
+        if left_names.len() != right_names.len() {
+            return false;
+        }
+
+        // Match transformations::union: its alignment mode follows the left
+        // DataFrame's setting, even when the right DataFrame came from another
+        // session with a different case-sensitivity setting.
+        let case_sensitive = self.inner.is_case_sensitive();
+        let right_names: std::collections::HashSet<String> = if case_sensitive {
+            right_names.iter().cloned().collect()
+        } else {
+            right_names.iter().map(|name| name.to_lowercase()).collect()
+        };
+        left_names.iter().all(|name| {
+            if case_sensitive {
+                right_names.contains(name)
+            } else {
+                right_names.contains(&name.to_lowercase())
+            }
+        })
+    }
+
+    fn resolve_union_column_name(&self, names: &[String], name: &str) -> Option<String> {
+        if self.inner.is_case_sensitive() {
+            names
+                .iter()
+                .find(|candidate| candidate.as_str() == name)
+                .cloned()
+        } else {
+            let name_lower = name.to_lowercase();
+            names
+                .iter()
+                .find(|candidate| candidate.to_lowercase() == name_lower)
+                .cloned()
+        }
+    }
+
     fn column_uses_arrow_array_struct(&self, name: &str) -> bool {
         let source_path = if let Ok(resolved) = self.inner.resolve_column_name(name) {
             arrow_field_path("", &resolved)
@@ -5200,6 +5247,34 @@ impl PyDataFrame {
             .contains(resolved.as_deref().unwrap_or(name))
         {
             tails.insert(String::new());
+        }
+        tails
+    }
+
+    fn arrow_array_struct_path_tails(&self, name: &str) -> std::collections::HashSet<String> {
+        let resolved = self.inner.resolve_column_name(name).ok();
+        let source_path = if let Some(source) = &resolved {
+            arrow_field_path("", source)
+        } else {
+            let mut parts = name.split('.');
+            let root = parts.next().unwrap_or(name);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        let mut tails = std::collections::HashSet::new();
+        for path in &self.arrow_array_struct_paths {
+            if path == &source_path {
+                tails.insert(String::new());
+            } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
+                if tail.starts_with(['.', '[', '{']) {
+                    tails.insert(tail.to_string());
+                }
+            }
         }
         tails
     }
@@ -5485,6 +5560,116 @@ impl PyDataFrame {
             robin_sparkless::Expr::Column(column) => Some(column.to_string()),
             _ => None,
         }
+    }
+
+    fn aggregate_value_source(expr: &robin_sparkless::Expr) -> Option<String> {
+        use robin_sparkless::Expr;
+
+        match expr {
+            Expr::Alias(inner, _)
+            | Expr::KeepName(inner)
+            | Expr::RenameAlias { expr: inner, .. } => Self::aggregate_value_source(inner),
+            Expr::Cast { expr: inner, .. } => Self::aggregate_value_source(inner),
+            Expr::Agg(
+                AggExpr::First(input)
+                | AggExpr::FirstNonNull(input)
+                | AggExpr::Last(input)
+                | AggExpr::LastNonNull(input),
+            ) => Self::column_source(input),
+            Expr::Agg(AggExpr::Min { input, .. } | AggExpr::Max { input, .. }) => {
+                Self::column_source(input)
+            }
+            _ => None,
+        }
+    }
+
+    fn wrap_value_aggregate_derived(
+        &self,
+        df: DataFrame,
+        source: &str,
+        leading_columns: usize,
+    ) -> Self {
+        let mut wrapped = Self::wrap(df);
+        let Some(source_dtype) = self.column_dtype_for_metadata(source) else {
+            return wrapped;
+        };
+        for output in wrapped
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .into_iter()
+            .skip(leading_columns)
+        {
+            if wrapped.inner.get_column_dtype(&output).as_ref() == Some(&source_dtype) {
+                self.copy_column_metadata(source, &output, &mut wrapped);
+            }
+        }
+        wrapped
+    }
+
+    fn wrap_aggregate_derived(
+        &self,
+        df: DataFrame,
+        expressions: &[robin_sparkless::Expr],
+        leading_columns: usize,
+    ) -> Self {
+        let mut wrapped = Self::wrap(df);
+        let outputs = wrapped
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .into_iter()
+            .skip(leading_columns)
+            .collect::<Vec<_>>();
+        let sources = expressions
+            .iter()
+            .map(Self::aggregate_value_source)
+            .collect::<Vec<_>>();
+
+        if outputs.len() == sources.len() {
+            for (source, output) in sources.iter().zip(outputs) {
+                let Some(source) = source else {
+                    continue;
+                };
+                if self.column_dtype_for_metadata(source) == wrapped.inner.get_column_dtype(&output)
+                {
+                    self.copy_column_metadata(source, &output, &mut wrapped);
+                }
+            }
+            return wrapped;
+        }
+
+        // Pivot aggregations can expand one expression into several output
+        // columns. Carry metadata only when every matching source has the same
+        // logical map/array interpretation.
+        for output in outputs {
+            let Some(output_dtype) = wrapped.inner.get_column_dtype(&output) else {
+                continue;
+            };
+            let matching_sources = sources
+                .iter()
+                .flatten()
+                .filter(|source| {
+                    self.column_dtype_for_metadata(source).as_ref() == Some(&output_dtype)
+                })
+                .collect::<Vec<_>>();
+            let Some(first_source) = matching_sources.first() else {
+                continue;
+            };
+            let first_array_paths = self.arrow_array_struct_path_tails(first_source);
+            let first_map_paths = self.logical_map_path_tails(first_source);
+            if first_array_paths.is_empty() && first_map_paths.is_empty() {
+                continue;
+            }
+            let all_match = matching_sources.iter().all(|source| {
+                self.arrow_array_struct_path_tails(source) == first_array_paths
+                    && self.logical_map_path_tails(source) == first_map_paths
+            });
+            if all_match {
+                self.copy_column_metadata(first_source, &output, &mut wrapped);
+            }
+        }
+        wrapped
     }
 
     fn wrap(df: DataFrame) -> Self {
@@ -5791,11 +5976,7 @@ impl PyDataFrame {
         };
         let left_names = self.inner.columns().unwrap_or_default();
         let right_names = other.inner.columns().unwrap_or_default();
-        let align_by_name = by_name
-            || (left_names.len() == right_names.len()
-                && left_names
-                    .iter()
-                    .all(|name| other.inner.resolve_column_name(name).is_ok()));
+        let align_by_name = self.union_aligns_by_name(&left_names, &right_names, by_name);
         for (index, output) in wrapped
             .inner
             .columns()
@@ -5804,7 +5985,7 @@ impl PyDataFrame {
             .enumerate()
         {
             let source = if align_by_name {
-                other.inner.resolve_column_name(output).ok()
+                Self::resolve_union_column_name(other, &right_names, output)
             } else {
                 right_names.get(index).cloned()
             };
@@ -5813,6 +5994,40 @@ impl PyDataFrame {
             }
         }
         wrapped
+    }
+
+    fn validate_union_metadata(&self, other: &PyDataFrame, by_name: bool) -> PyResult<()> {
+        let left_names = self.inner.columns().unwrap_or_default();
+        let right_names = other.inner.columns().unwrap_or_default();
+        let align_by_name = self.union_aligns_by_name(&left_names, &right_names, by_name);
+
+        for (index, left_name) in left_names.iter().enumerate() {
+            let right_name = if align_by_name {
+                Self::resolve_union_column_name(other, &right_names, left_name)
+            } else {
+                right_names.get(index).cloned()
+            };
+            let Some(right_name) = right_name else {
+                continue;
+            };
+            if self.inner.get_column_dtype(left_name) != other.inner.get_column_dtype(&right_name) {
+                continue;
+            }
+
+            let left_maps = self.logical_map_path_tails(left_name);
+            let right_maps = other.logical_map_path_tails(&right_name);
+            let left_arrays = self.arrow_array_struct_path_tails(left_name);
+            let right_arrays = other.arrow_array_struct_path_tails(&right_name);
+            let has_conflict = left_maps.iter().any(|path| right_arrays.contains(path))
+                || right_maps.iter().any(|path| left_arrays.contains(path));
+            if has_conflict {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "union: column '{}' has incompatible logical types (map and array<struct<key, value>>) despite matching physical types",
+                    left_name
+                )));
+            }
+        }
+        Ok(())
     }
 
     fn wrap_join_derived(&self, other: &PyDataFrame, df: DataFrame) -> Self {
@@ -7003,8 +7218,8 @@ impl PyDataFrame {
             push_expr(&item, &mut rust_exprs)?;
         }
         self.inner
-            .agg(rust_exprs)
-            .map(PyDataFrame::wrap)
+            .agg(rust_exprs.clone())
+            .map(|df| self.wrap_aggregate_derived(df, &rust_exprs, 0))
             .map_err(to_py_err)
     }
 
@@ -7040,7 +7255,11 @@ impl PyDataFrame {
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
             .rollup(refs)
-            .map(|cr| PyCubeRollupData { inner: cr })
+            .map(|cr| PyCubeRollupData {
+                inner: cr,
+                source: self.wrap_derived(self.inner.clone()),
+                grouping_column_count: names.len(),
+            })
             .map_err(to_py_err)
     }
 
@@ -7101,7 +7320,11 @@ impl PyDataFrame {
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
             .cube(refs)
-            .map(|cr| PyCubeRollupData { inner: cr })
+            .map(|cr| PyCubeRollupData {
+                inner: cr,
+                source: self.wrap_derived(self.inner.clone()),
+                grouping_column_count: names.len(),
+            })
             .map_err(to_py_err)
     }
 
@@ -7109,9 +7332,14 @@ impl PyDataFrame {
     fn group_by(&self, column_names: &Bound<'_, PyAny>) -> PyResult<PyGroupedData> {
         let names = py_cols_to_vec(column_names)?;
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let grouping_column_count = names.len();
         self.inner
             .group_by(refs)
-            .map(|gd| PyGroupedData { inner: gd })
+            .map(|gd| PyGroupedData {
+                inner: gd,
+                source: self.wrap_derived(self.inner.clone()),
+                grouping_column_count,
+            })
             .map_err(to_py_err)
     }
 
@@ -7147,9 +7375,14 @@ impl PyDataFrame {
                 specs.push(spec);
             }
         }
+        let grouping_column_count = specs.len();
         self.inner
             .group_by_specs(specs)
-            .map(|gd| PyGroupedData { inner: gd })
+            .map(|gd| PyGroupedData {
+                inner: gd,
+                source: self.wrap_derived(self.inner.clone()),
+                grouping_column_count,
+            })
             .map_err(to_py_err)
     }
 
@@ -7677,8 +7910,11 @@ impl PyDataFrame {
 
     fn union(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let other_inner = py_any_to_dataframe_inner(other)?;
-        let df = self.inner.union(&other_inner).map_err(to_py_err)?;
         let other_wrapper = other.cast::<PyDataFrame>().ok();
+        if let Some(other_wrapper) = other_wrapper {
+            self.validate_union_metadata(&other_wrapper.borrow(), false)?;
+        }
+        let df = self.inner.union(&other_inner).map_err(to_py_err)?;
         Ok(match other_wrapper {
             Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, false),
             None => self.wrap_union_derived(None, df, false),
@@ -7687,8 +7923,11 @@ impl PyDataFrame {
 
     fn union_all(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let other_inner = py_any_to_dataframe_inner(other)?;
-        let df = self.inner.union_all(&other_inner).map_err(to_py_err)?;
         let other_wrapper = other.cast::<PyDataFrame>().ok();
+        if let Some(other_wrapper) = other_wrapper {
+            self.validate_union_metadata(&other_wrapper.borrow(), false)?;
+        }
+        let df = self.inner.union_all(&other_inner).map_err(to_py_err)?;
         Ok(match other_wrapper {
             Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, false),
             None => self.wrap_union_derived(None, df, false),
@@ -7708,11 +7947,14 @@ impl PyDataFrame {
     ) -> PyResult<PyDataFrame> {
         let allow = extract_allow_missing_columns(kwargs)?;
         let other_inner = py_any_to_dataframe_inner(other)?;
+        let other_wrapper = other.cast::<PyDataFrame>().ok();
+        if let Some(other_wrapper) = other_wrapper {
+            self.validate_union_metadata(&other_wrapper.borrow(), true)?;
+        }
         let df = self
             .inner
             .union_by_name(&other_inner, allow)
             .map_err(to_py_err)?;
-        let other_wrapper = other.cast::<PyDataFrame>().ok();
         Ok(match other_wrapper {
             Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, true),
             None => self.wrap_union_derived(None, df, true),
@@ -10142,6 +10384,8 @@ impl PyDataFrameNaFunctions {
 #[pyclass]
 struct PyCubeRollupData {
     inner: CubeRollupData,
+    source: PyDataFrame,
+    grouping_column_count: usize,
 }
 
 #[pymethods]
@@ -10186,7 +10430,10 @@ impl PyCubeRollupData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .min(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, &name, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -10194,7 +10441,10 @@ impl PyCubeRollupData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .max(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, &name, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -10241,8 +10491,11 @@ impl PyCubeRollupData {
             }
         }
         self.inner
-            .agg(rust_exprs)
-            .map(PyDataFrame::wrap)
+            .agg(rust_exprs.clone())
+            .map(|df| {
+                self.source
+                    .wrap_aggregate_derived(df, &rust_exprs, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 }
@@ -10250,6 +10503,8 @@ impl PyCubeRollupData {
 #[pyclass]
 struct PyGroupedData {
     inner: GroupedData,
+    source: PyDataFrame,
+    grouping_column_count: usize,
 }
 
 #[pymethods]
@@ -10294,7 +10549,10 @@ impl PyGroupedData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .min(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, &name, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -10302,7 +10560,10 @@ impl PyGroupedData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .max(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, &name, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -10349,8 +10610,11 @@ impl PyGroupedData {
             }
         }
         self.inner
-            .agg(rust_exprs)
-            .map(PyDataFrame::wrap)
+            .agg(rust_exprs.clone())
+            .map(|df| {
+                self.source
+                    .wrap_aggregate_derived(df, &rust_exprs, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -10376,6 +10640,8 @@ impl PyGroupedData {
         };
         Ok(PyPivotedGroupedData {
             inner: self.inner.pivot(pivot_col, rust_values),
+            source: self.source.wrap_derived(self.source.inner.clone()),
+            grouping_column_count: self.grouping_column_count,
         })
     }
 }
@@ -10383,6 +10649,8 @@ impl PyGroupedData {
 #[pyclass]
 struct PyPivotedGroupedData {
     inner: PivotedGroupedData,
+    source: PyDataFrame,
+    grouping_column_count: usize,
 }
 
 #[pymethods]
@@ -10404,14 +10672,20 @@ impl PyPivotedGroupedData {
     fn min(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .min(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, value_col, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
     fn max(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .max(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, value_col, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -10443,14 +10717,20 @@ impl PyPivotedGroupedData {
     fn _first(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._first(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, value_col, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
     fn _last(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._last(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, value_col, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -10520,8 +10800,11 @@ impl PyPivotedGroupedData {
             push_expr(&item, &mut rust_exprs)?;
         }
         self.inner
-            .agg(rust_exprs)
-            .map(PyDataFrame::wrap)
+            .agg(rust_exprs.clone())
+            .map(|df| {
+                self.source
+                    .wrap_aggregate_derived(df, &rust_exprs, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 }

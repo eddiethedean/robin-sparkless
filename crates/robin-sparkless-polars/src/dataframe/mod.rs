@@ -326,7 +326,7 @@ impl DataFrame {
     /// as input columns, so select(col("x").substr(1, 3).alias("partial")),
     /// when().then().otherwise().alias("result"), and col("x").rank().over([]).alias("rank") work (issues #200, #212).
     pub fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
-        let expr = crate::functions::bind_aggregate_runtime_config(expr)?;
+        let schema = self.polars_schema()?;
         let df = self;
         let mut alias_output_names: HashSet<String> = HashSet::new();
         let _ = expr.clone().try_map_expr(|e| {
@@ -347,7 +347,7 @@ impl DataFrame {
                 alias_output_names.insert(out_str.to_string());
             }
         }
-        expr.try_map_expr(move |e| {
+        let resolved = expr.try_map_expr(move |e| {
             // Recurse into Alias so col("Person.name") inside F.col("Person.name").alias(...) gets resolved (struct field access).
             if let Expr::Alias(inner, name) = &e {
                 let new_inner = df.resolve_expr_column_names(inner.as_ref().clone())?;
@@ -544,7 +544,8 @@ impl DataFrame {
                 });
             }
             Ok(e)
-        })
+        })?;
+        crate::functions::bind_runtime_config(resolved, &schema)
     }
 
     /// Rewrite comparison expressions to apply PySpark-style type coercion.
@@ -570,13 +571,12 @@ impl DataFrame {
         }
 
         fn comparison_literal_dtype(dt: DataType) -> DataType {
-            if matches!(
-                dt,
-                DataType::Unknown(UnknownKind::Int(_)) | DataType::Unknown(UnknownKind::Float)
-            ) {
-                DataType::Float64
-            } else {
-                dt
+            match dt {
+                // SQL integer literals carry an unknown-width marker. Treat them as
+                // Int64 so Decimal comparisons retain exact integer precision.
+                DataType::Unknown(UnknownKind::Int(_)) => DataType::Int64,
+                DataType::Unknown(UnknownKind::Float) => DataType::Float64,
+                other => other,
             }
         }
 
@@ -1414,6 +1414,12 @@ impl DataFrame {
             .iter_names_and_dtypes()
             .map(|(n, _)| n.to_string())
             .collect())
+    }
+
+    /// Return this DataFrame's column-resolution mode.
+    #[doc(hidden)]
+    pub fn is_case_sensitive(&self) -> bool {
+        self.case_sensitive
     }
 
     /// Same as [`columns`](Self::columns) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -3826,7 +3832,7 @@ pub fn broadcast(df: &DataFrame) -> DataFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use polars::prelude::{NamedFrom, Series};
+    use polars::prelude::{IntoSeries, NamedFrom, Series};
 
     /// Issue #235: root-level string–numeric comparison coercion in filter.
     #[test]
@@ -3850,6 +3856,28 @@ mod tests {
         assert_eq!(out.count().unwrap(), 1);
         let rows = out.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("value").and_then(|v| v.as_i64()), Some(100));
+    }
+
+    #[test]
+    fn filter_sql_decimal_integral_literal_preserves_precision() {
+        let s = Series::new(
+            "amount".into(),
+            &[
+                Some(9_007_199_254_740_992i128),
+                Some(9_007_199_254_740_993i128),
+            ],
+        )
+        .into_decimal(20, 0)
+        .unwrap()
+        .into_series();
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        // SQL `expr()` aliases its parsed expression with the original source text.
+        let condition = col("amount")
+            .eq(lit(9_007_199_254_740_993i64))
+            .alias("amount = 9007199254740993");
+        let out = df.filter(condition).unwrap();
+        assert_eq!(out.count().unwrap(), 1);
     }
 
     /// #1589: to_date(expr) == string literal coerces string to date (PySpark parity).

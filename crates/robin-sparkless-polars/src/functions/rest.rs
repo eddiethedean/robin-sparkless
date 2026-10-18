@@ -112,25 +112,105 @@ pub fn sum(col: &Column) -> Column {
     c
 }
 
-/// Bind each use of SUM or AVG to the configuration of the plan being analyzed.
-/// Rebuilding the UDF gives reused Column expressions independent plan state.
-pub(crate) fn bind_aggregate_runtime_config(expr: Expr) -> PolarsResult<Expr> {
+/// Bind runtime-dependent expressions to the configuration of the plan being analyzed.
+/// Rebuilding the UDF gives reused expressions independent plan state.
+pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<Expr> {
     let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
+    let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
     expr.try_map_expr(|expr| {
         if let Expr::AnonymousFunction { input, fmt_str, .. } = &expr {
+            if let Some(op) =
+                crate::decimal_arithmetic::BinaryOp::from_expr_marker(fmt_str.as_str())
+                && input.len() == 2
+            {
+                return Ok(crate::column::pyspark_binary_arithmetic_expr(
+                    input[0].clone(),
+                    input[1].clone(),
+                    op,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ));
+            }
             if fmt_str.as_str() == "sum" {
                 if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
-                    return Ok(sum_expr(input.as_ref().clone(), ansi_enabled));
+                    let input = input.as_ref().clone();
+                    let input_dtype = input
+                        .to_field(schema)
+                        .ok()
+                        .map(|field| field.dtype().clone());
+                    if input_dtype.as_ref().is_some_and(DataType::is_integer) {
+                        return Ok(integer_sum_expr(input, ansi_enabled));
+                    }
+                    if input_dtype
+                        .as_ref()
+                        .is_some_and(|dtype| !matches!(dtype, DataType::Decimal(..)))
+                    {
+                        // Float and castable non-integral inputs do not need to be
+                        // collected into per-group lists. Keep the optimized native
+                        // reduction for these types. Decimal sums still use the
+                        // checked BigInt path below.
+                        return Ok(input.cast(DataType::Float64).sum());
+                    }
+                    return Ok(sum_expr(input, ansi_enabled));
                 }
             }
             if fmt_str.as_str() == "avg" {
                 if let Some(Expr::Agg(polars_plan::dsl::AggExpr::Implode(input))) = input.first() {
-                    return Ok(avg_expr(input.as_ref().clone(), ansi_enabled));
+                    let input = input.as_ref().clone();
+                    let input_dtype = input
+                        .to_field(schema)
+                        .ok()
+                        .map(|field| field.dtype().clone());
+                    if input_dtype
+                        .as_ref()
+                        .is_some_and(|dtype| !matches!(dtype, DataType::Decimal(..)))
+                    {
+                        // AVG's input is already normalized to Float64 for all
+                        // non-decimal types. Use Polars' native mean to avoid
+                        // materializing each group's values as a list.
+                        return Ok(input.mean());
+                    }
+                    return Ok(avg_expr(input, ansi_enabled));
                 }
             }
         }
         Ok(expr)
     })
+}
+
+/// Aggregate integer values in Polars' fixed-size group state, then apply Spark's
+/// Long overflow behavior to the one result per group. Casting to Int128 before
+/// summing preserves the exact Int64 range check in ANSI mode while avoiding an
+/// allocation of every group's values as a List.
+fn integer_sum_expr(input: Expr, ansi_enabled: bool) -> Expr {
+    let input = input.cast(DataType::Int64);
+    let non_null_count = input.clone().count();
+    let summed = input.cast(DataType::Int128).sum().map_with_fmt_str(
+        move |series| {
+            let values = series.i128()?;
+            let mut output = Vec::with_capacity(series.len());
+            for value in values.into_iter() {
+                let Some(value) = value else {
+                    output.push(None);
+                    continue;
+                };
+                if ansi_enabled && (value < i64::MIN as i128 || value > i64::MAX as i128) {
+                    return Err(PolarsError::ComputeError(
+                        "[ARITHMETIC_OVERFLOW] long overflow".into(),
+                    ));
+                }
+                // Rust's narrowing integer cast keeps the low 64 bits, matching
+                // JVM Long addition when ANSI mode is disabled.
+                output.push(Some(value as i64));
+            }
+            Ok(Series::new(series.name().clone(), output).into())
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
+        "sum_i64",
+    );
+    polars::prelude::when(non_null_count.gt(lit(0)))
+        .then(summed)
+        .otherwise(lit(NULL))
 }
 
 fn sum_expr(input: Expr, ansi_enabled: bool) -> Expr {

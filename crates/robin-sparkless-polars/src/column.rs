@@ -13,6 +13,71 @@ pub(crate) fn expect_col(
     r.and_then(|o| o.ok_or_else(|| PolarsError::ComputeError("expected column".into())))
 }
 
+/// Build a PySpark-style binary arithmetic expression with a marker so its
+/// session-dependent settings can be rebound when a DataFrame plan is analyzed.
+pub(crate) fn pyspark_binary_arithmetic_expr(
+    left: Expr,
+    right: Expr,
+    op: crate::decimal_arithmetic::BinaryOp,
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> Expr {
+    let args = [right];
+    let eval_op = op;
+    let schema_op = op;
+    let mut expr = left.map_many(
+        move |cols| match eval_op {
+            crate::decimal_arithmetic::BinaryOp::Add => {
+                expect_col(crate::udfs::apply_pyspark_add_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+            crate::decimal_arithmetic::BinaryOp::Subtract => {
+                expect_col(crate::udfs::apply_pyspark_subtract_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+            crate::decimal_arithmetic::BinaryOp::Multiply => {
+                expect_col(crate::udfs::apply_pyspark_multiply_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+            crate::decimal_arithmetic::BinaryOp::Divide if ansi_enabled => expect_col(
+                crate::udfs::apply_ansi_divide_with_precision_loss(cols, allow_precision_loss),
+            ),
+            crate::decimal_arithmetic::BinaryOp::Divide => {
+                expect_col(crate::udfs::apply_pyspark_divide_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+        },
+        &args,
+        move |_schema, fields| {
+            let dtype = crate::decimal_arithmetic::result_type(
+                fields[0].dtype(),
+                fields[1].dtype(),
+                schema_op,
+                allow_precision_loss,
+            )
+            .unwrap_or(DataType::Float64);
+            Ok(Field::new(fields[0].name().clone(), dtype))
+        },
+    );
+
+    if let Expr::AnonymousFunction { fmt_str, .. } = &mut expr {
+        **fmt_str = op.expr_marker().into();
+    }
+    expr
+}
+
 /// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.
 /// When escape_char is Some(esc), esc + any char treats that char as literal (no %/_ expansion).
 fn like_pattern_to_regex(pattern: &str, escape_char: Option<char>) -> String {
@@ -1792,27 +1857,12 @@ impl Column {
     /// Decimal operands use exact decimal arithmetic. Other operands use PySpark-style
     /// Double coercion; string columns are parsed where possible and invalid strings become null.
     pub fn multiply_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let op = crate::decimal_arithmetic::BinaryOp::Multiply;
-        let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
-        let expr = self.expr().clone().map_many(
-            move |cols| {
-                expect_col(crate::udfs::apply_pyspark_multiply_with_precision_loss(
-                    cols,
-                    allow_precision_loss,
-                ))
-            },
-            &args,
-            move |_schema, fields| {
-                let dtype = crate::decimal_arithmetic::result_type(
-                    fields[0].dtype(),
-                    fields[1].dtype(),
-                    op,
-                    allow_precision_loss,
-                )
-                .unwrap_or(DataType::Float64);
-                Ok(Field::new(fields[0].name().clone(), dtype))
-            },
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Multiply,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }
@@ -1820,89 +1870,36 @@ impl Column {
     /// Add with PySpark-style string/number coercion (used by Python Column operators).
     /// Decimal operands use exact decimal arithmetic; strings still become null when non-numeric.
     pub fn add_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let op = crate::decimal_arithmetic::BinaryOp::Add;
-        let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
-        let expr = self.expr().clone().map_many(
-            move |cols| {
-                expect_col(crate::udfs::apply_pyspark_add_with_precision_loss(
-                    cols,
-                    allow_precision_loss,
-                ))
-            },
-            &args,
-            move |_schema, fields| {
-                let dtype = crate::decimal_arithmetic::result_type(
-                    fields[0].dtype(),
-                    fields[1].dtype(),
-                    op,
-                    allow_precision_loss,
-                )
-                .unwrap_or(DataType::Float64);
-                Ok(Field::new(fields[0].name().clone(), dtype))
-            },
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Add,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }
 
     /// Subtract with PySpark-style string/number coercion (used by Python Column operators).
     pub fn subtract_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let op = crate::decimal_arithmetic::BinaryOp::Subtract;
-        let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
-        let expr = self.expr().clone().map_many(
-            move |cols| {
-                expect_col(crate::udfs::apply_pyspark_subtract_with_precision_loss(
-                    cols,
-                    allow_precision_loss,
-                ))
-            },
-            &args,
-            move |_schema, fields| {
-                let dtype = crate::decimal_arithmetic::result_type(
-                    fields[0].dtype(),
-                    fields[1].dtype(),
-                    op,
-                    allow_precision_loss,
-                )
-                .unwrap_or(DataType::Float64);
-                Ok(Field::new(fields[0].name().clone(), dtype))
-            },
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Subtract,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }
 
     /// Divide with PySpark-style string/number coercion (used by Python Column operators).
     pub fn divide_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
-        let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
-        let op = crate::decimal_arithmetic::BinaryOp::Divide;
-        let expr = self.expr().clone().map_many(
-            move |cols| {
-                if ansi_enabled {
-                    expect_col(crate::udfs::apply_ansi_divide_with_precision_loss(
-                        cols,
-                        allow_precision_loss,
-                    ))
-                } else {
-                    expect_col(crate::udfs::apply_pyspark_divide_with_precision_loss(
-                        cols,
-                        allow_precision_loss,
-                    ))
-                }
-            },
-            &args,
-            move |_schema, fields| {
-                let dtype = crate::decimal_arithmetic::result_type(
-                    fields[0].dtype(),
-                    fields[1].dtype(),
-                    op,
-                    allow_precision_loss,
-                )
-                .unwrap_or(DataType::Float64);
-                Ok(Field::new(fields[0].name().clone(), dtype))
-            },
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Divide,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }

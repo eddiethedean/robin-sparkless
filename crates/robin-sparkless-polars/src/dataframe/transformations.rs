@@ -727,6 +727,7 @@ fn compute_range_window_series(
 
     let n = sorted_df.height();
     let mut windows = vec![None; n];
+    let mut has_order_value = vec![false; n];
     let mut idx = 0usize;
 
     let part_series: Vec<Series> = if partition_by.is_empty() {
@@ -778,6 +779,7 @@ fn compute_range_window_series(
             let Some(v) = order_slice[i] else {
                 continue;
             };
+            has_order_value[part_start + i] = true;
             let low = if start == UNBOUNDED_PRECEDING {
                 f64::NEG_INFINITY
             } else {
@@ -813,12 +815,16 @@ fn compute_range_window_series(
             counts.push(counts[idx] + usize::from(!value_s.get(idx)?.is_null()));
         }
         let mut result = Vec::with_capacity(n);
-        for window in &windows {
+        for (idx, window) in windows.iter().enumerate() {
             let count = match window {
                 Some((left, right)) => counts[right + 1] - counts[*left],
                 None => 0,
             };
-            result.push(window.map(|_| count as f64));
+            result.push(if window.is_some() || has_order_value[idx] {
+                Some(count as f64)
+            } else {
+                None
+            });
         }
         return Ok(Series::new(value_col.into(), result));
     }

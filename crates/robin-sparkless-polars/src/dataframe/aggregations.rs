@@ -143,7 +143,6 @@ impl GroupedData {
         expr: Expr,
         schema: &Schema,
     ) -> Result<Expr, PolarsError> {
-        let expr = crate::functions::bind_aggregate_runtime_config(expr)?;
         use std::collections::HashSet;
         let mut alias_output_names: HashSet<String> = HashSet::new();
         let _ = expr.clone().try_map_expr(|e| {
@@ -153,7 +152,7 @@ impl GroupedData {
             Ok(e)
         })?;
         let gd = self;
-        let schema = schema.clone();
+        let resolution_schema = schema.clone();
         expr.try_map_expr(move |e| {
             if let Expr::Column(name) = &e {
                 let name_str = name.as_str();
@@ -176,14 +175,14 @@ impl GroupedData {
                             .into(),
                         ));
                     }
-                    let resolved = gd.resolve_column_with_schema(first, &schema)?;
+                    let resolved = gd.resolve_column_with_schema(first, &resolution_schema)?;
                     let mut expr = col(PlSmallStr::from(resolved.as_str()));
                     for field in rest {
                         expr = expr.struct_().field_by_name(field);
                     }
                     return Ok(expr);
                 }
-                let resolved = gd.resolve_column_with_schema(name_str, &schema)?;
+                let resolved = gd.resolve_column_with_schema(name_str, &resolution_schema)?;
                 return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
             }
             Ok(e)
@@ -207,11 +206,10 @@ impl GroupedData {
     /// Sum a column in each group
     pub fn sum(&self, column: &str) -> Result<DataFrame, PolarsError> {
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![
-            crate::functions::sum(&Column::new(c))
-                .into_expr()
-                .alias(format!("sum({column})")),
-        ];
+        let schema = self.lf.clone().collect_schema()?;
+        let expr = crate::functions::sum(&Column::new(c)).into_expr();
+        let expr = crate::functions::bind_runtime_config(expr, &schema)?;
+        let agg_expr = vec![expr.alias(format!("sum({column})"))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -228,13 +226,14 @@ impl GroupedData {
                 "avg requires at least one column".into(),
             ));
         }
+        let schema = self.lf.clone().collect_schema()?;
         let agg_expr: Vec<Expr> = columns
             .iter()
             .map(|c| {
                 let resolved = self.resolve_column(c)?;
-                Ok(crate::functions::avg(&Column::new(resolved))
-                    .into_expr()
-                    .alias(format!("avg({c})")))
+                let expr = crate::functions::avg(&Column::new(resolved)).into_expr();
+                let expr = crate::functions::bind_runtime_config(expr, &schema)?;
+                Ok(expr.alias(format!("avg({c})")))
             })
             .collect::<Result<Vec<_>, PolarsError>>()?;
         let lf = self.lazy_grouped.clone().agg(agg_expr);
@@ -800,6 +799,12 @@ impl GroupedData {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let disambiguated = disambiguate_agg_output_names(resolved);
+        // Derive PySpark output names before rebinding runtime-sensitive aggregate
+        // expressions (integer SUM, for example, expands into a conditional expression).
+        let disambiguated = disambiguated
+            .into_iter()
+            .map(|expr| crate::functions::bind_runtime_config(expr, &schema))
+            .collect::<Result<Vec<_>, _>>()?;
         use polars::prelude::*;
         let mut lf = self.lazy_grouped.clone().agg(disambiguated);
         // PySpark parity: groupBy().agg() results are ordered by grouping columns (lexicographic).
@@ -994,6 +999,7 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
             AggExpr::Min { input: e, .. } => ("min", e.as_ref()),
             AggExpr::Max { input: e, .. } => ("max", e.as_ref()),
             AggExpr::NUnique(e) => ("count_distinct", e.as_ref()),
+            AggExpr::Count { input: e, .. } => ("count", e.as_ref()),
             AggExpr::First(e) => ("first", e.as_ref()),
             AggExpr::Last(e) => ("last", e.as_ref()),
             AggExpr::Implode(e) => {
@@ -1084,6 +1090,14 @@ impl PivotedGroupedData {
         pivot_values_from_lf(&self.lf, &resolved)
     }
 
+    fn bind_pivot_runtime_config(&self, exprs: Vec<Expr>) -> Result<Vec<Expr>, PolarsError> {
+        let schema = self.lf.clone().collect_schema()?;
+        exprs
+            .into_iter()
+            .map(|expr| crate::functions::bind_runtime_config(expr, &schema))
+            .collect()
+    }
+
     fn pivot_agg<F>(&self, value_col: &str, agg_fn: F) -> Result<DataFrame, PolarsError>
     where
         F: Fn(Expr) -> Expr,
@@ -1128,6 +1142,7 @@ impl PivotedGroupedData {
             agg_exprs.push(agg_expr);
         }
         let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+        let agg_exprs = self.bind_pivot_runtime_config(agg_exprs)?;
         let lf = self.lf.clone().group_by(by).agg(agg_exprs);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -1341,6 +1356,10 @@ impl PivotedGroupedData {
                         }
                     };
                     let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+                    let agg_expr = self
+                        .bind_pivot_runtime_config(vec![agg_expr])?
+                        .pop()
+                        .expect("one pivot aggregation expression");
                     let lf = self.lf.clone().group_by(by).agg(vec![agg_expr]);
                     let mut pl_df = lf.collect()?;
                     pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -1415,6 +1434,7 @@ impl PivotedGroupedData {
             }
         }
         let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+        let agg_exprs = self.bind_pivot_runtime_config(agg_exprs)?;
         let lf = self.lf.clone().group_by(by).agg(agg_exprs);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;

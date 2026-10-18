@@ -190,6 +190,12 @@ impl DataFrame {
         self.0.columns()
     }
 
+    /// Return this DataFrame's column-resolution mode.
+    #[doc(hidden)]
+    pub fn is_case_sensitive(&self) -> bool {
+        self.0.is_case_sensitive()
+    }
+
     pub fn columns_engine(&self) -> Result<Vec<String>, EngineError> {
         self.0.columns_engine()
     }

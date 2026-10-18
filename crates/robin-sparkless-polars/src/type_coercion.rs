@@ -223,7 +223,7 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
                 DataType::Int8 | DataType::UInt8 => 3,
                 DataType::Int16 | DataType::UInt16 => 5,
                 DataType::Int32 | DataType::UInt32 => 10,
-                DataType::Int64 => 19,
+                DataType::Int64 => 20,
                 DataType::UInt64 => 20,
                 _ => unreachable!(),
             };

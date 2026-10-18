@@ -12,6 +12,27 @@ pub(crate) enum BinaryOp {
     Divide,
 }
 
+impl BinaryOp {
+    pub(crate) fn expr_marker(self) -> &'static str {
+        match self {
+            Self::Add => "__robin_decimal_add",
+            Self::Subtract => "__robin_decimal_subtract",
+            Self::Multiply => "__robin_decimal_multiply",
+            Self::Divide => "__robin_decimal_divide",
+        }
+    }
+
+    pub(crate) fn from_expr_marker(marker: &str) -> Option<Self> {
+        match marker {
+            "__robin_decimal_add" => Some(Self::Add),
+            "__robin_decimal_subtract" => Some(Self::Subtract),
+            "__robin_decimal_multiply" => Some(Self::Multiply),
+            "__robin_decimal_divide" => Some(Self::Divide),
+            _ => None,
+        }
+    }
+}
+
 fn decimal_shape(dtype: &DataType) -> Option<(usize, usize)> {
     Some(match dtype {
         DataType::Decimal(precision, scale) => (*precision, *scale),
