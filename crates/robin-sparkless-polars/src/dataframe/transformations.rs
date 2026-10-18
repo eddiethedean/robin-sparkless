@@ -7,7 +7,9 @@ use super::{DataFrame, resolve_column_with_schema};
 use crate::column::RangeWindowAgg;
 use crate::column::expect_col;
 use crate::functions::SortOrder;
-use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public};
+use crate::type_coercion::{
+    coerce_expr_pair, coerce_expr_to_common_type, find_common_type, is_numeric_public,
+};
 use crate::udfs;
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
@@ -1308,12 +1310,12 @@ pub fn union(
                 );
             }
             let left_expr = if need_coerce {
-                col(resolved_left.as_str()).cast(target.clone())
+                coerce_expr_to_common_type(col(resolved_left.as_str()), &left_dtype, &target)
             } else {
                 col(resolved_left.as_str())
             };
             let right_expr = if need_coerce {
-                col(resolved_right.as_str()).cast(target)
+                coerce_expr_to_common_type(col(resolved_right.as_str()), &right_dtype, &target)
             } else {
                 col(resolved_right.as_str())
             };
@@ -1353,12 +1355,12 @@ pub fn union(
                 );
             }
             let left_expr = if need_coerce {
-                col(resolved_left.as_str()).cast(target.clone())
+                coerce_expr_to_common_type(col(resolved_left.as_str()), &left_dtype, &target)
             } else {
                 col(resolved_left.as_str())
             };
             let right_expr = if need_coerce {
-                col(resolved_right.as_str()).cast(target)
+                coerce_expr_to_common_type(col(resolved_right.as_str()), &right_dtype, &target)
             } else {
                 col(resolved_right.as_str())
             };

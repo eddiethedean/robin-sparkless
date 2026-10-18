@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use super::DataFrame;
 use crate::schema_conv::data_type_to_polars_type;
-use crate::type_coercion::coerce_expr_pair_for_join;
+use crate::type_coercion::{coerce_expr_pair_for_join, coerce_expr_to_common_type};
 use polars::prelude::{
     DataType as PlDataType, Expr, JoinType as PlJoinType, Operator, PolarsError,
     SchemaNamesAndDtypes, coalesce as pl_coalesce,
@@ -491,8 +491,16 @@ pub fn join(
                 right_on_exprs.push(col(right_name.as_str()));
             } else {
                 let common = find_common_type_for_join(&left_dtype, &right_dtype)?;
-                left_on_exprs.push(col(left_name.as_str()).cast(common.clone()));
-                right_on_exprs.push(col(right_name.as_str()).cast(common));
+                left_on_exprs.push(coerce_expr_to_common_type(
+                    col(left_name.as_str()),
+                    &left_dtype,
+                    &common,
+                ));
+                right_on_exprs.push(coerce_expr_to_common_type(
+                    col(right_name.as_str()),
+                    &right_dtype,
+                    &common,
+                ));
             }
         }
     } else {

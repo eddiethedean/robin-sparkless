@@ -337,8 +337,8 @@ pub fn coerce_expr_pair(
 ) -> Result<(Expr, Expr), PolarsError> {
     let common = find_common_type(left_dtype, right_dtype)?;
     Ok((
-        col(left_name).cast(common.clone()).alias(alias),
-        col(right_name).cast(common).alias(alias),
+        coerce_expr_to_common_type(col(left_name), left_dtype, &common).alias(alias),
+        coerce_expr_to_common_type(col(right_name), right_dtype, &common).alias(alias),
     ))
 }
 
@@ -352,9 +352,24 @@ pub fn coerce_expr_pair_for_join(
 ) -> Result<(Expr, Expr), PolarsError> {
     let common = find_common_type_for_join(left_dtype, right_dtype)?;
     Ok((
-        col(left_name).cast(common.clone()).alias(alias),
-        col(right_name).cast(common).alias(alias),
+        coerce_expr_to_common_type(col(left_name), left_dtype, &common).alias(alias),
+        coerce_expr_to_common_type(col(right_name), right_dtype, &common).alias(alias),
     ))
+}
+
+/// Coerce an expression to a common type while preserving correctly rounded
+/// Decimal-to-Double conversion. Polars converts Decimal coefficients to f64
+/// before dividing by the scale factor, which can double-round large values.
+pub fn coerce_expr_to_common_type(
+    expr: Expr,
+    source_type: &DataType,
+    common_type: &DataType,
+) -> Expr {
+    if matches!(source_type, DataType::Decimal(..)) && common_type == &DataType::Float64 {
+        expr.cast(DataType::String).cast(DataType::Float64)
+    } else {
+        expr.cast(common_type.clone())
+    }
 }
 
 /// Check if a DataType is numeric

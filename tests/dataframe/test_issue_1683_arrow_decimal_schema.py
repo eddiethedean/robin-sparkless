@@ -294,6 +294,23 @@ def test_decimal_join_and_union_do_not_collapse_adjacent_large_values(spark) -> 
     ]
 
 
+def test_decimal_double_coercion_is_correctly_rounded_in_unions_and_joins(spark) -> None:
+    decimal_df = spark.createDataFrame(
+        [{"id": Decimal("9007199254740992.9")}], "id decimal(18,1)"
+    )
+    double_df = spark.createDataFrame(
+        [{"id": 9007199254740992.0}], "id double"
+    )
+    expected = 9007199254740992.0
+
+    unioned = decimal_df.unionByName(double_df).collect()
+    assert [row["id"] for row in unioned] == [expected, expected]
+
+    joined = decimal_df.join(double_df, "id").collect()
+    assert len(joined) == 1
+    assert joined[0]["id"] == expected
+
+
 def test_decimal38_comparison_does_not_overflow_valid_values(spark) -> None:
     largest = Decimal("9" * 38)
     df = spark.createDataFrame([{"amount": largest}], schema="amount decimal(38,0)")
