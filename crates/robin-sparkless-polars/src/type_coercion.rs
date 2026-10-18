@@ -357,6 +357,15 @@ pub fn coerce_expr_pair_for_join(
     ))
 }
 
+/// Convert a numeric expression to Float64 without double-rounding decimals.
+fn coerce_numeric_to_float64(expr: Expr, source_type: &DataType) -> Expr {
+    if matches!(source_type, DataType::Decimal(..)) {
+        expr.cast(DataType::String).cast(DataType::Float64)
+    } else {
+        expr.cast(DataType::Float64)
+    }
+}
+
 /// Coerce an expression to a common type while preserving correctly rounded
 /// Decimal-to-Double conversion. Polars converts Decimal coefficients to f64
 /// before dividing by the scale factor, which can double-round large values.
@@ -366,7 +375,7 @@ pub fn coerce_expr_to_common_type(
     common_type: &DataType,
 ) -> Expr {
     if matches!(source_type, DataType::Decimal(..)) && common_type == &DataType::Float64 {
-        expr.cast(DataType::String).cast(DataType::Float64)
+        coerce_numeric_to_float64(expr, source_type)
     } else {
         expr.cast(common_type.clone())
     }
@@ -532,14 +541,10 @@ pub fn coerce_for_pyspark_comparison(
             // Spark promotes Decimal/Float comparisons to Double. Go through the
             // exact decimal text so the conversion rounds as BigDecimal.doubleValue
             // does; Polars' direct Decimal-to-Float64 cast can round large values up.
-            let to_double = |expr: Expr, dtype: &DataType| {
-                if matches!(dtype, DataType::Decimal(_, _)) {
-                    expr.cast(DataType::String).cast(DataType::Float64)
-                } else {
-                    expr.cast(DataType::Float64)
-                }
-            };
-            return Ok((to_double(left, left_type), to_double(right, right_type)));
+            return Ok((
+                coerce_numeric_to_float64(left, left_type),
+                coerce_numeric_to_float64(right, right_type),
+            ));
         }
 
         let decimal_shape = match (left_type, right_type) {
@@ -621,7 +626,7 @@ pub fn coerce_for_pyspark_comparison(
         let left_out = if left_type == &DataType::String {
             wrap_try_to_number(left)?
         } else if is_numeric(left_type) {
-            coerce_to_type(left, DataType::Float64)
+            coerce_numeric_to_float64(left, left_type)
         } else {
             left
         };
@@ -629,7 +634,7 @@ pub fn coerce_for_pyspark_comparison(
         let right_out = if right_type == &DataType::String {
             wrap_try_to_number(right)?
         } else if is_numeric(right_type) {
-            coerce_to_type(right, DataType::Float64)
+            coerce_numeric_to_float64(right, right_type)
         } else {
             right
         };
@@ -838,14 +843,14 @@ pub fn coerce_for_pyspark_arithmetic(
     let left_out = if left_type == &DataType::String {
         wrap_try_to_number(left)?
     } else if is_numeric(left_type) {
-        coerce_to_type(left, DataType::Float64)
+        coerce_numeric_to_float64(left, left_type)
     } else {
         left
     };
     let right_out = if right_type == &DataType::String {
         wrap_try_to_number(right)?
     } else if is_numeric(right_type) {
-        coerce_to_type(right, DataType::Float64)
+        coerce_numeric_to_float64(right, right_type)
     } else {
         right
     };
@@ -920,6 +925,30 @@ mod tests {
             lit(9_007_199_254_740_992.0f64),
             &DataType::Decimal(20, 2),
             &DataType::Float64,
+            &CompareOp::Eq,
+        )?;
+
+        let out = df
+            .lazy()
+            .select([left.eq(right).alias("matches")])
+            .collect()?;
+        assert_eq!(out.column("matches")?.bool()?.get(0), Some(true));
+        Ok(())
+    }
+
+    #[test]
+    fn positive_scale_decimal_and_string_compare_without_double_rounding() -> Result<(), PolarsError>
+    {
+        let decimal = Series::new("amount".into(), vec![Some(90_071_992_547_409_929i128)])
+            .into_decimal(18, 1)?
+            .into_series();
+        let amount_text = Series::new("amount_text".into(), vec!["9007199254740992.9"]);
+        let df = DataFrame::new(1, vec![decimal.into(), amount_text.into()])?;
+        let (left, right) = coerce_for_pyspark_comparison(
+            col("amount"),
+            col("amount_text"),
+            &DataType::Decimal(18, 1),
+            &DataType::String,
             &CompareOp::Eq,
         )?;
 
