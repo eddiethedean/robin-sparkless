@@ -5146,28 +5146,6 @@ impl PyDataFrame {
         })
     }
 
-    fn column_uses_logical_map(&self, name: &str) -> bool {
-        let source_path = if let Ok(resolved) = self.inner.resolve_column_name(name) {
-            arrow_field_path("", &resolved)
-        } else {
-            let mut parts = name.split('.');
-            let root = parts.next().unwrap_or(name);
-            let root = self
-                .inner
-                .resolve_column_name(root)
-                .unwrap_or_else(|_| root.to_string());
-            parts.fold(arrow_field_path("", &root), |path, field| {
-                arrow_field_path(&path, field)
-            })
-        };
-        self.logical_map_paths.iter().any(|path| {
-            path == &source_path
-                || path
-                    .strip_prefix(source_path.as_str())
-                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
-        })
-    }
-
     fn column_dtype_for_metadata(&self, name: &str) -> Option<robin_sparkless::polars::PlDataType> {
         if let Ok(resolved) = self.inner.resolve_column_name(name) {
             if let Some(dtype) = self.inner.get_column_dtype(&resolved) {
@@ -5190,6 +5168,40 @@ impl PyDataFrame {
             dtype = field.dtype().clone();
         }
         Some(dtype)
+    }
+
+    fn logical_map_path_tails(&self, name: &str) -> std::collections::HashSet<String> {
+        let resolved = self.inner.resolve_column_name(name).ok();
+        let source_path = if let Some(source) = &resolved {
+            arrow_field_path("", source)
+        } else {
+            let mut parts = name.split('.');
+            let root = parts.next().unwrap_or(name);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        let mut tails = std::collections::HashSet::new();
+        for path in &self.logical_map_paths {
+            if path == &source_path {
+                tails.insert(String::new());
+            } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
+                if tail.starts_with(['.', '[', '{']) {
+                    tails.insert(tail.to_string());
+                }
+            }
+        }
+        if self
+            .logical_map_columns
+            .contains(resolved.as_deref().unwrap_or(name))
+        {
+            tails.insert(String::new());
+        }
+        tails
     }
 
     fn expression_column_references(expr: &robin_sparkless::Expr) -> Vec<String> {
@@ -5304,23 +5316,33 @@ impl PyDataFrame {
         let Some(output_dtype) = target.inner.get_column_dtype(output) else {
             return;
         };
-        let mut matching_sources = Vec::new();
+        // Keep only paths marked as maps on every matching branch. Physical
+        // list/struct dtypes alone cannot distinguish maps from arrays.
+        let mut common_map_paths: Option<std::collections::HashSet<String>> = None;
         for source in references {
             let Some(source_dtype) = self.column_dtype_for_metadata(source) else {
                 continue;
             };
             if source_dtype == output_dtype {
-                // The physical dtype cannot distinguish Arrow maps from arrays of
-                // key/value structs. Only propagate map intent when every matching
-                // source already carries logical-map metadata.
-                if !self.column_uses_logical_map(source) {
-                    return;
+                let source_map_paths = self.logical_map_path_tails(source);
+                if let Some(common_map_paths) = &mut common_map_paths {
+                    common_map_paths.retain(|path| source_map_paths.contains(path));
+                } else {
+                    common_map_paths = Some(source_map_paths);
                 }
-                matching_sources.push(source.as_str());
             }
         }
-        for source in matching_sources {
-            self.copy_column_metadata(source, output, target);
+        let Some(common_map_paths) = common_map_paths else {
+            return;
+        };
+        let output_path = arrow_field_path("", output);
+        for tail in common_map_paths {
+            target
+                .logical_map_paths
+                .insert(format!("{output_path}{tail}"));
+            if tail.is_empty() {
+                target.logical_map_columns.insert(output.to_string());
+            }
         }
     }
 
@@ -5602,58 +5624,89 @@ impl PyDataFrame {
         fn visit(
             source: &PyDataFrame,
             expr: &Expr,
-            output_path: &str,
             output_dtype: &robin_sparkless::polars::PlDataType,
-            target: &mut PyDataFrame,
-        ) {
+        ) -> Option<std::collections::HashSet<String>> {
             match expr {
                 Expr::Alias(inner, _)
                 | Expr::Cast { expr: inner, .. }
                 | Expr::KeepName(inner)
-                | Expr::RenameAlias { expr: inner, .. } => {
-                    visit(source, inner, output_path, output_dtype, target);
-                }
+                | Expr::RenameAlias { expr: inner, .. } => visit(source, inner, output_dtype),
                 Expr::Column(name) => {
                     if source.column_dtype_for_metadata(name.as_str()).as_ref()
                         == Some(output_dtype)
                     {
-                        source.copy_column_metadata_to_path(
-                            name.as_str(),
-                            output_path,
-                            None,
-                            target,
-                        );
+                        Some(source.logical_map_path_tails(name.as_str()))
+                    } else {
+                        Some(std::collections::HashSet::new())
                     }
                 }
+                Expr::Literal(value) if value.is_null() => None,
+                Expr::Ternary { truthy, falsy, .. } => Some(common_paths([
+                    visit(source, truthy, output_dtype),
+                    visit(source, falsy, output_dtype),
+                ])),
+                Expr::Function {
+                    input,
+                    function: polars::prelude::FunctionExpr::Coalesce,
+                } => Some(common_paths(
+                    input.iter().map(|input| visit(source, input, output_dtype)),
+                )),
                 Expr::Function {
                     input,
                     function: polars::prelude::FunctionExpr::AsStruct,
                 } => {
                     let robin_sparkless::polars::PlDataType::Struct(fields) = output_dtype else {
-                        return;
+                        return Some(std::collections::HashSet::new());
                     };
                     if input.len() != fields.len() {
-                        return;
+                        return Some(std::collections::HashSet::new());
                     }
+                    let mut paths = std::collections::HashSet::new();
                     for (input, field) in input.iter().zip(fields) {
-                        let field_path = arrow_field_path(output_path, &field.name);
-                        visit(source, input, &field_path, field.dtype(), target);
+                        if let Some(field_paths) = visit(source, input, field.dtype()) {
+                            let field_segment = format!(".{}", arrow_field_path("", &field.name));
+                            paths.extend(
+                                field_paths
+                                    .into_iter()
+                                    .map(|tail| format!("{field_segment}{tail}")),
+                            );
+                        }
                     }
+                    Some(paths)
                 }
-                _ => {}
+                _ => Some(std::collections::HashSet::new()),
             }
+        }
+
+        fn common_paths(
+            branches: impl IntoIterator<Item = Option<std::collections::HashSet<String>>>,
+        ) -> std::collections::HashSet<String> {
+            let mut common: Option<std::collections::HashSet<String>> = None;
+            for branch in branches.into_iter().flatten() {
+                if let Some(common) = &mut common {
+                    common.retain(|path| branch.contains(path));
+                } else {
+                    common = Some(branch);
+                }
+            }
+            common.unwrap_or_default()
         }
 
         let Some(output_dtype) = target.inner.get_column_dtype(output) else {
             return;
         };
-        visit(
-            self,
-            expr,
-            &arrow_field_path("", output),
-            &output_dtype,
-            target,
-        );
+        let output_path = arrow_field_path("", output);
+        let Some(paths) = visit(self, expr, &output_dtype) else {
+            return;
+        };
+        for tail in paths {
+            target
+                .logical_map_paths
+                .insert(format!("{output_path}{tail}"));
+            if tail.is_empty() {
+                target.logical_map_columns.insert(output.to_string());
+            }
+        }
     }
 
     fn wrap_with_column_derived(
