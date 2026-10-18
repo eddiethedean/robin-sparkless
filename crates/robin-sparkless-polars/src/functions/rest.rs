@@ -143,7 +143,9 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                         // The fixed-size Int128 reduction can only check the final
                         // total. ANSI SUM must detect overflow at each accumulation
                         // step, even when later values bring the result back in range.
-                        return Ok(if ansi_enabled && !is_try_aggregate {
+                        return Ok(if is_try_aggregate {
+                            sum_expr_with_marker(input, false, "try_sum")
+                        } else if ansi_enabled {
                             sum_expr(input, true)
                         } else {
                             integer_sum_expr(input, false)
@@ -313,21 +315,29 @@ fn sum_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -
                             let group = group.cast(&DataType::Int64)?;
                             let mut total = BigInt::zero();
                             let mut found_value = false;
+                            let mut overflowed = false;
                             for idx in 0..group.len() {
                                 if let AnyValue::Int64(value) = group.get(idx)? {
                                     found_value = true;
                                     total += value;
-                                    if ansi_enabled
-                                        && (total < BigInt::from(i64::MIN)
-                                            || total > BigInt::from(i64::MAX))
-                                    {
-                                        return Err(PolarsError::ComputeError(
-                                            "[ARITHMETIC_OVERFLOW] long overflow".into(),
-                                        ));
+                                    let out_of_range = total < BigInt::from(i64::MIN)
+                                        || total > BigInt::from(i64::MAX);
+                                    if out_of_range {
+                                        if ansi_enabled {
+                                            return Err(PolarsError::ComputeError(
+                                                "[ARITHMETIC_OVERFLOW] long overflow".into(),
+                                            ));
+                                        }
+                                        if marker == "try_sum" {
+                                            overflowed = true;
+                                            break;
+                                        }
                                     }
                                 }
                             }
                             if !found_value {
+                                sums.push(AnyValue::Null);
+                            } else if overflowed {
                                 sums.push(AnyValue::Null);
                             } else if ansi_enabled {
                                 sums.push(AnyValue::Int64(total.to_i64().ok_or_else(|| {

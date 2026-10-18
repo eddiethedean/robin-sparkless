@@ -932,7 +932,9 @@ fn parse_pivot_literal_expr(expr: &Expr) -> Option<(String, Expr)> {
 fn pivot_filtered_agg_expr(expr: Expr, agg_kind: &str) -> Result<Expr, PolarsError> {
     Ok(match agg_kind {
         "sum" => pivot_sum_expr(expr),
+        "try_sum" => pivot_try_sum_expr(expr),
         "avg" => pivot_avg_expr(expr),
+        "try_avg" => pivot_try_avg_expr(expr),
         "min" => expr.min(),
         "max" => expr.max(),
         "first" => expr.first_non_null(),
@@ -953,9 +955,19 @@ fn pivot_sum_expr(expr: Expr) -> Expr {
     crate::functions::sum(&input).expr().clone()
 }
 
+fn pivot_try_sum_expr(expr: Expr) -> Expr {
+    let input = Column::from_expr(expr, None);
+    crate::functions::try_sum(&input).expr().clone()
+}
+
 fn pivot_avg_expr(expr: Expr) -> Expr {
     let input = Column::from_expr(expr, None);
     crate::functions::avg(&input).expr().clone()
+}
+
+fn pivot_try_avg_expr(expr: Expr) -> Expr {
+    let input = Column::from_expr(expr, None);
+    crate::functions::try_avg(&input).expr().clone()
 }
 
 /// Parse a simple pivot agg expr: Alias(Agg(...), alias) or bare Agg(...) or Cast(Agg(...), _) -> (alias, agg_kind, value_col).
@@ -977,21 +989,21 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
         other => other,
     };
     let (agg_kind, input_expr) = match inner {
-        // avg() and sum() use a Series map over the imploded group. The map's
+        // avg()/sum() and try_avg()/try_sum() use a Series map over the imploded group. The map's
         // input is still an Implode aggregate, which pivot can express as the
         // corresponding native aggregate on the original value column.
         Expr::AnonymousFunction { input, fmt_str, .. } => {
             let Expr::Agg(AggExpr::Implode(e)) = input.first()? else {
                 return None;
             };
-            (
-                if fmt_str.as_str() == "sum" {
-                    "sum"
-                } else {
-                    "avg"
-                },
-                e.as_ref(),
-            )
+            let agg_kind = match fmt_str.as_str() {
+                "sum" => "sum",
+                "try_sum" => "try_sum",
+                "avg" => "avg",
+                "try_avg" => "try_avg",
+                _ => return None,
+            };
+            (agg_kind, e.as_ref())
         }
         Expr::Agg(agg) => match agg {
             AggExpr::Sum(e) => ("sum", e.as_ref()),
@@ -1346,7 +1358,9 @@ impl PivotedGroupedData {
                     let col_expr = col(value_resolved.as_str());
                     let agg_expr = match *agg_kind {
                         "sum" => pivot_sum_expr(col_expr).alias(alias.as_str()),
+                        "try_sum" => pivot_try_sum_expr(col_expr).alias(alias.as_str()),
                         "avg" => pivot_avg_expr(col_expr).alias(alias.as_str()),
+                        "try_avg" => pivot_try_avg_expr(col_expr).alias(alias.as_str()),
                         "min" => col_expr.min().alias(alias.as_str()),
                         "max" => col_expr.max().alias(alias.as_str()),
                         other => {

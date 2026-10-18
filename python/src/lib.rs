@@ -1152,6 +1152,123 @@ fn arrow_field_path(parent: &str, name: &str) -> String {
     }
 }
 
+fn split_top_level_spark_type_parts(value: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut angle_depth = 0i32;
+    let mut paren_depth = 0i32;
+    let mut in_backticks = false;
+    let mut chars = value.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if ch == '`' {
+            if in_backticks && chars.peek().is_some_and(|(_, next)| *next == '`') {
+                chars.next();
+            } else {
+                in_backticks = !in_backticks;
+            }
+            continue;
+        }
+        if in_backticks {
+            continue;
+        }
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth -= 1,
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            ',' if angle_depth == 0 && paren_depth == 0 => {
+                parts.push(value[start..index].trim());
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(value[start..].trim());
+    parts
+}
+
+fn collect_spark_type_map_paths(
+    type_name: &str,
+    path: &str,
+    paths: &mut std::collections::HashSet<String>,
+) {
+    let type_name = type_name.trim();
+    let lower = type_name.to_ascii_lowercase();
+    if lower.starts_with("map<") && type_name.ends_with('>') {
+        paths.insert(path.to_string());
+        let parts = split_top_level_spark_type_parts(&type_name[4..type_name.len() - 1]);
+        if let Some(key_type) = parts.first() {
+            collect_spark_type_map_paths(key_type, &format!("{path}{{key}}"), paths);
+        }
+        if let Some(value_type) = parts.get(1) {
+            collect_spark_type_map_paths(value_type, &format!("{path}{{value}}"), paths);
+        }
+    } else if lower.starts_with("array<") && type_name.ends_with('>') {
+        collect_spark_type_map_paths(
+            &type_name[6..type_name.len() - 1],
+            &format!("{path}[]"),
+            paths,
+        );
+    } else if lower.starts_with("struct<") && type_name.ends_with('>') {
+        let fields = &type_name[7..type_name.len() - 1];
+        for field in split_top_level_spark_type_parts(fields) {
+            let mut angle_depth = 0i32;
+            let mut paren_depth = 0i32;
+            let mut in_backticks = false;
+            let mut chars = field.char_indices().peekable();
+            let mut separator = None;
+            while let Some((index, ch)) = chars.next() {
+                if ch == '`' {
+                    if in_backticks && chars.peek().is_some_and(|(_, next)| *next == '`') {
+                        chars.next();
+                    } else {
+                        in_backticks = !in_backticks;
+                    }
+                    continue;
+                }
+                if in_backticks {
+                    continue;
+                }
+                match ch {
+                    '<' => angle_depth += 1,
+                    '>' => angle_depth -= 1,
+                    '(' => paren_depth += 1,
+                    ')' => paren_depth -= 1,
+                    ':' if angle_depth == 0 && paren_depth == 0 => {
+                        separator = Some(index);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            let Some(separator) = separator else {
+                continue;
+            };
+            let encoded_name = field[..separator].trim();
+            let field_name = encoded_name
+                .strip_prefix('`')
+                .and_then(|name| name.strip_suffix('`'))
+                .map(|name| name.replace("``", "`"))
+                .unwrap_or_else(|| encoded_name.to_string());
+            collect_spark_type_map_paths(
+                &field[separator + 1..],
+                &arrow_field_path(path, &field_name),
+                paths,
+            );
+        }
+    }
+}
+
+fn spark_schema_logical_map_paths(
+    schema_pairs: &[(String, String)],
+) -> std::collections::HashSet<String> {
+    let mut paths = std::collections::HashSet::new();
+    for (name, type_name) in schema_pairs {
+        collect_spark_type_map_paths(type_name, &arrow_field_path("", name), &mut paths);
+    }
+    paths
+}
+
 fn arrow_schema_field_names(arrow_schema: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     arrow_schema
         .try_iter()?
@@ -2183,6 +2300,7 @@ impl PySparkSession {
             pandas_column_order.as_deref(),
         )?;
         let mut logical_map_columns = std::collections::HashSet::new();
+        logical_map_paths.extend(spark_schema_logical_map_paths(&schema_pairs));
         for (name, type_name) in &schema_pairs {
             let type_name = type_name.trim().to_ascii_lowercase();
             if type_name.starts_with("array<struct<") {
