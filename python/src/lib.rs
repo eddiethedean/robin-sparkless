@@ -944,6 +944,8 @@ impl PySparkSessionBuilder {
                 inner: session,
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
+                #[cfg(feature = "delta")]
+                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -965,14 +967,17 @@ const DEFAULT_BACKEND_TYPE: &str = "robin";
 
 #[cfg(feature = "delta")]
 fn delta_map_paths_for_catalog_table(
-    session: &SparkSession,
+    session: &PySparkSession,
     name: &str,
 ) -> Result<std::collections::HashSet<String>, polars::prelude::PolarsError> {
     let mut result = std::collections::HashSet::new();
-    if name.starts_with("global_temp.") || session.has_temp_view(name) {
+    if let Some(paths) = session.delta_map_view_paths.borrow().get(name) {
+        return Ok(paths.clone());
+    }
+    if name.starts_with("global_temp.") || session.inner.has_temp_view(name) {
         return Ok(result);
     }
-    let Some(warehouse) = session.warehouse_dir() else {
+    let Some(warehouse) = session.inner.warehouse_dir() else {
         return Ok(result);
     };
     let mut candidates = Vec::new();
@@ -1000,7 +1005,7 @@ fn delta_map_paths_for_catalog_table(
 
 #[cfg(feature = "delta")]
 fn delta_map_paths_for_sql_query(
-    session: &SparkSession,
+    session: &PySparkSession,
     query: &str,
 ) -> std::collections::HashSet<String> {
     use robin_sparkless::sql::ast::{SelectItem, SetExpr, TableFactor};
@@ -1031,10 +1036,10 @@ fn delta_map_paths_for_sql_query(
     let SetExpr::Select(select) = query.body.as_ref() else {
         return Default::default();
     };
-    if select.from.len() != 1 || !select.from[0].joins.is_empty() {
+    let Some(from) = select.from.first() else {
         return Default::default();
-    }
-    let TableFactor::Table { name, alias, .. } = &select.from[0].relation else {
+    };
+    let TableFactor::Table { name, alias, .. } = &from.relation else {
         return Default::default();
     };
     let table_name = name.to_string();
@@ -1048,7 +1053,26 @@ fn delta_map_paths_for_sql_query(
         Err(_) => return Default::default(),
     };
     if source_paths.is_empty() {
-        return Default::default();
+        // A joined table may supply the projected MAP even when the first table does not.
+    }
+    let mut source_tables = vec![(
+        alias_prefix.unwrap_or(table_leaf).to_string(),
+        source_paths.clone(),
+    )];
+    for join in &from.joins {
+        let TableFactor::Table { name, alias, .. } = &join.relation else {
+            continue;
+        };
+        let name = name.to_string();
+        let leaf = name.rsplit('.').next().unwrap_or(name.as_str());
+        let qualifier = alias
+            .as_ref()
+            .map(|alias| alias.name.value.as_str())
+            .unwrap_or(leaf)
+            .to_string();
+        if let Ok(paths) = delta_map_paths_for_catalog_table(session, &name) {
+            source_tables.push((qualifier, paths));
+        }
     }
 
     let mut output_paths = std::collections::HashSet::new();
@@ -1075,6 +1099,15 @@ fn delta_map_paths_for_sql_query(
             continue;
         };
         let source_name = source.rsplit('.').next().unwrap_or(source.as_str());
+        let source_paths = source
+            .rsplit_once('.')
+            .and_then(|(qualifier, _)| {
+                source_tables
+                    .iter()
+                    .find(|(table_alias, _)| table_alias.eq_ignore_ascii_case(qualifier))
+                    .map(|(_, paths)| paths)
+            })
+            .unwrap_or(&source_paths);
         let qualified_alias = source
             .rsplit_once('.')
             .map(|(qualifier, _)| qualifier)
@@ -1086,7 +1119,7 @@ fn delta_map_paths_for_sql_query(
             .unwrap_or_else(|| source_name.to_string());
         let source_root = serde_json::to_string(source_name).unwrap_or_default();
         let output_root = serde_json::to_string(&output_name).unwrap_or_default();
-        for path in &source_paths {
+        for path in source_paths {
             if path == &source_root {
                 output_paths.insert(output_root.clone());
             } else if let Some(tail) = path.strip_prefix(source_root.as_str()) {
@@ -1107,6 +1140,9 @@ struct PySparkSession {
     backend_type: RefCell<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
     stopped: std::sync::atomic::AtomicBool,
+    #[cfg(feature = "delta")]
+    delta_map_view_paths:
+        RefCell<std::collections::HashMap<String, std::collections::HashSet<String>>>,
 }
 
 fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
@@ -1952,6 +1988,16 @@ impl PySparkSession {
             .iter()
             .all(|(k, v)| existing.get(k).map(|s| s.as_str()) == Some(v.as_str()))
     }
+
+    fn remember_delta_temp_view(&self, name: &str, df: &PyDataFrame) {
+        #[cfg(feature = "delta")]
+        {
+            self.delta_map_view_paths
+                .borrow_mut()
+                .insert(name.to_string(), df.logical_map_paths.clone());
+        }
+        let _ = (name, df);
+    }
 }
 
 thread_local! {
@@ -2153,6 +2199,8 @@ impl PySparkSession {
                 inner: session,
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
+                #[cfg(feature = "delta")]
+                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -2221,6 +2269,8 @@ impl PySparkSession {
                 inner: session,
                 backend_type: RefCell::new(backend_type),
                 stopped: std::sync::atomic::AtomicBool::new(false),
+                #[cfg(feature = "delta")]
+                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -2289,15 +2339,20 @@ impl PySparkSession {
     fn create_or_replace_temp_view(&self, name: &str, df: &PyDataFrame) {
         self.inner
             .create_or_replace_temp_view(name, df.inner.clone());
+        self.remember_delta_temp_view(name, df);
     }
 
     fn create_or_replace_global_temp_view(&self, name: &str, df: &PyDataFrame) {
         self.inner
             .create_or_replace_global_temp_view(name, df.inner.clone());
+        self.remember_delta_temp_view(&format!("global_temp.{name}"), df);
     }
 
     fn drop_temp_view(&self, name: &str) -> bool {
-        self.inner.drop_temp_view(name)
+        let dropped = self.inner.drop_temp_view(name);
+        #[cfg(feature = "delta")]
+        self.delta_map_view_paths.borrow_mut().remove(name);
+        dropped
     }
 
     fn table(&self, name: &str) -> PyResult<PyDataFrame> {
@@ -2309,7 +2364,7 @@ impl PySparkSession {
         #[cfg(feature = "delta")]
         {
             wrapped.logical_map_paths =
-                delta_map_paths_for_catalog_table(&self.inner, name).map_err(to_py_err)?;
+                delta_map_paths_for_catalog_table(self, name).map_err(to_py_err)?;
         }
         Ok(wrapped)
     }
@@ -2322,7 +2377,7 @@ impl PySparkSession {
             .map_err(to_py_err)?;
         #[cfg(feature = "delta")]
         {
-            wrapped.logical_map_paths = delta_map_paths_for_sql_query(&self.inner, query);
+            wrapped.logical_map_paths = delta_map_paths_for_sql_query(self, query);
         }
         Ok(wrapped)
     }
@@ -2812,7 +2867,10 @@ impl PyCatalog {
             .cast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        Ok(session.inner.drop_temp_view(name))
+        let dropped = session.inner.drop_temp_view(name);
+        #[cfg(feature = "delta")]
+        session.delta_map_view_paths.borrow_mut().remove(name);
+        Ok(dropped)
     }
 
     #[pyo3(name = "dropGlobalTempView")]
@@ -5117,7 +5175,7 @@ impl PyDataFrameReader {
         #[cfg(feature = "delta")]
         {
             wrapped.logical_map_paths =
-                delta_map_paths_for_catalog_table(&session.inner, name).map_err(to_py_err)?;
+                delta_map_paths_for_catalog_table(&session, name).map_err(to_py_err)?;
         }
         Ok(wrapped)
     }
@@ -5130,12 +5188,17 @@ impl PyDataFrameReader {
             .cast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        session
+        let mut wrapped = session
             .inner
             .read()
             .delta(Path::new(path))
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        wrapped.logical_map_paths = robin_sparkless::delta::logical_map_paths(path)
+            .map_err(to_py_err)?
+            .into_iter()
+            .collect();
+        Ok(wrapped)
     }
 
     /// PySpark: jdbc(url, table, properties=None, ...). Reads from a JDBC data source.
@@ -8523,6 +8586,7 @@ impl PyDataFrame {
             .borrow()
             .inner
             .create_or_replace_temp_view(name, self.inner.clone());
+        session_ref.borrow().remember_delta_temp_view(name, self);
         Ok(())
     }
 
@@ -8539,6 +8603,9 @@ impl PyDataFrame {
             .borrow()
             .inner
             .create_or_replace_global_temp_view(name, self.inner.clone());
+        session_ref
+            .borrow()
+            .remember_delta_temp_view(&format!("global_temp.{name}"), self);
         Ok(())
     }
 
