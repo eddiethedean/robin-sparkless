@@ -477,9 +477,7 @@ fn sum_expr_with_marker(input: Expr, ansi_enabled: bool, marker: &'static str) -
                                     }
                                 }
                             }
-                            if !found_value {
-                                sums.push(AnyValue::Null);
-                            } else if overflowed {
+                            if !found_value || overflowed {
                                 sums.push(AnyValue::Null);
                             } else if ansi_enabled {
                                 sums.push(AnyValue::Int64(total.to_i64().ok_or_else(|| {
@@ -794,15 +792,8 @@ fn running_numeric_series(
                     left + 1,
                     right + 2,
                     &max_sum_decimal,
-                ) {
-                    if ansi_enabled {
-                        return Err(PolarsError::ComputeError(
-                            "[ARITHMETIC_OVERFLOW] decimal window sum exceeds supported precision"
-                                .into(),
-                        ));
-                    }
-                    values.push(None);
-                } else if sum.abs() > max_decimal {
+                ) || sum.abs() > max_decimal
+                {
                     if ansi_enabled {
                         return Err(PolarsError::ComputeError(
                             "[ARITHMETIC_OVERFLOW] decimal window sum exceeds supported precision"

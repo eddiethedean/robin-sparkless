@@ -977,14 +977,8 @@ fn compute_range_window_series(
                     left + 1,
                     right + 2,
                     &maximum_sum,
-                ) {
-                    if ansi_enabled {
-                        return Err(PolarsError::ComputeError(
-                            "[ARITHMETIC_OVERFLOW] decimal range window sum exceeds supported precision".into(),
-                        ));
-                    }
-                    result.push(None);
-                } else if total.abs() > maximum {
+                ) || total.abs() > maximum
+                {
                     if ansi_enabled {
                         return Err(PolarsError::ComputeError(
                             "[ARITHMETIC_OVERFLOW] decimal range window sum exceeds supported precision".into(),
