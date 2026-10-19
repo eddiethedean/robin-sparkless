@@ -1025,10 +1025,11 @@ fn delta_map_paths_for_catalog_table(
 fn delta_map_paths_for_sql_query(
     session: &PySparkSession,
     query: &str,
+    output_columns: &[String],
 ) -> std::collections::HashSet<String> {
     use robin_sparkless::sql::ast::{SelectItem, SetExpr, TableFactor};
 
-    fn prefixed_path(path: &str, prefix: &str) -> Option<String> {
+    fn path_root_and_tail(path: &str) -> Option<(String, &str)> {
         let mut escaped = false;
         let mut end = None;
         for (index, character) in path.char_indices().skip(1) {
@@ -1043,8 +1044,29 @@ fn delta_map_paths_for_sql_query(
         }
         let end = end?;
         let root: String = serde_json::from_str(&path[..=end]).ok()?;
-        let output_root = serde_json::to_string(&format!("{prefix}_{root}")).ok()?;
-        Some(format!("{output_root}{}", &path[end + 1..]))
+        Some((root, &path[end + 1..]))
+    }
+
+    fn replace_path_root(path: &str, output_root: &str) -> Option<String> {
+        let (_, tail) = path_root_and_tail(path)?;
+        let output_root = serde_json::to_string(output_root).ok()?;
+        Some(format!("{output_root}{tail}"))
+    }
+
+    fn table_columns(session: &PySparkSession, name: &str) -> Vec<String> {
+        session
+            .inner
+            .table(name)
+            .and_then(|df| df.columns())
+            .unwrap_or_default()
+    }
+
+    fn table_name_for_alias(name: &robin_sparkless::sql::ast::ObjectName) -> String {
+        name.0
+            .iter()
+            .filter_map(|part| part.as_ident().map(|ident| ident.value.clone()))
+            .collect::<Vec<_>>()
+            .join(".")
     }
 
     let Ok(robin_sparkless::sql::Statement::Query(query)) = robin_sparkless::sql::parse_sql(query)
@@ -1065,7 +1087,7 @@ fn delta_map_paths_for_sql_query(
     let alias_prefix = alias
         .as_ref()
         .map(|alias| alias.name.value.as_str())
-        .filter(|alias| *alias != table_leaf);
+        .filter(|alias| *alias != table_name_for_alias(name));
     let source_paths = match delta_map_paths_for_catalog_table(session, &table_name) {
         Ok(paths) => paths,
         Err(_) => return Default::default(),
@@ -1076,6 +1098,8 @@ fn delta_map_paths_for_sql_query(
     let mut source_tables = vec![(
         alias_prefix.unwrap_or(table_leaf).to_string(),
         source_paths.clone(),
+        alias_prefix.map(str::to_string),
+        table_columns(session, &table_name),
     )];
     for join in &from.joins {
         let TableFactor::Table { name, alias, .. } = &join.relation else {
@@ -1083,13 +1107,30 @@ fn delta_map_paths_for_sql_query(
         };
         let name = name.to_string();
         let leaf = name.rsplit('.').next().unwrap_or(name.as_str());
+        let TableFactor::Table {
+            name: object_name, ..
+        } = &join.relation
+        else {
+            continue;
+        };
+        let full_name = table_name_for_alias(object_name);
+        let output_prefix = alias
+            .as_ref()
+            .map(|alias| alias.name.value.as_str())
+            .filter(|alias| *alias != full_name.as_str())
+            .map(str::to_string);
         let qualifier = alias
             .as_ref()
             .map(|alias| alias.name.value.as_str())
             .unwrap_or(leaf)
             .to_string();
         if let Ok(paths) = delta_map_paths_for_catalog_table(session, &name) {
-            source_tables.push((qualifier, paths));
+            source_tables.push((
+                qualifier,
+                paths,
+                output_prefix,
+                table_columns(session, &name),
+            ));
         }
     }
 
@@ -1097,14 +1138,48 @@ fn delta_map_paths_for_sql_query(
     for item in &select.projection {
         let expression_and_alias = match item {
             SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
-                if let Some(prefix) = alias_prefix {
-                    output_paths.extend(
-                        source_paths
-                            .iter()
-                            .filter_map(|path| prefixed_path(path, prefix)),
-                    );
-                } else {
-                    output_paths.extend(source_paths.iter().cloned());
+                let mut used_names = std::collections::HashSet::new();
+                let output_names = output_columns
+                    .iter()
+                    .cloned()
+                    .collect::<std::collections::HashSet<_>>();
+                for (_, paths, prefix, columns) in &source_tables {
+                    let mut output_by_source = std::collections::HashMap::new();
+                    for column in columns {
+                        let base = prefix
+                            .as_ref()
+                            .map(|prefix| format!("{prefix}_{column}"))
+                            .unwrap_or_else(|| column.clone());
+                        let mut output = base.clone();
+                        if used_names.contains(&output) {
+                            for index in 0.. {
+                                let suffix = if index == 0 {
+                                    "_right".to_string()
+                                } else {
+                                    format!("_right_{index}")
+                                };
+                                output = format!("{base}{suffix}");
+                                if !used_names.contains(&output) {
+                                    break;
+                                }
+                            }
+                        }
+                        used_names.insert(output.clone());
+                        output_by_source.insert(column.as_str(), output);
+                    }
+                    for path in paths {
+                        let Some((source_root, _)) = path_root_and_tail(path) else {
+                            continue;
+                        };
+                        let Some(output_root) = output_by_source.get(source_root.as_str()) else {
+                            continue;
+                        };
+                        if output_names.contains(output_root) {
+                            if let Some(path) = replace_path_root(path, output_root) {
+                                output_paths.insert(path);
+                            }
+                        }
+                    }
                 }
                 continue;
             }
@@ -1122,8 +1197,8 @@ fn delta_map_paths_for_sql_query(
             .and_then(|(qualifier, _)| {
                 source_tables
                     .iter()
-                    .find(|(table_alias, _)| table_alias.eq_ignore_ascii_case(qualifier))
-                    .map(|(_, paths)| paths)
+                    .find(|(table_alias, _, _, _)| table_alias.eq_ignore_ascii_case(qualifier))
+                    .map(|(_, paths, _, _)| paths)
             })
             .unwrap_or(&source_paths);
         let qualified_alias = source
@@ -2412,7 +2487,8 @@ impl PySparkSession {
             .map_err(to_py_err)?;
         #[cfg(feature = "delta")]
         {
-            wrapped.logical_map_paths = delta_map_paths_for_sql_query(self, query);
+            let output_columns = wrapped.inner.columns().map_err(to_py_err)?;
+            wrapped.logical_map_paths = delta_map_paths_for_sql_query(self, query, &output_columns);
         }
         Ok(wrapped)
     }
