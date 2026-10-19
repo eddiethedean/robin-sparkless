@@ -31,5 +31,7 @@ pub use path_security::{
     confine_user_path_under_base, maybe_confine_files_path, resolve_path_under_base,
     validate_table_name,
 };
-pub use runtime_config::{PysparkCompat, SessionRuntimeConfig};
+pub use runtime_config::{
+    PysparkCompat, SessionRuntimeConfig, decimal_allow_precision_loss_from_session_map,
+};
 pub use schema::{DataType, StructField, StructType};

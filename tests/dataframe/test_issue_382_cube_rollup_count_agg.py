@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
+import pytest
+
 from sparkless.testing import get_imports
 
 _imports = get_imports()
@@ -98,3 +102,27 @@ def test_rollup_avg_min_max(spark) -> None:
         assert col_name in (list(rows[0].asDict().keys()) if rows else []), (
             f"rollup().{method}() should have column {col_name}"
         )
+
+
+@pytest.mark.parametrize("grouping_method", ["cube", "rollup"])
+def test_cube_rollup_sum_avg_preserve_decimal_precision(spark, grouping_method) -> None:
+    df = spark.createDataFrame(
+        [
+            {"kind": "g", "amount": Decimal("9007199254740993.01")},
+            {"kind": "g", "amount": Decimal("9007199254740993.03")},
+        ],
+        schema="kind string, amount decimal(20,2)",
+    )
+    grouped = getattr(df, grouping_method)("kind")
+
+    sums = grouped.sum("amount")
+    assert sums.schema["sum(amount)"].dataType.simpleString() == "decimal(30,2)"
+    assert {row["sum(amount)"] for row in sums.collect()} == {
+        Decimal("18014398509481986.04")
+    }
+
+    averages = grouped.avg("amount")
+    assert averages.schema["avg(amount)"].dataType.simpleString() == "decimal(24,6)"
+    assert {row["avg(amount)"] for row in averages.collect()} == {
+        Decimal("9007199254740993.020000")
+    }

@@ -14,7 +14,10 @@ use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
-use robin_sparkless_core::{PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils};
+use robin_sparkless_core::{
+    PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils,
+    decimal_allow_precision_loss_from_session_map,
+};
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -27,7 +30,11 @@ pub use reader::DataFrameReader;
 /// Parse "array<element_type>" to get inner type string. Returns None if not array<>.
 fn parse_array_element_type(type_str: &str) -> Option<String> {
     let s = type_str.trim();
-    if !s.to_lowercase().starts_with("array<") || !s.ends_with('>') {
+    if !s
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("array<"))
+        || !s.ends_with('>')
+    {
         return None;
     }
     Some(s[6..s.len() - 1].trim().to_string())
@@ -36,13 +43,29 @@ fn parse_array_element_type(type_str: &str) -> Option<String> {
 /// Split by commas only at top level (not inside < >). Used for struct<...> and map<...>.
 fn split_at_top_level_commas(s: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let mut depth = 0i32;
+    let mut angle_depth = 0i32;
+    let mut paren_depth = 0i32;
+    let mut in_backticks = false;
     let mut start = 0;
-    for (i, c) in s.char_indices() {
+    let mut chars = s.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if c == '`' {
+            if in_backticks && chars.peek().is_some_and(|(_, next)| *next == '`') {
+                chars.next();
+                continue;
+            }
+            in_backticks = !in_backticks;
+            continue;
+        }
+        if in_backticks {
+            continue;
+        }
         match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
-            ',' if depth == 0 => {
+            '<' => angle_depth += 1,
+            '>' => angle_depth -= 1,
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            ',' if angle_depth == 0 && paren_depth == 0 => {
                 out.push(s[start..i].trim().to_string());
                 start = i + 1;
             }
@@ -68,8 +91,31 @@ fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
     let mut out = Vec::new();
     for part in split_at_top_level_commas(inner) {
         let part = part.trim();
-        if let Some(idx) = part.find(':') {
-            let name = part[..idx].trim().to_string();
+        let mut in_backticks = false;
+        let mut chars = part.char_indices().peekable();
+        let mut separator = None;
+        while let Some((idx, c)) = chars.next() {
+            if c == '`' {
+                if in_backticks && chars.peek().is_some_and(|(_, next)| *next == '`') {
+                    chars.next();
+                    continue;
+                }
+                in_backticks = !in_backticks;
+            } else if c == ':' && !in_backticks {
+                separator = Some(idx);
+                break;
+            }
+        }
+        if let Some(idx) = separator {
+            let encoded_name = part[..idx].trim();
+            let name = if let Some(name) = encoded_name
+                .strip_prefix('`')
+                .and_then(|name| name.strip_suffix('`'))
+            {
+                name.replace("``", "`")
+            } else {
+                encoded_name.to_string()
+            };
             let typ = part[idx + 1..].trim().to_string();
             out.push((name, typ));
         }
@@ -80,14 +126,21 @@ fn parse_struct_fields(type_str: &str) -> Option<Vec<(String, String)>> {
 /// Parse "map<key_type,value_type>" to get (key_type, value_type). Returns None if not map<>.
 /// PySpark: MapType(StringType(), StringType()) -> "map<string,string>".
 fn parse_map_key_value_types(type_str: &str) -> Option<(String, String)> {
-    let s = type_str.trim().to_lowercase();
-    if !s.starts_with("map<") || !s.ends_with('>') {
+    let s = type_str.trim();
+    if !s
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("map<"))
+        || !s.ends_with('>')
+    {
         return None;
     }
     let inner = s[4..s.len() - 1].trim();
-    let comma = inner.find(',')?;
-    let key_type = inner[..comma].trim().to_string();
-    let value_type = inner[comma + 1..].trim().to_string();
+    let mut parts = split_at_top_level_commas(inner).into_iter();
+    let key_type = parts.next()?;
+    let value_type = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
     Some((key_type, value_type))
 }
 
@@ -95,6 +148,132 @@ fn parse_map_key_value_types(type_str: &str) -> Option<(String, String)> {
 fn is_decimal_type_str(type_str: &str) -> bool {
     let s = type_str.trim().to_lowercase();
     s.starts_with("decimal(") && s.contains(')')
+}
+
+fn decimal_transport_value(value: &str) -> &str {
+    value
+        .strip_prefix("__sparkless_decimal__:")
+        .unwrap_or(value)
+}
+
+fn parse_decimal_precision_scale(type_str: &str) -> Option<(usize, usize)> {
+    let args = type_str.trim().to_ascii_lowercase();
+    let args = args.strip_prefix("decimal(")?.strip_suffix(')')?;
+    let (precision, scale) = args.split_once(',')?;
+    let precision = precision.trim().parse().ok()?;
+    let scale = scale.trim().parse().ok()?;
+    (1..=38).contains(&precision).then_some(())?;
+    (scale <= precision).then_some(())?;
+    Some((precision, scale))
+}
+
+fn decimal_to_scaled(value: &str, precision: usize, scale: usize) -> Result<i128, PolarsError> {
+    if !(1..=38).contains(&precision) || scale > precision {
+        return Err(PolarsError::ComputeError(
+            format!("invalid decimal precision/scale decimal({precision},{scale})").into(),
+        ));
+    }
+    let value = decimal_transport_value(value);
+    let (mantissa, exponent) = value
+        .split_once(['e', 'E'])
+        .map(|(mantissa, exponent)| {
+            exponent
+                .parse::<i32>()
+                .map(|exponent| (mantissa, exponent))
+                .map_err(|_| "invalid decimal exponent")
+        })
+        .transpose()
+        .map_err(|message| PolarsError::ComputeError(message.into()))?
+        .unwrap_or((value, 0));
+    let negative = mantissa.starts_with('-');
+    let mantissa = mantissa.strip_prefix(['-', '+']).unwrap_or(mantissa);
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if (whole.is_empty() && fraction.is_empty())
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(PolarsError::ComputeError(
+            format!("invalid decimal value {value}").into(),
+        ));
+    }
+    let mut digits = format!("{whole}{fraction}");
+    let significant = digits.trim_start_matches('0');
+    if significant.is_empty() {
+        return Ok(0);
+    }
+    digits = significant.to_string();
+    let shift = scale as i64 - fraction.len() as i64 + i64::from(exponent);
+    if shift >= 0 {
+        let shift = usize::try_from(shift).map_err(|_| {
+            PolarsError::ComputeError("decimal value exceeds supported precision".into())
+        })?;
+        if digits.len().saturating_add(shift) > 39 {
+            return Err(PolarsError::ComputeError(
+                "decimal value exceeds supported precision".into(),
+            ));
+        }
+        digits.extend(std::iter::repeat_n('0', shift));
+    } else {
+        let discarded = usize::try_from(shift.unsigned_abs()).map_err(|_| {
+            PolarsError::ComputeError("decimal value exceeds supported precision".into())
+        })?;
+        let retained_len = digits.len().saturating_sub(discarded);
+        let round_up = discarded <= digits.len()
+            && digits
+                .as_bytes()
+                .get(retained_len)
+                .is_some_and(|digit| *digit >= b'5');
+        digits.truncate(retained_len);
+        if digits.is_empty() {
+            digits.push('0');
+        }
+        if round_up {
+            let mut carry = true;
+            let mut digit_bytes = digits.into_bytes();
+            for digit in digit_bytes.iter_mut().rev() {
+                if *digit == b'9' {
+                    *digit = b'0';
+                } else {
+                    *digit += 1;
+                    carry = false;
+                    break;
+                }
+            }
+            if carry {
+                digit_bytes.insert(0, b'1');
+            }
+            digits = String::from_utf8(digit_bytes)
+                .expect("decimal digit conversion only contains ASCII digits");
+        }
+    }
+    let scaled = digits.parse::<i128>().map_err(|_| {
+        PolarsError::ComputeError("decimal value exceeds supported precision".into())
+    })?;
+    let scaled = if negative { -scaled } else { scaled };
+    let max_abs = 10_i128.pow(precision as u32) - 1;
+    if scaled.unsigned_abs() > max_abs as u128 {
+        return Err(PolarsError::ComputeError(
+            format!("decimal value exceeds declared precision {precision}").into(),
+        ));
+    }
+    Ok(scaled)
+}
+
+fn json_value_to_decimal_scaled(
+    value: &JsonValue,
+    precision: usize,
+    scale: usize,
+) -> Result<Option<i128>, PolarsError> {
+    match value {
+        JsonValue::Null => Ok(None),
+        JsonValue::Number(number) => {
+            decimal_to_scaled(&number.to_string(), precision, scale).map(Some)
+        }
+        JsonValue::String(text) => decimal_to_scaled(text, precision, scale).map(Some),
+        other => Err(PolarsError::ComputeError(
+            format!("cannot convert {other} to decimal").into(),
+        )),
+    }
 }
 
 /// Try to parse a string as Python dict repr (e.g. `"{'E1': 1, 'E2': 'A'}"`) into JSON Value.
@@ -129,7 +308,7 @@ fn string_to_json_object(s: &str) -> Option<serde_json::Map<String, JsonValue>> 
 }
 
 /// Map schema type string to Polars DataType (primitives and list for nested use).
-/// Decimal(p,s) is mapped to Float64 (Polars dtype-decimal feature not enabled).
+/// Decimal(p,s) uses Polars' fixed-precision decimal dtype.
 /// PR-G/#710: array<element_type> and nested array<array<...>> supported.
 /// #976: Nested array (e.g. array<array<long>>) recurses; elem_type "array<long>" maps to List(Int64).
 /// Array element types timestamp, date, struct<...>, map<...> supported for create_dataframe_from_rows parity.
@@ -137,9 +316,10 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     let trimmed = type_str.trim();
     let s = trimmed.to_lowercase();
     if is_decimal_type_str(&s) {
-        return Some(DataType::Float64);
+        let (precision, scale) = parse_decimal_precision_scale(&s)?;
+        return Some(DataType::Decimal(precision, scale));
     }
-    if let Some(elem_type) = parse_array_element_type(&s) {
+    if let Some(elem_type) = parse_array_element_type(trimmed) {
         // Special case: array<map<key_type,value_type>> – represented as
         // List(List(Struct{key, value})) so each array element is its own map
         // (list-of-{key,value} pairs) and collect() yields a list of dicts.
@@ -168,17 +348,18 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
             .collect::<Option<Vec<_>>>()?;
         return Some(DataType::Struct(polars_fields));
     }
-    if let Some((key_type, value_type)) = parse_map_key_value_types(&s) {
+    if let Some((key_type, value_type)) = parse_map_key_value_types(trimmed) {
         let key_dtype = json_type_str_to_polars(key_type.trim())?;
         let value_dtype = json_type_str_to_polars(value_type.trim())?;
-        return Some(DataType::Struct(vec![
+        return Some(DataType::List(Box::new(DataType::Struct(vec![
             Field::new("key".into(), key_dtype),
             Field::new("value".into(), value_dtype),
-        ]));
+        ]))));
     }
     match s.as_str() {
         // Preserve distinction between IntegerType (32-bit) and LongType (64-bit) for explicit schemas.
-        "int" | "integer" => Some(DataType::Int32),
+        "int" | "integer" | "int32" => Some(DataType::Int32),
+        "smallint" | "short" => Some(DataType::Int16),
         "bigint" | "long" => Some(DataType::Int64),
         "double" | "float" | "double_precision" => Some(DataType::Float64),
         "string" | "str" | "varchar" => Some(DataType::String),
@@ -199,9 +380,27 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
         return Ok(());
     }
     match t.as_str() {
-        "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => match v {
+        "smallint" | "short" => match v {
+            JsonValue::Number(n)
+                if n.as_i64().is_some_and(|value| i16::try_from(value).is_ok()) =>
+            {
+                Ok(())
+            }
+            JsonValue::String(s) if decimal_transport_value(s).parse::<i16>().is_ok() => Ok(()),
+            _ => Err(format!("expected smallint, got {}", value_type_name(v))),
+        },
+        "int32" => match v {
+            JsonValue::Number(n)
+                if n.as_i64().is_some_and(|value| i32::try_from(value).is_ok()) =>
+            {
+                Ok(())
+            }
+            JsonValue::String(s) if decimal_transport_value(s).parse::<i32>().is_ok() => Ok(()),
+            _ => Err(format!("expected int32, got {}", value_type_name(v))),
+        },
+        "int" | "integer" | "bigint" | "long" | "tinyint" => match v {
             JsonValue::Number(_) => Ok(()), // #1265: accept any number (e.g. 10^18 from UDF); build uses i64 or f64
-            JsonValue::String(s) if s.parse::<i64>().is_ok() => Ok(()),
+            JsonValue::String(s) if decimal_transport_value(s).parse::<i64>().is_ok() => Ok(()),
             _ => Err(format!(
                 "expected bigint/number, got {}",
                 value_type_name(v)
@@ -209,7 +408,7 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
         },
         "double" | "float" | "double_precision" => match v {
             JsonValue::Number(_) => Ok(()),
-            JsonValue::String(s) if s.parse::<f64>().is_ok() => Ok(()),
+            JsonValue::String(s) if decimal_transport_value(s).parse::<f64>().is_ok() => Ok(()),
             _ => Err(format!(
                 "expected double/number, got {}",
                 value_type_name(v)
@@ -220,6 +419,18 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
             JsonValue::Bool(_) => Ok(()),
             _ => Err(format!("expected boolean, got {}", value_type_name(v))),
         },
+        _ if is_decimal_type_str(&t) => {
+            let (precision, scale) = parse_decimal_precision_scale(&t)
+                .ok_or_else(|| format!("invalid decimal type {t}"))?;
+            let value = match v {
+                JsonValue::Number(number) => number.to_string(),
+                JsonValue::String(text) => decimal_transport_value(text).to_string(),
+                _ => return Err(format!("expected decimal, got {}", value_type_name(v))),
+            };
+            decimal_to_scaled(&value, precision, scale)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         _ => Ok(()), // date, timestamp, array, struct, etc.: allow and let build fail if needed
     }
 }
@@ -437,7 +648,7 @@ fn json_values_to_series(
     let epoch = date_utils::epoch_naive_date();
     let type_lower = type_str.trim().to_lowercase();
 
-    if let Some(elem_type) = parse_array_element_type(&type_lower) {
+    if let Some(elem_type) = parse_array_element_type(type_str) {
         let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
             PolarsError::ComputeError(
                 format!("array element type '{elem_type}' not supported").into(),
@@ -494,6 +705,24 @@ fn json_values_to_series(
             }
         }
         return Ok(builder.finish().into_series());
+    }
+
+    if parse_map_key_value_types(type_str).is_some() {
+        let dtype = json_type_str_to_polars(type_str).ok_or_else(|| {
+            PolarsError::ComputeError(format!("map type '{type_str}' not supported").into())
+        })?;
+        let null_value = JsonValue::Null;
+        let values = values
+            .iter()
+            .map(
+                |value| -> Result<polars::prelude::AnyValue<'static>, PolarsError> {
+                    let value = value.as_ref().unwrap_or(&null_value);
+                    let series = json_value_to_series_single(value, type_str, name)?;
+                    Ok(series.get(0)?.into_static())
+                },
+            )
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        return Series::from_any_values_and_dtype(name.into(), &values, &dtype, true);
     }
 
     // Use type_str (not type_lower) so struct field names preserve case (e.g. E1, E2); col("StructValue.E1") then resolves when case_sensitive.
@@ -607,27 +836,64 @@ fn json_values_to_series(
 
     // #978: Support integer/smallint/tinyint, double_precision, and decimal(...,...) so json_value_to_series doesn't hit "unsupported type".
     if is_decimal_type_str(&type_lower) {
-        let vals: Vec<Option<f64>> = values
+        let (precision, scale) = parse_decimal_precision_scale(&type_lower).ok_or_else(|| {
+            PolarsError::ComputeError(format!("invalid decimal type {type_lower}").into())
+        })?;
+        let vals: Vec<Option<i128>> = values
             .iter()
-            .map(|ov| {
-                ov.as_ref().and_then(|v| match v {
-                    JsonValue::Number(n) => n.as_f64(),
-                    JsonValue::Null => None,
-                    _ => None,
+            .map(|value| {
+                value.as_ref().map_or(Ok(None), |value| {
+                    json_value_to_decimal_scaled(value, precision, scale)
                 })
             })
-            .collect();
-        return Ok(Series::new(name.into(), vals));
+            .collect::<Result<_, PolarsError>>()?;
+        return Series::new(name.into(), vals)
+            .into_decimal(precision, scale)
+            .map(|series| series.into_series());
     }
 
     match type_lower.as_str() {
-        "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
+        "int32" => {
+            let vals: Vec<Option<i32>> = values
+                .iter()
+                .map(|value| {
+                    value.as_ref().and_then(|value| match value {
+                        JsonValue::Number(number) => {
+                            number.as_i64().and_then(|value| i32::try_from(value).ok())
+                        }
+                        JsonValue::String(value) => {
+                            decimal_transport_value(value).parse::<i32>().ok()
+                        }
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
+        }
+        "smallint" | "short" => {
+            let vals: Vec<Option<i16>> = values
+                .iter()
+                .map(|value| {
+                    value.as_ref().and_then(|value| match value {
+                        JsonValue::Number(number) => {
+                            number.as_i64().and_then(|value| i16::try_from(value).ok())
+                        }
+                        JsonValue::String(value) => {
+                            decimal_transport_value(value).parse::<i16>().ok()
+                        }
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
+        }
+        "int" | "integer" | "bigint" | "long" | "tinyint" => {
             let vals: Vec<Option<i64>> = values
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::Number(n) => n.as_i64(),
-                        JsonValue::String(s) => s.parse::<i64>().ok(),
+                        JsonValue::String(s) => decimal_transport_value(s).parse::<i64>().ok(),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -641,7 +907,7 @@ fn json_values_to_series(
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::Number(n) => n.as_f64(),
-                        JsonValue::String(s) => s.parse::<f64>().ok(),
+                        JsonValue::String(s) => decimal_transport_value(s).parse::<f64>().ok(),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -654,7 +920,7 @@ fn json_values_to_series(
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
-                        JsonValue::String(s) => Some(s.as_str()),
+                        JsonValue::String(s) => Some(decimal_transport_value(s)),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -785,7 +1051,8 @@ fn json_value_to_series_single(
     let type_trimmed = type_str.trim();
     let type_lower = type_trimmed.to_lowercase();
     // #1066: Nested array (e.g. createDataFrame with {"matrix": [[1,2,3],[4,5,6]]}) when type is array<...>.
-    if let (JsonValue::Array(arr), Some(elem_type)) = (value, parse_array_element_type(&type_lower))
+    if let (JsonValue::Array(arr), Some(elem_type)) =
+        (value, parse_array_element_type(type_trimmed))
     {
         let inner_dtype = json_type_str_to_polars(&elem_type).ok_or_else(|| {
             PolarsError::ComputeError(
@@ -820,7 +1087,7 @@ fn json_value_to_series_single(
         }
     }
     // Map element type (e.g. array<map<string,int>> where elem_type is "map<string,int>")
-    if let Some((key_type, value_type)) = parse_map_key_value_types(&type_lower) {
+    if let Some((key_type, value_type)) = parse_map_key_value_types(type_trimmed) {
         let key_dtype = json_type_str_to_polars(key_type.trim()).ok_or_else(|| {
             PolarsError::ComputeError(
                 format!("array element key type '{key_type}' not supported").into(),
@@ -866,11 +1133,35 @@ fn json_value_to_series_single(
     }
     match (value, type_lower.as_str()) {
         (JsonValue::Null, _) => Ok(Series::new_null(name.into(), 1)),
-        (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
+        (JsonValue::Number(n), "int32") => Ok(Series::new(
+            name.into(),
+            vec![n.as_i64().and_then(|value| i32::try_from(value).ok())],
+        )),
+        (JsonValue::String(s), "int32") => {
+            let value = decimal_transport_value(s)
+                .trim()
+                .parse::<i32>()
+                .map_err(|error| PolarsError::ComputeError(format!("int parse: {error}").into()))?;
+            Ok(Series::new(name.into(), vec![Some(value)]))
+        }
+        (JsonValue::Number(n), "smallint" | "short") => Ok(Series::new(
+            name.into(),
+            vec![n.as_i64().and_then(|value| i16::try_from(value).ok())],
+        )),
+        (JsonValue::String(s), "smallint" | "short") => {
+            let value = decimal_transport_value(s)
+                .trim()
+                .parse::<i16>()
+                .map_err(|error| {
+                    PolarsError::ComputeError(format!("smallint parse: {error}").into())
+                })?;
+            Ok(Series::new(name.into(), vec![Some(value)]))
+        }
+        (JsonValue::Number(n), "int" | "integer" | "bigint" | "long" | "tinyint") => {
             Ok(Series::new(name.into(), vec![n.as_i64()]))
         }
-        (JsonValue::String(s), "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint") => {
-            let i = s
+        (JsonValue::String(s), "int" | "integer" | "bigint" | "long" | "tinyint") => {
+            let i = decimal_transport_value(s)
                 .trim()
                 .parse::<i64>()
                 .map_err(|e| PolarsError::ComputeError(format!("int parse: {e}").into()))?;
@@ -880,17 +1171,36 @@ fn json_value_to_series_single(
             Ok(Series::new(name.into(), vec![n.as_f64()]))
         }
         (JsonValue::String(s), "double" | "float" | "double_precision") => {
-            let f = s
+            let f = decimal_transport_value(s)
                 .trim()
                 .parse::<f64>()
                 .map_err(|e| PolarsError::ComputeError(format!("float parse: {e}").into()))?;
             Ok(Series::new(name.into(), vec![Some(f)]))
         }
         (JsonValue::Number(n), t) if is_decimal_type_str(t) => {
-            Ok(Series::new(name.into(), vec![n.as_f64()]))
+            let (precision, scale) = parse_decimal_precision_scale(t).ok_or_else(|| {
+                PolarsError::ComputeError(format!("invalid decimal type {t}").into())
+            })?;
+            Series::new(
+                name.into(),
+                vec![Some(decimal_to_scaled(&n.to_string(), precision, scale)?)],
+            )
+            .into_decimal(precision, scale)
+            .map(|series| series.into_series())
+        }
+        (JsonValue::String(s), t) if is_decimal_type_str(t) => {
+            let (precision, scale) = parse_decimal_precision_scale(t).ok_or_else(|| {
+                PolarsError::ComputeError(format!("invalid decimal type {t}").into())
+            })?;
+            Series::new(
+                name.into(),
+                vec![Some(decimal_to_scaled(s, precision, scale)?)],
+            )
+            .into_decimal(precision, scale)
+            .map(|series| series.into_series())
         }
         (JsonValue::String(s), "string" | "str" | "varchar") => {
-            Ok(Series::new(name.into(), vec![s.as_str()]))
+            Ok(Series::new(name.into(), vec![decimal_transport_value(s)]))
         }
         (JsonValue::Number(n), "string" | "str" | "varchar") => {
             // #971: map<string,*> values may be numbers when Python sends dict with mixed types; coerce to string.
@@ -1883,6 +2193,9 @@ impl SparkSession {
             session_tz,
             self.runtime_config.clone(),
         );
+        crate::set_thread_decimal_allow_precision_loss(
+            decimal_allow_precision_loss_from_session_map(&self.config),
+        );
     }
 
     /// Whether column names are case-sensitive (PySpark: spark.sql.caseSensitive).
@@ -2435,7 +2748,44 @@ impl SparkSession {
         for (col_idx, (name, type_str)) in schema.iter().enumerate() {
             let type_lower = type_str.trim().to_lowercase();
             let s = match type_lower.as_str() {
-                "int" | "integer" | "bigint" | "long" | "smallint" | "tinyint" => {
+                "int32" => {
+                    let vals: Vec<Option<i32>> = rows
+                        .iter()
+                        .map(
+                            |row| match row.get(col_idx).cloned().unwrap_or(JsonValue::Null) {
+                                JsonValue::Number(n) => {
+                                    n.as_i64().and_then(|i| i32::try_from(i).ok())
+                                }
+                                JsonValue::String(s) => {
+                                    decimal_transport_value(&s).parse::<i32>().ok()
+                                }
+                                JsonValue::Null => None,
+                                _ => None,
+                            },
+                        )
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                "smallint" | "short" => {
+                    let vals: Vec<Option<i16>> = rows
+                        .iter()
+                        .map(|row| {
+                            let value = row.get(col_idx).unwrap_or(&JsonValue::Null);
+                            match value {
+                                JsonValue::Number(number) => {
+                                    number.as_i64().and_then(|value| i16::try_from(value).ok())
+                                }
+                                JsonValue::String(value) => {
+                                    decimal_transport_value(value).parse::<i16>().ok()
+                                }
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                "int" | "integer" | "bigint" | "long" | "tinyint" => {
                     // #1265: values may exceed i64 (e.g. UDF returns 10^18); use Float64 when any value doesn't fit.
                     let mut needs_f64 = false;
                     let i64_vals: Vec<Option<i64>> = rows
@@ -2451,7 +2801,9 @@ impl SparkSession {
                                         n.as_f64().map(|f| f as i64) // placeholder; we'll use f64 column
                                     }
                                 }
-                                JsonValue::String(s) => s.parse::<i64>().ok(),
+                                JsonValue::String(s) => {
+                                    decimal_transport_value(&s).parse::<i64>().ok()
+                                }
                                 JsonValue::Null => None,
                                 _ => None,
                             }
@@ -2466,7 +2818,10 @@ impl SparkSession {
                                     JsonValue::Number(n) => {
                                         n.as_i64().map(|i| i as f64).or_else(|| n.as_f64())
                                     }
-                                    JsonValue::String(s) => s.parse::<i64>().ok().map(|i| i as f64),
+                                    JsonValue::String(s) => decimal_transport_value(&s)
+                                        .parse::<i64>()
+                                        .ok()
+                                        .map(|i| i as f64),
                                     JsonValue::Null => None,
                                     _ => None,
                                 }
@@ -2484,7 +2839,9 @@ impl SparkSession {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
                                 JsonValue::Number(n) => n.as_f64(),
-                                JsonValue::String(s) => s.parse::<f64>().ok(),
+                                JsonValue::String(s) => {
+                                    decimal_transport_value(&s).parse::<f64>().ok()
+                                }
                                 JsonValue::Null => None,
                                 _ => None,
                             }
@@ -2493,18 +2850,25 @@ impl SparkSession {
                     Series::new(name.as_str().into(), vals)
                 }
                 _ if is_decimal_type_str(&type_lower) => {
-                    let vals: Vec<Option<f64>> = rows
+                    let (precision, scale) = parse_decimal_precision_scale(&type_lower)
+                        .ok_or_else(|| {
+                            PolarsError::ComputeError(
+                                format!("invalid decimal type {type_lower}").into(),
+                            )
+                        })?;
+                    let vals: Vec<Option<i128>> = rows
                         .iter()
                         .map(|row| {
-                            let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
-                            match v {
-                                JsonValue::Number(n) => n.as_f64(),
-                                JsonValue::Null => None,
-                                _ => None,
-                            }
+                            json_value_to_decimal_scaled(
+                                row.get(col_idx).unwrap_or(&JsonValue::Null),
+                                precision,
+                                scale,
+                            )
                         })
-                        .collect();
+                        .collect::<Result<_, PolarsError>>()?;
                     Series::new(name.as_str().into(), vals)
+                        .into_decimal(precision, scale)?
+                        .into_series()
                 }
                 "string" | "str" | "varchar" => {
                     let vals: Vec<Option<String>> = rows
@@ -2512,7 +2876,9 @@ impl SparkSession {
                         .map(|row| {
                             let v = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
                             match v {
-                                JsonValue::String(s) => Some(s),
+                                JsonValue::String(s) => {
+                                    Some(decimal_transport_value(&s).to_string())
+                                }
                                 JsonValue::Null => None,
                                 other => Some(other.to_string()),
                             }
@@ -2670,8 +3036,8 @@ impl SparkSession {
                     }
                     builder.finish().into_series()
                 }
-                _ if parse_array_element_type(&type_lower).is_some() => {
-                    let elem_type = parse_array_element_type(&type_lower).unwrap_or_else(|| {
+                _ if parse_array_element_type(type_str).is_some() => {
+                    let elem_type = parse_array_element_type(type_str).unwrap_or_else(|| {
                         unreachable!("guard above ensures parse_array_element_type returned Some")
                     });
                     // Special case: array<map<k,v>> – inner dtype is List(Struct{key,value})
@@ -2784,8 +3150,8 @@ impl SparkSession {
                     }
                     builder.finish().into_series()
                 }
-                _ if parse_map_key_value_types(&type_lower).is_some() => {
-                    let (key_type, value_type) = parse_map_key_value_types(&type_lower)
+                _ if parse_map_key_value_types(type_str).is_some() => {
+                    let (key_type, value_type) = parse_map_key_value_types(type_str)
                         .unwrap_or_else(|| unreachable!("guard ensures Some"));
                     let key_dtype = json_type_str_to_polars(&key_type).ok_or_else(|| {
                         PolarsError::ComputeError(
@@ -3255,6 +3621,19 @@ impl Default for SparkSession {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn decimal_schema_enforces_declared_precision() {
+        let valid = vec![Some(json!("99.99"))];
+        let series = json_values_to_series(&valid, "decimal(4,2)", "amount")
+            .expect("99.99 fits decimal(4,2)");
+        assert_eq!(series.dtype(), &DataType::Decimal(4, 2));
+
+        let too_large = json!("100.00");
+        assert!(verify_json_value_for_type(&too_large, "decimal(4,2)").is_err());
+        assert!(json_values_to_series(&[Some(too_large)], "decimal(4,2)", "amount").is_err());
+        assert!(parse_decimal_precision_scale("decimal(2,3)").is_none());
+    }
 
     #[test]
     fn test_spark_session_builder_basic() {

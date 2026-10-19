@@ -3,11 +3,25 @@
 use polars::prelude::{DataType, TimeUnit};
 
 /// Parse PySpark-like type name to Polars DataType.
-/// Decimal(precision, scale) and bare "decimal" are mapped to Float64 for schema parity (Polars dtype-decimal not enabled; #853).
+/// Decimal(precision, scale) maps to Polars' fixed-precision decimal dtype.
 pub fn parse_type_name(name: &str) -> Result<DataType, String> {
     let s = name.trim().to_lowercase();
-    if s.starts_with("decimal(") && s.contains(')') {
-        return Ok(DataType::Float64);
+    if let Some(args) = s.strip_prefix("decimal(").and_then(|s| s.strip_suffix(')')) {
+        let (precision, scale) = args
+            .split_once(',')
+            .ok_or_else(|| format!("invalid decimal type: {name}"))?;
+        let precision = precision
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| format!("invalid decimal precision: {name}"))?;
+        let scale = scale
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| format!("invalid decimal scale: {name}"))?;
+        if !(1..=38).contains(&precision) || scale > precision {
+            return Err(format!("invalid decimal precision or scale: {name}"));
+        }
+        return Ok(DataType::Decimal(precision, scale));
     }
     if let Some(inner) = s
         .strip_prefix("array<")
@@ -74,7 +88,7 @@ mod tests {
         assert!(matches!(parse_type_name("decimal"), Ok(DataType::Float64)));
         assert!(matches!(
             parse_type_name("decimal(10,2)"),
-            Ok(DataType::Float64)
+            Ok(DataType::Decimal(10, 2))
         ));
         assert!(parse_type_name("unknown_type").is_err());
         assert!(parse_type_name("").is_err());

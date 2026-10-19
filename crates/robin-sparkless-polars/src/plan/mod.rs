@@ -985,7 +985,9 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
                     .map(|dt| {
                         matches!(
                             dt,
-                            crate::schema::DataType::Long | crate::schema::DataType::Integer
+                            crate::schema::DataType::Short
+                                | crate::schema::DataType::Long
+                                | crate::schema::DataType::Integer
                         )
                     })
                     .unwrap_or(false);

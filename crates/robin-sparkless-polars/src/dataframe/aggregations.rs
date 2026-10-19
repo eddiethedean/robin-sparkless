@@ -152,7 +152,7 @@ impl GroupedData {
             Ok(e)
         })?;
         let gd = self;
-        let schema = schema.clone();
+        let resolution_schema = schema.clone();
         expr.try_map_expr(move |e| {
             if let Expr::Column(name) = &e {
                 let name_str = name.as_str();
@@ -175,14 +175,14 @@ impl GroupedData {
                             .into(),
                         ));
                     }
-                    let resolved = gd.resolve_column_with_schema(first, &schema)?;
+                    let resolved = gd.resolve_column_with_schema(first, &resolution_schema)?;
                     let mut expr = col(PlSmallStr::from(resolved.as_str()));
                     for field in rest {
                         expr = expr.struct_().field_by_name(field);
                     }
                     return Ok(expr);
                 }
-                let resolved = gd.resolve_column_with_schema(name_str, &schema)?;
+                let resolved = gd.resolve_column_with_schema(name_str, &resolution_schema)?;
                 return Ok(Expr::Column(PlSmallStr::from(resolved.as_str())));
             }
             Ok(e)
@@ -205,9 +205,11 @@ impl GroupedData {
 
     /// Sum a column in each group
     pub fn sum(&self, column: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
         let c = self.resolve_column(column)?;
-        let agg_expr = vec![col(c.as_str()).sum().alias(format!("sum({column})"))];
+        let schema = self.lf.clone().collect_schema()?;
+        let expr = crate::functions::sum(&Column::new(c)).into_expr();
+        let expr = crate::functions::bind_runtime_config(expr, &schema)?;
+        let agg_expr = vec![expr.alias(format!("sum({column})"))];
         let lf = self.lazy_grouped.clone().agg(agg_expr);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -224,12 +226,14 @@ impl GroupedData {
                 "avg requires at least one column".into(),
             ));
         }
-        use polars::prelude::*;
+        let schema = self.lf.clone().collect_schema()?;
         let agg_expr: Vec<Expr> = columns
             .iter()
             .map(|c| {
                 let resolved = self.resolve_column(c)?;
-                Ok(col(resolved.as_str()).mean().alias(format!("avg({c})")))
+                let expr = crate::functions::avg(&Column::new(resolved)).into_expr();
+                let expr = crate::functions::bind_runtime_config(expr, &schema)?;
+                Ok(expr.alias(format!("avg({c})")))
             })
             .collect::<Result<Vec<_>, PolarsError>>()?;
         let lf = self.lazy_grouped.clone().agg(agg_expr);
@@ -795,6 +799,12 @@ impl GroupedData {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let disambiguated = disambiguate_agg_output_names(resolved);
+        // Derive PySpark output names before rebinding runtime-sensitive aggregate
+        // expressions (integer SUM, for example, expands into a conditional expression).
+        let disambiguated = disambiguated
+            .into_iter()
+            .map(|expr| crate::functions::bind_runtime_config(expr, &schema))
+            .collect::<Result<Vec<_>, _>>()?;
         use polars::prelude::*;
         let mut lf = self.lazy_grouped.clone().agg(disambiguated);
         // PySpark parity: groupBy().agg() results are ordered by grouping columns (lexicographic).
@@ -865,6 +875,10 @@ fn pivot_agg_input_column_name(input_expr: &Expr) -> Option<String> {
             let first = input.first()?;
             pivot_agg_input_column_name(first)
         }
+        Expr::AnonymousFunction { input, .. } => {
+            let first = input.first()?;
+            pivot_agg_input_column_name(first)
+        }
         _ => None,
     }
 }
@@ -917,8 +931,10 @@ fn parse_pivot_literal_expr(expr: &Expr) -> Option<(String, Expr)> {
 /// Apply agg kind to a per-row filtered value expression (multi-agg pivot path).
 fn pivot_filtered_agg_expr(expr: Expr, agg_kind: &str) -> Result<Expr, PolarsError> {
     Ok(match agg_kind {
-        "sum" => expr.sum(),
-        "avg" => expr.mean(),
+        "sum" => pivot_sum_expr(expr),
+        "try_sum" => pivot_try_sum_expr(expr),
+        "avg" => pivot_avg_expr(expr),
+        "try_avg" => pivot_try_avg_expr(expr),
         "min" => expr.min(),
         "max" => expr.max(),
         "first" => expr.first_non_null(),
@@ -932,6 +948,26 @@ fn pivot_filtered_agg_expr(expr: Expr, agg_kind: &str) -> Result<Expr, PolarsErr
             ));
         }
     })
+}
+
+fn pivot_sum_expr(expr: Expr) -> Expr {
+    let input = Column::from_expr(expr, None);
+    crate::functions::sum(&input).expr().clone()
+}
+
+fn pivot_try_sum_expr(expr: Expr) -> Expr {
+    let input = Column::from_expr(expr, None);
+    crate::functions::try_sum(&input).expr().clone()
+}
+
+fn pivot_avg_expr(expr: Expr) -> Expr {
+    let input = Column::from_expr(expr, None);
+    crate::functions::avg(&input).expr().clone()
+}
+
+fn pivot_try_avg_expr(expr: Expr) -> Expr {
+    let input = Column::from_expr(expr, None);
+    crate::functions::try_avg(&input).expr().clone()
 }
 
 /// Parse a simple pivot agg expr: Alias(Agg(...), alias) or bare Agg(...) or Cast(Agg(...), _) -> (alias, agg_kind, value_col).
@@ -953,12 +989,29 @@ fn parse_pivot_agg_expr(expr: &Expr) -> Option<(String, &'static str, String)> {
         other => other,
     };
     let (agg_kind, input_expr) = match inner {
+        // avg()/sum() and try_avg()/try_sum() use a Series map over the imploded group. The map's
+        // input is still an Implode aggregate, which pivot can express as the
+        // corresponding native aggregate on the original value column.
+        Expr::AnonymousFunction { input, fmt_str, .. } => {
+            let Expr::Agg(AggExpr::Implode(e)) = input.first()? else {
+                return None;
+            };
+            let agg_kind = match fmt_str.as_str() {
+                "sum" => "sum",
+                "try_sum" => "try_sum",
+                "avg" => "avg",
+                "try_avg" => "try_avg",
+                _ => return None,
+            };
+            (agg_kind, e.as_ref())
+        }
         Expr::Agg(agg) => match agg {
             AggExpr::Sum(e) => ("sum", e.as_ref()),
             AggExpr::Mean(e) => ("avg", e.as_ref()),
             AggExpr::Min { input: e, .. } => ("min", e.as_ref()),
             AggExpr::Max { input: e, .. } => ("max", e.as_ref()),
             AggExpr::NUnique(e) => ("count_distinct", e.as_ref()),
+            AggExpr::Count { input: e, .. } => ("count", e.as_ref()),
             AggExpr::First(e) => ("first", e.as_ref()),
             AggExpr::Last(e) => ("last", e.as_ref()),
             AggExpr::Implode(e) => {
@@ -1049,6 +1102,14 @@ impl PivotedGroupedData {
         pivot_values_from_lf(&self.lf, &resolved)
     }
 
+    fn bind_pivot_runtime_config(&self, exprs: Vec<Expr>) -> Result<Vec<Expr>, PolarsError> {
+        let schema = self.lf.clone().collect_schema()?;
+        exprs
+            .into_iter()
+            .map(|expr| crate::functions::bind_runtime_config(expr, &schema))
+            .collect()
+    }
+
     fn pivot_agg<F>(&self, value_col: &str, agg_fn: F) -> Result<DataFrame, PolarsError>
     where
         F: Fn(Expr) -> Expr,
@@ -1093,6 +1154,7 @@ impl PivotedGroupedData {
             agg_exprs.push(agg_expr);
         }
         let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+        let agg_exprs = self.bind_pivot_runtime_config(agg_exprs)?;
         let lf = self.lf.clone().group_by(by).agg(agg_exprs);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -1154,12 +1216,12 @@ impl PivotedGroupedData {
 
     /// Pivot then sum (PySpark: groupBy(...).pivot(...).sum(column)).
     pub fn sum(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.pivot_agg(value_col, polars::prelude::Expr::sum)
+        self.pivot_agg(value_col, pivot_sum_expr)
     }
 
     /// Pivot then mean (PySpark: groupBy(...).pivot(...).avg(column)).
     pub fn avg(&self, value_col: &str) -> Result<DataFrame, PolarsError> {
-        self.pivot_agg(value_col, polars::prelude::Expr::mean)
+        self.pivot_agg(value_col, pivot_avg_expr)
     }
 
     /// Pivot then min (PySpark: groupBy(...).pivot(...).min(column)).
@@ -1295,8 +1357,10 @@ impl PivotedGroupedData {
                     let value_resolved = self.resolve_column(value_col)?;
                     let col_expr = col(value_resolved.as_str());
                     let agg_expr = match *agg_kind {
-                        "sum" => col_expr.sum().alias(alias.as_str()),
-                        "avg" => col_expr.mean().alias(alias.as_str()),
+                        "sum" => pivot_sum_expr(col_expr).alias(alias.as_str()),
+                        "try_sum" => pivot_try_sum_expr(col_expr).alias(alias.as_str()),
+                        "avg" => pivot_avg_expr(col_expr).alias(alias.as_str()),
+                        "try_avg" => pivot_try_avg_expr(col_expr).alias(alias.as_str()),
                         "min" => col_expr.min().alias(alias.as_str()),
                         "max" => col_expr.max().alias(alias.as_str()),
                         other => {
@@ -1306,6 +1370,10 @@ impl PivotedGroupedData {
                         }
                     };
                     let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+                    let agg_expr = self
+                        .bind_pivot_runtime_config(vec![agg_expr])?
+                        .pop()
+                        .expect("one pivot aggregation expression");
                     let lf = self.lf.clone().group_by(by).agg(vec![agg_expr]);
                     let mut pl_df = lf.collect()?;
                     pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -1380,6 +1448,7 @@ impl PivotedGroupedData {
             }
         }
         let by: Vec<&str> = self.grouping_cols.iter().map(|s| s.as_str()).collect();
+        let agg_exprs = self.bind_pivot_runtime_config(agg_exprs)?;
         let lf = self.lf.clone().group_by(by).agg(agg_exprs);
         let mut pl_df = lf.collect()?;
         pl_df = reorder_groupby_columns(&mut pl_df, &self.grouping_cols)?;
@@ -1501,8 +1570,11 @@ impl CubeRollupData {
 
     /// Sum of a column per grouping set (PySpark cube/rollup .sum(col)).
     pub fn sum(&self, column: &str) -> Result<DataFrame, PolarsError> {
-        use polars::prelude::*;
-        self.agg(vec![col(column).sum().alias(format!("sum({column})"))])
+        self.agg(vec![
+            crate::functions::sum(&Column::new(column.to_string()))
+                .into_expr()
+                .alias(format!("sum({column})")),
+        ])
     }
 
     /// Average of one or more columns per grouping set (PySpark cube/rollup .avg(...)).
@@ -1512,10 +1584,13 @@ impl CubeRollupData {
                 "avg requires at least one column".into(),
             ));
         }
-        use polars::prelude::*;
         let agg_exprs: Vec<Expr> = columns
             .iter()
-            .map(|c| col(*c).mean().alias(format!("avg({c})")))
+            .map(|c| {
+                crate::functions::avg(&Column::new((*c).to_string()))
+                    .into_expr()
+                    .alias(format!("avg({c})"))
+            })
             .collect();
         self.agg(agg_exprs)
     }

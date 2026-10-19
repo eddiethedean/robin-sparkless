@@ -5,6 +5,7 @@
 #![allow(unexpected_cfgs)] // pyo3 create_exception! uses cfg(gil-refs)
 #![allow(clippy::useless_conversion)] // PyO3 PyResult<T> / PyErr false positives (fixed in pyo3 0.23+)
 
+use polars_plan::dsl::AggExpr;
 use pyo3::class::basic::CompareOp;
 use pyo3::create_exception;
 use pyo3::prelude::*;
@@ -457,7 +458,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
     if fields.len() == 1 {
         let f = &fields[0];
         let val = match &f.data_type {
-            DataType::Integer | DataType::Long => inner
+            DataType::Short | DataType::Integer | DataType::Long => inner
                 .parse::<i64>()
                 .ok()
                 .map(serde_json::Number::from)
@@ -502,7 +503,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
                         .and_then(|t| t.strip_suffix('"'))
                         .unwrap_or(v);
                     let val = match &f.data_type {
-                        DataType::Integer | DataType::Long => v
+                        DataType::Short | DataType::Integer | DataType::Long => v
                             .parse::<i64>()
                             .ok()
                             .map(serde_json::Number::from)
@@ -558,7 +559,7 @@ fn parse_struct_string_to_json(s: &str, fields: &[StructField]) -> Option<JsonVa
                 .and_then(|t| t.strip_suffix('"'))
                 .unwrap_or(part);
             let matched = match &f.data_type {
-                DataType::Integer | DataType::Long => part
+                DataType::Short | DataType::Integer | DataType::Long => part
                     .parse::<i64>()
                     .ok()
                     .map(serde_json::Number::from)
@@ -613,7 +614,10 @@ fn json_value_to_py_with_schema(
             .call_method1("fromisoformat", (s.as_str(),))
             .and_then(|o| o.into_py_any(py))
             .or_else(|_| into_py_object(py, s.clone()))?,
-        (Some(DataType::Integer) | Some(DataType::Long), JsonValue::String(s)) => {
+        (
+            Some(DataType::Short) | Some(DataType::Integer) | Some(DataType::Long),
+            JsonValue::String(s),
+        ) => {
             let s = s.trim();
             if let Ok(i) = s.parse::<i64>() {
                 i.into_py_any(py)?
@@ -629,6 +633,10 @@ fn json_value_to_py_with_schema(
                 s.to_string().into_py_any(py)?
             }
         }
+        (Some(DataType::Decimal(_, _)), JsonValue::String(s)) => PyModule::import(py, "decimal")?
+            .getattr("Decimal")?
+            .call1((s.as_str(),))?
+            .into_py_any(py)?,
         (Some(DataType::Boolean), JsonValue::String(s)) => {
             let lower = s.trim().to_lowercase();
             if lower == "true" || lower == "1" {
@@ -638,6 +646,65 @@ fn json_value_to_py_with_schema(
             } else {
                 s.clone().into_py_any(py)?
             }
+        }
+        // Polars represents maps as list<struct<key, value>> internally, but JSON
+        // serialization exposes them as objects. Decode both schema forms recursively
+        // so decimal (and other typed) map values keep their Python types.
+        (Some(DataType::Map(key_type, value_type)), JsonValue::Object(obj)) => {
+            let dict = PyDict::new(py);
+            for (key, value) in obj {
+                let py_key = json_value_to_py_with_schema(
+                    py,
+                    &JsonValue::String(key.clone()),
+                    Some(key_type),
+                    datetime_cls,
+                    date_cls,
+                    None,
+                    None,
+                )?;
+                let py_value = json_value_to_py_with_schema(
+                    py,
+                    value,
+                    Some(value_type),
+                    datetime_cls,
+                    date_cls,
+                    None,
+                    None,
+                )?;
+                dict.set_item(py_key, py_value)?;
+            }
+            dict.into_py_any(py)?
+        }
+        (Some(DataType::Array(elem_type)), JsonValue::Object(obj)) if matches!(elem_type.as_ref(), DataType::Struct(fields) if fields.iter().any(|f| f.name == "key") && fields.iter().any(|f| f.name == "value")) =>
+        {
+            let DataType::Struct(fields) = elem_type.as_ref() else {
+                unreachable!()
+            };
+            let key_type = &fields.iter().find(|f| f.name == "key").unwrap().data_type;
+            let value_type = &fields.iter().find(|f| f.name == "value").unwrap().data_type;
+            let dict = PyDict::new(py);
+            for (key, value) in obj {
+                let py_key = json_value_to_py_with_schema(
+                    py,
+                    &JsonValue::String(key.clone()),
+                    Some(key_type),
+                    datetime_cls,
+                    date_cls,
+                    None,
+                    None,
+                )?;
+                let py_value = json_value_to_py_with_schema(
+                    py,
+                    value,
+                    Some(value_type),
+                    datetime_cls,
+                    date_cls,
+                    None,
+                    None,
+                )?;
+                dict.set_item(py_key, py_value)?;
+            }
+            dict.into_py_any(py)?
         }
         // Schema says String: preserve string (PySpark parity). Do not coerce to int/float by column name.
         // Tests that expect numeric from inferred String schema are skipped; see GitHub #1274.
@@ -855,6 +922,11 @@ impl PySparkSessionBuilder {
                                 .cloned(),
                             sess_guard.inner.runtime_config().clone(),
                         );
+                        robin_sparkless::set_thread_decimal_allow_precision_loss(
+                            robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                                sess_guard.inner.get_config(),
+                            ),
+                        );
                         // Reset builder to avoid config pollution between tests
                         slf.inner = SparkSessionBuilder::new();
                         ensure_thread_active_session(py, sess.clone_ref(py));
@@ -899,6 +971,840 @@ struct PySparkSession {
     backend_type: RefCell<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
     stopped: std::sync::atomic::AtomicBool,
+}
+
+fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let py = arrow_type.py();
+    let type_name = arrow_type.str()?.to_string();
+    let arrow_types = PyModule::import(py, "pyarrow.types")?;
+    let is_type = |predicate: &str| -> PyResult<bool> {
+        arrow_types
+            .getattr(predicate)?
+            .call1((arrow_type,))?
+            .extract()
+    };
+
+    if is_type("is_decimal")? {
+        let precision: usize = arrow_type.getattr("precision")?.extract()?;
+        let scale: usize = arrow_type.getattr("scale")?.extract()?;
+        return Ok(Some(format!("decimal({precision},{scale})")));
+    }
+    if is_type("is_list")? || is_type("is_large_list")? || is_type("is_fixed_size_list")? {
+        let value_type = arrow_type.getattr("value_type")?;
+        return Ok(
+            arrow_type_to_spark_type(&value_type)?.map(|value_type| format!("array<{value_type}>"))
+        );
+    }
+    if is_type("is_struct")? {
+        let mut fields = Vec::new();
+        for field in arrow_type.try_iter()? {
+            let field = field?;
+            let name: String = field.getattr("name")?.extract()?;
+            let field_type = field.getattr("type")?;
+            let Some(field_type) = arrow_type_to_spark_type(&field_type)? else {
+                return Ok(None);
+            };
+            // Struct type strings use backtick-quoted identifiers so field names
+            // containing commas, colons, or angle brackets remain unambiguous.
+            let quoted_name = name.replace('`', "``");
+            fields.push(format!("`{quoted_name}`:{field_type}"));
+        }
+        return Ok(Some(format!("struct<{}>", fields.join(","))));
+    }
+    if is_type("is_map")? {
+        let key_type = arrow_type.getattr("key_type")?;
+        let item_type = arrow_type.getattr("item_type")?;
+        let (Some(key_type), Some(item_type)) = (
+            arrow_type_to_spark_type(&key_type)?,
+            arrow_type_to_spark_type(&item_type)?,
+        ) else {
+            return Ok(None);
+        };
+        return Ok(Some(format!("map<{key_type},{item_type}>")));
+    }
+    if is_type("is_dictionary")? {
+        let value_type = arrow_type.getattr("value_type")?;
+        return arrow_type_to_spark_type(&value_type);
+    }
+
+    Ok(Some(match type_name.as_str() {
+        "bool" => "boolean".to_string(),
+        "int8" => "int".to_string(),
+        "int16" => "smallint".to_string(),
+        "int32" => "int32".to_string(),
+        "uint8" | "uint16" | "uint32" | "int64" => "bigint".to_string(),
+        "uint64" => "decimal(20,0)".to_string(),
+        "float" | "double" => "double".to_string(),
+        "string" | "large_string" => "string".to_string(),
+        "date32[day]" | "date64[ms]" => "date".to_string(),
+        "binary" | "large_binary" => "binary".to_string(),
+        ty if ty.starts_with("timestamp[") => "timestamp".to_string(),
+        _ => return Ok(None),
+    }))
+}
+
+fn is_pyarrow_table_or_batch(data: &Bound<'_, PyAny>) -> bool {
+    let ty = data.get_type();
+    let module = ty
+        .getattr("__module__")
+        .and_then(|value| value.extract::<String>())
+        .unwrap_or_default();
+    let name = ty
+        .getattr("__name__")
+        .and_then(|value| value.extract::<String>())
+        .unwrap_or_default();
+    module.starts_with("pyarrow") && (name == "Table" || name == "RecordBatch")
+}
+
+fn pyarrow_is_type(
+    arrow_types: &Bound<'_, PyModule>,
+    arrow_type: &Bound<'_, PyAny>,
+    predicate: &str,
+) -> PyResult<bool> {
+    arrow_types
+        .getattr(predicate)?
+        .call1((arrow_type,))?
+        .extract()
+}
+
+fn normalize_arrow_value(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+    arrow_type: &Bound<'_, PyAny>,
+    arrow_types: &Bound<'_, PyModule>,
+) -> PyResult<Py<PyAny>> {
+    if value.is_none() {
+        return Ok(value.clone().unbind());
+    }
+    // Python integers above i64::MAX fall through the generic JSON conversion
+    // to f64, which cannot preserve all UInt64 values. Route Arrow UInt64 through
+    // Decimal so the decimal(20,0) schema keeps every source digit.
+    if pyarrow_is_type(arrow_types, arrow_type, "is_uint64")? {
+        let decimal = PyModule::import(py, "decimal")?.getattr("Decimal")?;
+        return decimal.call1((value,))?.into_py_any(py);
+    }
+    if pyarrow_is_type(arrow_types, arrow_type, "is_dictionary")? {
+        let value_type = arrow_type.getattr("value_type")?;
+        return normalize_arrow_value(py, value, &value_type, arrow_types);
+    }
+    if pyarrow_is_type(arrow_types, arrow_type, "is_map")? {
+        let key_type = arrow_type.getattr("key_type")?;
+        let item_type = arrow_type.getattr("item_type")?;
+        let entries = if value.cast::<PyDict>().is_ok() {
+            value.call_method0("items")?
+        } else {
+            value.clone()
+        };
+        let mapped = PyDict::new(py);
+        let mut seen_nan_key = false;
+        for entry in entries.try_iter()? {
+            let entry = entry?;
+            let pair = entry.cast::<PyTuple>()?;
+            if pair.len() != 2 {
+                continue;
+            }
+            let key = pair.get_item(0)?;
+            let item = pair.get_item(1)?;
+            let key = normalize_arrow_value(py, &key, &key_type, arrow_types)?;
+            let item = normalize_arrow_value(py, &item, &item_type, arrow_types)?;
+            let key_is_nan = key
+                .bind(py)
+                .get_type()
+                .name()
+                .is_ok_and(|name| name == "float")
+                && key
+                    .bind(py)
+                    .extract::<f64>()
+                    .is_ok_and(|value| value.is_nan());
+            if (key_is_nan && seen_nan_key)
+                || (!key_is_nan && mapped.get_item(key.bind(py))?.is_some())
+            {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "PyArrow map contains duplicate keys; createDataFrame cannot preserve duplicate map keys",
+                ));
+            }
+            seen_nan_key |= key_is_nan;
+            mapped.set_item(key.bind(py), item.bind(py))?;
+        }
+        return mapped.into_py_any(py);
+    }
+    if pyarrow_is_type(arrow_types, arrow_type, "is_list")?
+        || pyarrow_is_type(arrow_types, arrow_type, "is_large_list")?
+        || pyarrow_is_type(arrow_types, arrow_type, "is_fixed_size_list")?
+    {
+        let item_type = arrow_type.getattr("value_type")?;
+        let items = PyList::empty(py);
+        for item in value.try_iter()? {
+            let item = item?;
+            let normalized = normalize_arrow_value(py, &item, &item_type, arrow_types)?;
+            items.append(normalized.bind(py))?;
+        }
+        return items.into_py_any(py);
+    }
+    if pyarrow_is_type(arrow_types, arrow_type, "is_struct")? {
+        if let Ok(object) = value.cast::<PyDict>() {
+            let normalized = PyDict::new(py);
+            for field in arrow_type.try_iter()? {
+                let field = field?;
+                let name: String = field.getattr("name")?.extract()?;
+                let field_type = field.getattr("type")?;
+                if let Some(field_value) = object.get_item(name.as_str())? {
+                    let field_value =
+                        normalize_arrow_value(py, &field_value, &field_type, arrow_types)?;
+                    normalized.set_item(name, field_value.bind(py))?;
+                }
+            }
+            return normalized.into_py_any(py);
+        }
+    }
+    Ok(value.clone().unbind())
+}
+
+// JSON-quoted field segments distinguish literal dots/brackets from nesting.
+fn arrow_field_path(parent: &str, name: &str) -> String {
+    let field = serde_json::to_string(name).expect("field names serialize as JSON strings");
+    if parent.is_empty() {
+        field
+    } else {
+        format!("{parent}.{field}")
+    }
+}
+
+fn split_top_level_spark_type_parts(value: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut angle_depth = 0i32;
+    let mut paren_depth = 0i32;
+    let mut in_backticks = false;
+    let mut chars = value.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if ch == '`' {
+            if in_backticks && chars.peek().is_some_and(|(_, next)| *next == '`') {
+                chars.next();
+            } else {
+                in_backticks = !in_backticks;
+            }
+            continue;
+        }
+        if in_backticks {
+            continue;
+        }
+        match ch {
+            '<' => angle_depth += 1,
+            '>' => angle_depth -= 1,
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            ',' if angle_depth == 0 && paren_depth == 0 => {
+                parts.push(value[start..index].trim());
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(value[start..].trim());
+    parts
+}
+
+fn split_spark_struct_fields(type_name: &str) -> Vec<(String, &str)> {
+    let type_name = type_name.trim();
+    let lower = type_name.to_ascii_lowercase();
+    if !lower.starts_with("struct<") || !type_name.ends_with('>') {
+        return Vec::new();
+    }
+
+    let fields = &type_name[7..type_name.len() - 1];
+    let mut parsed = Vec::new();
+    for field in split_top_level_spark_type_parts(fields) {
+        let mut angle_depth = 0i32;
+        let mut paren_depth = 0i32;
+        let mut in_backticks = false;
+        let mut chars = field.char_indices().peekable();
+        let mut separator = None;
+        while let Some((index, ch)) = chars.next() {
+            if ch == '`' {
+                if in_backticks && chars.peek().is_some_and(|(_, next)| *next == '`') {
+                    chars.next();
+                } else {
+                    in_backticks = !in_backticks;
+                }
+                continue;
+            }
+            if in_backticks {
+                continue;
+            }
+            match ch {
+                '<' => angle_depth += 1,
+                '>' => angle_depth -= 1,
+                '(' => paren_depth += 1,
+                ')' => paren_depth -= 1,
+                ':' if angle_depth == 0 && paren_depth == 0 => {
+                    separator = Some(index);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(separator) = separator else {
+            continue;
+        };
+        let encoded_name = field[..separator].trim();
+        let field_name = encoded_name
+            .strip_prefix('`')
+            .and_then(|name| name.strip_suffix('`'))
+            .map(|name| name.replace("``", "`"))
+            .unwrap_or_else(|| encoded_name.to_string());
+        parsed.push((field_name, field[separator + 1..].trim()));
+    }
+    parsed
+}
+
+fn collect_spark_type_map_paths(
+    type_name: &str,
+    path: &str,
+    paths: &mut std::collections::HashSet<String>,
+) {
+    let type_name = type_name.trim();
+    let lower = type_name.to_ascii_lowercase();
+    if lower.starts_with("map<") && type_name.ends_with('>') {
+        paths.insert(path.to_string());
+        let parts = split_top_level_spark_type_parts(&type_name[4..type_name.len() - 1]);
+        if let Some(key_type) = parts.first() {
+            collect_spark_type_map_paths(key_type, &format!("{path}{{key}}"), paths);
+        }
+        if let Some(value_type) = parts.get(1) {
+            collect_spark_type_map_paths(value_type, &format!("{path}{{value}}"), paths);
+        }
+    } else if lower.starts_with("array<") && type_name.ends_with('>') {
+        collect_spark_type_map_paths(
+            &type_name[6..type_name.len() - 1],
+            &format!("{path}[]"),
+            paths,
+        );
+    } else if lower.starts_with("struct<") && type_name.ends_with('>') {
+        for (field_name, child_type) in split_spark_struct_fields(type_name) {
+            collect_spark_type_map_paths(child_type, &arrow_field_path(path, &field_name), paths);
+        }
+    }
+}
+
+fn collect_spark_type_array_struct_paths(
+    type_name: &str,
+    path: &str,
+    paths: &mut std::collections::HashSet<String>,
+) {
+    let type_name = type_name.trim();
+    let lower = type_name.to_ascii_lowercase();
+    if lower.starts_with("array<") && type_name.ends_with('>') {
+        let element_type = type_name[6..type_name.len() - 1].trim();
+        if element_type.to_ascii_lowercase().starts_with("struct<") && element_type.ends_with('>') {
+            let fields = split_spark_struct_fields(element_type);
+            if fields.iter().any(|(name, _)| name == "key")
+                && fields.iter().any(|(name, _)| name == "value")
+            {
+                paths.insert(path.to_string());
+            }
+        }
+        collect_spark_type_array_struct_paths(element_type, &format!("{path}[]"), paths);
+    } else if lower.starts_with("struct<") && type_name.ends_with('>') {
+        for (field_name, child_type) in split_spark_struct_fields(type_name) {
+            collect_spark_type_array_struct_paths(
+                child_type,
+                &arrow_field_path(path, &field_name),
+                paths,
+            );
+        }
+    } else if lower.starts_with("map<") && type_name.ends_with('>') {
+        let parts = split_top_level_spark_type_parts(&type_name[4..type_name.len() - 1]);
+        if let Some(key_type) = parts.first() {
+            collect_spark_type_array_struct_paths(key_type, &format!("{path}{{key}}"), paths);
+        }
+        if let Some(value_type) = parts.get(1) {
+            collect_spark_type_array_struct_paths(value_type, &format!("{path}{{value}}"), paths);
+        }
+    }
+}
+
+fn spark_schema_logical_map_paths(
+    schema_pairs: &[(String, String)],
+) -> std::collections::HashSet<String> {
+    let mut paths = std::collections::HashSet::new();
+    for (name, type_name) in schema_pairs {
+        collect_spark_type_map_paths(type_name, &arrow_field_path("", name), &mut paths);
+    }
+    paths
+}
+
+fn spark_schema_array_struct_paths(
+    schema_pairs: &[(String, String)],
+) -> std::collections::HashSet<String> {
+    let mut paths = std::collections::HashSet::new();
+    for (name, type_name) in schema_pairs {
+        collect_spark_type_array_struct_paths(type_name, &arrow_field_path("", name), &mut paths);
+    }
+    paths
+}
+
+fn arrow_schema_field_names(arrow_schema: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    arrow_schema
+        .try_iter()?
+        .map(|field| field?.getattr("name")?.extract::<String>())
+        .collect()
+}
+
+fn remap_arrow_paths_for_names(
+    paths: &mut std::collections::HashSet<String>,
+    arrow_schema: &Bound<'_, PyAny>,
+    names: &[String],
+) -> PyResult<()> {
+    let source_names = arrow_schema_field_names(arrow_schema)?;
+    let source_paths = paths.clone();
+    let mut remapped = std::collections::HashSet::new();
+    for (source, output) in source_names.iter().zip(names) {
+        let source_root = arrow_field_path("", source);
+        let output_root = arrow_field_path("", output);
+        for path in &source_paths {
+            let Some(suffix) = path.strip_prefix(&source_root) else {
+                continue;
+            };
+            if suffix.is_empty()
+                || suffix.starts_with('.')
+                || suffix.starts_with('[')
+                || suffix.starts_with('{')
+            {
+                remapped.insert(format!("{output_root}{suffix}"));
+            }
+        }
+    }
+    *paths = remapped;
+    Ok(())
+}
+
+fn rename_arrow_rows_by_position<'py>(
+    py: Python<'py>,
+    data: &Bound<'py, PyAny>,
+    arrow_schema: &Bound<'py, PyAny>,
+    names: &[String],
+) -> PyResult<Bound<'py, PyAny>> {
+    let source_names = arrow_schema_field_names(arrow_schema)?;
+    let rows = data.cast::<PyList>()?;
+    let renamed_rows = PyList::empty(py);
+    for row in rows.iter() {
+        let row = row.cast::<PyDict>()?;
+        let renamed = PyDict::new(py);
+        for (source, output) in source_names.iter().zip(names) {
+            if let Some(value) = row.get_item(source.as_str())? {
+                renamed.set_item(output, value)?;
+            }
+        }
+        renamed_rows.append(renamed)?;
+    }
+    Ok(renamed_rows.into_any())
+}
+
+fn arrow_array_struct_paths(
+    arrow_schema: &Bound<'_, PyAny>,
+) -> PyResult<std::collections::HashSet<String>> {
+    let arrow_types = PyModule::import(arrow_schema.py(), "pyarrow.types")?;
+
+    fn visit_type(
+        arrow_type: &Bound<'_, PyAny>,
+        path: &str,
+        arrow_types: &Bound<'_, PyModule>,
+        paths: &mut std::collections::HashSet<String>,
+    ) -> PyResult<()> {
+        let is_list = pyarrow_is_type(arrow_types, arrow_type, "is_list")?
+            || pyarrow_is_type(arrow_types, arrow_type, "is_large_list")?
+            || pyarrow_is_type(arrow_types, arrow_type, "is_fixed_size_list")?;
+        if is_list {
+            let value_type = arrow_type.getattr("value_type")?;
+            if pyarrow_is_type(arrow_types, &value_type, "is_struct")? {
+                let mut has_key = false;
+                let mut has_value = false;
+                for field in value_type.try_iter()? {
+                    let field = field?;
+                    let name: String = field.getattr("name")?.extract()?;
+                    has_key |= name == "key";
+                    has_value |= name == "value";
+                }
+                if has_key && has_value {
+                    paths.insert(path.to_string());
+                }
+            }
+            visit_type(&value_type, &format!("{path}[]"), arrow_types, paths)?;
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_struct")? {
+            for field in arrow_type.try_iter()? {
+                let field = field?;
+                let name: String = field.getattr("name")?.extract()?;
+                let child_type = field.getattr("type")?;
+                visit_type(
+                    &child_type,
+                    &arrow_field_path(path, &name),
+                    arrow_types,
+                    paths,
+                )?;
+            }
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_map")? {
+            let key_type = arrow_type.getattr("key_type")?;
+            let item_type = arrow_type.getattr("item_type")?;
+            visit_type(&key_type, &format!("{path}{{key}}"), arrow_types, paths)?;
+            visit_type(&item_type, &format!("{path}{{value}}"), arrow_types, paths)?;
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_dictionary")? {
+            let value_type = arrow_type.getattr("value_type")?;
+            visit_type(&value_type, path, arrow_types, paths)?;
+        }
+        Ok(())
+    }
+
+    let mut paths = std::collections::HashSet::new();
+    for field in arrow_schema.try_iter()? {
+        let field = field?;
+        let arrow_type = field.getattr("type")?;
+        let name: String = field.getattr("name")?.extract()?;
+        visit_type(
+            &arrow_type,
+            &arrow_field_path("", &name),
+            &arrow_types,
+            &mut paths,
+        )?;
+    }
+    Ok(paths)
+}
+
+fn arrow_logical_map_paths(
+    arrow_schema: &Bound<'_, PyAny>,
+) -> PyResult<std::collections::HashSet<String>> {
+    let arrow_types = PyModule::import(arrow_schema.py(), "pyarrow.types")?;
+
+    fn visit_type(
+        arrow_type: &Bound<'_, PyAny>,
+        path: &str,
+        arrow_types: &Bound<'_, PyModule>,
+        paths: &mut std::collections::HashSet<String>,
+    ) -> PyResult<()> {
+        if pyarrow_is_type(arrow_types, arrow_type, "is_map")? {
+            paths.insert(path.to_string());
+            let key_type = arrow_type.getattr("key_type")?;
+            let item_type = arrow_type.getattr("item_type")?;
+            visit_type(&key_type, &format!("{path}{{key}}"), arrow_types, paths)?;
+            visit_type(&item_type, &format!("{path}{{value}}"), arrow_types, paths)?;
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_struct")? {
+            for field in arrow_type.try_iter()? {
+                let field = field?;
+                let name: String = field.getattr("name")?.extract()?;
+                let child_type = field.getattr("type")?;
+                visit_type(
+                    &child_type,
+                    &arrow_field_path(path, &name),
+                    arrow_types,
+                    paths,
+                )?;
+            }
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_list")?
+            || pyarrow_is_type(arrow_types, arrow_type, "is_large_list")?
+            || pyarrow_is_type(arrow_types, arrow_type, "is_fixed_size_list")?
+        {
+            let value_type = arrow_type.getattr("value_type")?;
+            visit_type(&value_type, &format!("{path}[]"), arrow_types, paths)?;
+        } else if pyarrow_is_type(arrow_types, arrow_type, "is_dictionary")? {
+            let value_type = arrow_type.getattr("value_type")?;
+            visit_type(&value_type, path, arrow_types, paths)?;
+        }
+        Ok(())
+    }
+
+    let mut paths = std::collections::HashSet::new();
+    for field in arrow_schema.try_iter()? {
+        let field = field?;
+        let name: String = field.getattr("name")?.extract()?;
+        let arrow_type = field.getattr("type")?;
+        visit_type(
+            &arrow_type,
+            &arrow_field_path("", &name),
+            &arrow_types,
+            &mut paths,
+        )?;
+    }
+    Ok(paths)
+}
+
+fn spark_type_to_arrow_type(
+    py: Python<'_>,
+    pa: &Bound<'_, PyModule>,
+    data_type: &DataType,
+) -> PyResult<PyObject> {
+    let (name, args): (&str, Vec<PyObject>) = match data_type {
+        DataType::String => ("string", Vec::new()),
+        DataType::Short => ("int16", Vec::new()),
+        DataType::Integer => ("int32", Vec::new()),
+        DataType::Long => ("int64", Vec::new()),
+        DataType::Double => ("float64", Vec::new()),
+        DataType::Decimal(precision, scale) => {
+            return pa
+                .getattr("decimal128")?
+                .call1((*precision, *scale))?
+                .into_py_any(py);
+        }
+        DataType::Boolean => ("bool_", Vec::new()),
+        DataType::Date => ("date32", Vec::new()),
+        DataType::Timestamp => {
+            return pa.getattr("timestamp")?.call1(("us",))?.into_py_any(py);
+        }
+        DataType::Binary => ("binary", Vec::new()),
+        DataType::Array(element_type) => {
+            let element_type = spark_type_to_arrow_type(py, pa, element_type)?;
+            return pa.getattr("list_")?.call1((element_type,))?.into_py_any(py);
+        }
+        DataType::Map(key_type, value_type) => {
+            let key_type = spark_type_to_arrow_type(py, pa, key_type)?;
+            let value_type = spark_type_to_arrow_type(py, pa, value_type)?;
+            return pa
+                .getattr("map_")?
+                .call1((key_type, value_type))?
+                .into_py_any(py);
+        }
+        DataType::Struct(fields) => {
+            let py_fields = PyList::empty(py);
+            for field in fields {
+                let field_type = spark_type_to_arrow_type(py, pa, &field.data_type)?;
+                py_fields.append((field.name.as_str(), field_type))?;
+            }
+            return pa.getattr("struct")?.call1((py_fields,))?.into_py_any(py);
+        }
+        _ => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unsupported Spark data type {data_type:?}"
+            )));
+        }
+    };
+    let args = PyTuple::new(py, args)?;
+    pa.getattr(name)?.call1(args)?.into_py_any(py)
+}
+
+fn spark_type_to_arrow_type_with_maps(
+    py: Python<'_>,
+    pa: &Bound<'_, PyModule>,
+    data_type: &DataType,
+    path: &str,
+    map_paths: &std::collections::HashSet<String>,
+) -> PyResult<PyObject> {
+    if map_paths.contains(path) {
+        let (key_type, value_type) = match data_type {
+            DataType::Map(key_type, value_type) => (key_type.as_ref(), value_type.as_ref()),
+            DataType::Array(element_type) => {
+                let DataType::Struct(fields) = element_type.as_ref() else {
+                    return spark_type_to_arrow_type(py, pa, data_type);
+                };
+                let (Some(key_type), Some(value_type)) = (
+                    fields.iter().find(|field| field.name == "key"),
+                    fields.iter().find(|field| field.name == "value"),
+                ) else {
+                    return spark_type_to_arrow_type(py, pa, data_type);
+                };
+                (&key_type.data_type, &value_type.data_type)
+            }
+            _ => return spark_type_to_arrow_type(py, pa, data_type),
+        };
+        let key_type = spark_type_to_arrow_type_with_maps(
+            py,
+            pa,
+            key_type,
+            &format!("{path}{{key}}"),
+            map_paths,
+        )?;
+        let value_type = spark_type_to_arrow_type_with_maps(
+            py,
+            pa,
+            value_type,
+            &format!("{path}{{value}}"),
+            map_paths,
+        )?;
+        return pa
+            .getattr("map_")?
+            .call1((key_type, value_type))?
+            .into_py_any(py);
+    }
+
+    match data_type {
+        DataType::Array(element_type) => {
+            let element_type = spark_type_to_arrow_type_with_maps(
+                py,
+                pa,
+                element_type,
+                &format!("{path}[]"),
+                map_paths,
+            )?;
+            pa.getattr("list_")?.call1((element_type,))?.into_py_any(py)
+        }
+        DataType::Struct(fields) => {
+            let py_fields = PyList::empty(py);
+            for field in fields {
+                let field_type = spark_type_to_arrow_type_with_maps(
+                    py,
+                    pa,
+                    &field.data_type,
+                    &arrow_field_path(path, &field.name),
+                    map_paths,
+                )?;
+                py_fields.append((field.name.as_str(), field_type))?;
+            }
+            pa.getattr("struct")?.call1((py_fields,))?.into_py_any(py)
+        }
+        DataType::Map(key_type, value_type) => {
+            let key_type = spark_type_to_arrow_type_with_maps(
+                py,
+                pa,
+                key_type,
+                &format!("{path}{{key}}"),
+                map_paths,
+            )?;
+            let value_type = spark_type_to_arrow_type_with_maps(
+                py,
+                pa,
+                value_type,
+                &format!("{path}{{value}}"),
+                map_paths,
+            )?;
+            pa.getattr("map_")?
+                .call1((key_type, value_type))?
+                .into_py_any(py)
+        }
+        _ => spark_type_to_arrow_type(py, pa, data_type),
+    }
+}
+
+fn normalize_arrow_value_with_maps(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+    data_type: &DataType,
+    path: &str,
+    map_paths: &std::collections::HashSet<String>,
+) -> PyResult<PyObject> {
+    if value.is_none() {
+        return value.clone().unbind().into_py_any(py);
+    }
+
+    if map_paths.contains(path) {
+        let (key_type, value_type) = match data_type {
+            DataType::Map(key_type, value_type) => (key_type.as_ref(), value_type.as_ref()),
+            DataType::Array(element_type) => {
+                let DataType::Struct(fields) = element_type.as_ref() else {
+                    return value.clone().unbind().into_py_any(py);
+                };
+                let (Some(key), Some(item)) = (
+                    fields.iter().find(|field| field.name == "key"),
+                    fields.iter().find(|field| field.name == "value"),
+                ) else {
+                    return value.clone().unbind().into_py_any(py);
+                };
+                (&key.data_type, &item.data_type)
+            }
+            _ => return value.clone().unbind().into_py_any(py),
+        };
+        let items = PyList::empty(py);
+        if let Ok(dict) = value.cast::<PyDict>() {
+            for (key, item) in dict.iter() {
+                let key = normalize_arrow_value_with_maps(
+                    py,
+                    &key,
+                    key_type,
+                    &format!("{path}{{key}}"),
+                    map_paths,
+                )?;
+                let item = normalize_arrow_value_with_maps(
+                    py,
+                    &item,
+                    value_type,
+                    &format!("{path}{{value}}"),
+                    map_paths,
+                )?;
+                items.append(PyTuple::new(py, [key, item])?)?;
+            }
+        } else {
+            for entry in value.try_iter()? {
+                let entry = entry?;
+                let entry_dict = if entry.is_instance_of::<PyDict>() {
+                    entry.clone()
+                } else if entry.hasattr("asDict")? {
+                    entry.call_method0("asDict")?
+                } else {
+                    entry.clone()
+                };
+                let (key, item) = if entry_dict.is_instance_of::<PyDict>() {
+                    (entry_dict.get_item("key")?, entry_dict.get_item("value")?)
+                } else {
+                    (entry.get_item(0)?, entry.get_item(1)?)
+                };
+                let key = normalize_arrow_value_with_maps(
+                    py,
+                    &key,
+                    key_type,
+                    &format!("{path}{{key}}"),
+                    map_paths,
+                )?;
+                let item = normalize_arrow_value_with_maps(
+                    py,
+                    &item,
+                    value_type,
+                    &format!("{path}{{value}}"),
+                    map_paths,
+                )?;
+                items.append(PyTuple::new(py, [key, item])?)?;
+            }
+        }
+        return items.into_py_any(py);
+    }
+
+    match data_type {
+        DataType::Struct(fields) => {
+            let source = if value.is_instance_of::<PyDict>() {
+                value.clone()
+            } else if value.hasattr("asDict")? {
+                value.call_method0("asDict")?
+            } else {
+                return value.clone().unbind().into_py_any(py);
+            };
+            let output = PyDict::new(py);
+            for field in fields {
+                let child = source.get_item(field.name.as_str())?;
+                let child = normalize_arrow_value_with_maps(
+                    py,
+                    &child,
+                    &field.data_type,
+                    &arrow_field_path(path, &field.name),
+                    map_paths,
+                )?;
+                output.set_item(field.name.as_str(), child.bind(py))?;
+            }
+            output.into_py_any(py)
+        }
+        DataType::Array(element_type) => {
+            let output = PyList::empty(py);
+            for item in value.try_iter()? {
+                let item = item?;
+                let item = normalize_arrow_value_with_maps(
+                    py,
+                    &item,
+                    element_type,
+                    &format!("{path}[]"),
+                    map_paths,
+                )?;
+                output.append(item.bind(py))?;
+            }
+            output.into_py_any(py)
+        }
+        DataType::Map(key_type, value_type) => {
+            let mut nested_map_paths = map_paths.clone();
+            nested_map_paths.insert(path.to_string());
+            normalize_arrow_value_with_maps(
+                py,
+                value,
+                &DataType::Map(key_type.clone(), value_type.clone()),
+                path,
+                &nested_map_paths,
+            )
+        }
+        _ => value.clone().unbind().into_py_any(py),
+    }
 }
 
 impl PySparkSession {
@@ -1056,6 +1962,11 @@ fn unregister_active_session_by_ptr(py: Python<'_>, ptr: *mut pyo3::ffi::PyObjec
                     .cloned(),
                 session.runtime_config().clone(),
             );
+            robin_sparkless::set_thread_decimal_allow_precision_loss(
+                robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                    session.get_config(),
+                ),
+            );
         }
     } else {
         robin_sparkless::clear_thread_udf_context();
@@ -1161,6 +2072,11 @@ impl PySparkSession {
                 .get("spark.sql.session.timeZone")
                 .cloned(),
             session.runtime_config().clone(),
+        );
+        robin_sparkless::set_thread_decimal_allow_precision_loss(
+            robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                session.get_config(),
+            ),
         );
         let backend_type = slf.backend_type.borrow().clone();
         let obj = Py::new(
@@ -1314,23 +2230,160 @@ impl PySparkSession {
                                     s.getattr("fields").ok().map(|_| s.clone().unbind())
                                 }),
                                 mixed_row_shape_error_on_collect: false,
+                                arrow_schema_cache: None,
+                                arrow_array_struct_paths: Default::default(),
+                                logical_map_columns: Default::default(),
+                                logical_map_paths: Default::default(),
                             });
                         }
                     }
                 }
             }
         }
+        // PyArrow's Python rows contain Decimal values, but the table schema is the
+        // authoritative source for precision and scale. Feed it through the same schema path.
+        let mut schema_names_only: Option<Vec<String>> = schema.and_then(|schema| {
+            let names = schema.cast::<PyList>().ok()?;
+            names
+                .iter()
+                .map(|name| name.extract::<String>().ok())
+                .collect()
+        });
+        let arrow_schema_source = if is_pyarrow_table_or_batch(data) {
+            data.getattr("schema").ok()
+        } else {
+            None
+        };
+        // Match the names-only schema behavior for tuple rows: infer names for
+        // extra Arrow fields, and reject a schema that names nonexistent fields.
+        if let (Some(names), Some(source_schema)) =
+            (schema_names_only.as_mut(), arrow_schema_source.as_ref())
+        {
+            let source_names = arrow_schema_field_names(source_schema)?;
+            if names.len() > source_names.len() {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "[AXIS_LENGTH_MISMATCH] schema has {} column names but Arrow input has {} columns",
+                    names.len(),
+                    source_names.len(),
+                )));
+            }
+            let mut fallback_index = names.len() + 1;
+            while names.len() < source_names.len() {
+                let fallback_name = loop {
+                    let candidate = format!("_{fallback_index}");
+                    fallback_index += 1;
+                    if !names.iter().any(|name| name == &candidate) {
+                        break candidate;
+                    }
+                };
+                names.push(fallback_name);
+            }
+        }
+        // Keep the Arrow logical shape when schema is omitted or only supplies
+        // column names. A typed Spark schema remains authoritative.
+        let keep_arrow_logical_shape = schema.is_none() || schema_names_only.is_some();
+        let mut arrow_array_struct_paths = if keep_arrow_logical_shape {
+            arrow_schema_source
+                .as_ref()
+                .map(arrow_array_struct_paths)
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        let mut logical_map_paths = if keep_arrow_logical_shape {
+            arrow_schema_source
+                .as_ref()
+                .map(arrow_logical_map_paths)
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        let arrow_schema_cache = arrow_schema_source.as_ref().map(|s| s.clone().unbind());
+        let arrow_schema = (schema.is_none() || schema_names_only.is_some())
+            .then_some(arrow_schema_source.as_ref())
+            .flatten()
+            .and_then(|arrow_schema| {
+                let arrow_rows_obj = data.call_method0("to_pylist").ok()?;
+                let arrow_rows = arrow_rows_obj.cast::<PyList>().ok()?;
+                let out = PyList::empty(py);
+                for field in arrow_schema.try_iter().ok()? {
+                    let field = field.ok()?;
+                    let name = field.getattr("name").ok()?.extract::<String>().ok()?;
+                    let arrow_type = field.getattr("type").ok()?;
+                    let spark_type = if let Some(spark_type) =
+                        arrow_type_to_spark_type(&arrow_type).ok().flatten()
+                    {
+                        spark_type
+                    } else {
+                        let mut inferred: Option<String> = None;
+                        for row in arrow_rows.iter() {
+                            let value = row.get_item(name.as_str()).ok()?;
+                            if !value.is_none() {
+                                let inferred_type = infer_type_from_py_value(&value);
+                                inferred = Some(match inferred {
+                                    Some(existing) => {
+                                        merge_spark_type_names(&existing, &inferred_type)
+                                    }
+                                    None => inferred_type,
+                                });
+                            }
+                        }
+                        inferred.unwrap_or_else(|| "string".to_string())
+                    };
+                    out.append((name, spark_type)).ok()?;
+                }
+                Some(out.into_any())
+            });
+        // A names-only schema changes order/names but PyArrow still owns the
+        // field types. Rebuild those typed pairs in the requested order.
+        let arrow_name_schema = if let (Some(names), Some(arrow_schema)) =
+            (schema_names_only.as_ref(), arrow_schema.as_ref())
+        {
+            let source_types = parse_schema_from_py(py, arrow_schema)?.unwrap_or_default();
+            let pairs = PyList::empty(py);
+            for (name, (_, type_name)) in names.iter().zip(source_types.iter()) {
+                pairs.append((name.as_str(), type_name))?;
+            }
+            Some(pairs.into_any())
+        } else {
+            None
+        };
+        let effective_schema = arrow_name_schema
+            .as_ref()
+            .or(schema)
+            .or(arrow_schema.as_ref());
         let (data, from_pandas, pandas_column_order) =
-            normalize_create_dataframe_input(py, data, schema)?;
+            normalize_create_dataframe_input(py, data, effective_schema)?;
+        let data = if let (Some(names), Some(source_schema)) =
+            (schema_names_only.as_ref(), arrow_schema_source.as_ref())
+        {
+            remap_arrow_paths_for_names(&mut arrow_array_struct_paths, source_schema, names)?;
+            remap_arrow_paths_for_names(&mut logical_map_paths, source_schema, names)?;
+            rename_arrow_rows_by_position(py, &data, source_schema, names)?
+        } else {
+            data
+        };
         let schema_cache =
             schema.and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
         let (rows, schema_pairs, schema_was_inferred, mixed_row_kinds) = python_data_and_schema(
             py,
             &data,
-            schema,
+            effective_schema,
             from_pandas,
             pandas_column_order.as_deref(),
         )?;
+        let mut logical_map_columns = std::collections::HashSet::new();
+        logical_map_paths.extend(spark_schema_logical_map_paths(&schema_pairs));
+        arrow_array_struct_paths.extend(spark_schema_array_struct_paths(&schema_pairs));
+        for (name, type_name) in &schema_pairs {
+            let type_name = type_name.trim().to_ascii_lowercase();
+            if type_name.starts_with("map<") {
+                logical_map_columns.insert(name.clone());
+                logical_map_paths.insert(arrow_field_path("", name));
+            }
+        }
         let df = self
             .inner
             .create_dataframe_from_rows(rows, schema_pairs, verify_schema, schema_was_inferred)
@@ -1338,7 +2391,11 @@ impl PySparkSession {
         Ok(PyDataFrame {
             inner: df,
             schema_cache,
-            mixed_row_shape_error_on_collect: mixed_row_kinds && schema.is_none(),
+            mixed_row_shape_error_on_collect: mixed_row_kinds && effective_schema.is_none(),
+            arrow_schema_cache,
+            arrow_array_struct_paths,
+            logical_map_columns,
+            logical_map_paths,
         })
     }
 
@@ -1821,7 +2878,9 @@ fn simple_string_to_type(s: &str) -> String {
     }
     match lower.as_str() {
         "string" | "str" => "string".to_string(),
-        "int" | "integer" | "int32" => "int".to_string(),
+        "int" | "integer" => "int".to_string(),
+        "short" | "smallint" => "smallint".to_string(),
+        "int32" => "int32".to_string(),
         "bigint" | "long" | "int64" => "long".to_string(),
         "double" | "float64" => "double".to_string(),
         "float" | "float32" => "float".to_string(),
@@ -2049,6 +3108,28 @@ fn parse_schema_from_py(
 fn infer_type_from_json_value(v: &JsonValue) -> String {
     match v {
         JsonValue::Null => "string".to_string(),
+        JsonValue::String(s) if s.starts_with("__sparkless_decimal__:__sparkless_decimal__:") => {
+            "string".to_string()
+        }
+        JsonValue::String(s) if s.starts_with("__sparkless_decimal__:") => {
+            let decimal = s.strip_prefix("__sparkless_decimal__:").unwrap_or(s);
+            let (mantissa, exponent) = decimal
+                .split_once(['e', 'E'])
+                .and_then(|(mantissa, exponent)| {
+                    exponent.parse::<i32>().ok().map(|e| (mantissa, e))
+                })
+                .unwrap_or((decimal, 0));
+            let unsigned_mantissa = mantissa.trim_start_matches(['-', '+']);
+            let (whole, fraction) = unsigned_mantissa
+                .split_once('.')
+                .unwrap_or((unsigned_mantissa, ""));
+            let scale = (fraction.len() as i32 - exponent).max(0) as usize;
+            let significant_digits = format!("{whole}{fraction}").trim_start_matches('0').len();
+            let precision = (significant_digits as i32 + (exponent - fraction.len() as i32).max(0))
+                .max(scale as i32)
+                .max(1) as usize;
+            format!("decimal({precision},{scale})")
+        }
         JsonValue::Bool(_) => "boolean".to_string(),
         JsonValue::Number(n) => {
             if n.is_i64() || n.is_u64() {
@@ -2102,7 +3183,30 @@ fn normalize_create_dataframe_input<'py>(
     if let Ok(to_pylist) = data.getattr("to_pylist") {
         if to_pylist.is_callable() {
             let list = to_pylist.call0()?;
-            if list.cast::<PyList>().is_ok() {
+            if let Ok(rows) = list.cast::<PyList>() {
+                // PyArrow represents map entries as lists of pairs at every nesting
+                // level; Spark's MapType input contract is a Python dict.
+                if is_pyarrow_table_or_batch(data) {
+                    let arrow_schema = data.getattr("schema")?;
+                    let arrow_types = PyModule::import(py, "pyarrow.types")?;
+                    for field in arrow_schema.try_iter()? {
+                        let field = field?;
+                        let name: String = field.getattr("name")?.extract()?;
+                        let field_type = field.getattr("type")?;
+                        for row in rows.iter() {
+                            let row = row.cast::<PyDict>()?;
+                            let Some(value) = row.get_item(name.as_str())? else {
+                                continue;
+                            };
+                            if value.is_none() {
+                                continue;
+                            }
+                            let normalized =
+                                normalize_arrow_value(py, &value, &field_type, &arrow_types)?;
+                            row.set_item(name.as_str(), normalized.bind(py))?;
+                        }
+                    }
+                }
                 return Ok((list, true, None));
             }
         }
@@ -2653,7 +3757,12 @@ fn python_data_and_schema(
                 // Refine string-like and untyped array/list columns by merging types across all rows.
                 let is_untyped_container =
                     typ.eq_ignore_ascii_case("array") || typ.eq_ignore_ascii_case("list");
-                let final_typ = if typ.eq_ignore_ascii_case("string")
+                let is_decimal = typ.starts_with("decimal(");
+                let final_typ = if is_decimal {
+                    better
+                        .filter(|inferred| inferred.starts_with("decimal("))
+                        .unwrap_or_else(|| typ.clone())
+                } else if typ.eq_ignore_ascii_case("string")
                     || typ.eq_ignore_ascii_case("str")
                     || typ.eq_ignore_ascii_case("varchar")
                     || is_untyped_container
@@ -2938,10 +4047,23 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
     if let Ok(b) = v.extract::<bool>() {
         return Ok(JsonValue::Bool(b));
     }
+    if type_name == "Decimal" {
+        return Ok(JsonValue::String(format!(
+            "__sparkless_decimal__:{}",
+            v.str()?
+        )));
+    }
     // Try String before i64/f64 so createDataFrame([{"key": "3"}]) keeps "3" as string (Issue #1262).
     // PyO3 can extract str "3" as i64, which would wrongly infer key as long and break union type coercion.
     if let Ok(s) = v.extract::<String>() {
-        return Ok(JsonValue::String(s));
+        const DECIMAL_TRANSPORT_PREFIX: &str = "__sparkless_decimal__:";
+        return Ok(JsonValue::String(
+            if s.starts_with(DECIMAL_TRANSPORT_PREFIX) {
+                format!("{DECIMAL_TRANSPORT_PREFIX}{s}")
+            } else {
+                s
+            },
+        ));
     }
     if let Ok(i) = v.extract::<i64>() {
         return Ok(JsonValue::Number(serde_json::Number::from(i)));
@@ -2959,17 +4081,6 @@ fn py_any_to_json(_py: Python<'_>, v: &Bound<'_, PyAny>) -> PyResult<JsonValue> 
         }
         if let Some(n) = serde_json::Number::from_f64(f) {
             return Ok(JsonValue::Number(n));
-        }
-    }
-    // decimal.Decimal -> number for createDataFrame tuple/list rows (#1544).
-    if let Ok(dec_mod) = _py.import("decimal") {
-        if let Ok(dec_type) = dec_mod.getattr("Decimal") {
-            if v.is_instance(&dec_type)? {
-                let f: f64 = v.call_method0("__float__")?.extract()?;
-                if let Some(n) = serde_json::Number::from_f64(f) {
-                    return Ok(JsonValue::Number(n));
-                }
-            }
         }
     }
     if let Ok(bytes) = v.cast::<PyBytes>() {
@@ -3077,6 +4188,49 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
     if a == b {
         return a;
     }
+    fn format_decimal_type_name(integral_digits: usize, scale: usize) -> String {
+        // Keep integral capacity and reduce scale as needed to fit Spark's
+        // maximum decimal precision of 38.
+        let scale = scale.min(38usize.saturating_sub(integral_digits));
+        let precision = integral_digits.saturating_add(scale).clamp(1, 38);
+        format!("decimal({precision},{scale})")
+    }
+    let decimal_a = parse_decimal_type_name(&a);
+    let decimal_b = parse_decimal_type_name(&b);
+    if let (Some((precision_a, scale_a)), Some((precision_b, scale_b))) = (decimal_a, decimal_b) {
+        let scale = scale_a.max(scale_b);
+        let integral_digits = precision_a
+            .saturating_sub(scale_a)
+            .max(precision_b.saturating_sub(scale_b));
+        return format_decimal_type_name(integral_digits, scale);
+    }
+    fn integer_precision(type_name: &str) -> Option<usize> {
+        match type_name {
+            "tinyint" | "byte" => Some(3),
+            "smallint" | "short" | "int16" => Some(5),
+            "int" | "integer" | "int32" => Some(10),
+            // The largest absolute signed 64-bit value has 19 decimal digits.
+            "long" | "bigint" | "int64" => Some(19),
+            "uint8" => Some(3),
+            "uint16" => Some(5),
+            "uint32" => Some(10),
+            "uint64" => Some(20),
+            _ => None,
+        }
+    }
+    if let (Some((precision, scale)), Some(integer)) = (decimal_a, integer_precision(&b)) {
+        let integral_digits = precision.saturating_sub(scale).max(integer);
+        return format_decimal_type_name(integral_digits, scale);
+    }
+    if let (Some(integer), Some((precision, scale))) = (integer_precision(&a), decimal_b) {
+        let integral_digits = integer.max(precision.saturating_sub(scale));
+        return format_decimal_type_name(integral_digits, scale);
+    }
+    if (decimal_a.is_some() && matches!(b.as_str(), "double" | "float"))
+        || (decimal_b.is_some() && matches!(a.as_str(), "double" | "float"))
+    {
+        return "double".to_string();
+    }
     if let (Some(ea), Some(eb)) = (
         parse_array_element_type_name(&a),
         parse_array_element_type_name(&b),
@@ -3116,6 +4270,15 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
         return "long".to_string();
     }
     "string".to_string()
+}
+
+fn parse_decimal_type_name(type_name: &str) -> Option<(usize, usize)> {
+    let args = type_name
+        .trim()
+        .strip_prefix("decimal(")?
+        .strip_suffix(')')?;
+    let (precision, scale) = args.split_once(',')?;
+    Some((precision.trim().parse().ok()?, scale.trim().parse().ok()?))
 }
 
 fn merge_inferred_types<I>(types: I) -> String
@@ -3166,6 +4329,21 @@ fn infer_type_from_py_value(v: &Bound<'_, PyAny>) -> String {
     let cfg = robin_sparkless::get_thread_runtime_config();
     if v.is_none() {
         return "string".to_string();
+    }
+    if v.get_type().name().is_ok_and(|name| name == "Decimal") {
+        if let Ok(tuple) = v.call_method0("as_tuple") {
+            let digits = tuple.get_item(1).ok().and_then(|value| value.len().ok());
+            let exponent = tuple
+                .get_item(2)
+                .ok()
+                .and_then(|value| value.extract::<i32>().ok());
+            if let (Some(digits), Some(exponent)) = (digits, exponent) {
+                let scale = exponent.saturating_neg().max(0) as usize;
+                let precision = (digits as i32 + exponent.max(0)).max(scale as i32).max(1);
+                return format!("decimal({precision},{scale})");
+            }
+        }
+        return "decimal(38,18)".to_string();
     }
     if v.extract::<bool>().is_ok() {
         return "boolean".to_string();
@@ -3588,7 +4766,11 @@ fn is_fill_compatible_with_schema_dtype(
         // Integers and floats can fill numeric columns (int/long/double).
         FillValueKind::Int | FillValueKind::Float => matches!(
             dt,
-            SchemaDataType::Integer | SchemaDataType::Long | SchemaDataType::Double
+            SchemaDataType::Short
+                | SchemaDataType::Integer
+                | SchemaDataType::Long
+                | SchemaDataType::Double
+                | SchemaDataType::Decimal(_, _)
         ),
         // Strings fill string-like columns only.
         FillValueKind::String => matches!(dt, SchemaDataType::String),
@@ -4294,15 +5476,1080 @@ struct PyDataFrame {
     /// When true, count()/collect() should raise an error due to mixed dict/list row shapes in
     /// schema inference (PySpark-style behavior for createDataFrame([{...}, (...)]) with no schema).
     mixed_row_shape_error_on_collect: bool,
+    /// Original PyArrow schema: Polars maps and arrays of key/value structs share a physical dtype.
+    arrow_schema_cache: Option<Py<PyAny>>,
+    arrow_array_struct_paths: std::collections::HashSet<String>,
+    logical_map_columns: std::collections::HashSet<String>,
+    logical_map_paths: std::collections::HashSet<String>,
 }
 
 impl PyDataFrame {
+    fn union_aligns_by_name(
+        &self,
+        left_names: &[String],
+        right_names: &[String],
+        by_name: bool,
+    ) -> bool {
+        if by_name {
+            return true;
+        }
+        if left_names.len() != right_names.len() {
+            return false;
+        }
+
+        // Match transformations::union: its alignment mode follows the left
+        // DataFrame's setting, even when the right DataFrame came from another
+        // session with a different case-sensitivity setting.
+        let case_sensitive = self.inner.is_case_sensitive();
+        let right_names: std::collections::HashSet<String> = if case_sensitive {
+            right_names.iter().cloned().collect()
+        } else {
+            right_names.iter().map(|name| name.to_lowercase()).collect()
+        };
+        left_names.iter().all(|name| {
+            if case_sensitive {
+                right_names.contains(name)
+            } else {
+                right_names.contains(&name.to_lowercase())
+            }
+        })
+    }
+
+    fn resolve_union_column_name(&self, names: &[String], name: &str) -> Option<String> {
+        if self.inner.is_case_sensitive() {
+            names
+                .iter()
+                .find(|candidate| candidate.as_str() == name)
+                .cloned()
+        } else {
+            let name_lower = name.to_lowercase();
+            names
+                .iter()
+                .find(|candidate| candidate.to_lowercase() == name_lower)
+                .cloned()
+        }
+    }
+
+    fn column_uses_arrow_array_struct(&self, name: &str) -> bool {
+        let source_path = if let Ok(resolved) = self.inner.resolve_column_name(name) {
+            arrow_field_path("", &resolved)
+        } else {
+            let mut parts = name.split('.');
+            let root = parts.next().unwrap_or(name);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        self.arrow_array_struct_paths.iter().any(|path| {
+            path == &source_path
+                || path
+                    .strip_prefix(source_path.as_str())
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        })
+    }
+
+    fn column_dtype_for_metadata(&self, name: &str) -> Option<robin_sparkless::polars::PlDataType> {
+        if let Ok(resolved) = self.inner.resolve_column_name(name) {
+            if let Some(dtype) = self.inner.get_column_dtype(&resolved) {
+                return Some(dtype);
+            }
+        }
+
+        let (root, nested_fields) = name.split_once('.')?;
+        let root = self.inner.resolve_column_name(root).ok()?;
+        let mut dtype = self.inner.get_column_dtype(&root)?;
+        for field_name in nested_fields.split('.') {
+            let fields = match &dtype {
+                robin_sparkless::polars::PlDataType::Struct(fields) => fields,
+                _ => return None,
+            };
+            let field = fields.iter().find(|field| {
+                field.name().as_str() == field_name
+                    || field.name().as_str().eq_ignore_ascii_case(field_name)
+            })?;
+            dtype = field.dtype().clone();
+        }
+        Some(dtype)
+    }
+
+    fn logical_map_path_tails(&self, name: &str) -> std::collections::HashSet<String> {
+        let resolved = self.inner.resolve_column_name(name).ok();
+        let source_path = if let Some(source) = &resolved {
+            arrow_field_path("", source)
+        } else {
+            let mut parts = name.split('.');
+            let root = parts.next().unwrap_or(name);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        let mut tails = std::collections::HashSet::new();
+        for path in &self.logical_map_paths {
+            if path == &source_path {
+                tails.insert(String::new());
+            } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
+                if tail.starts_with(['.', '[', '{']) {
+                    tails.insert(tail.to_string());
+                }
+            }
+        }
+        if self
+            .logical_map_columns
+            .contains(resolved.as_deref().unwrap_or(name))
+        {
+            tails.insert(String::new());
+        }
+        tails
+    }
+
+    fn arrow_array_struct_path_tails(&self, name: &str) -> std::collections::HashSet<String> {
+        let resolved = self.inner.resolve_column_name(name).ok();
+        let source_path = if let Some(source) = &resolved {
+            arrow_field_path("", source)
+        } else {
+            let mut parts = name.split('.');
+            let root = parts.next().unwrap_or(name);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        let mut tails = std::collections::HashSet::new();
+        for path in &self.arrow_array_struct_paths {
+            if path == &source_path {
+                tails.insert(String::new());
+            } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
+                if tail.starts_with(['.', '[', '{']) {
+                    tails.insert(tail.to_string());
+                }
+            }
+        }
+        tails
+    }
+
+    fn expression_column_references(expr: &robin_sparkless::Expr) -> Vec<String> {
+        use robin_sparkless::Expr;
+
+        fn visit(expr: &Expr, references: &mut Vec<String>) {
+            match expr {
+                Expr::Column(name) => references.push(name.to_string()),
+                Expr::Alias(inner, _)
+                | Expr::Cast { expr: inner, .. }
+                | Expr::Sort { expr: inner, .. }
+                | Expr::Explode { input: inner, .. }
+                | Expr::KeepName(inner)
+                | Expr::RenameAlias { expr: inner, .. } => visit(inner, references),
+                Expr::BinaryExpr { left, right, .. } => {
+                    visit(left, references);
+                    visit(right, references);
+                }
+                Expr::Ternary {
+                    predicate,
+                    truthy,
+                    falsy,
+                } => {
+                    visit(predicate, references);
+                    visit(truthy, references);
+                    visit(falsy, references);
+                }
+                Expr::Function { input, .. }
+                | Expr::AnonymousFunction { input, .. }
+                | Expr::Display { inputs: input, .. } => {
+                    for input in input {
+                        visit(input, references);
+                    }
+                }
+                Expr::Gather { expr, idx, .. } => {
+                    visit(expr, references);
+                    visit(idx, references);
+                }
+                Expr::SortBy { expr, by, .. } => {
+                    visit(expr, references);
+                    for by_expr in by {
+                        visit(by_expr, references);
+                    }
+                }
+                Expr::Filter { input, by } => {
+                    visit(input, references);
+                    visit(by, references);
+                }
+                Expr::Over {
+                    function,
+                    partition_by,
+                    order_by,
+                    ..
+                } => {
+                    visit(function, references);
+                    for expr in partition_by {
+                        visit(expr, references);
+                    }
+                    if let Some((expr, _)) = order_by {
+                        visit(expr, references);
+                    }
+                }
+                Expr::Slice {
+                    input,
+                    offset,
+                    length,
+                } => {
+                    visit(input, references);
+                    visit(offset, references);
+                    visit(length, references);
+                }
+                _ => {}
+            }
+        }
+
+        let mut references = Vec::new();
+        visit(expr, &mut references);
+        references
+    }
+
+    fn expression_preserves_map_value(expr: &robin_sparkless::Expr) -> bool {
+        use robin_sparkless::Expr;
+
+        match expr {
+            Expr::Column(_) => true,
+            Expr::Alias(inner, _)
+            | Expr::KeepName(inner)
+            | Expr::RenameAlias { expr: inner, .. } => Self::expression_preserves_map_value(inner),
+            Expr::Ternary { truthy, falsy, .. } => {
+                Self::expression_preserves_map_value(truthy)
+                    && Self::expression_preserves_map_value(falsy)
+            }
+            Expr::Function {
+                input,
+                function: polars::prelude::FunctionExpr::Coalesce,
+            } => !input.is_empty() && input.iter().all(Self::expression_preserves_map_value),
+            Expr::Literal(value) => value.is_null(),
+            _ => false,
+        }
+    }
+
+    fn copy_computed_map_metadata(
+        &self,
+        preserves_map_value: bool,
+        references: &[String],
+        output: &str,
+        target: &mut Self,
+    ) {
+        if !preserves_map_value {
+            return;
+        }
+        let Some(output_dtype) = target.inner.get_column_dtype(output) else {
+            return;
+        };
+        // Keep only paths marked as maps on every matching branch. Physical
+        // list/struct dtypes alone cannot distinguish maps from arrays.
+        let mut common_map_paths: Option<std::collections::HashSet<String>> = None;
+        for source in references {
+            let Some(source_dtype) = self.column_dtype_for_metadata(source) else {
+                continue;
+            };
+            if source_dtype == output_dtype {
+                let source_map_paths = self.logical_map_path_tails(source);
+                if let Some(common_map_paths) = &mut common_map_paths {
+                    common_map_paths.retain(|path| source_map_paths.contains(path));
+                } else {
+                    common_map_paths = Some(source_map_paths);
+                }
+            }
+        }
+        let Some(common_map_paths) = common_map_paths else {
+            return;
+        };
+        let output_path = arrow_field_path("", output);
+        for tail in common_map_paths {
+            target
+                .logical_map_paths
+                .insert(format!("{output_path}{tail}"));
+            if tail.is_empty() {
+                target.logical_map_columns.insert(output.to_string());
+            }
+        }
+    }
+
+    fn expr_uses_arrow_array_struct(&self, expr: &robin_sparkless::Expr) -> bool {
+        use robin_sparkless::Expr;
+
+        match expr {
+            Expr::Column(name) => self.column_uses_arrow_array_struct(name.as_str()),
+            Expr::Alias(inner, _)
+            | Expr::Cast { expr: inner, .. }
+            | Expr::Sort { expr: inner, .. }
+            | Expr::Explode { input: inner, .. }
+            | Expr::KeepName(inner)
+            | Expr::RenameAlias { expr: inner, .. } => self.expr_uses_arrow_array_struct(inner),
+            Expr::BinaryExpr { left, right, .. } => {
+                self.expr_uses_arrow_array_struct(left) || self.expr_uses_arrow_array_struct(right)
+            }
+            Expr::Ternary {
+                predicate,
+                truthy,
+                falsy,
+            } => {
+                self.expr_uses_arrow_array_struct(predicate)
+                    || self.expr_uses_arrow_array_struct(truthy)
+                    || self.expr_uses_arrow_array_struct(falsy)
+            }
+            Expr::Function { input, .. }
+            | Expr::AnonymousFunction { input, .. }
+            | Expr::Display { inputs: input, .. } => input
+                .iter()
+                .any(|input| self.expr_uses_arrow_array_struct(input)),
+            Expr::Gather { expr, idx, .. } => {
+                self.expr_uses_arrow_array_struct(expr) || self.expr_uses_arrow_array_struct(idx)
+            }
+            Expr::SortBy { expr, by, .. } => {
+                self.expr_uses_arrow_array_struct(expr)
+                    || by
+                        .iter()
+                        .any(|by_expr| self.expr_uses_arrow_array_struct(by_expr))
+            }
+            Expr::Filter { input, by } => {
+                self.expr_uses_arrow_array_struct(input) || self.expr_uses_arrow_array_struct(by)
+            }
+            Expr::Over {
+                function,
+                partition_by,
+                order_by,
+                ..
+            } => {
+                self.expr_uses_arrow_array_struct(function)
+                    || partition_by
+                        .iter()
+                        .any(|expr| self.expr_uses_arrow_array_struct(expr))
+                    || order_by
+                        .as_ref()
+                        .is_some_and(|(expr, _)| self.expr_uses_arrow_array_struct(expr))
+            }
+            Expr::Slice {
+                input,
+                offset,
+                length,
+            } => {
+                self.expr_uses_arrow_array_struct(input)
+                    || self.expr_uses_arrow_array_struct(offset)
+                    || self.expr_uses_arrow_array_struct(length)
+            }
+            _ => false,
+        }
+    }
+
+    fn mark_array_struct_path(target: &mut Self, output: &str) {
+        fn visit(data_type: &DataType, path: &str, paths: &mut std::collections::HashSet<String>) {
+            match data_type {
+                DataType::Array(element_type) => {
+                    let is_key_value_struct = matches!(
+                        element_type.as_ref(),
+                        DataType::Struct(fields)
+                            if fields.iter().any(|field| field.name == "key")
+                                && fields.iter().any(|field| field.name == "value")
+                    );
+                    if is_key_value_struct {
+                        paths.insert(path.to_string());
+                    }
+                    visit(element_type, &format!("{path}[]"), paths);
+                }
+                DataType::Struct(fields) => {
+                    for field in fields {
+                        visit(
+                            &field.data_type,
+                            &arrow_field_path(path, &field.name),
+                            paths,
+                        );
+                    }
+                }
+                DataType::Map(key_type, value_type) => {
+                    visit(key_type, &format!("{path}{{key}}"), paths);
+                    visit(value_type, &format!("{path}{{value}}"), paths);
+                }
+                _ => {}
+            }
+        }
+
+        let output_type = target.inner.schema_engine().ok().and_then(|schema| {
+            schema
+                .fields()
+                .iter()
+                .find(|field| field.name == output)
+                .map(|field| field.data_type.clone())
+        });
+        if let Some(output_type) = output_type {
+            visit(
+                &output_type,
+                &arrow_field_path("", output),
+                &mut target.arrow_array_struct_paths,
+            );
+        }
+    }
+
+    fn remove_metadata_root(target: &mut Self, root: &str) {
+        target.logical_map_columns.remove(root);
+        let root = arrow_field_path("", root);
+        target.logical_map_paths.retain(|path| {
+            path != &root
+                && !path
+                    .strip_prefix(root.as_str())
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        });
+        target.arrow_array_struct_paths.retain(|path| {
+            path != &root
+                && !path
+                    .strip_prefix(root.as_str())
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        });
+    }
+
+    fn column_source(expr: &robin_sparkless::Expr) -> Option<String> {
+        match expr {
+            robin_sparkless::Expr::Alias(inner, _) => Self::column_source(inner),
+            robin_sparkless::Expr::Cast { expr, .. } => Self::column_source(expr),
+            robin_sparkless::Expr::Column(column) => Some(column.to_string()),
+            _ => None,
+        }
+    }
+
+    fn aggregate_value_source(expr: &robin_sparkless::Expr) -> Option<String> {
+        use robin_sparkless::Expr;
+
+        match expr {
+            Expr::Alias(inner, _)
+            | Expr::KeepName(inner)
+            | Expr::RenameAlias { expr: inner, .. } => Self::aggregate_value_source(inner),
+            Expr::Cast { expr: inner, .. } => Self::aggregate_value_source(inner),
+            Expr::Agg(
+                AggExpr::First(input)
+                | AggExpr::FirstNonNull(input)
+                | AggExpr::Last(input)
+                | AggExpr::LastNonNull(input),
+            ) => Self::column_source(input),
+            Expr::Agg(AggExpr::Min { input, .. } | AggExpr::Max { input, .. }) => {
+                Self::column_source(input)
+            }
+            _ => None,
+        }
+    }
+
+    fn wrap_value_aggregate_derived(
+        &self,
+        df: DataFrame,
+        source: &str,
+        leading_columns: usize,
+    ) -> Self {
+        let mut wrapped = Self::wrap(df);
+        let Some(source_dtype) = self.column_dtype_for_metadata(source) else {
+            return wrapped;
+        };
+        for output in wrapped
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .into_iter()
+            .skip(leading_columns)
+        {
+            if wrapped.inner.get_column_dtype(&output).as_ref() == Some(&source_dtype) {
+                self.copy_column_metadata(source, &output, &mut wrapped);
+            }
+        }
+        wrapped
+    }
+
+    fn wrap_aggregate_derived(
+        &self,
+        df: DataFrame,
+        expressions: &[robin_sparkless::Expr],
+        leading_columns: usize,
+    ) -> Self {
+        let mut wrapped = Self::wrap(df);
+        let outputs = wrapped
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .into_iter()
+            .skip(leading_columns)
+            .collect::<Vec<_>>();
+        let sources = expressions
+            .iter()
+            .map(Self::aggregate_value_source)
+            .collect::<Vec<_>>();
+
+        if outputs.len() == sources.len() {
+            for (source, output) in sources.iter().zip(outputs) {
+                let Some(source) = source else {
+                    continue;
+                };
+                if self.column_dtype_for_metadata(source) == wrapped.inner.get_column_dtype(&output)
+                {
+                    self.copy_column_metadata(source, &output, &mut wrapped);
+                }
+            }
+            return wrapped;
+        }
+
+        // Pivot aggregations can expand one expression into several output
+        // columns. Carry metadata only when every matching source has the same
+        // logical map/array interpretation.
+        for output in outputs {
+            let Some(output_dtype) = wrapped.inner.get_column_dtype(&output) else {
+                continue;
+            };
+            let matching_sources = sources
+                .iter()
+                .flatten()
+                .filter(|source| {
+                    self.column_dtype_for_metadata(source).as_ref() == Some(&output_dtype)
+                })
+                .collect::<Vec<_>>();
+            let Some(first_source) = matching_sources.first() else {
+                continue;
+            };
+            let first_array_paths = self.arrow_array_struct_path_tails(first_source);
+            let first_map_paths = self.logical_map_path_tails(first_source);
+            if first_array_paths.is_empty() && first_map_paths.is_empty() {
+                continue;
+            }
+            let all_match = matching_sources.iter().all(|source| {
+                self.arrow_array_struct_path_tails(source) == first_array_paths
+                    && self.logical_map_path_tails(source) == first_map_paths
+            });
+            if all_match {
+                self.copy_column_metadata(first_source, &output, &mut wrapped);
+            }
+        }
+        wrapped
+    }
+
     fn wrap(df: DataFrame) -> Self {
         PyDataFrame {
             inner: df,
             schema_cache: None,
             mixed_row_shape_error_on_collect: false,
+            arrow_schema_cache: None,
+            arrow_array_struct_paths: Default::default(),
+            logical_map_columns: Default::default(),
+            logical_map_paths: Default::default(),
         }
+    }
+
+    fn wrap_derived(&self, df: DataFrame) -> Self {
+        let mut wrapped = Self::wrap(df);
+        if let Ok(columns) = wrapped.inner.columns() {
+            let output_names: std::collections::HashSet<&str> =
+                columns.iter().map(String::as_str).collect();
+            wrapped.arrow_array_struct_paths = self
+                .arrow_array_struct_paths
+                .iter()
+                .filter(|path| {
+                    output_names.iter().any(|name| {
+                        let root = arrow_field_path("", name);
+                        path.as_str() == root.as_str()
+                            || path
+                                .strip_prefix(root.as_str())
+                                .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+                    })
+                })
+                .cloned()
+                .collect();
+            wrapped.logical_map_columns = self
+                .logical_map_columns
+                .iter()
+                .filter(|name| output_names.contains(name.as_str()))
+                .cloned()
+                .collect();
+            wrapped.logical_map_paths = self
+                .logical_map_paths
+                .iter()
+                .filter(|path| {
+                    output_names.iter().any(|name| {
+                        let root = arrow_field_path("", name);
+                        path.as_str() == root.as_str()
+                            || path
+                                .strip_prefix(root.as_str())
+                                .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+                    })
+                })
+                .cloned()
+                .collect();
+        }
+        Python::attach(|py| {
+            wrapped.arrow_schema_cache = self
+                .arrow_schema_cache
+                .as_ref()
+                .map(|schema| schema.clone_ref(py));
+        });
+        wrapped
+    }
+
+    fn copy_column_metadata(&self, source: &str, output: &str, target: &mut Self) {
+        self.copy_column_metadata_to_path(
+            source,
+            &arrow_field_path("", output),
+            Some(output),
+            target,
+        );
+    }
+
+    fn copy_column_metadata_to_path(
+        &self,
+        source: &str,
+        output_path: &str,
+        output_root: Option<&str>,
+        target: &mut Self,
+    ) {
+        let resolved = self.inner.resolve_column_name(source).ok();
+        let source_path = if let Some(source) = &resolved {
+            arrow_field_path("", source)
+        } else {
+            let mut parts = source.split('.');
+            let root = parts.next().unwrap_or(source);
+            let root = self
+                .inner
+                .resolve_column_name(root)
+                .unwrap_or_else(|_| root.to_string());
+            parts.fold(arrow_field_path("", &root), |path, field| {
+                arrow_field_path(&path, field)
+            })
+        };
+        for path in &self.arrow_array_struct_paths {
+            if path == &source_path {
+                target
+                    .arrow_array_struct_paths
+                    .insert(output_path.to_string());
+            } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
+                if tail.starts_with(['.', '[', '{']) {
+                    target
+                        .arrow_array_struct_paths
+                        .insert(format!("{output_path}{tail}"));
+                }
+            }
+        }
+        for path in &self.logical_map_paths {
+            if path == &source_path {
+                target.logical_map_paths.insert(output_path.to_string());
+            } else if let Some(tail) = path.strip_prefix(source_path.as_str()) {
+                if tail.starts_with(['.', '[', '{']) {
+                    target
+                        .logical_map_paths
+                        .insert(format!("{output_path}{tail}"));
+                }
+            }
+        }
+        if self
+            .logical_map_columns
+            .contains(resolved.as_deref().unwrap_or(source))
+        {
+            target.logical_map_paths.insert(output_path.to_string());
+            if let Some(output_root) = output_root {
+                target.logical_map_columns.insert(output_root.to_string());
+            }
+        }
+    }
+
+    fn copy_struct_map_metadata(
+        &self,
+        expr: &robin_sparkless::Expr,
+        output: &str,
+        target: &mut Self,
+    ) {
+        use robin_sparkless::Expr;
+
+        fn visit(
+            source: &PyDataFrame,
+            expr: &Expr,
+            output_dtype: &robin_sparkless::polars::PlDataType,
+        ) -> Option<std::collections::HashSet<String>> {
+            match expr {
+                Expr::Alias(inner, _)
+                | Expr::Cast { expr: inner, .. }
+                | Expr::KeepName(inner)
+                | Expr::RenameAlias { expr: inner, .. } => visit(source, inner, output_dtype),
+                Expr::Column(name) => {
+                    if source.column_dtype_for_metadata(name.as_str()).as_ref()
+                        == Some(output_dtype)
+                    {
+                        Some(source.logical_map_path_tails(name.as_str()))
+                    } else {
+                        Some(std::collections::HashSet::new())
+                    }
+                }
+                Expr::Literal(value) if value.is_null() => None,
+                Expr::Ternary { truthy, falsy, .. } => Some(common_paths([
+                    visit(source, truthy, output_dtype),
+                    visit(source, falsy, output_dtype),
+                ])),
+                Expr::Function {
+                    input,
+                    function: polars::prelude::FunctionExpr::Coalesce,
+                } => Some(common_paths(
+                    input.iter().map(|input| visit(source, input, output_dtype)),
+                )),
+                Expr::Function {
+                    input,
+                    function: polars::prelude::FunctionExpr::AsStruct,
+                } => {
+                    let robin_sparkless::polars::PlDataType::Struct(fields) = output_dtype else {
+                        return Some(std::collections::HashSet::new());
+                    };
+                    if input.len() != fields.len() {
+                        return Some(std::collections::HashSet::new());
+                    }
+                    let mut paths = std::collections::HashSet::new();
+                    for (input, field) in input.iter().zip(fields) {
+                        if let Some(field_paths) = visit(source, input, field.dtype()) {
+                            let field_segment = format!(".{}", arrow_field_path("", &field.name));
+                            paths.extend(
+                                field_paths
+                                    .into_iter()
+                                    .map(|tail| format!("{field_segment}{tail}")),
+                            );
+                        }
+                    }
+                    Some(paths)
+                }
+                _ => Some(std::collections::HashSet::new()),
+            }
+        }
+
+        fn common_paths(
+            branches: impl IntoIterator<Item = Option<std::collections::HashSet<String>>>,
+        ) -> std::collections::HashSet<String> {
+            let mut common: Option<std::collections::HashSet<String>> = None;
+            for branch in branches.into_iter().flatten() {
+                if let Some(common) = &mut common {
+                    common.retain(|path| branch.contains(path));
+                } else {
+                    common = Some(branch);
+                }
+            }
+            common.unwrap_or_default()
+        }
+
+        let Some(output_dtype) = target.inner.get_column_dtype(output) else {
+            return;
+        };
+        let output_path = arrow_field_path("", output);
+        let Some(paths) = visit(self, expr, &output_dtype) else {
+            return;
+        };
+        for tail in paths {
+            target
+                .logical_map_paths
+                .insert(format!("{output_path}{tail}"));
+            if tail.is_empty() {
+                target.logical_map_columns.insert(output.to_string());
+            }
+        }
+    }
+
+    fn wrap_with_column_derived(
+        &self,
+        df: DataFrame,
+        name: &str,
+        expr: &robin_sparkless::Expr,
+    ) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        Self::remove_metadata_root(&mut wrapped, name);
+        if let Some(source) = Self::column_source(expr) {
+            self.copy_column_metadata(&source, name, &mut wrapped);
+        } else {
+            if self.expr_uses_arrow_array_struct(expr) {
+                Self::mark_array_struct_path(&mut wrapped, name);
+            }
+            let references = Self::expression_column_references(expr);
+            self.copy_computed_map_metadata(
+                Self::expression_preserves_map_value(expr),
+                &references,
+                name,
+                &mut wrapped,
+            );
+            self.copy_struct_map_metadata(expr, name, &mut wrapped);
+        }
+        wrapped
+    }
+
+    fn wrap_with_columns_derived(&self, df: DataFrame, expressions: &[(String, Column)]) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        for (name, column) in expressions {
+            Self::remove_metadata_root(&mut wrapped, name);
+            if let Some(source) = Self::column_source(column.expr()) {
+                self.copy_column_metadata(&source, name, &mut wrapped);
+            } else {
+                if self.expr_uses_arrow_array_struct(column.expr()) {
+                    Self::mark_array_struct_path(&mut wrapped, name);
+                }
+                let references = Self::expression_column_references(column.expr());
+                self.copy_computed_map_metadata(
+                    Self::expression_preserves_map_value(column.expr()),
+                    &references,
+                    name,
+                    &mut wrapped,
+                );
+                self.copy_struct_map_metadata(column.expr(), name, &mut wrapped);
+            }
+        }
+        wrapped
+    }
+
+    fn wrap_renamed_columns_derived(&self, df: DataFrame, renames: &[(String, String)]) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        let applied = renames
+            .iter()
+            .filter_map(|(old, new)| {
+                self.inner
+                    .resolve_column_name(old)
+                    .ok()
+                    .map(|old| (old, new))
+            })
+            .collect::<Vec<_>>();
+        for (old, new) in &applied {
+            Self::remove_metadata_root(&mut wrapped, old);
+            Self::remove_metadata_root(&mut wrapped, new);
+        }
+        for (old, new) in applied {
+            self.copy_column_metadata(&old, new, &mut wrapped);
+        }
+        wrapped
+    }
+
+    fn wrap_union_derived(
+        &self,
+        other: Option<&PyDataFrame>,
+        df: DataFrame,
+        by_name: bool,
+    ) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        let Some(other) = other else {
+            return wrapped;
+        };
+        let left_names = self.inner.columns().unwrap_or_default();
+        let right_names = other.inner.columns().unwrap_or_default();
+        let align_by_name = self.union_aligns_by_name(&left_names, &right_names, by_name);
+        for (index, output) in wrapped
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            let source = if align_by_name {
+                Self::resolve_union_column_name(other, &right_names, output)
+            } else {
+                right_names.get(index).cloned()
+            };
+            if let Some(source) = source {
+                other.copy_column_metadata(&source, output, &mut wrapped);
+            }
+        }
+        wrapped
+    }
+
+    fn validate_union_metadata(&self, other: &PyDataFrame, by_name: bool) -> PyResult<()> {
+        let left_names = self.inner.columns().unwrap_or_default();
+        let right_names = other.inner.columns().unwrap_or_default();
+        let align_by_name = self.union_aligns_by_name(&left_names, &right_names, by_name);
+
+        for (index, left_name) in left_names.iter().enumerate() {
+            let right_name = if align_by_name {
+                Self::resolve_union_column_name(other, &right_names, left_name)
+            } else {
+                right_names.get(index).cloned()
+            };
+            let Some(right_name) = right_name else {
+                continue;
+            };
+            if self.inner.get_column_dtype(left_name) != other.inner.get_column_dtype(&right_name) {
+                continue;
+            }
+
+            let left_maps = self.logical_map_path_tails(left_name);
+            let right_maps = other.logical_map_path_tails(&right_name);
+            let left_arrays = self.arrow_array_struct_path_tails(left_name);
+            let right_arrays = other.arrow_array_struct_path_tails(&right_name);
+            let has_conflict = left_maps.iter().any(|path| right_arrays.contains(path))
+                || right_maps.iter().any(|path| left_arrays.contains(path));
+            if has_conflict {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "union: column '{}' has incompatible logical types (map and array<struct<key, value>>) despite matching physical types",
+                    left_name
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn wrap_join_derived(&self, other: &PyDataFrame, df: DataFrame) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        let output_names = wrapped
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let left_names = self
+            .inner
+            .columns()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let right_names = other.inner.columns().unwrap_or_default();
+        for source in &right_names {
+            let has_metadata = other.arrow_array_struct_paths.iter().any(|path| {
+                let root = arrow_field_path("", source);
+                path.as_str() == root.as_str()
+                    || path
+                        .strip_prefix(root.as_str())
+                        .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+            }) || other.logical_map_paths.iter().any(|path| {
+                let root = arrow_field_path("", source);
+                path.as_str() == root.as_str()
+                    || path
+                        .strip_prefix(root.as_str())
+                        .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+            });
+            if !has_metadata {
+                continue;
+            }
+            let renamed = format!("{source}_right");
+            let output = if left_names.contains(source) && output_names.contains(&renamed) {
+                Some(renamed)
+            } else if output_names.contains(source) {
+                Some(source.clone())
+            } else {
+                None
+            };
+            if let Some(output) = output {
+                other.copy_column_metadata(source, &output, &mut wrapped);
+            }
+        }
+        for name in &other.logical_map_columns {
+            let right_name = format!("{name}_right");
+            let output_name = if left_names.contains(name) && output_names.contains(&right_name) {
+                Some(right_name)
+            } else if output_names.contains(name) {
+                Some(name.clone())
+            } else {
+                None
+            };
+            if let Some(output_name) = output_name {
+                wrapped.logical_map_columns.insert(output_name);
+            }
+        }
+        wrapped
+    }
+
+    fn wrap_select_derived(&self, df: DataFrame, items: &[SelectItem<'_>]) -> Self {
+        fn source_and_output_names(expr: &robin_sparkless::Expr) -> Option<(String, String)> {
+            let mut current = expr;
+            let mut output = None;
+            loop {
+                match current {
+                    robin_sparkless::Expr::Alias(inner, name) => {
+                        output.get_or_insert_with(|| name.to_string());
+                        current = inner.as_ref();
+                    }
+                    robin_sparkless::Expr::Cast { expr, .. } => current = expr.as_ref(),
+                    robin_sparkless::Expr::Column(name) => {
+                        return Some((
+                            name.to_string(),
+                            output.unwrap_or_else(|| name.to_string()),
+                        ));
+                    }
+                    _ => return None,
+                }
+            }
+        }
+
+        let mut wrapped = self.wrap_derived(df);
+        let output_names = wrapped.inner.columns().unwrap_or_default();
+        for output in &output_names {
+            Self::remove_metadata_root(&mut wrapped, output);
+        }
+        for (item_idx, item) in items.iter().enumerate() {
+            let (source, output) = match item {
+                SelectItem::ColumnName(source) => (
+                    source.to_string(),
+                    source.split('.').next_back().unwrap_or(source).to_string(),
+                ),
+                SelectItem::Expr(expr) => {
+                    let Some(names) = source_and_output_names(expr) else {
+                        if self.expr_uses_arrow_array_struct(expr) {
+                            if let Some(output) = output_names.get(item_idx) {
+                                Self::mark_array_struct_path(&mut wrapped, output);
+                            }
+                        }
+                        if let Some(output) = output_names.get(item_idx) {
+                            let references = Self::expression_column_references(expr);
+                            self.copy_computed_map_metadata(
+                                Self::expression_preserves_map_value(expr),
+                                &references,
+                                output,
+                                &mut wrapped,
+                            );
+                            self.copy_struct_map_metadata(expr, output, &mut wrapped);
+                        }
+                        continue;
+                    };
+                    names
+                }
+            };
+            self.copy_column_metadata(&source, &output, &mut wrapped);
+        }
+        wrapped
+    }
+
+    fn wrap_select_expr_derived(&self, df: DataFrame, expressions: &[String]) -> Self {
+        let mut wrapped = self.wrap_derived(df);
+        for expression in expressions {
+            let source_projection = robin_sparkless::sql::select_expr_source(expression)
+                .ok()
+                .flatten();
+            let Ok((alias, references)) = robin_sparkless::sql::select_expr_metadata(expression)
+            else {
+                continue;
+            };
+            let Some((source, projected_output)) = source_projection else {
+                // The SQL expression translator aliases unaliased projections with the original
+                // expression string, so use the same output name for metadata propagation.
+                let output = alias.unwrap_or_else(|| expression.to_string());
+                Self::remove_metadata_root(&mut wrapped, &output);
+                if references
+                    .iter()
+                    .any(|name| self.column_uses_arrow_array_struct(name))
+                {
+                    Self::mark_array_struct_path(&mut wrapped, &output);
+                }
+                let preserves_map_value =
+                    robin_sparkless::sql::select_expr_preserves_map_value(expression)
+                        .unwrap_or(false);
+                self.copy_computed_map_metadata(
+                    preserves_map_value,
+                    &references,
+                    &output,
+                    &mut wrapped,
+                );
+                continue;
+            };
+            let output = alias.unwrap_or(projected_output);
+            Self::remove_metadata_root(&mut wrapped, &output);
+            self.copy_column_metadata(&source, &output, &mut wrapped);
+        }
+        wrapped
+    }
+
+    fn wrap_renamed_derived(&self, df: DataFrame, old_name: &str, new_name: &str) -> Self {
+        self.wrap_renamed_columns_derived(df, &[(old_name.to_string(), new_name.to_string())])
     }
 
     fn check_mixed_row_shape(&self) -> PyResult<()> {
@@ -4443,7 +6690,7 @@ impl PyDataFrame {
             let df = slf
                 .inner
                 .filter(col_ref.inner.clone().into_expr())
-                .map(PyDataFrame::wrap)
+                .map(|df| slf.wrap_derived(df))
                 .map_err(to_py_err)?;
             return Ok(df);
         }
@@ -4466,7 +6713,7 @@ impl PyDataFrame {
             return slf
                 .inner
                 .filter(expr)
-                .map(PyDataFrame::wrap)
+                .map(|df| slf.wrap_derived(df))
                 .map_err(to_py_err);
         }
         if let Ok(expr_str) = condition.extract::<String>() {
@@ -4487,7 +6734,7 @@ impl PyDataFrame {
             return slf
                 .inner
                 .filter(expr)
-                .map(PyDataFrame::wrap)
+                .map(|df| slf.wrap_derived(df))
                 .map_err(to_py_err);
         }
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -4655,7 +6902,7 @@ impl PyDataFrame {
             return self
                 .inner
                 .select(col_refs)
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_derived(df))
                 .map_err(to_py_err);
         }
 
@@ -4722,7 +6969,7 @@ impl PyDataFrame {
             }
         }
 
-        let df = self.inner.select_items(items).map_err(to_py_err)?;
+        let df = self.inner.select_items(items.clone()).map_err(to_py_err)?;
         let out = WINDOW_ORDER_SORT_HINT.with(|cell| {
             if let Some((cols, desc)) = cell.borrow_mut().take() {
                 // Only apply sort if this select's result has the hint columns (from row_number with no partition).
@@ -4736,12 +6983,13 @@ impl PyDataFrame {
                 };
                 if all_present {
                     let ascending: Vec<bool> = desc.iter().map(|&d| !d).collect();
-                    df.order_by(col_refs, ascending).map(PyDataFrame::wrap)
+                    df.order_by(col_refs, ascending)
+                        .map(|df| self.wrap_select_derived(df, &items))
                 } else {
-                    Ok(PyDataFrame::wrap(df))
+                    Ok(self.wrap_select_derived(df, &items))
                 }
             } else {
-                Ok(PyDataFrame::wrap(df))
+                Ok(self.wrap_select_derived(df, &items))
             }
         });
         out.map_err(to_py_err)
@@ -4829,7 +7077,7 @@ impl PyDataFrame {
                     to_py_err(msg)
                 }
             })?;
-            return Ok(PyDataFrame::wrap(df));
+            return Ok(slf.wrap_with_column_derived(df, name, col.expr()));
         }
 
         // Case 2: expr-string from F.expr(...)
@@ -4877,7 +7125,7 @@ impl PyDataFrame {
                     to_py_err(msg)
                 }
             })?;
-            return Ok(PyDataFrame::wrap(df));
+            return Ok(slf.wrap_with_column_derived(df, name, col.expr()));
         }
 
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -4899,7 +7147,7 @@ impl PyDataFrame {
     fn with_column_renamed(&self, old_name: &str, new_name: &str) -> PyResult<PyDataFrame> {
         self.inner
             .with_column_renamed(old_name, new_name)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_renamed_derived(df, old_name, new_name))
             .map_err(to_py_err)
     }
 
@@ -4928,7 +7176,7 @@ impl PyDataFrame {
             let df = self
                 .inner
                 .select(refs)
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_derived(df))
                 .map_err(to_py_err)?;
             return df.into_py_any(py);
         }
@@ -4941,7 +7189,7 @@ impl PyDataFrame {
             let df = self
                 .inner
                 .select(refs)
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_derived(df))
                 .map_err(to_py_err)?;
             return df.into_py_any(py);
         }
@@ -4984,21 +7232,59 @@ impl PyDataFrame {
             py: Python<'_>,
             types_mod: &Bound<'_, PyModule>,
             dt: &DataType,
+            path: &str,
+            map_paths: &std::collections::HashSet<String>,
         ) -> PyResult<PyObject> {
             let mk0 = |name: &str| -> PyResult<PyObject> {
                 types_mod.getattr(name)?.call0()?.into_py_any(py)
             };
             match dt {
                 DataType::String => mk0("StringType"),
+                DataType::Short => mk0("ShortType"),
                 DataType::Integer => mk0("IntegerType"),
                 DataType::Long => mk0("LongType"),
                 DataType::Double => mk0("DoubleType"),
+                DataType::Decimal(precision, scale) => Ok(types_mod
+                    .getattr("DecimalType")?
+                    .call1((*precision, *scale))?
+                    .into_py_any(py)?),
                 DataType::Boolean => mk0("BooleanType"),
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
                 DataType::Binary => mk0("BinaryType"),
+                DataType::Array(elem)
+                    if map_paths.contains(path)
+                        && matches!(elem.as_ref(), DataType::Struct(fields)
+                            if fields.iter().any(|field| field.name == "key")
+                                && fields.iter().any(|field| field.name == "value")) =>
+                {
+                    let DataType::Struct(fields) = elem.as_ref() else {
+                        unreachable!()
+                    };
+                    let key = fields.iter().find(|field| field.name == "key").unwrap();
+                    let value = fields.iter().find(|field| field.name == "value").unwrap();
+                    let key_py = dtype_to_py(
+                        py,
+                        types_mod,
+                        &key.data_type,
+                        &format!("{path}{{key}}"),
+                        map_paths,
+                    )?;
+                    let value_py = dtype_to_py(
+                        py,
+                        types_mod,
+                        &value.data_type,
+                        &format!("{path}{{value}}"),
+                        map_paths,
+                    )?;
+                    Ok(types_mod
+                        .getattr("MapType")?
+                        .call1((key_py, value_py, true))?
+                        .into_py_any(py)?)
+                }
                 DataType::Array(elem) => {
-                    let elem_py = dtype_to_py(py, types_mod, elem)?;
+                    let elem_py =
+                        dtype_to_py(py, types_mod, elem, &format!("{path}[]"), map_paths)?;
                     Ok(types_mod
                         .getattr("ArrayType")?
                         // PySpark: many array-returning functions (including split) use
@@ -5009,8 +7295,9 @@ impl PyDataFrame {
                         .into_py_any(py)?)
                 }
                 DataType::Map(k, v) => {
-                    let k_py = dtype_to_py(py, types_mod, k)?;
-                    let v_py = dtype_to_py(py, types_mod, v)?;
+                    let k_py = dtype_to_py(py, types_mod, k, &format!("{path}{{key}}"), map_paths)?;
+                    let v_py =
+                        dtype_to_py(py, types_mod, v, &format!("{path}{{value}}"), map_paths)?;
                     Ok(types_mod
                         .getattr("MapType")?
                         .call1((k_py, v_py, true))?
@@ -5019,7 +7306,13 @@ impl PyDataFrame {
                 DataType::Struct(fields) => {
                     let mut py_fields: Vec<PyObject> = Vec::with_capacity(fields.len());
                     for f in fields {
-                        let dt_obj = dtype_to_py(py, types_mod, &f.data_type)?;
+                        let dt_obj = dtype_to_py(
+                            py,
+                            types_mod,
+                            &f.data_type,
+                            &arrow_field_path(path, &f.name),
+                            map_paths,
+                        )?;
                         let sf = types_mod.getattr("StructField")?.call1((
                             f.name.clone(),
                             dt_obj,
@@ -5033,12 +7326,21 @@ impl PyDataFrame {
                         .call1((py_fields,))?
                         .into_py_any(py)?)
                 }
+                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unsupported schema data type {dt:?}"
+                ))),
             }
         }
 
         let mut py_fields: Vec<PyObject> = Vec::with_capacity(schema.fields().len());
         for f in schema.fields() {
-            let dt_obj = dtype_to_py(py, &types_mod, &f.data_type)?;
+            let dt_obj = dtype_to_py(
+                py,
+                &types_mod,
+                &f.data_type,
+                &arrow_field_path("", &f.name),
+                &self.logical_map_paths,
+            )?;
             let sf = struct_field_cls.call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
             py_fields.push(sf.into_py_any(py)?);
         }
@@ -5063,7 +7365,9 @@ impl PyDataFrame {
         // get_json_object etc. are string (PySpark parity #1146).
         let (output_names, rows, schema) = self
             .inner
-            .collect_as_json_rows_with_names()
+            .collect_as_json_rows_with_names_and_array_struct_columns(
+                &self.arrow_array_struct_paths,
+            )
             .map_err(to_py_err)?;
         let mut dtype_by_name: std::collections::HashMap<String, DataType> =
             std::collections::HashMap::with_capacity(schema.fields().len());
@@ -5086,9 +7390,14 @@ impl PyDataFrame {
             };
             match dt {
                 DataType::String => mk0("StringType"),
+                DataType::Short => mk0("ShortType"),
                 DataType::Integer => mk0("IntegerType"),
                 DataType::Long => mk0("LongType"),
                 DataType::Double => mk0("DoubleType"),
+                DataType::Decimal(precision, scale) => Ok(types_mod
+                    .getattr("DecimalType")?
+                    .call1((*precision, *scale))?
+                    .into_py_any(py)?),
                 DataType::Boolean => mk0("BooleanType"),
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
@@ -5125,6 +7434,9 @@ impl PyDataFrame {
                         .call1((py_fields,))?
                         .into_py_any(py)?)
                 }
+                _ => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unsupported schema data type {dt:?}"
+                ))),
             }
         }
 
@@ -5210,7 +7522,7 @@ impl PyDataFrame {
     fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
         let k = n.unwrap_or(1);
         let limited = self.inner.limit(k).map_err(to_py_err)?;
-        let limited_py = PyDataFrame::wrap(limited);
+        let limited_py = self.wrap_derived(limited);
         let rows = limited_py.collect(py)?;
         match n {
             Some(_) => Ok(PyList::new(py, rows)?.into_py_any(py)?),
@@ -5230,7 +7542,7 @@ impl PyDataFrame {
     }
 
     fn alias(&self, name: &str) -> PyDataFrame {
-        PyDataFrame::wrap(self.inner.alias(name))
+        self.wrap_derived(self.inner.alias(name))
     }
 
     #[pyo3(signature = (*exprs))]
@@ -5265,13 +7577,16 @@ impl PyDataFrame {
             push_expr(&item, &mut rust_exprs)?;
         }
         self.inner
-            .agg(rust_exprs)
-            .map(PyDataFrame::wrap)
+            .agg(rust_exprs.clone())
+            .map(|df| self.wrap_aggregate_derived(df, &rust_exprs, 0))
             .map_err(to_py_err)
     }
 
     fn cache(&self) -> PyResult<PyDataFrame> {
-        self.inner.cache().map(PyDataFrame::wrap).map_err(to_py_err)
+        self.inner
+            .cache()
+            .map(|df| self.wrap_derived(df))
+            .map_err(to_py_err)
     }
 
     #[pyo3(signature = (*cols))]
@@ -5299,7 +7614,11 @@ impl PyDataFrame {
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
             .rollup(refs)
-            .map(|cr| PyCubeRollupData { inner: cr })
+            .map(|cr| PyCubeRollupData {
+                inner: cr,
+                source: self.wrap_derived(self.inner.clone()),
+                grouping_column_count: names.len(),
+            })
             .map_err(to_py_err)
     }
 
@@ -5360,7 +7679,11 @@ impl PyDataFrame {
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
             .cube(refs)
-            .map(|cr| PyCubeRollupData { inner: cr })
+            .map(|cr| PyCubeRollupData {
+                inner: cr,
+                source: self.wrap_derived(self.inner.clone()),
+                grouping_column_count: names.len(),
+            })
             .map_err(to_py_err)
     }
 
@@ -5368,9 +7691,14 @@ impl PyDataFrame {
     fn group_by(&self, column_names: &Bound<'_, PyAny>) -> PyResult<PyGroupedData> {
         let names = py_cols_to_vec(column_names)?;
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let grouping_column_count = names.len();
         self.inner
             .group_by(refs)
-            .map(|gd| PyGroupedData { inner: gd })
+            .map(|gd| PyGroupedData {
+                inner: gd,
+                source: self.wrap_derived(self.inner.clone()),
+                grouping_column_count,
+            })
             .map_err(to_py_err)
     }
 
@@ -5406,9 +7734,14 @@ impl PyDataFrame {
                 specs.push(spec);
             }
         }
+        let grouping_column_count = specs.len();
         self.inner
             .group_by_specs(specs)
-            .map(|gd| PyGroupedData { inner: gd })
+            .map(|gd| PyGroupedData {
+                inner: gd,
+                source: self.wrap_derived(self.inner.clone()),
+                grouping_column_count,
+            })
             .map_err(to_py_err)
     }
 
@@ -5425,7 +7758,7 @@ impl PyDataFrame {
         asc.truncate(refs.len());
         self.inner
             .order_by(refs, asc)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -5524,7 +7857,7 @@ impl PyDataFrame {
             return self
                 .inner
                 .order_by_exprs(sort_orders)
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_derived(df))
                 .map_err(to_py_err);
         }
 
@@ -5564,7 +7897,7 @@ impl PyDataFrame {
         }
         self.inner
             .order_by_exprs(sort_orders)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -5589,7 +7922,7 @@ impl PyDataFrame {
     fn limit(&self, n: usize) -> PyResult<PyDataFrame> {
         self.inner
             .limit(n)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -5598,7 +7931,7 @@ impl PyDataFrame {
         let specs = py_tuple_or_single_to_drop_specs(columns)?;
         self.inner
             .drop_specs(specs)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -5609,7 +7942,7 @@ impl PyDataFrame {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .distinct(sub)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -5656,7 +7989,7 @@ impl PyDataFrame {
             return self
                 .inner
                 .cross_join(&other.inner)
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_join_derived(other, df))
                 .map_err(to_py_err);
         }
         let join_type = match how_lower.as_str() {
@@ -5686,7 +8019,7 @@ impl PyDataFrame {
                     join_type,
                     false, // left_on/right_on: do not mark join keys ambiguous
                 )
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_join_derived(other, df))
                 .map_err(to_py_err)
         } else if let Some(on_arg) = on {
             // Try to use normal join when on is simple column name(s) (PySpark parity: one key column in result).
@@ -5698,7 +8031,7 @@ impl PyDataFrame {
                     return self
                         .inner
                         .join(&other.inner, on_refs, join_type)
-                        .map(PyDataFrame::wrap)
+                        .map(|df| self.wrap_join_derived(other, df))
                         .map_err(to_py_err);
                 }
             }
@@ -5842,7 +8175,7 @@ impl PyDataFrame {
                             }
                         }
 
-                        return Ok(PyDataFrame::wrap(joined));
+                        return Ok(self.wrap_join_derived(other, joined));
                     }
                 }
                 // Non-eq expression: cross + filter (ambiguous duplicate column names may apply).
@@ -5893,16 +8226,16 @@ impl PyDataFrame {
                     let all_refs: Vec<&str> = all_cols.iter().map(|s| s.as_str()).collect();
                     let augmented = augmented.select(all_refs).map_err(to_py_err)?;
                     let all = filtered.union(&augmented).map_err(to_py_err)?;
-                    return Ok(PyDataFrame::wrap(all));
+                    return Ok(self.wrap_join_derived(other, all));
                 }
-                return Ok(PyDataFrame::wrap(filtered));
+                return Ok(self.wrap_join_derived(other, filtered));
             }
             // Column-name list/tuple (no complex expressions): join on those keys.
             let on_vec = py_join_on_to_vec(on_arg)?;
             let on_refs: Vec<&str> = on_vec.iter().map(|s| s.as_str()).collect();
             self.inner
                 .join(&other.inner, on_refs, join_type)
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_join_derived(other, df))
                 .map_err(to_py_err)
         } else {
             Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
@@ -5915,14 +8248,14 @@ impl PyDataFrame {
     fn cross_join(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .cross_join(&other.inner)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_join_derived(other, df))
             .map_err(to_py_err)
     }
 
     fn intersect(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .intersect(&other.inner)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -5930,24 +8263,34 @@ impl PyDataFrame {
     fn except_all(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .except_all(&other.inner)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn union(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let other_inner = py_any_to_dataframe_inner(other)?;
-        self.inner
-            .union(&other_inner)
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        let other_wrapper = other.cast::<PyDataFrame>().ok();
+        if let Some(other_wrapper) = other_wrapper {
+            self.validate_union_metadata(&other_wrapper.borrow(), false)?;
+        }
+        let df = self.inner.union(&other_inner).map_err(to_py_err)?;
+        Ok(match other_wrapper {
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, false),
+            None => self.wrap_union_derived(None, df, false),
+        })
     }
 
     fn union_all(&self, other: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let other_inner = py_any_to_dataframe_inner(other)?;
-        self.inner
-            .union_all(&other_inner)
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+        let other_wrapper = other.cast::<PyDataFrame>().ok();
+        if let Some(other_wrapper) = other_wrapper {
+            self.validate_union_metadata(&other_wrapper.borrow(), false)?;
+        }
+        let df = self.inner.union_all(&other_inner).map_err(to_py_err)?;
+        Ok(match other_wrapper {
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, false),
+            None => self.wrap_union_derived(None, df, false),
+        })
     }
 
     #[pyo3(name = "unionAll")]
@@ -5963,10 +8306,18 @@ impl PyDataFrame {
     ) -> PyResult<PyDataFrame> {
         let allow = extract_allow_missing_columns(kwargs)?;
         let other_inner = py_any_to_dataframe_inner(other)?;
-        self.inner
+        let other_wrapper = other.cast::<PyDataFrame>().ok();
+        if let Some(other_wrapper) = other_wrapper {
+            self.validate_union_metadata(&other_wrapper.borrow(), true)?;
+        }
+        let df = self
+            .inner
             .union_by_name(&other_inner, allow)
-            .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        Ok(match other_wrapper {
+            Some(other) => self.wrap_union_derived(Some(&other.borrow()), df, true),
+            None => self.wrap_union_derived(None, df, true),
+        })
     }
 
     #[pyo3(name = "selectExpr", signature = (*exprs))]
@@ -5984,13 +8335,13 @@ impl PyDataFrame {
                     .inner
                     .select_expr_with_session(&session_ref.borrow().inner, &exprs_vec)
                 {
-                    return Ok(PyDataFrame::wrap(df));
+                    return Ok(self.wrap_select_expr_derived(df, &exprs_vec));
                 }
             }
         }
         self.inner
             .select_expr(&exprs_vec)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_select_expr_derived(df, &exprs_vec))
             .map_err(to_py_err)
     }
 
@@ -6037,7 +8388,7 @@ impl PyDataFrame {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner
             .dropna(sub, how_str, thresh)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6059,7 +8410,7 @@ impl PyDataFrame {
                     .fillna(val_expr, Some(vec![col_name.as_str()]))
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame::wrap(df));
+            return Ok(self.wrap_derived(df));
         }
         let value_expr = py_any_to_column(value)?.into_expr();
         let kind = classify_fill_value_kind(value);
@@ -6086,7 +8437,7 @@ impl PyDataFrame {
         let sub: Option<Vec<&str>> = Some(effective);
         self.inner
             .fillna(value_expr, sub)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6126,7 +8477,7 @@ impl PyDataFrame {
                         .replace(old_expr, new_expr, sub.as_ref().map(|v| v.to_vec()))
                         .map_err(to_py_err)?;
                 }
-                return Ok(PyDataFrame::wrap(current));
+                return Ok(self.wrap_derived(current));
             }
             return Err(to_py_err("value is required when to_replace is not a dict"));
         }
@@ -6146,7 +8497,7 @@ impl PyDataFrame {
                 .inner
                 .na()
                 .replace(old_expr, null_expr, sub.as_ref().map(|v| v.to_vec()))
-                .map(PyDataFrame::wrap)
+                .map(|df| self.wrap_derived(df))
                 .map_err(to_py_err);
         }
         let old_expr = py_any_to_column(to_replace)?.into_expr();
@@ -6154,14 +8505,14 @@ impl PyDataFrame {
         self.inner
             .na()
             .replace(old_expr, new_expr, sub.as_ref().map(|v| v.to_vec()))
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     /// Return the first row as a Row, or None if empty (Phase 7.8 / PySpark first() semantics).
     fn first(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         let one = self.inner.first().map_err(to_py_err)?;
-        let wrapper = PyDataFrame::wrap(one);
+        let wrapper = self.wrap_derived(one);
         let rows = wrapper.collect(py)?;
         Ok(rows.into_iter().next())
     }
@@ -6199,14 +8550,14 @@ impl PyDataFrame {
     fn persist(&self) -> PyResult<PyDataFrame> {
         self.inner
             .persist()
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn subtract(&self, other: &PyDataFrame) -> PyResult<PyDataFrame> {
         self.inner
             .subtract(&other.inner)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6231,7 +8582,7 @@ impl PyDataFrame {
         }
         self.inner
             .sample_by(col, &fracs, seed)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6256,7 +8607,7 @@ impl PyDataFrame {
         let vals: Vec<&str> = value_vars.iter().map(|s| s.as_str()).collect();
         self.inner
             .melt(&ids, &vals)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -6273,7 +8624,7 @@ impl PyDataFrame {
         let mut df = self
             .inner
             .unpivot(&id_refs, &val_refs)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)?;
         if let Some(ref name) = variableColumnName {
             df = df.with_column_renamed("variable", name)?;
@@ -6333,7 +8684,7 @@ impl PyDataFrame {
         }
         self.inner
             .with_columns_renamed(&renames)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_renamed_columns_derived(df, &renames))
             .map_err(to_py_err)
     }
 
@@ -6357,7 +8708,7 @@ impl PyDataFrame {
         }
         self.inner
             .with_columns(&exprs)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_with_columns_derived(df, &exprs))
             .map_err(to_py_err)
     }
 
@@ -6398,7 +8749,7 @@ impl PyDataFrame {
     #[pyo3(name = "toDF", signature = (*col_names))]
     fn to_df(&self, col_names: &Bound<'_, PyTuple>) -> PyResult<PyDataFrame> {
         if col_names.is_empty() {
-            return Ok(PyDataFrame::wrap(self.inner.clone()));
+            return Ok(self.wrap_derived(self.inner.clone()));
         }
         let mut df = self.inner.clone();
         let current = df.columns().map_err(to_py_err)?;
@@ -6411,26 +8762,140 @@ impl PyDataFrame {
                 .with_column_renamed(&current[i], &new_name)
                 .map_err(to_py_err)?;
         }
-        Ok(PyDataFrame::wrap(df))
+        let renames = current
+            .iter()
+            .zip(col_names.iter())
+            .map(|(old_name, item)| Ok((old_name.clone(), item.extract::<String>()?)))
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(self.wrap_renamed_columns_derived(df, &renames))
     }
 
     #[pyo3(name = "toPandas")]
     fn to_pandas(&self, py: Python<'_>) -> PyResult<PyObject> {
         self.check_mixed_row_shape()?;
         let pd = PyModule::import(py, "pandas")?;
-        let rows = self.inner.collect_as_json_rows().map_err(to_py_err)?;
+        let (_, rows, _) = self
+            .inner
+            .collect_as_json_rows_with_names_and_array_struct_columns(
+                &self.arrow_array_struct_paths,
+            )
+            .map_err(to_py_err)?;
         let cols = self.inner.columns().map_err(to_py_err)?;
+        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        let dtype_by_name: std::collections::HashMap<String, DataType> = schema
+            .fields()
+            .iter()
+            .map(|field| (field.name.clone(), field.data_type.clone()))
+            .collect();
+        let datetime_cls = PyModule::import(py, "datetime")?.getattr("datetime")?;
+        let date_cls = PyModule::import(py, "datetime")?.getattr("date")?;
         let data_dict = PyDict::new(py);
         for col_name in &cols {
             let vals = PyList::empty(py);
             for row in &rows {
                 let v = row.get(col_name).unwrap_or(&JsonValue::Null);
-                vals.append(json_to_py(v, py)?)?;
+                vals.append(json_value_to_py_with_schema(
+                    py,
+                    v,
+                    dtype_by_name.get(col_name),
+                    &datetime_cls,
+                    &date_cls,
+                    Some(col_name),
+                    Some(&cols),
+                )?)?;
             }
             data_dict.set_item(col_name, vals)?;
         }
         let df = pd.call_method1("DataFrame", (data_dict,))?;
         df.into_py_any(py)
+    }
+
+    /// Export collected values to a PyArrow Table, retaining decimal precision and scale.
+    #[pyo3(name = "toArrow")]
+    fn to_arrow(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.check_mixed_row_shape()?;
+        let rows = self.collect(py)?;
+        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        let pa = PyModule::import(py, "pyarrow")?;
+        let mut source_arrow_types = std::collections::HashMap::new();
+        if let Some(source_schema) = &self.arrow_schema_cache {
+            for source_field in source_schema.bind(py).try_iter()? {
+                let source_field = source_field?;
+                let name = source_field.getattr("name")?.extract::<String>()?;
+                source_arrow_types.insert(name, source_field.getattr("type")?.unbind());
+            }
+        }
+        let arrays = PyList::empty(py);
+        let names = PyList::empty(py);
+        for field in schema.fields() {
+            let values = PyList::empty(py);
+            let field_path = arrow_field_path("", &field.name);
+            let map_shaped_dtype = matches!(
+                &field.data_type,
+                DataType::Array(element_type)
+                    if matches!(element_type.as_ref(), DataType::Struct(fields)
+                        if fields.iter().any(|field| field.name == "key")
+                            && fields.iter().any(|field| field.name == "value"))
+            );
+            let map_value_present = if map_shaped_dtype {
+                let mut found = false;
+                for row in &rows {
+                    let dict = row.bind(py).call_method0("asDict")?;
+                    let value = dict.get_item(field.name.as_str())?;
+                    if !value.is_none() {
+                        found = value.is_instance_of::<PyDict>();
+                        break;
+                    }
+                }
+                found
+            } else {
+                false
+            };
+            // The cached source schema can be stale after withColumn replaces a
+            // map with an array that has the same physical key/value shape.
+            // Derived logical paths are authoritative; infer only for uncached,
+            // dictionary-shaped values.
+            let is_map = self.logical_map_paths.contains(&field_path)
+                || self.logical_map_columns.contains(&field.name)
+                || (map_shaped_dtype && map_value_present);
+            let mut field_map_paths = self.logical_map_paths.clone();
+            if is_map {
+                field_map_paths.insert(field_path.clone());
+            }
+            for row in &rows {
+                let row = row.bind(py);
+                let dict = row.call_method0("asDict")?;
+                let value = dict.get_item(field.name.as_str())?;
+                let value = normalize_arrow_value_with_maps(
+                    py,
+                    &value,
+                    &field.data_type,
+                    &field_path,
+                    &field_map_paths,
+                )?;
+                values.append(value.bind(py))?;
+            }
+            let current_arrow_type = spark_type_to_arrow_type_with_maps(
+                py,
+                &pa,
+                &field.data_type,
+                &field_path,
+                &field_map_paths,
+            )?;
+            let arrow_type = match source_arrow_types.get(&field.name) {
+                Some(source_type) if source_type.bind(py).eq(current_arrow_type.bind(py))? => {
+                    source_type.clone_ref(py)
+                }
+                _ => current_arrow_type,
+            };
+            let array = pa.getattr("array")?.call1((values, arrow_type))?;
+            arrays.append(array)?;
+            names.append(field.name.as_str())?;
+        }
+        pa.getattr("Table")?
+            .getattr("from_arrays")?
+            .call1((arrays, names))?
+            .into_py_any(py)
     }
 
     #[getter]
@@ -6441,29 +8906,34 @@ impl PyDataFrame {
             .iter()
             .map(|f| {
                 let ty = match &f.data_type {
-                    DataType::String => "string",
-                    DataType::Integer => "int",
-                    DataType::Long => "long",
-                    DataType::Double => "double",
-                    DataType::Boolean => "boolean",
-                    DataType::Date => "date",
-                    DataType::Timestamp => "timestamp",
-                    DataType::Binary => "binary",
-                    DataType::Array(_) => "array",
-                    DataType::Map(_, _) => "map",
-                    DataType::Struct(_) => "struct",
+                    DataType::String => "string".to_string(),
+                    DataType::Short => "smallint".to_string(),
+                    DataType::Integer => "int".to_string(),
+                    DataType::Long => "long".to_string(),
+                    DataType::Double => "double".to_string(),
+                    DataType::Decimal(precision, scale) => {
+                        format!("decimal({precision},{scale})")
+                    }
+                    DataType::Boolean => "boolean".to_string(),
+                    DataType::Date => "date".to_string(),
+                    DataType::Timestamp => "timestamp".to_string(),
+                    DataType::Binary => "binary".to_string(),
+                    DataType::Array(_) => "array".to_string(),
+                    DataType::Map(_, _) => "map".to_string(),
+                    DataType::Struct(_) => "struct".to_string(),
+                    _ => "unknown".to_string(),
                 };
-                (f.name.clone(), ty.to_string())
+                (f.name.clone(), ty)
             })
             .collect())
     }
 
     fn coalesce(&self, _n: usize) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame::wrap(self.inner.clone()))
+        Ok(self.wrap_derived(self.inner.clone()))
     }
 
     fn repartition(&self, _n: usize) -> PyResult<PyDataFrame> {
-        Ok(PyDataFrame::wrap(self.inner.clone()))
+        Ok(self.wrap_derived(self.inner.clone()))
     }
 
     #[pyo3(name = "isEmpty")]
@@ -6478,7 +8948,7 @@ impl PyDataFrame {
 
     fn take(&self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
         let limited = self.inner.limit(n).map_err(to_py_err)?;
-        let df = PyDataFrame::wrap(limited);
+        let df = self.wrap_derived(limited);
         df.collect(py)
     }
 
@@ -6909,9 +9379,66 @@ fn make_udf_filter_column(
 }
 
 /// Convert Python value (int, float, str, bool, None, list) or PyColumn to robin_sparkless Column.
+fn py_decimal_to_column(value: &Bound<'_, PyAny>) -> PyResult<Option<Column>> {
+    let py = value.py();
+    let decimal_type = PyModule::import(py, "decimal")?.getattr("Decimal")?;
+    if !value.is_instance(&decimal_type)? {
+        return Ok(None);
+    }
+
+    let tuple = value.call_method0("as_tuple")?;
+    let sign: u8 = tuple.get_item(0)?.extract()?;
+    let digits: Vec<u8> = tuple.get_item(1)?.extract()?;
+    let exponent = tuple.get_item(2)?.extract::<i32>().map_err(|_| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Decimal literals must be finite Spark decimal values",
+        )
+    })?;
+    let scale = exponent.unsigned_abs() as usize * usize::from(exponent < 0);
+    let positive_exponent = exponent.max(0) as usize;
+    let precision = digits
+        .len()
+        .saturating_add(positive_exponent)
+        .max(scale)
+        .max(1);
+    if precision > 38 || scale > 38 {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Decimal literal exceeds Spark DecimalType maximum precision 38",
+        ));
+    }
+
+    let mut coefficient = if digits.is_empty() {
+        "0".to_string()
+    } else {
+        digits
+            .iter()
+            .map(|digit| char::from(b'0' + *digit))
+            .collect()
+    };
+    coefficient.extend(std::iter::repeat_n('0', positive_exponent));
+    let mut coefficient = coefficient.parse::<i128>().map_err(|_| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Decimal literal exceeds Spark DecimalType maximum precision 38",
+        )
+    })?;
+    if sign != 0 {
+        coefficient = -coefficient;
+    }
+
+    let expression = polars::prelude::lit(polars::prelude::Scalar::new_decimal(
+        coefficient,
+        precision,
+        scale,
+    ));
+    Ok(Some(Column::from_expr(expression, None)))
+}
+
 fn py_any_to_column(other: &Bound<'_, PyAny>) -> PyResult<Column> {
     if let Some(py_col) = py_any_to_py_column_ref(other) {
         return Ok(py_col.bind(other.py()).borrow().inner.clone());
+    }
+    if let Some(decimal) = py_decimal_to_column(other)? {
+        return Ok(decimal);
     }
     if other.is_none() {
         return Ok(robin_sparkless::functions::lit_null_untyped());
@@ -8273,6 +10800,8 @@ impl PyDataFrameNaFunctions {
 #[pyclass]
 struct PyCubeRollupData {
     inner: CubeRollupData,
+    source: PyDataFrame,
+    grouping_column_count: usize,
 }
 
 #[pymethods]
@@ -8317,7 +10846,10 @@ impl PyCubeRollupData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .min(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, &name, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -8325,7 +10857,10 @@ impl PyCubeRollupData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .max(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, &name, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -8372,8 +10907,11 @@ impl PyCubeRollupData {
             }
         }
         self.inner
-            .agg(rust_exprs)
-            .map(PyDataFrame::wrap)
+            .agg(rust_exprs.clone())
+            .map(|df| {
+                self.source
+                    .wrap_aggregate_derived(df, &rust_exprs, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 }
@@ -8381,6 +10919,8 @@ impl PyCubeRollupData {
 #[pyclass]
 struct PyGroupedData {
     inner: GroupedData,
+    source: PyDataFrame,
+    grouping_column_count: usize,
 }
 
 #[pymethods]
@@ -8425,7 +10965,10 @@ impl PyGroupedData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .min(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, &name, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -8433,7 +10976,10 @@ impl PyGroupedData {
         let name = py_col_to_name(col_name)?;
         self.inner
             .max(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, &name, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -8480,8 +11026,11 @@ impl PyGroupedData {
             }
         }
         self.inner
-            .agg(rust_exprs)
-            .map(PyDataFrame::wrap)
+            .agg(rust_exprs.clone())
+            .map(|df| {
+                self.source
+                    .wrap_aggregate_derived(df, &rust_exprs, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -8507,6 +11056,8 @@ impl PyGroupedData {
         };
         Ok(PyPivotedGroupedData {
             inner: self.inner.pivot(pivot_col, rust_values),
+            source: self.source.wrap_derived(self.source.inner.clone()),
+            grouping_column_count: self.grouping_column_count,
         })
     }
 }
@@ -8514,6 +11065,8 @@ impl PyGroupedData {
 #[pyclass]
 struct PyPivotedGroupedData {
     inner: PivotedGroupedData,
+    source: PyDataFrame,
+    grouping_column_count: usize,
 }
 
 #[pymethods]
@@ -8535,14 +11088,20 @@ impl PyPivotedGroupedData {
     fn min(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .min(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, value_col, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
     fn max(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .max(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, value_col, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -8574,14 +11133,20 @@ impl PyPivotedGroupedData {
     fn _first(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._first(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, value_col, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
     fn _last(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._last(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| {
+                self.source
+                    .wrap_value_aggregate_derived(df, value_col, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 
@@ -8651,8 +11216,11 @@ impl PyPivotedGroupedData {
             push_expr(&item, &mut rust_exprs)?;
         }
         self.inner
-            .agg(rust_exprs)
-            .map(PyDataFrame::wrap)
+            .agg(rust_exprs.clone())
+            .map(|df| {
+                self.source
+                    .wrap_aggregate_derived(df, &rust_exprs, self.grouping_column_count)
+            })
             .map_err(to_py_err)
     }
 }
@@ -8745,6 +11313,9 @@ fn lit_null(dtype: &str) -> PyResult<PyColumn> {
 #[pyfunction]
 fn lit(value: &Bound<'_, PyAny>) -> PyResult<PyColumn> {
     let _py = value.py();
+    if let Some(decimal) = py_decimal_to_column(value)? {
+        return Ok(PyColumn { inner: decimal });
+    }
     if value.is_none() {
         return Ok(PyColumn {
             inner: robin_sparkless::functions::lit_null_untyped(),
@@ -10345,11 +12916,23 @@ fn native_array_except(a: &PyColumn, b: &PyColumn) -> PyColumn {
 
 /// Map simple type string (from DDL) to core DataType for from_json schema.
 fn py_type_str_to_core_data_type(s: &str) -> CoreDataType {
-    match simple_string_to_type(s).as_str() {
+    let type_str = simple_string_to_type(s);
+    match type_str.as_str() {
         "long" => CoreDataType::Long,
         "int" => CoreDataType::Integer,
+        "short" | "smallint" => CoreDataType::Short,
         "double" => CoreDataType::Double,
         "float" => CoreDataType::Double,
+        _ if type_str.starts_with("decimal(") => {
+            let args = type_str
+                .trim_start_matches("decimal(")
+                .trim_end_matches(')');
+            let (precision, scale) = args.split_once(',').unwrap_or(("10", "0"));
+            CoreDataType::Decimal(
+                precision.trim().parse().unwrap_or(10),
+                scale.trim().parse().unwrap_or(0),
+            )
+        }
         "boolean" => CoreDataType::Boolean,
         "date" => CoreDataType::Date,
         "timestamp" => CoreDataType::Timestamp,

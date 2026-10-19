@@ -8,14 +8,16 @@ use crate::dataframe::{DataFrame, JoinOptions, JoinType, disambiguate_agg_output
 use crate::functions;
 use crate::schema::{DataType as CoreDataType, StructType};
 use crate::session::{SparkSession, set_thread_udf_session};
-use polars::prelude::{AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, col, lit, when};
+use polars::prelude::{
+    AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, Scalar, col, lit, when,
+};
 use polars_plan::dsl::functions::nth;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
-    BinaryOperator, CastKind, Expr as SqlExpr, FromTable, Function, FunctionArg, FunctionArgExpr,
-    FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause, ObjectType,
-    OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
-    TableFactor, TableObject, Value, ValueWithSpan,
+    BinaryOperator, CastKind, ExactNumberInfo, Expr as SqlExpr, FromTable, Function, FunctionArg,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
+    ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
+    TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -41,6 +43,37 @@ fn parse_sql_number_val(s: &str, context: &str) -> Result<SqlNumberVal, PolarsEr
 }
 
 fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
+    // Spark parses fixed-point SQL literals as exact decimals. Keeping the source
+    // text here avoids losing fractional or integral digits through an f64 first.
+    if !s.contains(['e', 'E']) {
+        if let Some((whole, fraction)) = s.split_once('.') {
+            let digits = format!("{}{}", if whole.is_empty() { "0" } else { whole }, fraction);
+            if let Ok(coefficient) = digits.parse::<i128>() {
+                let precision = digits
+                    .trim_start_matches('0')
+                    .len()
+                    .max(fraction.len())
+                    .max(1);
+                let scale = fraction.len();
+                if precision <= 38 && scale <= 38 {
+                    return Ok(lit(Scalar::new_decimal(coefficient, precision, scale)));
+                }
+            }
+        } else if s.parse::<i64>().is_err() {
+            // Spark keeps integer literals outside the Int/Long ranges as exact
+            // decimals when they fit DecimalType's maximum precision.
+            let unsigned = s
+                .strip_prefix('-')
+                .or_else(|| s.strip_prefix('+'))
+                .unwrap_or(s);
+            let precision = unsigned.trim_start_matches('0').len().max(1);
+            if precision <= 38 {
+                if let Ok(coefficient) = s.parse::<i128>() {
+                    return Ok(lit(Scalar::new_decimal(coefficient, precision, 0)));
+                }
+            }
+        }
+    }
     match parse_sql_number_val(s, "literal")? {
         SqlNumberVal::Int(i) => Ok(lit(i)),
         SqlNumberVal::Float(f) => Ok(lit(f)),
@@ -49,6 +82,23 @@ fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
 
 /// Map SQL AST data types to PySpark-style cast type names.
 fn sql_ast_data_type_to_cast_name(dt: &spark_sql_parser::ast::DataType) -> String {
+    use spark_sql_parser::ast::DataType as SqlDataType;
+
+    let decimal_info = match dt {
+        SqlDataType::Decimal(info) | SqlDataType::Numeric(info) | SqlDataType::Dec(info) => {
+            Some(info)
+        }
+        _ => None,
+    };
+    if let Some(info) = decimal_info {
+        let (precision, scale) = match info {
+            ExactNumberInfo::None => (10, 0),
+            ExactNumberInfo::Precision(precision) => (*precision, 0),
+            ExactNumberInfo::PrecisionAndScale(precision, scale) => (*precision, *scale),
+        };
+        return format!("decimal({precision},{scale})");
+    }
+
     let s = dt.to_string().to_lowercase();
     if s.starts_with("int") || s.starts_with("integer") || s == "int4" {
         "int".to_string()
@@ -446,8 +496,10 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
     match dt {
         CoreDataType::String => "string".to_string(),
         CoreDataType::Integer => "int".to_string(),
+        CoreDataType::Short => "smallint".to_string(),
         CoreDataType::Long => "bigint".to_string(), // PySpark parity: simpleString uses "bigint"
         CoreDataType::Double => "double".to_string(),
+        CoreDataType::Decimal(precision, scale) => format!("decimal({precision},{scale})"),
         CoreDataType::Boolean => "boolean".to_string(),
         CoreDataType::Date => "date".to_string(),
         CoreDataType::Timestamp => "timestamp".to_string(),
@@ -467,6 +519,7 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
                 .collect();
             format!("struct<{}>", parts.join(","))
         }
+        _ => "unknown".to_string(),
     }
 }
 
@@ -1277,8 +1330,33 @@ fn sql_expr_to_polars(
         SqlExpr::Value(ValueWithSpan { value: Value::Boolean(b), .. }) => Ok(lit(*b)),
         SqlExpr::Value(ValueWithSpan { value: Value::Null, .. }) => Ok(lit(polars::prelude::NULL)),
         SqlExpr::BinaryOp { left, op, right } => {
-            let l = sql_expr_to_polars(left, session, df, having_agg_map, having_agg_list)?;
-            let r = sql_expr_to_polars(right, session, df, having_agg_map, having_agg_list)?;
+            let mut l = sql_expr_to_polars(left, session, df, having_agg_map, having_agg_list)?;
+            let mut r = sql_expr_to_polars(right, session, df, having_agg_map, having_agg_list)?;
+            if matches!(
+                op,
+                BinaryOperator::Plus | BinaryOperator::Minus
+                    | BinaryOperator::Multiply | BinaryOperator::Divide
+            ) {
+                let schema = df
+                    .map(|df| df.lazy_frame().collect_schema())
+                    .transpose()?
+                    .unwrap_or_default();
+                if let Some(expr) = super::decimal::binary_expr(
+                    l.clone(), r.clone(), op, &schema,
+                    session.runtime_config().ansi_enabled,
+                    robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                        session.get_config(),
+                    ),
+                )? {
+                    return Ok(expr);
+                }
+                if let Some((coerced_l, coerced_r)) =
+                    super::decimal::coerce_decimal_float_operands(l.clone(), r.clone(), &schema)?
+                {
+                    l = coerced_l;
+                    r = coerced_r;
+                }
+            }
             match op {
                 BinaryOperator::Eq => Ok(l.eq(r)),
                 BinaryOperator::NotEq => Ok(l.neq(r)),
@@ -1303,6 +1381,7 @@ fn sql_expr_to_polars(
         SqlExpr::UnaryOp { op, expr } => {
             let e = sql_expr_to_polars(expr, session, df, having_agg_map, having_agg_list)?;
             match op {
+                spark_sql_parser::ast::UnaryOperator::Minus => Ok(-e),
                 spark_sql_parser::ast::UnaryOperator::Not => Ok(e.not()),
                 spark_sql_parser::ast::UnaryOperator::BitwiseNot => {
                     let col = Column::from_expr(e, None);
@@ -2304,7 +2383,8 @@ fn push_agg_function(
                     SqlExpr::Identifier(ident) => format!("sum({})", ident.value),
                     _ => "sum".to_string(),
                 };
-                (inner.sum(), default)
+                let col = Column::from_expr(inner, None);
+                (functions::sum(&col).expr().clone(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
                     "SQL: SUM requires one expression argument (e.g. SUM(column) or SUM(a * b))."
@@ -2322,7 +2402,8 @@ fn push_agg_function(
                     SqlExpr::Identifier(ident) => format!("avg({})", ident.value),
                     _ => "avg".to_string(),
                 };
-                (inner.mean(), default)
+                let col = Column::from_expr(inner, None);
+                (functions::avg(&col).expr().clone(), default)
             } else {
                 return Err(PolarsError::InvalidOperation(
                     "SQL: AVG requires one expression argument (e.g. AVG(column) or AVG(a * b))."

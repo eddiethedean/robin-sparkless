@@ -190,6 +190,12 @@ impl DataFrame {
         self.0.columns()
     }
 
+    /// Return this DataFrame's column-resolution mode.
+    #[doc(hidden)]
+    pub fn is_case_sensitive(&self) -> bool {
+        self.0.is_case_sensitive()
+    }
+
     pub fn columns_engine(&self) -> Result<Vec<String>, EngineError> {
         self.0.columns_engine()
     }
@@ -226,6 +232,15 @@ impl DataFrame {
         &self,
     ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
         self.0.collect_as_json_rows_with_names()
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn collect_as_json_rows_with_names_and_array_struct_columns(
+        &self,
+        array_struct_columns: &std::collections::HashSet<String>,
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
+        self.0
+            .collect_as_json_rows_with_names_and_array_struct_columns(array_struct_columns)
     }
 
     pub fn to_json_rows(&self) -> Result<String, EngineError> {

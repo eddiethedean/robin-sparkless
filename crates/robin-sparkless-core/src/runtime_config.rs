@@ -49,6 +49,16 @@ pub struct SessionRuntimeConfig {
     pub legacy_db2_datetime_mapping: bool,
 }
 
+/// Whether decimal arithmetic may reduce scale to fit Spark's maximum precision.
+///
+/// Kept separate from [`SessionRuntimeConfig`] so adding this setting does not break
+/// downstream struct literals for that public type.
+pub fn decimal_allow_precision_loss_from_session_map(map: &HashMap<String, String>) -> bool {
+    map.get("spark.sql.decimalOperations.allowPrecisionLoss")
+        .map(|value| parse_bool(value))
+        .unwrap_or(true)
+}
+
 impl Default for SessionRuntimeConfig {
     fn default() -> Self {
         Self::for_compat(PysparkCompat::V3_5)
@@ -229,6 +239,17 @@ mod tests {
         m.insert("spark.sql.ansi.enabled".to_string(), "false".to_string());
         let c = SessionRuntimeConfig::from_session_map(&m);
         assert!(!c.ansi_enabled);
+    }
+
+    #[test]
+    fn decimal_precision_loss_defaults_to_true_and_can_be_disabled() {
+        let mut m = HashMap::new();
+        assert!(decimal_allow_precision_loss_from_session_map(&m));
+        m.insert(
+            "spark.sql.decimalOperations.allowPrecisionLoss".to_string(),
+            "false".to_string(),
+        );
+        assert!(!decimal_allow_precision_loss_from_session_map(&m));
     }
 
     #[test]

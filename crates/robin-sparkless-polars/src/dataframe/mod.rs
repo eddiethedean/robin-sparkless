@@ -326,6 +326,7 @@ impl DataFrame {
     /// as input columns, so select(col("x").substr(1, 3).alias("partial")),
     /// when().then().otherwise().alias("result"), and col("x").rank().over([]).alias("rank") work (issues #200, #212).
     pub fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
+        let schema = self.polars_schema()?;
         let df = self;
         let mut alias_output_names: HashSet<String> = HashSet::new();
         let _ = expr.clone().try_map_expr(|e| {
@@ -346,7 +347,7 @@ impl DataFrame {
                 alias_output_names.insert(out_str.to_string());
             }
         }
-        expr.try_map_expr(move |e| {
+        let resolved = expr.try_map_expr(move |e| {
             // Recurse into Alias so col("Person.name") inside F.col("Person.name").alias(...) gets resolved (struct field access).
             if let Expr::Alias(inner, name) = &e {
                 let new_inner = df.resolve_expr_column_names(inner.as_ref().clone())?;
@@ -543,7 +544,8 @@ impl DataFrame {
                 });
             }
             Ok(e)
-        })
+        })?;
+        crate::functions::bind_runtime_config(resolved, &schema)
     }
 
     /// Rewrite comparison expressions to apply PySpark-style type coercion.
@@ -569,13 +571,12 @@ impl DataFrame {
         }
 
         fn comparison_literal_dtype(dt: DataType) -> DataType {
-            if matches!(
-                dt,
-                DataType::Unknown(UnknownKind::Int(_)) | DataType::Unknown(UnknownKind::Float)
-            ) {
-                DataType::Float64
-            } else {
-                dt
+            match dt {
+                // SQL integer literals carry an unknown-width marker. Treat them as
+                // Int64 so Decimal comparisons retain exact integer precision.
+                DataType::Unknown(UnknownKind::Int(_)) => DataType::Int64,
+                DataType::Unknown(UnknownKind::Float) => DataType::Float64,
+                other => other,
             }
         }
 
@@ -1415,6 +1416,12 @@ impl DataFrame {
             .collect())
     }
 
+    /// Return this DataFrame's column-resolution mode.
+    #[doc(hidden)]
+    pub fn is_case_sensitive(&self) -> bool {
+        self.case_sensitive
+    }
+
     /// Same as [`columns`](Self::columns) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn columns_engine(&self) -> Result<Vec<String>, EngineError> {
         self.columns().map_err(polars_to_core_error)
@@ -1462,6 +1469,19 @@ impl DataFrame {
     #[allow(clippy::type_complexity)]
     pub fn collect_as_json_rows_with_names(
         &self,
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
+        self.collect_as_json_rows_with_names_and_array_struct_columns(&HashSet::new())
+    }
+
+    /// Collect rows while preserving paths whose logical type is Arrow
+    /// `list<struct<...>>`. Polars represents maps and these arrays with the same
+    /// physical `List(Struct)` dtype, so callers with the source schema must tell
+    /// the serializer which nested paths are arrays of structs. Field segments
+    /// are JSON-quoted, separated by dots; [] and {value} denote container children.
+    #[allow(clippy::type_complexity)]
+    pub fn collect_as_json_rows_with_names_and_array_struct_columns(
+        &self,
+        array_struct_paths: &HashSet<String>,
     ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
         let (collected, plan_schema) = match &self.inner {
             DataFrameInner::Eager(df) => (df.as_ref().clone(), df.schema().as_ref().clone()),
@@ -1592,7 +1612,12 @@ impl DataFrame {
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
-                let jv = any_value_to_json(&av, dtype)?;
+                let jv = any_value_to_json_with_array_struct_override(
+                    &av,
+                    dtype,
+                    array_struct_paths,
+                    &serde_json::to_string(name).expect("field names serialize as JSON strings"),
+                )?;
                 row.insert(name.clone(), jv);
             }
             rows.push(row);
@@ -3456,7 +3481,12 @@ fn struct_string_to_json_object(s: &str, fields: &[Field]) -> Option<JsonValue> 
 /// Float values close to integers are rounded for collect parity (#747, #748).
 /// Date and Datetime output ISO strings so Python bindings get date/datetime (#842, #843, #849).
 /// Returns Err when map has null key (PySpark NULL_MAP_KEY parity, #1140).
-fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, PolarsError> {
+fn any_value_to_json_with_array_struct_override(
+    av: &AnyValue<'_>,
+    dtype: &DataType,
+    array_struct_paths: &HashSet<String>,
+    path: &str,
+) -> Result<JsonValue, PolarsError> {
     use serde_json::Map;
     // Plan says String but execution may yield numeric (e.g. get_json_object; #1146): emit string.
     if matches!(dtype, DataType::String) {
@@ -3482,6 +3512,26 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
     }
     Ok(match av {
         AnyValue::Null => JsonValue::Null,
+        AnyValue::Decimal(value, _precision, scale) => {
+            let negative = *value < 0;
+            let digits = value.unsigned_abs().to_string();
+            let scale = *scale;
+            let mut decimal = if scale == 0 {
+                digits
+            } else if digits.len() <= scale {
+                format!("0.{}{}", "0".repeat(scale - digits.len()), digits)
+            } else {
+                format!(
+                    "{}.{}",
+                    &digits[..digits.len() - scale],
+                    &digits[digits.len() - scale..]
+                )
+            };
+            if negative {
+                decimal.insert(0, '-');
+            }
+            JsonValue::String(decimal)
+        }
         AnyValue::Boolean(b) => JsonValue::Bool(*b),
         // Date/Datetime columns may appear as Int32/Int64 from plan; serialize as ISO strings (#849, #841, #840, #839).
         AnyValue::Int32(i) if matches!(dtype, DataType::Date) => date_days_to_json(*i),
@@ -3567,7 +3617,7 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
             }
         }
         AnyValue::List(s) => {
-            if is_map_format(dtype) {
+            if !array_struct_paths.contains(path) && is_map_format(dtype) {
                 // List(Struct{key, value}) -> JSON object {} (PySpark empty map #578).
                 // For mixed string + numeric/boolean map values, coerce numeric/boolean values to strings
                 // so collected maps match PySpark behavior (issue #1140).
@@ -3596,10 +3646,20 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json(&fld_av, &fld.dtype)?
+                                                any_value_to_json_with_array_struct_override(
+                                                    &fld_av,
+                                                    &fld.dtype,
+                                                    array_struct_paths,
+                                                    &format!("{path}{{value}}"),
+                                                )?
                                             }
                                         } else {
-                                            any_value_to_json(&fld_av, &fld.dtype)?
+                                            any_value_to_json_with_array_struct_override(
+                                                &fld_av,
+                                                &fld.dtype,
+                                                array_struct_paths,
+                                                &format!("{path}{{value}}"),
+                                            )?
                                         });
                                     }
                                 }
@@ -3625,10 +3685,20 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json(fld_av, &fld.dtype)?
+                                                any_value_to_json_with_array_struct_override(
+                                                    fld_av,
+                                                    &fld.dtype,
+                                                    array_struct_paths,
+                                                    &format!("{path}{{value}}"),
+                                                )?
                                             }
                                         } else {
-                                            any_value_to_json(fld_av, &fld.dtype)?
+                                            any_value_to_json_with_array_struct_override(
+                                                fld_av,
+                                                &fld.dtype,
+                                                array_struct_paths,
+                                                &format!("{path}{{value}}"),
+                                            )?
                                         });
                                     }
                                 }
@@ -3671,7 +3741,14 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
                 };
                 let arr: Vec<JsonValue> = (0..s.len())
                     .filter_map(|i| s.get(i).ok())
-                    .map(|a| any_value_to_json(&a, inner_dtype))
+                    .map(|a| {
+                        any_value_to_json_with_array_struct_override(
+                            &a,
+                            inner_dtype,
+                            array_struct_paths,
+                            &format!("{path}[]"),
+                        )
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 JsonValue::Array(arr)
             }
@@ -3679,7 +3756,16 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
         AnyValue::Struct(_, _, fields) => {
             let mut vals: Vec<JsonValue> = Vec::with_capacity(fields.len());
             for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
-                vals.push(any_value_to_json(&fld_av, &fld.dtype)?);
+                vals.push(any_value_to_json_with_array_struct_override(
+                    &fld_av,
+                    &fld.dtype,
+                    array_struct_paths,
+                    &format!(
+                        "{path}.{}",
+                        serde_json::to_string(fld.name.as_str())
+                            .expect("field names serialize as JSON strings")
+                    ),
+                )?);
             }
             if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
                 JsonValue::Null
@@ -3696,7 +3782,18 @@ fn any_value_to_json(av: &AnyValue<'_>, dtype: &DataType) -> Result<JsonValue, P
             let vals: Vec<JsonValue> = values
                 .iter()
                 .zip(fields.iter())
-                .map(|(fld_av, fld)| any_value_to_json(fld_av, &fld.dtype))
+                .map(|(fld_av, fld)| {
+                    any_value_to_json_with_array_struct_override(
+                        fld_av,
+                        &fld.dtype,
+                        array_struct_paths,
+                        &format!(
+                            "{path}.{}",
+                            serde_json::to_string(fld.name.as_str())
+                                .expect("field names serialize as JSON strings")
+                        ),
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
                 JsonValue::Null
@@ -3735,7 +3832,7 @@ pub fn broadcast(df: &DataFrame) -> DataFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use polars::prelude::{NamedFrom, Series};
+    use polars::prelude::{IntoSeries, NamedFrom, Series};
 
     /// Issue #235: root-level string–numeric comparison coercion in filter.
     #[test]
@@ -3759,6 +3856,28 @@ mod tests {
         assert_eq!(out.count().unwrap(), 1);
         let rows = out.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("value").and_then(|v| v.as_i64()), Some(100));
+    }
+
+    #[test]
+    fn filter_sql_decimal_integral_literal_preserves_precision() {
+        let s = Series::new(
+            "amount".into(),
+            &[
+                Some(9_007_199_254_740_992i128),
+                Some(9_007_199_254_740_993i128),
+            ],
+        )
+        .into_decimal(20, 0)
+        .unwrap()
+        .into_series();
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![s.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+        // SQL `expr()` aliases its parsed expression with the original source text.
+        let condition = col("amount")
+            .eq(lit(9_007_199_254_740_993i64))
+            .alias("amount = 9007199254740993");
+        let out = df.filter(condition).unwrap();
+        assert_eq!(out.count().unwrap(), 1);
     }
 
     /// #1589: to_date(expr) == string literal coerces string to date (PySpark parity).

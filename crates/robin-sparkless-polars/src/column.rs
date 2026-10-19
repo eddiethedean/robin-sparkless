@@ -13,6 +13,187 @@ pub(crate) fn expect_col(
     r.and_then(|o| o.ok_or_else(|| PolarsError::ComputeError("expected column".into())))
 }
 
+/// Build a PySpark-style binary arithmetic expression with a marker so its
+/// session-dependent settings can be rebound when a DataFrame plan is analyzed.
+pub(crate) fn pyspark_binary_arithmetic_expr(
+    left: Expr,
+    right: Expr,
+    op: crate::decimal_arithmetic::BinaryOp,
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> Expr {
+    let args = [right];
+    let eval_op = op;
+    let schema_op = op;
+    let mut expr = left.map_many(
+        move |cols| match eval_op {
+            crate::decimal_arithmetic::BinaryOp::Add => {
+                expect_col(crate::udfs::apply_pyspark_add_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+            crate::decimal_arithmetic::BinaryOp::Subtract => {
+                expect_col(crate::udfs::apply_pyspark_subtract_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+            crate::decimal_arithmetic::BinaryOp::Multiply => {
+                expect_col(crate::udfs::apply_pyspark_multiply_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+            crate::decimal_arithmetic::BinaryOp::Divide if ansi_enabled => expect_col(
+                crate::udfs::apply_ansi_divide_with_precision_loss(cols, allow_precision_loss),
+            ),
+            crate::decimal_arithmetic::BinaryOp::Divide => {
+                expect_col(crate::udfs::apply_pyspark_divide_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+        },
+        &args,
+        move |_schema, fields| {
+            let dtype = crate::decimal_arithmetic::result_type(
+                fields[0].dtype(),
+                fields[1].dtype(),
+                schema_op,
+                allow_precision_loss,
+            )
+            .unwrap_or(DataType::Float64);
+            Ok(Field::new(fields[0].name().clone(), dtype))
+        },
+    );
+
+    if let Expr::AnonymousFunction { fmt_str, .. } = &mut expr {
+        **fmt_str = op.expr_marker().into();
+    }
+    expr
+}
+
+/// Mark an ExprIr arithmetic expression for plan-time dispatch. Decimal and
+/// integral operands use the exact decimal implementation; other operands are
+/// rebound to the existing ANSI expression semantics during analysis.
+pub(crate) fn expr_ir_binary_arithmetic_expr(
+    left: Expr,
+    right: Expr,
+    op: crate::decimal_arithmetic::BinaryOp,
+) -> Expr {
+    let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
+    let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
+    let args = [right];
+    let eval_op = op;
+    let schema_op = op;
+    let mut expr = left.map_many(
+        move |cols| {
+            let left_type = cols[0].dtype();
+            let right_type = cols[1].dtype();
+            let exact_decimal = crate::decimal_arithmetic::result_type(
+                left_type,
+                right_type,
+                eval_op,
+                allow_precision_loss,
+            )
+            .is_some();
+            let decimal_float = (matches!(left_type, DataType::Decimal(..))
+                && right_type.is_float())
+                || (matches!(right_type, DataType::Decimal(..)) && left_type.is_float());
+            let use_decimal_arithmetic = exact_decimal || decimal_float;
+
+            let result = match (eval_op, ansi_enabled, use_decimal_arithmetic) {
+                (crate::decimal_arithmetic::BinaryOp::Add, _, true) => {
+                    crate::udfs::apply_pyspark_add_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Add, true, false) => {
+                    crate::udfs::apply_ansi_add(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Add, false, false) => {
+                    crate::udfs::apply_try_add(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Subtract, _, true) => {
+                    crate::udfs::apply_pyspark_subtract_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Subtract, true, false) => {
+                    crate::udfs::apply_ansi_subtract(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Subtract, false, false) => {
+                    crate::udfs::apply_try_subtract(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Multiply, _, true) => {
+                    crate::udfs::apply_pyspark_multiply_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Multiply, true, false) => {
+                    crate::udfs::apply_ansi_multiply(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Multiply, false, false) => {
+                    crate::udfs::apply_try_multiply(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Divide, true, _) => {
+                    crate::udfs::apply_ansi_divide_with_precision_loss(cols, allow_precision_loss)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Divide, false, _) => {
+                    crate::udfs::apply_pyspark_divide_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+            };
+            expect_col(result)
+        },
+        &args,
+        move |_schema, fields| {
+            let left_type = fields[0].dtype();
+            let right_type = fields[1].dtype();
+            let dtype = crate::decimal_arithmetic::result_type(
+                left_type,
+                right_type,
+                schema_op,
+                allow_precision_loss,
+            );
+            let dtype = if let Some(dtype) = dtype {
+                dtype
+            } else {
+                let decimal_float = (matches!(left_type, DataType::Decimal(..))
+                    && right_type.is_float())
+                    || (matches!(right_type, DataType::Decimal(..)) && left_type.is_float());
+                if decimal_float
+                    || (matches!(schema_op, crate::decimal_arithmetic::BinaryOp::Divide)
+                        && !ansi_enabled)
+                {
+                    DataType::Float64
+                } else {
+                    crate::ansi::arithmetic_field(fields)?.dtype().clone()
+                }
+            };
+            Ok(Field::new(fields[0].name().clone(), dtype))
+        },
+    );
+    if let Expr::AnonymousFunction { fmt_str, .. } = &mut expr {
+        **fmt_str = op.engine_expr_marker().into();
+    }
+    expr
+}
+
 /// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.
 /// When escape_char is Some(esc), esc + any char treats that char as literal (no %/_ expansion).
 fn like_pattern_to_regex(pattern: &str, escape_char: Option<char>) -> String {
@@ -107,7 +288,7 @@ pub struct RangeWindowSpec {
     pub agg: RangeWindowAgg,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RangeWindowAgg {
     Sum,
     Mean,
@@ -1789,55 +1970,52 @@ impl Column {
 
     /// Multiply with PySpark-style string/number coercion (used by Python Column operators).
     ///
-    /// Both operands are coerced to Double when used from Python; string columns are parsed
-    /// as doubles where possible, invalid strings become null.
+    /// Decimal operands use exact decimal arithmetic. Other operands use PySpark-style
+    /// Double coercion; string columns are parsed where possible and invalid strings become null.
     pub fn multiply_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pyspark_multiply(cols)),
-            &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Multiply,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }
 
     /// Add with PySpark-style string/number coercion (used by Python Column operators).
-    /// For string columns, + attempts numeric addition so non-numeric strings become null (issue #1138).
+    /// Decimal operands use exact decimal arithmetic; strings still become null when non-numeric.
     pub fn add_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pyspark_add(cols)),
-            &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Add,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }
 
     /// Subtract with PySpark-style string/number coercion (used by Python Column operators).
     pub fn subtract_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pyspark_subtract(cols)),
-            &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Subtract,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }
 
     /// Divide with PySpark-style string/number coercion (used by Python Column operators).
     pub fn divide_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
-        let expr = self.expr().clone().map_many(
-            move |cols| {
-                if ansi_enabled {
-                    expect_col(crate::udfs::apply_ansi_divide(cols))
-                } else {
-                    expect_col(crate::udfs::apply_pyspark_divide(cols))
-                }
-            },
-            &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Divide,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }
@@ -2712,15 +2890,27 @@ impl Column {
                 Some((order_exprs, default_opts)),
             );
             let expr = if let Some(ref src) = self.source_for_running_mean {
-                col(src)
-                    .cast(DataType::Float64)
-                    .rolling_mean(rolling_opts.clone())
-                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
+                crate::functions::running_avg_expr(
+                    col(src),
+                    crate::udf_context::get_thread_ansi_enabled(),
+                    Some((start, end)),
+                )
+                .over_with_options(
+                    over_opts.0,
+                    over_opts.1,
+                    WindowMapping::default(),
+                )?
             } else if let Some(ref src) = self.source_for_running {
-                col(src)
-                    .cast(DataType::Float64)
-                    .rolling_sum(rolling_opts.clone())
-                    .over_with_options(over_opts.0, over_opts.1, WindowMapping::default())?
+                crate::functions::running_sum_expr(
+                    col(src),
+                    crate::udf_context::get_thread_ansi_enabled(),
+                    Some((start, end)),
+                )
+                .over_with_options(
+                    over_opts.0,
+                    over_opts.1,
+                    WindowMapping::default(),
+                )?
             } else if let Some(ref src) = self.source_for_running_count {
                 col(src)
                     .is_not_null()
@@ -2769,14 +2959,17 @@ impl Column {
 
         let base_expr = if use_running_aggregate {
             if let Some(ref src) = self.source_for_running_mean {
-                // Running mean in window order: cum_sum / cum_count on same column so order applies (#1241).
-                let sum_expr = col(src).cast(DataType::Float64).cum_sum(false);
-                let count_expr = col(src).cum_count(false).cast(DataType::Float64);
-                sum_expr / count_expr
+                crate::functions::running_avg_expr(
+                    col(src),
+                    crate::udf_context::get_thread_ansi_enabled(),
+                    None,
+                )
             } else if let Some(ref src) = self.source_for_running {
-                // Running sum in window order. Cast to Float64 so string columns work
-                // (PySpark parity, issue #393). Non-running sums still use native dtype.
-                col(src).cast(DataType::Float64).cum_sum(false)
+                crate::functions::running_sum_expr(
+                    col(src),
+                    crate::udf_context::get_thread_ansi_enabled(),
+                    None,
+                )
             } else if let Some(ref src) = self.source_for_running_count {
                 // Running count in window order (PySpark count().over(order); #1218).
                 col(src).cum_count(false).cast(DataType::Int64)

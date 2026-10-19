@@ -2,6 +2,7 @@
 //! Parsing is provided by the `spark-sql-parser` crate; this module translates AST to DataFrame ops.
 //! Compiled only when the `sql` feature is enabled.
 
+mod decimal;
 mod translator;
 
 use crate::dataframe::DataFrame;
@@ -197,6 +198,122 @@ pub fn parse_select_exprs(
 }
 
 pub use translator::{expr_string_to_polars, translate};
+
+/// Source and output names for a SQL projection that selects an existing column.
+/// Uses the same parser as selectExpr, including implicit and quoted aliases.
+pub fn select_expr_source(expression: &str) -> Result<Option<(String, String)>, PolarsError> {
+    use spark_sql_parser::ast::Expr;
+    let (expr, alias) = spark_sql_parser::parse_select_expr(expression)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    fn source(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Identifier(name) => Some(name.value.clone()),
+            Expr::CompoundIdentifier(parts) => Some(
+                parts
+                    .iter()
+                    .map(|part| part.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            ),
+            Expr::Nested(expr) | Expr::Cast { expr, .. } => source(expr),
+            _ => None,
+        }
+    }
+    Ok(source(&expr).map(|source| {
+        let output = alias
+            .map(|alias| alias.value)
+            .unwrap_or_else(|| expression.to_string());
+        (source, output)
+    }))
+}
+
+/// Return an explicit alias and all column references in a SQL projection.
+/// The references let Python-side metadata follow computed expressions such as COALESCE.
+pub fn select_expr_metadata(
+    expression: &str,
+) -> Result<(Option<String>, Vec<String>), PolarsError> {
+    use std::ops::ControlFlow;
+
+    use spark_sql_parser::ast::{self, Expr};
+    let (expr, alias) = spark_sql_parser::parse_select_expr(expression)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    let alias = alias.map(|alias| alias.value);
+    let mut references = Vec::new();
+    let _: ControlFlow<()> = ast::visit_expressions(&expr, |expr| {
+        match expr {
+            Expr::Identifier(name) => references.push(name.value.clone()),
+            Expr::CompoundIdentifier(parts) => references.push(
+                parts
+                    .iter()
+                    .map(|part| part.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            ),
+            _ => {}
+        }
+        ControlFlow::Continue(())
+    });
+    Ok((alias, references))
+}
+
+/// Return whether a SQL projection only chooses between existing values and NULL.
+/// Python uses this to carry Arrow map intent through map-preserving expressions
+/// without treating map-to-entry-array functions as maps.
+pub fn select_expr_preserves_map_value(expression: &str) -> Result<bool, PolarsError> {
+    use spark_sql_parser::ast::{
+        Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan,
+    };
+
+    fn map_value_expr(expr: &Expr) -> bool {
+        match expr {
+            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => true,
+            Expr::Nested(expr) => map_value_expr(expr),
+            Expr::Value(ValueWithSpan {
+                value: Value::Null, ..
+            }) => true,
+            Expr::Case {
+                conditions,
+                else_result,
+                ..
+            } => {
+                !conditions.is_empty()
+                    && conditions
+                        .iter()
+                        .all(|condition| map_value_expr(&condition.result))
+                    && else_result.as_deref().is_none_or(map_value_expr)
+            }
+            Expr::Function(function)
+                if function.name.to_string().eq_ignore_ascii_case("coalesce") =>
+            {
+                let FunctionArguments::List(arguments) = &function.args else {
+                    return false;
+                };
+                !arguments.args.is_empty()
+                    && arguments.clauses.is_empty()
+                    && arguments.args.iter().all(|argument| {
+                        let argument = match argument {
+                            FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+                            | FunctionArg::Named {
+                                arg: FunctionArgExpr::Expr(expr),
+                                ..
+                            }
+                            | FunctionArg::ExprNamed {
+                                arg: FunctionArgExpr::Expr(expr),
+                                ..
+                            } => expr,
+                            _ => return false,
+                        };
+                        map_value_expr(argument)
+                    })
+            }
+            _ => false,
+        }
+    }
+
+    let (expr, _) = spark_sql_parser::parse_select_expr(expression)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    Ok(map_value_expr(&expr))
+}
 
 #[cfg(test)]
 mod tests {

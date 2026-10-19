@@ -2,6 +2,8 @@
 use super::compute_err;
 use chrono::{Datelike, TimeZone};
 use chrono_tz::Tz;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 use polars::prelude::*;
 use regex::Regex;
 use std::borrow::Cow;
@@ -3778,6 +3780,12 @@ fn series_to_f64_pyspark(s: &Series, ctx: &str) -> PolarsResult<Float64Chunked> 
             // All-null column – return a null Float64Chunked of same length.
             Ok(Float64Chunked::full_null(PlSmallStr::EMPTY, s.len()))
         }
+        DataType::Decimal(..) => {
+            // Polars' direct Decimal-to-Float64 cast can round large values up.
+            // Parsing the exact decimal text gives the correctly rounded f64.
+            let text = s.cast(&DataType::String).map_err(|e| compute_err(ctx, e))?;
+            series_to_f64_pyspark(&text, ctx)
+        }
         // For all other dtypes, rely on Polars cast to Float64.
         _ => {
             let casted = s
@@ -3843,32 +3851,146 @@ fn pyspark_binary_arith(
     Ok(Some(Column::new(name, out)))
 }
 
+/// Keep decimal and integral Column arithmetic in exact decimal coefficients.
+/// Returns `None` for inputs that should use the regular Float64 coercion path.
+fn pyspark_decimal_binary_arith(
+    columns: &mut [Column],
+    ctx: &str,
+    op: crate::decimal_arithmetic::BinaryOp,
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            format!("{ctx} needs two columns").into(),
+        ));
+    }
+    let left_type = columns[0].dtype().clone();
+    let right_type = columns[1].dtype().clone();
+    let Some(output_type) =
+        crate::decimal_arithmetic::result_type(&left_type, &right_type, op, allow_precision_loss)
+    else {
+        return Ok(None);
+    };
+
+    let name = columns[0].field().into_owned().name;
+    let left = std::mem::take(&mut columns[0]).take_materialized_series();
+    let right = std::mem::take(&mut columns[1]).take_materialized_series();
+    let output =
+        crate::decimal_arithmetic::evaluate(&left, &right, op, &output_type, ansi_enabled)?;
+    Ok(Some(Column::new(name, output)))
+}
+
 /// PySpark-style addition for Python Column + operator.
 /// For string inputs, PySpark treats + as numeric addition: non-numeric strings become null.
-/// We implement this via pyspark_binary_arith so that all operands are coerced to f64 and
-/// invalid parses become null, matching PySpark behavior from issue #1138.
+/// Decimal and integral inputs take the exact decimal path; other values use Float64 parsing.
 pub fn apply_pyspark_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_add_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_ansi_enabled(),
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
+    )
+}
+
+pub(crate) fn apply_pyspark_add_with_precision_loss(
+    columns: &mut [Column],
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_add",
+        crate::decimal_arithmetic::BinaryOp::Add,
+        ansi_enabled,
+        allow_precision_loss,
+    )? {
+        return Ok(Some(output));
+    }
     pyspark_binary_arith(columns, "pyspark_add", |a, b| a + b)
 }
 
 /// PySpark-style subtraction with string/number coercion for Python Column operators.
 pub fn apply_pyspark_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_subtract_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_ansi_enabled(),
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
+    )
+}
+
+pub(crate) fn apply_pyspark_subtract_with_precision_loss(
+    columns: &mut [Column],
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_subtract",
+        crate::decimal_arithmetic::BinaryOp::Subtract,
+        ansi_enabled,
+        allow_precision_loss,
+    )? {
+        return Ok(Some(output));
+    }
     pyspark_binary_arith(columns, "pyspark_subtract", |a, b| a - b)
 }
 
 /// PySpark-style multiplication with string/number coercion for Python Column operators.
 pub fn apply_pyspark_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_multiply_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_ansi_enabled(),
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
+    )
+}
+
+pub(crate) fn apply_pyspark_multiply_with_precision_loss(
+    columns: &mut [Column],
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_multiply",
+        crate::decimal_arithmetic::BinaryOp::Multiply,
+        ansi_enabled,
+        allow_precision_loss,
+    )? {
+        return Ok(Some(output));
+    }
     pyspark_binary_arith(columns, "pyspark_multiply", |a, b| a * b)
 }
 
 /// PySpark-style true division with string/number coercion for Python Column operators.
 /// Division by zero yields null (Spark/PySpark parity; issue #218).
-#[allow(clippy::useless_conversion)] // ChunkedArray needs .into_iter() for owned iteration
 pub fn apply_pyspark_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_divide_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_ansi_enabled(),
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
+    )
+}
+
+#[allow(clippy::useless_conversion)] // ChunkedArray needs .into_iter() for owned iteration
+pub(crate) fn apply_pyspark_divide_with_precision_loss(
+    columns: &mut [Column],
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
             "pyspark_divide needs two columns".into(),
         ));
+    }
+
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_divide",
+        crate::decimal_arithmetic::BinaryOp::Divide,
+        ansi_enabled,
+        allow_precision_loss,
+    )? {
+        return Ok(Some(output));
     }
 
     let name = columns[0].field().into_owned().name;
@@ -4160,10 +4282,29 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
 
 /// ANSI divide: error if any divisor is zero (spark.sql.ansi.enabled=true).
 pub fn apply_ansi_divide(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_ansi_divide_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
+    )
+}
+
+pub(crate) fn apply_ansi_divide_with_precision_loss(
+    columns: &mut [Column],
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
     if columns.len() < 2 {
         return Err(PolarsError::ComputeError(
             "ansi_divide needs two columns".into(),
         ));
+    }
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "ansi_divide",
+        crate::decimal_arithmetic::BinaryOp::Divide,
+        true,
+        allow_precision_loss,
+    )? {
+        return Ok(Some(output));
     }
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
@@ -5889,11 +6030,91 @@ fn f64_to_int_trunc(f: f64) -> Option<i64> {
     }
 }
 
+fn cast_decimal_to_integer(
+    series: &Series,
+    target: &DataType,
+    strict: bool,
+    try_cast: bool,
+) -> PolarsResult<Series> {
+    let DataType::Decimal(_, scale) = series.dtype() else {
+        unreachable!("decimal cast helper requires a decimal input")
+    };
+    let (bits, target_name) = match target {
+        DataType::Int16 => (16usize, "SMALLINT"),
+        DataType::Int32 => (32usize, "INT"),
+        DataType::Int64 => (64usize, "BIGINT"),
+        _ => unreachable!("target is Int16, Int32, or Int64"),
+    };
+    let divisor = BigInt::from(10).pow(*scale as u32);
+    let modulus = BigInt::from(1) << bits;
+    let sign_bit = BigInt::from(1) << (bits - 1);
+    let minimum = -&sign_bit;
+    let maximum = &sign_bit - BigInt::from(1);
+    let mut cast_values = Vec::with_capacity(series.len());
+
+    for idx in 0..series.len() {
+        let value = match series.get(idx)? {
+            AnyValue::Null => None,
+            AnyValue::Decimal(coefficient, _, _) | AnyValue::Int128(coefficient) => {
+                Some(BigInt::from(coefficient) / &divisor)
+            }
+            other => {
+                return Err(PolarsError::ComputeError(
+                    format!("decimal to integer received unexpected value {other:?}").into(),
+                ));
+            }
+        };
+        let Some(value) = value else {
+            cast_values.push(None);
+            continue;
+        };
+        if strict && (value < minimum || value > maximum) {
+            return Err(PolarsError::ComputeError(
+                format!("[CAST_OVERFLOW] decimal value {value} overflows {target_name}").into(),
+            ));
+        }
+        if try_cast && (value < minimum || value > maximum) {
+            cast_values.push(None);
+            continue;
+        }
+        let wrapped = ((&value % &modulus) + &modulus) % &modulus;
+        let signed = if wrapped >= sign_bit {
+            wrapped - &modulus
+        } else {
+            wrapped
+        };
+        cast_values.push(Some(signed));
+    }
+
+    match target {
+        DataType::Int16 => {
+            let values = cast_values
+                .into_iter()
+                .map(|value| value.map(|value| value.to_i16().expect("wrapped value fits i16")));
+            Ok(Int16Chunked::from_iter_options(series.name().clone(), values).into_series())
+        }
+        DataType::Int32 => {
+            let values = cast_values
+                .into_iter()
+                .map(|value| value.map(|value| value.to_i32().expect("wrapped value fits i32")));
+            Ok(Int32Chunked::from_iter_options(series.name().clone(), values).into_series())
+        }
+        DataType::Int64 => {
+            let values = cast_values
+                .into_iter()
+                .map(|value| value.map(|value| value.to_i64().expect("wrapped value fits i64")));
+            Ok(Int64Chunked::from_iter_options(series.name().clone(), values).into_series())
+        }
+        _ => unreachable!("target is Int16, Int32, or Int64"),
+    }
+}
+
 /// Apply string-to-int cast. Handles string columns: empty/invalid -> null (Spark parity); passes through int columns; others error (strict) or null.
 pub fn apply_string_to_int(
     column: Column,
     strict: bool,
     target: DataType,
+    try_cast: bool,
 ) -> PolarsResult<Option<Column>> {
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -5909,7 +6130,8 @@ pub fn apply_string_to_int(
                 let v = opt_s.and_then(parse_str_to_int);
                 if strict {
                     if let Some(s) = opt_s {
-                        if v.is_none() {
+                        if v.is_none_or(|n| target == DataType::Int16 && i16::try_from(n).is_err())
+                        {
                             return Err(PolarsError::ComputeError(
                                 format!(
                                     "conversion from `str` to `{}` failed in column '{}' for value \"{s}\"",
@@ -5924,6 +6146,14 @@ pub fn apply_string_to_int(
                 results.push(v);
             }
             match &target {
+                DataType::Int16 => {
+                    let vals: Vec<Option<i16>> = results
+                        .into_iter()
+                        .map(|o| o.and_then(|n| i16::try_from(n).ok()))
+                        .collect();
+                    Int16Chunked::from_iter_options(name.as_str().into(), vals.into_iter())
+                        .into_series()
+                }
                 DataType::Int32 => {
                     let vals: Vec<Option<i32>> = results
                         .into_iter()
@@ -5943,10 +6173,11 @@ pub fn apply_string_to_int(
                         Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter());
                     chunked.into_series()
                 }
-                _ => unreachable!("target is Int32 or Int64"),
+                _ => unreachable!("target is Int16, Int32, or Int64"),
             }
         }
-        DataType::Int32 | DataType::Int64 => series.cast(&target)?,
+        DataType::Int16 | DataType::Int32 | DataType::Int64 => series.cast(&target)?,
+        DataType::Decimal(_, _) => cast_decimal_to_integer(&series, &target, strict, try_cast)?,
         DataType::Float32 | DataType::Float64 => {
             // #649: f64/f32 -> i32/i64 with truncation; NaN/inf -> null (try_cast) or error (cast).
             let casted = series.cast(&DataType::Float64)?;
@@ -5971,7 +6202,26 @@ pub fn apply_string_to_int(
                             }
                             None
                         } else {
-                            let n = f.trunc() as i64;
+                            let truncated = f.trunc();
+                            if target == DataType::Int16
+                                && (truncated < f64::from(i16::MIN)
+                                    || truncated > f64::from(i16::MAX))
+                            {
+                                if strict {
+                                    return Err(PolarsError::ComputeError(
+                                        format!(
+                                            "casting from {} to {} overflow for value {}",
+                                            series.dtype(),
+                                            target,
+                                            f
+                                        )
+                                        .into(),
+                                    ));
+                                }
+                                results.push(None);
+                                continue;
+                            }
+                            let n = truncated as i64;
                             if target == DataType::Int32
                                 && (n < i64::from(i32::MIN) || n > i64::from(i32::MAX))
                             {
@@ -5996,6 +6246,14 @@ pub fn apply_string_to_int(
                 results.push(v);
             }
             let out_series = match &target {
+                DataType::Int16 => {
+                    let vals: Vec<Option<i16>> = results
+                        .into_iter()
+                        .map(|o| o.and_then(|n| i16::try_from(n).ok()))
+                        .collect();
+                    Int16Chunked::from_iter_options(name.as_str().into(), vals.into_iter())
+                        .into_series()
+                }
                 DataType::Int32 => {
                     let vals: Vec<Option<i32>> = results
                         .into_iter()
@@ -6013,7 +6271,7 @@ pub fn apply_string_to_int(
                     Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter())
                         .into_series()
                 }
-                _ => unreachable!("target is Int32 or Int64"),
+                _ => unreachable!("target is Int16, Int32, or Int64"),
             };
             out_series
         }
@@ -6227,6 +6485,9 @@ pub fn apply_string_to_double(column: Column, strict: bool) -> PolarsResult<Opti
             }
             Float64Chunked::from_iter_options(name.as_str().into(), results.into_iter())
                 .into_series()
+        }
+        DataType::Decimal(_, _) => {
+            series_to_f64_pyspark(&series, "string to double")?.into_series()
         }
         DataType::Float32 | DataType::Float64 => series.cast(&DataType::Float64)?,
         DataType::Int32 | DataType::Int64 | DataType::UInt32 | DataType::UInt64 => {

@@ -139,8 +139,8 @@ pub fn to_engine_error(e: PolarsError) -> EngineError {
 
 // Re-export thread UDF context functions for test isolation fix
 pub use robin_sparkless_polars::{
-    clear_thread_udf_context, get_thread_runtime_config, set_thread_udf_context,
-    set_thread_udf_context_full, set_thread_udf_context_with_tz,
+    clear_thread_udf_context, get_thread_runtime_config, set_thread_decimal_allow_precision_loss,
+    set_thread_udf_context, set_thread_udf_context_full, set_thread_udf_context_with_tz,
 };
 
 #[cfg(feature = "sql")]
@@ -150,7 +150,10 @@ pub mod sql {
     use crate::session::SparkSession;
     use robin_sparkless_polars::PolarsError;
 
-    pub use robin_sparkless_polars::sql::{Statement, execute_sql, parse_sql};
+    pub use robin_sparkless_polars::sql::{
+        Statement, execute_sql, parse_sql, select_expr_metadata, select_expr_preserves_map_value,
+        select_expr_source,
+    };
 
     /// Parse a single SQL expression string to Polars Expr using the session and DataFrame for resolution.
     pub fn expr_string_to_polars(

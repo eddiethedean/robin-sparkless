@@ -30,8 +30,10 @@ sqlite = ["dep:rusqlite"]
 
 [dependencies]
 robin-sparkless-core = { version = "4.13.3", path = "../robin-sparkless-core" }
-polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment", "rolling_window"] }
+polars = { version = "0.53", features = ["lazy", "csv", "parquet", "json", "temporal", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "dtype-decimal", "dtype-u128", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment", "rolling_window"] }
 polars-plan = "0.53"
+num-bigint = "0.4"
+num-traits = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = "0.4"
@@ -65,8 +67,8 @@ indexmap = { version = "2", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
 postgres = { version = "0.19.14", optional = true }
 rusqlite = { version = "0.32", optional = true }
-mysql = { version = "28", optional = true }
-tiberius = { version = "0.12.3", optional = true, default-features = false, features = ["tds73", "rustls", "chrono", "tokio", "sql-browser-tokio"] }
+mysql = { version = "28.0.4", optional = true }
+tiberius = { version = "0.13.0", optional = true, default-features = false, features = ["tds73", "rustls", "chrono", "tokio", "sql-browser-tokio"] }
 tokio-util = { version = "0.7", optional = true, features = ["compat"] }
 futures-util = { version = "0.3", optional = true }
 oracle-rs = { version = "0.1.5", package = "oracle-rs", optional = true }

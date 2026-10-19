@@ -1,4 +1,145 @@
+use num_bigint::BigInt;
+use num_traits::{Signed, Zero};
 use polars::prelude::*;
+
+fn decimal_ordering_key_expr(expr: Expr, scale: usize, integral_width: usize) -> Expr {
+    expr.map(
+        move |column| {
+            let series = column.as_materialized_series();
+            let values = if let DataType::Decimal(_, source_scale) = series.dtype() {
+                let multiplier = BigInt::from(10).pow(scale.saturating_sub(*source_scale) as u32);
+                let mut values = Vec::with_capacity(series.len());
+                for idx in 0..series.len() {
+                    values.push(match series.get(idx)? {
+                        AnyValue::Decimal(value, _, _) => Some(BigInt::from(value) * &multiplier),
+                        AnyValue::Null => None,
+                        _ => {
+                            return Err(PolarsError::ComputeError(
+                                "expected a decimal value for decimal comparison".into(),
+                            ));
+                        }
+                    });
+                }
+                values
+            } else {
+                let mut values = Vec::with_capacity(series.len());
+                let integer_factor = BigInt::from(10).pow(scale as u32);
+                for idx in 0..series.len() {
+                    let value = series.get(idx)?;
+                    let value = match value {
+                        AnyValue::Null => None,
+                        AnyValue::Int8(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::Int16(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::Int32(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::Int64(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::UInt8(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::UInt16(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::UInt32(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::UInt64(value) => Some(BigInt::from(value) * &integer_factor),
+                        AnyValue::Float32(value) => {
+                            decimal_string_to_scaled(&value.to_string(), scale)?
+                        }
+                        AnyValue::Float64(value) => {
+                            decimal_string_to_scaled(&value.to_string(), scale)?
+                        }
+                        _ => {
+                            return Err(PolarsError::ComputeError(
+                                "expected a numeric value for decimal comparison".into(),
+                            ));
+                        }
+                    };
+                    values.push(value);
+                }
+                values
+            };
+
+            let factor = BigInt::from(10).pow(scale as u32);
+            let mut keys = Vec::with_capacity(values.len());
+            for value in values {
+                let Some(value) = value else {
+                    keys.push(None);
+                    continue;
+                };
+                let absolute = value.abs();
+                let integer = (&absolute / &factor).to_string();
+                if integer.len() > integral_width {
+                    return Err(PolarsError::ComputeError(
+                        "decimal comparison value exceeds supported precision".into(),
+                    ));
+                }
+                let fraction = (&absolute % &factor).to_string();
+                let digits = format!(
+                    "{}{}{}{}",
+                    "0".repeat(integral_width - integer.len()),
+                    integer,
+                    "0".repeat(scale.saturating_sub(fraction.len())),
+                    fraction
+                );
+                if value.is_negative() {
+                    let digits: String = digits
+                        .bytes()
+                        .map(|digit| (b'9' - (digit - b'0')) as char)
+                        .collect();
+                    keys.push(Some(format!("0{digits}")));
+                } else {
+                    keys.push(Some(format!("1{digits}")));
+                }
+            }
+            Ok(Series::new(series.name().clone(), keys).into())
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
+    )
+}
+
+fn decimal_string_to_scaled(value: &str, scale: usize) -> PolarsResult<Option<BigInt>> {
+    let (mantissa, exponent) = match value.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (
+            mantissa,
+            exponent.parse::<i32>().map_err(|_| {
+                PolarsError::ComputeError("invalid exponent in decimal comparison".into())
+            })?,
+        ),
+        None => (value, 0),
+    };
+    let negative = mantissa.starts_with('-');
+    let unsigned = mantissa.trim_start_matches(['-', '+']);
+    let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    if (whole.is_empty() && fraction.is_empty())
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Ok(None);
+    }
+    let digits = format!("{whole}{fraction}");
+    let mut scaled = BigInt::parse_bytes(digits.as_bytes(), 10).ok_or_else(|| {
+        PolarsError::ComputeError("invalid numeric literal in decimal comparison".into())
+    })?;
+    let shift = scale as i64 - fraction.len() as i64 + i64::from(exponent);
+    if shift >= 0 {
+        if shift > 4096 {
+            return Err(PolarsError::ComputeError(
+                "decimal comparison exponent exceeds supported precision".into(),
+            ));
+        }
+        scaled *= BigInt::from(10).pow(shift as u32);
+    } else {
+        let discarded = shift.unsigned_abs();
+        if discarded > 4096 {
+            scaled = BigInt::zero();
+        } else {
+            let divisor = BigInt::from(10).pow(discarded as u32);
+            let remainder = &scaled % &divisor;
+            scaled /= &divisor;
+            if remainder.abs() * 2 >= divisor {
+                scaled += 1;
+            }
+        }
+    }
+    if negative {
+        scaled = -scaled;
+    }
+    Ok(Some(scaled))
+}
 
 /// Comparison operators of interest for PySpark-style coercion.
 ///
@@ -10,17 +151,19 @@ pub type CompareOp = polars::prelude::Operator;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code)] // Decimal reserved for future use
 enum TypePrecedence {
-    Int = 1,
-    Long = 2,
-    Decimal = 3,
-    Float = 4,
-    Double = 5,
-    String = 6,
+    Short = 1,
+    Int = 2,
+    Long = 3,
+    Decimal = 4,
+    Float = 5,
+    Double = 6,
+    String = 7,
 }
 
 /// Convert Polars DataType to TypePrecedence
 fn dtype_to_precedence(dtype: &DataType) -> Option<TypePrecedence> {
     match dtype {
+        DataType::Int16 => Some(TypePrecedence::Short),
         DataType::Int32 => Some(TypePrecedence::Int),
         DataType::Int64 => Some(TypePrecedence::Long),
         DataType::Float32 => Some(TypePrecedence::Float),
@@ -41,6 +184,53 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
     }
     if right == &DataType::Null {
         return Ok(left.clone());
+    }
+
+    fn decimal_common_type(
+        left_precision: usize,
+        left_scale: usize,
+        right_precision: usize,
+        right_scale: usize,
+    ) -> DataType {
+        let integral_digits = left_precision
+            .saturating_sub(left_scale)
+            .max(right_precision.saturating_sub(right_scale));
+        let scale = left_scale.max(right_scale);
+        // Keep the integral capacity when the common type reaches Spark's
+        // precision limit; reduce scale only by the amount needed to fit.
+        let scale = scale.min(38usize.saturating_sub(integral_digits));
+        let precision = integral_digits.saturating_add(scale).clamp(1, 38);
+        DataType::Decimal(precision, scale)
+    }
+
+    match (left, right) {
+        (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
+            return Ok(decimal_common_type(*lp, *ls, *rp, *rs));
+        }
+        (DataType::Decimal(p, s), integer) | (integer, DataType::Decimal(p, s))
+            if matches!(
+                integer,
+                DataType::Int8
+                    | DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::UInt8
+                    | DataType::UInt16
+                    | DataType::UInt32
+                    | DataType::UInt64
+            ) =>
+        {
+            let integer_precision = match integer {
+                DataType::Int8 | DataType::UInt8 => 3,
+                DataType::Int16 | DataType::UInt16 => 5,
+                DataType::Int32 | DataType::UInt32 => 10,
+                DataType::Int64 => 20,
+                DataType::UInt64 => 20,
+                _ => unreachable!(),
+            };
+            return Ok(decimal_common_type(*p, *s, integer_precision, 0));
+        }
+        _ => {}
     }
 
     // #615 / #1596: Date vs Datetime — cast date to datetime (start-of-day) for join/compare parity.
@@ -74,6 +264,7 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
             // Return the type with higher precedence
             let target_prec = if l > r { l } else { r };
             match target_prec {
+                TypePrecedence::Short => Ok(DataType::Int16),
                 TypePrecedence::Int => Ok(DataType::Int32),
                 TypePrecedence::Long => Ok(DataType::Int64),
                 TypePrecedence::Float => Ok(DataType::Float32),
@@ -81,7 +272,7 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
                 TypePrecedence::String => Ok(DataType::String),
                 _ => Err(PolarsError::ComputeError(
                     format!(
-                        "Type coercion: unsupported type precedence {target_prec:?}. Supported: Int32, Int64, Float32, Float64, String."
+                        "Type coercion: unsupported type precedence {target_prec:?}. Supported: Int16, Int32, Int64, Float32, Float64, String."
                     )
                     .into(),
                 )),
@@ -147,8 +338,8 @@ pub fn coerce_expr_pair(
 ) -> Result<(Expr, Expr), PolarsError> {
     let common = find_common_type(left_dtype, right_dtype)?;
     Ok((
-        col(left_name).cast(common.clone()).alias(alias),
-        col(right_name).cast(common).alias(alias),
+        coerce_expr_to_common_type(col(left_name), left_dtype, &common).alias(alias),
+        coerce_expr_to_common_type(col(right_name), right_dtype, &common).alias(alias),
     ))
 }
 
@@ -162,9 +353,33 @@ pub fn coerce_expr_pair_for_join(
 ) -> Result<(Expr, Expr), PolarsError> {
     let common = find_common_type_for_join(left_dtype, right_dtype)?;
     Ok((
-        col(left_name).cast(common.clone()).alias(alias),
-        col(right_name).cast(common).alias(alias),
+        coerce_expr_to_common_type(col(left_name), left_dtype, &common).alias(alias),
+        coerce_expr_to_common_type(col(right_name), right_dtype, &common).alias(alias),
     ))
+}
+
+/// Convert a numeric expression to Float64 without double-rounding decimals.
+fn coerce_numeric_to_float64(expr: Expr, source_type: &DataType) -> Expr {
+    if matches!(source_type, DataType::Decimal(..)) {
+        expr.cast(DataType::String).cast(DataType::Float64)
+    } else {
+        expr.cast(DataType::Float64)
+    }
+}
+
+/// Coerce an expression to a common type while preserving correctly rounded
+/// Decimal-to-Double conversion. Polars converts Decimal coefficients to f64
+/// before dividing by the scale factor, which can double-round large values.
+pub fn coerce_expr_to_common_type(
+    expr: Expr,
+    source_type: &DataType,
+    common_type: &DataType,
+) -> Expr {
+    if matches!(source_type, DataType::Decimal(..)) && common_type == &DataType::Float64 {
+        coerce_numeric_to_float64(expr, source_type)
+    } else {
+        expr.cast(common_type.clone())
+    }
 }
 
 /// Check if a DataType is numeric
@@ -181,6 +396,7 @@ fn is_numeric(dtype: &DataType) -> bool {
             | DataType::UInt64
             | DataType::Float32
             | DataType::Float64
+            | DataType::Decimal(_, _)
     )
 }
 
@@ -246,8 +462,125 @@ pub fn coerce_for_pyspark_comparison(
 ) -> Result<(Expr, Expr), PolarsError> {
     use crate::column::Column;
 
-    // Fast-path: both numeric -> existing numeric coercion.
+    fn decimal_shape_of_literal(expr: &Expr) -> Option<(usize, usize)> {
+        fn shape_from_str(value: &str) -> Option<(usize, usize)> {
+            let (mantissa, exponent) = match value.split_once(['e', 'E']) {
+                Some((mantissa, exponent)) => (mantissa, exponent.parse::<i32>().ok()?),
+                None => (value, 0),
+            };
+            let unsigned_mantissa = mantissa.trim_start_matches(['-', '+']);
+            let (whole, fraction) = unsigned_mantissa
+                .split_once('.')
+                .unwrap_or((unsigned_mantissa, ""));
+            let scale = (fraction.len() as i32 - exponent).max(0) as usize;
+            let significant_digits = format!("{whole}{fraction}").trim_start_matches('0').len();
+            let precision = (significant_digits as i32 + (exponent - fraction.len() as i32).max(0))
+                .max(scale as i32)
+                .max(1) as usize;
+            Some((precision, scale))
+        }
+
+        match expr {
+            Expr::Alias(inner, _) => decimal_shape_of_literal(inner),
+            Expr::Cast { expr, dtype, .. } => dtype.as_literal().and_then(|dtype| match dtype {
+                DataType::Decimal(precision, scale) => Some((*precision, *scale)),
+                _ => decimal_shape_of_literal(expr),
+            }),
+            Expr::Literal(value) => match value.get_datatype() {
+                DataType::Decimal(precision, scale) => Some((precision, scale)),
+                _ => match value.to_any_value()? {
+                    // Spark promotes Decimal + Float/Double comparisons to Double.
+                    // Keep value-based decimal shaping for integral literals only.
+                    AnyValue::Int8(value) => shape_from_str(&value.to_string()),
+                    AnyValue::Int16(value) => shape_from_str(&value.to_string()),
+                    AnyValue::Int32(value) => shape_from_str(&value.to_string()),
+                    AnyValue::Int64(value) => shape_from_str(&value.to_string()),
+                    AnyValue::UInt8(value) => shape_from_str(&value.to_string()),
+                    AnyValue::UInt16(value) => shape_from_str(&value.to_string()),
+                    AnyValue::UInt32(value) => shape_from_str(&value.to_string()),
+                    AnyValue::UInt64(value) => shape_from_str(&value.to_string()),
+                    _ => None,
+                },
+            },
+            _ => None,
+        }
+    }
+
+    fn decimal_shape_of_integral_column(expr: &Expr, dtype: &DataType) -> Option<(usize, usize)> {
+        // Preserve the tighter value-based shapes above for literals. For a column,
+        // use its declared integral width so comparisons never round through a
+        // clamped decimal common type.
+        if matches!(expr, Expr::Literal(_)) {
+            return None;
+        }
+        Some(match dtype {
+            DataType::Int8 | DataType::UInt8 => (3, 0),
+            DataType::Int16 | DataType::UInt16 => (5, 0),
+            DataType::Int32 | DataType::UInt32 => (10, 0),
+            DataType::Int64 | DataType::UInt64 => (20, 0),
+            _ => return None,
+        })
+    }
+
+    fn decimal_shape_of_numeric(expr: &Expr, dtype: &DataType) -> Option<(usize, usize)> {
+        decimal_shape_of_literal(expr).or_else(|| decimal_shape_of_integral_column(expr, dtype))
+    }
+
+    // Keep decimal comparisons in decimal arithmetic. Promoting a Decimal column
+    // and a numeric literal to Float64 loses integer precision above 2^53.
     if is_numeric(left_type) && is_numeric(right_type) {
+        if matches!(
+            (left_type, right_type),
+            (
+                DataType::Decimal(_, _),
+                DataType::Float32 | DataType::Float64
+            ) | (
+                DataType::Float32 | DataType::Float64,
+                DataType::Decimal(_, _)
+            )
+        ) {
+            // Spark promotes Decimal/Float comparisons to Double. Go through the
+            // exact decimal text so the conversion rounds as BigDecimal.doubleValue
+            // does; Polars' direct Decimal-to-Float64 cast can round large values up.
+            return Ok((
+                coerce_numeric_to_float64(left, left_type),
+                coerce_numeric_to_float64(right, right_type),
+            ));
+        }
+
+        let decimal_shape = match (left_type, right_type) {
+            (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
+                Some(((*lp - *ls).max(*rp - *rs), (*ls).max(*rs)))
+            }
+            (DataType::Decimal(p, s), _) => {
+                decimal_shape_of_numeric(&right, right_type).map(|(literal_p, literal_s)| {
+                    ((*p - *s).max(literal_p - literal_s), (*s).max(literal_s))
+                })
+            }
+            (_, DataType::Decimal(p, s)) => {
+                decimal_shape_of_numeric(&left, left_type).map(|(literal_p, literal_s)| {
+                    ((*p - *s).max(literal_p - literal_s), (*s).max(literal_s))
+                })
+            }
+            _ => None,
+        };
+        if let Some((integral_digits, scale)) = decimal_shape {
+            let precision = integral_digits.saturating_add(scale);
+            if precision <= 38 {
+                let common_decimal = DataType::Decimal(precision.max(1), scale);
+                return Ok((
+                    coerce_to_type(left, common_decimal.clone()),
+                    coerce_to_type(right, common_decimal),
+                ));
+            }
+            // No fixed-precision decimal can represent both operands at this scale.
+            // Encode both as lexicographically sortable decimal strings so large
+            // values remain comparable without rounding through Float64.
+            return Ok((
+                decimal_ordering_key_expr(left, scale, integral_digits),
+                decimal_ordering_key_expr(right, scale, integral_digits),
+            ));
+        }
         return coerce_for_comparison(left, right, left_type, right_type);
     }
 
@@ -260,6 +593,31 @@ pub fn coerce_for_pyspark_comparison(
         Ok(coerced.into_expr())
     }
 
+    fn wrap_try_to_decimal(
+        expr: Expr,
+        precision: usize,
+        scale: usize,
+    ) -> Result<Expr, PolarsError> {
+        let col = Column::from_expr(expr, None);
+        let type_name = format!("decimal({precision},{scale})");
+        let coerced = crate::functions::try_cast(&col, &type_name)
+            .map_err(|e| PolarsError::ComputeError(e.into()))?;
+        Ok(coerced.into_expr())
+    }
+
+    // Spark keeps scale-zero Decimal/string comparisons in decimal arithmetic.
+    // Parsing the string as Double here would make adjacent integers above 2^53
+    // compare equal. Decimal values with a positive scale use the Double path below.
+    match (left_type, right_type) {
+        (DataType::Decimal(precision, 0), DataType::String) => {
+            return Ok((left, wrap_try_to_decimal(right, *precision, 0)?));
+        }
+        (DataType::String, DataType::Decimal(precision, 0)) => {
+            return Ok((wrap_try_to_decimal(left, *precision, 0)?, right));
+        }
+        _ => {}
+    }
+
     // String–numeric (or numeric–string): route string side through try_to_number and
     // cast numeric side to Float64 so both sides line up.
     let string_numeric = (left_type == &DataType::String && is_numeric(right_type))
@@ -269,7 +627,7 @@ pub fn coerce_for_pyspark_comparison(
         let left_out = if left_type == &DataType::String {
             wrap_try_to_number(left)?
         } else if is_numeric(left_type) {
-            coerce_to_type(left, DataType::Float64)
+            coerce_numeric_to_float64(left, left_type)
         } else {
             left
         };
@@ -277,7 +635,7 @@ pub fn coerce_for_pyspark_comparison(
         let right_out = if right_type == &DataType::String {
             wrap_try_to_number(right)?
         } else if is_numeric(right_type) {
-            coerce_to_type(right, DataType::Float64)
+            coerce_numeric_to_float64(right, right_type)
         } else {
             right
         };
@@ -486,14 +844,14 @@ pub fn coerce_for_pyspark_arithmetic(
     let left_out = if left_type == &DataType::String {
         wrap_try_to_number(left)?
     } else if is_numeric(left_type) {
-        coerce_to_type(left, DataType::Float64)
+        coerce_numeric_to_float64(left, left_type)
     } else {
         left
     };
     let right_out = if right_type == &DataType::String {
         wrap_try_to_number(right)?
     } else if is_numeric(right_type) {
-        coerce_to_type(right, DataType::Float64)
+        coerce_numeric_to_float64(right, right_type)
     } else {
         right
     };
@@ -522,6 +880,19 @@ mod tests {
     }
 
     #[test]
+    fn find_common_type_short_promotes_to_integer() -> Result<(), PolarsError> {
+        assert_eq!(
+            find_common_type(&DataType::Int16, &DataType::Int32)?,
+            DataType::Int32
+        );
+        assert_eq!(
+            find_common_type(&DataType::Int16, &DataType::Int16)?,
+            DataType::Int16
+        );
+        Ok(())
+    }
+
+    #[test]
     fn numeric_numeric_uses_standard_coercion() -> Result<(), PolarsError> {
         let df = df!(
             "a" => &[1i32, 2, 3],
@@ -541,6 +912,52 @@ mod tests {
         // After coercion both sides should be comparable without error and all rows match.
         let out = df.lazy().filter(ac.eq(bc)).collect()?;
         assert_eq!(out.height(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn decimal_column_and_float_literal_compare_as_double() -> Result<(), PolarsError> {
+        let decimal = Series::new("amount".into(), vec![Some(900_719_925_474_099_300i128)])
+            .into_decimal(20, 2)?
+            .into_series();
+        let df = DataFrame::new(1, vec![decimal.into()])?;
+        let (left, right) = coerce_for_pyspark_comparison(
+            col("amount"),
+            lit(9_007_199_254_740_992.0f64),
+            &DataType::Decimal(20, 2),
+            &DataType::Float64,
+            &CompareOp::Eq,
+        )?;
+
+        let out = df
+            .lazy()
+            .select([left.eq(right).alias("matches")])
+            .collect()?;
+        assert_eq!(out.column("matches")?.bool()?.get(0), Some(true));
+        Ok(())
+    }
+
+    #[test]
+    fn positive_scale_decimal_and_string_compare_without_double_rounding() -> Result<(), PolarsError>
+    {
+        let decimal = Series::new("amount".into(), vec![Some(90_071_992_547_409_929i128)])
+            .into_decimal(18, 1)?
+            .into_series();
+        let amount_text = Series::new("amount_text".into(), vec!["9007199254740992.9"]);
+        let df = DataFrame::new(1, vec![decimal.into(), amount_text.into()])?;
+        let (left, right) = coerce_for_pyspark_comparison(
+            col("amount"),
+            col("amount_text"),
+            &DataType::Decimal(18, 1),
+            &DataType::String,
+            &CompareOp::Eq,
+        )?;
+
+        let out = df
+            .lazy()
+            .select([left.eq(right).alias("matches")])
+            .collect()?;
+        assert_eq!(out.column("matches")?.bool()?.get(0), Some(true));
         Ok(())
     }
 

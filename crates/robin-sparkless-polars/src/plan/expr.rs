@@ -99,8 +99,10 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                     let l_ty = infer_lit_type(&l);
                     let r_ty = infer_lit_type(&r);
 
-                    // #612: When one side is a literal and the other is a column, assume column is String
-                    // so string–numeric coercion is applied (PySpark parity: df.filter(df["s"] == 123)).
+                    // Comparison types involving a column cannot be resolved here. Keep the
+                    // expression uncoerced so the DataFrame-level rewriter can use the actual
+                    // schema; assuming String here would route large integer literals through
+                    // Float64 and lose precision for Decimal columns.
                     use crate::type_coercion::{CompareOp, coerce_for_pyspark_comparison};
                     let op_enum = match op {
                         "eq" => CompareOp::Eq,
@@ -111,26 +113,11 @@ pub fn expr_from_value(v: &Value) -> Result<Expr, PlanExprError> {
                         "le" => CompareOp::LtEq,
                         _ => unreachable!(),
                     };
-                    // #1084: When one side is a column (no type at plan time) and the other is a
-                    // string literal, skip coercion here so the DataFrame-level coerce_string_numeric_comparisons
-                    // (in filter()) can cast the string literal to date/datetime using the actual schema.
                     let (lt, rt) = match (&l_ty, &r_ty) {
                         (Some(lt), Some(rt)) => (lt.clone(), rt.clone()),
-                        (Some(lt), None) => (lt.clone(), DataType::String),
-                        (None, Some(rt)) if *rt == DataType::String => {
-                            return Ok(match op {
-                                "eq" => l.eq(r),
-                                "ne" => l.neq(r),
-                                "gt" => l.gt(r),
-                                "ge" => l.gt_eq(r),
-                                "lt" => l.lt(r),
-                                "le" => l.lt_eq(r),
-                                _ => unreachable!(),
-                            });
-                        }
-                        (None, Some(rt)) => (DataType::String, rt.clone()),
-                        (None, None) => {
-                            // No type info; skip coercion (may error at runtime).
+                        _ => {
+                            // No column schema is available until this expression is attached to
+                            // a DataFrame. Its comparison rewriter applies PySpark coercion then.
                             return Ok(match op {
                                 "eq" => l.eq(r),
                                 "ne" => l.neq(r),

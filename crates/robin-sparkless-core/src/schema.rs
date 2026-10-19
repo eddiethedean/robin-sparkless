@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum DataType {
     String,
     Integer,
+    Short,
     Long,
     Double,
+    Decimal(u8, u8),
     Boolean,
     Date,
     Timestamp,

@@ -6,9 +6,13 @@
 use super::{DataFrame, resolve_column_with_schema};
 use crate::column::RangeWindowAgg;
 use crate::column::expect_col;
-use crate::functions::SortOrder;
-use crate::type_coercion::{coerce_expr_pair, find_common_type, is_numeric_public};
+use crate::functions::{DecimalPrefixExtrema, SortOrder};
+use crate::type_coercion::{
+    coerce_expr_pair, coerce_expr_to_common_type, find_common_type, is_numeric_public,
+};
 use crate::udfs;
+use num_bigint::BigInt;
+use num_traits::{Signed, ToPrimitive, Zero};
 use polars::prelude::{
     DataType, Expr, Float64Chunked, IntoLazy, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     SchemaNamesAndDtypes, Selector, Series, SortMultipleOptions, UniqueKeepStrategy, col, len, lit,
@@ -716,17 +720,22 @@ fn compute_range_window_series(
     const UNBOUNDED_PRECEDING: i64 = i64::MIN;
     const UNBOUNDED_FOLLOWING: i64 = i64::MAX;
 
-    let order_s = sorted_df
-        .column(order_by)?
-        .as_materialized_series()
-        .cast(&DataType::Float64)?;
+    let order_s = sorted_df.column(order_by)?.as_materialized_series().clone();
+    let exact_order_scale = match order_s.dtype() {
+        DataType::Decimal(_, scale) => Some(*scale),
+        dtype if dtype.is_integer() => Some(0),
+        _ => None,
+    };
+    let order_f64 = if exact_order_scale.is_none() {
+        Some(order_s.cast(&DataType::Float64)?)
+    } else {
+        None
+    };
     let value_s = sorted_df.column(value_col)?.as_materialized_series();
-    let value_f64 = value_s.cast(&DataType::Float64)?;
-    let order_ca = order_s.f64()?;
-    let value_ca = value_f64.f64()?;
 
     let n = sorted_df.height();
-    let mut result = Vec::with_capacity(n);
+    let mut windows = vec![None; n];
+    let mut has_order_value = vec![false; n];
     let mut idx = 0usize;
 
     let part_series: Vec<Series> = if partition_by.is_empty() {
@@ -741,9 +750,11 @@ fn compute_range_window_series(
             })
             .collect::<Result<Vec<_>, PolarsError>>()?
     };
+    let mut partition_starts = Vec::new();
 
     while idx < n {
         let part_start = idx;
+        partition_starts.push(part_start);
         let part_end = if part_series.is_empty() {
             n
         } else {
@@ -761,81 +772,296 @@ fn compute_range_window_series(
         };
 
         let part_len = part_end - part_start;
-        let order_slice: Vec<Option<f64>> =
-            (part_start..part_end).map(|i| order_ca.get(i)).collect();
-        let value_slice: Vec<Option<f64>> =
-            (part_start..part_end).map(|i| value_ca.get(i)).collect();
-
-        let start_f = start as f64;
-        let end_f = end as f64;
-
-        let mut prefix_sum: Vec<f64> = Vec::with_capacity(part_len + 1);
-        prefix_sum.push(0.0);
-        let mut prefix_count: Vec<usize> = Vec::with_capacity(part_len + 1);
-        prefix_count.push(0);
-        for (i, v) in value_slice.iter().enumerate() {
-            let prev_s = prefix_sum[i];
-            let prev_c = prefix_count[i];
-            match v {
-                Some(x) => {
-                    prefix_sum.push(prev_s + x);
-                    prefix_count.push(prev_c + 1);
-                }
-                None => {
-                    prefix_sum.push(prev_s);
-                    prefix_count.push(prev_c);
+        if let Some(scale) = exact_order_scale {
+            let factor = BigInt::from(10).pow(scale as u32);
+            let mut ordered_values = Vec::new();
+            for (relative_idx, absolute_idx) in (part_start..part_end).enumerate() {
+                if let Some(value) = exact_range_order_key(order_s.get(absolute_idx)?)? {
+                    ordered_values.push((relative_idx, value));
                 }
             }
-        }
-
-        for i in 0..part_len {
-            let order_val = order_slice[i];
-            let (sum_val, count_val) = match order_val {
-                None => (None, None),
-                Some(v) => {
-                    let low = if start == UNBOUNDED_PRECEDING {
-                        0.0
-                    } else {
-                        v + start_f
-                    };
-                    let high = if end == UNBOUNDED_FOLLOWING {
-                        f64::INFINITY
-                    } else {
-                        v + end_f
-                    };
-                    // Leftmost index where order >= low (inclusive start of range).
-                    let left = order_slice[..=i]
-                        .iter()
-                        .position(|x: &Option<f64>| x.is_some_and(|o| o >= low))
-                        .unwrap_or(0);
-                    let right = order_slice[i..]
-                        .iter()
-                        .position(|x: &Option<f64>| x.is_none_or(|o| o > high))
-                        .map(|p| i + p - 1)
-                        .unwrap_or(part_len - 1);
-                    let left = left.min(i);
-                    let right = right.max(i);
-                    let sum_r = prefix_sum[right + 1] - prefix_sum[left];
-                    let count_r = prefix_count[right + 1] - prefix_count[left];
-                    (Some(sum_r), Some(count_r))
+            let start_offset =
+                (start != UNBOUNDED_PRECEDING).then(|| BigInt::from(start) * &factor);
+            let end_offset = (end != UNBOUNDED_FOLLOWING).then(|| BigInt::from(end) * &factor);
+            let mut left = 0usize;
+            let mut right = 0usize;
+            for i in 0..part_len {
+                let value = exact_range_order_key(order_s.get(part_start + i)?)?;
+                let Some(value) = value else {
+                    continue;
+                };
+                has_order_value[part_start + i] = true;
+                let low = start_offset.as_ref().map(|offset| &value + offset);
+                let high = end_offset.as_ref().map(|offset| &value + offset);
+                while left < ordered_values.len()
+                    && low
+                        .as_ref()
+                        .is_some_and(|low| &ordered_values[left].1 < low)
+                {
+                    left += 1;
                 }
-            };
-            let out: Option<f64> = match agg {
-                RangeWindowAgg::Sum => sum_val,
-                RangeWindowAgg::Count => count_val.map(|c| c as f64),
-                RangeWindowAgg::Mean => match (sum_val, count_val) {
-                    (Some(s), Some(c)) if c > 0 => Some(s / c as f64),
-                    _ => None,
-                },
-            };
-            result.push(out);
+                right = right.max(left);
+                while right < ordered_values.len()
+                    && high
+                        .as_ref()
+                        .is_none_or(|high| &ordered_values[right].1 <= high)
+                {
+                    right += 1;
+                }
+                if left < right {
+                    let first = ordered_values[left].0;
+                    let last = ordered_values[right - 1].0;
+                    windows[part_start + i] = Some((part_start + first, part_start + last));
+                }
+            }
+        } else {
+            let order_ca = order_f64
+                .as_ref()
+                .expect("non-integral range order is cast to Float64")
+                .f64()?;
+            let order_slice: Vec<Option<f64>> =
+                (part_start..part_end).map(|i| order_ca.get(i)).collect();
+            let ordered_values: Vec<(usize, f64)> = order_slice
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, value)| value.map(|value| (idx, value)))
+                .collect();
+            let start_f = start as f64;
+            let end_f = end as f64;
+            let mut left = 0usize;
+            let mut right = 0usize;
+            for i in 0..part_len {
+                let Some(v) = order_slice[i] else {
+                    continue;
+                };
+                has_order_value[part_start + i] = true;
+                let low = if start == UNBOUNDED_PRECEDING {
+                    f64::NEG_INFINITY
+                } else {
+                    v + start_f
+                };
+                let high = if end == UNBOUNDED_FOLLOWING {
+                    f64::INFINITY
+                } else {
+                    v + end_f
+                };
+                while left < ordered_values.len() && ordered_values[left].1 < low {
+                    left += 1;
+                }
+                right = right.max(left);
+                while right < ordered_values.len() && ordered_values[right].1 <= high {
+                    right += 1;
+                }
+                if left < right {
+                    let first = ordered_values[left].0;
+                    let last = ordered_values[right - 1].0;
+                    windows[part_start + i] = Some((part_start + first, part_start + last));
+                }
+            }
         }
 
         idx = part_end;
     }
 
-    let ca = Float64Chunked::from_iter(result);
-    Ok(Series::new(value_col.into(), ca))
+    let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
+    if agg == RangeWindowAgg::Count {
+        let mut counts = Vec::with_capacity(n + 1);
+        counts.push(0usize);
+        for idx in 0..n {
+            counts.push(counts[idx] + usize::from(!value_s.get(idx)?.is_null()));
+        }
+        let mut result = Vec::with_capacity(n);
+        for (idx, window) in windows.iter().enumerate() {
+            let count = match window {
+                Some((left, right)) => counts[right + 1] - counts[*left],
+                None => 0,
+            };
+            result.push(if window.is_some() || has_order_value[idx] {
+                Some(count as f64)
+            } else {
+                None
+            });
+        }
+        return Ok(Series::new(value_col.into(), result));
+    }
+
+    match value_s.dtype() {
+        DataType::Decimal(precision, scale) => {
+            let (output_precision, output_scale) = if agg == RangeWindowAgg::Mean {
+                let output_precision = precision.saturating_add(4).clamp(1, 38);
+                (
+                    output_precision,
+                    scale.saturating_add(4).min(output_precision),
+                )
+            } else {
+                (precision.saturating_add(10).min(38), *scale)
+            };
+            let factor = BigInt::from(10).pow(output_scale.saturating_sub(*scale) as u32);
+            let maximum = BigInt::from(10).pow(output_precision as u32) - BigInt::from(1);
+            let sum_precision = precision.saturating_add(10).min(38);
+            let maximum_sum = BigInt::from(10).pow(sum_precision as u32) - BigInt::from(1);
+            let coefficients = (0..n)
+                .map(|idx| match value_s.get(idx)? {
+                    AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => {
+                        Ok(Some(BigInt::from(value)))
+                    }
+                    AnyValue::Null => Ok(None),
+                    _ => Err(PolarsError::ComputeError(
+                        "decimal range window received a non-decimal value".into(),
+                    )),
+                })
+                .collect::<PolarsResult<Vec<_>>>()?;
+            let mut prefix_sums = Vec::with_capacity(n + 1);
+            let mut prefix_counts = Vec::with_capacity(n + 1);
+            prefix_sums.push(BigInt::zero());
+            prefix_counts.push(0usize);
+            for coefficient in &coefficients {
+                prefix_sums.push(
+                    prefix_sums.last().unwrap().clone()
+                        + coefficient.as_ref().cloned().unwrap_or_else(BigInt::zero),
+                );
+                prefix_counts.push(
+                    prefix_counts.last().copied().unwrap() + usize::from(coefficient.is_some()),
+                );
+            }
+            let prefix_extrema = DecimalPrefixExtrema::new(&prefix_sums);
+            let mut result = Vec::with_capacity(n);
+            for window in &windows {
+                let Some((left, right)) = window else {
+                    result.push(None);
+                    continue;
+                };
+                let total = &prefix_sums[right + 1] - &prefix_sums[*left];
+                let count = prefix_counts[right + 1] - prefix_counts[*left];
+                if count == 0 {
+                    result.push(None);
+                } else if agg == RangeWindowAgg::Mean {
+                    // AVG accumulates into Decimal(p + 10, s), capped at
+                    // precision 38. Check every intermediate frame sum before
+                    // dividing; later values can cancel an earlier overflow.
+                    if prefix_extrema.exceeds_delta_from(
+                        &prefix_sums[*left],
+                        left + 1,
+                        right + 2,
+                        &maximum_sum,
+                    ) {
+                        if ansi_enabled {
+                            return Err(PolarsError::ComputeError(
+                                "[ARITHMETIC_OVERFLOW] decimal average sum exceeds supported precision"
+                                    .into(),
+                            ));
+                        }
+                        result.push(None);
+                        continue;
+                    }
+                    let scaled = total * &factor;
+                    let divisor = BigInt::from(count);
+                    let mut average = &scaled / &divisor;
+                    let remainder = scaled % &divisor;
+                    if remainder.abs() * 2 >= divisor {
+                        average += if remainder.is_negative() { -1 } else { 1 };
+                    }
+                    if average.abs() > maximum {
+                        if ansi_enabled {
+                            return Err(PolarsError::ComputeError(
+                                "[ARITHMETIC_OVERFLOW] decimal range window average exceeds supported precision"
+                                    .into(),
+                            ));
+                        }
+                        result.push(None);
+                    } else {
+                        result.push(average.to_i128());
+                    }
+                } else if prefix_extrema.exceeds_delta_from(
+                    &prefix_sums[*left],
+                    left + 1,
+                    right + 2,
+                    &maximum_sum,
+                ) || total.abs() > maximum
+                {
+                    if ansi_enabled {
+                        return Err(PolarsError::ComputeError(
+                            "[ARITHMETIC_OVERFLOW] decimal range window sum exceeds supported precision".into(),
+                        ));
+                    }
+                    result.push(None);
+                } else {
+                    result.push(total.to_i128());
+                }
+            }
+            Series::new(value_col.into(), result)
+                .into_decimal(output_precision, output_scale)
+                .map(|series| series.into_series())
+        }
+        dtype if dtype.is_integer() && agg == RangeWindowAgg::Sum => {
+            crate::functions::integer_window_sum_series(value_s, &windows, ansi_enabled)
+        }
+        _ => {
+            let values = value_s.cast(&DataType::Float64)?;
+            let values = values.f64()?;
+            let mut prefix_sums = Vec::with_capacity(n);
+            let mut prefix_counts = Vec::with_capacity(n + 1);
+            prefix_counts.push(0usize);
+            let mut partition_idx = 0usize;
+            let mut partition_sum = 0.0;
+            for idx in 0..n {
+                while partition_idx + 1 < partition_starts.len()
+                    && partition_starts[partition_idx + 1] <= idx
+                {
+                    partition_idx += 1;
+                }
+                if partition_starts.get(partition_idx) == Some(&idx) {
+                    partition_sum = 0.0;
+                }
+                prefix_sums.push(partition_sum);
+                let value = values.get(idx);
+                partition_sum += value.unwrap_or(0.0);
+                prefix_counts.push(prefix_counts[idx] + usize::from(value.is_some()));
+            }
+            let mut result = Vec::with_capacity(n);
+            for window in &windows {
+                let Some((left, right)) = window else {
+                    result.push(None);
+                    continue;
+                };
+                let total =
+                    prefix_sums[*right] + values.get(*right).unwrap_or(0.0) - prefix_sums[*left];
+                let count = prefix_counts[right + 1] - prefix_counts[*left];
+                result.push(if count == 0 {
+                    None
+                } else if agg == RangeWindowAgg::Mean {
+                    Some(total / count as f64)
+                } else {
+                    Some(total)
+                });
+            }
+            Ok(Series::new(value_col.into(), result))
+        }
+    }
+}
+
+fn exact_range_order_key(
+    value: polars::prelude::AnyValue<'_>,
+) -> Result<Option<BigInt>, PolarsError> {
+    use polars::prelude::AnyValue;
+
+    Ok(match value {
+        AnyValue::Null => None,
+        AnyValue::Decimal(value, _, _) | AnyValue::Int128(value) => Some(BigInt::from(value)),
+        AnyValue::Int8(value) => Some(BigInt::from(value)),
+        AnyValue::Int16(value) => Some(BigInt::from(value)),
+        AnyValue::Int32(value) => Some(BigInt::from(value)),
+        AnyValue::Int64(value) => Some(BigInt::from(value)),
+        AnyValue::UInt8(value) => Some(BigInt::from(value)),
+        AnyValue::UInt16(value) => Some(BigInt::from(value)),
+        AnyValue::UInt32(value) => Some(BigInt::from(value)),
+        AnyValue::UInt64(value) => Some(BigInt::from(value)),
+        other => {
+            return Err(PolarsError::ComputeError(
+                format!("expected an integral or decimal RANGE order value, got {other:?}").into(),
+            ));
+        }
+    })
 }
 
 /// Add or replace a column. Handles deferred rand/randn and Python UDF (UdfCall).
@@ -1189,12 +1415,12 @@ pub fn union(
                 );
             }
             let left_expr = if need_coerce {
-                col(resolved_left.as_str()).cast(target.clone())
+                coerce_expr_to_common_type(col(resolved_left.as_str()), &left_dtype, &target)
             } else {
                 col(resolved_left.as_str())
             };
             let right_expr = if need_coerce {
-                col(resolved_right.as_str()).cast(target)
+                coerce_expr_to_common_type(col(resolved_right.as_str()), &right_dtype, &target)
             } else {
                 col(resolved_right.as_str())
             };
@@ -1234,12 +1460,12 @@ pub fn union(
                 );
             }
             let left_expr = if need_coerce {
-                col(resolved_left.as_str()).cast(target.clone())
+                coerce_expr_to_common_type(col(resolved_left.as_str()), &left_dtype, &target)
             } else {
                 col(resolved_left.as_str())
             };
             let right_expr = if need_coerce {
-                col(resolved_right.as_str()).cast(target)
+                coerce_expr_to_common_type(col(resolved_right.as_str()), &right_dtype, &target)
             } else {
                 col(resolved_right.as_str())
             };
@@ -2193,14 +2419,18 @@ pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
     let mut s = "root\n".to_string();
     for f in schema.fields() {
         let dt = match &f.data_type {
-            crate::schema::DataType::String => "string",
-            crate::schema::DataType::Integer => "int",
-            crate::schema::DataType::Long => "bigint",
-            crate::schema::DataType::Double => "double",
-            crate::schema::DataType::Boolean => "boolean",
-            crate::schema::DataType::Date => "date",
-            crate::schema::DataType::Timestamp => "timestamp",
-            _ => "string",
+            crate::schema::DataType::String => "string".to_string(),
+            crate::schema::DataType::Short => "smallint".to_string(),
+            crate::schema::DataType::Integer => "int".to_string(),
+            crate::schema::DataType::Long => "bigint".to_string(),
+            crate::schema::DataType::Double => "double".to_string(),
+            crate::schema::DataType::Decimal(precision, scale) => {
+                format!("decimal({precision},{scale})")
+            }
+            crate::schema::DataType::Boolean => "boolean".to_string(),
+            crate::schema::DataType::Date => "date".to_string(),
+            crate::schema::DataType::Timestamp => "timestamp".to_string(),
+            _ => "string".to_string(),
         };
         s.push_str(&format!(" |-- {}: {}\n", f.name, dt));
     }
