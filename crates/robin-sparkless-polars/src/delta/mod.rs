@@ -138,7 +138,7 @@ fn align_delta_expr_to_dtype(
     source_dtype: &polars::prelude::DataType,
     target_dtype: &polars::prelude::DataType,
 ) -> Result<polars::prelude::Expr, PolarsError> {
-    use polars::prelude::{DataType, NULL, as_struct, col, lit};
+    use polars::prelude::{DataType, NULL, as_struct, col, lit, when};
 
     match (source_dtype, target_dtype) {
         (DataType::Struct(source_fields), DataType::Struct(target_fields)) => {
@@ -156,18 +156,21 @@ fn align_delta_expr_to_dtype(
                             target_field_dtype,
                         )?
                     } else {
-                        lit(NULL).cast(target_field_dtype.clone())
+                        lit(NULL).strict_cast(target_field_dtype.clone())
                     };
                     Ok(field_expr.alias(name.as_str()))
                 })
                 .collect::<Result<Vec<_>, PolarsError>>()?;
-            Ok(as_struct(fields))
+            let aligned = as_struct(fields);
+            Ok(when(expr.clone().is_null())
+                .then(lit(NULL).strict_cast(target_dtype.clone()))
+                .otherwise(aligned))
         }
         (DataType::List(source_inner), DataType::List(target_inner)) => {
             let item_expr = align_delta_expr_to_dtype(col(""), source_inner, target_inner)?;
             Ok(expr.list().eval(item_expr))
         }
-        _ => Ok(expr.cast(target_dtype.clone())),
+        _ => Ok(expr.strict_cast(target_dtype.clone())),
     }
 }
 
@@ -519,36 +522,6 @@ pub fn read_delta_with_version(
     }
 }
 
-/// Load existing Delta table rows from file URIs (sync; for use inside async write_delta).
-#[cfg(feature = "delta")]
-fn load_pl_from_parquet_uris(
-    uris: &[String],
-    table_root: &Path,
-) -> Result<polars::prelude::DataFrame, PolarsError> {
-    use polars::prelude::DataFrame as PlDataFrame;
-    if uris.is_empty() {
-        return Ok(PlDataFrame::default());
-    }
-    let table_root_canonical = table_root
-        .canonicalize()
-        .unwrap_or_else(|_| table_root.to_path_buf());
-    let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
-    for uri in uris {
-        let parquet_path = confine_parquet_uri_to_table_root(uri, &table_root_canonical)?;
-        let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
-            PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
-        })?;
-        let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
-        lfs.push(lf);
-    }
-    let combined = if lfs.len() == 1 {
-        lfs.into_iter().next().unwrap()
-    } else {
-        concat_lazy_frames_diagonal(lfs)?
-    };
-    combined.collect()
-}
-
 #[cfg(feature = "delta")]
 fn path_to_table_uri(path: &Path) -> Result<String, PolarsError> {
     let s = path.to_string_lossy();
@@ -865,7 +838,11 @@ fn delta_partition_field(
         PlDataType::Float64 => serde_json::json!("double"),
         PlDataType::Binary => serde_json::json!("binary"),
         PlDataType::Date => serde_json::json!("date"),
-        PlDataType::Datetime(_, _) => serde_json::json!("timestamp"),
+        PlDataType::Datetime(_, time_zone) => serde_json::json!(if time_zone.is_some() {
+            "timestamp"
+        } else {
+            "timestamp_ntz"
+        }),
         PlDataType::Decimal(precision, scale) => {
             serde_json::json!(format!("decimal({},{})", precision, scale))
         }
@@ -1082,7 +1059,9 @@ async fn delta_schema_from_frame(
         let mut file = fs::File::create(&parquet_path).map_err(|e| {
             PolarsError::ComputeError(format!("write_delta: create schema parquet: {e}").into())
         })?;
-        let mut df_mut = df.clone();
+        // Schema inference needs the physical column definitions, not the input rows. Keeping
+        // this file empty avoids copying the entire batch into the temporary schema table.
+        let mut df_mut = df.slice(0, 0);
         polars::prelude::ParquetWriter::new(&mut file)
             .finish(&mut df_mut)
             .map_err(|e| {
@@ -1142,7 +1121,39 @@ fn merge_delta_data_types(
     existing: &deltalake::kernel::DataType,
     incoming: &deltalake::kernel::DataType,
 ) -> Result<deltalake::kernel::DataType, PolarsError> {
-    use deltalake::kernel::{ArrayType, DataType, MapType};
+    use deltalake::kernel::{ArrayType, DataType, MapType, PrimitiveType};
+
+    fn integer_rank(data_type: &PrimitiveType) -> Option<u8> {
+        match data_type {
+            PrimitiveType::Byte => Some(0),
+            PrimitiveType::Short => Some(1),
+            PrimitiveType::Integer => Some(2),
+            PrimitiveType::Long => Some(3),
+            _ => None,
+        }
+    }
+
+    fn primitive_merge(
+        existing: &PrimitiveType,
+        incoming: &PrimitiveType,
+    ) -> Option<PrimitiveType> {
+        if existing == incoming {
+            return Some(existing.clone());
+        }
+        if matches!((integer_rank(incoming), integer_rank(existing)), (Some(new), Some(old)) if new <= old)
+        {
+            return Some(existing.clone());
+        }
+        match (existing, incoming) {
+            (PrimitiveType::Double, PrimitiveType::Float) => Some(PrimitiveType::Double),
+            (PrimitiveType::Decimal(old), PrimitiveType::Decimal(new))
+                if old.scale() == new.scale() && new.precision() <= old.precision() =>
+            {
+                PrimitiveType::decimal(old.precision().max(new.precision()), old.scale()).ok()
+            }
+            _ => None,
+        }
+    }
 
     match (existing, incoming) {
         (DataType::Struct(existing), DataType::Struct(incoming)) => Ok(DataType::Struct(Box::new(
@@ -1162,8 +1173,171 @@ fn merge_delta_data_types(
             existing.value_contains_null || incoming.value_contains_null,
         )
         .into()),
-        _ => Ok(incoming.clone()),
+        (DataType::Primitive(existing), DataType::Primitive(incoming)) => {
+            primitive_merge(existing, incoming)
+                .map(DataType::Primitive)
+                .ok_or_else(|| {
+                    PolarsError::InvalidOperation(
+                        format!("incompatible Delta schema types: {existing:?} and {incoming:?}")
+                            .into(),
+                    )
+                })
+        }
+        _ if existing == incoming => Ok(existing.clone()),
+        _ => Err(PolarsError::InvalidOperation(
+            format!("incompatible Delta schema types: {existing:?} and {incoming:?}").into(),
+        )),
     }
+}
+
+#[cfg(feature = "delta")]
+fn validate_delta_schema_for_write(
+    target: &deltalake::kernel::StructType,
+    incoming: &deltalake::kernel::StructType,
+    allow_extra: bool,
+) -> Result<(), PolarsError> {
+    use deltalake::kernel::{DataType, PrimitiveType};
+
+    fn integer_rank(data_type: &PrimitiveType) -> Option<u8> {
+        match data_type {
+            PrimitiveType::Byte => Some(0),
+            PrimitiveType::Short => Some(1),
+            PrimitiveType::Integer => Some(2),
+            PrimitiveType::Long => Some(3),
+            _ => None,
+        }
+    }
+
+    fn can_cast_type(
+        incoming: &DataType,
+        target: &DataType,
+        allow_extra: bool,
+    ) -> Result<(), PolarsError> {
+        match (incoming, target) {
+            (DataType::Primitive(source), DataType::Primitive(target)) => {
+                let compatible = source == target
+                    || matches!((integer_rank(source), integer_rank(target)), (Some(a), Some(b)) if a <= b)
+                    || matches!(
+                        (source, target),
+                        (PrimitiveType::Float, PrimitiveType::Double)
+                    )
+                    || matches!((source, target), (PrimitiveType::Decimal(a), PrimitiveType::Decimal(b)) if a.scale() == b.scale() && a.precision() <= b.precision());
+                if compatible {
+                    Ok(())
+                } else {
+                    Err(PolarsError::InvalidOperation(
+                        format!("incompatible Delta schema types: {source:?} cannot be written as {target:?}").into(),
+                    ))
+                }
+            }
+            (DataType::Struct(source), DataType::Struct(target))
+            | (DataType::Variant(source), DataType::Variant(target)) => {
+                validate_delta_schema_for_write(target, source, allow_extra)
+            }
+            (DataType::Array(source), DataType::Array(target)) => {
+                can_cast_type(&source.element_type, &target.element_type, allow_extra)
+            }
+            (DataType::Map(source), DataType::Map(target)) => {
+                can_cast_type(&source.key_type, &target.key_type, false)?;
+                can_cast_type(&source.value_type, &target.value_type, allow_extra)
+            }
+            _ if incoming == target => Ok(()),
+            _ => Err(PolarsError::InvalidOperation(
+                format!(
+                    "incompatible Delta schema types: {incoming:?} cannot be written as {target:?}"
+                )
+                .into(),
+            )),
+        }
+    }
+
+    for incoming_field in incoming.fields() {
+        let target_field = match target
+            .fields()
+            .find(|field| field.name == incoming_field.name)
+        {
+            Some(field) => field,
+            None if allow_extra => continue,
+            None => {
+                return Err(PolarsError::InvalidOperation(
+                    format!("write_delta: column '{}' is not present in the existing Delta schema; enable mergeSchema or overwriteSchema", incoming_field.name).into(),
+                ));
+            }
+        };
+        can_cast_type(
+            &incoming_field.data_type,
+            &target_field.data_type,
+            allow_extra,
+        )
+        .map_err(|error| {
+            PolarsError::InvalidOperation(
+                format!("write_delta: column '{}': {error}", incoming_field.name).into(),
+            )
+        })?;
+    }
+
+    for target_field in target.fields() {
+        if incoming
+            .fields()
+            .all(|field| field.name != target_field.name)
+            && !target_field.nullable
+        {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "write_delta: required column '{}' is missing from the input",
+                    target_field.name
+                )
+                .into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "delta")]
+fn align_delta_frame_to_schema(
+    df: &polars::prelude::DataFrame,
+    incoming_schema: &deltalake::kernel::StructType,
+    target_schema: &deltalake::kernel::StructType,
+    allow_extra: bool,
+) -> Result<polars::prelude::DataFrame, PolarsError> {
+    use polars::prelude::{IntoLazy, NULL, col, lit};
+
+    validate_delta_schema_for_write(target_schema, incoming_schema, allow_extra)?;
+
+    let source_polars_schema = df.schema();
+    let exprs = target_schema
+        .fields()
+        .map(|target_field| {
+            let target_dtype = delta_schema_type_to_polars(&target_field.data_type)?;
+            let expr = if incoming_schema
+                .fields()
+                .any(|field| field.name == target_field.name)
+            {
+                let source_dtype =
+                    source_polars_schema
+                        .get(&target_field.name)
+                        .ok_or_else(|| {
+                            PolarsError::ColumnNotFound(
+                                format!(
+                                    "write_delta: missing input column '{}'",
+                                    target_field.name
+                                )
+                                .into(),
+                            )
+                        })?;
+                align_delta_expr_to_dtype(
+                    col(target_field.name.as_str()),
+                    source_dtype,
+                    &target_dtype,
+                )?
+            } else {
+                lit(NULL).strict_cast(target_dtype)
+            };
+            Ok(expr.alias(target_field.name.as_str()))
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
+    df.clone().lazy().select(exprs).collect()
 }
 
 #[cfg(feature = "delta")]
@@ -1516,10 +1690,40 @@ pub fn write_delta_with_options(
     merge_schema: bool,
     partition_by: &[String],
 ) -> Result<(), PolarsError> {
+    write_delta_with_save_options(
+        df,
+        path,
+        if overwrite {
+            crate::dataframe::SaveMode::Overwrite
+        } else {
+            crate::dataframe::SaveMode::Append
+        },
+        merge_schema,
+        false,
+        partition_by,
+    )
+}
+
+/// Write Delta data with Spark-style save mode and schema evolution options.
+#[cfg(feature = "delta")]
+pub fn write_delta_with_save_options(
+    df: &polars::prelude::DataFrame,
+    path: impl AsRef<Path>,
+    save_mode: crate::dataframe::SaveMode,
+    merge_schema: bool,
+    overwrite_schema: bool,
+    partition_by: &[String],
+) -> Result<(), PolarsError> {
     use futures::TryStreamExt;
     use std::fs;
     use tokio::runtime::Runtime;
 
+    if overwrite_schema && save_mode != crate::dataframe::SaveMode::Overwrite {
+        return Err(PolarsError::InvalidOperation(
+            "write_delta: overwriteSchema requires overwrite mode".into(),
+        ));
+    }
+    let overwrite = save_mode == crate::dataframe::SaveMode::Overwrite;
     let path = robin_sparkless_core::maybe_confine_files_path(path.as_ref()).map_err(|e| {
         PolarsError::InvalidOperation(format!("write_delta path confinement: {e}").into())
     })?;
@@ -1553,9 +1757,6 @@ pub fn write_delta_with_options(
     })?;
     reject_symlinks_recursively(&path.join("_delta_log"), "write_delta")?;
     let table_uri = path_to_table_uri(path)?;
-    if df.height() == 0 && df.width() == 0 {
-        return Ok(());
-    }
 
     let rt = Runtime::new().map_err(|e| {
         PolarsError::ComputeError(format!("write_delta: failed to create runtime: {}", e).into())
@@ -1576,6 +1777,19 @@ pub fn write_delta_with_options(
 
         match load_result {
             Ok(mut table) => {
+                match save_mode {
+                    crate::dataframe::SaveMode::Ignore => return Ok(()),
+                    crate::dataframe::SaveMode::ErrorIfExists => {
+                        return Err(PolarsError::InvalidOperation(
+                            "Delta table already exists (save mode ErrorIfExists)".into(),
+                        ));
+                    }
+                    crate::dataframe::SaveMode::Append
+                    | crate::dataframe::SaveMode::Overwrite => {}
+                }
+                if df.height() == 0 && df.width() == 0 {
+                    return Ok(());
+                }
                 let table_state = table.snapshot().map_err(|e: deltalake::DeltaTableError| {
                     PolarsError::ComputeError(format!("write_delta: snapshot: {}", e).into())
                 })?;
@@ -1600,6 +1814,32 @@ pub fn write_delta_with_options(
                         format!("write_delta: parse existing schema: {e}").into(),
                     )
                 })?;
+                let incoming_schema = delta_schema_from_frame(df).await?;
+                let target_schema = if overwrite_schema {
+                    incoming_schema.clone()
+                } else if merge_schema {
+                    merge_delta_struct_schemas(&existing_schema, &incoming_schema)?
+                } else {
+                    existing_schema.clone()
+                };
+                let schema_changed = target_schema != existing_schema;
+                let schema_to_align = target_schema.clone();
+                let input_to_align = df.clone();
+                let incoming_to_align = incoming_schema.clone();
+                let aligned_df = tokio::task::spawn_blocking(move || {
+                    align_delta_frame_to_schema(
+                        &input_to_align,
+                        &incoming_to_align,
+                        &schema_to_align,
+                        false,
+                    )
+                })
+                .await
+                .map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("write_delta: align input to table schema: {e}").into(),
+                    )
+                })??;
                 for name in &effective_partition_columns {
                     let incoming_field = delta_partition_field(df, name)?;
                     let existing_field = existing_schema
@@ -1641,50 +1881,20 @@ pub fn write_delta_with_options(
                         })?;
                 }
 
-                let df_for_part = if merge_schema && !overwrite {
-                    let uris: Vec<String> = table
-                        .get_file_uris()
-                        .map_err(|e: deltalake::DeltaTableError| {
-                            PolarsError::ComputeError(
-                                format!("write_delta: get_file_uris for merge_schema: {e}").into(),
-                            )
-                        })?
-                        .collect();
-                    // Polars collect() may start a runtime; must not run inside block_on.
-                    let table_root = path.to_path_buf();
-                    let df_clone = df.clone();
-                    let existing_pl = tokio::task::spawn_blocking(move || {
-                        load_pl_from_parquet_uris(&uris, &table_root)
-                    })
-                    .await
-                    .map_err(|e| {
-                        PolarsError::ComputeError(
-                            format!("write_delta: load existing for merge_schema: {e}").into(),
-                        )
-                    })??;
-                    let (_, aligned_new) =
-                        crate::dataframe::align_to_merged_schema_inline(&existing_pl, &df_clone)?;
-                    aligned_new
-                } else {
-                    df.clone()
-                };
-                if merge_schema && !overwrite {
+                if schema_changed {
                     use deltalake::kernel::MetadataExt;
 
-                    let incoming_schema = delta_schema_from_frame(&df_for_part).await?;
-                    let merged_schema =
-                        merge_delta_struct_schemas(&existing_schema, &incoming_schema)?;
                     let updated_metadata = table_state
                         .metadata()
                         .clone()
-                        .with_schema(&merged_schema)
+                        .with_schema(&target_schema)
                         .map_err(|e| {
                             PolarsError::ComputeError(
                                 format!("write_delta: update merged schema metadata: {e}").into(),
                             )
                         })?;
                     if let Some(protocol) =
-                        protocol_for_schema(table_state.protocol(), &merged_schema)?
+                        protocol_for_schema(table_state.protocol(), &target_schema)?
                     {
                         actions.push(deltalake::kernel::Action::Protocol(protocol));
                     }
@@ -1692,14 +1902,14 @@ pub fn write_delta_with_options(
                 }
 
                 if effective_partition_columns.is_empty() {
-                    let parquet_path = write_parquet_part(&df_for_part, path)?;
+                    let parquet_path = write_parquet_part(&aligned_df, path)?;
                     let add = parquet_file_to_add_action(&parquet_path, path).map_err(|e| {
                         PolarsError::ComputeError(format!("write_delta: add action: {}", e).into())
                     })?;
                     actions.push(add);
                 } else {
                     actions.extend(write_partitioned_delta_parts(
-                        &df_for_part,
+                        &aligned_df,
                         path,
                         &effective_partition_columns,
                     )?);
@@ -1717,6 +1927,9 @@ pub fn write_delta_with_options(
                 Ok(())
             }
             Err(e) if is_not_a_table(&e) => {
+                if df.height() == 0 && df.width() == 0 {
+                    return Ok(());
+                }
                 if partition_by.is_empty() {
                     write_delta_bootstrap_parquet(df, path, &table_uri).await
                 } else {

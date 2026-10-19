@@ -2443,6 +2443,30 @@ impl DataFrame {
         )
     }
 
+    /// Write Delta data with Spark-style save modes and schema evolution options.
+    #[cfg(feature = "delta")]
+    pub fn write_delta_with_save_options(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        mode: SaveMode,
+        merge_schema: bool,
+        overwrite_schema: bool,
+        partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        let resolved_partition_by = partition_by
+            .iter()
+            .map(|name| self.resolve_column_name(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        crate::delta::write_delta_with_save_options(
+            self.collect_inner()?.as_ref(),
+            path,
+            mode,
+            merge_schema,
+            overwrite_schema,
+            &resolved_partition_by,
+        )
+    }
+
     /// Stub when `delta` feature is disabled.
     #[cfg(not(feature = "delta"))]
     pub fn write_delta(
@@ -2460,6 +2484,20 @@ impl DataFrame {
         _path: impl AsRef<std::path::Path>,
         _overwrite: bool,
         _merge_schema: bool,
+        _partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        Err(PolarsError::InvalidOperation(
+            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+        ))
+    }
+
+    #[cfg(not(feature = "delta"))]
+    pub fn write_delta_with_save_options(
+        &self,
+        _path: impl AsRef<std::path::Path>,
+        _mode: SaveMode,
+        _merge_schema: bool,
+        _overwrite_schema: bool,
         _partition_by: &[String],
     ) -> Result<(), PolarsError> {
         Err(PolarsError::InvalidOperation(
@@ -2701,20 +2739,26 @@ impl<'a> DataFrameWriter<'a> {
         use std::fs;
         use std::path::Path;
 
-        let (merge_schema, is_delta_format) = options.map_or((false, false), |opts| {
-            let mut merge_schema = false;
-            let mut is_delta = false;
-            for (k, v) in opts {
-                if k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true") {
-                    merge_schema = true;
-                } else if k.eq_ignore_ascii_case("sparkless.writer.format")
-                    && v.eq_ignore_ascii_case("delta")
-                {
-                    is_delta = true;
+        let (merge_schema, overwrite_schema, is_delta_format) =
+            options.map_or((false, false, false), |opts| {
+                let mut merge_schema = false;
+                let mut overwrite_schema = false;
+                let mut is_delta = false;
+                for (k, v) in opts {
+                    if k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true") {
+                        merge_schema = true;
+                    } else if k.eq_ignore_ascii_case("overwriteSchema")
+                        && v.eq_ignore_ascii_case("true")
+                    {
+                        overwrite_schema = true;
+                    } else if k.eq_ignore_ascii_case("sparkless.writer.format")
+                        && v.eq_ignore_ascii_case("delta")
+                    {
+                        is_delta = true;
+                    }
                 }
-            }
-            (merge_schema, is_delta)
-        });
+                (merge_schema, overwrite_schema, is_delta)
+            });
 
         // Warehouse paths (disk-backed saveAsTable). For schema-qualified names, allow both:
         // - "{warehouse}/{schema.table}" (single dir)
@@ -2737,8 +2781,8 @@ impl<'a> DataFrameWriter<'a> {
             .unwrap_or_default();
         let warehouse_exists = warehouse_paths.iter().any(|p| p.is_dir());
 
-        // Delta saveAsTable is warehouse-backed. Implement overwrite/append by writing a Delta
-        // table under {warehouse}/{name} and registering the loaded result in the session.
+        // Delta saveAsTable is warehouse-backed. Let the transaction snapshot determine whether
+        // the target exists as a Delta table; an empty warehouse directory is only a location.
         if is_delta_format {
             #[cfg(feature = "delta")]
             {
@@ -2750,12 +2794,8 @@ impl<'a> DataFrameWriter<'a> {
                 })?;
 
                 match mode {
-                    SaveMode::Ignore if session.saved_table_exists(name) || warehouse_exists => {
-                        return Ok(());
-                    }
-                    SaveMode::ErrorIfExists
-                        if session.saved_table_exists(name) || warehouse_exists =>
-                    {
+                    SaveMode::Ignore if session.saved_table_exists(name) => return Ok(()),
+                    SaveMode::ErrorIfExists if session.saved_table_exists(name) => {
                         return Err(PolarsError::InvalidOperation(
                             format!(
                                 "Table or view '{name}' already exists. SaveMode is ErrorIfExists."
@@ -2763,25 +2803,32 @@ impl<'a> DataFrameWriter<'a> {
                             .into(),
                         ));
                     }
-                    SaveMode::Append => {
-                        let pl_df = self.df.collect_inner()?.as_ref().clone();
-                        crate::delta::write_delta(&pl_df, target, false, merge_schema)?;
-                        let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
-                        session.register_table(name, loaded);
-                        return Ok(());
-                    }
-                    SaveMode::Overwrite | SaveMode::Ignore | SaveMode::ErrorIfExists => {
-                        let pl_df = self.df.collect_inner()?.as_ref().clone();
-                        crate::delta::write_delta(&pl_df, target, true, false)?;
-                        let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
-                        session.register_table(name, loaded);
-                        return Ok(());
-                    }
+                    SaveMode::Append
+                    | SaveMode::Overwrite
+                    | SaveMode::Ignore
+                    | SaveMode::ErrorIfExists => {}
                 }
+                let pl_df = self.df.collect_inner()?.as_ref().clone();
+                crate::delta::write_delta_with_save_options(
+                    &pl_df,
+                    target,
+                    mode,
+                    merge_schema,
+                    overwrite_schema,
+                    &[],
+                )?;
+                let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
+                session.register_table(name, loaded);
+                return Ok(());
             }
             #[cfg(not(feature = "delta"))]
             {
-                let _ = (warehouse_paths, warehouse_exists, merge_schema);
+                let _ = (
+                    warehouse_paths,
+                    warehouse_exists,
+                    merge_schema,
+                    overwrite_schema,
+                );
                 return Err(PolarsError::InvalidOperation(
                     "saveAsTable(format=delta) requires the delta feature to be enabled.".into(),
                 ));

@@ -732,6 +732,24 @@ impl DataFrame {
             .write_delta_with_options(path, overwrite, merge_schema, partition_by)
     }
 
+    #[cfg(feature = "delta")]
+    pub fn write_delta_with_save_options(
+        &self,
+        path: impl AsRef<Path>,
+        mode: robin_sparkless_polars::dataframe::SaveMode,
+        merge_schema: bool,
+        overwrite_schema: bool,
+        partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        self.0.write_delta_with_save_options(
+            path,
+            mode,
+            merge_schema,
+            overwrite_schema,
+            partition_by,
+        )
+    }
+
     #[cfg(not(feature = "delta"))]
     pub fn write_delta(
         &self,
@@ -748,6 +766,20 @@ impl DataFrame {
         _path: impl AsRef<Path>,
         _overwrite: bool,
         _merge_schema: bool,
+        _partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        Err(PolarsError::InvalidOperation(
+            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+        ))
+    }
+
+    #[cfg(not(feature = "delta"))]
+    pub fn write_delta_with_save_options(
+        &self,
+        _path: impl AsRef<Path>,
+        _mode: robin_sparkless_polars::dataframe::SaveMode,
+        _merge_schema: bool,
+        _overwrite_schema: bool,
         _partition_by: &[String],
     ) -> Result<(), PolarsError> {
         Err(PolarsError::InvalidOperation(

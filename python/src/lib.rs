@@ -9094,18 +9094,17 @@ impl PyDataFrameWriter {
                 .rev()
                 .find(|(key, _)| key.eq_ignore_ascii_case("mergeSchema"))
                 .is_some_and(|(_, value)| value.eq_ignore_ascii_case("true") || value == "1");
-
-            let overwrite = match self.mode.to_ascii_lowercase().as_str() {
-                "append" => false,
-                "overwrite" => true,
-                "ignore" if path.exists() => return Ok(()),
-                "ignore" => true,
-                "error" | "errorifexists" if path.exists() => {
-                    return Err(PyErr::new::<pyo3::exceptions::PyFileExistsError, _>(
-                        format!("Delta output path already exists: {}", path.display()),
-                    ));
-                }
-                "error" | "errorifexists" => true,
+            let overwrite_schema = self
+                .options
+                .iter()
+                .rev()
+                .find(|(key, _)| key.eq_ignore_ascii_case("overwriteSchema"))
+                .is_some_and(|(_, value)| value.eq_ignore_ascii_case("true") || value == "1");
+            let save_mode = match self.mode.to_ascii_lowercase().as_str() {
+                "append" => SaveMode::Append,
+                "overwrite" => SaveMode::Overwrite,
+                "ignore" => SaveMode::Ignore,
+                "error" | "errorifexists" => SaveMode::ErrorIfExists,
                 mode => {
                     return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                         "unsupported DataFrameWriter save mode: {mode}"
@@ -9113,10 +9112,26 @@ impl PyDataFrameWriter {
                 }
             };
 
-            return inner
-                .inner
-                .write_delta_with_options(&path, overwrite, merge_schema, &self.partition_by)
-                .map_err(to_py_err);
+            return match inner.inner.write_delta_with_save_options(
+                &path,
+                save_mode,
+                merge_schema,
+                overwrite_schema,
+                &self.partition_by,
+            ) {
+                Ok(()) => Ok(()),
+                Err(error)
+                    if save_mode == SaveMode::ErrorIfExists
+                        && error
+                            .to_string()
+                            .contains("Delta table already exists (save mode ErrorIfExists)") =>
+                {
+                    Err(PyErr::new::<pyo3::exceptions::PyFileExistsError, _>(
+                        format!("Delta table already exists at {}", path.display()),
+                    ))
+                }
+                Err(error) => Err(to_py_err(error)),
+            };
         }
 
         let write_format = match format.as_str() {
