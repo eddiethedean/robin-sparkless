@@ -1103,6 +1103,59 @@ fn delta_map_paths_for_sql_query(
         output_by_source: std::collections::HashMap<String, String>,
     }
 
+    struct SourceInput {
+        qualifier: String,
+        paths: std::collections::HashSet<String>,
+        output_prefix: Option<String>,
+        join_alias: Option<String>,
+        columns: Vec<String>,
+    }
+
+    fn source_input(session: &PySparkSession, factor: &TableFactor) -> Option<SourceInput> {
+        match factor {
+            TableFactor::Table { name, alias, .. } => {
+                let table_name = name.to_string();
+                let table_leaf = table_name.rsplit('.').next().unwrap_or(table_name.as_str());
+                let full_name = table_name_for_alias(name);
+                let output_prefix = alias
+                    .as_ref()
+                    .map(|alias| alias.name.value.as_str())
+                    .filter(|alias| *alias != full_name.as_str())
+                    .map(str::to_string);
+                let qualifier = alias
+                    .as_ref()
+                    .map(|alias| alias.name.value.as_str())
+                    .unwrap_or(table_leaf)
+                    .to_string();
+                Some(SourceInput {
+                    qualifier,
+                    paths: delta_map_paths_for_catalog_table(session, &table_name).ok()?,
+                    join_alias: output_prefix.clone(),
+                    output_prefix,
+                    columns: table_columns(session, &table_name),
+                })
+            }
+            TableFactor::Derived {
+                subquery, alias, ..
+            } => {
+                let query = subquery.to_string();
+                let dataframe = session.inner.sql(&query).ok()?;
+                let columns = dataframe.columns().ok()?;
+                Some(SourceInput {
+                    qualifier: alias
+                        .as_ref()
+                        .map(|alias| alias.name.value.clone())
+                        .unwrap_or_default(),
+                    paths: delta_map_paths_for_sql_query(session, &query, &columns),
+                    output_prefix: None,
+                    join_alias: alias.as_ref().map(|alias| alias.name.value.clone()),
+                    columns,
+                })
+            }
+            _ => None,
+        }
+    }
+
     let Ok(robin_sparkless::sql::Statement::Query(query)) = robin_sparkless::sql::parse_sql(query)
     else {
         return Default::default();
@@ -1113,28 +1166,21 @@ fn delta_map_paths_for_sql_query(
     let Some(from) = select.from.first() else {
         return Default::default();
     };
-    let TableFactor::Table { name, alias, .. } = &from.relation else {
+    let Some(first_source) = source_input(session, &from.relation) else {
         return Default::default();
     };
-    let table_name = name.to_string();
-    let table_leaf = table_name.rsplit('.').next().unwrap_or(table_name.as_str());
-    let alias_prefix = alias
-        .as_ref()
-        .map(|alias| alias.name.value.as_str())
-        .filter(|alias| *alias != table_name_for_alias(name));
-    let source_paths = match delta_map_paths_for_catalog_table(session, &table_name) {
-        Ok(paths) => paths,
-        Err(_) => return Default::default(),
-    };
+    let source_paths = first_source.paths.clone();
     if source_paths.is_empty() {
         // A joined table may supply the projected MAP even when the first table does not.
     }
-    let first_columns = table_columns(session, &table_name);
     let mut current_output_names = std::collections::HashSet::new();
-    let first_output_by_source = first_columns
+    let first_output_by_source = first_source
+        .columns
         .iter()
         .map(|column| {
-            let output = alias_prefix
+            let output = first_source
+                .output_prefix
+                .as_ref()
                 .map(|prefix| format!("{prefix}_{column}"))
                 .unwrap_or_else(|| column.clone());
             current_output_names.insert(output.clone());
@@ -1142,35 +1188,18 @@ fn delta_map_paths_for_sql_query(
         })
         .collect();
     let mut source_tables = vec![SourceTable {
-        qualifier: alias_prefix.unwrap_or(table_leaf).to_string(),
+        qualifier: first_source.qualifier.clone(),
         paths: source_paths.clone(),
         output_by_source: first_output_by_source,
     }];
+    let left_join_alias = first_source.join_alias.clone();
     for join in &from.joins {
-        let TableFactor::Table { name, alias, .. } = &join.relation else {
+        let Some(right_source) = source_input(session, &join.relation) else {
             continue;
         };
-        let name = name.to_string();
-        let leaf = name.rsplit('.').next().unwrap_or(name.as_str());
-        let TableFactor::Table {
-            name: object_name, ..
-        } = &join.relation
-        else {
-            continue;
-        };
-        let full_name = table_name_for_alias(object_name);
-        let output_prefix = alias
-            .as_ref()
-            .map(|alias| alias.name.value.as_str())
-            .filter(|alias| *alias != full_name.as_str())
-            .map(str::to_string);
-        let qualifier = alias
-            .as_ref()
-            .map(|alias| alias.name.value.as_str())
-            .unwrap_or(leaf)
-            .to_string();
-        if let Ok(paths) = delta_map_paths_for_catalog_table(session, &name) {
-            let columns = table_columns(session, &name);
+        {
+            let columns = right_source.columns;
+            let output_prefix = right_source.output_prefix;
             let right_columns = columns
                 .iter()
                 .map(|column| {
@@ -1182,8 +1211,8 @@ fn delta_map_paths_for_sql_query(
                 .collect::<Vec<_>>();
             let (left_keys, right_key_names) = robin_sparkless::sql::join_condition_to_on_columns(
                 &join.join_operator,
-                alias_prefix,
-                output_prefix.as_deref(),
+                left_join_alias.as_deref(),
+                right_source.join_alias.as_deref(),
             )
             .unwrap_or_default();
             let right_keys = right_key_names
@@ -1225,8 +1254,8 @@ fn delta_map_paths_for_sql_query(
                 output_by_source.insert(column.clone(), output);
             }
             source_tables.push(SourceTable {
-                qualifier,
-                paths,
+                qualifier: right_source.qualifier,
+                paths: right_source.paths,
                 output_by_source,
             });
         }
@@ -1280,7 +1309,7 @@ fn delta_map_paths_for_sql_query(
         let qualified_alias = source
             .rsplit_once('.')
             .map(|(qualifier, _)| qualifier)
-            .filter(|qualifier| Some(*qualifier) == alias_prefix);
+            .filter(|qualifier| first_source.output_prefix.as_deref() == Some(*qualifier));
         let aliased_output = qualified_alias.map(|qualifier| format!("{qualifier}_{source_name}"));
         let output_name = explicit_alias
             .map(str::to_string)
