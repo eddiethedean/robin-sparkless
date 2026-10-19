@@ -6807,7 +6807,19 @@ impl PyDataFrame {
         let source_path = if let Some(source) = &resolved {
             arrow_field_path("", source)
         } else {
-            let mut parts = source.split('.');
+            // `selectExpr` preserves qualified identifiers as `alias.field.nested`. The
+            // DataFrame schema only contains `field`, so discard this DataFrame's alias
+            // before resolving the metadata path.
+            let qualified_source = self
+                .inner
+                .get_alias()
+                .and_then(|alias| {
+                    source
+                        .strip_prefix(&format!("{alias}."))
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| source.to_string());
+            let mut parts = qualified_source.split('.');
             let root = parts.next().unwrap_or(source);
             let root = self
                 .inner
