@@ -844,7 +844,8 @@ fn window_bounds(index: usize, len: usize, frame: Option<(i64, i64)>) -> Option<
 #[derive(Default)]
 struct FloatWindowAccumulator {
     finite_sum: f64,
-    finite_compensation: f64,
+    add_compensation: f64,
+    remove_compensation: f64,
     exact_finite_sum: Option<BigInt>,
     count: usize,
     nan_count: usize,
@@ -898,16 +899,30 @@ fn scaled_integer_as_finite_float(value: &BigInt) -> f64 {
 }
 
 impl FloatWindowAccumulator {
-    fn update_finite(&mut self, value: f64) {
+    fn update_finite(&mut self, value: f64, adding: bool) {
         if let Some(exact_sum) = &mut self.exact_finite_sum {
-            *exact_sum += finite_float_as_scaled_integer(value);
+            let scaled = finite_float_as_scaled_integer(value);
+            if adding {
+                *exact_sum += scaled;
+            } else {
+                *exact_sum -= scaled;
+            }
         }
-        let adjusted = value - self.finite_compensation;
+        // Keep the rounding errors from additions and removals separate. Reusing
+        // one Kahan compensation can erase small values when a large value leaves
+        // a sliding frame and the next value is added.
+        let compensation = if adding {
+            &mut self.add_compensation
+        } else {
+            &mut self.remove_compensation
+        };
+        let signed_value = if adding { value } else { -value };
+        let adjusted = signed_value - *compensation;
         let next = self.finite_sum + adjusted;
         if self.finite_sum.is_finite() && next.is_finite() {
-            self.finite_compensation = (next - self.finite_sum) - adjusted;
+            *compensation = (next - self.finite_sum) - adjusted;
         } else {
-            self.finite_compensation = 0.0;
+            *compensation = 0.0;
         }
         self.finite_sum = next;
     }
@@ -960,7 +975,7 @@ impl FloatWindowAccumulator {
                 self.negative_infinity_count -= 1;
             }
         } else {
-            self.update_finite(value * sign);
+            self.update_finite(value, sign > 0.0);
         }
     }
 
@@ -976,7 +991,10 @@ impl FloatWindowAccumulator {
         } else if let Some(exact_sum) = &self.exact_finite_sum {
             scaled_integer_as_finite_float(exact_sum)
         } else {
-            self.finite_sum
+            // Kahan compensation normally gets folded into the next update. Apply
+            // any remainder at read time too, since a frame can end after a null
+            // or non-finite value without another finite update to consume it.
+            self.finite_sum - self.add_compensation - self.remove_compensation
         }
     }
 }
