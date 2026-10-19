@@ -1326,9 +1326,22 @@ fn rewrite_delta_type_for_logical_maps(
         DataType::Array(array) => {
             let element_paths = paths
                 .iter()
-                .filter_map(|path| match path.split_first() {
-                    Some((DeltaSchemaPathSegment::ArrayElement, tail)) => Some(tail.to_vec()),
-                    _ => None,
+                .filter_map(|path| {
+                    let (segment, tail) = path.split_first()?;
+                    match segment {
+                        DeltaSchemaPathSegment::ArrayElement => Some(tail.to_vec()),
+                        DeltaSchemaPathSegment::MapKey if exact_map => {
+                            let mut nested = vec![DeltaSchemaPathSegment::Field("key".into())];
+                            nested.extend_from_slice(tail);
+                            Some(nested)
+                        }
+                        DeltaSchemaPathSegment::MapValue if exact_map => {
+                            let mut nested = vec![DeltaSchemaPathSegment::Field("value".into())];
+                            nested.extend_from_slice(tail);
+                            Some(nested)
+                        }
+                        _ => None,
+                    }
                 })
                 .collect::<Vec<_>>();
             let element = rewrite_delta_type_for_logical_maps(array.element_type, &element_paths)?;
