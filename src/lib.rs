@@ -151,8 +151,9 @@ pub mod sql {
     use robin_sparkless_polars::PolarsError;
 
     pub use robin_sparkless_polars::sql::{
-        Statement, execute_sql, parse_sql, select_expr_metadata, select_expr_preserves_map_value,
-        select_expr_source,
+        Statement, ast, execute_sql, join_condition_to_on_columns, parse_sql,
+        select_expr_map_value_reference_parts, select_expr_map_value_references,
+        select_expr_metadata, select_expr_preserves_map_value, select_expr_source,
     };
 
     /// Parse a single SQL expression string to Polars Expr using the session and DataFrame for resolution.
@@ -177,7 +178,9 @@ pub mod delta {
     use robin_sparkless_polars::PolarsError;
     use std::path::Path;
 
-    pub use robin_sparkless_polars::delta::{read_delta, read_delta_with_version, write_delta};
+    pub use robin_sparkless_polars::delta::{
+        logical_map_paths, read_delta, read_delta_with_version, write_delta,
+    };
 
     /// Read Delta table; returns root-owned DataFrame.
     pub fn read_delta_root(

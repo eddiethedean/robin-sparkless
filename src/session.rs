@@ -176,6 +176,11 @@ impl SparkSession {
         self.0.table(name).map(DataFrame)
     }
 
+    /// Returns true when `name` resolves to a session temporary view.
+    pub fn has_temp_view(&self, name: &str) -> bool {
+        self.0.has_temp_view(name)
+    }
+
     pub fn get_config(&self) -> &HashMap<String, String> {
         self.0.get_config()
     }

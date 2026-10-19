@@ -944,6 +944,8 @@ impl PySparkSessionBuilder {
                 inner: session,
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
+                #[cfg(feature = "delta")]
+                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -963,6 +965,609 @@ impl PySparkSessionBuilder {
 /// Default backend type so tests that read session.backend_type always get a value (e.g. "robin").
 const DEFAULT_BACKEND_TYPE: &str = "robin";
 
+#[cfg(feature = "delta")]
+fn delta_global_map_view_registry(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>
+{
+    static REGISTRY: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+    > = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(feature = "delta")]
+fn delta_map_paths_for_catalog_table(
+    session: &PySparkSession,
+    name: &str,
+) -> Result<std::collections::HashSet<String>, polars::prelude::PolarsError> {
+    let mut result = std::collections::HashSet::new();
+    if name.starts_with("global_temp.") {
+        return Ok(delta_global_map_view_registry()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(name)
+            .cloned()
+            .unwrap_or_default());
+    }
+    if let Some(paths) = session.delta_map_view_paths.borrow().get(name) {
+        return Ok(paths.clone());
+    }
+    if session.inner.has_temp_view(name) {
+        return Ok(result);
+    }
+    let Some(warehouse) = session.inner.warehouse_dir() else {
+        return Ok(result);
+    };
+    let mut candidates = Vec::new();
+    if let Ok(path) = robin_sparkless_core::resolve_path_under_base(warehouse, name) {
+        candidates.push(path);
+    }
+    if name.contains('.') {
+        let nested = name.replace('.', std::path::MAIN_SEPARATOR_STR);
+        if let Ok(path) = robin_sparkless_core::resolve_path_under_base(warehouse, &nested) {
+            candidates.push(path);
+        }
+    }
+    for path in candidates {
+        if !path.is_dir() {
+            continue;
+        }
+        let paths = robin_sparkless::delta::logical_map_paths(path)?;
+        if !paths.is_empty() {
+            result.extend(paths);
+            break;
+        }
+    }
+    Ok(result)
+}
+
+#[cfg(feature = "delta")]
+fn delta_map_paths_for_sql_query(
+    session: &PySparkSession,
+    query: &str,
+    output_columns: &[String],
+) -> std::collections::HashSet<String> {
+    use robin_sparkless::sql::ast::{SelectItem, SetExpr, TableFactor};
+
+    fn path_root_and_tail(path: &str) -> Option<(String, &str)> {
+        let mut escaped = false;
+        let mut end = None;
+        for (index, character) in path.char_indices().skip(1) {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                end = Some(index);
+                break;
+            }
+        }
+        let end = end?;
+        let root: String = serde_json::from_str(&path[..=end]).ok()?;
+        Some((root, &path[end + 1..]))
+    }
+
+    fn replace_path_root(path: &str, output_root: &str) -> Option<String> {
+        let (_, tail) = path_root_and_tail(path)?;
+        let output_root = serde_json::to_string(output_root).ok()?;
+        Some(format!("{output_root}{tail}"))
+    }
+
+    fn table_columns(session: &PySparkSession, name: &str) -> Vec<String> {
+        session
+            .inner
+            .table(name)
+            .and_then(|df| df.columns())
+            .unwrap_or_default()
+    }
+
+    fn table_name_for_alias(name: &robin_sparkless::sql::ast::ObjectName) -> String {
+        name.0
+            .iter()
+            .filter_map(|part| part.as_ident().map(|ident| ident.value.clone()))
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+
+    fn join_suffix(
+        left_names: &std::collections::HashSet<String>,
+        right_names: &[String],
+        right_keys: &std::collections::HashSet<String>,
+    ) -> String {
+        let overlaps = right_names
+            .iter()
+            .filter(|name| left_names.contains(*name) && !right_keys.contains(*name))
+            .collect::<Vec<_>>();
+        if overlaps.is_empty() {
+            return "_right".to_string();
+        }
+        for index in 0.. {
+            let suffix = if index == 0 {
+                "_right".to_string()
+            } else {
+                format!("_right_{index}")
+            };
+            let collides = overlaps
+                .iter()
+                .any(|name| left_names.contains(&format!("{name}{suffix}")));
+            if !collides {
+                return suffix;
+            }
+        }
+        unreachable!("a free join suffix always exists")
+    }
+
+    struct SourceTable {
+        qualifier: String,
+        paths: std::collections::HashSet<String>,
+        output_by_source: std::collections::HashMap<String, String>,
+    }
+
+    fn identifier_parts(expr: &robin_sparkless::sql::ast::Expr) -> Option<Vec<String>> {
+        use robin_sparkless::sql::ast::Expr;
+        match expr {
+            Expr::Identifier(name) => Some(vec![name.value.clone()]),
+            Expr::CompoundIdentifier(parts) => {
+                Some(parts.iter().map(|part| part.value.clone()).collect())
+            }
+            Expr::Nested(expr) => identifier_parts(expr),
+            _ => None,
+        }
+    }
+
+    fn resolve_source_reference<'a>(
+        parts: &[String],
+        source_tables: &'a [SourceTable],
+        case_sensitive: bool,
+    ) -> Option<(&'a SourceTable, String, String)> {
+        if parts.is_empty() {
+            return None;
+        }
+        let qualified = parts.len() > 1
+            && source_tables.iter().any(|table| {
+                if case_sensitive {
+                    table.qualifier == parts[0]
+                } else {
+                    table.qualifier.eq_ignore_ascii_case(&parts[0])
+                }
+            });
+        let (qualifier, root_index) = if qualified {
+            (Some(parts[0].as_str()), 1)
+        } else {
+            (None, 0)
+        };
+        let nested_start = root_index + 1;
+        let matching_tables = source_tables.iter().filter(|table| {
+            qualifier.is_none_or(|qualifier| {
+                if case_sensitive {
+                    table.qualifier == qualifier
+                } else {
+                    table.qualifier.eq_ignore_ascii_case(qualifier)
+                }
+            })
+        });
+        for table in matching_tables {
+            let Some(canonical_root) = table.output_by_source.keys().find(|name| {
+                if case_sensitive {
+                    *name == &parts[root_index]
+                } else {
+                    name.eq_ignore_ascii_case(&parts[root_index])
+                }
+            }) else {
+                continue;
+            };
+            let nested_fields = &parts[nested_start..];
+            let source_path = canonical_nested_source_path(
+                &table.paths,
+                canonical_root,
+                nested_fields,
+                case_sensitive,
+            )
+            .or_else(|| {
+                let mut source_path = serde_json::to_string(canonical_root).ok()?;
+                for field in nested_fields {
+                    source_path.push('.');
+                    source_path.push_str(&serde_json::to_string(field).ok()?);
+                }
+                Some(source_path)
+            })?;
+            return Some((table, canonical_root.clone(), source_path));
+        }
+        None
+    }
+
+    fn json_string_prefix(input: &str) -> Option<(String, &str)> {
+        if !input.starts_with('"') {
+            return None;
+        }
+        let mut escaped = false;
+        for (index, character) in input.char_indices().skip(1) {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                let value = serde_json::from_str(&input[..=index]).ok()?;
+                return Some((value, &input[index + 1..]));
+            }
+        }
+        None
+    }
+
+    fn canonical_nested_source_path(
+        paths: &std::collections::HashSet<String>,
+        root: &str,
+        nested_fields: &[String],
+        case_sensitive: bool,
+    ) -> Option<String> {
+        let encoded_root = serde_json::to_string(root).ok()?;
+        if nested_fields.is_empty() {
+            return Some(encoded_root);
+        }
+        for path in paths {
+            let Some((path_root, mut tail)) = path_root_and_tail(path) else {
+                continue;
+            };
+            if path_root != root {
+                continue;
+            }
+            let mut prefix_length = path.len() - tail.len();
+            let mut matches = true;
+            for expected_field in nested_fields {
+                let Some(field_tail) = tail.strip_prefix('.') else {
+                    matches = false;
+                    break;
+                };
+                let Some((actual_field, remaining)) = json_string_prefix(field_tail) else {
+                    matches = false;
+                    break;
+                };
+                let same_field = if case_sensitive {
+                    actual_field == *expected_field
+                } else {
+                    actual_field.eq_ignore_ascii_case(expected_field)
+                };
+                if !same_field {
+                    matches = false;
+                    break;
+                }
+                prefix_length += tail.len() - remaining.len();
+                tail = remaining;
+            }
+            if matches {
+                return Some(path[..prefix_length].to_string());
+            }
+        }
+        None
+    }
+
+    fn tails_below_path(
+        paths: &std::collections::HashSet<String>,
+        source_path: &str,
+    ) -> std::collections::HashSet<String> {
+        paths
+            .iter()
+            .filter_map(|path| {
+                if path == source_path {
+                    Some(String::new())
+                } else {
+                    path.strip_prefix(source_path)
+                        .filter(|tail| tail.starts_with(['.', '[', '{']))
+                        .map(str::to_string)
+                }
+            })
+            .collect()
+    }
+
+    struct SourceInput {
+        qualifier: String,
+        paths: std::collections::HashSet<String>,
+        output_prefix: Option<String>,
+        join_alias: Option<String>,
+        columns: Vec<String>,
+    }
+
+    fn source_input(session: &PySparkSession, factor: &TableFactor) -> Option<SourceInput> {
+        match factor {
+            TableFactor::Table { name, alias, .. } => {
+                let table_name = name.to_string();
+                let table_leaf = table_name.rsplit('.').next().unwrap_or(table_name.as_str());
+                let full_name = table_name_for_alias(name);
+                let output_prefix = alias
+                    .as_ref()
+                    .map(|alias| alias.name.value.as_str())
+                    .filter(|alias| *alias != full_name.as_str())
+                    .map(str::to_string);
+                let qualifier = alias
+                    .as_ref()
+                    .map(|alias| alias.name.value.as_str())
+                    .unwrap_or(table_leaf)
+                    .to_string();
+                Some(SourceInput {
+                    qualifier,
+                    paths: delta_map_paths_for_catalog_table(session, &table_name).ok()?,
+                    join_alias: output_prefix.clone(),
+                    output_prefix,
+                    columns: table_columns(session, &table_name),
+                })
+            }
+            TableFactor::Derived {
+                subquery, alias, ..
+            } => {
+                let query = subquery.to_string();
+                let dataframe = session.inner.sql(&query).ok()?;
+                let columns = dataframe.columns().ok()?;
+                Some(SourceInput {
+                    qualifier: alias
+                        .as_ref()
+                        .map(|alias| alias.name.value.clone())
+                        .unwrap_or_default(),
+                    paths: delta_map_paths_for_sql_query(session, &query, &columns),
+                    output_prefix: None,
+                    join_alias: alias.as_ref().map(|alias| alias.name.value.clone()),
+                    columns,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    let Ok(robin_sparkless::sql::Statement::Query(query)) = robin_sparkless::sql::parse_sql(query)
+    else {
+        return Default::default();
+    };
+    match query.body.as_ref() {
+        SetExpr::Query(inner) => {
+            return delta_map_paths_for_sql_query(session, &inner.to_string(), output_columns);
+        }
+        SetExpr::SetOperation { left, right, .. } => {
+            let left_query = left.to_string();
+            let right_query = right.to_string();
+            let Ok(left_df) = session.inner.sql(&left_query) else {
+                return Default::default();
+            };
+            let Ok(right_df) = session.inner.sql(&right_query) else {
+                return Default::default();
+            };
+            let (Ok(left_columns), Ok(right_columns)) = (left_df.columns(), right_df.columns())
+            else {
+                return Default::default();
+            };
+            let mut paths = delta_map_paths_for_sql_query(session, &left_query, &left_columns);
+            let right_paths = delta_map_paths_for_sql_query(session, &right_query, &right_columns);
+            for path in right_paths {
+                let Some((root, tail)) = path_root_and_tail(&path) else {
+                    continue;
+                };
+                let Some(index) = right_columns
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(&root))
+                else {
+                    continue;
+                };
+                let Some(left_name) = left_columns.get(index) else {
+                    continue;
+                };
+                let Ok(left_root) = serde_json::to_string(left_name) else {
+                    continue;
+                };
+                paths.insert(format!("{left_root}{tail}"));
+            }
+            return paths;
+        }
+        SetExpr::Select(_) => {}
+        _ => return Default::default(),
+    }
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        unreachable!("the set expression was checked above")
+    };
+    let Some(from) = select.from.first() else {
+        return Default::default();
+    };
+    let Some(first_source) = source_input(session, &from.relation) else {
+        return Default::default();
+    };
+    let source_paths = first_source.paths.clone();
+    if source_paths.is_empty() {
+        // A joined table may supply the projected MAP even when the first table does not.
+    }
+    let mut current_output_names = std::collections::HashSet::new();
+    let first_output_by_source = first_source
+        .columns
+        .iter()
+        .map(|column| {
+            let output = first_source
+                .output_prefix
+                .as_ref()
+                .map(|prefix| format!("{prefix}_{column}"))
+                .unwrap_or_else(|| column.clone());
+            current_output_names.insert(output.clone());
+            (column.clone(), output)
+        })
+        .collect();
+    let mut source_tables = vec![SourceTable {
+        qualifier: first_source.qualifier.clone(),
+        paths: source_paths.clone(),
+        output_by_source: first_output_by_source,
+    }];
+    let left_join_alias = first_source.join_alias.clone();
+    for join in &from.joins {
+        let Some(right_source) = source_input(session, &join.relation) else {
+            continue;
+        };
+        {
+            let columns = right_source.columns;
+            let output_prefix = right_source.output_prefix;
+            let right_columns = columns
+                .iter()
+                .map(|column| {
+                    output_prefix
+                        .as_ref()
+                        .map(|prefix| format!("{prefix}_{column}"))
+                        .unwrap_or_else(|| column.clone())
+                })
+                .collect::<Vec<_>>();
+            let (left_keys, right_key_names) = robin_sparkless::sql::join_condition_to_on_columns(
+                &join.join_operator,
+                left_join_alias.as_deref(),
+                right_source.join_alias.as_deref(),
+            )
+            .unwrap_or_default();
+            let right_keys = right_key_names
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            let suffix = join_suffix(&current_output_names, &right_columns, &right_keys);
+            let coalesces_same_keys = left_keys == right_key_names
+                && matches!(
+                    &join.join_operator,
+                    robin_sparkless::sql::ast::JoinOperator::Join(_)
+                        | robin_sparkless::sql::ast::JoinOperator::Inner(_)
+                        | robin_sparkless::sql::ast::JoinOperator::Left(_)
+                        | robin_sparkless::sql::ast::JoinOperator::LeftOuter(_)
+                        | robin_sparkless::sql::ast::JoinOperator::Right(_)
+                        | robin_sparkless::sql::ast::JoinOperator::RightOuter(_)
+                );
+            let drops_right_columns = matches!(
+                &join.join_operator,
+                robin_sparkless::sql::ast::JoinOperator::LeftSemi(_)
+                    | robin_sparkless::sql::ast::JoinOperator::LeftAnti(_)
+                    | robin_sparkless::sql::ast::JoinOperator::Semi(_)
+                    | robin_sparkless::sql::ast::JoinOperator::Anti(_)
+            );
+            let mut output_by_source = std::collections::HashMap::new();
+            for (column, base) in columns.iter().zip(right_columns) {
+                if drops_right_columns {
+                    continue;
+                }
+                if coalesces_same_keys && right_keys.contains(&base) {
+                    continue;
+                }
+                let output = if current_output_names.contains(&base) {
+                    format!("{base}{suffix}")
+                } else {
+                    base
+                };
+                current_output_names.insert(output.clone());
+                output_by_source.insert(column.clone(), output);
+            }
+            source_tables.push(SourceTable {
+                qualifier: right_source.qualifier,
+                paths: right_source.paths,
+                output_by_source,
+            });
+        }
+    }
+
+    let mut output_paths = std::collections::HashSet::new();
+    for item in &select.projection {
+        let expression_and_alias = match item {
+            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
+                let output_names = output_columns
+                    .iter()
+                    .cloned()
+                    .collect::<std::collections::HashSet<_>>();
+                for source_table in &source_tables {
+                    for path in &source_table.paths {
+                        let Some((source_root, _)) = path_root_and_tail(path) else {
+                            continue;
+                        };
+                        let Some(output_root) =
+                            source_table.output_by_source.get(source_root.as_str())
+                        else {
+                            continue;
+                        };
+                        if output_names.contains(output_root) {
+                            if let Some(path) = replace_path_root(path, output_root) {
+                                output_paths.insert(path);
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            SelectItem::UnnamedExpr(expr) => (expr, None),
+            SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.value.as_str())),
+        };
+        let (expr, explicit_alias) = expression_and_alias;
+        let expression = expr.to_string();
+        let map_value_references =
+            robin_sparkless::sql::select_expr_map_value_reference_parts(&expression)
+                .ok()
+                .flatten();
+        let case_sensitive = session.inner.is_case_sensitive();
+        if let Some(parts) = identifier_parts(expr) {
+            let Some((table, canonical_root, source_path)) =
+                resolve_source_reference(&parts, &source_tables, case_sensitive)
+            else {
+                continue;
+            };
+            let selected_leaf = parts.last().map(String::as_str).unwrap_or(&canonical_root);
+            let mapped_output = table.output_by_source.get(&canonical_root);
+            let output_name = explicit_alias
+                .map(str::to_string)
+                .or_else(|| {
+                    output_columns
+                        .iter()
+                        .find(|column| column.eq_ignore_ascii_case(selected_leaf))
+                        .cloned()
+                })
+                .or_else(|| {
+                    mapped_output.and_then(|mapped| {
+                        output_columns
+                            .iter()
+                            .find(|column| column.eq_ignore_ascii_case(mapped))
+                            .cloned()
+                    })
+                })
+                .unwrap_or_else(|| selected_leaf.to_string());
+            let output_root = serde_json::to_string(&output_name).unwrap_or_default();
+            for tail in tails_below_path(&table.paths, &source_path) {
+                output_paths.insert(format!("{output_root}{tail}"));
+            }
+            continue;
+        }
+
+        // Computed expressions such as COALESCE and CASE preserve a map only
+        // when every referenced branch has the same logical map paths.
+        let Some(references) = map_value_references else {
+            continue;
+        };
+        if references.is_empty() {
+            continue;
+        }
+        let output_name = explicit_alias
+            .map(str::to_string)
+            .unwrap_or_else(|| expression.clone());
+        let Some(output_name) = output_columns
+            .iter()
+            .find(|column| column.eq_ignore_ascii_case(&output_name))
+        else {
+            continue;
+        };
+        let mut common_tails: Option<std::collections::HashSet<String>> = None;
+        for reference in references {
+            let Some((table, _, source_path)) =
+                resolve_source_reference(&reference, &source_tables, case_sensitive)
+            else {
+                common_tails = Some(Default::default());
+                break;
+            };
+            let source_tails = tails_below_path(&table.paths, &source_path);
+            if let Some(common_tails) = &mut common_tails {
+                common_tails.retain(|tail| source_tails.contains(tail));
+            } else {
+                common_tails = Some(source_tails);
+            }
+        }
+        let output_root = serde_json::to_string(output_name).unwrap_or_default();
+        for tail in common_tails.unwrap_or_default() {
+            output_paths.insert(format!("{output_root}{tail}"));
+        }
+    }
+    output_paths
+}
+
 /// #1344: module = "sparkless.sql.session" so type(spark).__module__ identifies engine (not builtins).
 #[pyclass(module = "sparkless.sql.session", unsendable)]
 struct PySparkSession {
@@ -971,6 +1576,9 @@ struct PySparkSession {
     backend_type: RefCell<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
     stopped: std::sync::atomic::AtomicBool,
+    #[cfg(feature = "delta")]
+    delta_map_view_paths:
+        RefCell<std::collections::HashMap<String, std::collections::HashSet<String>>>,
 }
 
 fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
@@ -1816,6 +2424,23 @@ impl PySparkSession {
             .iter()
             .all(|(k, v)| existing.get(k).map(|s| s.as_str()) == Some(v.as_str()))
     }
+
+    fn remember_delta_temp_view(&self, name: &str, df: &PyDataFrame) {
+        #[cfg(feature = "delta")]
+        {
+            if name.starts_with("global_temp.") {
+                delta_global_map_view_registry()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(name.to_string(), df.logical_map_paths.clone());
+            } else {
+                self.delta_map_view_paths
+                    .borrow_mut()
+                    .insert(name.to_string(), df.logical_map_paths.clone());
+            }
+        }
+        let _ = (name, df);
+    }
 }
 
 thread_local! {
@@ -2017,6 +2642,8 @@ impl PySparkSession {
                 inner: session,
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
+                #[cfg(feature = "delta")]
+                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -2085,6 +2712,8 @@ impl PySparkSession {
                 inner: session,
                 backend_type: RefCell::new(backend_type),
                 stopped: std::sync::atomic::AtomicBool::new(false),
+                #[cfg(feature = "delta")]
+                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -2153,29 +2782,58 @@ impl PySparkSession {
     fn create_or_replace_temp_view(&self, name: &str, df: &PyDataFrame) {
         self.inner
             .create_or_replace_temp_view(name, df.inner.clone());
+        self.remember_delta_temp_view(name, df);
     }
 
     fn create_or_replace_global_temp_view(&self, name: &str, df: &PyDataFrame) {
         self.inner
             .create_or_replace_global_temp_view(name, df.inner.clone());
+        self.remember_delta_temp_view(&format!("global_temp.{name}"), df);
     }
 
     fn drop_temp_view(&self, name: &str) -> bool {
-        self.inner.drop_temp_view(name)
+        let dropped = self.inner.drop_temp_view(name);
+        #[cfg(feature = "delta")]
+        self.delta_map_view_paths.borrow_mut().remove(name);
+        dropped
+    }
+
+    fn drop_global_temp_view(&self, name: &str) -> bool {
+        let dropped = self.inner.drop_global_temp_view(name);
+        #[cfg(feature = "delta")]
+        delta_global_map_view_registry()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&format!("global_temp.{name}"));
+        dropped
     }
 
     fn table(&self, name: &str) -> PyResult<PyDataFrame> {
-        self.inner
+        let mut wrapped = self
+            .inner
             .table(name)
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            wrapped.logical_map_paths =
+                delta_map_paths_for_catalog_table(self, name).map_err(to_py_err)?;
+        }
+        Ok(wrapped)
     }
 
     fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
-        self.inner
+        let mut wrapped = self
+            .inner
             .sql(query)
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            let output_columns = wrapped.inner.columns().map_err(to_py_err)?;
+            wrapped.logical_map_paths = delta_map_paths_for_sql_query(self, query, &output_columns);
+        }
+        Ok(wrapped)
     }
 
     fn create_dataframe(
@@ -2663,7 +3321,10 @@ impl PyCatalog {
             .cast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        Ok(session.inner.drop_temp_view(name))
+        let dropped = session.inner.drop_temp_view(name);
+        #[cfg(feature = "delta")]
+        session.delta_map_view_paths.borrow_mut().remove(name);
+        Ok(dropped)
     }
 
     #[pyo3(name = "dropGlobalTempView")]
@@ -2674,7 +3335,7 @@ impl PyCatalog {
             .cast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        Ok(session.inner.drop_global_temp_view(name))
+        Ok(session.drop_global_temp_view(name))
     }
 
     #[pyo3(name = "dropTable")]
@@ -4873,10 +5534,22 @@ impl PyDataFrameReader {
         if let Some(ref fmt) = self.format {
             reader = reader.format(fmt);
         }
-        reader
+        let mut wrapped = reader
             .load(Path::new(path))
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        if self
+            .format
+            .as_deref()
+            .is_some_and(|format| format.eq_ignore_ascii_case("delta"))
+        {
+            wrapped.logical_map_paths = robin_sparkless::delta::logical_map_paths(path)
+                .map_err(to_py_err)?
+                .into_iter()
+                .collect();
+        }
+        Ok(wrapped)
     }
 
     fn csv(&self, py: Python<'_>, path: &str) -> PyResult<PyDataFrame> {
@@ -4948,11 +5621,17 @@ impl PyDataFrameReader {
             .cast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        session
+        let mut wrapped = session
             .inner
             .table(name)
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            wrapped.logical_map_paths =
+                delta_map_paths_for_catalog_table(&session, name).map_err(to_py_err)?;
+        }
+        Ok(wrapped)
     }
 
     #[cfg(feature = "delta")]
@@ -4963,12 +5642,17 @@ impl PyDataFrameReader {
             .cast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        session
+        let mut wrapped = session
             .inner
             .read()
             .delta(Path::new(path))
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        wrapped.logical_map_paths = robin_sparkless::delta::logical_map_paths(path)
+            .map_err(to_py_err)?
+            .into_iter()
+            .collect();
+        Ok(wrapped)
     }
 
     /// PySpark: jdbc(url, table, properties=None, ...). Reads from a JDBC data source.
@@ -5912,6 +6596,17 @@ impl PyDataFrame {
         });
     }
 
+    fn remove_logical_map_metadata_root(target: &mut Self, root: &str) {
+        target.logical_map_columns.remove(root);
+        let root = arrow_field_path("", root);
+        target.logical_map_paths.retain(|path| {
+            path != &root
+                && !path
+                    .strip_prefix(root.as_str())
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        });
+    }
+
     fn column_source(expr: &robin_sparkless::Expr) -> Option<String> {
         match expr {
             robin_sparkless::Expr::Alias(inner, _) => Self::column_source(inner),
@@ -6112,7 +6807,26 @@ impl PyDataFrame {
         let source_path = if let Some(source) = &resolved {
             arrow_field_path("", source)
         } else {
-            let mut parts = source.split('.');
+            // `selectExpr` preserves qualified identifiers as `alias.field.nested`. The
+            // DataFrame schema only contains `field`, so discard this DataFrame's alias
+            // before resolving the metadata path.
+            let qualified_source = self
+                .inner
+                .get_alias()
+                .and_then(|alias| {
+                    source
+                        .split_once('.')
+                        .filter(|(qualifier, _)| {
+                            if self.inner.is_case_sensitive() {
+                                *qualifier == alias
+                            } else {
+                                qualifier.to_lowercase() == alias.to_lowercase()
+                            }
+                        })
+                        .map(|(_, nested_source)| nested_source.to_string())
+                })
+                .unwrap_or_else(|| source.to_string());
+            let mut parts = qualified_source.split('.');
             let root = parts.next().unwrap_or(source);
             let root = self
                 .inner
@@ -6544,6 +7258,9 @@ impl PyDataFrame {
             let output = alias.unwrap_or(projected_output);
             Self::remove_metadata_root(&mut wrapped, &output);
             self.copy_column_metadata(&source, &output, &mut wrapped);
+            if !robin_sparkless::sql::select_expr_preserves_map_value(expression).unwrap_or(false) {
+                Self::remove_logical_map_metadata_root(&mut wrapped, &output);
+            }
         }
         wrapped
     }
@@ -8356,6 +9073,7 @@ impl PyDataFrame {
             .borrow()
             .inner
             .create_or_replace_temp_view(name, self.inner.clone());
+        session_ref.borrow().remember_delta_temp_view(name, self);
         Ok(())
     }
 
@@ -8372,6 +9090,9 @@ impl PyDataFrame {
             .borrow()
             .inner
             .create_or_replace_global_temp_view(name, self.inner.clone());
+        session_ref
+            .borrow()
+            .remember_delta_temp_view(&format!("global_temp.{name}"), self);
         Ok(())
     }
 
@@ -8983,6 +9704,28 @@ fn save_mode_from_str(mode: &str) -> SaveMode {
     }
 }
 
+fn validate_delta_options(options: &[(String, String)], save_mode: SaveMode) -> PyResult<()> {
+    if options
+        .iter()
+        .any(|(key, _)| key.eq_ignore_ascii_case("replaceWhere"))
+    {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Delta option 'replaceWhere' is not supported by this writer; refusing to overwrite the full table",
+        ));
+    }
+    if save_mode == SaveMode::Overwrite
+        && options.iter().any(|(key, value)| {
+            key.eq_ignore_ascii_case("partitionOverwriteMode")
+                && value.eq_ignore_ascii_case("dynamic")
+        })
+    {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Delta option 'partitionOverwriteMode=dynamic' is not supported by this writer; refusing to overwrite the full table",
+        ));
+    }
+    Ok(())
+}
+
 #[pymethods]
 impl PyDataFrameWriter {
     fn mode<'a>(mut slf: PyRefMut<'a, Self>, mode: &str) -> PyRefMut<'a, Self> {
@@ -9070,18 +9813,93 @@ impl PyDataFrameWriter {
         w.save(Path::new(path)).map_err(to_py_err)
     }
 
-    /// PySpark: save(path). Uses current format (parquet default when using .parquet/.csv/.json).
+    /// PySpark: save(path). Uses the selected format (Parquet by default).
     fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
         let df =
             self.df.bind(py).cast::<PyDataFrame>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
             })?;
         let inner = df.borrow();
+
+        let format = self
+            .writer_format
+            .as_deref()
+            .unwrap_or("parquet")
+            .to_ascii_lowercase();
+
+        if format == "delta" {
+            let path = robin_sparkless_core::maybe_confine_files_path(Path::new(path))
+                .map_err(to_py_err)?;
+
+            let merge_schema = self
+                .options
+                .iter()
+                .rev()
+                .find(|(key, _)| key.eq_ignore_ascii_case("mergeSchema"))
+                .is_some_and(|(_, value)| value.eq_ignore_ascii_case("true") || value == "1");
+            let overwrite_schema = self
+                .options
+                .iter()
+                .rev()
+                .find(|(key, _)| key.eq_ignore_ascii_case("overwriteSchema"))
+                .is_some_and(|(_, value)| value.eq_ignore_ascii_case("true") || value == "1");
+            let save_mode = match self.mode.to_ascii_lowercase().as_str() {
+                "append" => SaveMode::Append,
+                "overwrite" => SaveMode::Overwrite,
+                "ignore" => SaveMode::Ignore,
+                "error" | "errorifexists" => SaveMode::ErrorIfExists,
+                mode => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "unsupported DataFrameWriter save mode: {mode}"
+                    )));
+                }
+            };
+            validate_delta_options(&self.options, save_mode)?;
+
+            let mut logical_map_paths = inner.logical_map_paths.iter().cloned().collect::<Vec<_>>();
+            logical_map_paths.sort();
+
+            return match inner
+                .inner
+                .write_delta_with_save_options_and_logical_map_paths(
+                    &path,
+                    save_mode,
+                    merge_schema,
+                    overwrite_schema,
+                    &self.partition_by,
+                    &logical_map_paths,
+                ) {
+                Ok(()) => Ok(()),
+                Err(error)
+                    if save_mode == SaveMode::ErrorIfExists
+                        && error
+                            .to_string()
+                            .contains("Delta table already exists (save mode ErrorIfExists)") =>
+                {
+                    Err(PyErr::new::<pyo3::exceptions::PyFileExistsError, _>(
+                        format!("Delta table already exists at {}", path.display()),
+                    ))
+                }
+                Err(error) => Err(to_py_err(error)),
+            };
+        }
+
+        let write_format = match format.as_str() {
+            "parquet" => WriteFormat::Parquet,
+            "csv" => WriteFormat::Csv,
+            "json" => WriteFormat::Json,
+            _ => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "unsupported DataFrameWriter format for save(): {format}"
+                )));
+            }
+        };
+
         let mut w = inner
             .inner
             .write()
             .mode(write_mode_from_str(&self.mode))
-            .format(WriteFormat::Parquet);
+            .format(write_format);
         for (k, v) in &self.options {
             w = w.option(k, v);
         }
@@ -9161,15 +9979,36 @@ impl PyDataFrameWriter {
         let inner = df.borrow();
         let active = require_active_session(py)?.bind(py).borrow().inner.clone();
         let save_mode = save_mode_from_str(mode.unwrap_or(self.mode.as_str()));
+        if self
+            .writer_format
+            .as_deref()
+            .is_some_and(|format| format.eq_ignore_ascii_case("delta"))
+        {
+            validate_delta_options(&self.options, save_mode)?;
+        }
         // Thread writer-level options (including format) through to the backend so
         // saveAsTable can make format-aware decisions (e.g. Delta overwrite parity).
         let mut options: Vec<(String, String)> = self.options.clone();
         if let Some(fmt) = &self.writer_format {
             options.push(("sparkless.writer.format".to_string(), fmt.to_string()));
         }
-        inner
-            .inner
-            .write()
+        if self
+            .writer_format
+            .as_deref()
+            .is_some_and(|format| format.eq_ignore_ascii_case("delta"))
+        {
+            let mut paths = inner.logical_map_paths.iter().cloned().collect::<Vec<_>>();
+            paths.sort();
+            options.push((
+                "sparkless.delta.logicalMapPaths".to_string(),
+                serde_json::to_string(&paths).map_err(to_py_err)?,
+            ));
+        }
+        let mut writer = inner.inner.write();
+        if !self.partition_by.is_empty() {
+            writer = writer.partition_by(self.partition_by.iter().map(|s| s.as_str()));
+        }
+        writer
             .save_as_table_with_options(&active, name, save_mode, &options)
             .map_err(to_py_err)
     }

@@ -2418,11 +2418,77 @@ impl DataFrame {
         overwrite: bool,
         merge_schema: bool,
     ) -> Result<(), PolarsError> {
-        crate::delta::write_delta(
+        self.write_delta_with_options(path, overwrite, merge_schema, &[])
+    }
+
+    /// Write to Delta while preserving path-writer options such as partition columns.
+    #[cfg(feature = "delta")]
+    pub fn write_delta_with_options(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        overwrite: bool,
+        merge_schema: bool,
+        partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        let resolved_partition_by = partition_by
+            .iter()
+            .map(|name| self.resolve_column_name(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        crate::delta::write_delta_with_options(
             self.collect_inner()?.as_ref(),
             path,
             overwrite,
             merge_schema,
+            &resolved_partition_by,
+        )
+    }
+
+    /// Write Delta data with Spark-style save modes and schema evolution options.
+    #[cfg(feature = "delta")]
+    pub fn write_delta_with_save_options(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        mode: SaveMode,
+        merge_schema: bool,
+        overwrite_schema: bool,
+        partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        let resolved_partition_by = partition_by
+            .iter()
+            .map(|name| self.resolve_column_name(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        crate::delta::write_delta_with_save_options(
+            self.collect_inner()?.as_ref(),
+            path,
+            mode,
+            merge_schema,
+            overwrite_schema,
+            &resolved_partition_by,
+        )
+    }
+
+    #[cfg(feature = "delta")]
+    pub fn write_delta_with_save_options_and_logical_map_paths(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        mode: SaveMode,
+        merge_schema: bool,
+        overwrite_schema: bool,
+        partition_by: &[String],
+        logical_map_paths: &[String],
+    ) -> Result<(), PolarsError> {
+        let resolved_partition_by = partition_by
+            .iter()
+            .map(|name| self.resolve_column_name(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        crate::delta::write_delta_with_save_options_and_logical_map_paths(
+            self.collect_inner()?.as_ref(),
+            path,
+            mode,
+            merge_schema,
+            overwrite_schema,
+            &resolved_partition_by,
+            logical_map_paths,
         )
     }
 
@@ -2430,9 +2496,34 @@ impl DataFrame {
     #[cfg(not(feature = "delta"))]
     pub fn write_delta(
         &self,
+        path: impl AsRef<std::path::Path>,
+        overwrite: bool,
+        merge_schema: bool,
+    ) -> Result<(), PolarsError> {
+        self.write_delta_with_options(path, overwrite, merge_schema, &[])
+    }
+
+    #[cfg(not(feature = "delta"))]
+    pub fn write_delta_with_options(
+        &self,
         _path: impl AsRef<std::path::Path>,
         _overwrite: bool,
         _merge_schema: bool,
+        _partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        Err(PolarsError::InvalidOperation(
+            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+        ))
+    }
+
+    #[cfg(not(feature = "delta"))]
+    pub fn write_delta_with_save_options(
+        &self,
+        _path: impl AsRef<std::path::Path>,
+        _mode: SaveMode,
+        _merge_schema: bool,
+        _overwrite_schema: bool,
+        _partition_by: &[String],
     ) -> Result<(), PolarsError> {
         Err(PolarsError::InvalidOperation(
             "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
@@ -2673,20 +2764,29 @@ impl<'a> DataFrameWriter<'a> {
         use std::fs;
         use std::path::Path;
 
-        let (merge_schema, is_delta_format) = options.map_or((false, false), |opts| {
-            let mut merge_schema = false;
-            let mut is_delta = false;
-            for (k, v) in opts {
-                if k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true") {
-                    merge_schema = true;
-                } else if k.eq_ignore_ascii_case("sparkless.writer.format")
-                    && v.eq_ignore_ascii_case("delta")
-                {
-                    is_delta = true;
+        let (merge_schema, overwrite_schema, is_delta_format, logical_map_paths) =
+            options.map_or((false, false, false, Vec::new()), |opts| {
+                let mut merge_schema = false;
+                let mut overwrite_schema = false;
+                let mut is_delta = false;
+                let mut logical_map_paths: Vec<String> = Vec::new();
+                for (k, v) in opts {
+                    if k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true") {
+                        merge_schema = true;
+                    } else if k.eq_ignore_ascii_case("overwriteSchema")
+                        && v.eq_ignore_ascii_case("true")
+                    {
+                        overwrite_schema = true;
+                    } else if k.eq_ignore_ascii_case("sparkless.writer.format")
+                        && v.eq_ignore_ascii_case("delta")
+                    {
+                        is_delta = true;
+                    } else if k.eq_ignore_ascii_case("sparkless.delta.logicalMapPaths") {
+                        logical_map_paths = serde_json::from_str(v).unwrap_or_default();
+                    }
                 }
-            }
-            (merge_schema, is_delta)
-        });
+                (merge_schema, overwrite_schema, is_delta, logical_map_paths)
+            });
 
         // Warehouse paths (disk-backed saveAsTable). For schema-qualified names, allow both:
         // - "{warehouse}/{schema.table}" (single dir)
@@ -2709,25 +2809,25 @@ impl<'a> DataFrameWriter<'a> {
             .unwrap_or_default();
         let warehouse_exists = warehouse_paths.iter().any(|p| p.is_dir());
 
-        // Delta saveAsTable is warehouse-backed. Implement overwrite/append by writing a Delta
-        // table under {warehouse}/{name} and registering the loaded result in the session.
+        // Delta saveAsTable is warehouse-backed. Let the transaction snapshot determine whether
+        // the target exists as a Delta table; an empty warehouse directory is only a location.
         if is_delta_format {
             #[cfg(feature = "delta")]
             {
-                let target = warehouse_paths.first().ok_or_else(|| {
-                    PolarsError::InvalidOperation(
-                        "saveAsTable(format=delta) requires spark.sql.warehouse.dir to be set."
-                            .into(),
-                    )
-                })?;
+                let target = warehouse_paths
+                    .iter()
+                    .find(|path| path.join("_delta_log").is_dir())
+                    .or_else(|| warehouse_paths.first())
+                    .ok_or_else(|| {
+                        PolarsError::InvalidOperation(
+                            "saveAsTable(format=delta) requires spark.sql.warehouse.dir to be set."
+                                .into(),
+                        )
+                    })?;
 
                 match mode {
-                    SaveMode::Ignore if session.saved_table_exists(name) || warehouse_exists => {
-                        return Ok(());
-                    }
-                    SaveMode::ErrorIfExists
-                        if session.saved_table_exists(name) || warehouse_exists =>
-                    {
+                    SaveMode::Ignore if session.saved_table_exists(name) => return Ok(()),
+                    SaveMode::ErrorIfExists if session.saved_table_exists(name) => {
                         return Err(PolarsError::InvalidOperation(
                             format!(
                                 "Table or view '{name}' already exists. SaveMode is ErrorIfExists."
@@ -2735,25 +2835,39 @@ impl<'a> DataFrameWriter<'a> {
                             .into(),
                         ));
                     }
-                    SaveMode::Append => {
-                        let pl_df = self.df.collect_inner()?.as_ref().clone();
-                        crate::delta::write_delta(&pl_df, target, false, merge_schema)?;
-                        let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
-                        session.register_table(name, loaded);
-                        return Ok(());
-                    }
-                    SaveMode::Overwrite | SaveMode::Ignore | SaveMode::ErrorIfExists => {
-                        let pl_df = self.df.collect_inner()?.as_ref().clone();
-                        crate::delta::write_delta(&pl_df, target, true, false)?;
-                        let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
-                        session.register_table(name, loaded);
-                        return Ok(());
-                    }
+                    SaveMode::Append
+                    | SaveMode::Overwrite
+                    | SaveMode::Ignore
+                    | SaveMode::ErrorIfExists => {}
                 }
+                let pl_df = self.df.collect_inner()?.as_ref().clone();
+                let resolved_partition_by = self
+                    .partition_by
+                    .iter()
+                    .map(|name| self.df.resolve_column_name(name))
+                    .collect::<Result<Vec<_>, _>>()?;
+                crate::delta::write_delta_with_save_options_and_logical_map_paths_for_catalog(
+                    &pl_df,
+                    target,
+                    mode,
+                    merge_schema,
+                    overwrite_schema,
+                    &resolved_partition_by,
+                    &logical_map_paths,
+                )?;
+                let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
+                session.register_table(name, loaded);
+                return Ok(());
             }
             #[cfg(not(feature = "delta"))]
             {
-                let _ = (warehouse_paths, warehouse_exists, merge_schema);
+                let _ = (
+                    warehouse_paths,
+                    warehouse_exists,
+                    merge_schema,
+                    overwrite_schema,
+                    logical_map_paths,
+                );
                 return Err(PolarsError::InvalidOperation(
                     "saveAsTable(format=delta) requires the delta feature to be enabled.".into(),
                 ));
@@ -3151,10 +3265,13 @@ impl<'a> DataFrameWriter<'a> {
                 continue;
             }
 
-            let part_path: std::path::PathBuf = resolved
+            let partition_segments = resolved
                 .iter()
                 .zip(row.iter())
-                .map(|(name, av)| format!("{}={}", name, format_partition_value(av)))
+                .map(|(name, av)| format_partition_value(av).map(|value| format!("{name}={value}")))
+                .collect::<Result<Vec<_>, _>>()?;
+            let part_path = partition_segments
+                .into_iter()
                 .fold(path.to_path_buf(), |p, seg| p.join(seg));
             std::fs::create_dir_all(&part_path).map_err(|e| {
                 PolarsError::ComputeError(
@@ -3259,11 +3376,12 @@ impl Clone for DataFrame {
     }
 }
 
-/// Format a partition column value for use in a directory name (Spark/Hive style).
-/// Null becomes "__HIVE_DEFAULT_PARTITION__"; other values use string representation with path-unsafe chars replaced.
-fn format_partition_value(av: &AnyValue<'_>) -> String {
+/// Format a partition value as a reversible, path-safe directory component.
+/// Null uses the Hive sentinel; all non-null values are percent-encoded so they cannot collide
+/// with the sentinel or turn path data into directory separators.
+fn format_partition_value(av: &AnyValue<'_>) -> Result<String, PolarsError> {
     let s = match av {
-        AnyValue::Null => "__HIVE_DEFAULT_PARTITION__".to_string(),
+        AnyValue::Null => return Ok("__HIVE_DEFAULT_PARTITION__".to_string()),
         AnyValue::Boolean(b) => b.to_string(),
         AnyValue::Int32(i) => i.to_string(),
         AnyValue::Int64(i) => i.to_string(),
@@ -3273,11 +3391,53 @@ fn format_partition_value(av: &AnyValue<'_>) -> String {
         AnyValue::Float64(f) => f.to_string(),
         AnyValue::String(s) => s.to_string(),
         AnyValue::StringOwned(s) => s.as_str().to_string(),
-        AnyValue::Date(d) => d.to_string(),
+        AnyValue::Binary(value) => std::str::from_utf8(value).map(str::to_owned).map_err(|e| {
+            PolarsError::InvalidOperation(
+                format!("binary partition value is not valid UTF-8: {e}").into(),
+            )
+        })?,
+        AnyValue::BinaryOwned(value) => {
+            std::str::from_utf8(value).map(str::to_owned).map_err(|e| {
+                PolarsError::InvalidOperation(
+                    format!("binary partition value is not valid UTF-8: {e}").into(),
+                )
+            })?
+        }
+        AnyValue::Date(d) => date_days_to_json(*d)
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                PolarsError::ComputeError(
+                    format!("cannot format out-of-range Date partition value: {d}").into(),
+                )
+            })?,
+        AnyValue::Datetime(value, unit, timezone) => {
+            format_datetime_partition_value(*value, unit, timezone.is_some())?
+        }
+        AnyValue::DatetimeOwned(value, unit, timezone) => {
+            format_datetime_partition_value(*value, unit, timezone.is_some())?
+        }
         _ => av.to_string(),
     };
-    // Replace path separators and other unsafe chars so the value is a valid path segment
-    s.replace([std::path::MAIN_SEPARATOR, '/'], "_")
+    Ok(percent_encoding::utf8_percent_encode(&s, percent_encoding::NON_ALPHANUMERIC).to_string())
+}
+
+fn format_datetime_partition_value(
+    value: i64,
+    unit: &TimeUnit,
+    has_timezone: bool,
+) -> Result<String, PolarsError> {
+    let timestamp = datetime_anyvalue_to_json_iso(value, unit);
+    let timestamp = timestamp.as_str().ok_or_else(|| {
+        PolarsError::ComputeError(
+            format!("cannot format out-of-range Datetime partition value: {value}").into(),
+        )
+    })?;
+    if has_timezone {
+        Ok(format!("{timestamp}Z"))
+    } else {
+        Ok(timestamp.replacen('T', " ", 1))
+    }
 }
 
 /// Build a filter expression that matches rows where partition columns equal the given row values.
@@ -3302,12 +3462,21 @@ fn partition_row_to_filter_expr(
             AnyValue::Boolean(b) => col(name.as_str()).eq(lit(*b)),
             AnyValue::Int32(i) => col(name.as_str()).eq(lit(*i)),
             AnyValue::Int64(i) => col(name.as_str()).eq(lit(*i)),
+            // Date and Datetime AnyValues store their physical integer representation, while
+            // casting a temporal column to String formats it as a date/time string. Comparing
+            // those strings can miss rows because formatting precision differs from the writer.
+            AnyValue::Date(days) => col(name.as_str()).cast(DataType::Int32).eq(lit(*days)),
+            AnyValue::Datetime(value, _, _) | AnyValue::DatetimeOwned(value, _, _) => {
+                col(name.as_str()).cast(DataType::Int64).eq(lit(*value))
+            }
             AnyValue::UInt32(u) => col(name.as_str()).eq(lit(*u)),
             AnyValue::UInt64(u) => col(name.as_str()).eq(lit(*u)),
             AnyValue::Float32(f) => col(name.as_str()).eq(lit(*f)),
             AnyValue::Float64(f) => col(name.as_str()).eq(lit(*f)),
             AnyValue::String(s) => col(name.as_str()).eq(lit(s.to_string())),
             AnyValue::StringOwned(s) => col(name.as_str()).eq(lit(s.clone())),
+            AnyValue::Binary(value) => col(name.as_str()).eq(lit(value.to_vec())),
+            AnyValue::BinaryOwned(value) => col(name.as_str()).eq(lit(value.clone())),
             _ => {
                 // Fallback: compare as string
                 let s = av.to_string();
