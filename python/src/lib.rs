@@ -1160,8 +1160,50 @@ fn delta_map_paths_for_sql_query(
     else {
         return Default::default();
     };
+    match query.body.as_ref() {
+        SetExpr::Query(inner) => {
+            return delta_map_paths_for_sql_query(session, &inner.to_string(), output_columns);
+        }
+        SetExpr::SetOperation { left, right, .. } => {
+            let left_query = left.to_string();
+            let right_query = right.to_string();
+            let Ok(left_df) = session.inner.sql(&left_query) else {
+                return Default::default();
+            };
+            let Ok(right_df) = session.inner.sql(&right_query) else {
+                return Default::default();
+            };
+            let (Ok(left_columns), Ok(right_columns)) = (left_df.columns(), right_df.columns())
+            else {
+                return Default::default();
+            };
+            let mut paths = delta_map_paths_for_sql_query(session, &left_query, &left_columns);
+            let right_paths = delta_map_paths_for_sql_query(session, &right_query, &right_columns);
+            for path in right_paths {
+                let Some((root, tail)) = path_root_and_tail(&path) else {
+                    continue;
+                };
+                let Some(index) = right_columns
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(&root))
+                else {
+                    continue;
+                };
+                let Some(left_name) = left_columns.get(index) else {
+                    continue;
+                };
+                let Ok(left_root) = serde_json::to_string(left_name) else {
+                    continue;
+                };
+                paths.insert(format!("{left_root}{tail}"));
+            }
+            return paths;
+        }
+        SetExpr::Select(_) => {}
+        _ => return Default::default(),
+    }
     let SetExpr::Select(select) = query.body.as_ref() else {
-        return Default::default();
+        unreachable!("the set expression was checked above")
     };
     let Some(from) = select.from.first() else {
         return Default::default();
@@ -1297,23 +1339,20 @@ fn delta_map_paths_for_sql_query(
             continue;
         };
         let source_name = source.rsplit('.').next().unwrap_or(source.as_str());
-        let source_paths = source
-            .rsplit_once('.')
-            .and_then(|(qualifier, _)| {
-                source_tables
-                    .iter()
-                    .find(|table| table.qualifier.eq_ignore_ascii_case(qualifier))
-                    .map(|table| &table.paths)
-            })
+        let source_table = source.rsplit_once('.').and_then(|(qualifier, _)| {
+            source_tables
+                .iter()
+                .find(|table| table.qualifier.eq_ignore_ascii_case(qualifier))
+        });
+        let source_paths = source_table
+            .map(|table| &table.paths)
             .unwrap_or(&source_paths);
-        let qualified_alias = source
-            .rsplit_once('.')
-            .map(|(qualifier, _)| qualifier)
-            .filter(|qualifier| first_source.output_prefix.as_deref() == Some(*qualifier));
-        let aliased_output = qualified_alias.map(|qualifier| format!("{qualifier}_{source_name}"));
+        let mapped_output = source_table
+            .and_then(|table| table.output_by_source.get(source_name))
+            .cloned();
         let output_name = explicit_alias
             .map(str::to_string)
-            .or(aliased_output)
+            .or(mapped_output)
             .unwrap_or_else(|| source_name.to_string());
         let source_root = serde_json::to_string(source_name).unwrap_or_default();
         let output_root = serde_json::to_string(&output_name).unwrap_or_default();

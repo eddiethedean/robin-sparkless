@@ -2812,11 +2812,68 @@ pub fn write_delta_with_save_options_and_logical_map_paths(
     partition_by: &[String],
     logical_map_paths: &[String],
 ) -> Result<(), PolarsError> {
+    write_delta_with_save_options_and_logical_map_paths_impl(
+        df,
+        path,
+        save_mode,
+        merge_schema,
+        overwrite_schema,
+        partition_by,
+        logical_map_paths,
+        true,
+    )
+}
+
+/// Catalog writes use table existence, rather than directory existence, for Ignore mode.
+#[cfg(feature = "delta")]
+pub(crate) fn write_delta_with_save_options_and_logical_map_paths_for_catalog(
+    df: &polars::prelude::DataFrame,
+    path: impl AsRef<Path>,
+    save_mode: crate::dataframe::SaveMode,
+    merge_schema: bool,
+    overwrite_schema: bool,
+    partition_by: &[String],
+    logical_map_paths: &[String],
+) -> Result<(), PolarsError> {
+    write_delta_with_save_options_and_logical_map_paths_impl(
+        df,
+        path,
+        save_mode,
+        merge_schema,
+        overwrite_schema,
+        partition_by,
+        logical_map_paths,
+        false,
+    )
+}
+
+#[cfg(feature = "delta")]
+fn write_delta_with_save_options_and_logical_map_paths_impl(
+    df: &polars::prelude::DataFrame,
+    path: impl AsRef<Path>,
+    save_mode: crate::dataframe::SaveMode,
+    merge_schema: bool,
+    overwrite_schema: bool,
+    partition_by: &[String],
+    logical_map_paths: &[String],
+    ignore_existing_path: bool,
+) -> Result<(), PolarsError> {
     let normalized = normalize_delta_path(path.as_ref())?;
     let path = robin_sparkless_core::maybe_confine_files_path(&normalized).map_err(|e| {
         PolarsError::InvalidOperation(format!("write_delta path confinement: {e}").into())
     })?;
     let path = path.as_path();
+    if save_mode == crate::dataframe::SaveMode::Ignore && ignore_existing_path {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(PolarsError::ComputeError(
+                    format!("write_delta: inspect path for Ignore mode: {error}").into(),
+                ));
+            }
+        }
+    }
     if save_mode == crate::dataframe::SaveMode::ErrorIfExists
         && std::fs::symlink_metadata(path).is_ok()
     {

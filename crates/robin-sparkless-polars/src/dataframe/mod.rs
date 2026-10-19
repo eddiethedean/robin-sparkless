@@ -2842,7 +2842,7 @@ impl<'a> DataFrameWriter<'a> {
                     .iter()
                     .map(|name| self.df.resolve_column_name(name))
                     .collect::<Result<Vec<_>, _>>()?;
-                crate::delta::write_delta_with_save_options_and_logical_map_paths(
+                crate::delta::write_delta_with_save_options_and_logical_map_paths_for_catalog(
                     &pl_df,
                     target,
                     mode,
