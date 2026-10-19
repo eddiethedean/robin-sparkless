@@ -204,6 +204,28 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
     }
 
     match (left, right) {
+        (DataType::List(left_inner), DataType::List(right_inner)) => Ok(DataType::List(Box::new(
+            find_common_type(left_inner, right_inner)?,
+        ))),
+        (DataType::Struct(left_fields), DataType::Struct(right_fields))
+            if left_fields.len() == right_fields.len()
+                && left_fields
+                    .iter()
+                    .zip(right_fields)
+                    .all(|(left, right)| left.name() == right.name()) =>
+        {
+            let fields = left_fields
+                .iter()
+                .zip(right_fields)
+                .map(|(left, right)| {
+                    Ok(Field::new(
+                        left.name().clone(),
+                        find_common_type(left.dtype(), right.dtype())?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, PolarsError>>()?;
+            Ok(DataType::Struct(fields))
+        }
         (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
             return Ok(decimal_common_type(*lp, *ls, *rp, *rs));
         }
