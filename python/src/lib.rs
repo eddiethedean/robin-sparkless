@@ -1335,10 +1335,12 @@ fn delta_map_paths_for_sql_query(
         };
         let (expr, explicit_alias) = expression_and_alias;
         let expression = expr.to_string();
+        let map_value_references =
+            robin_sparkless::sql::select_expr_map_value_references(&expression)
+                .ok()
+                .flatten();
         let Ok(Some((source, _))) = robin_sparkless::sql::select_expr_source(&expression) else {
-            let Ok(Some(references)) =
-                robin_sparkless::sql::select_expr_map_value_references(&expression)
-            else {
+            let Some(references) = map_value_references else {
                 continue;
             };
             if references.is_empty() {
@@ -1410,6 +1412,11 @@ fn delta_map_paths_for_sql_query(
             }
             continue;
         };
+        // `select_expr_source` also unwraps casts; only a direct value projection can
+        // carry the source column's logical map annotation to its output.
+        if map_value_references.is_none() {
+            continue;
+        }
         let source_name = source.rsplit('.').next().unwrap_or(source.as_str());
         let source_table = source
             .rsplit_once('.')
@@ -6501,6 +6508,17 @@ impl PyDataFrame {
         });
     }
 
+    fn remove_logical_map_metadata_root(target: &mut Self, root: &str) {
+        target.logical_map_columns.remove(root);
+        let root = arrow_field_path("", root);
+        target.logical_map_paths.retain(|path| {
+            path != &root
+                && !path
+                    .strip_prefix(root.as_str())
+                    .is_some_and(|tail| tail.starts_with(['.', '[', '{']))
+        });
+    }
+
     fn column_source(expr: &robin_sparkless::Expr) -> Option<String> {
         match expr {
             robin_sparkless::Expr::Alias(inner, _) => Self::column_source(inner),
@@ -7133,6 +7151,9 @@ impl PyDataFrame {
             let output = alias.unwrap_or(projected_output);
             Self::remove_metadata_root(&mut wrapped, &output);
             self.copy_column_metadata(&source, &output, &mut wrapped);
+            if !robin_sparkless::sql::select_expr_preserves_map_value(expression).unwrap_or(false) {
+                Self::remove_logical_map_metadata_root(&mut wrapped, &output);
+            }
         }
         wrapped
     }
