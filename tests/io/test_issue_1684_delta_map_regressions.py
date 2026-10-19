@@ -529,14 +529,20 @@ def test_map_metadata_survives_temp_view_and_join(spark, tmp_path):
 @pytest.mark.delta
 def test_global_temp_map_metadata_is_shared_with_new_session(spark, tmp_path):
     path = tmp_path / "global-view-map"
+    view_name = f"issue_1684_global_map_{tmp_path.name.replace('-', '_')}"
     spark.createDataFrame([(1, {"a": 1})], _map_schema()).write.format("delta").mode(
         "overwrite"
     ).save(str(path))
-    spark.read.delta(str(path)).createOrReplaceGlobalTempView("issue_1684_global_map")
+    spark.read.delta(str(path)).createOrReplaceGlobalTempView(view_name)
 
     new_session = spark.newSession()
-    result = new_session.table("global_temp.issue_1684_global_map")
-    assert isinstance(result.schema["m"].dataType, MapType)
+    independent_session = _imports.SparkSession(app_name=f"global-map-{view_name}")
+    try:
+        for session in (new_session, independent_session):
+            result = session.table(f"global_temp.{view_name}")
+            assert isinstance(result.schema["m"].dataType, MapType)
+    finally:
+        spark.catalog.dropGlobalTempView(view_name)
 
 
 @pytest.mark.delta

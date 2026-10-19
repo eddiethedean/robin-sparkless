@@ -946,10 +946,6 @@ impl PySparkSessionBuilder {
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
                 delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
-                #[cfg(feature = "delta")]
-                delta_global_map_view_paths: std::rc::Rc::new(RefCell::new(
-                    std::collections::HashMap::new(),
-                )),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -970,15 +966,25 @@ impl PySparkSessionBuilder {
 const DEFAULT_BACKEND_TYPE: &str = "robin";
 
 #[cfg(feature = "delta")]
+fn delta_global_map_view_registry(
+) -> &'static std::sync::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>
+{
+    static REGISTRY: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+    > = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(feature = "delta")]
 fn delta_map_paths_for_catalog_table(
     session: &PySparkSession,
     name: &str,
 ) -> Result<std::collections::HashSet<String>, polars::prelude::PolarsError> {
     let mut result = std::collections::HashSet::new();
     if name.starts_with("global_temp.") {
-        return Ok(session
-            .delta_global_map_view_paths
-            .borrow()
+        return Ok(delta_global_map_view_registry()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(name)
             .cloned()
             .unwrap_or_default());
@@ -1155,9 +1161,6 @@ struct PySparkSession {
     #[cfg(feature = "delta")]
     delta_map_view_paths:
         RefCell<std::collections::HashMap<String, std::collections::HashSet<String>>>,
-    #[cfg(feature = "delta")]
-    delta_global_map_view_paths:
-        std::rc::Rc<RefCell<std::collections::HashMap<String, std::collections::HashSet<String>>>>,
 }
 
 fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
@@ -2008,8 +2011,9 @@ impl PySparkSession {
         #[cfg(feature = "delta")]
         {
             if name.starts_with("global_temp.") {
-                self.delta_global_map_view_paths
-                    .borrow_mut()
+                delta_global_map_view_registry()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .insert(name.to_string(), df.logical_map_paths.clone());
             } else {
                 self.delta_map_view_paths
@@ -2222,10 +2226,6 @@ impl PySparkSession {
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
                 delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
-                #[cfg(feature = "delta")]
-                delta_global_map_view_paths: std::rc::Rc::new(RefCell::new(
-                    std::collections::HashMap::new(),
-                )),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -2296,8 +2296,6 @@ impl PySparkSession {
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
                 delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
-                #[cfg(feature = "delta")]
-                delta_global_map_view_paths: slf.delta_global_map_view_paths.clone(),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -2385,8 +2383,9 @@ impl PySparkSession {
     fn drop_global_temp_view(&self, name: &str) -> bool {
         let dropped = self.inner.drop_global_temp_view(name);
         #[cfg(feature = "delta")]
-        self.delta_global_map_view_paths
-            .borrow_mut()
+        delta_global_map_view_registry()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&format!("global_temp.{name}"));
         dropped
     }
