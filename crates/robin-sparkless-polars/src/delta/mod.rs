@@ -2817,6 +2817,13 @@ pub fn write_delta_with_save_options_and_logical_map_paths(
         PolarsError::InvalidOperation(format!("write_delta path confinement: {e}").into())
     })?;
     let path = path.as_path();
+    if save_mode == crate::dataframe::SaveMode::ErrorIfExists
+        && std::fs::symlink_metadata(path).is_ok()
+    {
+        return Err(PolarsError::InvalidOperation(
+            "Delta table already exists (save mode ErrorIfExists)".into(),
+        ));
+    }
     let replacing_plain_path = save_mode == crate::dataframe::SaveMode::Overwrite
         && path.exists()
         && !path.join("_delta_log").exists();
