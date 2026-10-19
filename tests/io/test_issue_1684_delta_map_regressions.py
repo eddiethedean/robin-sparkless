@@ -187,8 +187,8 @@ def _write_column_mapped_map_table(path):
 
 
 def _write_non_nullable_id_table(path):
-    import pyarrow as pa
-    import pyarrow.parquet as pq
+    pa = pytest.importorskip("pyarrow")
+    pq = pytest.importorskip("pyarrow.parquet")
 
     path.mkdir()
     pq.write_table(pa.table({"id": [1]}), path / "part.parquet")
@@ -227,8 +227,8 @@ def _write_non_nullable_id_table(path):
 
 
 def _write_nested_non_nullable_table(path):
-    import pyarrow as pa
-    import pyarrow.parquet as pq
+    pa = pytest.importorskip("pyarrow")
+    pq = pytest.importorskip("pyarrow.parquet")
 
     path.mkdir()
     pq.write_table(
@@ -316,8 +316,8 @@ def test_partitioned_map_delta_write_round_trips(spark, tmp_path):
 
 @pytest.mark.delta
 def test_append_missing_map_column_keeps_parquet_map_encoding(spark, tmp_path):
-    import pyarrow as pa
-    import pyarrow.parquet as pq
+    pa = pytest.importorskip("pyarrow")
+    pq = pytest.importorskip("pyarrow.parquet")
 
     path = tmp_path / "map-append"
     spark.createDataFrame([(1, {"a": 1})], _map_schema()).write.format("delta").mode(
