@@ -80,6 +80,98 @@ fn collect_parquet_paths_under_depth(
 }
 
 #[cfg(feature = "delta")]
+fn reject_symlinks_recursively(path: &Path, operation: &str) -> Result<(), PolarsError> {
+    reject_symlinks_recursively_at_depth(path, operation, 0)
+}
+
+#[cfg(feature = "delta")]
+fn reject_symlinks_recursively_at_depth(
+    path: &Path,
+    operation: &str,
+    depth: u32,
+) -> Result<(), PolarsError> {
+    if depth > PARQUET_WALK_MAX_DEPTH {
+        return Err(PolarsError::InvalidOperation(
+            format!("{operation}: Delta log directory depth exceeds {PARQUET_WALK_MAX_DEPTH}")
+                .into(),
+        ));
+    }
+
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(PolarsError::ComputeError(
+                format!("{operation}: inspect {}: {error}", path.display()).into(),
+            ));
+        }
+    };
+
+    if metadata.file_type().is_symlink() {
+        return Err(PolarsError::InvalidOperation(
+            format!(
+                "{operation}: Delta log contains a symbolic link: {}",
+                path.display()
+            )
+            .into(),
+        ));
+    }
+    if !metadata.is_dir() {
+        return Ok(());
+    }
+
+    let entries = std::fs::read_dir(path).map_err(|error| {
+        PolarsError::ComputeError(format!("{operation}: read {}: {error}", path.display()).into())
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            PolarsError::ComputeError(format!("{operation}: read log entry: {error}").into())
+        })?;
+        reject_symlinks_recursively_at_depth(&entry.path(), operation, depth + 1)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "delta")]
+fn align_delta_expr_to_dtype(
+    expr: polars::prelude::Expr,
+    source_dtype: &polars::prelude::DataType,
+    target_dtype: &polars::prelude::DataType,
+) -> Result<polars::prelude::Expr, PolarsError> {
+    use polars::prelude::{DataType, NULL, as_struct, col, lit};
+
+    match (source_dtype, target_dtype) {
+        (DataType::Struct(source_fields), DataType::Struct(target_fields)) => {
+            let fields = target_fields
+                .iter()
+                .map(|target_field| {
+                    let name = target_field.name();
+                    let target_field_dtype = target_field.dtype();
+                    let field_expr = if let Some(source_field) =
+                        source_fields.iter().find(|field| field.name() == name)
+                    {
+                        align_delta_expr_to_dtype(
+                            expr.clone().struct_().field_by_name(name),
+                            source_field.dtype(),
+                            target_field_dtype,
+                        )?
+                    } else {
+                        lit(NULL).cast(target_field_dtype.clone())
+                    };
+                    Ok(field_expr.alias(name.as_str()))
+                })
+                .collect::<Result<Vec<_>, PolarsError>>()?;
+            Ok(as_struct(fields))
+        }
+        (DataType::List(source_inner), DataType::List(target_inner)) => {
+            let item_expr = align_delta_expr_to_dtype(col(""), source_inner, target_inner)?;
+            Ok(expr.list().eval(item_expr))
+        }
+        _ => Ok(expr.cast(target_dtype.clone())),
+    }
+}
+
+#[cfg(feature = "delta")]
 fn create_partition_dir_under_table_root(
     table_root: &Path,
     relative_parent: &Path,
@@ -200,6 +292,8 @@ pub fn read_delta_with_version(
 
     let table_result = (|| {
         let table_uri = path_to_table_uri(path)?;
+        let table_root = uri_to_parquet_path(&table_uri)?;
+        reject_symlinks_recursively(&table_root.join("_delta_log"), "read_delta")?;
         let rt = Runtime::new().map_err(|e| {
             PolarsError::ComputeError(format!("read_delta: failed to create runtime: {}", e).into())
         })?;
@@ -315,7 +409,9 @@ pub fn read_delta_with_version(
                     PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
                 })?;
                 let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
-                let mut partition_exprs = Vec::with_capacity(partition_columns.len());
+                let source_schema = lf.clone().collect_schema()?;
+                let mut partition_exprs =
+                    std::collections::HashMap::with_capacity(partition_columns.len());
                 for name in &partition_columns {
                     let Some(data_type) = partition_types.get(name) else {
                         return Err(PolarsError::ComputeError(
@@ -348,16 +444,48 @@ pub fn read_delta_with_version(
                             let micros = parse_delta_timestamp_partition_value(&value)?;
                             polars::prelude::lit(micros)
                         }
+                        Some(value) if data_type.as_str() == Some("boolean") => {
+                            let parsed = value.parse::<bool>().map_err(|_| {
+                                PolarsError::ComputeError(
+                                    format!(
+                                        "read_delta: invalid boolean partition value: {value:?}"
+                                    )
+                                    .into(),
+                                )
+                            })?;
+                            polars::prelude::lit(parsed)
+                        }
                         Some(value) => polars::prelude::lit(value),
                         None => polars::prelude::lit(polars::prelude::NULL),
                     };
-                    partition_exprs.push(value_expr.cast(dtype).alias(name));
+                    partition_exprs.insert(name.clone(), value_expr.cast(dtype));
                 }
-                lfs.push(if partition_exprs.is_empty() {
-                    lf
-                } else {
-                    lf.with_columns(partition_exprs)
-                });
+
+                let mut aligned_exprs = Vec::new();
+                for field in schema.fields() {
+                    let target_dtype = delta_schema_type_to_polars(&field.data_type)?;
+                    let expr = if let Some(partition_expr) = partition_exprs.remove(&field.name) {
+                        partition_expr
+                    } else if let Some(source_field) = source_schema.get(&field.name) {
+                        align_delta_expr_to_dtype(
+                            polars::prelude::col(field.name.as_str()),
+                            source_field,
+                            &target_dtype,
+                        )?
+                    } else {
+                        polars::prelude::lit(polars::prelude::NULL).cast(target_dtype)
+                    };
+                    aligned_exprs.push(expr.alias(field.name.as_str()));
+                }
+                if let Some(missing_partition) = partition_exprs.keys().next() {
+                    return Err(PolarsError::ComputeError(
+                        format!(
+                            "read_delta: partition column '{missing_partition}' is missing from the schema"
+                        )
+                        .into(),
+                    ));
+                }
+                lfs.push(lf.select(aligned_exprs));
             }
             let combined = concat_lazy_frames_diagonal(lfs)?;
             let pl_df = combined.collect()?;
@@ -1423,6 +1551,7 @@ pub fn write_delta_with_options(
     fs::create_dir_all(path).map_err(|e| {
         PolarsError::ComputeError(format!("write_delta: create_dir_all: {}", e).into())
     })?;
+    reject_symlinks_recursively(&path.join("_delta_log"), "write_delta")?;
     let table_uri = path_to_table_uri(path)?;
     if df.height() == 0 && df.width() == 0 {
         return Ok(());
@@ -1466,8 +1595,33 @@ pub fn write_delta_with_options(
                 } else {
                     partition_by.clone()
                 };
+                let existing_schema = table_state.metadata().parse_schema().map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("write_delta: parse existing schema: {e}").into(),
+                    )
+                })?;
                 for name in &effective_partition_columns {
-                    delta_partition_field(df, name)?;
+                    let incoming_field = delta_partition_field(df, name)?;
+                    let existing_field = existing_schema
+                        .fields()
+                        .find(|field| field.name == *name)
+                        .ok_or_else(|| {
+                            PolarsError::ComputeError(
+                                format!(
+                                    "write_delta: partition column '{name}' is missing from the existing schema"
+                                )
+                                .into(),
+                            )
+                        })?;
+                    if incoming_field.data_type != existing_field.data_type {
+                        return Err(PolarsError::InvalidOperation(
+                            format!(
+                                "write_delta: incompatible type for partition column '{name}': existing Delta type is {}, incoming type is {}",
+                                existing_field.data_type, incoming_field.data_type
+                            )
+                            .into(),
+                        ));
+                    }
                 }
                 let mut actions: Vec<deltalake::kernel::Action> = Vec::new();
 
@@ -1518,11 +1672,6 @@ pub fn write_delta_with_options(
                     use deltalake::kernel::MetadataExt;
 
                     let incoming_schema = delta_schema_from_frame(&df_for_part).await?;
-                    let existing_schema = table_state.metadata().parse_schema().map_err(|e| {
-                        PolarsError::ComputeError(
-                            format!("write_delta: parse existing schema for merge: {e}").into(),
-                        )
-                    })?;
                     let merged_schema =
                         merge_delta_struct_schemas(&existing_schema, &incoming_schema)?;
                     let updated_metadata = table_state
