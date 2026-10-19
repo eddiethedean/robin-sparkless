@@ -2809,13 +2809,18 @@ impl<'a> DataFrameWriter<'a> {
                     | SaveMode::ErrorIfExists => {}
                 }
                 let pl_df = self.df.collect_inner()?.as_ref().clone();
+                let resolved_partition_by = self
+                    .partition_by
+                    .iter()
+                    .map(|name| self.df.resolve_column_name(name))
+                    .collect::<Result<Vec<_>, _>>()?;
                 crate::delta::write_delta_with_save_options(
                     &pl_df,
                     target,
                     mode,
                     merge_schema,
                     overwrite_schema,
-                    &[],
+                    &resolved_partition_by,
                 )?;
                 let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
                 session.register_table(name, loaded);

@@ -9235,9 +9235,11 @@ impl PyDataFrameWriter {
         if let Some(fmt) = &self.writer_format {
             options.push(("sparkless.writer.format".to_string(), fmt.to_string()));
         }
-        inner
-            .inner
-            .write()
+        let mut writer = inner.inner.write();
+        if !self.partition_by.is_empty() {
+            writer = writer.partition_by(self.partition_by.iter().map(|s| s.as_str()));
+        }
+        writer
             .save_as_table_with_options(&active, name, save_mode, &options)
             .map_err(to_py_err)
     }
