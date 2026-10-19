@@ -116,16 +116,27 @@ pub fn read_delta_with_version(
             .block_on(async {
                 eager_snapshot
                     .file_views(log_store.as_ref(), None)
-                    .map_ok(|view: deltalake::kernel::LogicalFileView| {
-                        // Keep partition values from the Add action. File paths are not required
-                        // to use Hive-style directory names in a Delta table.
-                        #[allow(deprecated)]
-                        let add = view.add_action();
-                        let file_path = deltalake::Path::parse(&add.path)
-                            .unwrap_or_else(|_| deltalake::Path::from(add.path.as_str()));
-                        (log_store.to_uri(&file_path), add.partition_values)
-                    })
-                    .try_collect::<Vec<_>>()
+                    .try_fold(
+                        Vec::new(),
+                        |mut files, view: deltalake::kernel::LogicalFileView| {
+                            // Keep partition values from the Add action. File paths are not required
+                            // to use Hive-style directory names in a Delta table.
+                            #[allow(deprecated)]
+                            let add = view.add_action();
+                            if add.path.split(['/', '\\']).any(|part| part == "..") {
+                                return futures::future::ready(Err(
+                                    deltalake::DeltaTableError::Generic(format!(
+                                        "read_delta: parquet URI '{}' escapes table root '{}'",
+                                        add.path, table_uri
+                                    )),
+                                ));
+                            }
+                            let file_path = deltalake::Path::parse(&add.path)
+                                .unwrap_or_else(|_| deltalake::Path::from(add.path.as_str()));
+                            files.push((log_store.to_uri(&file_path), add.partition_values));
+                            futures::future::ready(Ok(files))
+                        },
+                    )
                     .await
             })
             .map_err(|e: deltalake::DeltaTableError| {
