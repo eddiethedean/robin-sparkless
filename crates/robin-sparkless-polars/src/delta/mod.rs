@@ -106,15 +106,31 @@ pub fn read_delta_with_version(
                 PolarsError::ComputeError(format!("read_delta: {}", e).into())
             })
         })?;
-        let uris: Vec<String> = table
-            .get_file_uris()
-            .map_err(|e: deltalake::DeltaTableError| {
-                PolarsError::ComputeError(format!("read_delta: get_file_uris: {}", e).into())
-            })?
-            .collect();
         let snapshot = table.snapshot().map_err(|e: deltalake::DeltaTableError| {
             PolarsError::ComputeError(format!("read_delta: snapshot: {e}").into())
         })?;
+        use futures::TryStreamExt;
+        let eager_snapshot = snapshot.snapshot();
+        let log_store = table.log_store();
+        let files = rt
+            .block_on(async {
+                eager_snapshot
+                    .file_views(log_store.as_ref(), None)
+                    .map_ok(|view: deltalake::kernel::LogicalFileView| {
+                        // Keep partition values from the Add action. File paths are not required
+                        // to use Hive-style directory names in a Delta table.
+                        #[allow(deprecated)]
+                        let add = view.add_action();
+                        let file_path = deltalake::Path::parse(&add.path)
+                            .unwrap_or_else(|_| deltalake::Path::from(add.path.as_str()));
+                        (log_store.to_uri(&file_path), add.partition_values)
+                    })
+                    .try_collect::<Vec<_>>()
+                    .await
+            })
+            .map_err(|e: deltalake::DeltaTableError| {
+                PolarsError::ComputeError(format!("read_delta: file_views: {e}").into())
+            })?;
         let partition_columns = snapshot.metadata().partition_columns().to_vec();
         let schema = snapshot.metadata().parse_schema().map_err(|e| {
             PolarsError::ComputeError(format!("read_delta: parse schema: {e}").into())
@@ -132,12 +148,12 @@ pub fn read_delta_with_version(
                     })
             })
             .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
-        Ok::<_, PolarsError>((uris, partition_columns, partition_types, schema))
+        Ok::<_, PolarsError>((files, partition_columns, partition_types, schema))
     })();
 
     match table_result {
-        Ok((uris, partition_columns, partition_types, schema)) => {
-            if uris.is_empty() {
+        Ok((files, partition_columns, partition_types, schema)) => {
+            if files.is_empty() {
                 let columns = schema
                     .fields()
                     .map(|field| {
@@ -152,8 +168,8 @@ pub fn read_delta_with_version(
                 return Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive));
             }
             let table_root_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-            let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
-            for uri in &uris {
+            let mut lfs: Vec<LazyFrame> = Vec::with_capacity(files.len());
+            for (uri, partition_values) in &files {
                 let parquet_path = confine_parquet_uri_to_table_root(uri, &table_root_canonical)?;
                 let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
                     PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
@@ -170,17 +186,18 @@ pub fn read_delta_with_version(
                         ));
                     };
                     let dtype = delta_partition_type_to_polars(data_type)?;
-                    let value =
-                        partition_value_from_path(&parquet_path, &table_root_canonical, name)
-                            .ok_or_else(|| {
-                                PolarsError::ComputeError(
-                                    format!(
-                                        "read_delta: missing partition value for '{name}' in {}",
-                                        parquet_path.display()
-                                    )
-                                    .into(),
+                    let value = partition_values
+                        .get(name)
+                        .ok_or_else(|| {
+                            PolarsError::ComputeError(
+                                format!(
+                                    "read_delta: missing partition value for '{name}' in {uri}"
                                 )
-                            })?;
+                                .into(),
+                            )
+                        })?
+                        .clone()
+                        .filter(|value| !value.is_empty());
                     let value_expr = match value {
                         Some(value) => polars::prelude::lit(value),
                         None => polars::prelude::lit(polars::prelude::NULL),
@@ -340,8 +357,21 @@ fn confine_parquet_uri_to_table_root(
 #[cfg(feature = "delta")]
 fn raw_file_uri_relative_path(uri: &str, table_root: &Path) -> Option<std::path::PathBuf> {
     let root_uri = Url::from_directory_path(table_root).ok()?.to_string();
-    let root_prefix = root_uri.trim_end_matches('/');
-    let relative = uri.strip_prefix(root_prefix)?.strip_prefix('/')?;
+    let relative_after_root = |root: &str| {
+        let prefix = root.strip_suffix('/').unwrap_or(root);
+        uri.strip_prefix(prefix)?.strip_prefix('/')
+    };
+
+    // Delta-rs preserves escapes in the suffix, but its local file log store strips the
+    // `file://` scheme and returns a bare filesystem path. Match both forms against the URL-
+    // encoded root so spaces and other escaped characters in the table path still work.
+    let relative = relative_after_root(&root_uri).or_else(|| {
+        #[cfg(windows)]
+        let bare_root = root_uri.strip_prefix("file:///")?;
+        #[cfg(not(windows))]
+        let bare_root = root_uri.strip_prefix("file://")?;
+        relative_after_root(bare_root)
+    })?;
     if relative.is_empty() || relative.starts_with('/') {
         return None;
     }
@@ -734,36 +764,6 @@ async fn delta_schema_from_frame(
     .await;
     let _ = fs::remove_dir_all(&scratch);
     result
-}
-
-#[cfg(feature = "delta")]
-fn partition_value_from_path(
-    parquet_path: &Path,
-    table_root: &Path,
-    column: &str,
-) -> Option<Option<String>> {
-    let relative_parent = parquet_path.strip_prefix(table_root).ok()?.parent()?;
-    for component in relative_parent.components() {
-        let part = component.as_os_str().to_str()?;
-        if let Some((name, value)) = part.split_once('=') {
-            if name == column {
-                // Delta's partition-value serialization treats empty strings/binary as null.
-                return Some(
-                    if value.is_empty() || value == "__HIVE_DEFAULT_PARTITION__" {
-                        None
-                    } else {
-                        Some(
-                            percent_encoding::percent_decode_str(value)
-                                .decode_utf8()
-                                .ok()?
-                                .into_owned(),
-                        )
-                    },
-                );
-            }
-        }
-    }
-    None
 }
 
 #[cfg(feature = "delta")]

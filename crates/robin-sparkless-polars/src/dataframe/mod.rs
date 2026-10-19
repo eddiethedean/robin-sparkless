@@ -2430,12 +2430,16 @@ impl DataFrame {
         merge_schema: bool,
         partition_by: &[String],
     ) -> Result<(), PolarsError> {
+        let resolved_partition_by = partition_by
+            .iter()
+            .map(|name| self.resolve_column_name(name))
+            .collect::<Result<Vec<_>, _>>()?;
         crate::delta::write_delta_with_options(
             self.collect_inner()?.as_ref(),
             path,
             overwrite,
             merge_schema,
-            partition_by,
+            &resolved_partition_by,
         )
     }
 
@@ -3321,18 +3325,33 @@ fn format_partition_value(av: &AnyValue<'_>) -> Result<String, PolarsError> {
                     format!("cannot format out-of-range Date partition value: {d}").into(),
                 )
             })?,
-        AnyValue::Datetime(value, unit, _) | AnyValue::DatetimeOwned(value, unit, _) => {
-            let timestamp = datetime_anyvalue_to_json_iso(*value, unit);
-            let timestamp = timestamp.as_str().ok_or_else(|| {
-                PolarsError::ComputeError(
-                    format!("cannot format out-of-range Datetime partition value: {value}").into(),
-                )
-            })?;
-            format!("{timestamp}Z")
+        AnyValue::Datetime(value, unit, timezone) => {
+            format_datetime_partition_value(*value, unit, timezone.is_some())?
+        }
+        AnyValue::DatetimeOwned(value, unit, timezone) => {
+            format_datetime_partition_value(*value, unit, timezone.is_some())?
         }
         _ => av.to_string(),
     };
     Ok(percent_encoding::utf8_percent_encode(&s, percent_encoding::NON_ALPHANUMERIC).to_string())
+}
+
+fn format_datetime_partition_value(
+    value: i64,
+    unit: &TimeUnit,
+    has_timezone: bool,
+) -> Result<String, PolarsError> {
+    let timestamp = datetime_anyvalue_to_json_iso(value, unit);
+    let timestamp = timestamp.as_str().ok_or_else(|| {
+        PolarsError::ComputeError(
+            format!("cannot format out-of-range Datetime partition value: {value}").into(),
+        )
+    })?;
+    if has_timezone {
+        Ok(format!("{timestamp}Z"))
+    } else {
+        Ok(timestamp.replacen('T', " ", 1))
+    }
 }
 
 /// Build a filter expression that matches rows where partition columns equal the given row values.
