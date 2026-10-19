@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless.testing import create_session, get_imports
 
 _imports = get_imports()
 ArrayType = _imports.ArrayType
@@ -253,7 +253,12 @@ def _write_nested_non_nullable_table(path):
                 "type": {
                     "type": "struct",
                     "fields": [
-                        {"name": "x", "type": "long", "nullable": False, "metadata": {}},
+                        {
+                            "name": "x",
+                            "type": "long",
+                            "nullable": False,
+                            "metadata": {},
+                        },
                         {"name": "y", "type": "long", "nullable": True, "metadata": {}},
                     ],
                 },
@@ -322,7 +327,9 @@ def test_append_missing_map_column_keeps_parquet_map_encoding(spark, tmp_path):
         str(path)
     )
 
-    appended_file = max(path.glob("*.parquet"), key=lambda item: item.stat().st_mtime_ns)
+    appended_file = max(
+        path.glob("*.parquet"), key=lambda item: item.stat().st_mtime_ns
+    )
     map_type = pq.read_schema(appended_file).field("m").type
     assert pa.types.is_map(map_type)
 
@@ -330,14 +337,18 @@ def test_append_missing_map_column_keeps_parquet_map_encoding(spark, tmp_path):
 @pytest.mark.delta
 def test_nested_case_insensitive_append_preserves_struct_value(spark, tmp_path):
     path = tmp_path / "nested-case"
-    lower_schema = StructType([
-        StructField("id", LongType()),
-        StructField("s", StructType([StructField("a", LongType())])),
-    ])
-    upper_schema = StructType([
-        StructField("id", LongType()),
-        StructField("s", StructType([StructField("A", LongType())])),
-    ])
+    lower_schema = StructType(
+        [
+            StructField("id", LongType()),
+            StructField("s", StructType([StructField("a", LongType())])),
+        ]
+    )
+    upper_schema = StructType(
+        [
+            StructField("id", LongType()),
+            StructField("s", StructType([StructField("A", LongType())])),
+        ]
+    )
     spark.createDataFrame([(1, {"a": 1})], lower_schema).write.format("delta").mode(
         "overwrite"
     ).save(str(path))
@@ -411,7 +422,10 @@ def test_temp_view_shadowing_delta_table_keeps_array_semantics(spark, tmp_path):
                 "m",
                 ArrayType(
                     StructType(
-                        [StructField("key", StringType()), StructField("value", LongType())]
+                        [
+                            StructField("key", StringType()),
+                            StructField("value", LongType()),
+                        ]
                     )
                 ),
             ),
@@ -422,7 +436,9 @@ def test_temp_view_shadowing_delta_table_keeps_array_semantics(spark, tmp_path):
     )
     view.createOrReplaceTempView(table_name)
 
-    for index, resolved in enumerate((spark.table(table_name), spark.read.table(table_name))):
+    for index, resolved in enumerate(
+        (spark.table(table_name), spark.read.table(table_name))
+    ):
         assert isinstance(resolved.schema["m"].dataType, ArrayType)
         copy_path = tmp_path / f"view-copy-{index}"
         resolved.write.format("delta").mode("overwrite").save(str(copy_path))
@@ -464,7 +480,10 @@ def test_append_case_only_partition_rename(spark, tmp_path):
         "P"
     ).mode("append").save(str(path))
 
-    assert {row["id"]: row["p"] for row in spark.read.format("delta").load(str(path)).collect()} == {
+    assert {
+        row["id"]: row["p"]
+        for row in spark.read.format("delta").load(str(path)).collect()
+    } == {
         1: 1,
         2: 2,
     }
@@ -487,7 +506,9 @@ def test_file_url_write_keeps_data_under_table_root(spark, tmp_path):
         path.as_uri()
     )
 
-    assert [row["id"] for row in spark.read.format("delta").load(path.as_uri()).collect()] == [1]
+    assert [
+        row["id"] for row in spark.read.format("delta").load(path.as_uri()).collect()
+    ] == [1]
 
 
 @pytest.mark.delta
@@ -523,7 +544,10 @@ def test_map_metadata_survives_temp_view_and_join(spark, tmp_path):
     for index, frame in enumerate((view, joined)):
         copy_path = tmp_path / f"view-map-copy-{index}"
         frame.write.format("delta").mode("overwrite").save(str(copy_path))
-        assert isinstance(spark.read.format("delta").load(str(copy_path)).schema["m"].dataType, MapType)
+        assert isinstance(
+            spark.read.format("delta").load(str(copy_path)).schema["m"].dataType,
+            MapType,
+        )
 
 
 @pytest.mark.delta
@@ -573,3 +597,33 @@ def test_column_mapping_inside_map_values_is_respected(spark, tmp_path):
 
     rows = spark.read.format("delta").load(str(path)).collect()
     assert rows[0]["m"]["k"]["a"] == 42
+
+
+@pytest.mark.delta
+@pytest.mark.xdist_group(name="delta_serial")
+def test_qualified_delta_save_as_table_appends_to_existing_nested_warehouse_path(
+    tmp_path,
+):
+    warehouse = tmp_path / "warehouse"
+    spark = create_session(
+        app_name="qualified_delta_warehouse_append",
+        enable_delta=True,
+        **{"spark.sql.warehouse.dir": str(warehouse)},
+    )
+    table_name = "legacy_schema.legacy_table"
+    nested_path = warehouse / "legacy_schema" / "legacy_table"
+
+    try:
+        spark.createDataFrame([(1,)], ["id"]).write.format("delta").mode(
+            "overwrite"
+        ).save(str(nested_path))
+
+        spark.createDataFrame([(2,)], ["id"]).write.format("delta").mode(
+            "append"
+        ).saveAsTable(table_name)
+
+        assert sorted(row["id"] for row in spark.table(table_name).collect()) == [1, 2]
+        assert (nested_path / "_delta_log" / "00000000000000000001.json").is_file()
+        assert not (warehouse / table_name / "_delta_log").exists()
+    finally:
+        spark.stop()
