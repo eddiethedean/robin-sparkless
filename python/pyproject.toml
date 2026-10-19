@@ -29,6 +29,7 @@ dev = [
     "pytest-timeout",
     "polars",
     "pyarrow",
+    "deltalake>=1.2,<2; python_version >= '3.9'",
 ]
 # JDBC integration tests using testcontainers (requires Docker)
 jdbc = [

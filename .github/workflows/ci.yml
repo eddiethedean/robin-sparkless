@@ -250,7 +250,7 @@ jobs:
       - name: Build and run delta-marked pytest (serial)
         run: |
           python -m venv .venv
-          .venv/bin/pip install --upgrade pip maturin pytest pytest-timeout
+          .venv/bin/pip install --upgrade pip maturin pytest pytest-timeout pyarrow 'deltalake>=1.2,<2'
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
           cd python && ../.venv/bin/maturin develop --locked --release
           cd ..
