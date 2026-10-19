@@ -58,6 +58,20 @@ pub(crate) fn pyspark_binary_arithmetic_expr(
                     allow_precision_loss,
                 ))
             }
+            crate::decimal_arithmetic::BinaryOp::Remainder => {
+                expect_col(crate::udfs::apply_pyspark_mod_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
+            crate::decimal_arithmetic::BinaryOp::Pmod => {
+                expect_col(crate::udfs::apply_pyspark_pmod_with_precision_loss(
+                    cols,
+                    ansi_enabled,
+                    allow_precision_loss,
+                ))
+            }
         },
         &args,
         move |_schema, fields| {
@@ -156,6 +170,26 @@ pub(crate) fn expr_ir_binary_arithmetic_expr(
                         ansi_enabled,
                         allow_precision_loss,
                     )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Remainder, _, true) => {
+                    crate::udfs::apply_pyspark_mod_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Remainder, _, false) => {
+                    crate::udfs::apply_pyspark_mod(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Pmod, _, true) => {
+                    crate::udfs::apply_pyspark_pmod_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Pmod, _, false) => {
+                    crate::udfs::apply_pmod(cols)
                 }
             };
             expect_col(result)
@@ -2021,12 +2055,14 @@ impl Column {
     }
 
     /// Modulo with PySpark-style string/number coercion (used by Python Column operators).
+    /// Decimal operands use exact decimal arithmetic.
     pub fn mod_pyspark(&self, other: &Column) -> Column {
-        let args = [other.expr().clone()];
-        let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pyspark_mod(cols)),
-            &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            other.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Remainder,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }
@@ -2754,13 +2790,15 @@ impl Column {
         Self::from_expr(expr, None)
     }
 
-    /// Positive modulus (PySpark pmod). Column method: pmod(self, other).
+    /// Positive modulus (PySpark pmod). Decimal operands use exact decimal arithmetic.
+    /// Column method: pmod(self, other).
     pub fn pmod(&self, divisor: &Column) -> Column {
-        let args = [divisor.expr().clone()];
-        let expr = self.expr().clone().map_many(
-            |cols| expect_col(crate::udfs::apply_pmod(cols)),
-            &args,
-            |_schema, fields| Ok(Field::new(fields[0].name().clone(), DataType::Float64)),
+        let expr = pyspark_binary_arithmetic_expr(
+            self.expr().clone(),
+            divisor.expr().clone(),
+            crate::decimal_arithmetic::BinaryOp::Pmod,
+            crate::udf_context::get_thread_ansi_enabled(),
+            crate::udf_context::get_thread_decimal_allow_precision_loss(),
         );
         Self::from_expr(expr, None)
     }

@@ -224,6 +224,20 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                     ));
                 }
 
+                if matches!(
+                    op,
+                    crate::decimal_arithmetic::BinaryOp::Remainder
+                        | crate::decimal_arithmetic::BinaryOp::Pmod
+                ) {
+                    return Ok(crate::column::pyspark_binary_arithmetic_expr(
+                        left,
+                        right,
+                        op,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    ));
+                }
+
                 if (matches!(&left_type, DataType::Decimal(..)) && right_type.is_float())
                     || (matches!(&right_type, DataType::Decimal(..)) && left_type.is_float())
                 {
@@ -245,6 +259,7 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                         crate::decimal_arithmetic::BinaryOp::Divide => {
                             crate::ansi::div_expr(left, right)
                         }
+                        _ => unreachable!("remainder expressions are handled above"),
                     });
                 }
 
@@ -259,6 +274,7 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                     crate::decimal_arithmetic::BinaryOp::Divide => {
                         crate::ansi::div_expr(left, right)
                     }
+                    _ => unreachable!("remainder expressions are handled above"),
                 });
             }
             if let Some(op) =

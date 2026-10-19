@@ -4038,7 +4038,45 @@ pub(crate) fn apply_pyspark_divide_with_precision_loss(
 
 /// PySpark-style modulo with string/number coercion for Python Column operators.
 pub fn apply_pyspark_mod(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    apply_pyspark_mod_with_precision_loss(
+        columns,
+        crate::udf_context::get_thread_ansi_enabled(),
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
+    )
+}
+
+pub(crate) fn apply_pyspark_mod_with_precision_loss(
+    columns: &mut [Column],
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_mod",
+        crate::decimal_arithmetic::BinaryOp::Remainder,
+        ansi_enabled,
+        allow_precision_loss,
+    )? {
+        return Ok(Some(output));
+    }
     pyspark_binary_arith(columns, "pyspark_mod", |a, b| a % b)
+}
+
+pub(crate) fn apply_pyspark_pmod_with_precision_loss(
+    columns: &mut [Column],
+    ansi_enabled: bool,
+    allow_precision_loss: bool,
+) -> PolarsResult<Option<Column>> {
+    if let Some(output) = pyspark_decimal_binary_arith(
+        columns,
+        "pyspark_pmod",
+        crate::decimal_arithmetic::BinaryOp::Pmod,
+        ansi_enabled,
+        allow_precision_loss,
+    )? {
+        return Ok(Some(output));
+    }
+    apply_pmod(columns)
 }
 
 /// try_add: returns null on overflow.

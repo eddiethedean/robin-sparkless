@@ -1,4 +1,4 @@
-//! Exact arithmetic helpers for decimal-backed Python Column operations.
+//! Exact decimal arithmetic helpers shared by Column and SQL expressions.
 
 use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive, Zero};
@@ -10,6 +10,8 @@ pub(crate) enum BinaryOp {
     Subtract,
     Multiply,
     Divide,
+    Remainder,
+    Pmod,
 }
 
 impl BinaryOp {
@@ -19,6 +21,8 @@ impl BinaryOp {
             Self::Subtract => "__robin_decimal_subtract",
             Self::Multiply => "__robin_decimal_multiply",
             Self::Divide => "__robin_decimal_divide",
+            Self::Remainder => "__robin_decimal_remainder",
+            Self::Pmod => "__robin_decimal_pmod",
         }
     }
 
@@ -28,6 +32,8 @@ impl BinaryOp {
             "__robin_decimal_subtract" => Some(Self::Subtract),
             "__robin_decimal_multiply" => Some(Self::Multiply),
             "__robin_decimal_divide" => Some(Self::Divide),
+            "__robin_decimal_remainder" => Some(Self::Remainder),
+            "__robin_decimal_pmod" => Some(Self::Pmod),
             _ => None,
         }
     }
@@ -38,6 +44,8 @@ impl BinaryOp {
             Self::Subtract => "__robin_expr_ir_subtract",
             Self::Multiply => "__robin_expr_ir_multiply",
             Self::Divide => "__robin_expr_ir_divide",
+            Self::Remainder => "__robin_expr_ir_remainder",
+            Self::Pmod => "__robin_expr_ir_pmod",
         }
     }
 
@@ -47,6 +55,8 @@ impl BinaryOp {
             "__robin_expr_ir_subtract" => Some(Self::Subtract),
             "__robin_expr_ir_multiply" => Some(Self::Multiply),
             "__robin_expr_ir_divide" => Some(Self::Divide),
+            "__robin_expr_ir_remainder" => Some(Self::Remainder),
+            "__robin_expr_ir_pmod" => Some(Self::Pmod),
             _ => None,
         }
     }
@@ -84,6 +94,10 @@ pub(crate) fn result_type(
             ((p1 - s1).max(p2 - s2) + scale + 1, scale)
         }
         BinaryOp::Multiply => (p1 + p2 + 1, s1 + s2),
+        BinaryOp::Remainder | BinaryOp::Pmod => {
+            let scale = s1.max(s2);
+            ((p1 - s1).min(p2 - s2) + scale, scale)
+        }
         BinaryOp::Divide => {
             let scale = 6.max(s1 + p2 + 1);
             if allow_precision_loss {
@@ -141,7 +155,7 @@ fn rescale(value: BigInt, from: usize, to: usize) -> BigInt {
     }
 }
 
-/// Evaluate decimal/integer Column arithmetic without a Float64 conversion.
+/// Evaluate decimal/integer arithmetic without a Float64 conversion.
 pub(crate) fn evaluate(
     left: &Series,
     right: &Series,
@@ -197,6 +211,24 @@ pub(crate) fn evaluate(
                     rounded_divide(left_value * ten_pow(*scale + s2 - s1), right_value)
                 } else {
                     rounded_divide(left_value, right_value * ten_pow(s1 - *scale - s2))
+                }
+            }
+            BinaryOp::Remainder | BinaryOp::Pmod => {
+                let common_scale = s1.max(s2);
+                let left_value = rescale(left_value, s1, common_scale);
+                let right_value = rescale(right_value, s2, common_scale);
+                if right_value.is_zero() {
+                    if ansi_enabled {
+                        polars_bail!(ComputeError: "[DIVIDE_BY_ZERO] remainder by zero");
+                    }
+                    output.push(None);
+                    continue;
+                }
+                let remainder = left_value % &right_value;
+                if matches!(op, BinaryOp::Pmod) && remainder.is_negative() {
+                    remainder + right_value.abs()
+                } else {
+                    remainder
                 }
             }
         };

@@ -123,6 +123,10 @@ pub(super) fn binary_expr(
             ((p1 - s1).max(p2 - s2) + scale + 1, scale)
         }
         BinaryOperator::Multiply => (p1 + p2 + 1, s1 + s2),
+        BinaryOperator::Modulo => {
+            let scale = s1.max(s2);
+            ((p1 - s1).min(p2 - s2) + scale, scale)
+        }
         BinaryOperator::Divide => {
             let scale = 6.max(s1 + p2 + 1);
             if allow_precision_loss {
@@ -193,6 +197,19 @@ pub(super) fn binary_expr(
                         } else {
                             rounded_divide(left, right * ten_pow(s1 - scale - s2))
                         }
+                    }
+                    BinaryOperator::Modulo => {
+                        let common_scale = s1.max(s2);
+                        let left = rescale(left, s1, common_scale);
+                        let right = rescale(right, s2, common_scale);
+                        if right.is_zero() {
+                            if ansi {
+                                polars_bail!(ComputeError: "[DIVIDE_BY_ZERO] remainder by zero");
+                            }
+                            output.push(None);
+                            continue;
+                        }
+                        left % right
                     }
                     _ => unreachable!(),
                 };

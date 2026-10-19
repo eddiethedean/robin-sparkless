@@ -1336,6 +1336,7 @@ fn sql_expr_to_polars(
                 op,
                 BinaryOperator::Plus | BinaryOperator::Minus
                     | BinaryOperator::Multiply | BinaryOperator::Divide
+                    | BinaryOperator::Modulo
             ) {
                 let schema = df
                     .map(|df| df.lazy_frame().collect_schema())
@@ -1370,8 +1371,9 @@ fn sql_expr_to_polars(
                 BinaryOperator::Minus => Ok(l - r),
                 BinaryOperator::Multiply => Ok(l * r),
                 BinaryOperator::Divide => Ok(l / r),
+                BinaryOperator::Modulo => Ok(l % r),
                 _ => Err(PolarsError::InvalidOperation(
-                    format!("SQL: unsupported operator in WHERE: {:?}. Use =, <>, <, <=, >, >=, AND, OR, +, -, *, /.", op).into(),
+                    format!("SQL: unsupported operator in WHERE: {:?}. Use =, <>, <, <=, >, >=, AND, OR, +, -, *, /, %.", op).into(),
                 )),
             }
         }
