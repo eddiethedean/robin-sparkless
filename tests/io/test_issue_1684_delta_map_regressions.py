@@ -1,10 +1,15 @@
 """Regression tests for logical Delta MAP writes and reads."""
 
+import json
+import time
+import uuid
+
 import pytest
 
 from sparkless.testing import get_imports
 
 _imports = get_imports()
+ArrayType = _imports.ArrayType
 LongType = _imports.LongType
 MapType = _imports.MapType
 StringType = _imports.StringType
@@ -18,6 +23,74 @@ def _map_schema():
             StructField("id", LongType()),
             StructField("m", MapType(StringType(), LongType())),
         ]
+    )
+
+
+def _write_map_of_struct_delta_table(path, field_name, value):
+    pa = pytest.importorskip("pyarrow")
+    pq = pytest.importorskip("pyarrow.parquet")
+    path.mkdir()
+    value_type = {
+        "type": "struct",
+        "fields": [
+            {"name": field_name, "type": "long", "nullable": True, "metadata": {}}
+        ],
+    }
+    schema = {
+        "type": "struct",
+        "fields": [
+            {"name": "id", "type": "long", "nullable": True, "metadata": {}},
+            {
+                "name": "m",
+                "type": {
+                    "type": "map",
+                    "keyType": "string",
+                    "valueType": value_type,
+                    "valueContainsNull": True,
+                },
+                "nullable": True,
+                "metadata": {},
+            },
+        ],
+    }
+    table = pa.table(
+        {
+            "id": [value],
+            "m": pa.array(
+                [[("k", {field_name: value})]],
+                type=pa.map_(pa.string(), pa.struct([(field_name, pa.int64())])),
+            ),
+        }
+    )
+    parquet_path = path / "part.parquet"
+    pq.write_table(table, parquet_path)
+    now = int(time.time() * 1000)
+    actions = [
+        {"protocol": {"minReaderVersion": 1, "minWriterVersion": 2}},
+        {
+            "metaData": {
+                "id": str(uuid.uuid4()),
+                "format": {"provider": "parquet", "options": {}},
+                "schemaString": json.dumps(schema),
+                "partitionColumns": [],
+                "configuration": {},
+                "createdTime": now,
+            }
+        },
+        {
+            "add": {
+                "path": parquet_path.name,
+                "partitionValues": {},
+                "size": parquet_path.stat().st_size,
+                "modificationTime": now,
+                "dataChange": True,
+            }
+        },
+    ]
+    log_path = path / "_delta_log"
+    log_path.mkdir()
+    (log_path / "00000000000000000000.json").write_text(
+        "\n".join(json.dumps(action) for action in actions) + "\n"
     )
 
 
@@ -80,6 +153,20 @@ def test_nested_case_insensitive_append_preserves_struct_value(spark, tmp_path):
 
 
 @pytest.mark.delta
+def test_nested_case_insensitive_append_preserves_map_value(spark, tmp_path):
+    target = tmp_path / "map-value-case-target"
+    source = tmp_path / "map-value-case-source"
+    _write_map_of_struct_delta_table(target, "a", 1)
+    _write_map_of_struct_delta_table(source, "A", 2)
+
+    incoming = spark.read.format("delta").load(str(source))
+    incoming.write.format("delta").mode("append").save(str(target))
+
+    rows = spark.read.format("delta").load(str(target)).collect()
+    assert {row["id"]: row["m"]["k"]["a"] for row in rows} == {1: 1, 2: 2}
+
+
+@pytest.mark.delta
 def test_catalog_table_keeps_map_type_when_copied(spark, tmp_path):
     table_name = f"issue_1684_map_{tmp_path.name.replace('-', '_')}"
     spark.createDataFrame([(1, {"a": 1})], _map_schema()).write.format("delta").mode(
@@ -92,6 +179,58 @@ def test_catalog_table_keeps_map_type_when_copied(spark, tmp_path):
     table.write.format("delta").mode("overwrite").save(str(copy_path))
     copied_schema = spark.read.format("delta").load(str(copy_path)).schema
     assert isinstance(copied_schema["m"].dataType, MapType)
+
+
+@pytest.mark.delta
+def test_sql_catalog_read_keeps_map_type_when_copied(spark, tmp_path):
+    table_name = f"issue_1684_sql_map_{tmp_path.name.replace('-', '_')}"
+    spark.createDataFrame([(1, {"a": 1})], _map_schema()).write.format("delta").mode(
+        "overwrite"
+    ).saveAsTable(table_name)
+
+    for query, output_column in (
+        (f"SELECT * FROM {table_name}", "m"),
+        (f"SELECT t.m AS copied FROM {table_name} t", "copied"),
+    ):
+        table = spark.sql(query)
+        assert isinstance(table.schema[output_column].dataType, MapType)
+        copy_path = tmp_path / f"sql-catalog-copy-{output_column}"
+        table.write.format("delta").mode("overwrite").save(str(copy_path))
+        copied_schema = spark.read.format("delta").load(str(copy_path)).schema
+        assert isinstance(copied_schema[output_column].dataType, MapType)
+
+
+@pytest.mark.delta
+def test_temp_view_shadowing_delta_table_keeps_array_semantics(spark, tmp_path):
+    table_name = f"issue_1684_view_map_{tmp_path.name.replace('-', '_')}"
+    spark.createDataFrame([(1, {"a": 1})], _map_schema()).write.format("delta").mode(
+        "overwrite"
+    ).saveAsTable(table_name)
+
+    array_schema = StructType(
+        [
+            StructField("id", LongType()),
+            StructField(
+                "m",
+                ArrayType(
+                    StructType(
+                        [StructField("key", StringType()), StructField("value", LongType())]
+                    )
+                ),
+            ),
+        ]
+    )
+    view = spark.createDataFrame(
+        [(2, [{"key": "x", "value": 2}, {"key": "x", "value": 3}])], array_schema
+    )
+    view.createOrReplaceTempView(table_name)
+
+    for index, resolved in enumerate((spark.table(table_name), spark.read.table(table_name))):
+        assert isinstance(resolved.schema["m"].dataType, ArrayType)
+        copy_path = tmp_path / f"view-copy-{index}"
+        resolved.write.format("delta").mode("overwrite").save(str(copy_path))
+        copied_schema = spark.read.format("delta").load(str(copy_path)).schema
+        assert isinstance(copied_schema["m"].dataType, ArrayType)
 
 
 @pytest.mark.delta

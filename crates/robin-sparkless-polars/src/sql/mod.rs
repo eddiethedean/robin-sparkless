@@ -9,6 +9,8 @@ use crate::dataframe::DataFrame;
 use crate::session::SparkSession;
 use polars::prelude::PolarsError;
 use spark_sql_parser::SparkStatement;
+/// SQL AST types used by API consumers that inspect parsed statements.
+pub use spark_sql_parser::ast;
 /// SQL AST statement type; re-exported for API consumers (e.g. root crate).
 pub use spark_sql_parser::ast::Statement;
 

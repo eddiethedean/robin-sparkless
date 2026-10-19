@@ -969,6 +969,9 @@ fn delta_map_paths_for_catalog_table(
     name: &str,
 ) -> Result<std::collections::HashSet<String>, polars::prelude::PolarsError> {
     let mut result = std::collections::HashSet::new();
+    if name.starts_with("global_temp.") || session.has_temp_view(name) {
+        return Ok(result);
+    }
     let Some(warehouse) = session.warehouse_dir() else {
         return Ok(result);
     };
@@ -993,6 +996,107 @@ fn delta_map_paths_for_catalog_table(
         }
     }
     Ok(result)
+}
+
+#[cfg(feature = "delta")]
+fn delta_map_paths_for_sql_query(
+    session: &SparkSession,
+    query: &str,
+) -> std::collections::HashSet<String> {
+    use robin_sparkless::sql::ast::{SelectItem, SetExpr, TableFactor};
+
+    fn prefixed_path(path: &str, prefix: &str) -> Option<String> {
+        let mut escaped = false;
+        let mut end = None;
+        for (index, character) in path.char_indices().skip(1) {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                end = Some(index);
+                break;
+            }
+        }
+        let end = end?;
+        let root: String = serde_json::from_str(&path[..=end]).ok()?;
+        let output_root = serde_json::to_string(&format!("{prefix}_{root}")).ok()?;
+        Some(format!("{output_root}{}", &path[end + 1..]))
+    }
+
+    let Ok(robin_sparkless::sql::Statement::Query(query)) = robin_sparkless::sql::parse_sql(query)
+    else {
+        return Default::default();
+    };
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        return Default::default();
+    };
+    if select.from.len() != 1 || !select.from[0].joins.is_empty() {
+        return Default::default();
+    }
+    let TableFactor::Table { name, alias, .. } = &select.from[0].relation else {
+        return Default::default();
+    };
+    let table_name = name.to_string();
+    let table_leaf = table_name.rsplit('.').next().unwrap_or(table_name.as_str());
+    let alias_prefix = alias
+        .as_ref()
+        .map(|alias| alias.name.value.as_str())
+        .filter(|alias| *alias != table_leaf);
+    let source_paths = match delta_map_paths_for_catalog_table(session, &table_name) {
+        Ok(paths) => paths,
+        Err(_) => return Default::default(),
+    };
+    if source_paths.is_empty() {
+        return Default::default();
+    }
+
+    let mut output_paths = std::collections::HashSet::new();
+    for item in &select.projection {
+        let expression_and_alias = match item {
+            SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
+                if let Some(prefix) = alias_prefix {
+                    output_paths.extend(
+                        source_paths
+                            .iter()
+                            .filter_map(|path| prefixed_path(path, prefix)),
+                    );
+                } else {
+                    output_paths.extend(source_paths.iter().cloned());
+                }
+                continue;
+            }
+            SelectItem::UnnamedExpr(expr) => (expr, None),
+            SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.value.as_str())),
+        };
+        let (expr, explicit_alias) = expression_and_alias;
+        let Ok(Some((source, _))) = robin_sparkless::sql::select_expr_source(&expr.to_string())
+        else {
+            continue;
+        };
+        let source_name = source.rsplit('.').next().unwrap_or(source.as_str());
+        let qualified_alias = source
+            .rsplit_once('.')
+            .map(|(qualifier, _)| qualifier)
+            .filter(|qualifier| Some(*qualifier) == alias_prefix);
+        let aliased_output = qualified_alias.map(|qualifier| format!("{qualifier}_{source_name}"));
+        let output_name = explicit_alias
+            .map(str::to_string)
+            .or(aliased_output)
+            .unwrap_or_else(|| source_name.to_string());
+        let source_root = serde_json::to_string(source_name).unwrap_or_default();
+        let output_root = serde_json::to_string(&output_name).unwrap_or_default();
+        for path in &source_paths {
+            if path == &source_root {
+                output_paths.insert(output_root.clone());
+            } else if let Some(tail) = path.strip_prefix(source_root.as_str()) {
+                if tail.starts_with(['.', '[', '{']) {
+                    output_paths.insert(format!("{output_root}{tail}"));
+                }
+            }
+        }
+    }
+    output_paths
 }
 
 /// #1344: module = "sparkless.sql.session" so type(spark).__module__ identifies engine (not builtins).
@@ -2211,10 +2315,16 @@ impl PySparkSession {
     }
 
     fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
-        self.inner
+        let mut wrapped = self
+            .inner
             .sql(query)
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            wrapped.logical_map_paths = delta_map_paths_for_sql_query(&self.inner, query);
+        }
+        Ok(wrapped)
     }
 
     fn create_dataframe(

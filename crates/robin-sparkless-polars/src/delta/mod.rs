@@ -210,6 +210,7 @@ fn align_delta_expr_to_dtype(
     expr: polars::prelude::Expr,
     source_dtype: &polars::prelude::DataType,
     target_dtype: &polars::prelude::DataType,
+    case_insensitive_fields: bool,
 ) -> Result<polars::prelude::Expr, PolarsError> {
     use polars::prelude::{DataType, NULL, as_struct, col, lit, when};
 
@@ -221,12 +222,20 @@ fn align_delta_expr_to_dtype(
                     let name = target_field.name();
                     let target_field_dtype = target_field.dtype();
                     let field_expr = if let Some(source_field) =
-                        source_fields.iter().find(|field| field.name() == name)
-                    {
+                        source_fields.iter().find(|field| {
+                            if case_insensitive_fields {
+                                delta_names_equal(field.name().as_str(), name.as_str())
+                            } else {
+                                field.name() == name
+                            }
+                        }) {
                         align_delta_expr_to_dtype(
-                            expr.clone().struct_().field_by_name(name),
+                            expr.clone()
+                                .struct_()
+                                .field_by_name(source_field.name().as_str()),
                             source_field.dtype(),
                             target_field_dtype,
+                            case_insensitive_fields,
                         )?
                     } else {
                         lit(NULL).strict_cast(target_field_dtype.clone())
@@ -240,7 +249,12 @@ fn align_delta_expr_to_dtype(
                 .otherwise(aligned))
         }
         (DataType::List(source_inner), DataType::List(target_inner)) => {
-            let item_expr = align_delta_expr_to_dtype(col(""), source_inner, target_inner)?;
+            let item_expr = align_delta_expr_to_dtype(
+                col(""),
+                source_inner,
+                target_inner,
+                case_insensitive_fields,
+            )?;
             Ok(expr.list().eval(item_expr))
         }
         _ => Ok(expr.strict_cast(target_dtype.clone())),
@@ -345,7 +359,7 @@ fn align_delta_expr_to_schema_type(
         }
         (DataType::List(_), DeltaDataType::Map(_)) => {
             let target_dtype = delta_schema_type_to_polars(target_type)?;
-            align_delta_expr_to_dtype(expr, source_dtype, &target_dtype)
+            align_delta_expr_to_dtype(expr, source_dtype, &target_dtype, case_insensitive_fields)
         }
         _ => Ok(expr.strict_cast(delta_schema_type_to_polars(target_type)?)),
     }
