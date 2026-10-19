@@ -227,8 +227,17 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                 if (matches!(&left_type, DataType::Decimal(..)) && right_type.is_float())
                     || (matches!(&right_type, DataType::Decimal(..)) && left_type.is_float())
                 {
-                    let left = left.cast(DataType::Float64);
-                    let right = right.cast(DataType::Float64);
+                    let common_type = DataType::Float64;
+                    let left = crate::type_coercion::coerce_expr_to_common_type(
+                        left,
+                        &left_type,
+                        &common_type,
+                    );
+                    let right = crate::type_coercion::coerce_expr_to_common_type(
+                        right,
+                        &right_type,
+                        &common_type,
+                    );
                     return Ok(match op {
                         crate::decimal_arithmetic::BinaryOp::Add => left + right,
                         crate::decimal_arithmetic::BinaryOp::Subtract => left - right,
