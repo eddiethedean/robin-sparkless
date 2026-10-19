@@ -1069,6 +1069,40 @@ fn delta_map_paths_for_sql_query(
             .join(".")
     }
 
+    fn join_suffix(
+        left_names: &std::collections::HashSet<String>,
+        right_names: &[String],
+        right_keys: &std::collections::HashSet<String>,
+    ) -> String {
+        let overlaps = right_names
+            .iter()
+            .filter(|name| left_names.contains(*name) && !right_keys.contains(*name))
+            .collect::<Vec<_>>();
+        if overlaps.is_empty() {
+            return "_right".to_string();
+        }
+        for index in 0.. {
+            let suffix = if index == 0 {
+                "_right".to_string()
+            } else {
+                format!("_right_{index}")
+            };
+            let collides = overlaps
+                .iter()
+                .any(|name| left_names.contains(&format!("{name}{suffix}")));
+            if !collides {
+                return suffix;
+            }
+        }
+        unreachable!("a free join suffix always exists")
+    }
+
+    struct SourceTable {
+        qualifier: String,
+        paths: std::collections::HashSet<String>,
+        output_by_source: std::collections::HashMap<String, String>,
+    }
+
     let Ok(robin_sparkless::sql::Statement::Query(query)) = robin_sparkless::sql::parse_sql(query)
     else {
         return Default::default();
@@ -1095,12 +1129,23 @@ fn delta_map_paths_for_sql_query(
     if source_paths.is_empty() {
         // A joined table may supply the projected MAP even when the first table does not.
     }
-    let mut source_tables = vec![(
-        alias_prefix.unwrap_or(table_leaf).to_string(),
-        source_paths.clone(),
-        alias_prefix.map(str::to_string),
-        table_columns(session, &table_name),
-    )];
+    let first_columns = table_columns(session, &table_name);
+    let mut current_output_names = std::collections::HashSet::new();
+    let first_output_by_source = first_columns
+        .iter()
+        .map(|column| {
+            let output = alias_prefix
+                .map(|prefix| format!("{prefix}_{column}"))
+                .unwrap_or_else(|| column.clone());
+            current_output_names.insert(output.clone());
+            (column.clone(), output)
+        })
+        .collect();
+    let mut source_tables = vec![SourceTable {
+        qualifier: alias_prefix.unwrap_or(table_leaf).to_string(),
+        paths: source_paths.clone(),
+        output_by_source: first_output_by_source,
+    }];
     for join in &from.joins {
         let TableFactor::Table { name, alias, .. } = &join.relation else {
             continue;
@@ -1125,12 +1170,65 @@ fn delta_map_paths_for_sql_query(
             .unwrap_or(leaf)
             .to_string();
         if let Ok(paths) = delta_map_paths_for_catalog_table(session, &name) {
-            source_tables.push((
+            let columns = table_columns(session, &name);
+            let right_columns = columns
+                .iter()
+                .map(|column| {
+                    output_prefix
+                        .as_ref()
+                        .map(|prefix| format!("{prefix}_{column}"))
+                        .unwrap_or_else(|| column.clone())
+                })
+                .collect::<Vec<_>>();
+            let (left_keys, right_key_names) = robin_sparkless::sql::join_condition_to_on_columns(
+                &join.join_operator,
+                alias_prefix,
+                output_prefix.as_deref(),
+            )
+            .unwrap_or_default();
+            let right_keys = right_key_names
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            let suffix = join_suffix(&current_output_names, &right_columns, &right_keys);
+            let coalesces_same_keys = left_keys == right_key_names
+                && matches!(
+                    &join.join_operator,
+                    robin_sparkless::sql::ast::JoinOperator::Join(_)
+                        | robin_sparkless::sql::ast::JoinOperator::Inner(_)
+                        | robin_sparkless::sql::ast::JoinOperator::Left(_)
+                        | robin_sparkless::sql::ast::JoinOperator::LeftOuter(_)
+                        | robin_sparkless::sql::ast::JoinOperator::Right(_)
+                        | robin_sparkless::sql::ast::JoinOperator::RightOuter(_)
+                );
+            let drops_right_columns = matches!(
+                &join.join_operator,
+                robin_sparkless::sql::ast::JoinOperator::LeftSemi(_)
+                    | robin_sparkless::sql::ast::JoinOperator::LeftAnti(_)
+                    | robin_sparkless::sql::ast::JoinOperator::Semi(_)
+                    | robin_sparkless::sql::ast::JoinOperator::Anti(_)
+            );
+            let mut output_by_source = std::collections::HashMap::new();
+            for (column, base) in columns.iter().zip(right_columns) {
+                if drops_right_columns {
+                    continue;
+                }
+                if coalesces_same_keys && right_keys.contains(&base) {
+                    continue;
+                }
+                let output = if current_output_names.contains(&base) {
+                    format!("{base}{suffix}")
+                } else {
+                    base
+                };
+                current_output_names.insert(output.clone());
+                output_by_source.insert(column.clone(), output);
+            }
+            source_tables.push(SourceTable {
                 qualifier,
                 paths,
-                output_prefix,
-                table_columns(session, &name),
-            ));
+                output_by_source,
+            });
         }
     }
 
@@ -1138,40 +1236,18 @@ fn delta_map_paths_for_sql_query(
     for item in &select.projection {
         let expression_and_alias = match item {
             SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
-                let mut used_names = std::collections::HashSet::new();
                 let output_names = output_columns
                     .iter()
                     .cloned()
                     .collect::<std::collections::HashSet<_>>();
-                for (_, paths, prefix, columns) in &source_tables {
-                    let mut output_by_source = std::collections::HashMap::new();
-                    for column in columns {
-                        let base = prefix
-                            .as_ref()
-                            .map(|prefix| format!("{prefix}_{column}"))
-                            .unwrap_or_else(|| column.clone());
-                        let mut output = base.clone();
-                        if used_names.contains(&output) {
-                            for index in 0.. {
-                                let suffix = if index == 0 {
-                                    "_right".to_string()
-                                } else {
-                                    format!("_right_{index}")
-                                };
-                                output = format!("{base}{suffix}");
-                                if !used_names.contains(&output) {
-                                    break;
-                                }
-                            }
-                        }
-                        used_names.insert(output.clone());
-                        output_by_source.insert(column.as_str(), output);
-                    }
-                    for path in paths {
+                for source_table in &source_tables {
+                    for path in &source_table.paths {
                         let Some((source_root, _)) = path_root_and_tail(path) else {
                             continue;
                         };
-                        let Some(output_root) = output_by_source.get(source_root.as_str()) else {
+                        let Some(output_root) =
+                            source_table.output_by_source.get(source_root.as_str())
+                        else {
                             continue;
                         };
                         if output_names.contains(output_root) {
@@ -1197,8 +1273,8 @@ fn delta_map_paths_for_sql_query(
             .and_then(|(qualifier, _)| {
                 source_tables
                     .iter()
-                    .find(|(table_alias, _, _, _)| table_alias.eq_ignore_ascii_case(qualifier))
-                    .map(|(_, paths, _, _)| paths)
+                    .find(|table| table.qualifier.eq_ignore_ascii_case(qualifier))
+                    .map(|table| &table.paths)
             })
             .unwrap_or(&source_paths);
         let qualified_alias = source

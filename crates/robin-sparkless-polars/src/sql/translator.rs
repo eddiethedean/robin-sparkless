@@ -1173,7 +1173,7 @@ fn join_on_equality_pairs(
 }
 
 /// Returns (left_column_names, right_column_names) for JOIN ON. When table aliases are used, names are prefixed (e.g. e_dept_id, d_id) (#152).
-fn join_condition_to_on_columns(
+pub fn join_condition_to_on_columns(
     join_op: &JoinOperator,
     left_alias: Option<&str>,
     right_alias: Option<&str>,

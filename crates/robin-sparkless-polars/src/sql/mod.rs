@@ -199,7 +199,7 @@ pub fn parse_select_exprs(
     Ok(result)
 }
 
-pub use translator::{expr_string_to_polars, translate};
+pub use translator::{expr_string_to_polars, join_condition_to_on_columns, translate};
 
 /// Source and output names for a SQL projection that selects an existing column.
 /// Uses the same parser as selectExpr, including implicit and quoted aliases.
