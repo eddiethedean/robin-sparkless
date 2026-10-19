@@ -651,6 +651,39 @@ async fn write_delta_bootstrap_partitioned(
     partition_columns: &[String],
 ) -> Result<(), PolarsError> {
     use deltalake::operations::create::CreateBuilder;
+    use std::collections::HashSet;
+
+    // When appending to a plain path, CreateBuilder adopts every Parquet file it finds.
+    // Files without the requested partition directories have no partition values in their
+    // Add actions, and readers then cannot reconstruct the table's partition columns.
+    // Reject that mixed layout before writing any new files instead of creating an unreadable
+    // Delta table.
+    let existing_files = collect_parquet_paths_under(path)?;
+    let requested_partitions: HashSet<String> = partition_columns.iter().cloned().collect();
+    for file in &existing_files {
+        let action = parquet_file_to_add_action(file, path).map_err(|e| {
+            PolarsError::ComputeError(
+                format!("write_delta: inspect existing partition file: {e}").into(),
+            )
+        })?;
+        let actual_partitions = match action {
+            deltalake::kernel::Action::Add(add) => {
+                add.partition_values.into_keys().collect::<HashSet<_>>()
+            }
+            _ => unreachable!("parquet_file_to_add_action always returns an Add action"),
+        };
+        if actual_partitions != requested_partitions {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "cannot append partitioned Delta data to '{}': existing Parquet file '{}' is not partitioned by {:?}; use overwrite or a path with matching partition directories",
+                    path.display(),
+                    file.display(),
+                    partition_columns
+                )
+                .into(),
+            ));
+        }
+    }
 
     // Build the schema from the full frame, including partition columns. Empty inputs still have
     // a schema and should create a Delta log even though they produce no Parquet parts.
