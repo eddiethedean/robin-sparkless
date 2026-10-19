@@ -9070,18 +9070,51 @@ impl PyDataFrameWriter {
         w.save(Path::new(path)).map_err(to_py_err)
     }
 
-    /// PySpark: save(path). Uses current format (parquet default when using .parquet/.csv/.json).
+    /// PySpark: save(path). Uses the selected format (Parquet by default).
     fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
         let df =
             self.df.bind(py).cast::<PyDataFrame>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
             })?;
         let inner = df.borrow();
+
+        let format = self
+            .writer_format
+            .as_deref()
+            .unwrap_or("parquet")
+            .to_ascii_lowercase();
+
+        if format == "delta" {
+            let merge_schema = self.options.iter().any(|(key, value)| {
+                key.eq_ignore_ascii_case("mergeSchema")
+                    && (value.eq_ignore_ascii_case("true") || value == "1")
+            });
+            return inner
+                .inner
+                .write_delta(
+                    Path::new(path),
+                    write_mode_from_str(&self.mode) != WriteMode::Append,
+                    merge_schema,
+                )
+                .map_err(to_py_err);
+        }
+
+        let write_format = match format.as_str() {
+            "parquet" => WriteFormat::Parquet,
+            "csv" => WriteFormat::Csv,
+            "json" => WriteFormat::Json,
+            _ => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "unsupported DataFrameWriter format for save(): {format}"
+                )));
+            }
+        };
+
         let mut w = inner
             .inner
             .write()
             .mode(write_mode_from_str(&self.mode))
-            .format(WriteFormat::Parquet);
+            .format(write_format);
         for (k, v) in &self.options {
             w = w.option(k, v);
         }
