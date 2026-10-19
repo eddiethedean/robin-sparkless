@@ -2814,12 +2814,16 @@ impl<'a> DataFrameWriter<'a> {
         if is_delta_format {
             #[cfg(feature = "delta")]
             {
-                let target = warehouse_paths.first().ok_or_else(|| {
-                    PolarsError::InvalidOperation(
-                        "saveAsTable(format=delta) requires spark.sql.warehouse.dir to be set."
-                            .into(),
-                    )
-                })?;
+                let target = warehouse_paths
+                    .iter()
+                    .find(|path| path.join("_delta_log").is_dir())
+                    .or_else(|| warehouse_paths.first())
+                    .ok_or_else(|| {
+                        PolarsError::InvalidOperation(
+                            "saveAsTable(format=delta) requires spark.sql.warehouse.dir to be set."
+                                .into(),
+                        )
+                    })?;
 
                 match mode {
                     SaveMode::Ignore if session.saved_table_exists(name) => return Ok(()),
