@@ -6815,8 +6815,15 @@ impl PyDataFrame {
                 .get_alias()
                 .and_then(|alias| {
                     source
-                        .strip_prefix(&format!("{alias}."))
-                        .map(str::to_string)
+                        .split_once('.')
+                        .filter(|(qualifier, _)| {
+                            if self.inner.is_case_sensitive() {
+                                *qualifier == alias
+                            } else {
+                                qualifier.to_lowercase() == alias.to_lowercase()
+                            }
+                        })
+                        .map(|(_, nested_source)| nested_source.to_string())
                 })
                 .unwrap_or_else(|| source.to_string());
             let mut parts = qualified_source.split('.');
