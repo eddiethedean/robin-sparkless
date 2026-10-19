@@ -226,6 +226,71 @@ def _write_non_nullable_id_table(path):
     )
 
 
+def _write_nested_non_nullable_table(path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    path.mkdir()
+    pq.write_table(
+        pa.table(
+            {
+                "id": [1],
+                "s": pa.array(
+                    [{"x": 5, "y": 6}],
+                    type=pa.struct([("x", pa.int64()), ("y", pa.int64())]),
+                ),
+            }
+        ),
+        path / "part.parquet",
+    )
+    now = int(time.time() * 1000)
+    schema = {
+        "type": "struct",
+        "fields": [
+            {"name": "id", "type": "long", "nullable": True, "metadata": {}},
+            {
+                "name": "s",
+                "type": {
+                    "type": "struct",
+                    "fields": [
+                        {"name": "x", "type": "long", "nullable": False, "metadata": {}},
+                        {"name": "y", "type": "long", "nullable": True, "metadata": {}},
+                    ],
+                },
+                "nullable": True,
+                "metadata": {},
+            },
+        ],
+    }
+    actions = [
+        {"protocol": {"minReaderVersion": 1, "minWriterVersion": 2}},
+        {
+            "metaData": {
+                "id": str(uuid.uuid4()),
+                "format": {"provider": "parquet", "options": {}},
+                "schemaString": json.dumps(schema),
+                "partitionColumns": [],
+                "configuration": {},
+                "createdTime": now,
+            }
+        },
+        {
+            "add": {
+                "path": "part.parquet",
+                "partitionValues": {},
+                "size": (path / "part.parquet").stat().st_size,
+                "modificationTime": now,
+                "dataChange": True,
+            }
+        },
+    ]
+    log_path = path / "_delta_log"
+    log_path.mkdir()
+    (log_path / "00000000000000000000.json").write_text(
+        "\n".join(json.dumps(action) for action in actions) + "\n"
+    )
+
+
 @pytest.mark.delta
 def test_partitioned_map_delta_write_round_trips(spark, tmp_path):
     path = tmp_path / "partitioned-map"
@@ -410,7 +475,7 @@ def test_append_rejects_null_in_non_nullable_column(spark, tmp_path):
     path = tmp_path / "not-null"
     _write_non_nullable_id_table(path)
     incoming = spark.createDataFrame([(2,)], ["id"]).withColumn("id", F.lit(None))
-    with pytest.raises(Exception, match="non-nullable column 'id' contains NULL"):
+    with pytest.raises(Exception, match="non-nullable field 'id' contains NULL"):
         incoming.write.format("delta").mode("append").save(str(path))
 
 
@@ -459,6 +524,40 @@ def test_map_metadata_survives_temp_view_and_join(spark, tmp_path):
         copy_path = tmp_path / f"view-map-copy-{index}"
         frame.write.format("delta").mode("overwrite").save(str(copy_path))
         assert isinstance(spark.read.format("delta").load(str(copy_path)).schema["m"].dataType, MapType)
+
+
+@pytest.mark.delta
+def test_global_temp_map_metadata_is_shared_with_new_session(spark, tmp_path):
+    path = tmp_path / "global-view-map"
+    spark.createDataFrame([(1, {"a": 1})], _map_schema()).write.format("delta").mode(
+        "overwrite"
+    ).save(str(path))
+    spark.read.delta(str(path)).createOrReplaceGlobalTempView("issue_1684_global_map")
+
+    new_session = spark.newSession()
+    result = new_session.table("global_temp.issue_1684_global_map")
+    assert isinstance(result.schema["m"].dataType, MapType)
+
+
+@pytest.mark.delta
+def test_nested_non_nullable_field_rejects_null_value(spark, tmp_path):
+    path = tmp_path / "nested-not-null"
+    _write_nested_non_nullable_table(path)
+    incoming_schema = StructType(
+        [
+            StructField("id", LongType()),
+            StructField(
+                "s",
+                StructType(
+                    [StructField("x", LongType()), StructField("y", LongType())]
+                ),
+            ),
+        ]
+    )
+    incoming = spark.createDataFrame([(2, {"x": None, "y": 7})], incoming_schema)
+
+    with pytest.raises(Exception, match="non-nullable field 's.x' contains NULL"):
+        incoming.write.format("delta").mode("append").save(str(path))
 
 
 @pytest.mark.delta

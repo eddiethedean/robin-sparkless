@@ -2166,7 +2166,166 @@ fn validate_non_nullable_values(
     df: &polars::prelude::DataFrame,
     target: &deltalake::kernel::StructType,
 ) -> Result<(), PolarsError> {
-    for field in target.fields().filter(|field| !field.nullable) {
+    use deltalake::kernel::DataType as DeltaDataType;
+    use polars::prelude::AnyValue;
+
+    fn has_required_descendant(data_type: &DeltaDataType) -> bool {
+        match data_type {
+            DeltaDataType::Struct(fields) | DeltaDataType::Variant(fields) => fields
+                .fields()
+                .any(|field| !field.nullable || has_required_descendant(&field.data_type)),
+            DeltaDataType::Array(array) => {
+                !array.contains_null || has_required_descendant(&array.element_type)
+            }
+            DeltaDataType::Map(map) => {
+                !map.value_contains_null || has_required_descendant(&map.value_type)
+            }
+            DeltaDataType::Primitive(_) => false,
+        }
+    }
+
+    fn validate_value(
+        value: &AnyValue<'_>,
+        data_type: &DeltaDataType,
+        nullable: bool,
+        path: &str,
+    ) -> Result<(), PolarsError> {
+        if matches!(value, AnyValue::Null) {
+            return if nullable {
+                Ok(())
+            } else {
+                Err(PolarsError::InvalidOperation(
+                    format!("write_delta: non-nullable field '{path}' contains NULL values").into(),
+                ))
+            };
+        }
+
+        fn validate_struct_values(
+            values: &[AnyValue<'_>],
+            physical_fields: &[polars::prelude::Field],
+            target_fields: &deltalake::kernel::StructType,
+            path: &str,
+        ) -> Result<(), PolarsError> {
+            for target_field in target_fields.fields() {
+                if target_field.nullable && !has_required_descendant(&target_field.data_type) {
+                    continue;
+                }
+                let source = physical_fields
+                    .iter()
+                    .position(|field| field.name().as_str() == target_field.name)
+                    .and_then(|index| values.get(index))
+                    .ok_or_else(|| {
+                        PolarsError::ColumnNotFound(
+                            format!(
+                                "write_delta: missing nested field '{}.{}'",
+                                path, target_field.name
+                            )
+                            .into(),
+                        )
+                    })?;
+                validate_value(
+                    source,
+                    &target_field.data_type,
+                    target_field.nullable,
+                    &format!("{path}.{}", target_field.name),
+                )?;
+            }
+            Ok(())
+        }
+
+        match data_type {
+            DeltaDataType::Struct(target_fields) | DeltaDataType::Variant(target_fields) => {
+                match value {
+                    AnyValue::Struct(_, _, physical_fields) => {
+                        let values = value._iter_struct_av().collect::<Vec<_>>();
+                        validate_struct_values(&values, physical_fields, target_fields, path)
+                    }
+                    AnyValue::StructOwned(payload) => {
+                        let (values, physical_fields) = &**payload;
+                        validate_struct_values(values, physical_fields, target_fields, path)
+                    }
+                    other => Err(PolarsError::InvalidOperation(
+                        format!("write_delta: expected struct at '{path}', found {other:?}").into(),
+                    )),
+                }
+            }
+            DeltaDataType::Array(array) => {
+                if array.contains_null && !has_required_descendant(&array.element_type) {
+                    return Ok(());
+                }
+                let AnyValue::List(values) = value else {
+                    return Err(PolarsError::InvalidOperation(
+                        format!("write_delta: expected array at '{path}', found {value:?}").into(),
+                    ));
+                };
+                for index in 0..values.len() {
+                    let item = values.get(index)?;
+                    validate_value(
+                        &item,
+                        &array.element_type,
+                        array.contains_null,
+                        &format!("{path}[{index}]"),
+                    )?;
+                }
+                Ok(())
+            }
+            DeltaDataType::Map(map) => {
+                let AnyValue::List(entries) = value else {
+                    return Err(PolarsError::InvalidOperation(
+                        format!("write_delta: expected map at '{path}', found {value:?}").into(),
+                    ));
+                };
+                for index in 0..entries.len() {
+                    let entry = entries.get(index)?;
+                    let (AnyValue::Struct(_, _, _) | AnyValue::StructOwned(_)) = &entry else {
+                        return Err(PolarsError::InvalidOperation(
+                            format!("write_delta: invalid map entry at '{path}[{index}]'").into(),
+                        ));
+                    };
+                    let (values, physical_fields): (
+                        Vec<AnyValue<'_>>,
+                        Vec<polars::prelude::Field>,
+                    ) = match &entry {
+                        AnyValue::Struct(_, _, fields) => {
+                            (entry._iter_struct_av().collect(), fields.to_vec())
+                        }
+                        AnyValue::StructOwned(payload) => (payload.0.clone(), payload.1.clone()),
+                        _ => unreachable!(),
+                    };
+                    for (field_name, field_type, field_nullable) in [
+                        ("key", &map.key_type, false),
+                        ("value", &map.value_type, map.value_contains_null),
+                    ] {
+                        let source = physical_fields
+                            .iter()
+                            .position(|field| field.name().as_str() == field_name)
+                            .and_then(|position| values.get(position))
+                            .ok_or_else(|| {
+                                PolarsError::ColumnNotFound(
+                                    format!(
+                                        "write_delta: malformed map entry at '{path}[{index}]'"
+                                    )
+                                    .into(),
+                                )
+                            })?;
+                        validate_value(
+                            source,
+                            field_type,
+                            field_nullable,
+                            &format!("{path}[{index}].{field_name}"),
+                        )?;
+                    }
+                }
+                Ok(())
+            }
+            DeltaDataType::Primitive(_) => Ok(()),
+        }
+    }
+
+    for field in target.fields() {
+        if field.nullable && !has_required_descendant(&field.data_type) {
+            continue;
+        }
         let Some(name) = df
             .get_column_names()
             .into_iter()
@@ -2175,14 +2334,9 @@ fn validate_non_nullable_values(
             continue;
         };
         let column = df.column(name)?;
-        if column.null_count() > 0 {
-            return Err(PolarsError::InvalidOperation(
-                format!(
-                    "write_delta: non-nullable column '{}' contains NULL values",
-                    field.name
-                )
-                .into(),
-            ));
+        for row in 0..df.height() {
+            let value = column.get(row)?;
+            validate_value(&value, &field.data_type, field.nullable, &field.name)?;
         }
     }
     Ok(())
