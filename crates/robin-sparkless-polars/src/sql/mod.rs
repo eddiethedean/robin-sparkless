@@ -269,25 +269,19 @@ pub fn select_expr_preserves_map_value(expression: &str) -> Result<bool, PolarsE
 /// CASE predicates are intentionally excluded because they do not contribute to the output value.
 pub fn select_expr_map_value_references(
     expression: &str,
-) -> Result<Option<Vec<String>>, PolarsError> {
+) -> Result<Option<Vec<Vec<String>>>, PolarsError> {
     use spark_sql_parser::ast::{
         Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan,
     };
 
-    fn map_value_expr(expr: &Expr, references: &mut Vec<String>) -> bool {
+    fn map_value_expr(expr: &Expr, references: &mut Vec<Vec<String>>) -> bool {
         match expr {
             Expr::Identifier(name) => {
-                references.push(name.value.clone());
+                references.push(vec![name.value.clone()]);
                 true
             }
             Expr::CompoundIdentifier(parts) => {
-                references.push(
-                    parts
-                        .iter()
-                        .map(|part| part.value.as_str())
-                        .collect::<Vec<_>>()
-                        .join("."),
-                );
+                references.push(parts.iter().map(|part| part.value.clone()).collect());
                 true
             }
             Expr::Nested(expr) => map_value_expr(expr, references),
