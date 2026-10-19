@@ -78,6 +78,27 @@ pub(crate) fn pyspark_binary_arithmetic_expr(
     expr
 }
 
+/// Mark an ExprIr arithmetic expression for plan-time dispatch. Decimal and
+/// integral operands use the exact decimal implementation; other operands are
+/// rebound to the existing ANSI expression semantics during analysis.
+pub(crate) fn expr_ir_binary_arithmetic_expr(
+    left: Expr,
+    right: Expr,
+    op: crate::decimal_arithmetic::BinaryOp,
+) -> Expr {
+    let mut expr = pyspark_binary_arithmetic_expr(
+        left,
+        right,
+        op,
+        crate::udf_context::get_thread_ansi_enabled(),
+        crate::udf_context::get_thread_decimal_allow_precision_loss(),
+    );
+    if let Expr::AnonymousFunction { fmt_str, .. } = &mut expr {
+        **fmt_str = op.engine_expr_marker().into();
+    }
+    expr
+}
+
 /// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.
 /// When escape_char is Some(esc), esc + any char treats that char as literal (no %/_ expansion).
 fn like_pattern_to_regex(pattern: &str, escape_char: Option<char>) -> String {

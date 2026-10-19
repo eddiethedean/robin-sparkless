@@ -31,6 +31,25 @@ impl BinaryOp {
             _ => None,
         }
     }
+
+    pub(crate) fn engine_expr_marker(self) -> &'static str {
+        match self {
+            Self::Add => "__robin_expr_ir_add",
+            Self::Subtract => "__robin_expr_ir_subtract",
+            Self::Multiply => "__robin_expr_ir_multiply",
+            Self::Divide => "__robin_expr_ir_divide",
+        }
+    }
+
+    pub(crate) fn from_engine_expr_marker(marker: &str) -> Option<Self> {
+        match marker {
+            "__robin_expr_ir_add" => Some(Self::Add),
+            "__robin_expr_ir_subtract" => Some(Self::Subtract),
+            "__robin_expr_ir_multiply" => Some(Self::Multiply),
+            "__robin_expr_ir_divide" => Some(Self::Divide),
+            _ => None,
+        }
+    }
 }
 
 fn decimal_shape(dtype: &DataType) -> Option<(usize, usize)> {

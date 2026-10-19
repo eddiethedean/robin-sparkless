@@ -199,6 +199,60 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
     expr.try_map_expr(|expr| {
         if let Expr::AnonymousFunction { input, fmt_str, .. } = &expr {
             if let Some(op) =
+                crate::decimal_arithmetic::BinaryOp::from_engine_expr_marker(fmt_str.as_str())
+                && input.len() == 2
+            {
+                let left = input[0].clone();
+                let right = input[1].clone();
+                let left_type = left.to_field(schema)?.dtype().clone();
+                let right_type = right.to_field(schema)?.dtype().clone();
+
+                if crate::decimal_arithmetic::result_type(
+                    &left_type,
+                    &right_type,
+                    op,
+                    allow_precision_loss,
+                )
+                .is_some()
+                {
+                    return Ok(crate::column::pyspark_binary_arithmetic_expr(
+                        left,
+                        right,
+                        op,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    ));
+                }
+
+                if (matches!(&left_type, DataType::Decimal(..)) && right_type.is_float())
+                    || (matches!(&right_type, DataType::Decimal(..)) && left_type.is_float())
+                {
+                    let left = left.cast(DataType::Float64);
+                    let right = right.cast(DataType::Float64);
+                    return Ok(match op {
+                        crate::decimal_arithmetic::BinaryOp::Add => left + right,
+                        crate::decimal_arithmetic::BinaryOp::Subtract => left - right,
+                        crate::decimal_arithmetic::BinaryOp::Multiply => left * right,
+                        crate::decimal_arithmetic::BinaryOp::Divide => {
+                            crate::ansi::div_expr(left, right)
+                        }
+                    });
+                }
+
+                return Ok(match op {
+                    crate::decimal_arithmetic::BinaryOp::Add => crate::ansi::add_expr(left, right),
+                    crate::decimal_arithmetic::BinaryOp::Subtract => {
+                        crate::ansi::sub_expr(left, right)
+                    }
+                    crate::decimal_arithmetic::BinaryOp::Multiply => {
+                        crate::ansi::mul_expr(left, right)
+                    }
+                    crate::decimal_arithmetic::BinaryOp::Divide => {
+                        crate::ansi::div_expr(left, right)
+                    }
+                });
+            }
+            if let Some(op) =
                 crate::decimal_arithmetic::BinaryOp::from_expr_marker(fmt_str.as_str())
                 && input.len() == 2
             {

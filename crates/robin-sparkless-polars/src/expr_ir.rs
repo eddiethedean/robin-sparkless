@@ -77,22 +77,38 @@ pub fn expr_ir_to_expr(ir: &ExprIr) -> Result<Expr, EngineError> {
         ExprIr::Add(a, b) => {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
-            Ok(crate::ansi::add_expr(l, r))
+            Ok(crate::column::expr_ir_binary_arithmetic_expr(
+                l,
+                r,
+                crate::decimal_arithmetic::BinaryOp::Add,
+            ))
         }
         ExprIr::Sub(a, b) => {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
-            Ok(crate::ansi::sub_expr(l, r))
+            Ok(crate::column::expr_ir_binary_arithmetic_expr(
+                l,
+                r,
+                crate::decimal_arithmetic::BinaryOp::Subtract,
+            ))
         }
         ExprIr::Mul(a, b) => {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
-            Ok(crate::ansi::mul_expr(l, r))
+            Ok(crate::column::expr_ir_binary_arithmetic_expr(
+                l,
+                r,
+                crate::decimal_arithmetic::BinaryOp::Multiply,
+            ))
         }
         ExprIr::Div(a, b) => {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
-            Ok(crate::ansi::div_expr(l, r))
+            Ok(crate::column::expr_ir_binary_arithmetic_expr(
+                l,
+                r,
+                crate::decimal_arithmetic::BinaryOp::Divide,
+            ))
         }
 
         ExprIr::Between { left, lower, upper } => {
@@ -187,11 +203,17 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
 /// Aggregation-style calls (sum, count, avg, percentiles, etc.).
 fn agg_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineError> {
     let out = match (name, args) {
-        ("sum", [a]) => Some(expr_ir_to_expr(a)?.sum()),
+        ("sum", [a]) => {
+            let input = crate::column::Column::from_expr(expr_ir_to_expr(a)?, None);
+            Some(crate::functions::sum(&input).expr().clone())
+        }
         ("count", [a]) => Some(expr_ir_to_expr(a)?.count()),
         ("min", [a]) => Some(expr_ir_to_expr(a)?.min()),
         ("max", [a]) => Some(expr_ir_to_expr(a)?.max()),
-        ("mean" | "avg", [a]) => Some(expr_ir_to_expr(a)?.mean()),
+        ("mean" | "avg", [a]) => {
+            let input = crate::column::Column::from_expr(expr_ir_to_expr(a)?, None);
+            Some(crate::functions::avg(&input).expr().clone())
+        }
         ("first", [a]) => Some(expr_ir_to_expr(a)?.first()),
         ("last", [a]) => Some(expr_ir_to_expr(a)?.last()),
         ("try_sum", [a]) => {
