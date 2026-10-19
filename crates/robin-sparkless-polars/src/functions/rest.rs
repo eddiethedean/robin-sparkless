@@ -991,7 +991,10 @@ impl FloatWindowAccumulator {
         } else if let Some(exact_sum) = &self.exact_finite_sum {
             scaled_integer_as_finite_float(exact_sum)
         } else {
-            self.finite_sum
+            // Kahan compensation normally gets folded into the next update. Apply
+            // any remainder at read time too, since a frame can end after a null
+            // or non-finite value without another finite update to consume it.
+            self.finite_sum - self.add_compensation - self.remove_compensation
         }
     }
 }

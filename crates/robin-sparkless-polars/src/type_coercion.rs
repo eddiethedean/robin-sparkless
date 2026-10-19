@@ -185,6 +185,9 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
     if right == &DataType::Null {
         return Ok(left.clone());
     }
+    if left == right {
+        return Ok(left.clone());
+    }
 
     fn decimal_common_type(
         left_precision: usize,
@@ -204,9 +207,12 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
     }
 
     match (left, right) {
-        (DataType::List(left_inner), DataType::List(right_inner)) => Ok(DataType::List(Box::new(
-            find_common_type(left_inner, right_inner)?,
-        ))),
+        (DataType::List(left_inner), DataType::List(right_inner)) => {
+            return Ok(DataType::List(Box::new(find_common_type(
+                left_inner,
+                right_inner,
+            )?)));
+        }
         (DataType::Struct(left_fields), DataType::Struct(right_fields))
             if left_fields.len() == right_fields.len()
                 && left_fields
@@ -224,7 +230,7 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
                     ))
                 })
                 .collect::<Result<Vec<_>, PolarsError>>()?;
-            Ok(DataType::Struct(fields))
+            return Ok(DataType::Struct(fields));
         }
         (DataType::Decimal(lp, ls), DataType::Decimal(rp, rs)) => {
             return Ok(decimal_common_type(*lp, *ls, *rp, *rs));
