@@ -3175,10 +3175,13 @@ impl<'a> DataFrameWriter<'a> {
                 continue;
             }
 
-            let part_path: std::path::PathBuf = resolved
+            let partition_segments = resolved
                 .iter()
                 .zip(row.iter())
-                .map(|(name, av)| format!("{}={}", name, format_partition_value(av)))
+                .map(|(name, av)| format_partition_value(av).map(|value| format!("{name}={value}")))
+                .collect::<Result<Vec<_>, _>>()?;
+            let part_path = partition_segments
+                .into_iter()
                 .fold(path.to_path_buf(), |p, seg| p.join(seg));
             std::fs::create_dir_all(&part_path).map_err(|e| {
                 PolarsError::ComputeError(
@@ -3283,11 +3286,12 @@ impl Clone for DataFrame {
     }
 }
 
-/// Format a partition column value for use in a directory name (Spark/Hive style).
-/// Null becomes "__HIVE_DEFAULT_PARTITION__"; other values use string representation with path-unsafe chars replaced.
-fn format_partition_value(av: &AnyValue<'_>) -> String {
+/// Format a partition value as a reversible, path-safe directory component.
+/// Null uses the Hive sentinel; all non-null values are percent-encoded so they cannot collide
+/// with the sentinel or turn path data into directory separators.
+fn format_partition_value(av: &AnyValue<'_>) -> Result<String, PolarsError> {
     let s = match av {
-        AnyValue::Null => "__HIVE_DEFAULT_PARTITION__".to_string(),
+        AnyValue::Null => return Ok("__HIVE_DEFAULT_PARTITION__".to_string()),
         AnyValue::Boolean(b) => b.to_string(),
         AnyValue::Int32(i) => i.to_string(),
         AnyValue::Int64(i) => i.to_string(),
@@ -3297,11 +3301,38 @@ fn format_partition_value(av: &AnyValue<'_>) -> String {
         AnyValue::Float64(f) => f.to_string(),
         AnyValue::String(s) => s.to_string(),
         AnyValue::StringOwned(s) => s.as_str().to_string(),
-        AnyValue::Date(d) => d.to_string(),
+        AnyValue::Binary(value) => std::str::from_utf8(value).map(str::to_owned).map_err(|e| {
+            PolarsError::InvalidOperation(
+                format!("binary partition value is not valid UTF-8: {e}").into(),
+            )
+        })?,
+        AnyValue::BinaryOwned(value) => {
+            std::str::from_utf8(value).map(str::to_owned).map_err(|e| {
+                PolarsError::InvalidOperation(
+                    format!("binary partition value is not valid UTF-8: {e}").into(),
+                )
+            })?
+        }
+        AnyValue::Date(d) => date_days_to_json(*d)
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                PolarsError::ComputeError(
+                    format!("cannot format out-of-range Date partition value: {d}").into(),
+                )
+            })?,
+        AnyValue::Datetime(value, unit, _) | AnyValue::DatetimeOwned(value, unit, _) => {
+            let timestamp = datetime_anyvalue_to_json_iso(*value, unit);
+            let timestamp = timestamp.as_str().ok_or_else(|| {
+                PolarsError::ComputeError(
+                    format!("cannot format out-of-range Datetime partition value: {value}").into(),
+                )
+            })?;
+            format!("{timestamp}Z")
+        }
         _ => av.to_string(),
     };
-    // Replace path separators and other unsafe chars so the value is a valid path segment
-    s.replace([std::path::MAIN_SEPARATOR, '/'], "_")
+    Ok(percent_encoding::utf8_percent_encode(&s, percent_encoding::NON_ALPHANUMERIC).to_string())
 }
 
 /// Build a filter expression that matches rows where partition columns equal the given row values.

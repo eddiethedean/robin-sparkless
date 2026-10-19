@@ -132,16 +132,24 @@ pub fn read_delta_with_version(
                     })
             })
             .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
-        Ok::<_, PolarsError>((uris, partition_columns, partition_types))
+        Ok::<_, PolarsError>((uris, partition_columns, partition_types, schema))
     })();
 
     match table_result {
-        Ok((uris, partition_columns, partition_types)) => {
+        Ok((uris, partition_columns, partition_types, schema)) => {
             if uris.is_empty() {
-                return Ok(DataFrame::from_polars_with_options(
-                    polars::prelude::DataFrame::default(),
-                    case_sensitive,
-                ));
+                let columns = schema
+                    .fields()
+                    .map(|field| {
+                        let dtype = delta_schema_type_to_polars(&field.data_type)?;
+                        Ok(
+                            polars::prelude::Series::new_empty(field.name.clone().into(), &dtype)
+                                .into(),
+                        )
+                    })
+                    .collect::<Result<Vec<polars::prelude::Column>, PolarsError>>()?;
+                let pl_df = polars::prelude::DataFrame::new(0, columns)?;
+                return Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive));
             }
             let table_root_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
             let mut lfs: Vec<LazyFrame> = Vec::with_capacity(uris.len());
@@ -300,10 +308,16 @@ fn confine_parquet_uri_to_table_root(
             return confine_parquet_uri_to_table_root(&uri[pos..], table_root);
         }
     }
-    let parquet_path = uri_to_parquet_path(uri)?;
     let table_canonical = table_root.canonicalize().map_err(|e| {
         PolarsError::ComputeError(format!("read_delta: canonicalize table root: {e}").into())
     })?;
+    // Delta file URIs append the encoded Add.path directly to the root URI. Preserve percent
+    // escapes in the relative path because they are literal characters in the on-disk partition
+    // directory (for example, a slash in a value is stored as `%2F`). Decode only the root URI.
+    let parquet_path = match raw_file_uri_relative_path(uri, &table_canonical) {
+        Some(relative_path) => relative_path,
+        None => uri_to_parquet_path(uri)?,
+    };
     let resolved = if parquet_path.is_absolute() {
         parquet_path
     } else {
@@ -321,6 +335,17 @@ fn confine_parquet_uri_to_table_root(
         ));
     }
     Ok(canonical)
+}
+
+#[cfg(feature = "delta")]
+fn raw_file_uri_relative_path(uri: &str, table_root: &Path) -> Option<std::path::PathBuf> {
+    let root_uri = Url::from_directory_path(table_root).ok()?.to_string();
+    let root_prefix = root_uri.trim_end_matches('/');
+    let relative = uri.strip_prefix(root_prefix)?.strip_prefix('/')?;
+    if relative.is_empty() || relative.starts_with('/') {
+        return None;
+    }
+    Some(std::path::PathBuf::from(relative))
 }
 
 /// Resolve `..` / `.` by canonicalizing the nearest existing ancestor (same idea as path_security).
@@ -578,26 +603,35 @@ async fn write_delta_bootstrap_partitioned(
     table_uri: &str,
     partition_columns: &[String],
 ) -> Result<(), PolarsError> {
-    use deltalake::operations::convert_to_delta::ConvertToDeltaBuilder;
+    use deltalake::operations::create::CreateBuilder;
 
-    let fields = partition_columns
-        .iter()
-        .map(|name| delta_partition_field(df, name))
-        .collect::<Result<Vec<_>, _>>()?;
+    // Build the schema from the full frame, including partition columns. Empty inputs still have
+    // a schema and should create a Delta log even though they produce no Parquet parts.
+    let schema = delta_schema_from_frame(df).await?;
     write_partitioned_parquet(
         df,
         path,
         partition_columns,
         crate::dataframe::WriteMode::Append,
     )?;
-    ConvertToDeltaBuilder::new()
+
+    let files = collect_parquet_paths_under(path)?;
+    let actions = files
+        .iter()
+        .map(|file| parquet_file_to_add_action(file, path))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            PolarsError::ComputeError(format!("write_delta: add bootstrap partition: {e}").into())
+        })?;
+
+    CreateBuilder::new()
         .with_location(table_uri)
-        .with_partition_schema(fields)
+        .with_columns(schema.fields().cloned())
+        .with_partition_columns(partition_columns.iter().cloned())
+        .with_actions(actions)
         .await
         .map_err(|e: deltalake::DeltaTableError| {
-            PolarsError::ComputeError(
-                format!("write_delta: convert partitioned parquet: {e}").into(),
-            )
+            PolarsError::ComputeError(format!("write_delta: create partitioned table: {e}").into())
         })?;
     Ok(())
 }
@@ -716,7 +750,12 @@ fn partition_value_from_path(
                 return Some(if value == "__HIVE_DEFAULT_PARTITION__" {
                     None
                 } else {
-                    Some(value.to_string())
+                    Some(
+                        percent_encoding::percent_decode_str(value)
+                            .decode_utf8()
+                            .ok()?
+                            .into_owned(),
+                    )
                 });
             }
         }
@@ -769,6 +808,43 @@ fn delta_partition_type_to_polars(
     }
 }
 
+#[cfg(feature = "delta")]
+fn delta_schema_type_to_polars(
+    data_type: &deltalake::kernel::DataType,
+) -> Result<polars::prelude::DataType, PolarsError> {
+    use deltalake::kernel::DataType as DeltaDataType;
+    use polars::prelude::{DataType, Field};
+
+    match data_type {
+        DeltaDataType::Primitive(_) => {
+            let serialized = serde_json::to_value(data_type).map_err(|e| {
+                PolarsError::ComputeError(format!("read_delta: serialize schema type: {e}").into())
+            })?;
+            delta_partition_type_to_polars(&serialized)
+        }
+        DeltaDataType::Struct(fields) | DeltaDataType::Variant(fields) => {
+            let fields = fields
+                .fields()
+                .map(|field| {
+                    delta_schema_type_to_polars(&field.data_type)
+                        .map(|dtype| Field::new(field.name.clone().into(), dtype))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(DataType::Struct(fields))
+        }
+        DeltaDataType::Array(array) => Ok(DataType::List(Box::new(delta_schema_type_to_polars(
+            &array.element_type,
+        )?))),
+        DeltaDataType::Map(map) => Ok(DataType::List(Box::new(DataType::Struct(vec![
+            Field::new("key".into(), delta_schema_type_to_polars(&map.key_type)?),
+            Field::new(
+                "value".into(),
+                delta_schema_type_to_polars(&map.value_type)?,
+            ),
+        ])))),
+    }
+}
+
 /// Build an Add action for a parquet file on disk.
 #[cfg(feature = "delta")]
 fn parquet_file_to_add_action(
@@ -786,7 +862,12 @@ fn parquet_file_to_add_action(
             "write_delta: parquet file is outside table root: {e}"
         ))
     })?;
-    let rel_path = relative_path.to_string_lossy().replace('\\', "/");
+    // Delta decodes Add.path once when constructing object-store paths. Escape percent signs so
+    // a physical partition directory like `country=a%2Fb` still resolves to that exact path.
+    let rel_path = relative_path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('%', "%25");
     let mut partition_values = HashMap::new();
     if let Some(parent) = relative_path.parent() {
         for component in parent.components() {
@@ -799,7 +880,16 @@ fn parquet_file_to_add_action(
                     if value == "__HIVE_DEFAULT_PARTITION__" {
                         None
                     } else {
-                        Some(value.to_string())
+                        Some(
+                            percent_encoding::percent_decode_str(value)
+                                .decode_utf8()
+                                .map_err(|e| {
+                                    deltalake::DeltaTableError::Generic(format!(
+                                        "write_delta: invalid UTF-8 in partition path value: {e}"
+                                    ))
+                                })?
+                                .into_owned(),
+                        )
                     },
                 );
             }
