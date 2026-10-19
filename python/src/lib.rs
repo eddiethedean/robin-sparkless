@@ -1118,14 +1118,19 @@ fn delta_map_paths_for_sql_query(
     fn resolve_source_reference<'a>(
         parts: &[String],
         source_tables: &'a [SourceTable],
+        case_sensitive: bool,
     ) -> Option<(&'a SourceTable, String, String)> {
         if parts.is_empty() {
             return None;
         }
         let qualified = parts.len() > 1
-            && source_tables
-                .iter()
-                .any(|table| table.qualifier.eq_ignore_ascii_case(&parts[0]));
+            && source_tables.iter().any(|table| {
+                if case_sensitive {
+                    table.qualifier == parts[0]
+                } else {
+                    table.qualifier.eq_ignore_ascii_case(&parts[0])
+                }
+            });
         let (qualifier, root_index) = if qualified {
             (Some(parts[0].as_str()), 1)
         } else {
@@ -1133,22 +1138,105 @@ fn delta_map_paths_for_sql_query(
         };
         let nested_start = root_index + 1;
         let matching_tables = source_tables.iter().filter(|table| {
-            qualifier.is_none_or(|qualifier| table.qualifier.eq_ignore_ascii_case(qualifier))
+            qualifier.is_none_or(|qualifier| {
+                if case_sensitive {
+                    table.qualifier == qualifier
+                } else {
+                    table.qualifier.eq_ignore_ascii_case(qualifier)
+                }
+            })
         });
         for table in matching_tables {
-            let Some(canonical_root) = table
-                .output_by_source
-                .keys()
-                .find(|name| name.eq_ignore_ascii_case(&parts[root_index]))
-            else {
+            let Some(canonical_root) = table.output_by_source.keys().find(|name| {
+                if case_sensitive {
+                    *name == &parts[root_index]
+                } else {
+                    name.eq_ignore_ascii_case(&parts[root_index])
+                }
+            }) else {
                 continue;
             };
-            let mut source_path = serde_json::to_string(canonical_root).ok()?;
-            for field in &parts[nested_start..] {
-                source_path.push('.');
-                source_path.push_str(&serde_json::to_string(field).ok()?);
-            }
+            let nested_fields = &parts[nested_start..];
+            let source_path = canonical_nested_source_path(
+                &table.paths,
+                canonical_root,
+                nested_fields,
+                case_sensitive,
+            )
+            .or_else(|| {
+                let mut source_path = serde_json::to_string(canonical_root).ok()?;
+                for field in nested_fields {
+                    source_path.push('.');
+                    source_path.push_str(&serde_json::to_string(field).ok()?);
+                }
+                Some(source_path)
+            })?;
             return Some((table, canonical_root.clone(), source_path));
+        }
+        None
+    }
+
+    fn json_string_prefix(input: &str) -> Option<(String, &str)> {
+        if !input.starts_with('"') {
+            return None;
+        }
+        let mut escaped = false;
+        for (index, character) in input.char_indices().skip(1) {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                let value = serde_json::from_str(&input[..=index]).ok()?;
+                return Some((value, &input[index + 1..]));
+            }
+        }
+        None
+    }
+
+    fn canonical_nested_source_path(
+        paths: &std::collections::HashSet<String>,
+        root: &str,
+        nested_fields: &[String],
+        case_sensitive: bool,
+    ) -> Option<String> {
+        let encoded_root = serde_json::to_string(root).ok()?;
+        if nested_fields.is_empty() {
+            return Some(encoded_root);
+        }
+        for path in paths {
+            let Some((path_root, mut tail)) = path_root_and_tail(path) else {
+                continue;
+            };
+            if path_root != root {
+                continue;
+            }
+            let mut prefix_length = path.len() - tail.len();
+            let mut matches = true;
+            for expected_field in nested_fields {
+                let Some(field_tail) = tail.strip_prefix('.') else {
+                    matches = false;
+                    break;
+                };
+                let Some((actual_field, remaining)) = json_string_prefix(field_tail) else {
+                    matches = false;
+                    break;
+                };
+                let same_field = if case_sensitive {
+                    actual_field == *expected_field
+                } else {
+                    actual_field.eq_ignore_ascii_case(expected_field)
+                };
+                if !same_field {
+                    matches = false;
+                    break;
+                }
+                prefix_length += tail.len() - remaining.len();
+                tail = remaining;
+            }
+            if matches {
+                return Some(path[..prefix_length].to_string());
+            }
         }
         None
     }
@@ -1404,12 +1492,13 @@ fn delta_map_paths_for_sql_query(
         let (expr, explicit_alias) = expression_and_alias;
         let expression = expr.to_string();
         let map_value_references =
-            robin_sparkless::sql::select_expr_map_value_references(&expression)
+            robin_sparkless::sql::select_expr_map_value_reference_parts(&expression)
                 .ok()
                 .flatten();
+        let case_sensitive = session.inner.is_case_sensitive();
         if let Some(parts) = identifier_parts(expr) {
             let Some((table, canonical_root, source_path)) =
-                resolve_source_reference(&parts, &source_tables)
+                resolve_source_reference(&parts, &source_tables, case_sensitive)
             else {
                 continue;
             };
@@ -1459,7 +1548,7 @@ fn delta_map_paths_for_sql_query(
         let mut common_tails: Option<std::collections::HashSet<String>> = None;
         for reference in references {
             let Some((table, _, source_path)) =
-                resolve_source_reference(&reference, &source_tables)
+                resolve_source_reference(&reference, &source_tables, case_sensitive)
             else {
                 common_tails = Some(Default::default());
                 break;

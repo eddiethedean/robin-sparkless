@@ -262,12 +262,27 @@ pub fn select_expr_metadata(
 /// Python uses this to carry Arrow map intent through map-preserving expressions
 /// without treating map-to-entry-array functions as maps.
 pub fn select_expr_preserves_map_value(expression: &str) -> Result<bool, PolarsError> {
-    Ok(select_expr_map_value_references(expression)?.is_some())
+    Ok(select_expr_map_value_reference_parts(expression)?.is_some())
 }
 
 /// Return the source columns whose values are selected by a map-preserving SQL projection.
 /// CASE predicates are intentionally excluded because they do not contribute to the output value.
 pub fn select_expr_map_value_references(
+    expression: &str,
+) -> Result<Option<Vec<String>>, PolarsError> {
+    Ok(
+        select_expr_map_value_reference_parts(expression)?.map(|references| {
+            references
+                .into_iter()
+                .map(|parts| parts.join("."))
+                .collect()
+        }),
+    )
+}
+
+/// Return each map-preserving source reference as its parsed identifier components.
+/// This avoids confusing a table qualifier with a nested field in consumers that resolve schema paths.
+pub fn select_expr_map_value_reference_parts(
     expression: &str,
 ) -> Result<Option<Vec<Vec<String>>>, PolarsError> {
     use spark_sql_parser::ast::{
