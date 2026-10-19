@@ -1096,6 +1096,7 @@ fn normalize_arrow_value(
             value.clone()
         };
         let mapped = PyDict::new(py);
+        let mut seen_nan_key = false;
         for entry in entries.try_iter()? {
             let entry = entry?;
             let pair = entry.cast::<PyTuple>()?;
@@ -1106,11 +1107,23 @@ fn normalize_arrow_value(
             let item = pair.get_item(1)?;
             let key = normalize_arrow_value(py, &key, &key_type, arrow_types)?;
             let item = normalize_arrow_value(py, &item, &item_type, arrow_types)?;
-            if mapped.get_item(key.bind(py))?.is_some() {
+            let key_is_nan = key
+                .bind(py)
+                .get_type()
+                .name()
+                .is_ok_and(|name| name == "float")
+                && key
+                    .bind(py)
+                    .extract::<f64>()
+                    .is_ok_and(|value| value.is_nan());
+            if (key_is_nan && seen_nan_key)
+                || (!key_is_nan && mapped.get_item(key.bind(py))?.is_some())
+            {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "PyArrow map contains duplicate keys; createDataFrame cannot preserve duplicate map keys",
                 ));
             }
+            seen_nan_key |= key_is_nan;
             mapped.set_item(key.bind(py), item.bind(py))?;
         }
         return mapped.into_py_any(py);
@@ -4175,6 +4188,12 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
     if a == b {
         return a;
     }
+    fn format_decimal_type_name(integral_digits: usize, scale: usize) -> String {
+        // Spark decimal precision is limited to 38. Preserve scale and cap the
+        // integral capacity, matching the engine's common-decimal coercion.
+        let precision = integral_digits.saturating_add(scale).clamp(1, 38);
+        format!("decimal({precision},{scale})")
+    }
     let decimal_a = parse_decimal_type_name(&a);
     let decimal_b = parse_decimal_type_name(&b);
     if let (Some((precision_a, scale_a)), Some((precision_b, scale_b))) = (decimal_a, decimal_b) {
@@ -4182,15 +4201,15 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
         let integral_digits = precision_a
             .saturating_sub(scale_a)
             .max(precision_b.saturating_sub(scale_b));
-        let precision = integral_digits.saturating_add(scale).max(1);
-        return format!("decimal({precision},{scale})");
+        return format_decimal_type_name(integral_digits, scale);
     }
     fn integer_precision(type_name: &str) -> Option<usize> {
         match type_name {
             "tinyint" | "byte" => Some(3),
             "smallint" | "short" | "int16" => Some(5),
             "int" | "integer" | "int32" => Some(10),
-            "long" | "bigint" | "int64" => Some(20),
+            // The largest absolute signed 64-bit value has 19 decimal digits.
+            "long" | "bigint" | "int64" => Some(19),
             "uint8" => Some(3),
             "uint16" => Some(5),
             "uint32" => Some(10),
@@ -4200,17 +4219,11 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
     }
     if let (Some((precision, scale)), Some(integer)) = (decimal_a, integer_precision(&b)) {
         let integral_digits = precision.saturating_sub(scale).max(integer);
-        return format!(
-            "decimal({},{scale})",
-            integral_digits.saturating_add(scale).max(1)
-        );
+        return format_decimal_type_name(integral_digits, scale);
     }
     if let (Some(integer), Some((precision, scale))) = (integer_precision(&a), decimal_b) {
         let integral_digits = integer.max(precision.saturating_sub(scale));
-        return format!(
-            "decimal({},{scale})",
-            integral_digits.saturating_add(scale).max(1)
-        );
+        return format_decimal_type_name(integral_digits, scale);
     }
     if (decimal_a.is_some() && matches!(b.as_str(), "double" | "float"))
         || (decimal_b.is_some() && matches!(a.as_str(), "double" | "float"))
