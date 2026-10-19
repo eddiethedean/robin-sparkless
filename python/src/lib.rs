@@ -1339,22 +1339,54 @@ fn delta_map_paths_for_sql_query(
             continue;
         };
         let source_name = source.rsplit('.').next().unwrap_or(source.as_str());
-        let source_table = source.rsplit_once('.').and_then(|(qualifier, _)| {
-            source_tables
-                .iter()
-                .find(|table| table.qualifier.eq_ignore_ascii_case(qualifier))
-        });
+        let source_table = source
+            .rsplit_once('.')
+            .and_then(|(qualifier, _)| {
+                source_tables
+                    .iter()
+                    .find(|table| table.qualifier.eq_ignore_ascii_case(qualifier))
+            })
+            .or_else(|| {
+                source_tables.iter().find(|table| {
+                    table
+                        .output_by_source
+                        .keys()
+                        .any(|name| name.eq_ignore_ascii_case(source_name))
+                })
+            });
+        let canonical_source_name = source_table
+            .and_then(|table| {
+                table
+                    .output_by_source
+                    .keys()
+                    .find(|name| name.eq_ignore_ascii_case(source_name))
+            })
+            .map(String::as_str)
+            .unwrap_or(source_name);
         let source_paths = source_table
             .map(|table| &table.paths)
             .unwrap_or(&source_paths);
         let mapped_output = source_table
-            .and_then(|table| table.output_by_source.get(source_name))
+            .and_then(|table| table.output_by_source.get(canonical_source_name))
             .cloned();
         let output_name = explicit_alias
             .map(str::to_string)
-            .or(mapped_output)
+            .or_else(|| {
+                mapped_output.and_then(|mapped| {
+                    output_columns
+                        .iter()
+                        .find(|column| column.eq_ignore_ascii_case(&mapped))
+                        .cloned()
+                })
+            })
+            .or_else(|| {
+                output_columns
+                    .iter()
+                    .find(|column| column.eq_ignore_ascii_case(source_name))
+                    .cloned()
+            })
             .unwrap_or_else(|| source_name.to_string());
-        let source_root = serde_json::to_string(source_name).unwrap_or_default();
+        let source_root = serde_json::to_string(canonical_source_name).unwrap_or_default();
         let output_root = serde_json::to_string(&output_name).unwrap_or_default();
         for path in source_paths {
             if path == &source_root {
