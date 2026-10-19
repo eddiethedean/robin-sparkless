@@ -11,4 +11,5 @@ mod column;
 pub use column::*;
 
 mod rest;
+pub(crate) use rest::DecimalPrefixExtrema;
 pub use rest::*;

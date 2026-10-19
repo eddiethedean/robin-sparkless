@@ -6,7 +6,7 @@
 use super::{DataFrame, resolve_column_with_schema};
 use crate::column::RangeWindowAgg;
 use crate::column::expect_col;
-use crate::functions::SortOrder;
+use crate::functions::{DecimalPrefixExtrema, SortOrder};
 use crate::type_coercion::{
     coerce_expr_pair, coerce_expr_to_common_type, find_common_type, is_numeric_public,
 };
@@ -924,6 +924,8 @@ fn compute_range_window_series(
                     prefix_counts.last().copied().unwrap() + usize::from(coefficient.is_some()),
                 );
             }
+            let prefix_extrema =
+                (agg == RangeWindowAgg::Mean).then(|| DecimalPrefixExtrema::new(&prefix_sums));
             let mut result = Vec::with_capacity(n);
             for window in &windows {
                 let Some((left, right)) = window else {
@@ -936,9 +938,14 @@ fn compute_range_window_series(
                     result.push(None);
                 } else if agg == RangeWindowAgg::Mean {
                     // AVG accumulates into Decimal(p + 10, s), capped at
-                    // precision 38. Check the accumulator before division so an
-                    // oversized sum cannot yield a seemingly valid average.
-                    if total.abs() > maximum_sum {
+                    // precision 38. Check every intermediate frame sum before
+                    // dividing; later values can cancel an earlier overflow.
+                    if prefix_extrema.as_ref().unwrap().exceeds_delta_from(
+                        &prefix_sums[*left],
+                        left + 1,
+                        right + 2,
+                        &maximum_sum,
+                    ) {
                         if ansi_enabled {
                             return Err(PolarsError::ComputeError(
                                 "[ARITHMETIC_OVERFLOW] decimal average sum exceeds supported precision"

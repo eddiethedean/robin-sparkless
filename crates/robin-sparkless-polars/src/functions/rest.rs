@@ -6,6 +6,85 @@ use num_traits::{Signed, ToPrimitive, Zero};
 use polars::prelude::*;
 use std::collections::VecDeque;
 
+pub(crate) struct DecimalPrefixExtrema {
+    len: usize,
+    leaf_count: usize,
+    minima: Vec<BigInt>,
+    maxima: Vec<BigInt>,
+}
+
+impl DecimalPrefixExtrema {
+    pub(crate) fn new(prefix_sums: &[BigInt]) -> Self {
+        let len = prefix_sums.len();
+        let leaf_count = len.next_power_of_two().max(1);
+        let mut minima = vec![BigInt::zero(); leaf_count * 2];
+        let mut maxima = vec![BigInt::zero(); leaf_count * 2];
+        for (idx, prefix_sum) in prefix_sums.iter().enumerate() {
+            minima[leaf_count + idx] = prefix_sum.clone();
+            maxima[leaf_count + idx] = prefix_sum.clone();
+        }
+        for idx in (1..leaf_count).rev() {
+            let left = idx * 2;
+            let right = left + 1;
+            minima[idx] = if minima[left].cmp(&minima[right]).is_le() {
+                minima[left].clone()
+            } else {
+                minima[right].clone()
+            };
+            maxima[idx] = if maxima[left].cmp(&maxima[right]).is_ge() {
+                maxima[left].clone()
+            } else {
+                maxima[right].clone()
+            };
+        }
+        Self {
+            len,
+            leaf_count,
+            minima,
+            maxima,
+        }
+    }
+
+    /// Check whether a running sum starting at zero exceeds `maximum_delta`
+    /// anywhere in the prefix range `[query_start, query_end)`.
+    pub(crate) fn exceeds_delta_from(
+        &self,
+        baseline: &BigInt,
+        query_start: usize,
+        query_end: usize,
+        maximum_delta: &BigInt,
+    ) -> bool {
+        debug_assert!(query_start <= query_end);
+        debug_assert!(query_end <= self.len);
+        if query_start == query_end {
+            return false;
+        }
+
+        let lower = baseline - maximum_delta;
+        let upper = baseline + maximum_delta;
+        let mut left = query_start + self.leaf_count;
+        let mut right = query_end + self.leaf_count;
+        while left < right {
+            if left % 2 == 1 {
+                if self.minima[left].cmp(&lower).is_lt() || self.maxima[left].cmp(&upper).is_gt() {
+                    return true;
+                }
+                left += 1;
+            }
+            if right % 2 == 1 {
+                right -= 1;
+                if self.minima[right].cmp(&lower).is_lt() || self.maxima[right].cmp(&upper).is_gt()
+                {
+                    return true;
+                }
+            }
+            left /= 2;
+            right /= 2;
+        }
+        false
+    }
+}
+
 /// Count aggregation (PySpark LongType; cast to Int64 for schema parity #734).
 /// count(column): count non-null values in that column (PySpark parity, #1209).
 /// count(*): use len() to count all rows per group.
@@ -583,8 +662,10 @@ fn running_numeric_series(
                     )),
                 })
                 .collect::<PolarsResult<Vec<_>>>()?;
-            let mut sums: Vec<BigInt> = Vec::with_capacity(series.len());
-            let mut counts: Vec<usize> = Vec::with_capacity(series.len());
+            let mut sums: Vec<BigInt> = Vec::with_capacity(series.len() + 1);
+            let mut counts: Vec<usize> = Vec::with_capacity(series.len() + 1);
+            sums.push(BigInt::zero());
+            counts.push(0);
             let mut total = BigInt::zero();
             let mut count = 0usize;
             for coefficient in &coefficients {
@@ -595,29 +676,29 @@ fn running_numeric_series(
                 sums.push(total.clone());
                 counts.push(count);
             }
+            let prefix_extrema = average.then(|| DecimalPrefixExtrema::new(&sums));
             let mut values = Vec::with_capacity(series.len());
             for idx in 0..series.len() {
                 let Some((left, right)) = window_bounds(idx, series.len(), frame) else {
                     values.push(None);
                     continue;
                 };
-                let prev_sum = if left == 0 {
-                    BigInt::zero()
-                } else {
-                    sums[left - 1].clone()
-                };
-                let prev_count = if left == 0 { 0 } else { counts[left - 1] };
-                let sum = sums[right].clone() - prev_sum;
-                let count = counts[right] - prev_count;
+                let sum = &sums[right + 1] - &sums[left];
+                let count = counts[right + 1] - counts[left];
                 if count == 0 {
                     values.push(None);
                     continue;
                 }
                 if average {
                     // Spark keeps AVG's running sum in Decimal(p + 10, s), capped
-                    // at precision 38. Check that buffer before dividing; the
-                    // average itself can fit even after its sum has overflowed.
-                    if sum.abs() > max_sum_decimal {
+                    // at precision 38. Check every intermediate frame sum before
+                    // dividing; later values can cancel an earlier overflow.
+                    if prefix_extrema.as_ref().unwrap().exceeds_delta_from(
+                        &sums[left],
+                        left + 1,
+                        right + 2,
+                        &max_sum_decimal,
+                    ) {
                         if ansi_enabled {
                             return Err(PolarsError::ComputeError(
                                 "[ARITHMETIC_OVERFLOW] decimal average sum exceeds supported precision"
