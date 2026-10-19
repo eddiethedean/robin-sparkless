@@ -1088,6 +1088,39 @@ async fn delta_schema_from_frame(
 }
 
 #[cfg(feature = "delta")]
+fn resolve_delta_null_columns(
+    df: &polars::prelude::DataFrame,
+    existing_schema: &deltalake::kernel::StructType,
+) -> Result<polars::prelude::DataFrame, PolarsError> {
+    use polars::prelude::{DataType, IntoLazy, col};
+
+    let input_schema = df.schema();
+    let expressions = input_schema
+        .iter()
+        .filter_map(|(name, dtype)| {
+            if dtype != &DataType::Null {
+                return None;
+            }
+            existing_schema
+                .fields()
+                .find(|field| field.name == name.as_str())
+                .map(|field| {
+                    delta_schema_type_to_polars(&field.data_type).map(|target_dtype| {
+                        col(name.as_str())
+                            .strict_cast(target_dtype)
+                            .alias(name.as_str())
+                    })
+                })
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
+
+    if expressions.is_empty() {
+        return Ok(df.clone());
+    }
+    df.clone().lazy().with_columns(expressions).collect()
+}
+
+#[cfg(feature = "delta")]
 fn merge_delta_struct_schemas(
     existing: &deltalake::kernel::StructType,
     incoming: &deltalake::kernel::StructType,
@@ -1470,9 +1503,11 @@ fn delta_partition_type_to_polars(
         Some("double") => Ok(DataType::Float64),
         Some("binary") => Ok(DataType::Binary),
         Some("date") => Ok(DataType::Date),
-        Some("timestamp") | Some("timestamp_ntz") => {
-            Ok(DataType::Datetime(TimeUnit::Microseconds, None))
-        }
+        Some("timestamp") => Ok(DataType::Datetime(
+            TimeUnit::Microseconds,
+            Some(polars::prelude::TimeZone::UTC),
+        )),
+        Some("timestamp_ntz") => Ok(DataType::Datetime(TimeUnit::Microseconds, None)),
         Some(decimal) if decimal.starts_with("decimal(") && decimal.ends_with(')') => {
             let dimensions = &decimal[8..decimal.len() - 1];
             let (precision, scale) = dimensions.split_once(',').ok_or_else(|| {
@@ -1609,12 +1644,13 @@ async fn commit_delta_actions(
     table: &mut deltalake::DeltaTable,
     actions: Vec<deltalake::kernel::Action>,
     mode: deltalake::protocol::SaveMode,
+    partition_columns: &[String],
 ) -> Result<(), deltalake::DeltaTableError> {
     use deltalake::kernel::transaction::CommitBuilder;
     use deltalake::protocol::DeltaOperation;
 
     let table_state = table.snapshot()?;
-    let partition_cols: Vec<String> = table_state.metadata().partition_columns().to_vec();
+    let partition_cols = partition_columns.to_vec();
     let operation = DeltaOperation::Write {
         mode,
         partition_by: if partition_cols.is_empty() {
@@ -1795,7 +1831,11 @@ pub fn write_delta_with_save_options(
                 })?;
                 let existing_partition_columns =
                     table_state.metadata().partition_columns().to_vec();
-                if !partition_by.is_empty() && partition_by != existing_partition_columns {
+                let replace_table_definition = overwrite && overwrite_schema;
+                if !replace_table_definition
+                    && !partition_by.is_empty()
+                    && partition_by != existing_partition_columns
+                {
                     return Err(PolarsError::InvalidOperation(
                         format!(
                             "write_delta: requested partition columns {:?} do not match the existing Delta table partition columns {:?}",
@@ -1804,8 +1844,10 @@ pub fn write_delta_with_save_options(
                         .into(),
                     ));
                 }
-                let effective_partition_columns = if partition_by.is_empty() {
-                    existing_partition_columns
+                let effective_partition_columns = if replace_table_definition {
+                    partition_by.clone()
+                } else if partition_by.is_empty() {
+                    existing_partition_columns.clone()
                 } else {
                     partition_by.clone()
                 };
@@ -1814,7 +1856,18 @@ pub fn write_delta_with_save_options(
                         format!("write_delta: parse existing schema: {e}").into(),
                     )
                 })?;
-                let incoming_schema = delta_schema_from_frame(df).await?;
+                let input_to_resolve = df.clone();
+                let schema_for_null_columns = existing_schema.clone();
+                let resolved_df = tokio::task::spawn_blocking(move || {
+                    resolve_delta_null_columns(&input_to_resolve, &schema_for_null_columns)
+                })
+                .await
+                .map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("write_delta: resolve null input columns: {e}").into(),
+                    )
+                })??;
+                let incoming_schema = delta_schema_from_frame(&resolved_df).await?;
                 let target_schema = if overwrite_schema {
                     incoming_schema.clone()
                 } else if merge_schema {
@@ -1824,7 +1877,7 @@ pub fn write_delta_with_save_options(
                 };
                 let schema_changed = target_schema != existing_schema;
                 let schema_to_align = target_schema.clone();
-                let input_to_align = df.clone();
+                let input_to_align = resolved_df.clone();
                 let incoming_to_align = incoming_schema.clone();
                 let aligned_df = tokio::task::spawn_blocking(move || {
                     align_delta_frame_to_schema(
@@ -1841,7 +1894,10 @@ pub fn write_delta_with_save_options(
                     )
                 })??;
                 for name in &effective_partition_columns {
-                    let incoming_field = delta_partition_field(df, name)?;
+                    let incoming_field = delta_partition_field(&resolved_df, name)?;
+                    if replace_table_definition {
+                        continue;
+                    }
                     let existing_field = existing_schema
                         .fields()
                         .find(|field| field.name == *name)
@@ -1881,16 +1937,41 @@ pub fn write_delta_with_save_options(
                         })?;
                 }
 
-                if schema_changed {
+                let partition_columns_changed =
+                    effective_partition_columns != existing_partition_columns;
+                if schema_changed || partition_columns_changed {
                     use deltalake::kernel::MetadataExt;
 
-                    let updated_metadata = table_state
-                        .metadata()
-                        .clone()
-                        .with_schema(&target_schema)
-                        .map_err(|e| {
+                    let mut updated_metadata = table_state.metadata().clone();
+                    if schema_changed {
+                        updated_metadata = updated_metadata
+                            .with_schema(&target_schema)
+                            .map_err(|e| {
+                                PolarsError::ComputeError(
+                                    format!("write_delta: update schema metadata: {e}").into(),
+                                )
+                            })?;
+                    }
+                    let mut metadata_value = serde_json::to_value(updated_metadata).map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("write_delta: serialize updated metadata: {e}").into(),
+                        )
+                    })?;
+                    metadata_value
+                        .as_object_mut()
+                        .ok_or_else(|| {
                             PolarsError::ComputeError(
-                                format!("write_delta: update merged schema metadata: {e}").into(),
+                                "write_delta: updated metadata is not an object".into(),
+                            )
+                        })?
+                        .insert(
+                            "partitionColumns".to_string(),
+                            serde_json::json!(effective_partition_columns),
+                        );
+                    let updated_metadata: deltalake::kernel::Metadata =
+                        serde_json::from_value(metadata_value).map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("write_delta: update partition metadata: {e}").into(),
                             )
                         })?;
                     if let Some(protocol) =
@@ -1919,7 +2000,12 @@ pub fn write_delta_with_save_options(
                 } else {
                     deltalake::protocol::SaveMode::Append
                 };
-                commit_delta_actions(&mut table, actions, mode)
+                commit_delta_actions(
+                    &mut table,
+                    actions,
+                    mode,
+                    &effective_partition_columns,
+                )
                     .await
                     .map_err(|e: deltalake::DeltaTableError| {
                         PolarsError::ComputeError(format!("write_delta: commit: {}", e).into())
