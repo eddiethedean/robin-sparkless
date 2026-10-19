@@ -165,11 +165,11 @@ pub fn read_delta_with_version(
                     })
             })
             .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
-        Ok::<_, PolarsError>((files, partition_columns, partition_types, schema))
+        Ok::<_, PolarsError>((files, partition_columns, partition_types, schema, table_uri))
     })();
 
     match table_result {
-        Ok((files, partition_columns, partition_types, schema)) => {
+        Ok((files, partition_columns, partition_types, schema, table_uri)) => {
             if files.is_empty() {
                 let columns = schema
                     .fields()
@@ -184,7 +184,12 @@ pub fn read_delta_with_version(
                 let pl_df = polars::prelude::DataFrame::new(0, columns)?;
                 return Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive));
             }
-            let table_root_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            let table_root = uri_to_parquet_path(&table_uri)?;
+            let table_root_canonical = table_root.canonicalize().map_err(|e| {
+                PolarsError::ComputeError(
+                    format!("read_delta: canonicalize table root: {e}").into(),
+                )
+            })?;
             let mut lfs: Vec<LazyFrame> = Vec::with_capacity(files.len());
             for (uri, partition_values) in &files {
                 let parquet_path = confine_parquet_uri_to_table_root(uri, &table_root_canonical)?;
@@ -216,6 +221,15 @@ pub fn read_delta_with_version(
                         .clone()
                         .filter(|value| !value.is_empty());
                     let value_expr = match value {
+                        Some(value)
+                            if matches!(
+                                data_type.as_str(),
+                                Some("timestamp" | "timestamp_ntz")
+                            ) =>
+                        {
+                            let micros = parse_delta_timestamp_partition_value(&value)?;
+                            polars::prelude::lit(micros)
+                        }
                         Some(value) => polars::prelude::lit(value),
                         None => polars::prelude::lit(polars::prelude::NULL),
                     };
@@ -817,6 +831,30 @@ async fn delta_schema_from_frame(
 }
 
 #[cfg(feature = "delta")]
+fn parse_delta_timestamp_partition_value(value: &str) -> Result<i64, PolarsError> {
+    if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Ok(timestamp.timestamp_micros());
+    }
+
+    for format in [
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+    ] {
+        if let Ok(timestamp) = chrono::NaiveDateTime::parse_from_str(value, format) {
+            // Delta timestamp partition values without an offset are UTC instants. TimestampNTZ
+            // uses the same microsecond representation in Polars, with no timezone attached.
+            return Ok(timestamp.and_utc().timestamp_micros());
+        }
+    }
+
+    Err(PolarsError::ComputeError(
+        format!("read_delta: invalid timestamp partition value: {value:?}").into(),
+    ))
+}
+
+#[cfg(feature = "delta")]
 fn delta_partition_type_to_polars(
     value: &serde_json::Value,
 ) -> Result<polars::prelude::DataType, PolarsError> {
@@ -1182,7 +1220,30 @@ pub fn write_delta_with_options(
                 if merge_schema && !overwrite {
                     use deltalake::kernel::MetadataExt;
 
-                    let merged_schema = delta_schema_from_frame(&df_for_part).await?;
+                    let incoming_schema = delta_schema_from_frame(&df_for_part).await?;
+                    let existing_schema = table_state.metadata().parse_schema().map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("write_delta: parse existing schema for merge: {e}").into(),
+                        )
+                    })?;
+                    let mut merged_fields: Vec<_> =
+                        existing_schema.fields().cloned().collect();
+                    for incoming_field in incoming_schema.fields() {
+                        if let Some(existing_field) = merged_fields
+                            .iter_mut()
+                            .find(|field| field.name.as_str() == incoming_field.name.as_str())
+                        {
+                            *existing_field = incoming_field.clone();
+                        } else {
+                            merged_fields.push(incoming_field.clone());
+                        }
+                    }
+                    let merged_schema = deltalake::kernel::StructType::try_new(merged_fields)
+                        .map_err(|e| {
+                            PolarsError::ComputeError(
+                                format!("write_delta: merge existing schema: {e}").into(),
+                            )
+                        })?;
                     let updated_metadata = table_state
                         .metadata()
                         .clone()
