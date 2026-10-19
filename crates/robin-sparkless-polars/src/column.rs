@@ -86,12 +86,107 @@ pub(crate) fn expr_ir_binary_arithmetic_expr(
     right: Expr,
     op: crate::decimal_arithmetic::BinaryOp,
 ) -> Expr {
-    let mut expr = pyspark_binary_arithmetic_expr(
-        left,
-        right,
-        op,
-        crate::udf_context::get_thread_ansi_enabled(),
-        crate::udf_context::get_thread_decimal_allow_precision_loss(),
+    let ansi_enabled = crate::udf_context::get_thread_ansi_enabled();
+    let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
+    let args = [right];
+    let eval_op = op;
+    let schema_op = op;
+    let mut expr = left.map_many(
+        move |cols| {
+            let left_type = cols[0].dtype();
+            let right_type = cols[1].dtype();
+            let exact_decimal = crate::decimal_arithmetic::result_type(
+                left_type,
+                right_type,
+                eval_op,
+                allow_precision_loss,
+            )
+            .is_some();
+            let decimal_float = (matches!(left_type, DataType::Decimal(..))
+                && right_type.is_float())
+                || (matches!(right_type, DataType::Decimal(..)) && left_type.is_float());
+            let use_decimal_arithmetic = exact_decimal || decimal_float;
+
+            let result = match (eval_op, ansi_enabled, use_decimal_arithmetic) {
+                (crate::decimal_arithmetic::BinaryOp::Add, _, true) => {
+                    crate::udfs::apply_pyspark_add_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Add, true, false) => {
+                    crate::udfs::apply_ansi_add(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Add, false, false) => {
+                    crate::udfs::apply_try_add(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Subtract, _, true) => {
+                    crate::udfs::apply_pyspark_subtract_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Subtract, true, false) => {
+                    crate::udfs::apply_ansi_subtract(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Subtract, false, false) => {
+                    crate::udfs::apply_try_subtract(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Multiply, _, true) => {
+                    crate::udfs::apply_pyspark_multiply_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+                (crate::decimal_arithmetic::BinaryOp::Multiply, true, false) => {
+                    crate::udfs::apply_ansi_multiply(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Multiply, false, false) => {
+                    crate::udfs::apply_try_multiply(cols)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Divide, true, _) => {
+                    crate::udfs::apply_ansi_divide_with_precision_loss(cols, allow_precision_loss)
+                }
+                (crate::decimal_arithmetic::BinaryOp::Divide, false, _) => {
+                    crate::udfs::apply_pyspark_divide_with_precision_loss(
+                        cols,
+                        ansi_enabled,
+                        allow_precision_loss,
+                    )
+                }
+            };
+            expect_col(result)
+        },
+        &args,
+        move |_schema, fields| {
+            let left_type = fields[0].dtype();
+            let right_type = fields[1].dtype();
+            let dtype = crate::decimal_arithmetic::result_type(
+                left_type,
+                right_type,
+                schema_op,
+                allow_precision_loss,
+            );
+            let dtype = if let Some(dtype) = dtype {
+                dtype
+            } else {
+                let decimal_float = (matches!(left_type, DataType::Decimal(..))
+                    && right_type.is_float())
+                    || (matches!(right_type, DataType::Decimal(..)) && left_type.is_float());
+                if decimal_float
+                    || (matches!(schema_op, crate::decimal_arithmetic::BinaryOp::Divide)
+                        && !ansi_enabled)
+                {
+                    DataType::Float64
+                } else {
+                    crate::ansi::arithmetic_field(fields)?.dtype().clone()
+                }
+            };
+            Ok(Field::new(fields[0].name().clone(), dtype))
+        },
     );
     if let Expr::AnonymousFunction { fmt_str, .. } = &mut expr {
         **fmt_str = op.engine_expr_marker().into();
