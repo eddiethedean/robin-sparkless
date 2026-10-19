@@ -924,8 +924,7 @@ fn compute_range_window_series(
                     prefix_counts.last().copied().unwrap() + usize::from(coefficient.is_some()),
                 );
             }
-            let prefix_extrema =
-                (agg == RangeWindowAgg::Mean).then(|| DecimalPrefixExtrema::new(&prefix_sums));
+            let prefix_extrema = DecimalPrefixExtrema::new(&prefix_sums);
             let mut result = Vec::with_capacity(n);
             for window in &windows {
                 let Some((left, right)) = window else {
@@ -940,7 +939,7 @@ fn compute_range_window_series(
                     // AVG accumulates into Decimal(p + 10, s), capped at
                     // precision 38. Check every intermediate frame sum before
                     // dividing; later values can cancel an earlier overflow.
-                    if prefix_extrema.as_ref().unwrap().exceeds_delta_from(
+                    if prefix_extrema.exceeds_delta_from(
                         &prefix_sums[*left],
                         left + 1,
                         right + 2,
@@ -973,6 +972,18 @@ fn compute_range_window_series(
                     } else {
                         result.push(average.to_i128());
                     }
+                } else if prefix_extrema.exceeds_delta_from(
+                    &prefix_sums[*left],
+                    left + 1,
+                    right + 2,
+                    &maximum_sum,
+                ) {
+                    if ansi_enabled {
+                        return Err(PolarsError::ComputeError(
+                            "[ARITHMETIC_OVERFLOW] decimal range window sum exceeds supported precision".into(),
+                        ));
+                    }
+                    result.push(None);
                 } else if total.abs() > maximum {
                     if ansi_enabled {
                         return Err(PolarsError::ComputeError(

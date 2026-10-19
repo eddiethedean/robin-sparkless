@@ -196,7 +196,9 @@ pub fn find_common_type(left: &DataType, right: &DataType) -> Result<DataType, P
             .saturating_sub(left_scale)
             .max(right_precision.saturating_sub(right_scale));
         let scale = left_scale.max(right_scale);
-        // Spark bounds the common decimal's precision without reducing its scale.
+        // Keep the integral capacity when the common type reaches Spark's
+        // precision limit; reduce scale only by the amount needed to fit.
+        let scale = scale.min(38usize.saturating_sub(integral_digits));
         let precision = integral_digits.saturating_add(scale).clamp(1, 38);
         DataType::Decimal(precision, scale)
     }

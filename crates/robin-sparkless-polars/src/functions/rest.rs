@@ -730,7 +730,7 @@ fn running_numeric_series(
                 sums.push(total.clone());
                 counts.push(count);
             }
-            let prefix_extrema = average.then(|| DecimalPrefixExtrema::new(&sums));
+            let prefix_extrema = DecimalPrefixExtrema::new(&sums);
             let mut values = Vec::with_capacity(series.len());
             for idx in 0..series.len() {
                 let Some((left, right)) = window_bounds(idx, series.len(), frame) else {
@@ -747,7 +747,7 @@ fn running_numeric_series(
                     // Spark keeps AVG's running sum in Decimal(p + 10, s), capped
                     // at precision 38. Check every intermediate frame sum before
                     // dividing; later values can cancel an earlier overflow.
-                    if prefix_extrema.as_ref().unwrap().exceeds_delta_from(
+                    if prefix_extrema.exceeds_delta_from(
                         &sums[left],
                         left + 1,
                         right + 2,
@@ -780,6 +780,19 @@ fn running_numeric_series(
                     } else {
                         values.push(rounded.to_i128());
                     }
+                } else if prefix_extrema.exceeds_delta_from(
+                    &sums[left],
+                    left + 1,
+                    right + 2,
+                    &max_sum_decimal,
+                ) {
+                    if ansi_enabled {
+                        return Err(PolarsError::ComputeError(
+                            "[ARITHMETIC_OVERFLOW] decimal window sum exceeds supported precision"
+                                .into(),
+                        ));
+                    }
+                    values.push(None);
                 } else if sum.abs() > max_decimal {
                     if ansi_enabled {
                         return Err(PolarsError::ComputeError(

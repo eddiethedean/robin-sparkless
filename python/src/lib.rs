@@ -4189,8 +4189,9 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
         return a;
     }
     fn format_decimal_type_name(integral_digits: usize, scale: usize) -> String {
-        // Spark decimal precision is limited to 38. Preserve scale and cap the
-        // integral capacity, matching the engine's common-decimal coercion.
+        // Keep integral capacity and reduce scale as needed to fit Spark's
+        // maximum decimal precision of 38.
+        let scale = scale.min(38usize.saturating_sub(integral_digits));
         let precision = integral_digits.saturating_add(scale).clamp(1, 38);
         format!("decimal({precision},{scale})")
     }
