@@ -18,3 +18,17 @@ def test_format_delta_save_creates_readable_delta_table(spark):
         assert (path / "_delta_log").is_dir()
         rows = spark.read.format("delta").load(str(path)).collect()
         assert [(row["id"], row["name"]) for row in rows] == [(1, "alpha")]
+
+
+@pytest.mark.delta
+def test_delta_overwrite_replaces_plain_parquet_directory(spark, tmp_path):
+    path = tmp_path / "table"
+    path.mkdir()
+    spark.createDataFrame([(99,)], ["id"]).write.parquet(str(path / "old.parquet"))
+
+    spark.createDataFrame([(1,)], ["id"]).write.format("delta").mode("overwrite").save(
+        str(path)
+    )
+
+    rows = spark.read.format("delta").load(str(path)).collect()
+    assert [row["id"] for row in rows] == [1]

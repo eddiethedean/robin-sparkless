@@ -720,12 +720,35 @@ impl DataFrame {
         self.0.write_delta(path, overwrite, merge_schema)
     }
 
+    #[cfg(feature = "delta")]
+    pub fn write_delta_with_options(
+        &self,
+        path: impl AsRef<Path>,
+        overwrite: bool,
+        merge_schema: bool,
+        partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        self.0
+            .write_delta_with_options(path, overwrite, merge_schema, partition_by)
+    }
+
     #[cfg(not(feature = "delta"))]
     pub fn write_delta(
+        &self,
+        path: impl AsRef<Path>,
+        overwrite: bool,
+        merge_schema: bool,
+    ) -> Result<(), PolarsError> {
+        self.0.write_delta(path, overwrite, merge_schema)
+    }
+
+    #[cfg(not(feature = "delta"))]
+    pub fn write_delta_with_options(
         &self,
         _path: impl AsRef<Path>,
         _overwrite: bool,
         _merge_schema: bool,
+        _partition_by: &[String],
     ) -> Result<(), PolarsError> {
         Err(PolarsError::InvalidOperation(
             "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),

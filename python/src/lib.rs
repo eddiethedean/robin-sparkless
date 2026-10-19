@@ -9085,17 +9085,37 @@ impl PyDataFrameWriter {
             .to_ascii_lowercase();
 
         if format == "delta" {
-            let merge_schema = self.options.iter().any(|(key, value)| {
-                key.eq_ignore_ascii_case("mergeSchema")
-                    && (value.eq_ignore_ascii_case("true") || value == "1")
-            });
+            let path = robin_sparkless_core::maybe_confine_files_path(Path::new(path))
+                .map_err(to_py_err)?;
+
+            let merge_schema = self
+                .options
+                .iter()
+                .rev()
+                .find(|(key, _)| key.eq_ignore_ascii_case("mergeSchema"))
+                .is_some_and(|(_, value)| value.eq_ignore_ascii_case("true") || value == "1");
+
+            let overwrite = match self.mode.to_ascii_lowercase().as_str() {
+                "append" => false,
+                "overwrite" => true,
+                "ignore" if path.exists() => return Ok(()),
+                "ignore" => true,
+                "error" | "errorifexists" if path.exists() => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyFileExistsError, _>(
+                        format!("Delta output path already exists: {}", path.display()),
+                    ));
+                }
+                "error" | "errorifexists" => true,
+                mode => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "unsupported DataFrameWriter save mode: {mode}"
+                    )));
+                }
+            };
+
             return inner
                 .inner
-                .write_delta(
-                    Path::new(path),
-                    write_mode_from_str(&self.mode) != WriteMode::Append,
-                    merge_schema,
-                )
+                .write_delta_with_options(&path, overwrite, merge_schema, &self.partition_by)
                 .map_err(to_py_err);
         }
 

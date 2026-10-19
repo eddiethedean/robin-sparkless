@@ -2418,11 +2418,24 @@ impl DataFrame {
         overwrite: bool,
         merge_schema: bool,
     ) -> Result<(), PolarsError> {
-        crate::delta::write_delta(
+        self.write_delta_with_options(path, overwrite, merge_schema, &[])
+    }
+
+    /// Write to Delta while preserving path-writer options such as partition columns.
+    #[cfg(feature = "delta")]
+    pub fn write_delta_with_options(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        overwrite: bool,
+        merge_schema: bool,
+        partition_by: &[String],
+    ) -> Result<(), PolarsError> {
+        crate::delta::write_delta_with_options(
             self.collect_inner()?.as_ref(),
             path,
             overwrite,
             merge_schema,
+            partition_by,
         )
     }
 
@@ -2430,9 +2443,20 @@ impl DataFrame {
     #[cfg(not(feature = "delta"))]
     pub fn write_delta(
         &self,
+        path: impl AsRef<std::path::Path>,
+        overwrite: bool,
+        merge_schema: bool,
+    ) -> Result<(), PolarsError> {
+        self.write_delta_with_options(path, overwrite, merge_schema, &[])
+    }
+
+    #[cfg(not(feature = "delta"))]
+    pub fn write_delta_with_options(
+        &self,
         _path: impl AsRef<std::path::Path>,
         _overwrite: bool,
         _merge_schema: bool,
+        _partition_by: &[String],
     ) -> Result<(), PolarsError> {
         Err(PolarsError::InvalidOperation(
             "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
