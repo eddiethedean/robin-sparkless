@@ -1334,8 +1334,80 @@ fn delta_map_paths_for_sql_query(
             SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.value.as_str())),
         };
         let (expr, explicit_alias) = expression_and_alias;
-        let Ok(Some((source, _))) = robin_sparkless::sql::select_expr_source(&expr.to_string())
-        else {
+        let expression = expr.to_string();
+        let Ok(Some((source, _))) = robin_sparkless::sql::select_expr_source(&expression) else {
+            let Ok(Some(references)) =
+                robin_sparkless::sql::select_expr_map_value_references(&expression)
+            else {
+                continue;
+            };
+            if references.is_empty() {
+                continue;
+            }
+            let output_name = explicit_alias
+                .map(str::to_string)
+                .unwrap_or_else(|| expression.clone());
+            let Some(output_name) = output_columns
+                .iter()
+                .find(|column| column.eq_ignore_ascii_case(&output_name))
+            else {
+                continue;
+            };
+
+            // Computed expressions such as COALESCE and CASE preserve a map only
+            // when every referenced branch has the same logical map paths.
+            let mut common_tails: Option<std::collections::HashSet<String>> = None;
+            for reference in references {
+                let source_name = reference.rsplit('.').next().unwrap_or(&reference);
+                let source_table = reference
+                    .rsplit_once('.')
+                    .and_then(|(qualifier, _)| {
+                        source_tables
+                            .iter()
+                            .find(|table| table.qualifier.eq_ignore_ascii_case(qualifier))
+                    })
+                    .or_else(|| {
+                        source_tables.iter().find(|table| {
+                            table
+                                .output_by_source
+                                .keys()
+                                .any(|name| name.eq_ignore_ascii_case(source_name))
+                        })
+                    });
+                let Some((source_table, canonical_source_name)) = source_table.and_then(|table| {
+                    table
+                        .output_by_source
+                        .keys()
+                        .find(|name| name.eq_ignore_ascii_case(source_name))
+                        .map(|name| (table, name.as_str()))
+                }) else {
+                    common_tails = Some(Default::default());
+                    break;
+                };
+                let source_root = serde_json::to_string(canonical_source_name).unwrap_or_default();
+                let source_tails = source_table
+                    .paths
+                    .iter()
+                    .filter_map(|path| {
+                        if path == &source_root {
+                            Some(String::new())
+                        } else {
+                            path.strip_prefix(&source_root)
+                                .filter(|tail| tail.starts_with(['.', '[', '{']))
+                                .map(str::to_string)
+                        }
+                    })
+                    .collect::<std::collections::HashSet<_>>();
+                if let Some(common_tails) = &mut common_tails {
+                    common_tails.retain(|tail| source_tails.contains(tail));
+                } else {
+                    common_tails = Some(source_tails);
+                }
+            }
+            let output_root = serde_json::to_string(output_name).unwrap_or_default();
+            for tail in common_tails.unwrap_or_default() {
+                output_paths.insert(format!("{output_root}{tail}"));
+            }
             continue;
         };
         let source_name = source.rsplit('.').next().unwrap_or(source.as_str());

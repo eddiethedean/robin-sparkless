@@ -2815,12 +2815,14 @@ pub fn write_delta_with_save_options_and_logical_map_paths(
     write_delta_with_save_options_and_logical_map_paths_impl(
         df,
         path,
-        save_mode,
-        merge_schema,
-        overwrite_schema,
-        partition_by,
-        logical_map_paths,
-        true,
+        DeltaWriteConfig {
+            save_mode,
+            merge_schema,
+            overwrite_schema,
+            partition_by,
+            logical_map_paths,
+            ignore_existing_path: true,
+        },
     )
 }
 
@@ -2838,26 +2840,41 @@ pub(crate) fn write_delta_with_save_options_and_logical_map_paths_for_catalog(
     write_delta_with_save_options_and_logical_map_paths_impl(
         df,
         path,
-        save_mode,
-        merge_schema,
-        overwrite_schema,
-        partition_by,
-        logical_map_paths,
-        false,
+        DeltaWriteConfig {
+            save_mode,
+            merge_schema,
+            overwrite_schema,
+            partition_by,
+            logical_map_paths,
+            ignore_existing_path: false,
+        },
     )
+}
+
+#[cfg(feature = "delta")]
+struct DeltaWriteConfig<'a> {
+    save_mode: crate::dataframe::SaveMode,
+    merge_schema: bool,
+    overwrite_schema: bool,
+    partition_by: &'a [String],
+    logical_map_paths: &'a [String],
+    ignore_existing_path: bool,
 }
 
 #[cfg(feature = "delta")]
 fn write_delta_with_save_options_and_logical_map_paths_impl(
     df: &polars::prelude::DataFrame,
     path: impl AsRef<Path>,
-    save_mode: crate::dataframe::SaveMode,
-    merge_schema: bool,
-    overwrite_schema: bool,
-    partition_by: &[String],
-    logical_map_paths: &[String],
-    ignore_existing_path: bool,
+    config: DeltaWriteConfig<'_>,
 ) -> Result<(), PolarsError> {
+    let DeltaWriteConfig {
+        save_mode,
+        merge_schema,
+        overwrite_schema,
+        partition_by,
+        logical_map_paths,
+        ignore_existing_path,
+    } = config;
     let normalized = normalize_delta_path(path.as_ref())?;
     let path = robin_sparkless_core::maybe_confine_files_path(&normalized).map_err(|e| {
         PolarsError::InvalidOperation(format!("write_delta path confinement: {e}").into())

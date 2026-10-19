@@ -151,8 +151,9 @@ pub mod sql {
     use robin_sparkless_polars::PolarsError;
 
     pub use robin_sparkless_polars::sql::{
-        Statement, ast, execute_sql, join_condition_to_on_columns, parse_sql, select_expr_metadata,
-        select_expr_preserves_map_value, select_expr_source,
+        Statement, ast, execute_sql, join_condition_to_on_columns, parse_sql,
+        select_expr_map_value_references, select_expr_metadata, select_expr_preserves_map_value,
+        select_expr_source,
     };
 
     /// Parse a single SQL expression string to Polars Expr using the session and DataFrame for resolution.

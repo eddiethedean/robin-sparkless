@@ -262,14 +262,35 @@ pub fn select_expr_metadata(
 /// Python uses this to carry Arrow map intent through map-preserving expressions
 /// without treating map-to-entry-array functions as maps.
 pub fn select_expr_preserves_map_value(expression: &str) -> Result<bool, PolarsError> {
+    Ok(select_expr_map_value_references(expression)?.is_some())
+}
+
+/// Return the source columns whose values are selected by a map-preserving SQL projection.
+/// CASE predicates are intentionally excluded because they do not contribute to the output value.
+pub fn select_expr_map_value_references(
+    expression: &str,
+) -> Result<Option<Vec<String>>, PolarsError> {
     use spark_sql_parser::ast::{
         Expr, FunctionArg, FunctionArgExpr, FunctionArguments, Value, ValueWithSpan,
     };
 
-    fn map_value_expr(expr: &Expr) -> bool {
+    fn map_value_expr(expr: &Expr, references: &mut Vec<String>) -> bool {
         match expr {
-            Expr::Identifier(_) | Expr::CompoundIdentifier(_) => true,
-            Expr::Nested(expr) => map_value_expr(expr),
+            Expr::Identifier(name) => {
+                references.push(name.value.clone());
+                true
+            }
+            Expr::CompoundIdentifier(parts) => {
+                references.push(
+                    parts
+                        .iter()
+                        .map(|part| part.value.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                );
+                true
+            }
+            Expr::Nested(expr) => map_value_expr(expr, references),
             Expr::Value(ValueWithSpan {
                 value: Value::Null, ..
             }) => true,
@@ -281,8 +302,10 @@ pub fn select_expr_preserves_map_value(expression: &str) -> Result<bool, PolarsE
                 !conditions.is_empty()
                     && conditions
                         .iter()
-                        .all(|condition| map_value_expr(&condition.result))
-                    && else_result.as_deref().is_none_or(map_value_expr)
+                        .all(|condition| map_value_expr(&condition.result, references))
+                    && else_result
+                        .as_deref()
+                        .is_none_or(|expr| map_value_expr(expr, references))
             }
             Expr::Function(function)
                 if function.name.to_string().eq_ignore_ascii_case("coalesce") =>
@@ -305,7 +328,7 @@ pub fn select_expr_preserves_map_value(expression: &str) -> Result<bool, PolarsE
                             } => expr,
                             _ => return false,
                         };
-                        map_value_expr(argument)
+                        map_value_expr(argument, references)
                     })
             }
             _ => false,
@@ -314,7 +337,12 @@ pub fn select_expr_preserves_map_value(expression: &str) -> Result<bool, PolarsE
 
     let (expr, _) = spark_sql_parser::parse_select_expr(expression)
         .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
-    Ok(map_value_expr(&expr))
+    let mut references = Vec::new();
+    if map_value_expr(&expr, &mut references) {
+        Ok(Some(references))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
