@@ -1106,6 +1106,11 @@ fn normalize_arrow_value(
             let item = pair.get_item(1)?;
             let key = normalize_arrow_value(py, &key, &key_type, arrow_types)?;
             let item = normalize_arrow_value(py, &item, &item_type, arrow_types)?;
+            if mapped.get_item(key.bind(py))?.is_some() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "PyArrow map contains duplicate keys; createDataFrame cannot preserve duplicate map keys",
+                ));
+            }
             mapped.set_item(key.bind(py), item.bind(py))?;
         }
         return mapped.into_py_any(py);
@@ -4179,6 +4184,38 @@ fn merge_spark_type_names(a: &str, b: &str) -> String {
             .max(precision_b.saturating_sub(scale_b));
         let precision = integral_digits.saturating_add(scale).max(1);
         return format!("decimal({precision},{scale})");
+    }
+    fn integer_precision(type_name: &str) -> Option<usize> {
+        match type_name {
+            "tinyint" | "byte" => Some(3),
+            "smallint" | "short" | "int16" => Some(5),
+            "int" | "integer" | "int32" => Some(10),
+            "long" | "bigint" | "int64" => Some(20),
+            "uint8" => Some(3),
+            "uint16" => Some(5),
+            "uint32" => Some(10),
+            "uint64" => Some(20),
+            _ => None,
+        }
+    }
+    if let (Some((precision, scale)), Some(integer)) = (decimal_a, integer_precision(&b)) {
+        let integral_digits = precision.saturating_sub(scale).max(integer);
+        return format!(
+            "decimal({},{scale})",
+            integral_digits.saturating_add(scale).max(1)
+        );
+    }
+    if let (Some(integer), Some((precision, scale))) = (integer_precision(&a), decimal_b) {
+        let integral_digits = integer.max(precision.saturating_sub(scale));
+        return format!(
+            "decimal({},{scale})",
+            integral_digits.saturating_add(scale).max(1)
+        );
+    }
+    if (decimal_a.is_some() && matches!(b.as_str(), "double" | "float"))
+        || (decimal_b.is_some() && matches!(a.as_str(), "double" | "float"))
+    {
+        return "double".to_string();
     }
     if let (Some(ea), Some(eb)) = (
         parse_array_element_type_name(&a),
