@@ -971,21 +971,404 @@ fn is_not_a_table(err: &deltalake::DeltaTableError) -> bool {
 fn write_parquet_part(
     df: &polars::prelude::DataFrame,
     path: &Path,
+    logical_map_paths: &[String],
 ) -> Result<std::path::PathBuf, PolarsError> {
-    use std::fs;
     let part_id: u64 = rand::random();
     let parquet_path = path.join(format!("part-{part_id:016x}.parquet"));
-    let mut file = std::io::BufWriter::new(fs::File::create(&parquet_path).map_err(|e| {
+    write_delta_parquet_file(df, &parquet_path, logical_map_paths)?;
+    Ok(parquet_path)
+}
+
+#[cfg(feature = "delta")]
+fn write_delta_parquet_file(
+    df: &polars::prelude::DataFrame,
+    parquet_path: &Path,
+    logical_map_paths: &[String],
+) -> Result<(), PolarsError> {
+    use std::fs;
+
+    let mut file = std::io::BufWriter::new(fs::File::create(parquet_path).map_err(|e| {
         PolarsError::ComputeError(format!("write_delta: create parquet file: {}", e).into())
     })?);
-    let mut df_mut = df.clone();
-    polars::prelude::ParquetWriter::new(&mut file)
-        .finish(&mut df_mut)
-        .map_err(|e| {
-            PolarsError::ComputeError(format!("write_delta: parquet write: {}", e).into())
+    if logical_map_paths.is_empty() {
+        let mut df_mut = df.clone();
+        polars::prelude::ParquetWriter::new(&mut file)
+            .finish(&mut df_mut)
+            .map_err(|e| {
+                PolarsError::ComputeError(format!("write_delta: parquet write: {}", e).into())
+            })?;
+        return Ok(());
+    }
+
+    write_delta_parquet_with_logical_maps(df, file, logical_map_paths)
+}
+
+#[cfg(feature = "delta")]
+fn write_delta_parquet_with_logical_maps<W: std::io::Write + Send>(
+    df: &polars::prelude::DataFrame,
+    file: W,
+    logical_map_paths: &[String],
+) -> Result<(), PolarsError> {
+    use arrow_array::{ArrayRef, RecordBatch};
+    use arrow_schema::Schema as ArrowSchema;
+    use std::sync::Arc;
+
+    let parsed_paths = logical_map_paths
+        .iter()
+        .map(|path| parse_delta_schema_path(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut rechunked = df.clone();
+    rechunked.rechunk_mut();
+    let mut batches = Vec::new();
+    for batch in rechunked.iter_chunks(polars::prelude::CompatLevel::newest(), false) {
+        let mut fields = Vec::with_capacity(batch.width());
+        let mut arrays = Vec::<ArrayRef>::with_capacity(batch.width());
+        for ((_, field), array) in batch.schema().iter().zip(batch.arrays()) {
+            let field_paths = parsed_paths
+                .iter()
+                .filter_map(|path| match path.split_first() {
+                    Some((DeltaSchemaPathSegment::Field(name), tail))
+                        if delta_names_equal(name, field.name.as_str()) =>
+                    {
+                        Some(tail.to_vec())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let (field, array) =
+                rewrite_arrow_field_array(field.clone(), array.clone(), &field_paths)?;
+            let (arrow_field, array) = polars_arrow_to_arrow_rs(&field, array)?;
+            fields.push(arrow_field);
+            arrays.push(array);
+        }
+
+        let schema = Arc::new(ArrowSchema::new(fields));
+        let batch = RecordBatch::try_new(schema, arrays).map_err(|e| {
+            PolarsError::ComputeError(format!("write_delta: build Arrow record batch: {e}").into())
         })?;
-    drop(file);
-    Ok(parquet_path)
+        batches.push(batch);
+    }
+
+    let schema = batches
+        .first()
+        .map(|batch| batch.schema().clone())
+        .unwrap_or_else(|| Arc::new(ArrowSchema::empty()));
+    let mut writer = parquet::arrow::ArrowWriter::try_new(file, schema, None).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: create Arrow Parquet writer: {e}").into())
+    })?;
+    for batch in &batches {
+        writer.write(batch).map_err(|e| {
+            PolarsError::ComputeError(format!("write_delta: write Arrow Parquet batch: {e}").into())
+        })?;
+    }
+    writer.close().map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: finish Arrow Parquet file: {e}").into())
+    })?;
+    Ok(())
+}
+
+#[cfg(feature = "delta")]
+fn polars_arrow_to_arrow_rs(
+    field: &polars_arrow::datatypes::Field,
+    array: Box<dyn polars_arrow::array::Array>,
+) -> Result<(arrow_schema::Field, arrow_array::ArrayRef), PolarsError> {
+    use arrow_array::{ffi, make_array};
+    use arrow_schema::{Field, ffi::FFI_ArrowSchema};
+
+    let ffi_field = polars_arrow::ffi::export_field_to_c(field);
+    // Both crates implement the Arrow C Data Interface, whose C layouts are ABI-stable.
+    let ffi_field: FFI_ArrowSchema = unsafe { std::mem::transmute(ffi_field) };
+    let arrow_field = Field::try_from(&ffi_field).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: convert Arrow field: {e}").into())
+    })?;
+
+    let ffi_array = polars_arrow::ffi::export_array_to_c(array);
+    // Transfer ownership through the Arrow C Data Interface so Arrow-rs can write MAP fields.
+    let ffi_array: ffi::FFI_ArrowArray = unsafe { std::mem::transmute(ffi_array) };
+    let data = unsafe { ffi::from_ffi(ffi_array, &ffi_field) }.map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: convert Arrow array: {e}").into())
+    })?;
+    Ok((arrow_field, make_array(data)))
+}
+
+#[cfg(feature = "delta")]
+fn rewrite_arrow_field_array(
+    mut field: polars_arrow::datatypes::Field,
+    array: Box<dyn polars_arrow::array::Array>,
+    paths: &[Vec<DeltaSchemaPathSegment>],
+) -> Result<
+    (
+        polars_arrow::datatypes::Field,
+        Box<dyn polars_arrow::array::Array>,
+    ),
+    PolarsError,
+> {
+    use polars_arrow::array::{Array, ListArray, MapArray, StructArray};
+    use polars_arrow::datatypes::ArrowDataType;
+
+    let exact_map = paths.iter().any(Vec::is_empty);
+    if exact_map {
+        let map_paths = paths
+            .iter()
+            .filter_map(|path| match path.split_first() {
+                Some((DeltaSchemaPathSegment::MapKey, tail)) => {
+                    let mut nested = vec![DeltaSchemaPathSegment::Field("key".into())];
+                    nested.extend_from_slice(tail);
+                    Some(nested)
+                }
+                Some((DeltaSchemaPathSegment::MapValue, tail)) => {
+                    let mut nested = vec![DeltaSchemaPathSegment::Field("value".into())];
+                    nested.extend_from_slice(tail);
+                    Some(nested)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        let (list_dtype, entries, offsets, validity) = match array.dtype() {
+            ArrowDataType::List(_) => {
+                let list = array
+                    .as_any()
+                    .downcast_ref::<ListArray<i32>>()
+                    .ok_or_else(|| {
+                        PolarsError::ComputeError("write_delta: invalid Arrow List array".into())
+                    })?;
+                list.clone().into_inner()
+            }
+            ArrowDataType::LargeList(_) => {
+                let list = array
+                    .as_any()
+                    .downcast_ref::<ListArray<i64>>()
+                    .ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            "write_delta: invalid Arrow LargeList array".into(),
+                        )
+                    })?;
+                let (dtype, values, offsets, validity) = list.clone().into_inner();
+                let offsets = polars_arrow::offset::OffsetsBuffer::<i32>::try_from(&offsets)
+                    .map_err(|e| {
+                        PolarsError::ComputeError(
+                            format!("write_delta: map offsets exceed Parquet limits: {e}").into(),
+                        )
+                    })?;
+                (dtype, values, offsets, validity)
+            }
+            other => {
+                return Err(PolarsError::InvalidOperation(
+                    format!("write_delta: logical MapType requires a list of key/value structs, got {other:?}").into(),
+                ));
+            }
+        };
+        let entry_field = match list_dtype {
+            ArrowDataType::List(field) | ArrowDataType::LargeList(field) => *field,
+            _ => unreachable!("the array type was checked above"),
+        };
+        let (_entry_field, entries) = rewrite_arrow_field_array(entry_field, entries, &map_paths)?;
+        let entry_struct = entries
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .ok_or_else(|| {
+                PolarsError::InvalidOperation(
+                    "write_delta: logical MapType requires key/value struct entries".into(),
+                )
+            })?;
+        let entry_fields = entry_struct.fields();
+        if entry_fields.len() != 2 {
+            return Err(PolarsError::InvalidOperation(
+                "write_delta: logical MapType entries must contain exactly key and value fields"
+                    .into(),
+            ));
+        }
+        let key_index = entry_fields
+            .iter()
+            .position(|field| field.name.as_str() == "key");
+        let value_index = entry_fields
+            .iter()
+            .position(|field| field.name.as_str() == "value");
+        let (Some(key_index), Some(value_index)) = (key_index, value_index) else {
+            return Err(PolarsError::InvalidOperation(
+                "write_delta: logical MapType entries must contain key and value fields".into(),
+            ));
+        };
+        if entry_struct.null_count() != 0 {
+            return Err(PolarsError::InvalidOperation(
+                "write_delta: logical MapType entries cannot be null".into(),
+            ));
+        }
+        let key_values = entry_struct.values()[key_index].clone();
+        let value_values = entry_struct.values()[value_index].clone();
+        if key_values.null_count() != 0 {
+            return Err(PolarsError::InvalidOperation(
+                "write_delta: logical MapType keys cannot be null".into(),
+            ));
+        }
+
+        let mut key_field = entry_fields[key_index].clone();
+        let value_field = entry_fields[value_index].clone();
+        if !value_field.is_nullable && value_values.null_count() != 0 {
+            return Err(PolarsError::InvalidOperation(
+                "write_delta: non-nullable logical MapType values contain nulls".into(),
+            ));
+        }
+        key_field.is_nullable = false;
+        let entry_dtype = ArrowDataType::Struct(vec![key_field.clone(), value_field.clone()]);
+        let entries = StructArray::try_new(
+            entry_dtype.clone(),
+            entry_struct.len(),
+            vec![key_values, value_values],
+            entry_struct.validity().cloned(),
+        )
+        .map_err(|e| {
+            PolarsError::ComputeError(format!("write_delta: normalize map entries: {e}").into())
+        })?;
+        let entries_field =
+            polars_arrow::datatypes::Field::new("entries".into(), entry_dtype, false);
+        let map_dtype = ArrowDataType::Map(Box::new(entries_field.clone()), false);
+        let map = MapArray::try_new(map_dtype.clone(), offsets, Box::new(entries), validity)
+            .map_err(|e| {
+                PolarsError::ComputeError(format!("write_delta: build Arrow Map array: {e}").into())
+            })?;
+        field.dtype = map_dtype;
+        return Ok((field, Box::new(map)));
+    }
+
+    match array.dtype() {
+        ArrowDataType::Struct(_) => {
+            let struct_array = array
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .ok_or_else(|| {
+                    PolarsError::ComputeError("write_delta: invalid Arrow Struct array".into())
+                })?;
+            let mut fields = Vec::with_capacity(struct_array.fields().len());
+            let mut values = Vec::with_capacity(struct_array.values().len());
+            for (child_field, child_array) in
+                struct_array.fields().iter().zip(struct_array.values())
+            {
+                let child_paths = paths
+                    .iter()
+                    .filter_map(|path| match path.split_first() {
+                        Some((DeltaSchemaPathSegment::Field(name), tail))
+                            if delta_names_equal(name, child_field.name.as_str()) =>
+                        {
+                            Some(tail.to_vec())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let (child_field, child_array) = if child_paths.is_empty() {
+                    (child_field.clone(), child_array.clone())
+                } else {
+                    rewrite_arrow_field_array(
+                        child_field.clone(),
+                        child_array.clone(),
+                        &child_paths,
+                    )?
+                };
+                fields.push(child_field);
+                values.push(child_array);
+            }
+            let dtype = ArrowDataType::Struct(fields);
+            let updated = StructArray::try_new(
+                dtype.clone(),
+                struct_array.len(),
+                values,
+                struct_array.validity().cloned(),
+            )
+            .map_err(|e| {
+                PolarsError::ComputeError(format!("write_delta: rewrite Arrow struct: {e}").into())
+            })?;
+            field.dtype = dtype;
+            Ok((field, Box::new(updated)))
+        }
+        ArrowDataType::List(_) | ArrowDataType::LargeList(_) => {
+            let child_paths = paths
+                .iter()
+                .filter_map(|path| match path.split_first() {
+                    Some((DeltaSchemaPathSegment::ArrayElement, tail)) => Some(tail.to_vec()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if child_paths.is_empty() {
+                return Ok((field, array));
+            }
+            match array.dtype() {
+                ArrowDataType::List(_) => {
+                    let list =
+                        array
+                            .as_any()
+                            .downcast_ref::<ListArray<i32>>()
+                            .ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "write_delta: invalid Arrow List array".into(),
+                                )
+                            })?;
+                    let (dtype, values, offsets, validity) = list.clone().into_inner();
+                    let child_field = match dtype {
+                        ArrowDataType::List(child) => *child,
+                        _ => unreachable!(),
+                    };
+                    let (child_field, values) =
+                        rewrite_arrow_field_array(child_field, values, &child_paths)?;
+                    let dtype = ArrowDataType::List(Box::new(child_field));
+                    let updated =
+                        ListArray::<i32>::try_new(dtype.clone(), offsets, values, validity)
+                            .map_err(|e| {
+                                PolarsError::ComputeError(
+                                    format!("write_delta: rewrite Arrow list: {e}").into(),
+                                )
+                            })?;
+                    field.dtype = dtype;
+                    Ok((field, Box::new(updated)))
+                }
+                ArrowDataType::LargeList(_) => {
+                    let list =
+                        array
+                            .as_any()
+                            .downcast_ref::<ListArray<i64>>()
+                            .ok_or_else(|| {
+                                PolarsError::ComputeError(
+                                    "write_delta: invalid Arrow LargeList array".into(),
+                                )
+                            })?;
+                    let (dtype, values, offsets, validity) = list.clone().into_inner();
+                    let child_field = match dtype {
+                        ArrowDataType::LargeList(child) => *child,
+                        _ => unreachable!(),
+                    };
+                    let (child_field, values) =
+                        rewrite_arrow_field_array(child_field, values, &child_paths)?;
+                    let dtype = ArrowDataType::LargeList(Box::new(child_field));
+                    let updated =
+                        ListArray::<i64>::try_new(dtype.clone(), offsets, values, validity)
+                            .map_err(|e| {
+                                PolarsError::ComputeError(
+                                    format!("write_delta: rewrite Arrow large list: {e}").into(),
+                                )
+                            })?;
+                    field.dtype = dtype;
+                    Ok((field, Box::new(updated)))
+                }
+                _ => unreachable!(),
+            }
+        }
+        other
+            if paths.iter().any(|path| {
+                path.iter().any(|segment| {
+                    matches!(
+                        segment,
+                        DeltaSchemaPathSegment::ArrayElement | DeltaSchemaPathSegment::Field(_)
+                    )
+                })
+            }) =>
+        {
+            Err(PolarsError::InvalidOperation(
+                format!("write_delta: logical map path cannot descend into Arrow type {other:?}")
+                    .into(),
+            ))
+        }
+        _ => Ok((field, array)),
+    }
 }
 
 #[cfg(feature = "delta")]
@@ -1049,6 +1432,7 @@ fn write_partitioned_parquet(
     path: &Path,
     partition_columns: &[String],
     mode: crate::dataframe::WriteMode,
+    logical_map_paths: &[String],
 ) -> Result<(), PolarsError> {
     let frame = DataFrame::from_polars(df.clone());
     frame
@@ -1056,7 +1440,32 @@ fn write_partitioned_parquet(
         .mode(mode)
         .format(crate::dataframe::WriteFormat::Parquet)
         .partition_by(partition_columns.iter().cloned())
-        .save(path)
+        .save(path)?;
+
+    if !logical_map_paths.is_empty() {
+        use std::fs;
+
+        for parquet_path in collect_parquet_paths_under(path)? {
+            let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
+                PolarsError::ComputeError(
+                    format!("write_delta: staged partition Parquet path: {e}").into(),
+                )
+            })?;
+            let partition_frame =
+                LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?.collect()?;
+            let rewritten_path = parquet_path.with_file_name(format!(
+                ".sparkless_delta_map_{:016x}.parquet",
+                rand::random::<u64>()
+            ));
+            write_delta_parquet_file(&partition_frame, &rewritten_path, logical_map_paths)?;
+            fs::rename(&rewritten_path, &parquet_path).map_err(|e| {
+                PolarsError::ComputeError(
+                    format!("write_delta: replace staged partition Parquet file: {e}").into(),
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "delta")]
@@ -1135,7 +1544,7 @@ async fn write_delta_bootstrap_partitioned(
 
     // Stage new files first, then move them into the table only after checking every destination
     // partition directory for symlinks and table-root confinement.
-    write_partitioned_delta_parts(df, path, partition_columns)?;
+    write_partitioned_delta_parts(df, path, partition_columns, logical_map_paths)?;
 
     let files = collect_parquet_paths_under(path)?;
     let actions = files
@@ -1163,6 +1572,7 @@ fn write_partitioned_delta_parts(
     df: &polars::prelude::DataFrame,
     table_root: &Path,
     partition_columns: &[String],
+    logical_map_paths: &[String],
 ) -> Result<Vec<deltalake::kernel::Action>, PolarsError> {
     use std::fs;
 
@@ -1182,6 +1592,7 @@ fn write_partitioned_delta_parts(
             &staging,
             partition_columns,
             crate::dataframe::WriteMode::Append,
+            logical_map_paths,
         )?;
         let staged_files = collect_parquet_paths_under(&staging)?;
         let mut moves = Vec::with_capacity(staged_files.len());
@@ -2095,7 +2506,7 @@ async fn write_delta_bootstrap_parquet(
     })??;
     let schema = delta_schema_from_frame(&schema_frame, logical_map_paths).await?;
 
-    write_parquet_part(df, path)?;
+    write_parquet_part(df, path, logical_map_paths)?;
     let actions = collect_parquet_paths_under(path)?
         .iter()
         .map(|file| parquet_file_to_add_action(file, path))
@@ -2535,7 +2946,7 @@ fn write_delta_with_save_options_inner(
                 }
 
                 if effective_partition_columns.is_empty() {
-                    let parquet_path = write_parquet_part(&aligned_df, path)?;
+                    let parquet_path = write_parquet_part(&aligned_df, path, logical_map_paths)?;
                     let add = parquet_file_to_add_action(&parquet_path, path).map_err(|e| {
                         PolarsError::ComputeError(format!("write_delta: add action: {}", e).into())
                     })?;
@@ -2545,6 +2956,7 @@ fn write_delta_with_save_options_inner(
                         &aligned_df,
                         path,
                         &effective_partition_columns,
+                        logical_map_paths,
                     )?);
                 }
                 let mode = if overwrite {

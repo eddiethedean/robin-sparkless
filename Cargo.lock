@@ -458,6 +458,9 @@ name = "arrow-schema"
 version = "57.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bb63203e8e0e54b288d0d8043ca8fa1013820822a27692ef1b78a977d879f2c"
+dependencies = [
+ "bitflags 2.10.0",
+]
 
 [[package]]
 name = "arrow-schema"
@@ -5161,6 +5164,8 @@ name = "robin-sparkless-polars"
 version = "4.13.3"
 dependencies = [
  "aes-gcm",
+ "arrow-array 57.2.0",
+ "arrow-schema 57.2.0",
  "base64 0.22.1",
  "buoyant_kernel_derive",
  "bytes",
@@ -5183,6 +5188,7 @@ dependencies = [
  "parquet 57.2.0",
  "percent-encoding",
  "polars",
+ "polars-arrow",
  "polars-plan",
  "postgres",
  "rand 0.8.5",
