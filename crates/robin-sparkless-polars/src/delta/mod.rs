@@ -123,7 +123,13 @@ pub fn read_delta_with_version(
                             // to use Hive-style directory names in a Delta table.
                             #[allow(deprecated)]
                             let add = view.add_action();
-                            if add.path.split(['/', '\\']).any(|part| part == "..") {
+                            // Delta paths use `/`; also recognize the host separator so Windows
+                            // traversal is rejected without treating Unix backslashes as separators.
+                            if add
+                                .path
+                                .split(['/', std::path::MAIN_SEPARATOR])
+                                .any(|part| part == "..")
+                            {
                                 return futures::future::ready(Err(
                                     deltalake::DeltaTableError::Generic(format!(
                                         "read_delta: parquet URI '{}' escapes table root '{}'",
