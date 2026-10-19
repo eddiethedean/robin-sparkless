@@ -3376,6 +3376,13 @@ fn partition_row_to_filter_expr(
             AnyValue::Boolean(b) => col(name.as_str()).eq(lit(*b)),
             AnyValue::Int32(i) => col(name.as_str()).eq(lit(*i)),
             AnyValue::Int64(i) => col(name.as_str()).eq(lit(*i)),
+            // Date and Datetime AnyValues store their physical integer representation, while
+            // casting a temporal column to String formats it as a date/time string. Comparing
+            // those strings can miss rows because formatting precision differs from the writer.
+            AnyValue::Date(days) => col(name.as_str()).cast(DataType::Int32).eq(lit(*days)),
+            AnyValue::Datetime(value, _, _) | AnyValue::DatetimeOwned(value, _, _) => {
+                col(name.as_str()).cast(DataType::Int64).eq(lit(*value))
+            }
             AnyValue::UInt32(u) => col(name.as_str()).eq(lit(*u)),
             AnyValue::UInt64(u) => col(name.as_str()).eq(lit(*u)),
             AnyValue::Float32(f) => col(name.as_str()).eq(lit(*f)),

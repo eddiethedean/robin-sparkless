@@ -2,7 +2,7 @@
 //! Uses deltalake (delta-rs) with Polars for execution.
 
 use crate::dataframe::DataFrame;
-use polars::prelude::{LazyFrame, PlRefPath, PolarsError, ScanArgsParquet, UnionArgs};
+use polars::prelude::{IntoLazy, LazyFrame, PlRefPath, PolarsError, ScanArgsParquet, UnionArgs};
 use std::path::Path;
 use url::Url;
 
@@ -57,14 +57,132 @@ fn collect_parquet_paths_under_depth(
             PolarsError::ComputeError(format!("read_delta fallback read_dir entry: {}", e).into())
         })?;
         let p = entry.path();
-        if p.is_dir() {
+        let file_type = entry.file_type().map_err(|e| {
+            PolarsError::ComputeError(format!("read_delta fallback file type: {e}").into())
+        })?;
+        if file_type.is_symlink() {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "Delta Parquet path contains a symbolic link: {}",
+                    p.display()
+                )
+                .into(),
+            ));
+        }
+        if file_type.is_dir() {
             out.extend(collect_parquet_paths_under_depth(&p, depth + 1)?);
-        } else if p.extension().is_some_and(|e| e == "parquet") {
+        } else if file_type.is_file() && p.extension().is_some_and(|e| e == "parquet") {
             out.push(p);
         }
     }
     out.sort();
     Ok(out)
+}
+
+#[cfg(feature = "delta")]
+fn create_partition_dir_under_table_root(
+    table_root: &Path,
+    relative_parent: &Path,
+) -> Result<std::path::PathBuf, PolarsError> {
+    use std::path::Component;
+
+    std::fs::create_dir_all(table_root).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: create table root: {e}").into())
+    })?;
+    let canonical_root = table_root.canonicalize().map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: canonicalize table root: {e}").into())
+    })?;
+    if !canonical_root.is_dir() {
+        return Err(PolarsError::InvalidOperation(
+            format!(
+                "write_delta: table root is not a directory: {}",
+                canonical_root.display()
+            )
+            .into(),
+        ));
+    }
+
+    let mut destination = table_root.to_path_buf();
+    for component in relative_parent.components() {
+        let Component::Normal(name) = component else {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "write_delta: invalid partition directory: {}",
+                    relative_parent.display()
+                )
+                .into(),
+            ));
+        };
+        destination.push(name);
+        match std::fs::symlink_metadata(&destination) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "write_delta: partition directory is a symbolic link: {}",
+                            destination.display()
+                        )
+                        .into(),
+                    ));
+                }
+                if !metadata.is_dir() {
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "write_delta: partition path is not a directory: {}",
+                            destination.display()
+                        )
+                        .into(),
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::create_dir(&destination) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => {
+                        return Err(PolarsError::ComputeError(
+                            format!("write_delta: create partition directory: {error}").into(),
+                        ));
+                    }
+                }
+                let metadata = std::fs::symlink_metadata(&destination).map_err(|e| {
+                    PolarsError::ComputeError(
+                        format!("write_delta: inspect partition directory: {e}").into(),
+                    )
+                })?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(PolarsError::InvalidOperation(
+                        format!(
+                            "write_delta: unsafe partition directory: {}",
+                            destination.display()
+                        )
+                        .into(),
+                    ));
+                }
+            }
+            Err(error) => {
+                return Err(PolarsError::ComputeError(
+                    format!("write_delta: inspect partition directory: {error}").into(),
+                ));
+            }
+        }
+
+        let canonical_destination = destination.canonicalize().map_err(|e| {
+            PolarsError::ComputeError(
+                format!("write_delta: canonicalize partition directory: {e}").into(),
+            )
+        })?;
+        if !canonical_destination.starts_with(&canonical_root) {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "write_delta: partition directory escapes table root: {}",
+                    destination.display()
+                )
+                .into(),
+            ));
+        }
+    }
+    Ok(destination)
 }
 
 /// Read a Delta table at the given path, optionally at a specific version (time travel).
@@ -699,15 +817,40 @@ async fn write_delta_bootstrap_partitioned(
         }
     }
 
-    // Build the schema from the full frame, including partition columns. Empty inputs still have
-    // a schema and should create a Delta log even though they produce no Parquet parts.
-    let schema = delta_schema_from_frame(df).await?;
-    write_partitioned_parquet(
-        df,
-        path,
-        partition_columns,
-        crate::dataframe::WriteMode::Append,
-    )?;
+    // Include schemas from both the existing Parquet files and the incoming frame. Otherwise
+    // CreateBuilder's explicit schema would drop columns already present in the plain path.
+    // Materialize outside the async runtime because Polars collection may create its own pool.
+    let schema_files = existing_files.clone();
+    let incoming_for_schema = df.clone();
+    let schema_frame = tokio::task::spawn_blocking(move || {
+        let mut frames = Vec::with_capacity(schema_files.len() + 1);
+        for file in schema_files {
+            let pl_path = PlRefPath::try_from_path(&file).map_err(|e| {
+                PolarsError::ComputeError(
+                    format!("write_delta: existing bootstrap Parquet path: {e}").into(),
+                )
+            })?;
+            frames.push(LazyFrame::scan_parquet(
+                pl_path,
+                ScanArgsParquet::default(),
+            )?);
+        }
+        frames.push(incoming_for_schema.lazy());
+        if frames.len() == 1 {
+            frames.pop().expect("one incoming schema frame").collect()
+        } else {
+            concat_lazy_frames_diagonal(frames)?.collect()
+        }
+    })
+    .await
+    .map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: merge bootstrap schemas: {e}").into())
+    })??;
+    let schema = delta_schema_from_frame(&schema_frame).await?;
+
+    // Stage new files first, then move them into the table only after checking every destination
+    // partition directory for symlinks and table-root confinement.
+    write_partitioned_delta_parts(df, path, partition_columns)?;
 
     let files = collect_parquet_paths_under(path)?;
     let actions = files
@@ -738,19 +881,25 @@ fn write_partitioned_delta_parts(
 ) -> Result<Vec<deltalake::kernel::Action>, PolarsError> {
     use std::fs;
 
+    fs::create_dir_all(table_root).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: create table root: {e}").into())
+    })?;
     let staging = table_root.join(format!(
         ".sparkless_delta_write_{:016x}",
         rand::random::<u64>()
     ));
     let result = (|| {
+        fs::create_dir(&staging).map_err(|e| {
+            PolarsError::ComputeError(format!("write_delta: create staging directory: {e}").into())
+        })?;
         write_partitioned_parquet(
             df,
             &staging,
             partition_columns,
-            crate::dataframe::WriteMode::Overwrite,
+            crate::dataframe::WriteMode::Append,
         )?;
         let staged_files = collect_parquet_paths_under(&staging)?;
-        let mut actions = Vec::with_capacity(staged_files.len());
+        let mut moves = Vec::with_capacity(staged_files.len());
         for staged_file in staged_files {
             let relative_path = staged_file.strip_prefix(&staging).map_err(|e| {
                 PolarsError::ComputeError(
@@ -758,14 +907,15 @@ fn write_partitioned_delta_parts(
                 )
             })?;
             let relative_parent = relative_path.parent().unwrap_or(Path::new(""));
-            let destination_dir = table_root.join(relative_parent);
-            fs::create_dir_all(&destination_dir).map_err(|e| {
-                PolarsError::ComputeError(
-                    format!("write_delta: create partition directory: {e}").into(),
-                )
-            })?;
+            let destination_dir =
+                create_partition_dir_under_table_root(table_root, relative_parent)?;
             let destination =
                 destination_dir.join(format!("part-{:016x}.parquet", rand::random::<u64>()));
+            moves.push((staged_file, destination));
+        }
+
+        let mut actions = Vec::with_capacity(moves.len());
+        for (staged_file, destination) in moves {
             fs::rename(&staged_file, &destination).map_err(|e| {
                 PolarsError::ComputeError(format!("write_delta: move partition file: {e}").into())
             })?;
@@ -828,6 +978,153 @@ async fn delta_schema_from_frame(
     .await;
     let _ = fs::remove_dir_all(&scratch);
     result
+}
+
+#[cfg(feature = "delta")]
+fn merge_delta_struct_schemas(
+    existing: &deltalake::kernel::StructType,
+    incoming: &deltalake::kernel::StructType,
+) -> Result<deltalake::kernel::StructType, PolarsError> {
+    let mut fields: Vec<_> = existing.fields().cloned().collect();
+    for incoming_field in incoming.fields() {
+        if let Some(existing_field) = fields
+            .iter_mut()
+            .find(|field| field.name == incoming_field.name)
+        {
+            let old_field = existing_field.clone();
+            let mut merged_field = incoming_field.clone();
+            merged_field.data_type =
+                merge_delta_data_types(&old_field.data_type, &incoming_field.data_type)?;
+            merged_field.nullable |= old_field.nullable;
+            for (key, value) in old_field.metadata {
+                merged_field.metadata.entry(key).or_insert(value);
+            }
+            *existing_field = merged_field;
+        } else {
+            fields.push(incoming_field.clone());
+        }
+    }
+    deltalake::kernel::StructType::try_new(fields).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: merge schema fields: {e}").into())
+    })
+}
+
+#[cfg(feature = "delta")]
+fn merge_delta_data_types(
+    existing: &deltalake::kernel::DataType,
+    incoming: &deltalake::kernel::DataType,
+) -> Result<deltalake::kernel::DataType, PolarsError> {
+    use deltalake::kernel::{ArrayType, DataType, MapType};
+
+    match (existing, incoming) {
+        (DataType::Struct(existing), DataType::Struct(incoming)) => Ok(DataType::Struct(Box::new(
+            merge_delta_struct_schemas(existing, incoming)?,
+        ))),
+        (DataType::Variant(existing), DataType::Variant(incoming)) => Ok(DataType::Variant(
+            Box::new(merge_delta_struct_schemas(existing, incoming)?),
+        )),
+        (DataType::Array(existing), DataType::Array(incoming)) => Ok(ArrayType::new(
+            merge_delta_data_types(&existing.element_type, &incoming.element_type)?,
+            existing.contains_null || incoming.contains_null,
+        )
+        .into()),
+        (DataType::Map(existing), DataType::Map(incoming)) => Ok(MapType::new(
+            merge_delta_data_types(&existing.key_type, &incoming.key_type)?,
+            merge_delta_data_types(&existing.value_type, &incoming.value_type)?,
+            existing.value_contains_null || incoming.value_contains_null,
+        )
+        .into()),
+        _ => Ok(incoming.clone()),
+    }
+}
+
+#[cfg(feature = "delta")]
+fn protocol_for_schema(
+    protocol: &deltalake::kernel::Protocol,
+    schema: &deltalake::kernel::StructType,
+) -> Result<Option<deltalake::kernel::Protocol>, PolarsError> {
+    use deltalake::kernel::{DataType, PrimitiveType};
+
+    fn collect_features(
+        data_type: &DataType,
+        features: &mut std::collections::BTreeSet<&'static str>,
+    ) {
+        match data_type {
+            DataType::Primitive(PrimitiveType::TimestampNtz) => {
+                features.insert("timestampNtz");
+            }
+            DataType::Array(array) => collect_features(&array.element_type, features),
+            DataType::Struct(fields) | DataType::Variant(fields) => {
+                if matches!(data_type, DataType::Variant(_)) {
+                    features.insert("variantType");
+                }
+                for field in fields.fields() {
+                    collect_features(&field.data_type, features);
+                }
+            }
+            DataType::Map(map) => {
+                collect_features(&map.key_type, features);
+                collect_features(&map.value_type, features);
+            }
+            DataType::Primitive(_) => {}
+        }
+    }
+
+    let mut required_features = std::collections::BTreeSet::new();
+    for field in schema.fields() {
+        collect_features(&field.data_type, &mut required_features);
+    }
+    if required_features.is_empty() {
+        return Ok(None);
+    }
+
+    let mut updated = serde_json::to_value(protocol).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: serialize protocol: {e}").into())
+    })?;
+    let protocol_fields = updated.as_object_mut().ok_or_else(|| {
+        PolarsError::ComputeError("write_delta: invalid serialized protocol".into())
+    })?;
+    for (version_key, minimum) in [("minReaderVersion", 3_i64), ("minWriterVersion", 7_i64)] {
+        let current = protocol_fields
+            .get(version_key)
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(1);
+        protocol_fields.insert(
+            version_key.to_string(),
+            serde_json::Value::from(current.max(minimum)),
+        );
+    }
+    for (feature_key, required) in [
+        (
+            "readerFeatures",
+            required_features.iter().copied().collect::<Vec<_>>(),
+        ),
+        (
+            "writerFeatures",
+            required_features.iter().copied().collect::<Vec<_>>(),
+        ),
+    ] {
+        let features = protocol_fields
+            .entry(feature_key.to_string())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()))
+            .as_array_mut()
+            .ok_or_else(|| {
+                PolarsError::ComputeError(
+                    format!("write_delta: invalid protocol {feature_key}").into(),
+                )
+            })?;
+        for feature in required {
+            if !features.iter().any(|value| value.as_str() == Some(feature)) {
+                features.push(serde_json::Value::String(feature.to_string()));
+            }
+        }
+    }
+    if serde_json::to_value(protocol).ok().as_ref() == Some(&updated) {
+        return Ok(None);
+    }
+    serde_json::from_value(updated).map(Some).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: upgrade protocol: {e}").into())
+    })
 }
 
 #[cfg(feature = "delta")]
@@ -953,12 +1250,9 @@ fn parquet_file_to_add_action(
             "write_delta: parquet file is outside table root: {e}"
         ))
     })?;
-    // Delta decodes Add.path once when constructing object-store paths. Escape percent signs so
-    // a physical partition directory like `country=a%2Fb` still resolves to that exact path.
-    let rel_path = relative_path
-        .to_string_lossy()
-        .replace('\\', "/")
-        .replace('%', "%25");
+    // Add.path's serializer performs the Delta protocol's percent encoding. Keep the filesystem
+    // relative path raw here so escaped partition characters are encoded exactly once.
+    let rel_path = relative_path.to_string_lossy().replace('\\', "/");
     let mut partition_values = HashMap::new();
     if let Some(parent) = relative_path.parent() {
         for component in parent.components() {
@@ -1098,7 +1392,10 @@ pub fn write_delta_with_options(
     use std::fs;
     use tokio::runtime::Runtime;
 
-    let path = path.as_ref();
+    let path = robin_sparkless_core::maybe_confine_files_path(path.as_ref()).map_err(|e| {
+        PolarsError::InvalidOperation(format!("write_delta path confinement: {e}").into())
+    })?;
+    let path = path.as_path();
     let partition_by = partition_by.to_vec();
     let mut partition_names = std::collections::HashSet::new();
     for name in &partition_by {
@@ -1226,24 +1523,8 @@ pub fn write_delta_with_options(
                             format!("write_delta: parse existing schema for merge: {e}").into(),
                         )
                     })?;
-                    let mut merged_fields: Vec<_> =
-                        existing_schema.fields().cloned().collect();
-                    for incoming_field in incoming_schema.fields() {
-                        if let Some(existing_field) = merged_fields
-                            .iter_mut()
-                            .find(|field| field.name.as_str() == incoming_field.name.as_str())
-                        {
-                            *existing_field = incoming_field.clone();
-                        } else {
-                            merged_fields.push(incoming_field.clone());
-                        }
-                    }
-                    let merged_schema = deltalake::kernel::StructType::try_new(merged_fields)
-                        .map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write_delta: merge existing schema: {e}").into(),
-                            )
-                        })?;
+                    let merged_schema =
+                        merge_delta_struct_schemas(&existing_schema, &incoming_schema)?;
                     let updated_metadata = table_state
                         .metadata()
                         .clone()
@@ -1253,6 +1534,11 @@ pub fn write_delta_with_options(
                                 format!("write_delta: update merged schema metadata: {e}").into(),
                             )
                         })?;
+                    if let Some(protocol) =
+                        protocol_for_schema(table_state.protocol(), &merged_schema)?
+                    {
+                        actions.push(deltalake::kernel::Action::Protocol(protocol));
+                    }
                     actions.push(deltalake::kernel::Action::Metadata(updated_metadata));
                 }
 
