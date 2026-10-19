@@ -747,16 +747,19 @@ fn partition_value_from_path(
         let part = component.as_os_str().to_str()?;
         if let Some((name, value)) = part.split_once('=') {
             if name == column {
-                return Some(if value == "__HIVE_DEFAULT_PARTITION__" {
-                    None
-                } else {
-                    Some(
-                        percent_encoding::percent_decode_str(value)
-                            .decode_utf8()
-                            .ok()?
-                            .into_owned(),
-                    )
-                });
+                // Delta's partition-value serialization treats empty strings/binary as null.
+                return Some(
+                    if value.is_empty() || value == "__HIVE_DEFAULT_PARTITION__" {
+                        None
+                    } else {
+                        Some(
+                            percent_encoding::percent_decode_str(value)
+                                .decode_utf8()
+                                .ok()?
+                                .into_owned(),
+                        )
+                    },
+                );
             }
         }
     }
@@ -877,7 +880,8 @@ fn parquet_file_to_add_action(
             if let Some((name, value)) = component.split_once('=') {
                 partition_values.insert(
                     name.to_string(),
-                    if value == "__HIVE_DEFAULT_PARTITION__" {
+                    // Empty string/binary partition values serialize as null in Delta.
+                    if value.is_empty() || value == "__HIVE_DEFAULT_PARTITION__" {
                         None
                     } else {
                         Some(

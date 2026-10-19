@@ -3363,6 +3363,8 @@ fn partition_row_to_filter_expr(
             AnyValue::Float64(f) => col(name.as_str()).eq(lit(*f)),
             AnyValue::String(s) => col(name.as_str()).eq(lit(s.to_string())),
             AnyValue::StringOwned(s) => col(name.as_str()).eq(lit(s.clone())),
+            AnyValue::Binary(value) => col(name.as_str()).eq(lit(value.to_vec())),
+            AnyValue::BinaryOwned(value) => col(name.as_str()).eq(lit(value.clone())),
             _ => {
                 // Fallback: compare as string
                 let s = av.to_string();
