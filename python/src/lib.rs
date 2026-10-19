@@ -963,6 +963,38 @@ impl PySparkSessionBuilder {
 /// Default backend type so tests that read session.backend_type always get a value (e.g. "robin").
 const DEFAULT_BACKEND_TYPE: &str = "robin";
 
+#[cfg(feature = "delta")]
+fn delta_map_paths_for_catalog_table(
+    session: &SparkSession,
+    name: &str,
+) -> Result<std::collections::HashSet<String>, polars::prelude::PolarsError> {
+    let mut result = std::collections::HashSet::new();
+    let Some(warehouse) = session.warehouse_dir() else {
+        return Ok(result);
+    };
+    let mut candidates = Vec::new();
+    if let Ok(path) = robin_sparkless_core::resolve_path_under_base(warehouse, name) {
+        candidates.push(path);
+    }
+    if name.contains('.') {
+        let nested = name.replace('.', std::path::MAIN_SEPARATOR_STR);
+        if let Ok(path) = robin_sparkless_core::resolve_path_under_base(warehouse, &nested) {
+            candidates.push(path);
+        }
+    }
+    for path in candidates {
+        if !path.is_dir() {
+            continue;
+        }
+        let paths = robin_sparkless::delta::logical_map_paths(path)?;
+        if !paths.is_empty() {
+            result.extend(paths);
+            break;
+        }
+    }
+    Ok(result)
+}
+
 /// #1344: module = "sparkless.sql.session" so type(spark).__module__ identifies engine (not builtins).
 #[pyclass(module = "sparkless.sql.session", unsendable)]
 struct PySparkSession {
@@ -2165,10 +2197,17 @@ impl PySparkSession {
     }
 
     fn table(&self, name: &str) -> PyResult<PyDataFrame> {
-        self.inner
+        let mut wrapped = self
+            .inner
             .table(name)
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            wrapped.logical_map_paths =
+                delta_map_paths_for_catalog_table(&self.inner, name).map_err(to_py_err)?;
+        }
+        Ok(wrapped)
     }
 
     fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
@@ -4960,11 +4999,17 @@ impl PyDataFrameReader {
             .cast::<PySparkSession>()
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected SparkSession"))?
             .borrow();
-        session
+        let mut wrapped = session
             .inner
             .table(name)
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            wrapped.logical_map_paths =
+                delta_map_paths_for_catalog_table(&session.inner, name).map_err(to_py_err)?;
+        }
+        Ok(wrapped)
     }
 
     #[cfg(feature = "delta")]
