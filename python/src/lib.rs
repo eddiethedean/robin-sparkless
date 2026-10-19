@@ -4873,10 +4873,22 @@ impl PyDataFrameReader {
         if let Some(ref fmt) = self.format {
             reader = reader.format(fmt);
         }
-        reader
+        let mut wrapped = reader
             .load(Path::new(path))
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        if self
+            .format
+            .as_deref()
+            .is_some_and(|format| format.eq_ignore_ascii_case("delta"))
+        {
+            wrapped.logical_map_paths = robin_sparkless::delta::logical_map_paths(path)
+                .map_err(to_py_err)?
+                .into_iter()
+                .collect();
+        }
+        Ok(wrapped)
     }
 
     fn csv(&self, py: Python<'_>, path: &str) -> PyResult<PyDataFrame> {
@@ -8983,6 +8995,28 @@ fn save_mode_from_str(mode: &str) -> SaveMode {
     }
 }
 
+fn validate_delta_options(options: &[(String, String)], save_mode: SaveMode) -> PyResult<()> {
+    if options
+        .iter()
+        .any(|(key, _)| key.eq_ignore_ascii_case("replaceWhere"))
+    {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Delta option 'replaceWhere' is not supported by this writer; refusing to overwrite the full table",
+        ));
+    }
+    if save_mode == SaveMode::Overwrite
+        && options.iter().any(|(key, value)| {
+            key.eq_ignore_ascii_case("partitionOverwriteMode")
+                && value.eq_ignore_ascii_case("dynamic")
+        })
+    {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Delta option 'partitionOverwriteMode=dynamic' is not supported by this writer; refusing to overwrite the full table",
+        ));
+    }
+    Ok(())
+}
+
 #[pymethods]
 impl PyDataFrameWriter {
     fn mode<'a>(mut slf: PyRefMut<'a, Self>, mode: &str) -> PyRefMut<'a, Self> {
@@ -9111,14 +9145,21 @@ impl PyDataFrameWriter {
                     )));
                 }
             };
+            validate_delta_options(&self.options, save_mode)?;
 
-            return match inner.inner.write_delta_with_save_options(
-                &path,
-                save_mode,
-                merge_schema,
-                overwrite_schema,
-                &self.partition_by,
-            ) {
+            let mut logical_map_paths = inner.logical_map_paths.iter().cloned().collect::<Vec<_>>();
+            logical_map_paths.sort();
+
+            return match inner
+                .inner
+                .write_delta_with_save_options_and_logical_map_paths(
+                    &path,
+                    save_mode,
+                    merge_schema,
+                    overwrite_schema,
+                    &self.partition_by,
+                    &logical_map_paths,
+                ) {
                 Ok(()) => Ok(()),
                 Err(error)
                     if save_mode == SaveMode::ErrorIfExists
@@ -9229,11 +9270,30 @@ impl PyDataFrameWriter {
         let inner = df.borrow();
         let active = require_active_session(py)?.bind(py).borrow().inner.clone();
         let save_mode = save_mode_from_str(mode.unwrap_or(self.mode.as_str()));
+        if self
+            .writer_format
+            .as_deref()
+            .is_some_and(|format| format.eq_ignore_ascii_case("delta"))
+        {
+            validate_delta_options(&self.options, save_mode)?;
+        }
         // Thread writer-level options (including format) through to the backend so
         // saveAsTable can make format-aware decisions (e.g. Delta overwrite parity).
         let mut options: Vec<(String, String)> = self.options.clone();
         if let Some(fmt) = &self.writer_format {
             options.push(("sparkless.writer.format".to_string(), fmt.to_string()));
+        }
+        if self
+            .writer_format
+            .as_deref()
+            .is_some_and(|format| format.eq_ignore_ascii_case("delta"))
+        {
+            let mut paths = inner.logical_map_paths.iter().cloned().collect::<Vec<_>>();
+            paths.sort();
+            options.push((
+                "sparkless.delta.logicalMapPaths".to_string(),
+                serde_json::to_string(&paths).map_err(to_py_err)?,
+            ));
         }
         let mut writer = inner.inner.write();
         if !self.partition_by.is_empty() {

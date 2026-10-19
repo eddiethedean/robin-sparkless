@@ -26,6 +26,68 @@ pub fn read_delta(path: impl AsRef<Path>, case_sensitive: bool) -> Result<DataFr
     read_delta_with_version(path, None, case_sensitive)
 }
 
+#[cfg(feature = "delta")]
+pub fn logical_map_paths(path: impl AsRef<Path>) -> Result<Vec<String>, PolarsError> {
+    use deltalake::DeltaTableBuilder;
+    use deltalake::kernel::DataType;
+    use tokio::runtime::Runtime;
+
+    fn field_path(parent: &str, name: &str) -> String {
+        let encoded = serde_json::to_string(name).expect("field names serialize as JSON strings");
+        if parent.is_empty() {
+            encoded
+        } else {
+            format!("{parent}.{encoded}")
+        }
+    }
+
+    fn visit_type(data_type: &DataType, path: &str, paths: &mut Vec<String>) {
+        match data_type {
+            DataType::Map(map) => {
+                paths.push(path.to_string());
+                visit_type(&map.key_type, &format!("{path}{{key}}"), paths);
+                visit_type(&map.value_type, &format!("{path}{{value}}"), paths);
+            }
+            DataType::Array(array) => visit_type(&array.element_type, &format!("{path}[]"), paths),
+            DataType::Struct(fields) | DataType::Variant(fields) => {
+                for field in fields.fields() {
+                    visit_type(&field.data_type, &field_path(path, &field.name), paths);
+                }
+            }
+            DataType::Primitive(_) => {}
+        }
+    }
+
+    let path = robin_sparkless_core::maybe_confine_files_path(path.as_ref()).map_err(|e| {
+        PolarsError::InvalidOperation(format!("read_delta path confinement: {e}").into())
+    })?;
+    let table_uri = path_to_table_uri(path.as_path())?;
+    let url = Url::parse(table_uri.as_str()).map_err(|e| {
+        PolarsError::ComputeError(format!("read_delta: invalid table URI: {e}").into())
+    })?;
+    let runtime = Runtime::new().map_err(|e| {
+        PolarsError::ComputeError(format!("read_delta: failed to create runtime: {e}").into())
+    })?;
+    let table = runtime.block_on(async {
+        DeltaTableBuilder::from_url(url)
+            .map_err(|e| PolarsError::ComputeError(format!("read_delta: {e}").into()))?
+            .load()
+            .await
+            .map_err(|e| PolarsError::ComputeError(format!("read_delta: {e}").into()))
+    })?;
+    let schema = table
+        .snapshot()
+        .map_err(|e| PolarsError::ComputeError(format!("read_delta: snapshot: {e}").into()))?
+        .metadata()
+        .parse_schema()
+        .map_err(|e| PolarsError::ComputeError(format!("read_delta: parse schema: {e}").into()))?;
+    let mut paths = Vec::new();
+    for field in schema.fields() {
+        visit_type(&field.data_type, &field_path("", &field.name), &mut paths);
+    }
+    Ok(paths)
+}
+
 const PARQUET_WALK_MAX_DEPTH: u32 = 64;
 
 /// Recursively collect paths of all .parquet files under `dir` (depth-limited).
@@ -172,6 +234,103 @@ fn align_delta_expr_to_dtype(
         }
         _ => Ok(expr.strict_cast(target_dtype.clone())),
     }
+}
+
+#[cfg(feature = "delta")]
+fn delta_field_physical_name(field: &deltalake::kernel::StructField) -> &str {
+    use deltalake::kernel::MetadataValue;
+
+    match field.metadata.get("delta.columnMapping.physicalName") {
+        Some(MetadataValue::String(name)) => name,
+        _ => &field.name,
+    }
+}
+
+#[cfg(feature = "delta")]
+fn delta_field_uses_column_mapping(field: &deltalake::kernel::StructField) -> bool {
+    field
+        .metadata
+        .contains_key("delta.columnMapping.physicalName")
+        || field.metadata.contains_key("delta.columnMapping.id")
+        || delta_type_uses_column_mapping(&field.data_type)
+}
+
+#[cfg(feature = "delta")]
+fn delta_type_uses_column_mapping(data_type: &deltalake::kernel::DataType) -> bool {
+    use deltalake::kernel::DataType;
+
+    match data_type {
+        DataType::Struct(fields) | DataType::Variant(fields) => {
+            fields.fields().any(delta_field_uses_column_mapping)
+        }
+        DataType::Array(array) => delta_type_uses_column_mapping(&array.element_type),
+        DataType::Map(map) => {
+            delta_type_uses_column_mapping(&map.key_type)
+                || delta_type_uses_column_mapping(&map.value_type)
+        }
+        DataType::Primitive(_) => false,
+    }
+}
+
+#[cfg(feature = "delta")]
+fn delta_schema_uses_column_mapping(schema: &deltalake::kernel::StructType) -> bool {
+    schema.fields().any(delta_field_uses_column_mapping)
+}
+
+#[cfg(feature = "delta")]
+fn align_delta_expr_to_schema_type(
+    expr: polars::prelude::Expr,
+    source_dtype: &polars::prelude::DataType,
+    target_type: &deltalake::kernel::DataType,
+) -> Result<polars::prelude::Expr, PolarsError> {
+    use deltalake::kernel::DataType as DeltaDataType;
+    use polars::prelude::{DataType, NULL, as_struct, col, lit, when};
+
+    match (source_dtype, target_type) {
+        (DataType::Struct(source_fields), DeltaDataType::Struct(target_fields))
+        | (DataType::Struct(source_fields), DeltaDataType::Variant(target_fields)) => {
+            let fields = target_fields
+                .fields()
+                .map(|target_field| {
+                    let physical_name = delta_field_physical_name(target_field);
+                    let target_dtype = delta_schema_type_to_polars(&target_field.data_type)?;
+                    let field_expr = if let Some(source_field) = source_fields
+                        .iter()
+                        .find(|field| field.name() == physical_name)
+                    {
+                        align_delta_expr_to_schema_type(
+                            expr.clone().struct_().field_by_name(physical_name),
+                            source_field.dtype(),
+                            &target_field.data_type,
+                        )?
+                    } else {
+                        lit(NULL).strict_cast(target_dtype)
+                    };
+                    Ok(field_expr.alias(target_field.name.as_str()))
+                })
+                .collect::<Result<Vec<_>, PolarsError>>()?;
+            let aligned = as_struct(fields);
+            let target_dtype = delta_schema_type_to_polars(target_type)?;
+            Ok(when(expr.clone().is_null())
+                .then(lit(NULL).strict_cast(target_dtype))
+                .otherwise(aligned))
+        }
+        (DataType::List(source_inner), DeltaDataType::Array(target_array)) => {
+            let item_expr =
+                align_delta_expr_to_schema_type(col(""), source_inner, &target_array.element_type)?;
+            Ok(expr.list().eval(item_expr))
+        }
+        (DataType::List(_), DeltaDataType::Map(_)) => {
+            let target_dtype = delta_schema_type_to_polars(target_type)?;
+            align_delta_expr_to_dtype(expr, source_dtype, &target_dtype)
+        }
+        _ => Ok(expr.strict_cast(delta_schema_type_to_polars(target_type)?)),
+    }
+}
+
+#[cfg(feature = "delta")]
+fn delta_names_equal(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
 }
 
 #[cfg(feature = "delta")]
@@ -405,14 +564,30 @@ pub fn read_delta_with_version(
                     format!("read_delta: canonicalize table root: {e}").into(),
                 )
             })?;
-            let mut lfs: Vec<LazyFrame> = Vec::with_capacity(files.len());
-            for (uri, partition_values) in &files {
+            let mut scans = Vec::with_capacity(files.len());
+            for (uri, _) in &files {
                 let parquet_path = confine_parquet_uri_to_table_root(uri, &table_root_canonical)?;
                 let pl_path = PlRefPath::try_from_path(&parquet_path).map_err(|e| {
                     PolarsError::ComputeError(format!("read_delta scan_parquet path: {e}").into())
                 })?;
                 let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())?;
                 let source_schema = lf.clone().collect_schema()?;
+                scans.push((lf, source_schema));
+            }
+            let mut row_index_name = "__sparkless_delta_row_index".to_string();
+            while scans
+                .iter()
+                .any(|(_, source_schema)| source_schema.get(row_index_name.as_str()).is_some())
+            {
+                row_index_name.push('_');
+            }
+            let mut lfs: Vec<LazyFrame> = Vec::with_capacity(files.len());
+            for ((uri, partition_values), (lf, source_schema)) in files.iter().zip(scans) {
+                // Keep an input column in the projection's execution context. Delta partition
+                // values are scalar expressions, and selecting only those expressions from a
+                // Parquet file would otherwise produce one row per file rather than one row per
+                // physical record (notably for tables with no non-partition columns).
+                let lf = lf.with_row_index(row_index_name.clone(), None);
                 let mut partition_exprs =
                     std::collections::HashMap::with_capacity(partition_columns.len());
                 for name in &partition_columns {
@@ -466,20 +641,23 @@ pub fn read_delta_with_version(
 
                 let mut aligned_exprs = Vec::new();
                 for field in schema.fields() {
-                    let target_dtype = delta_schema_type_to_polars(&field.data_type)?;
                     let expr = if let Some(partition_expr) = partition_exprs.remove(&field.name) {
                         partition_expr
-                    } else if let Some(source_field) = source_schema.get(&field.name) {
-                        align_delta_expr_to_dtype(
-                            polars::prelude::col(field.name.as_str()),
+                    } else if let Some(source_field) =
+                        source_schema.get(delta_field_physical_name(field))
+                    {
+                        align_delta_expr_to_schema_type(
+                            polars::prelude::col(delta_field_physical_name(field)),
                             source_field,
-                            &target_dtype,
+                            &field.data_type,
                         )?
                     } else {
-                        polars::prelude::lit(polars::prelude::NULL).cast(target_dtype)
+                        polars::prelude::lit(polars::prelude::NULL)
+                            .cast(delta_schema_type_to_polars(&field.data_type)?)
                     };
                     aligned_exprs.push(expr.alias(field.name.as_str()));
                 }
+                aligned_exprs.push(polars::prelude::col(row_index_name.as_str()));
                 if let Some(missing_partition) = partition_exprs.keys().next() {
                     return Err(PolarsError::ComputeError(
                         format!(
@@ -491,7 +669,8 @@ pub fn read_delta_with_version(
                 lfs.push(lf.select(aligned_exprs));
             }
             let combined = concat_lazy_frames_diagonal(lfs)?;
-            let pl_df = combined.collect()?;
+            let mut pl_df = combined.collect()?;
+            pl_df.drop_in_place(row_index_name.as_str())?;
             Ok(DataFrame::from_polars_with_options(pl_df, case_sensitive))
         }
         Err(e) => {
@@ -886,6 +1065,7 @@ async fn write_delta_bootstrap_partitioned(
     path: &Path,
     table_uri: &str,
     partition_columns: &[String],
+    logical_map_paths: &[String],
 ) -> Result<(), PolarsError> {
     use deltalake::operations::create::CreateBuilder;
     use std::collections::HashSet;
@@ -951,7 +1131,7 @@ async fn write_delta_bootstrap_partitioned(
     .map_err(|e| {
         PolarsError::ComputeError(format!("write_delta: merge bootstrap schemas: {e}").into())
     })??;
-    let schema = delta_schema_from_frame(&schema_frame).await?;
+    let schema = delta_schema_from_frame(&schema_frame, logical_map_paths).await?;
 
     // Stage new files first, then move them into the table only after checking every destination
     // partition directory for symlinks and table-root confinement.
@@ -1039,8 +1219,200 @@ fn write_partitioned_delta_parts(
 }
 
 #[cfg(feature = "delta")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DeltaSchemaPathSegment {
+    Field(String),
+    ArrayElement,
+    MapKey,
+    MapValue,
+}
+
+#[cfg(feature = "delta")]
+fn parse_delta_schema_path(path: &str) -> Result<Vec<DeltaSchemaPathSegment>, PolarsError> {
+    let bytes = path.as_bytes();
+    let mut offset = 0;
+    let mut segments = Vec::new();
+    while offset < bytes.len() {
+        match bytes[offset] {
+            b'"' => {
+                let start = offset;
+                offset += 1;
+                let mut escaped = false;
+                while offset < bytes.len() {
+                    let byte = bytes[offset];
+                    offset += 1;
+                    if escaped {
+                        escaped = false;
+                    } else if byte == b'\\' {
+                        escaped = true;
+                    } else if byte == b'"' {
+                        break;
+                    }
+                }
+                let field = serde_json::from_str::<String>(&path[start..offset]).map_err(|e| {
+                    PolarsError::InvalidOperation(
+                        format!("write_delta: invalid logical map path {path:?}: {e}").into(),
+                    )
+                })?;
+                segments.push(DeltaSchemaPathSegment::Field(field));
+            }
+            b'.' => offset += 1,
+            b'[' if bytes.get(offset + 1) == Some(&b']') => {
+                offset += 2;
+                segments.push(DeltaSchemaPathSegment::ArrayElement);
+            }
+            b'{' if path[offset..].starts_with("{key}") => {
+                offset += 5;
+                segments.push(DeltaSchemaPathSegment::MapKey);
+            }
+            b'{' if path[offset..].starts_with("{value}") => {
+                offset += 7;
+                segments.push(DeltaSchemaPathSegment::MapValue);
+            }
+            _ => {
+                return Err(PolarsError::InvalidOperation(
+                    format!("write_delta: invalid logical map path {path:?}").into(),
+                ));
+            }
+        }
+    }
+    Ok(segments)
+}
+
+#[cfg(feature = "delta")]
+fn rewrite_delta_struct_for_logical_maps(
+    schema: deltalake::kernel::StructType,
+    paths: &[Vec<DeltaSchemaPathSegment>],
+) -> Result<deltalake::kernel::StructType, PolarsError> {
+    let fields = schema
+        .fields()
+        .map(|field| {
+            let mut field = field.clone();
+            let child_paths = paths
+                .iter()
+                .filter_map(|path| match path.split_first() {
+                    Some((DeltaSchemaPathSegment::Field(name), tail))
+                        if delta_names_equal(name, &field.name) =>
+                    {
+                        Some(tail.to_vec())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            field.data_type = rewrite_delta_type_for_logical_maps(field.data_type, &child_paths)?;
+            Ok(field)
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
+    deltalake::kernel::StructType::try_new(fields).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: apply logical map schema: {e}").into())
+    })
+}
+
+#[cfg(feature = "delta")]
+fn rewrite_delta_type_for_logical_maps(
+    data_type: deltalake::kernel::DataType,
+    paths: &[Vec<DeltaSchemaPathSegment>],
+) -> Result<deltalake::kernel::DataType, PolarsError> {
+    use deltalake::kernel::{ArrayType, DataType, MapType};
+
+    let exact_map = paths.iter().any(Vec::is_empty);
+    match data_type {
+        DataType::Struct(fields) => Ok(DataType::Struct(Box::new(
+            rewrite_delta_struct_for_logical_maps(*fields, paths)?,
+        ))),
+        DataType::Variant(fields) => Ok(DataType::Variant(Box::new(
+            rewrite_delta_struct_for_logical_maps(*fields, paths)?,
+        ))),
+        DataType::Array(array) => {
+            let element_paths = paths
+                .iter()
+                .filter_map(|path| match path.split_first() {
+                    Some((DeltaSchemaPathSegment::ArrayElement, tail)) => Some(tail.to_vec()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let element = rewrite_delta_type_for_logical_maps(array.element_type, &element_paths)?;
+            if exact_map {
+                let DataType::Struct(entries) = element else {
+                    return Err(PolarsError::InvalidOperation(
+                        "write_delta: logical MapType requires an array of key/value structs"
+                            .into(),
+                    ));
+                };
+                let key = entries
+                    .fields()
+                    .find(|field| field.name == "key")
+                    .ok_or_else(|| {
+                        PolarsError::InvalidOperation(
+                            "write_delta: logical MapType is missing its key field".into(),
+                        )
+                    })?;
+                let value = entries
+                    .fields()
+                    .find(|field| field.name == "value")
+                    .ok_or_else(|| {
+                        PolarsError::InvalidOperation(
+                            "write_delta: logical MapType is missing its value field".into(),
+                        )
+                    })?;
+                Ok(MapType::new(
+                    key.data_type.clone(),
+                    value.data_type.clone(),
+                    value.nullable,
+                )
+                .into())
+            } else {
+                Ok(ArrayType::new(element, array.contains_null).into())
+            }
+        }
+        DataType::Map(map) => {
+            let key_paths = paths
+                .iter()
+                .filter_map(|path| match path.split_first() {
+                    Some((DeltaSchemaPathSegment::MapKey, tail)) => Some(tail.to_vec()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let value_paths = paths
+                .iter()
+                .filter_map(|path| match path.split_first() {
+                    Some((DeltaSchemaPathSegment::MapValue, tail)) => Some(tail.to_vec()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            Ok(MapType::new(
+                rewrite_delta_type_for_logical_maps(map.key_type, &key_paths)?,
+                rewrite_delta_type_for_logical_maps(map.value_type, &value_paths)?,
+                map.value_contains_null,
+            )
+            .into())
+        }
+        other if exact_map => Err(PolarsError::InvalidOperation(
+            format!("write_delta: cannot encode {other:?} as a logical MapType").into(),
+        )),
+        other => Ok(other),
+    }
+}
+
+#[cfg(feature = "delta")]
+fn apply_logical_map_paths(
+    schema: deltalake::kernel::StructType,
+    paths: &[String],
+) -> Result<deltalake::kernel::StructType, PolarsError> {
+    if paths.is_empty() {
+        return Ok(schema);
+    }
+    let parsed = paths
+        .iter()
+        .map(|path| parse_delta_schema_path(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    rewrite_delta_struct_for_logical_maps(schema, &parsed)
+}
+
+#[cfg(feature = "delta")]
 async fn delta_schema_from_frame(
     df: &polars::prelude::DataFrame,
+    logical_map_paths: &[String],
 ) -> Result<deltalake::kernel::StructType, PolarsError> {
     use deltalake::operations::convert_to_delta::ConvertToDeltaBuilder;
     use std::fs;
@@ -1078,9 +1450,10 @@ async fn delta_schema_from_frame(
         let snapshot = table.snapshot().map_err(|e: deltalake::DeltaTableError| {
             PolarsError::ComputeError(format!("write_delta: merged schema snapshot: {e}").into())
         })?;
-        snapshot.metadata().parse_schema().map_err(|e| {
+        let schema = snapshot.metadata().parse_schema().map_err(|e| {
             PolarsError::ComputeError(format!("write_delta: parse merged schema: {e}").into())
-        })
+        })?;
+        apply_logical_map_paths(schema, logical_map_paths)
     }
     .await;
     let _ = fs::remove_dir_all(&scratch);
@@ -1103,7 +1476,7 @@ fn resolve_delta_null_columns(
             }
             existing_schema
                 .fields()
-                .find(|field| field.name == name.as_str())
+                .find(|field| delta_names_equal(&field.name, name.as_str()))
                 .map(|field| {
                     delta_schema_type_to_polars(&field.data_type).map(|target_dtype| {
                         col(name.as_str())
@@ -1129,10 +1502,13 @@ fn merge_delta_struct_schemas(
     for incoming_field in incoming.fields() {
         if let Some(existing_field) = fields
             .iter_mut()
-            .find(|field| field.name == incoming_field.name)
+            .find(|field| delta_names_equal(&field.name, &incoming_field.name))
         {
             let old_field = existing_field.clone();
             let mut merged_field = incoming_field.clone();
+            // Delta resolves names case-insensitively by default while preserving the name
+            // already stored in the table schema.
+            merged_field.name = old_field.name.clone();
             merged_field.data_type =
                 merge_delta_data_types(&old_field.data_type, &incoming_field.data_type)?;
             merged_field.nullable |= old_field.nullable;
@@ -1287,7 +1663,7 @@ fn validate_delta_schema_for_write(
     for incoming_field in incoming.fields() {
         let target_field = match target
             .fields()
-            .find(|field| field.name == incoming_field.name)
+            .find(|field| delta_names_equal(&field.name, &incoming_field.name))
         {
             Some(field) => field,
             None if allow_extra => continue,
@@ -1312,7 +1688,7 @@ fn validate_delta_schema_for_write(
     for target_field in target.fields() {
         if incoming
             .fields()
-            .all(|field| field.name != target_field.name)
+            .all(|field| !delta_names_equal(&field.name, &target_field.name))
             && !target_field.nullable
         {
             return Err(PolarsError::InvalidOperation(
@@ -1342,30 +1718,29 @@ fn align_delta_frame_to_schema(
     let exprs = target_schema
         .fields()
         .map(|target_field| {
-            let target_dtype = delta_schema_type_to_polars(&target_field.data_type)?;
-            let expr = if incoming_schema
+            let incoming_field = incoming_schema
                 .fields()
-                .any(|field| field.name == target_field.name)
-            {
+                .find(|field| delta_names_equal(&field.name, &target_field.name));
+            let expr = if let Some(incoming_field) = incoming_field {
                 let source_dtype =
                     source_polars_schema
-                        .get(&target_field.name)
+                        .get(&incoming_field.name)
                         .ok_or_else(|| {
                             PolarsError::ColumnNotFound(
                                 format!(
                                     "write_delta: missing input column '{}'",
-                                    target_field.name
+                                    incoming_field.name
                                 )
                                 .into(),
                             )
                         })?;
-                align_delta_expr_to_dtype(
-                    col(target_field.name.as_str()),
+                align_delta_expr_to_schema_type(
+                    col(incoming_field.name.as_str()),
                     source_dtype,
-                    &target_dtype,
+                    &target_field.data_type,
                 )?
             } else {
-                lit(NULL).strict_cast(target_dtype)
+                lit(NULL).strict_cast(delta_schema_type_to_polars(&target_field.data_type)?)
             };
             Ok(expr.alias(target_field.name.as_str()))
         })
@@ -1674,30 +2049,54 @@ async fn write_delta_bootstrap_parquet(
     df: &polars::prelude::DataFrame,
     path: &Path,
     table_uri: &str,
+    logical_map_paths: &[String],
 ) -> Result<(), PolarsError> {
-    use deltalake::operations::convert_to_delta::ConvertToDeltaBuilder;
-    use std::fs;
+    use deltalake::operations::create::CreateBuilder;
 
-    fs::create_dir_all(path).map_err(|e| {
-        PolarsError::ComputeError(format!("write_delta: create_dir_all: {}", e).into())
-    })?;
-    let part_id: u64 = rand::random();
-    let parquet_path = path.join(format!("part-{part_id:016x}.parquet"));
-    let mut file = std::io::BufWriter::new(fs::File::create(&parquet_path).map_err(|e| {
-        PolarsError::ComputeError(format!("write_delta: create parquet file: {}", e).into())
-    })?);
-    let mut df_mut = df.clone();
-    polars::prelude::ParquetWriter::new(&mut file)
-        .finish(&mut df_mut)
+    let existing_files = collect_parquet_paths_under(path)?;
+    let schema_files = existing_files.clone();
+    let incoming_for_schema = df.clone();
+    let schema_frame = tokio::task::spawn_blocking(move || {
+        let mut frames = Vec::with_capacity(schema_files.len() + 1);
+        for file in schema_files {
+            let pl_path = PlRefPath::try_from_path(&file).map_err(|e| {
+                PolarsError::ComputeError(
+                    format!("write_delta: existing bootstrap Parquet path: {e}").into(),
+                )
+            })?;
+            frames.push(LazyFrame::scan_parquet(
+                pl_path,
+                ScanArgsParquet::default(),
+            )?);
+        }
+        frames.push(incoming_for_schema.lazy());
+        if frames.len() == 1 {
+            frames.pop().expect("one incoming schema frame").collect()
+        } else {
+            concat_lazy_frames_diagonal(frames)?.collect()
+        }
+    })
+    .await
+    .map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: merge bootstrap schemas: {e}").into())
+    })??;
+    let schema = delta_schema_from_frame(&schema_frame, logical_map_paths).await?;
+
+    write_parquet_part(df, path)?;
+    let actions = collect_parquet_paths_under(path)?
+        .iter()
+        .map(|file| parquet_file_to_add_action(file, path))
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
-            PolarsError::ComputeError(format!("write_delta: parquet write: {}", e).into())
+            PolarsError::ComputeError(format!("write_delta: add bootstrap parquet: {e}").into())
         })?;
-    drop(file);
-    ConvertToDeltaBuilder::new()
+    CreateBuilder::new()
         .with_location(table_uri)
+        .with_columns(schema.fields().cloned())
+        .with_actions(actions)
         .await
         .map_err(|e: deltalake::DeltaTableError| {
-            PolarsError::ComputeError(format!("write_delta: convert_to_delta: {}", e).into())
+            PolarsError::ComputeError(format!("write_delta: create table: {e}").into())
         })?;
     Ok(())
 }
@@ -1750,6 +2149,150 @@ pub fn write_delta_with_save_options(
     overwrite_schema: bool,
     partition_by: &[String],
 ) -> Result<(), PolarsError> {
+    write_delta_with_save_options_and_logical_map_paths(
+        df,
+        path,
+        save_mode,
+        merge_schema,
+        overwrite_schema,
+        partition_by,
+        &[],
+    )
+}
+
+#[cfg(feature = "delta")]
+pub fn write_delta_with_save_options_and_logical_map_paths(
+    df: &polars::prelude::DataFrame,
+    path: impl AsRef<Path>,
+    save_mode: crate::dataframe::SaveMode,
+    merge_schema: bool,
+    overwrite_schema: bool,
+    partition_by: &[String],
+    logical_map_paths: &[String],
+) -> Result<(), PolarsError> {
+    let path = robin_sparkless_core::maybe_confine_files_path(path.as_ref()).map_err(|e| {
+        PolarsError::InvalidOperation(format!("write_delta path confinement: {e}").into())
+    })?;
+    let path = path.as_path();
+    let replacing_plain_path = save_mode == crate::dataframe::SaveMode::Overwrite
+        && path.exists()
+        && !path.join("_delta_log").exists();
+    if replacing_plain_path {
+        let parent = path.parent().ok_or_else(|| {
+            PolarsError::InvalidOperation(
+                "write_delta: cannot stage overwrite without a parent directory".into(),
+            )
+        })?;
+        let name = path.file_name().ok_or_else(|| {
+            PolarsError::InvalidOperation(
+                "write_delta: cannot stage overwrite at filesystem root".into(),
+            )
+        })?;
+        let staging = parent.join(format!(
+            ".{}.sparkless_delta_stage_{:016x}",
+            name.to_string_lossy(),
+            rand::random::<u64>()
+        ));
+        let staged = write_delta_with_save_options_inner(
+            df,
+            &staging,
+            save_mode,
+            merge_schema,
+            overwrite_schema,
+            partition_by,
+            logical_map_paths,
+        );
+        if let Err(error) = staged {
+            let _ = remove_delta_path(&staging);
+            return Err(error);
+        }
+        if let Err(error) = replace_delta_path_with_staged(path, &staging) {
+            let _ = remove_delta_path(&staging);
+            return Err(error);
+        }
+        return Ok(());
+    }
+
+    write_delta_with_save_options_inner(
+        df,
+        path,
+        save_mode,
+        merge_schema,
+        overwrite_schema,
+        partition_by,
+        logical_map_paths,
+    )
+}
+
+#[cfg(feature = "delta")]
+fn remove_delta_path(path: &Path) -> Result<(), PolarsError> {
+    use std::fs;
+
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(PolarsError::ComputeError(
+                format!("write_delta: inspect path {}: {error}", path.display()).into(),
+            ));
+        }
+    };
+    if metadata.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+    .map_err(|e| {
+        PolarsError::ComputeError(
+            format!("write_delta: remove path {}: {e}", path.display()).into(),
+        )
+    })
+}
+
+#[cfg(feature = "delta")]
+fn replace_delta_path_with_staged(path: &Path, staging: &Path) -> Result<(), PolarsError> {
+    use std::fs;
+
+    let parent = path.parent().ok_or_else(|| {
+        PolarsError::InvalidOperation("write_delta: cannot replace filesystem root".into())
+    })?;
+    let name = path.file_name().ok_or_else(|| {
+        PolarsError::InvalidOperation("write_delta: cannot replace filesystem root".into())
+    })?;
+    let backup = parent.join(format!(
+        ".{}.sparkless_delta_backup_{:016x}",
+        name.to_string_lossy(),
+        rand::random::<u64>()
+    ));
+    fs::rename(path, &backup).map_err(|e| {
+        PolarsError::ComputeError(format!("write_delta: stage old path: {e}").into())
+    })?;
+    if let Err(error) = fs::rename(staging, path) {
+        let rollback = fs::rename(&backup, path);
+        return Err(PolarsError::ComputeError(
+            format!(
+                "write_delta: install staged table: {error}{}",
+                rollback
+                    .err()
+                    .map(|rollback| format!("; restoring original path failed: {rollback}"))
+                    .unwrap_or_default()
+            )
+            .into(),
+        ));
+    }
+    remove_delta_path(&backup)
+}
+
+#[cfg(feature = "delta")]
+fn write_delta_with_save_options_inner(
+    df: &polars::prelude::DataFrame,
+    path: &Path,
+    save_mode: crate::dataframe::SaveMode,
+    merge_schema: bool,
+    overwrite_schema: bool,
+    partition_by: &[String],
+    logical_map_paths: &[String],
+) -> Result<(), PolarsError> {
     use futures::TryStreamExt;
     use std::fs;
     use tokio::runtime::Runtime;
@@ -1760,10 +2303,6 @@ pub fn write_delta_with_save_options(
         ));
     }
     let overwrite = save_mode == crate::dataframe::SaveMode::Overwrite;
-    let path = robin_sparkless_core::maybe_confine_files_path(path.as_ref()).map_err(|e| {
-        PolarsError::InvalidOperation(format!("write_delta path confinement: {e}").into())
-    })?;
-    let path = path.as_path();
     let partition_by = partition_by.to_vec();
     let mut partition_names = std::collections::HashSet::new();
     for name in &partition_by {
@@ -1773,20 +2312,6 @@ pub fn write_delta_with_save_options(
             ));
         }
         delta_partition_field(df, name)?;
-    }
-    // Overwrite should replace a plain Parquet location instead of converting its old files
-    // into the initial Delta snapshot. Existing Delta tables are overwritten transactionally
-    // below by adding remove actions to the log.
-    if overwrite && path.exists() && !path.join("_delta_log").exists() {
-        if path.is_dir() {
-            fs::remove_dir_all(path).map_err(|e| {
-                PolarsError::ComputeError(format!("write_delta: remove existing path: {e}").into())
-            })?;
-        } else {
-            fs::remove_file(path).map_err(|e| {
-                PolarsError::ComputeError(format!("write_delta: remove existing path: {e}").into())
-            })?;
-        }
     }
     fs::create_dir_all(path).map_err(|e| {
         PolarsError::ComputeError(format!("write_delta: create_dir_all: {}", e).into())
@@ -1832,9 +2357,19 @@ pub fn write_delta_with_save_options(
                 let existing_partition_columns =
                     table_state.metadata().partition_columns().to_vec();
                 let replace_table_definition = overwrite && overwrite_schema;
+                let requested_partition_names = partition_by
+                    .iter()
+                    .map(|name| name.to_lowercase())
+                    .collect::<std::collections::HashSet<_>>();
+                let existing_partition_names = existing_partition_columns
+                    .iter()
+                    .map(|name| name.to_lowercase())
+                    .collect::<std::collections::HashSet<_>>();
+                let requested_partitions_match =
+                    requested_partition_names == existing_partition_names;
                 if !replace_table_definition
                     && !partition_by.is_empty()
-                    && partition_by != existing_partition_columns
+                    && !requested_partitions_match
                 {
                     return Err(PolarsError::InvalidOperation(
                         format!(
@@ -1846,16 +2381,19 @@ pub fn write_delta_with_save_options(
                 }
                 let effective_partition_columns = if replace_table_definition {
                     partition_by.clone()
-                } else if partition_by.is_empty() {
-                    existing_partition_columns.clone()
                 } else {
-                    partition_by.clone()
+                    existing_partition_columns.clone()
                 };
                 let existing_schema = table_state.metadata().parse_schema().map_err(|e| {
                     PolarsError::ComputeError(
                         format!("write_delta: parse existing schema: {e}").into(),
                     )
                 })?;
+                if delta_schema_uses_column_mapping(&existing_schema) {
+                    return Err(PolarsError::InvalidOperation(
+                        "write_delta: writes to Delta tables with column mapping are not supported; refusing to create data files with logical column names".into(),
+                    ));
+                }
                 let input_to_resolve = df.clone();
                 let schema_for_null_columns = existing_schema.clone();
                 let resolved_df = tokio::task::spawn_blocking(move || {
@@ -1867,7 +2405,8 @@ pub fn write_delta_with_save_options(
                         format!("write_delta: resolve null input columns: {e}").into(),
                     )
                 })??;
-                let incoming_schema = delta_schema_from_frame(&resolved_df).await?;
+                let incoming_schema =
+                    delta_schema_from_frame(&resolved_df, logical_map_paths).await?;
                 let target_schema = if overwrite_schema {
                     incoming_schema.clone()
                 } else if merge_schema {
@@ -1900,7 +2439,7 @@ pub fn write_delta_with_save_options(
                     }
                     let existing_field = existing_schema
                         .fields()
-                        .find(|field| field.name == *name)
+                        .find(|field| delta_names_equal(&field.name, name))
                         .ok_or_else(|| {
                             PolarsError::ComputeError(
                                 format!(
@@ -2017,9 +2556,16 @@ pub fn write_delta_with_save_options(
                     return Ok(());
                 }
                 if partition_by.is_empty() {
-                    write_delta_bootstrap_parquet(df, path, &table_uri).await
+                    write_delta_bootstrap_parquet(df, path, &table_uri, logical_map_paths).await
                 } else {
-                    write_delta_bootstrap_partitioned(df, path, &table_uri, &partition_by).await
+                    write_delta_bootstrap_partitioned(
+                        df,
+                        path,
+                        &table_uri,
+                        &partition_by,
+                        logical_map_paths,
+                    )
+                    .await
                 }
             }
             Err(e) => Err(PolarsError::ComputeError(

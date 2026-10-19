@@ -2467,6 +2467,31 @@ impl DataFrame {
         )
     }
 
+    #[cfg(feature = "delta")]
+    pub fn write_delta_with_save_options_and_logical_map_paths(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        mode: SaveMode,
+        merge_schema: bool,
+        overwrite_schema: bool,
+        partition_by: &[String],
+        logical_map_paths: &[String],
+    ) -> Result<(), PolarsError> {
+        let resolved_partition_by = partition_by
+            .iter()
+            .map(|name| self.resolve_column_name(name))
+            .collect::<Result<Vec<_>, _>>()?;
+        crate::delta::write_delta_with_save_options_and_logical_map_paths(
+            self.collect_inner()?.as_ref(),
+            path,
+            mode,
+            merge_schema,
+            overwrite_schema,
+            &resolved_partition_by,
+            logical_map_paths,
+        )
+    }
+
     /// Stub when `delta` feature is disabled.
     #[cfg(not(feature = "delta"))]
     pub fn write_delta(
@@ -2739,11 +2764,12 @@ impl<'a> DataFrameWriter<'a> {
         use std::fs;
         use std::path::Path;
 
-        let (merge_schema, overwrite_schema, is_delta_format) =
-            options.map_or((false, false, false), |opts| {
+        let (merge_schema, overwrite_schema, is_delta_format, logical_map_paths) =
+            options.map_or((false, false, false, Vec::new()), |opts| {
                 let mut merge_schema = false;
                 let mut overwrite_schema = false;
                 let mut is_delta = false;
+                let mut logical_map_paths: Vec<String> = Vec::new();
                 for (k, v) in opts {
                     if k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true") {
                         merge_schema = true;
@@ -2755,9 +2781,11 @@ impl<'a> DataFrameWriter<'a> {
                         && v.eq_ignore_ascii_case("delta")
                     {
                         is_delta = true;
+                    } else if k.eq_ignore_ascii_case("sparkless.delta.logicalMapPaths") {
+                        logical_map_paths = serde_json::from_str(v).unwrap_or_default();
                     }
                 }
-                (merge_schema, overwrite_schema, is_delta)
+                (merge_schema, overwrite_schema, is_delta, logical_map_paths)
             });
 
         // Warehouse paths (disk-backed saveAsTable). For schema-qualified names, allow both:
@@ -2814,13 +2842,14 @@ impl<'a> DataFrameWriter<'a> {
                     .iter()
                     .map(|name| self.df.resolve_column_name(name))
                     .collect::<Result<Vec<_>, _>>()?;
-                crate::delta::write_delta_with_save_options(
+                crate::delta::write_delta_with_save_options_and_logical_map_paths(
                     &pl_df,
                     target,
                     mode,
                     merge_schema,
                     overwrite_schema,
                     &resolved_partition_by,
+                    &logical_map_paths,
                 )?;
                 let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
                 session.register_table(name, loaded);
@@ -2833,6 +2862,7 @@ impl<'a> DataFrameWriter<'a> {
                     warehouse_exists,
                     merge_schema,
                     overwrite_schema,
+                    logical_map_paths,
                 );
                 return Err(PolarsError::InvalidOperation(
                     "saveAsTable(format=delta) requires the delta feature to be enabled.".into(),

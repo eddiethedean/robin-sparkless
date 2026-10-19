@@ -177,7 +177,9 @@ pub mod delta {
     use robin_sparkless_polars::PolarsError;
     use std::path::Path;
 
-    pub use robin_sparkless_polars::delta::{read_delta, read_delta_with_version, write_delta};
+    pub use robin_sparkless_polars::delta::{
+        logical_map_paths, read_delta, read_delta_with_version, write_delta,
+    };
 
     /// Read Delta table; returns root-owned DataFrame.
     pub fn read_delta_root(
