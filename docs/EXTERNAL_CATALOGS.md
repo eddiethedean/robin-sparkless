@@ -188,6 +188,5 @@ same limits in both languages.
 
 ## Availability
 
-This change is developed against the `v4.13.4` source tree. Until a compatible
-Sparkless release includes it, the API is available only to consumers building the
-corresponding source revision. It is not part of the published `4.13.4` artifact.
+This API is included in Sparkless `4.14.0`. Consumers on earlier releases must build
+from the corresponding source revision to use it.
