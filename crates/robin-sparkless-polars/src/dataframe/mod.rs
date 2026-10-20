@@ -2545,6 +2545,7 @@ impl DataFrame {
             df: self,
             mode: WriteMode::Overwrite,
             format: WriteFormat::Parquet,
+            format_was_set: false,
             options: HashMap::new(),
             partition_by: Vec::new(),
         }
@@ -2645,6 +2646,7 @@ pub struct DataFrameWriter<'a> {
     df: &'a DataFrame,
     mode: WriteMode,
     format: WriteFormat,
+    format_was_set: bool,
     options: HashMap<String, String>,
     partition_by: Vec<String>,
 }
@@ -2657,6 +2659,7 @@ impl<'a> DataFrameWriter<'a> {
 
     pub fn format(mut self, format: WriteFormat) -> Self {
         self.format = format;
+        self.format_was_set = true;
         self
     }
 
@@ -2752,7 +2755,14 @@ impl<'a> DataFrameWriter<'a> {
             .iter()
             .rev()
             .find(|(key, _)| key.eq_ignore_ascii_case("sparkless.writer.format"))
-            .map(|(_, value)| value.clone());
+            .map(|(_, value)| value.clone())
+            .or_else(|| {
+                self.format_was_set.then(|| match self.format {
+                    WriteFormat::Parquet => "parquet".to_string(),
+                    WriteFormat::Csv => "csv".to_string(),
+                    WriteFormat::Json => "json".to_string(),
+                })
+            });
         let writer_options = options
             .unwrap_or_default()
             .iter()
@@ -2872,7 +2882,7 @@ impl<'a> DataFrameWriter<'a> {
         // provider hit owns this write; provider errors or unsupported writes must never fall
         // through into Sparkless' in-memory or warehouse writer.
         if !session.saved_table_exists(name)
-            && !session.has_temp_view(name)
+            && !session.has_exact_temp_view(name)
             && let Some(provider) = session.external_catalog_provider()?
         {
             let descriptor = provider.resolve_table(name).map_err(|error| {
@@ -3139,6 +3149,7 @@ impl<'a> DataFrameWriter<'a> {
             df: self.df,
             mode: self.mode,
             format: WriteFormat::Parquet,
+            format_was_set: true,
             options: self.options.clone(),
             partition_by: self.partition_by.clone(),
         }
@@ -3151,6 +3162,7 @@ impl<'a> DataFrameWriter<'a> {
             df: self.df,
             mode: self.mode,
             format: WriteFormat::Csv,
+            format_was_set: true,
             options: self.options.clone(),
             partition_by: self.partition_by.clone(),
         }
@@ -3163,6 +3175,7 @@ impl<'a> DataFrameWriter<'a> {
             df: self.df,
             mode: self.mode,
             format: WriteFormat::Json,
+            format_was_set: true,
             options: self.options.clone(),
             partition_by: self.partition_by.clone(),
         }

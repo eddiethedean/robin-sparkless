@@ -1767,6 +1767,14 @@ impl SparkSession {
         false
     }
 
+    /// Returns whether a temp view is registered under exactly this identifier.
+    pub(crate) fn has_exact_temp_view(&self, name: &str) -> bool {
+        self.catalog
+            .lock()
+            .ok()
+            .is_some_and(|m| m.contains_key(name))
+    }
+
     /// Drop a temporary view by name (PySpark: catalog.dropTempView).
     /// Returns true if a view was removed; false if not present.
     /// If the catalog lock is poisoned, returns false and a message is emitted to stderr.
@@ -1918,7 +1926,7 @@ impl SparkSession {
 
     /// Check if a table or temp view exists (PySpark: catalog.tableExists). True if name is in temp views, saved tables, global temp, or warehouse.
     /// If a catalog lock is poisoned, returns false for that source and a message is emitted to stderr.
-    pub fn table_exists(&self, name: &str) -> bool {
+    pub(crate) fn local_table_exists(&self, name: &str) -> bool {
         // global_temp.xyz
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
             return match global_temp_catalog().lock() {
@@ -1981,6 +1989,14 @@ impl SparkSession {
             }
         }
         false
+    }
+
+    /// Check local catalogs, the warehouse, and the configured external catalog.
+    pub fn table_exists(&self, name: &str) -> bool {
+        self.local_table_exists(name)
+            || self
+                .resolve_external_table_descriptor(name)
+                .is_ok_and(|(resolved, _)| resolved.is_some())
     }
 
     /// Return global temp view names (process-scoped). PySpark: catalog.listTables(dbName="global_temp").
@@ -2096,6 +2112,24 @@ impl SparkSession {
     /// Look up a table or temp view by name (PySpark: table(name)).
     /// Resolution order: (1) global_temp.xyz from global catalog, (2) temp view, (3) saved table, (4) warehouse.
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
+        self.table_impl(name, true, false)
+    }
+
+    #[cfg(any(feature = "sql", feature = "delta"))]
+    pub(crate) fn table_after_external_miss(
+        &self,
+        name: &str,
+        provider_configured: bool,
+    ) -> Result<DataFrame, PolarsError> {
+        self.table_impl(name, false, provider_configured)
+    }
+
+    fn table_impl(
+        &self,
+        name: &str,
+        resolve_external: bool,
+        provider_configured: bool,
+    ) -> Result<DataFrame, PolarsError> {
         // global_temp.xyz -> global catalog only
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
             if let Some(df) = global_temp_catalog()
@@ -2132,7 +2166,11 @@ impl SparkSession {
         {
             return Ok(df);
         }
-        let (external_df, has_external_provider) = self.resolve_external_table(name)?;
+        let (external_df, has_external_provider) = if resolve_external {
+            self.resolve_external_table(name)?
+        } else {
+            (None, provider_configured)
+        };
         if let Some(df) = external_df {
             return Ok(df);
         }
@@ -2224,7 +2262,11 @@ impl SparkSession {
         let frame = self.read_external_descriptor(descriptor)?;
 
         let actual_schema = frame.schema()?;
-        if !external_schemas_match(&descriptor.schema, &actual_schema) {
+        #[cfg(feature = "delta")]
+        let logical_map_paths = crate::delta::logical_map_paths(&descriptor.canonical_location)?;
+        #[cfg(not(feature = "delta"))]
+        let logical_map_paths = Vec::new();
+        if !external_schemas_match(&descriptor.schema, &actual_schema, &logical_map_paths) {
             return Err(PolarsError::InvalidOperation(
                 format!(
                     "external table schema mismatch for '{}' (table_id '{}')",
@@ -3623,14 +3665,11 @@ impl SparkSession {
     /// Read a Delta table or in-memory table by name/path. If name_or_path looks like a path, reads from Delta on disk; else resolves as table name (temp view then saved table).
     #[cfg(feature = "delta")]
     pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
-        if let Ok(table) = self.table(name_or_path) {
-            return Ok(table);
+        if !Self::looks_like_path(name_or_path) {
+            return self.table(name_or_path);
         }
-        if Self::looks_like_path(name_or_path) {
-            let path = name_or_path.strip_prefix("file://").unwrap_or(name_or_path);
-            return self.read_delta_path(Path::new(path));
-        }
-        self.table(name_or_path)
+        let path = name_or_path.strip_prefix("file://").unwrap_or(name_or_path);
+        self.read_delta_path(Path::new(path))
     }
 
     #[cfg(feature = "delta")]
@@ -3639,15 +3678,27 @@ impl SparkSession {
         name_or_path: &str,
         version: Option<i64>,
     ) -> Result<DataFrame, PolarsError> {
-        if let Ok(table) = self.table(name_or_path) {
-            return Ok(table);
+        if !Self::looks_like_path(name_or_path) {
+            let (resolved, has_provider) = self.resolve_external_table_descriptor(name_or_path)?;
+            if let Some((_, mut descriptor)) = resolved {
+                if version.is_some() {
+                    descriptor.version = version;
+                }
+                return self.read_external_table_descriptor(name_or_path, &descriptor);
+            }
+            if has_provider {
+                return self.table_after_external_miss(name_or_path, true);
+            }
+            if let Ok(table) = self.table(name_or_path) {
+                return Ok(table);
+            }
+            return self.table(name_or_path);
         }
         if Self::looks_like_path(name_or_path) {
             let path = name_or_path.strip_prefix("file://").unwrap_or(name_or_path);
             return self.read_delta_path_with_version(Path::new(path), version);
         }
-        // In-memory tables have no version; ignore version and return table.
-        self.table(name_or_path)
+        unreachable!("non-path Delta reads are handled above")
     }
 
     /// Stub when `delta` feature is disabled. Still supports reading by table name.
@@ -3735,7 +3786,11 @@ impl SparkSession {
 
 /// Compare names and data types while ignoring nullability. The current Polars schema adapter
 /// reports fields as nullable because Polars does not retain Delta's nullability metadata.
-fn external_schemas_match(expected: &StructType, actual: &StructType) -> bool {
+fn external_schemas_match(
+    expected: &StructType,
+    actual: &StructType,
+    logical_map_paths: &[String],
+) -> bool {
     let expected_fields = expected.fields();
     let actual_fields = actual.fields();
     expected_fields.len() == actual_fields.len()
@@ -3744,11 +3799,24 @@ fn external_schemas_match(expected: &StructType, actual: &StructType) -> bool {
             .zip(actual_fields)
             .all(|(expected, actual)| {
                 expected.name == actual.name
-                    && external_data_types_match(&expected.data_type, &actual.data_type)
+                    && external_data_types_match(
+                        &expected.data_type,
+                        &actual.data_type,
+                        &format!(
+                            "\"{}\"",
+                            expected.name.replace('\\', "\\\\").replace('"', "\\\"")
+                        ),
+                        logical_map_paths,
+                    )
             })
 }
 
-fn external_data_types_match(expected: &CoreDataType, actual: &CoreDataType) -> bool {
+fn external_data_types_match(
+    expected: &CoreDataType,
+    actual: &CoreDataType,
+    path: &str,
+    logical_map_paths: &[String],
+) -> bool {
     use CoreDataType::*;
 
     match (expected, actual) {
@@ -3764,20 +3832,34 @@ fn external_data_types_match(expected: &CoreDataType, actual: &CoreDataType) -> 
         (Decimal(expected_precision, expected_scale), Decimal(actual_precision, actual_scale)) => {
             expected_precision == actual_precision && expected_scale == actual_scale
         }
-        (Array(expected), Array(actual)) => external_data_types_match(expected, actual),
-        (Map(expected_key, expected_value), Map(actual_key, actual_value)) => {
-            external_data_types_match(expected_key, actual_key)
-                && external_data_types_match(expected_value, actual_value)
+        (Array(expected), Array(actual)) => {
+            external_data_types_match(expected, actual, path, logical_map_paths)
         }
-        (Map(expected_key, expected_value), Array(actual_entries)) => {
+        (Map(expected_key, expected_value), Map(actual_key, actual_value)) => {
+            external_data_types_match(expected_key, actual_key, path, logical_map_paths)
+                && external_data_types_match(expected_value, actual_value, path, logical_map_paths)
+        }
+        (Map(expected_key, expected_value), Array(actual_entries))
+            if logical_map_paths.iter().any(|p| p == path) =>
+        {
             let Struct(actual_fields) = actual_entries.as_ref() else {
                 return false;
             };
             actual_fields.len() == 2
                 && actual_fields[0].name == "key"
                 && actual_fields[1].name == "value"
-                && external_data_types_match(expected_key, &actual_fields[0].data_type)
-                && external_data_types_match(expected_value, &actual_fields[1].data_type)
+                && external_data_types_match(
+                    expected_key,
+                    &actual_fields[0].data_type,
+                    &format!("{path}{{key}}"),
+                    logical_map_paths,
+                )
+                && external_data_types_match(
+                    expected_value,
+                    &actual_fields[1].data_type,
+                    &format!("{path}{{value}}"),
+                    logical_map_paths,
+                )
         }
         (Struct(expected_fields), Struct(actual_fields)) => {
             expected_fields.len() == actual_fields.len()
@@ -3786,7 +3868,15 @@ fn external_data_types_match(expected: &CoreDataType, actual: &CoreDataType) -> 
                     .zip(actual_fields)
                     .all(|(expected, actual)| {
                         expected.name == actual.name
-                            && external_data_types_match(&expected.data_type, &actual.data_type)
+                            && external_data_types_match(
+                                &expected.data_type,
+                                &actual.data_type,
+                                &format!(
+                                    "{path}.\"{}\"",
+                                    expected.name.replace('\\', "\\\\").replace('"', "\\\"")
+                                ),
+                                logical_map_paths,
+                            )
                     })
         }
         _ => false,
