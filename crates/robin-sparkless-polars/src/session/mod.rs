@@ -14,18 +14,24 @@ use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
+use robin_sparkless_core::engine::{
+    ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
+};
+use robin_sparkless_core::schema::{DataType as CoreDataType, StructType};
 use robin_sparkless_core::{
     PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils,
     decimal_allow_precision_loss_from_session_map,
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 mod builder;
 pub use builder::SparkSessionBuilder;
 mod reader;
 pub use reader::DataFrameReader;
+
+type ResolvedExternalTable = (Arc<dyn ExternalCatalogProvider>, ExternalTableDescriptor);
 
 /// Parse "array<element_type>" to get inner type string. Returns None if not array<>.
 fn parse_array_element_type(type_str: &str) -> Option<String> {
@@ -1554,6 +1560,8 @@ pub struct SparkSession {
     pub(crate) current_database: Arc<Mutex<String>>,
     /// Best-effort cache flags (PySpark: catalog.cacheTable / isCached). No execution impact today.
     pub(crate) cached_tables: Arc<Mutex<HashSet<String>>>,
+    /// External catalog resolver attached to this logical session.
+    external_catalog_provider: Arc<RwLock<Option<Arc<dyn ExternalCatalogProvider>>>>,
 }
 
 impl SparkSession {
@@ -1580,6 +1588,7 @@ impl SparkSession {
             udf_registry: UdfRegistry::new(),
             current_database: Arc::new(Mutex::new("default".to_string())),
             cached_tables: Arc::new(Mutex::new(HashSet::new())),
+            external_catalog_provider: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -1603,7 +1612,38 @@ impl SparkSession {
             udf_registry: UdfRegistry::new(),
             current_database: Arc::new(Mutex::new(current_db)),
             cached_tables: Arc::new(Mutex::new(HashSet::new())),
+            // A new logical session never inherits external catalog callbacks.
+            external_catalog_provider: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Attach or remove this logical session's external catalog resolver.
+    ///
+    /// Clones of this session share the resolver slot. `new_session()` creates a fresh slot.
+    pub fn set_external_catalog_provider(
+        &self,
+        provider: Option<Arc<dyn ExternalCatalogProvider>>,
+    ) -> Result<(), EngineError> {
+        let mut current = self
+            .external_catalog_provider
+            .write()
+            .map_err(|_| EngineError::Internal("external catalog provider lock poisoned".into()))?;
+        let previous = std::mem::replace(&mut *current, provider);
+        drop(current);
+        // Provider destruction may execute Python finalizers that re-enter this session.
+        drop(previous);
+        Ok(())
+    }
+
+    pub(crate) fn external_catalog_provider(
+        &self,
+    ) -> Result<Option<Arc<dyn ExternalCatalogProvider>>, PolarsError> {
+        self.external_catalog_provider
+            .read()
+            .map(|provider| provider.clone())
+            .map_err(|_| {
+                PolarsError::InvalidOperation("external catalog provider lock poisoned".into())
+            })
     }
 
     /// Return the current database for this session. Defaults to "default".
@@ -1728,6 +1768,14 @@ impl SparkSession {
                 .is_some_and(|m| m.contains_key(unqualified));
         }
         false
+    }
+
+    /// Returns whether a temp view is registered under exactly this identifier.
+    pub(crate) fn has_exact_temp_view(&self, name: &str) -> bool {
+        self.catalog
+            .lock()
+            .ok()
+            .is_some_and(|m| m.contains_key(name))
     }
 
     /// Drop a temporary view by name (PySpark: catalog.dropTempView).
@@ -1881,7 +1929,7 @@ impl SparkSession {
 
     /// Check if a table or temp view exists (PySpark: catalog.tableExists). True if name is in temp views, saved tables, global temp, or warehouse.
     /// If a catalog lock is poisoned, returns false for that source and a message is emitted to stderr.
-    pub fn table_exists(&self, name: &str) -> bool {
+    pub(crate) fn local_table_exists(&self, name: &str) -> bool {
         // global_temp.xyz
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
             return match global_temp_catalog().lock() {
@@ -1916,8 +1964,10 @@ impl SparkSession {
         } {
             return true;
         }
-        // #984: schema-qualified name — try unqualified table name
-        if name.contains('.') {
+        // #984: schema-qualified name — try unqualified table name only for the
+        // legacy local catalog. Once an external provider is attached, a miss for
+        // the full identifier must not be shadowed by an unrelated local suffix.
+        if name.contains('.') && self.external_catalog_provider().ok().flatten().is_none() {
             let unqualified = name.rsplit_once('.').map(|(_, tbl)| tbl).unwrap_or(name);
             if match self.catalog.lock() {
                 Ok(m) => m.contains_key(unqualified),
@@ -1944,6 +1994,25 @@ impl SparkSession {
             }
         }
         false
+    }
+
+    /// Check local catalogs, the warehouse, and the configured external catalog.
+    pub fn try_table_exists(&self, name: &str) -> Result<bool, PolarsError> {
+        if self.local_table_exists(name) {
+            return Ok(true);
+        }
+        let (resolved, _) = self.resolve_external_table_descriptor(name)?;
+        Ok(resolved.is_some())
+    }
+
+    /// Best-effort existence check. Use [`Self::try_table_exists`] when provider errors
+    /// need to be distinguished from a genuine catalog miss.
+    pub fn table_exists(&self, name: &str) -> bool {
+        self.try_table_exists(name).unwrap_or(false)
+    }
+
+    pub(crate) fn is_global_temp_name(name: &str) -> bool {
+        Self::parse_global_temp_name(name).is_some()
     }
 
     /// Return global temp view names (process-scoped). PySpark: catalog.listTables(dbName="global_temp").
@@ -2059,6 +2128,24 @@ impl SparkSession {
     /// Look up a table or temp view by name (PySpark: table(name)).
     /// Resolution order: (1) global_temp.xyz from global catalog, (2) temp view, (3) saved table, (4) warehouse.
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
+        self.table_impl(name, true, false)
+    }
+
+    #[cfg(any(feature = "sql", feature = "delta"))]
+    pub(crate) fn table_after_external_miss(
+        &self,
+        name: &str,
+        provider_configured: bool,
+    ) -> Result<DataFrame, PolarsError> {
+        self.table_impl(name, false, provider_configured)
+    }
+
+    fn table_impl(
+        &self,
+        name: &str,
+        resolve_external: bool,
+        provider_configured: bool,
+    ) -> Result<DataFrame, PolarsError> {
         // global_temp.xyz -> global catalog only
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
             if let Some(df) = global_temp_catalog()
@@ -2095,8 +2182,19 @@ impl SparkSession {
         {
             return Ok(df);
         }
+        let (external_df, has_external_provider) = if resolve_external {
+            self.resolve_external_table(name)?
+        } else {
+            (None, provider_configured)
+        };
+        if let Some(df) = external_df {
+            return Ok(df);
+        }
         // #984: schema-qualified name (e.g. test_schema.test_table): try unqualified table name so table("test_schema.test_table") finds a table registered as "test_table".
-        if name.contains('.') {
+        // Preserve this historical fallback only when there is no external resolver. If a
+        // configured catalog misses a multipart name, returning a local table with the same
+        // final component would bind an unrelated relation.
+        if name.contains('.') && !has_external_provider {
             let unqualified = name.rsplit_once('.').map(|(_, tbl)| tbl).unwrap_or(name);
             if let Some(df) = self
                 .catalog
@@ -2137,6 +2235,105 @@ impl SparkSession {
             )
             .into(),
         ))
+    }
+
+    fn resolve_external_table(&self, name: &str) -> Result<(Option<DataFrame>, bool), PolarsError> {
+        let (external_target, has_provider) = self.resolve_external_table_descriptor(name)?;
+        let Some((_, descriptor)) = external_target else {
+            return Ok((None, has_provider));
+        };
+        let frame = self.read_external_table_descriptor(name, &descriptor)?;
+        Ok((Some(frame), true))
+    }
+
+    pub(crate) fn resolve_external_table_descriptor(
+        &self,
+        name: &str,
+    ) -> Result<(Option<ResolvedExternalTable>, bool), PolarsError> {
+        let Some(provider) = self.external_catalog_provider()? else {
+            return Ok((None, false));
+        };
+        let Some(descriptor) = provider.resolve_table(name).map_err(|error| {
+            PolarsError::InvalidOperation(
+                format!("external catalog provider failed to resolve '{name}': {error}").into(),
+            )
+        })?
+        else {
+            return Ok((None, true));
+        };
+        descriptor.validate().map_err(|error| {
+            PolarsError::InvalidOperation(
+                format!("external catalog returned an invalid descriptor for '{name}': {error}")
+                    .into(),
+            )
+        })?;
+        Ok((Some((provider, descriptor)), true))
+    }
+
+    pub(crate) fn read_external_table_descriptor(
+        &self,
+        name: &str,
+        descriptor: &ExternalTableDescriptor,
+    ) -> Result<DataFrame, PolarsError> {
+        self.read_external_table_descriptor_with_schema_validation(name, descriptor, true)
+    }
+
+    fn read_external_table_descriptor_with_schema_validation(
+        &self,
+        name: &str,
+        descriptor: &ExternalTableDescriptor,
+        validate_schema: bool,
+    ) -> Result<DataFrame, PolarsError> {
+        let frame = self.read_external_descriptor(descriptor)?;
+
+        if !validate_schema {
+            return Ok(frame);
+        }
+        let actual_schema = frame.schema()?;
+        #[cfg(feature = "delta")]
+        let logical_map_paths = crate::delta::logical_map_paths_with_version(
+            &descriptor.canonical_location,
+            descriptor.version,
+        )?;
+        #[cfg(not(feature = "delta"))]
+        let logical_map_paths = Vec::new();
+        if !external_schemas_match(&descriptor.schema, &actual_schema, &logical_map_paths) {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "external table schema mismatch for '{}' (table_id '{}')",
+                    name, descriptor.table_id
+                )
+                .into(),
+            ));
+        }
+        Ok(frame)
+    }
+
+    fn read_external_descriptor(
+        &self,
+        descriptor: &ExternalTableDescriptor,
+    ) -> Result<DataFrame, PolarsError> {
+        match descriptor.format {
+            #[cfg(feature = "delta")]
+            ExternalTableFormat::Delta => {
+                let normalized = crate::delta::normalize_delta_path(std::path::Path::new(
+                    &descriptor.canonical_location,
+                ))?;
+                let path = confine_io_path(&normalized)?;
+                crate::delta::read_delta_snapshot_with_version(
+                    path,
+                    descriptor.version,
+                    self.is_case_sensitive(),
+                )
+            }
+            #[cfg(not(feature = "delta"))]
+            ExternalTableFormat::Delta => Err(PolarsError::InvalidOperation(
+                "external Delta table reads require the 'delta' feature".into(),
+            )),
+            _ => Err(PolarsError::InvalidOperation(
+                "external table format is not supported by this Sparkless backend".into(),
+            )),
+        }
     }
 
     pub fn builder() -> SparkSessionBuilder {
@@ -3502,14 +3699,11 @@ impl SparkSession {
     /// Read a Delta table or in-memory table by name/path. If name_or_path looks like a path, reads from Delta on disk; else resolves as table name (temp view then saved table).
     #[cfg(feature = "delta")]
     pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
-        if let Ok(table) = self.table(name_or_path) {
-            return Ok(table);
+        if !Self::looks_like_path(name_or_path) {
+            return self.table(name_or_path);
         }
-        if Self::looks_like_path(name_or_path) {
-            let path = name_or_path.strip_prefix("file://").unwrap_or(name_or_path);
-            return self.read_delta_path(Path::new(path));
-        }
-        self.table(name_or_path)
+        let path = name_or_path.strip_prefix("file://").unwrap_or(name_or_path);
+        self.read_delta_path(Path::new(path))
     }
 
     #[cfg(feature = "delta")]
@@ -3518,29 +3712,49 @@ impl SparkSession {
         name_or_path: &str,
         version: Option<i64>,
     ) -> Result<DataFrame, PolarsError> {
-        if let Ok(table) = self.table(name_or_path) {
-            return Ok(table);
+        if !Self::looks_like_path(name_or_path) {
+            if Self::parse_global_temp_name(name_or_path).is_some()
+                || self.has_exact_temp_view(name_or_path)
+                || self.saved_table_exists(name_or_path)
+            {
+                return self.table(name_or_path);
+            }
+            let (resolved, has_provider) = self.resolve_external_table_descriptor(name_or_path)?;
+            if let Some((_, mut descriptor)) = resolved {
+                let validate_schema = version.is_none() || descriptor.version == version;
+                if version.is_some() {
+                    descriptor.version = version;
+                }
+                return self.read_external_table_descriptor_with_schema_validation(
+                    name_or_path,
+                    &descriptor,
+                    validate_schema,
+                );
+            }
+            if has_provider {
+                return self.table_after_external_miss(name_or_path, true);
+            }
+            if let Ok(table) = self.table(name_or_path) {
+                return Ok(table);
+            }
+            return self.table(name_or_path);
         }
         if Self::looks_like_path(name_or_path) {
             let path = name_or_path.strip_prefix("file://").unwrap_or(name_or_path);
             return self.read_delta_path_with_version(Path::new(path), version);
         }
-        // In-memory tables have no version; ignore version and return table.
-        self.table(name_or_path)
+        unreachable!("non-path Delta reads are handled above")
     }
 
     /// Stub when `delta` feature is disabled. Still supports reading by table name.
     #[cfg(not(feature = "delta"))]
     pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
-        if let Ok(table) = self.table(name_or_path) {
-            return Ok(table);
+        if !Self::looks_like_path(name_or_path) {
+            return self.table(name_or_path);
         }
-        if Self::looks_like_path(name_or_path) {
-            return Err(PolarsError::InvalidOperation(
-                "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
-            ));
-        }
-        self.table(name_or_path)
+        Err(PolarsError::InvalidOperation(
+            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+        ))
     }
 
     #[cfg(not(feature = "delta"))]
@@ -3607,7 +3821,107 @@ impl SparkSession {
             udf_registry: self.udf_registry.clone(),
             current_database: self.current_database.clone(),
             cached_tables: self.cached_tables.clone(),
+            external_catalog_provider: self.external_catalog_provider.clone(),
         })
+    }
+}
+
+/// Compare names and data types while ignoring nullability. The current Polars schema adapter
+/// reports fields as nullable because Polars does not retain Delta's nullability metadata.
+fn external_schemas_match(
+    expected: &StructType,
+    actual: &StructType,
+    logical_map_paths: &[String],
+) -> bool {
+    let expected_fields = expected.fields();
+    let actual_fields = actual.fields();
+    expected_fields.len() == actual_fields.len()
+        && expected_fields
+            .iter()
+            .zip(actual_fields)
+            .all(|(expected, actual)| {
+                expected.name == actual.name
+                    && external_data_types_match(
+                        &expected.data_type,
+                        &actual.data_type,
+                        &format!(
+                            "\"{}\"",
+                            expected.name.replace('\\', "\\\\").replace('"', "\\\"")
+                        ),
+                        logical_map_paths,
+                    )
+            })
+}
+
+fn external_data_types_match(
+    expected: &CoreDataType,
+    actual: &CoreDataType,
+    path: &str,
+    logical_map_paths: &[String],
+) -> bool {
+    use CoreDataType::*;
+
+    match (expected, actual) {
+        (String, String)
+        | (Integer, Integer)
+        | (Short, Short)
+        | (Long, Long)
+        | (Double, Double)
+        | (Boolean, Boolean)
+        | (Date, Date)
+        | (Timestamp, Timestamp)
+        | (Binary, Binary) => true,
+        (Decimal(expected_precision, expected_scale), Decimal(actual_precision, actual_scale)) => {
+            expected_precision == actual_precision && expected_scale == actual_scale
+        }
+        (Array(expected), Array(actual)) => {
+            external_data_types_match(expected, actual, &format!("{path}[]"), logical_map_paths)
+        }
+        (Map(expected_key, expected_value), Map(actual_key, actual_value)) => {
+            external_data_types_match(expected_key, actual_key, path, logical_map_paths)
+                && external_data_types_match(expected_value, actual_value, path, logical_map_paths)
+        }
+        (Map(expected_key, expected_value), Array(actual_entries))
+            if logical_map_paths.iter().any(|p| p == path) =>
+        {
+            let Struct(actual_fields) = actual_entries.as_ref() else {
+                return false;
+            };
+            actual_fields.len() == 2
+                && actual_fields[0].name == "key"
+                && actual_fields[1].name == "value"
+                && external_data_types_match(
+                    expected_key,
+                    &actual_fields[0].data_type,
+                    &format!("{path}{{key}}"),
+                    logical_map_paths,
+                )
+                && external_data_types_match(
+                    expected_value,
+                    &actual_fields[1].data_type,
+                    &format!("{path}{{value}}"),
+                    logical_map_paths,
+                )
+        }
+        (Struct(expected_fields), Struct(actual_fields)) => {
+            expected_fields.len() == actual_fields.len()
+                && expected_fields
+                    .iter()
+                    .zip(actual_fields)
+                    .all(|(expected, actual)| {
+                        expected.name == actual.name
+                            && external_data_types_match(
+                                &expected.data_type,
+                                &actual.data_type,
+                                &format!(
+                                    "{path}.\"{}\"",
+                                    expected.name.replace('\\', "\\\\").replace('"', "\\\"")
+                                ),
+                                logical_map_paths,
+                            )
+                    })
+        }
+        _ => false,
     }
 }
 
@@ -3620,7 +3934,191 @@ impl Default for SparkSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "delta")]
+    use robin_sparkless_core::engine::ExternalTableSaveMode;
     use serde_json::json;
+
+    #[derive(Clone)]
+    struct TestExternalCatalog {
+        identifier: String,
+        descriptor: Arc<Mutex<Option<ExternalTableDescriptor>>>,
+        error: Option<String>,
+        write_error: Arc<Mutex<Option<String>>>,
+        resolutions: Arc<Mutex<Vec<String>>>,
+        writes: Arc<Mutex<Vec<robin_sparkless_core::engine::ExternalTableWriteRequest>>>,
+    }
+
+    impl ExternalCatalogProvider for TestExternalCatalog {
+        fn resolve_table(
+            &self,
+            identifier: &str,
+        ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+            self.resolutions
+                .lock()
+                .expect("test resolution lock")
+                .push(identifier.to_string());
+            if let Some(error) = &self.error {
+                return Err(EngineError::User(error.clone()));
+            }
+            if identifier == self.identifier {
+                Ok(self
+                    .descriptor
+                    .lock()
+                    .expect("test descriptor lock")
+                    .clone())
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn write_table(
+            &self,
+            request: robin_sparkless_core::engine::ExternalTableWriteRequest,
+        ) -> Result<robin_sparkless_core::engine::ExternalTableWriteResult, EngineError> {
+            self.writes
+                .lock()
+                .expect("test write lock")
+                .push(request.clone());
+            if let Some(error) = self
+                .write_error
+                .lock()
+                .expect("test write error lock")
+                .clone()
+            {
+                return Err(EngineError::User(error));
+            }
+
+            #[cfg(feature = "delta")]
+            {
+                use polars::io::ipc::IpcStreamReader;
+                use polars::prelude::SerReader;
+
+                let input = IpcStreamReader::new(std::io::Cursor::new(request.data.bytes))
+                    .finish()
+                    .map_err(|error| EngineError::User(format!("decode Arrow IPC: {error}")))?;
+                let mode = match request.mode {
+                    robin_sparkless_core::engine::ExternalTableSaveMode::Append => {
+                        crate::dataframe::SaveMode::Append
+                    }
+                    robin_sparkless_core::engine::ExternalTableSaveMode::Overwrite => {
+                        crate::dataframe::SaveMode::Overwrite
+                    }
+                    robin_sparkless_core::engine::ExternalTableSaveMode::ErrorIfExists
+                    | robin_sparkless_core::engine::ExternalTableSaveMode::Ignore => {
+                        return Err(EngineError::User(
+                            "test provider received a non-mutating save mode".into(),
+                        ));
+                    }
+                };
+                let option_is_true = |name: &str| {
+                    request.options.iter().rev().any(|(key, value)| {
+                        key.eq_ignore_ascii_case(name) && value.eq_ignore_ascii_case("true")
+                    })
+                };
+                crate::delta::write_delta_with_save_options_and_logical_map_paths_for_catalog(
+                    &input,
+                    &request.table.canonical_location,
+                    mode,
+                    option_is_true("mergeSchema"),
+                    option_is_true("overwriteSchema"),
+                    &request.partition_by,
+                    &[],
+                )
+                .map_err(|error| {
+                    EngineError::User(format!("write local Delta fixture: {error}"))
+                })?;
+
+                let committed_version = request.table.version.unwrap_or(0) + 1;
+                let mut table = request.table;
+                table.version = Some(committed_version);
+                *self.descriptor.lock().expect("test descriptor lock") = Some(table.clone());
+                Ok(robin_sparkless_core::engine::ExternalTableWriteResult {
+                    table,
+                    committed_version,
+                })
+            }
+            #[cfg(not(feature = "delta"))]
+            {
+                let _ = request;
+                Err(EngineError::User(
+                    "test provider requires the delta feature".into(),
+                ))
+            }
+        }
+    }
+
+    fn external_descriptor(path: &std::path::Path, schema: StructType) -> ExternalTableDescriptor {
+        ExternalTableDescriptor {
+            table_id: "table-123".into(),
+            canonical_location: path.to_string_lossy().into_owned(),
+            schema,
+            version: None,
+            provider: "delta-rs".into(),
+            permissions_context: Some("test-principal".into()),
+            format: ExternalTableFormat::Delta,
+        }
+    }
+
+    #[cfg(feature = "delta")]
+    fn write_test_delta_table(path: &std::path::Path) -> StructType {
+        let session = SparkSession::builder()
+            .app_name("external-catalog-fixture")
+            .get_or_create();
+        let frame = session
+            .create_dataframe(
+                vec![(7, 10, "value".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .expect("create fixture DataFrame");
+        let schema = frame.schema().expect("read fixture schema");
+        frame
+            .write_delta(path, true, false)
+            .expect("write real local Delta fixture");
+        schema
+    }
+
+    #[cfg(feature = "delta")]
+    fn typed_external_frame(session: &SparkSession, id: i64, amount: &str) -> DataFrame {
+        session
+            .create_dataframe_from_rows(
+                vec![vec![
+                    json!(id),
+                    json!(amount),
+                    json!("2026-10-19"),
+                    json!("2026-10-19 12:34:56"),
+                    json!([id, id + 1]),
+                    json!({"label": "sample", "count": id}),
+                ]],
+                vec![
+                    ("id".into(), "long".into()),
+                    ("amount".into(), "decimal(10,2)".into()),
+                    ("day".into(), "date".into()),
+                    ("created".into(), "timestamp".into()),
+                    ("items".into(), "array<long>".into()),
+                    ("payload".into(), "struct<label:string,count:long>".into()),
+                ],
+                true,
+                false,
+            )
+            .expect("create typed external table fixture")
+    }
+
+    fn test_external_catalog(
+        identifier: &str,
+        descriptor: Option<ExternalTableDescriptor>,
+        error: Option<&str>,
+    ) -> (Arc<TestExternalCatalog>, Arc<Mutex<Vec<String>>>) {
+        let resolutions = Arc::new(Mutex::new(Vec::new()));
+        let provider = Arc::new(TestExternalCatalog {
+            identifier: identifier.to_string(),
+            descriptor: Arc::new(Mutex::new(descriptor)),
+            error: error.map(str::to_string),
+            write_error: Arc::new(Mutex::new(None)),
+            resolutions: resolutions.clone(),
+            writes: Arc::new(Mutex::new(Vec::new())),
+        });
+        (provider, resolutions)
+    }
 
     #[test]
     fn decimal_schema_enforces_declared_precision() {
@@ -5151,5 +5649,421 @@ mod tests {
             .sql("SELECT value AS x FROM a1 UNION ALL SELECT value AS x FROM a2")
             .unwrap();
         assert_eq!(out.count().unwrap(), 2);
+    }
+
+    #[test]
+    #[cfg(feature = "delta")]
+    fn external_catalog_table_and_reader_resolve_real_delta_snapshot() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("orders");
+        let schema = write_test_delta_table(&path);
+        let descriptor = external_descriptor(&path, schema);
+        let identifier = "main.analytics.orders";
+        let (provider, resolutions) = test_external_catalog(identifier, Some(descriptor), None);
+        let session = SparkSession::builder()
+            .app_name("external-catalog-read")
+            .get_or_create();
+        session
+            .set_external_catalog_provider(Some(provider))
+            .expect("set external provider");
+
+        let direct = session
+            .table(identifier)
+            .expect("resolve via SparkSession.table");
+        assert_eq!(direct.count().unwrap(), 1);
+        assert_eq!(direct.collect_as_json_rows().unwrap()[0]["name"], "value");
+
+        let reader = session
+            .read()
+            .table(identifier)
+            .expect("resolve via DataFrameReader.table");
+        assert_eq!(reader.count().unwrap(), 1);
+        assert_eq!(
+            *resolutions.lock().expect("test resolution lock"),
+            vec![identifier.to_string(), identifier.to_string()]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "delta")]
+    fn external_catalog_table_writes_delegate_typed_ipc_with_modes_and_options() {
+        use crate::dataframe::SaveMode;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::SerReader;
+        use std::io::Cursor;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("orders");
+        let seed_session = SparkSession::builder()
+            .app_name("external-catalog-write-seed")
+            .get_or_create();
+        let seed = typed_external_frame(&seed_session, 1, "1.25");
+        let schema = seed.schema().unwrap();
+        seed.write_delta(&path, true, false)
+            .expect("write real local Delta seed");
+        let mut descriptor = external_descriptor(&path, schema);
+        descriptor.version = Some(0);
+
+        let identifier = "main.analytics.orders";
+        let (provider, resolutions) = test_external_catalog(identifier, Some(descriptor), None);
+        let session = SparkSession::builder()
+            .app_name("external-catalog-write")
+            .get_or_create();
+        session
+            .set_external_catalog_provider(Some(provider.clone()))
+            .expect("set external provider");
+
+        let input = typed_external_frame(&session, 2, "12.34");
+        let expected = input.collect_inner().unwrap().as_ref().clone();
+        input
+            .write()
+            .option("mergeSchema", "true")
+            .option("user.option", "kept")
+            .option("sparkless.writer.format", "delta")
+            .save_as_table(&session, identifier, SaveMode::Append)
+            .expect("delegate append to the external table provider");
+
+        let writes = provider.writes.lock().expect("test write lock");
+        assert_eq!(writes.len(), 1);
+        let request = &writes[0];
+        assert_eq!(request.identifier, identifier);
+        assert_eq!(request.table.table_id, "table-123");
+        assert_eq!(request.mode, ExternalTableSaveMode::Append);
+        assert_eq!(request.format.as_deref(), Some("delta"));
+        assert!(
+            request
+                .options
+                .iter()
+                .any(|(key, value)| { key.eq_ignore_ascii_case("mergeSchema") && value == "true" })
+        );
+        assert!(
+            request
+                .options
+                .iter()
+                .any(|(key, value)| { key == "user.option" && value == "kept" })
+        );
+        assert!(
+            request
+                .options
+                .iter()
+                .all(|(key, _)| !key.to_ascii_lowercase().starts_with("sparkless."))
+        );
+        assert!(request.partition_by.is_empty());
+
+        let transmitted = IpcStreamReader::new(Cursor::new(request.data.bytes.clone()))
+            .finish()
+            .expect("decode captured Arrow IPC stream");
+        assert_eq!(transmitted.schema(), expected.schema());
+        assert_eq!(expected.column("created").unwrap().null_count(), 0);
+        for name in ["id", "amount", "day", "created", "items", "payload"] {
+            assert!(
+                transmitted
+                    .column(name)
+                    .unwrap()
+                    .equals_missing(expected.column(name).unwrap())
+            );
+        }
+        drop(writes);
+
+        let committed = session
+            .table(identifier)
+            .expect("read the committed external snapshot");
+        assert_eq!(committed.count().unwrap(), 2);
+        assert_eq!(
+            provider
+                .descriptor
+                .lock()
+                .expect("test descriptor lock")
+                .as_ref()
+                .and_then(|table| table.version),
+            Some(1)
+        );
+        assert_eq!(
+            *resolutions.lock().expect("test resolution lock"),
+            vec![identifier.to_string(), identifier.to_string()]
+        );
+
+        let overwrite_input = typed_external_frame(&session, 3, "30.00");
+        overwrite_input
+            .write()
+            .option("sparkless.writer.format", "delta")
+            .save_as_table(&session, identifier, SaveMode::Overwrite)
+            .expect("delegate overwrite to the external table provider");
+        {
+            let writes = provider.writes.lock().expect("test write lock");
+            assert_eq!(writes.len(), 2);
+            assert_eq!(writes[1].mode, ExternalTableSaveMode::Overwrite);
+            assert_eq!(writes[1].table.version, Some(1));
+        }
+        assert_eq!(session.table(identifier).unwrap().count().unwrap(), 1);
+
+        *provider.write_error.lock().expect("test write error lock") =
+            Some("native commit failed".into());
+        let failing_input = typed_external_frame(&session, 4, "99.99");
+        let error = failing_input
+            .write()
+            .mode(crate::dataframe::WriteMode::Append)
+            .save_as_table(&session, identifier, SaveMode::Append)
+            .expect_err("provider error must stop the write without a local fallback");
+        assert!(error.to_string().contains("native commit failed"));
+        assert_eq!(
+            session.table(identifier).unwrap().count().unwrap(),
+            1,
+            "failed delegated write must leave the committed table unchanged"
+        );
+    }
+
+    #[test]
+    fn external_catalog_save_modes_do_not_delegate_non_mutating_modes() {
+        use crate::dataframe::SaveMode;
+
+        let session = SparkSession::builder()
+            .app_name("external-catalog-save-modes")
+            .get_or_create();
+        let frame = session
+            .create_dataframe(vec![(9, 1, "value".into())], vec!["id", "age", "name"])
+            .unwrap();
+        let schema = frame.schema().unwrap();
+        let descriptor =
+            external_descriptor(std::path::Path::new("/unused/external-table"), schema);
+        let (provider, resolutions) =
+            test_external_catalog("main.analytics.orders", Some(descriptor), None);
+        session
+            .set_external_catalog_provider(Some(provider.clone()))
+            .expect("set external provider");
+
+        let error = frame
+            .write()
+            .save_as_table(&session, "main.analytics.orders", SaveMode::ErrorIfExists)
+            .expect_err("ErrorIfExists must reject an existing external table");
+        assert!(error.to_string().contains("SaveMode is ErrorIfExists"));
+        frame
+            .write()
+            .save_as_table(&session, "main.analytics.orders", SaveMode::Ignore)
+            .expect("Ignore leaves an existing external table unchanged");
+        assert!(provider.writes.lock().expect("test write lock").is_empty());
+        assert_eq!(
+            *resolutions.lock().expect("test resolution lock"),
+            vec![
+                "main.analytics.orders".to_string(),
+                "main.analytics.orders".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "delta", feature = "sql"))]
+    fn sql_reads_external_catalog_relation_through_session_table() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("orders");
+        let schema = write_test_delta_table(&path);
+        let descriptor = external_descriptor(&path, schema);
+        let identifier = "main.analytics.orders";
+        let (provider, resolutions) = test_external_catalog(identifier, Some(descriptor), None);
+        let session = SparkSession::builder()
+            .app_name("external-catalog-sql")
+            .get_or_create();
+        session
+            .set_external_catalog_provider(Some(provider))
+            .expect("set external provider");
+
+        let result = session
+            .sql("SELECT id, name FROM main.analytics.orders")
+            .expect("SQL external table read");
+        assert_eq!(result.count().unwrap(), 1);
+        let rows = result.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0]["id"], 7);
+        assert_eq!(rows[0]["name"], "value");
+        assert_eq!(
+            *resolutions.lock().expect("test resolution lock"),
+            vec![identifier.to_string()]
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "delta", feature = "sql"))]
+    fn sql_insert_into_external_catalog_delegates_a_native_append() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("orders");
+        let seed_session = SparkSession::builder()
+            .app_name("external-catalog-insert-seed")
+            .get_or_create();
+        let seed = seed_session
+            .create_dataframe(
+                vec![(7, 10, "value".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let schema = seed.schema().unwrap();
+        seed.write_delta(&path, true, false)
+            .expect("write real local Delta seed");
+        let mut descriptor = external_descriptor(&path, schema);
+        descriptor.version = Some(0);
+
+        let identifier = "main.analytics.orders";
+        let (provider, _) = test_external_catalog(identifier, Some(descriptor), None);
+        let session = SparkSession::builder()
+            .app_name("external-catalog-insert")
+            .get_or_create();
+        session
+            .set_external_catalog_provider(Some(provider.clone()))
+            .expect("set external provider");
+
+        let statement = session
+            .sql("INSERT INTO main.analytics.orders VALUES (8, 20, 'added')")
+            .expect("insert into external Delta table");
+        assert_eq!(statement.count().unwrap(), 0);
+        assert_eq!(session.table(identifier).unwrap().count().unwrap(), 2);
+
+        let writes = provider.writes.lock().expect("test write lock");
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].identifier, identifier);
+        assert_eq!(writes[0].mode, ExternalTableSaveMode::Append);
+        assert_eq!(writes[0].table.version, Some(0));
+        assert!(writes[0].options.is_empty());
+    }
+
+    #[test]
+    fn external_catalog_provider_errors_are_not_treated_as_misses() {
+        let session = SparkSession::builder()
+            .app_name("external-catalog-error")
+            .get_or_create();
+        let local = session
+            .create_dataframe(
+                vec![(99, 0, "local".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        session.register_table("orders", local);
+        let (provider, resolutions) = test_external_catalog(
+            "main.analytics.orders",
+            None,
+            Some("catalog service unavailable"),
+        );
+        session
+            .set_external_catalog_provider(Some(provider))
+            .expect("set external provider");
+
+        let error = session
+            .table("main.analytics.orders")
+            .err()
+            .expect("provider failure must surface");
+        assert!(error.to_string().contains("catalog service unavailable"));
+        assert_eq!(
+            *resolutions.lock().expect("test resolution lock"),
+            vec!["main.analytics.orders".to_string()]
+        );
+    }
+
+    #[test]
+    fn external_catalog_miss_does_not_strip_multipart_name_to_local_table() {
+        let session = SparkSession::builder()
+            .app_name("external-catalog-miss")
+            .get_or_create();
+        let local = session
+            .create_dataframe(
+                vec![(99, 0, "local".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        session.register_table("orders", local);
+        let (provider, _) = test_external_catalog("another.catalog.table", None, None);
+        session
+            .set_external_catalog_provider(Some(provider))
+            .expect("set external provider");
+
+        let error = session
+            .table("main.analytics.orders")
+            .err()
+            .expect("multipart miss must not bind unrelated local table");
+        assert!(error.to_string().contains("main.analytics.orders"));
+    }
+
+    #[test]
+    #[cfg(feature = "delta")]
+    fn external_catalog_descriptor_schema_mismatch_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("orders");
+        let _actual_schema = write_test_delta_table(&path);
+        let wrong_schema = StructType::new(vec![robin_sparkless_core::StructField::new(
+            "id".into(),
+            CoreDataType::String,
+            true,
+        )]);
+        let descriptor = external_descriptor(&path, wrong_schema);
+        let (provider, _) = test_external_catalog("main.analytics.orders", Some(descriptor), None);
+        let session = SparkSession::builder()
+            .app_name("external-catalog-schema")
+            .get_or_create();
+        session
+            .set_external_catalog_provider(Some(provider))
+            .expect("set external provider");
+
+        let error = session
+            .table("main.analytics.orders")
+            .err()
+            .expect("schema mismatch must fail");
+        assert!(error.to_string().contains("external table schema mismatch"));
+    }
+
+    #[test]
+    #[cfg(not(feature = "delta"))]
+    fn external_catalog_requires_delta_feature_for_delta_descriptors() {
+        let path = std::path::Path::new("/tmp/external-catalog-delta-feature-required");
+        let schema = StructType::new(vec![robin_sparkless_core::StructField::new(
+            "id".into(),
+            CoreDataType::Long,
+            true,
+        )]);
+        let descriptor = external_descriptor(path, schema);
+        let (provider, _) = test_external_catalog("main.analytics.orders", Some(descriptor), None);
+        let session = SparkSession::builder()
+            .app_name("external-catalog-no-delta-feature")
+            .get_or_create();
+        session
+            .set_external_catalog_provider(Some(provider))
+            .expect("set external provider");
+
+        let error = session
+            .table("main.analytics.orders")
+            .err()
+            .expect("Delta descriptor must fail without the optional feature");
+        assert!(
+            error
+                .to_string()
+                .contains("external Delta table reads require the 'delta' feature")
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "delta")]
+    fn external_catalog_provider_is_not_inherited_by_new_session() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("orders");
+        let schema = write_test_delta_table(&path);
+        let descriptor = external_descriptor(&path, schema);
+        let (provider, resolutions) =
+            test_external_catalog("main.analytics.orders", Some(descriptor), None);
+        let parent = SparkSession::builder()
+            .app_name("external-catalog-parent")
+            .get_or_create();
+        parent
+            .set_external_catalog_provider(Some(provider))
+            .expect("set external provider");
+        assert_eq!(
+            parent
+                .table("main.analytics.orders")
+                .unwrap()
+                .count()
+                .unwrap(),
+            1
+        );
+
+        let child = parent.new_session();
+        assert!(child.table("main.analytics.orders").is_err());
+        assert_eq!(
+            *resolutions.lock().expect("test resolution lock"),
+            vec!["main.analytics.orders".to_string()]
+        );
     }
 }

@@ -377,6 +377,12 @@ def pytest_collection_modifyitems(
     # not to branch and hide the discrepancy.
     allowlist = {
         Path(__file__).resolve(),
+        # Sparkless's external provider API has no PySpark counterpart.
+        (
+            Path(__file__).resolve().parent
+            / "unit"
+            / "test_external_catalog_provider.py"
+        ).resolve(),
         (Path(__file__).resolve().parent / "sql" / "conftest.py").resolve(),
         (
             Path(__file__).resolve().parent / "unit" / "test_sparkless_testing.py"

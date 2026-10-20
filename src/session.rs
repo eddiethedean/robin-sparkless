@@ -1,6 +1,7 @@
 //! Root-owned Session API; delegates to robin-sparkless-polars for execution.
 
 use crate::EngineError;
+use robin_sparkless_core::engine::ExternalCatalogProvider;
 use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 use robin_sparkless_polars::{
     DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError,
@@ -8,6 +9,7 @@ use robin_sparkless_polars::{
 };
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::dataframe::DataFrame;
 
@@ -96,6 +98,17 @@ impl SparkSession {
         self.0.register_table(name, df.0)
     }
 
+    /// Attach or remove this logical session's external catalog resolver.
+    ///
+    /// Resolver implementations receive exact identifiers from table lookups and return a
+    /// stable table descriptor. A new logical session starts without this resolver.
+    pub fn set_external_catalog_provider(
+        &self,
+        provider: Option<Arc<dyn ExternalCatalogProvider>>,
+    ) -> Result<(), EngineError> {
+        self.0.set_external_catalog_provider(provider)
+    }
+
     pub fn register_database(&self, name: &str) {
         self.0.register_database(name)
     }
@@ -118,6 +131,11 @@ impl SparkSession {
 
     pub fn table_exists(&self, name: &str) -> bool {
         self.0.table_exists(name)
+    }
+
+    /// Check local and external catalogs while preserving provider errors.
+    pub fn try_table_exists(&self, name: &str) -> Result<bool, PolarsError> {
+        self.0.try_table_exists(name)
     }
 
     pub fn list_global_temp_view_names(&self) -> Vec<String> {
@@ -322,12 +340,10 @@ impl SparkSession {
             .map(DataFrame)
     }
 
-    #[cfg(feature = "delta")]
     pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
         self.0.read_delta(name_or_path).map(DataFrame)
     }
 
-    #[cfg(feature = "delta")]
     pub fn read_delta_with_version(
         &self,
         name_or_path: &str,

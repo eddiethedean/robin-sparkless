@@ -5,6 +5,8 @@
 #![allow(unexpected_cfgs)] // pyo3 create_exception! uses cfg(gil-refs)
 #![allow(clippy::useless_conversion)] // PyO3 PyResult<T> / PyErr false positives (fixed in pyo3 0.23+)
 
+mod external_catalog;
+
 use polars_plan::dsl::AggExpr;
 use pyo3::class::basic::CompareOp;
 use pyo3::create_exception;
@@ -942,6 +944,7 @@ impl PySparkSessionBuilder {
             py,
             PySparkSession {
                 inner: session,
+                external_catalog_tables: Default::default(),
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -992,6 +995,21 @@ fn delta_map_paths_for_catalog_table(
     if let Some(paths) = session.delta_map_view_paths.borrow().get(name) {
         return Ok(paths.clone());
     }
+    let exact_local = session.inner.saved_table_exists(name)
+        || session
+            .inner
+            .list_temp_view_names()
+            .iter()
+            .any(|view| view == name);
+    if !exact_local {
+        let schemas = session
+            .external_catalog_tables
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(table) = schemas.get(name) {
+            return Ok(external_catalog::logical_map_paths(&table.schema));
+        }
+    }
     if session.inner.has_temp_view(name) {
         return Ok(result);
     }
@@ -1019,6 +1037,40 @@ fn delta_map_paths_for_catalog_table(
         }
     }
     Ok(result)
+}
+
+#[cfg(feature = "delta")]
+fn delta_map_paths_for_delta_read(
+    session: &PySparkSession,
+    name: &str,
+    version: Option<i64>,
+) -> Result<std::collections::HashSet<String>, polars::prelude::PolarsError> {
+    let exact_local = session.inner.saved_table_exists(name)
+        || session
+            .inner
+            .list_temp_view_names()
+            .iter()
+            .any(|view| view == name);
+    if !exact_local {
+        let tables = session
+            .external_catalog_tables
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(table) = tables.get(name) {
+            let version = version.or(table.version);
+            return robin_sparkless::delta::logical_map_paths_with_version(
+                &table.canonical_location,
+                version,
+            )
+            .map(|paths| paths.into_iter().collect());
+        }
+    }
+    if name.contains('/') || name.contains('\\') || std::path::Path::new(name).exists() {
+        let path = name.strip_prefix("file://").unwrap_or(name);
+        return robin_sparkless::delta::logical_map_paths_with_version(path, version)
+            .map(|paths| paths.into_iter().collect());
+    }
+    delta_map_paths_for_catalog_table(session, name)
 }
 
 #[cfg(feature = "delta")]
@@ -1054,6 +1106,30 @@ fn delta_map_paths_for_sql_query(
     }
 
     fn table_columns(session: &PySparkSession, name: &str) -> Vec<String> {
+        let exact_local = session.inner.saved_table_exists(name)
+            || session
+                .inner
+                .list_temp_view_names()
+                .iter()
+                .any(|view| view == name);
+        if !exact_local {
+            if let Some(columns) = session
+                .external_catalog_tables
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(name)
+                .map(|table| {
+                    table
+                        .schema
+                        .fields()
+                        .iter()
+                        .map(|field| field.name.clone())
+                        .collect()
+                })
+            {
+                return columns;
+            }
+        }
         session
             .inner
             .table(name)
@@ -1285,10 +1361,10 @@ fn delta_map_paths_for_sql_query(
                     .to_string();
                 Some(SourceInput {
                     qualifier,
-                    paths: delta_map_paths_for_catalog_table(session, &table_name).ok()?,
+                    paths: delta_map_paths_for_catalog_table(session, &full_name).ok()?,
                     join_alias: output_prefix.clone(),
                     output_prefix,
-                    columns: table_columns(session, &table_name),
+                    columns: table_columns(session, &full_name),
                 })
             }
             TableFactor::Derived {
@@ -1572,6 +1648,7 @@ fn delta_map_paths_for_sql_query(
 #[pyclass(module = "sparkless.sql.session", unsendable)]
 struct PySparkSession {
     inner: SparkSession,
+    external_catalog_tables: external_catalog::ResolvedTables,
     /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
     backend_type: RefCell<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
@@ -2640,6 +2717,7 @@ impl PySparkSession {
             py,
             PySparkSession {
                 inner: session,
+                external_catalog_tables: Default::default(),
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -2710,6 +2788,7 @@ impl PySparkSession {
             py,
             PySparkSession {
                 inner: session,
+                external_catalog_tables: Default::default(),
                 backend_type: RefCell::new(backend_type),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -2820,6 +2899,43 @@ impl PySparkSession {
                 delta_map_paths_for_catalog_table(self, name).map_err(to_py_err)?;
         }
         Ok(wrapped)
+    }
+
+    /// Attach a synchronous Python catalog provider, or pass None to remove it.
+    fn set_external_catalog_provider(
+        &self,
+        py: Python<'_>,
+        provider: Option<Py<PyAny>>,
+    ) -> PyResult<()> {
+        let provider = provider
+            .map(|provider| {
+                external_catalog::PythonExternalCatalogProvider::new(
+                    py,
+                    provider,
+                    self.external_catalog_tables.clone(),
+                )
+            })
+            .transpose()?
+            .map(|provider| {
+                std::sync::Arc::new(provider)
+                    as std::sync::Arc<dyn robin_sparkless_core::ExternalCatalogProvider>
+            });
+        self.external_catalog_tables
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        self.inner
+            .set_external_catalog_provider(provider)
+            .map_err(to_py_err)
+    }
+
+    #[pyo3(name = "setExternalCatalogProvider")]
+    fn set_external_catalog_provider_camel(
+        &self,
+        py: Python<'_>,
+        provider: Option<Py<PyAny>>,
+    ) -> PyResult<()> {
+        self.set_external_catalog_provider(py, provider)
     }
 
     fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
@@ -3114,29 +3230,44 @@ impl PySparkSession {
             .map_err(to_py_err)
     }
 
-    #[cfg(feature = "delta")]
     fn read_delta(&self, name_or_path: &str) -> PyResult<PyDataFrame> {
-        self.inner
+        #[cfg_attr(not(feature = "delta"), allow(unused_mut))]
+        let mut frame = self
+            .inner
             .read_delta(name_or_path)
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            frame.logical_map_paths =
+                delta_map_paths_for_delta_read(self, name_or_path, None).map_err(to_py_err)?;
+        }
+        Ok(frame)
     }
 
-    #[cfg(feature = "delta")]
     #[pyo3(signature = (name_or_path, version=None))]
     fn read_delta_with_version(
         &self,
         name_or_path: &str,
         version: Option<i64>,
     ) -> PyResult<PyDataFrame> {
-        self.inner
+        #[cfg_attr(not(feature = "delta"), allow(unused_mut))]
+        let mut frame = self
+            .inner
             .read_delta_with_version(name_or_path, version)
             .map(PyDataFrame::wrap)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            frame.logical_map_paths =
+                delta_map_paths_for_delta_read(self, name_or_path, version).map_err(to_py_err)?;
+        }
+        Ok(frame)
     }
 
     fn stop(slf: PyRef<Self>, py: Python<'_>) -> PyResult<()> {
         slf.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        slf.set_external_catalog_provider(py, None)?;
         WINDOW_ORDER_SORT_HINT.with(|cell| *cell.borrow_mut() = None);
         slf.inner.stop();
         let ptr = slf.into_py_any(py)?.as_ptr();
@@ -3419,7 +3550,7 @@ impl PyCatalog {
         } else {
             a1
         };
-        Ok(session.inner.table_exists(&full))
+        session.inner.try_table_exists(&full).map_err(to_py_err)
     }
 
     #[pyo3(name = "getTable", signature = (tableName))]
@@ -3436,7 +3567,9 @@ impl PyCatalog {
             ("default".to_string(), tableName.to_string())
         };
         let full = format!("{db}.{tbl}");
-        if !session.inner.table_exists(&full) && !session.inner.table_exists(&tbl) {
+        if !session.inner.try_table_exists(&full).map_err(to_py_err)?
+            && !session.inner.try_table_exists(&tbl).map_err(to_py_err)?
+        {
             return Err(to_py_err(format!("Table not found: {full}")));
         }
         Py::new(
@@ -5682,9 +5815,9 @@ impl PyDataFrameReader {
         )))]
         {
             let _ = (py, url, table, properties);
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 "JDBC support requires building robin-sparkless with a JDBC feature enabled (e.g. 'jdbc', 'jdbc_mysql', 'sqlite').",
-            ));
+            ))
         }
 
         #[cfg(any(
@@ -9733,9 +9866,42 @@ impl PyDataFrameWriter {
         slf
     }
 
-    fn option<'a>(mut slf: PyRefMut<'a, Self>, key: &str, value: &str) -> PyRefMut<'a, Self> {
-        slf.options.push((key.to_string(), value.to_string()));
-        slf
+    fn option<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        key: &str,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRefMut<'a, Self>> {
+        slf.options
+            .push((key.to_string(), option_value_to_string(value)?));
+        Ok(slf)
+    }
+
+    /// Accept mappings or ordered pairs, preserving duplicate keys like the Rust writer.
+    #[pyo3(signature = (opts=None, **kwargs))]
+    fn options<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        opts: Option<&Bound<'_, PyAny>>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<PyRefMut<'a, Self>> {
+        let mut pairs = Vec::new();
+        if let Some(opts) = opts {
+            if let Ok(mapping) = opts.cast::<PyDict>() {
+                for (key, value) in mapping.iter() {
+                    pairs.push((key.extract::<String>()?, option_value_to_string(&value)?));
+                }
+            } else {
+                for (key, value) in opts.extract::<Vec<(String, Py<PyAny>)>>()? {
+                    pairs.push((key, option_value_to_string(value.bind(slf.py()))?));
+                }
+            }
+        }
+        if let Some(kwargs) = kwargs {
+            for (key, value) in kwargs.iter() {
+                pairs.push((key.extract::<String>()?, option_value_to_string(&value)?));
+            }
+        }
+        slf.options.extend(pairs);
+        Ok(slf)
     }
 
     #[pyo3(name = "partitionBy", signature = (*cols))]
@@ -9930,9 +10096,9 @@ impl PyDataFrameWriter {
         )))]
         {
             let _ = (py, url, table, properties, mode);
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 "JDBC/SQLite support requires building robin-sparkless with a JDBC/SQLite feature enabled (e.g. 'jdbc', 'jdbc_mysql', 'sqlite').",
-            ));
+            ))
         }
 
         #[cfg(any(
@@ -9992,11 +10158,7 @@ impl PyDataFrameWriter {
         if let Some(fmt) = &self.writer_format {
             options.push(("sparkless.writer.format".to_string(), fmt.to_string()));
         }
-        if self
-            .writer_format
-            .as_deref()
-            .is_some_and(|format| format.eq_ignore_ascii_case("delta"))
-        {
+        if !inner.logical_map_paths.is_empty() {
             let mut paths = inner.logical_map_paths.iter().cloned().collect::<Vec<_>>();
             paths.sort();
             options.push((
@@ -14252,6 +14414,11 @@ fn configure_for_multiprocessing() {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SparklessError", m.py().get_type::<SparklessError>())?;
+    m.add_function(wrap_pyfunction!(external_catalog::validate_descriptor, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        external_catalog::validate_write_result,
+        m
+    )?)?;
     m.add_class::<PySparkSessionBuilder>()?;
     m.add_class::<PySparkSession>()?;
     m.add_class::<PyDataFrameReader>()?;

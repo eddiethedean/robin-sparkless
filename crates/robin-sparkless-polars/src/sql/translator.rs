@@ -197,8 +197,13 @@ pub fn translate(
             ))
         }
         Statement::CreateTable(create_table) => {
-            let table_name = create_table.name.to_string();
-            if session.table_exists(&table_name) {
+            let table_name = table_name_from_object_name(&create_table.name);
+            let exists = session.local_table_exists(&table_name)
+                || session
+                    .resolve_external_table_descriptor(&table_name)?
+                    .0
+                    .is_some();
+            if exists {
                 if create_table.if_not_exists {
                     return Ok(DataFrame::from_polars_with_options(
                         PlDataFrame::empty(),
@@ -391,7 +396,21 @@ fn translate_insert(
         }
     };
 
-    let target_df = session.table(&table_name)?;
+    let local_target = table_name
+        .get(.."global_temp.".len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("global_temp."))
+        || session.has_exact_temp_view(&table_name)
+        || session.saved_table_exists(&table_name);
+    let (external_target, has_provider) = if local_target {
+        (None, false)
+    } else {
+        session.resolve_external_table_descriptor(&table_name)?
+    };
+    let target_df = match &external_target {
+        Some((_, descriptor)) => session.read_external_table_descriptor(&table_name, descriptor)?,
+        None if has_provider => session.table_after_external_miss(&table_name, true)?,
+        None => session.table(&table_name)?,
+    };
     let target_schema: StructType = target_df.schema()?;
     let target_cols: Vec<String> = target_schema
         .fields()
@@ -477,9 +496,26 @@ fn translate_insert(
         }
     };
 
+    if let Some((provider, descriptor)) = external_target {
+        new_rows_df.write().save_as_external_table_descriptor(
+            &table_name,
+            crate::dataframe::SaveMode::Append,
+            None,
+            provider.as_ref(),
+            &descriptor,
+            &[],
+        )?;
+        return Ok(DataFrame::from_polars_with_options(
+            PlDataFrame::empty(),
+            session.is_case_sensitive(),
+        ));
+    }
+
     // Append rows to existing table in the same namespace that provided the target table.
     let appended = target_df.union(&new_rows_df)?;
-    if session.has_temp_view(&table_name) {
+    if session.has_exact_temp_view(&table_name)
+        || (!has_provider && session.has_temp_view(&table_name))
+    {
         session.create_or_replace_temp_view(&table_name, appended);
     } else {
         session.register_table(&table_name, appended);

@@ -54,8 +54,10 @@ pub mod traits;
 /// Prefer these for engine-generic code and embeddings that should not depend on Polars.
 pub mod engine {
     pub use robin_sparkless_core::engine::{
-        CollectedRows, DataFrameBackend, DataFrameReaderBackend, GroupedDataBackend, JoinType,
-        PlanExecutor, SparkSessionBackend,
+        ArrowIpcStream, CollectedRows, DataFrameBackend, DataFrameReaderBackend,
+        ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
+        ExternalTableSaveMode, ExternalTableWriteRequest, ExternalTableWriteResult,
+        GroupedDataBackend, JoinType, PlanExecutor, SparkSessionBackend,
     };
     pub use robin_sparkless_core::expr::{
         ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
@@ -179,7 +181,8 @@ pub mod delta {
     use std::path::Path;
 
     pub use robin_sparkless_polars::delta::{
-        logical_map_paths, read_delta, read_delta_with_version, write_delta,
+        logical_map_paths, logical_map_paths_with_version, read_delta, read_delta_with_version,
+        write_delta,
     };
 
     /// Read Delta table; returns root-owned DataFrame.

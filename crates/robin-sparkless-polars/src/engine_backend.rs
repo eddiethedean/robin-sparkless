@@ -17,7 +17,8 @@ use crate::expr_ir::expr_ir_to_expr;
 use crate::session::{DataFrameReader, SparkSession};
 use polars::prelude::PolarsError;
 use robin_sparkless_core::engine::{
-    DataFrameBackend, DataFrameReaderBackend, GroupedDataBackend, SparkSessionBackend,
+    DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider, GroupedDataBackend,
+    SparkSessionBackend,
 };
 use robin_sparkless_core::error::EngineError as CoreEngineError;
 use robin_sparkless_core::expr::ExprIr;
@@ -305,6 +306,13 @@ impl SparkSessionBackend for SparkSession {
         let polars_df = downcast_df(df, "register_table")?;
         SparkSession::register_table(self, name, polars_df.clone());
         Ok(())
+    }
+
+    fn set_external_catalog_provider(
+        &self,
+        provider: Option<std::sync::Arc<dyn ExternalCatalogProvider>>,
+    ) -> Result<(), CoreEngineError> {
+        SparkSession::set_external_catalog_provider(self, provider)
     }
 
     fn is_case_sensitive(&self) -> bool {
