@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
 
+## [4.13.4] - 2026-10-19
+
+### Fixed
+
+- Preserve nested common types and decimal unions, and retain sliding-window floating-point compensation.
+
 ## [4.13.3] - 2026-09-14
 
 ### Fixed
