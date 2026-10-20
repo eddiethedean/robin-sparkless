@@ -1964,8 +1964,10 @@ impl SparkSession {
         } {
             return true;
         }
-        // #984: schema-qualified name — try unqualified table name
-        if name.contains('.') {
+        // #984: schema-qualified name — try unqualified table name only for the
+        // legacy local catalog. Once an external provider is attached, a miss for
+        // the full identifier must not be shadowed by an unrelated local suffix.
+        if name.contains('.') && self.external_catalog_provider().ok().flatten().is_none() {
             let unqualified = name.rsplit_once('.').map(|(_, tbl)| tbl).unwrap_or(name);
             if match self.catalog.lock() {
                 Ok(m) => m.contains_key(unqualified),
@@ -2000,6 +2002,10 @@ impl SparkSession {
             || self
                 .resolve_external_table_descriptor(name)
                 .is_ok_and(|(resolved, _)| resolved.is_some())
+    }
+
+    pub(crate) fn is_global_temp_name(name: &str) -> bool {
+        Self::parse_global_temp_name(name).is_some()
     }
 
     /// Return global temp view names (process-scoped). PySpark: catalog.listTables(dbName="global_temp").
@@ -2266,7 +2272,10 @@ impl SparkSession {
 
         let actual_schema = frame.schema()?;
         #[cfg(feature = "delta")]
-        let logical_map_paths = crate::delta::logical_map_paths(&descriptor.canonical_location)?;
+        let logical_map_paths = crate::delta::logical_map_paths_with_version(
+            &descriptor.canonical_location,
+            descriptor.version,
+        )?;
         #[cfg(not(feature = "delta"))]
         let logical_map_paths = Vec::new();
         if !external_schemas_match(&descriptor.schema, &actual_schema, &logical_map_paths) {
@@ -2288,7 +2297,10 @@ impl SparkSession {
         match descriptor.format {
             #[cfg(feature = "delta")]
             ExternalTableFormat::Delta => {
-                let path = confine_io_path(std::path::Path::new(&descriptor.canonical_location))?;
+                let normalized = crate::delta::normalize_delta_path(std::path::Path::new(
+                    &descriptor.canonical_location,
+                ))?;
+                let path = confine_io_path(&normalized)?;
                 crate::delta::read_delta_snapshot_with_version(
                     path,
                     descriptor.version,

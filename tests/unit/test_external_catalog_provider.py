@@ -399,6 +399,55 @@ def test_python_catalog_retains_map_metadata_for_reads_and_rejects_map_writes(
     assert provider.writes == []
 
 
+@pytest.mark.delta
+def test_python_provider_map_metadata_handles_quoted_sql_and_single_lookup(
+    session, tmp_path
+):
+    path = str(tmp_path / "maps")
+    schema = T.StructType(
+        [T.StructField("attrs", T.MapType(T.StringType(), T.LongType()))]
+    )
+    seed = session.createDataFrame([({"key": 7},)], schema)
+    seed.write.format("delta").mode("overwrite").save(path)
+    table = descriptor(schema, path)
+
+    class OneLookupProvider(Provider):
+        def resolve_table(self, identifier):
+            self.lookups.append(identifier)
+            if len(self.lookups) > 1:
+                raise RuntimeError("unexpected second lookup")
+            return self.table if identifier == IDENTIFIER else None
+
+    provider = OneLookupProvider(table)
+    session.set_external_catalog_provider(provider)
+    quoted = "SELECT * FROM `catalog`.`schema`.`orders`"
+    frame = session.sql(quoted)
+    assert type(frame.schema["attrs"].dataType) is T.MapType
+    assert frame.collect()[0]["attrs"] == {"key": 7}
+    frame.write.format("delta").mode("overwrite").save(str(tmp_path / "copy"))
+    copied = session.read.format("delta").load(str(tmp_path / "copy"))
+    assert type(copied.schema["attrs"].dataType) is T.MapType
+    assert provider.lookups == [IDENTIFIER]
+
+
+@pytest.mark.delta
+def test_python_provider_file_url_is_confined_after_url_normalization(
+    session, tmp_path, monkeypatch
+):
+    base = tmp_path / "base"
+    nested = base / "nested" / "orders"
+    flattened = base / "orders"
+    base.mkdir()
+    schema = T.StructType([T.StructField("id", T.LongType())])
+    session.createDataFrame([(99,)], schema).write.format("delta").save(str(nested))
+    session.createDataFrame([(123,)], schema).write.format("delta").save(str(flattened))
+    provider = Provider(descriptor(schema, nested.as_uri()))
+    session.set_external_catalog_provider(provider)
+    monkeypatch.setenv("SPARKLESS_FILES_BASE", str(base))
+
+    assert session.table(IDENTIFIER).collect()[0]["id"] == 99
+
+
 def test_public_arrow_stream_supports_bytes_and_buffer_consumers():
     payload = ArrowIpcStream(b"stream-bytes")
     assert payload.bytes == b"stream-bytes"

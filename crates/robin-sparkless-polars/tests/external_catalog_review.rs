@@ -257,6 +257,87 @@ fn review_create_if_not_exists_preserves_external_table() {
     );
 }
 
+#[test]
+fn review_global_temp_write_does_not_call_external_provider() {
+    let session = SparkSession::default();
+    let input = frame(&session, 1);
+    session.create_or_replace_global_temp_view("review_global", input.clone());
+    let provider = attach(
+        &session,
+        std::path::Path::new("/unused"),
+        input.schema().unwrap(),
+        Some(0),
+        false,
+    );
+    input
+        .write()
+        .save_as_table(&session, "global_temp.review_global", SaveMode::Append)
+        .unwrap();
+    assert!(provider.writes.lock().unwrap().is_empty());
+}
+
+#[test]
+fn review_external_miss_does_not_make_qualified_local_suffix_exist() {
+    struct Missing;
+    impl ExternalCatalogProvider for Missing {
+        fn resolve_table(&self, _: &str) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+            Ok(None)
+        }
+    }
+
+    let session = SparkSession::default();
+    session.create_or_replace_temp_view("orders", frame(&session, 1));
+    session
+        .set_external_catalog_provider(Some(Arc::new(Missing)))
+        .unwrap();
+    assert!(!session.table_exists("catalog.schema.orders"));
+    assert!(session
+        .sql("CREATE TABLE IF NOT EXISTS catalog.schema.orders (id BIGINT, age BIGINT, name STRING)")
+        .is_ok());
+    assert!(session.table("catalog.schema.orders").is_ok());
+}
+
+#[test]
+fn review_external_map_validation_uses_the_pinned_delta_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("_delta_log");
+    std::fs::create_dir(&log).unwrap();
+    let map_schema = json!({"type":"struct","fields":[{"name":"attrs","type":{"type":"map","keyType":"string","valueType":"long","valueContainsNull":true},"nullable":true,"metadata":{}}]});
+    let array_schema = json!({"type":"struct","fields":[{"name":"attrs","type":{"type":"array","elementType":{"type":"struct","fields":[{"name":"key","type":"string","nullable":true,"metadata":{}},{"name":"value","type":"long","nullable":true,"metadata":{}}]},"containsNull":true},"nullable":true,"metadata":{}}]});
+    let protocol = json!({"protocol":{"minReaderVersion":1,"minWriterVersion":2}});
+    let metadata = |schema: &serde_json::Value| json!({"metaData":{"id":"review-map","format":{"provider":"parquet","options":{}},"schemaString":schema.to_string(),"partitionColumns":[],"configuration":{},"createdTime":0}});
+    for (version, schema) in [(0, &map_schema), (1, &array_schema)] {
+        let actions = if version == 0 {
+            vec![protocol.clone(), metadata(schema)]
+        } else {
+            vec![metadata(schema)]
+        };
+        std::fs::write(
+            log.join(format!("{version:020}.json")),
+            actions
+                .iter()
+                .map(|action| format!("{action}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+    }
+    let session = SparkSession::default();
+    let schema = StructType::new(vec![StructField::new(
+        "attrs".into(),
+        DataType::Map(Box::new(DataType::String), Box::new(DataType::Long)),
+        true,
+    )]);
+    attach(&session, dir.path(), schema, Some(0), false);
+    assert_eq!(
+        session
+            .table("catalog.schema.orders")
+            .unwrap()
+            .count()
+            .unwrap(),
+        0
+    );
+}
+
 struct ErrorThenHit {
     inner: Arc<Provider>,
     calls: AtomicUsize,

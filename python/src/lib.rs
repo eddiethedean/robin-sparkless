@@ -1072,6 +1072,21 @@ fn delta_map_paths_for_sql_query(
     }
 
     fn table_columns(session: &PySparkSession, name: &str) -> Vec<String> {
+        if let Some(columns) = session
+            .external_catalog_schemas
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(name)
+            .map(|schema| {
+                schema
+                    .fields()
+                    .iter()
+                    .map(|field| field.name.clone())
+                    .collect()
+            })
+        {
+            return columns;
+        }
         session
             .inner
             .table(name)
@@ -1303,10 +1318,10 @@ fn delta_map_paths_for_sql_query(
                     .to_string();
                 Some(SourceInput {
                     qualifier,
-                    paths: delta_map_paths_for_catalog_table(session, &table_name).ok()?,
+                    paths: delta_map_paths_for_catalog_table(session, &full_name).ok()?,
                     join_alias: output_prefix.clone(),
                     output_prefix,
-                    columns: table_columns(session, &table_name),
+                    columns: table_columns(session, &full_name),
                 })
             }
             TableFactor::Derived {

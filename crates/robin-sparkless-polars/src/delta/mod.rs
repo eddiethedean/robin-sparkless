@@ -28,6 +28,14 @@ pub fn read_delta(path: impl AsRef<Path>, case_sensitive: bool) -> Result<DataFr
 
 #[cfg(feature = "delta")]
 pub fn logical_map_paths(path: impl AsRef<Path>) -> Result<Vec<String>, PolarsError> {
+    logical_map_paths_with_version(path, None)
+}
+
+#[cfg(feature = "delta")]
+pub(crate) fn logical_map_paths_with_version(
+    path: impl AsRef<Path>,
+    version: Option<i64>,
+) -> Result<Vec<String>, PolarsError> {
     use deltalake::DeltaTableBuilder;
     use tokio::runtime::Runtime;
 
@@ -47,7 +55,21 @@ pub fn logical_map_paths(path: impl AsRef<Path>) -> Result<Vec<String>, PolarsEr
     let runtime = Runtime::new().map_err(|e| {
         PolarsError::ComputeError(format!("read_delta: failed to create runtime: {e}").into())
     })?;
-    let table = match runtime.block_on(async { DeltaTableBuilder::from_url(url)?.load().await }) {
+    let version = version
+        .map(|version| {
+            u64::try_from(version).map_err(|_| {
+                PolarsError::ComputeError(format!("read_delta: invalid version {version}").into())
+            })
+        })
+        .transpose()?;
+    let table = match runtime.block_on(async {
+        let builder = DeltaTableBuilder::from_url(url)?;
+        if let Some(version) = version {
+            builder.with_version(version).load().await
+        } else {
+            builder.load().await
+        }
+    }) {
         Ok(table) => table,
         Err(error) if is_not_a_table(&error) => return Ok(Vec::new()),
         Err(error) => {
@@ -778,7 +800,7 @@ fn path_to_table_uri(path: &Path) -> Result<String, PolarsError> {
 }
 
 #[cfg(feature = "delta")]
-fn normalize_delta_path(path: &Path) -> Result<std::path::PathBuf, PolarsError> {
+pub(crate) fn normalize_delta_path(path: &Path) -> Result<std::path::PathBuf, PolarsError> {
     let raw = path.to_string_lossy();
     if raw.starts_with("file:") {
         let url = Url::parse(&raw).map_err(|error| {

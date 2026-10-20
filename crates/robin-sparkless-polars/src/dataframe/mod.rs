@@ -2900,6 +2900,7 @@ impl<'a> DataFrameWriter<'a> {
         // through into Sparkless' in-memory or warehouse writer.
         if !session.saved_table_exists(name)
             && !session.has_exact_temp_view(name)
+            && !SparkSession::is_global_temp_name(name)
             && let Some(provider) = session.external_catalog_provider()?
         {
             let descriptor = provider.resolve_table(name).map_err(|error| {
