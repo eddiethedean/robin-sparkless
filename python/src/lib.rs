@@ -944,7 +944,7 @@ impl PySparkSessionBuilder {
             py,
             PySparkSession {
                 inner: session,
-                external_catalog_schemas: Default::default(),
+                external_catalog_tables: Default::default(),
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -1003,11 +1003,11 @@ fn delta_map_paths_for_catalog_table(
             .any(|view| view == name);
     if !exact_local {
         let schemas = session
-            .external_catalog_schemas
+            .external_catalog_tables
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(schema) = schemas.get(name) {
-            return Ok(external_catalog::logical_map_paths(schema));
+        if let Some(table) = schemas.get(name) {
+            return Ok(external_catalog::logical_map_paths(&table.schema));
         }
     }
     if session.inner.has_temp_view(name) {
@@ -1037,6 +1037,40 @@ fn delta_map_paths_for_catalog_table(
         }
     }
     Ok(result)
+}
+
+#[cfg(feature = "delta")]
+fn delta_map_paths_for_delta_read(
+    session: &PySparkSession,
+    name: &str,
+    version: Option<i64>,
+) -> Result<std::collections::HashSet<String>, polars::prelude::PolarsError> {
+    let exact_local = session.inner.saved_table_exists(name)
+        || session
+            .inner
+            .list_temp_view_names()
+            .iter()
+            .any(|view| view == name);
+    if !exact_local {
+        let tables = session
+            .external_catalog_tables
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(table) = tables.get(name) {
+            let version = version.or(table.version);
+            return robin_sparkless::delta::logical_map_paths_with_version(
+                &table.canonical_location,
+                version,
+            )
+            .map(|paths| paths.into_iter().collect());
+        }
+    }
+    if name.contains('/') || name.contains('\\') || std::path::Path::new(name).exists() {
+        let path = name.strip_prefix("file://").unwrap_or(name);
+        return robin_sparkless::delta::logical_map_paths_with_version(path, version)
+            .map(|paths| paths.into_iter().collect());
+    }
+    delta_map_paths_for_catalog_table(session, name)
 }
 
 #[cfg(feature = "delta")]
@@ -1073,12 +1107,13 @@ fn delta_map_paths_for_sql_query(
 
     fn table_columns(session: &PySparkSession, name: &str) -> Vec<String> {
         if let Some(columns) = session
-            .external_catalog_schemas
+            .external_catalog_tables
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(name)
-            .map(|schema| {
-                schema
+            .map(|table| {
+                table
+                    .schema
                     .fields()
                     .iter()
                     .map(|field| field.name.clone())
@@ -1605,7 +1640,7 @@ fn delta_map_paths_for_sql_query(
 #[pyclass(module = "sparkless.sql.session", unsendable)]
 struct PySparkSession {
     inner: SparkSession,
-    external_catalog_schemas: external_catalog::ResolvedSchemas,
+    external_catalog_tables: external_catalog::ResolvedTables,
     /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
     backend_type: RefCell<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
@@ -2674,7 +2709,7 @@ impl PySparkSession {
             py,
             PySparkSession {
                 inner: session,
-                external_catalog_schemas: Default::default(),
+                external_catalog_tables: Default::default(),
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -2745,7 +2780,7 @@ impl PySparkSession {
             py,
             PySparkSession {
                 inner: session,
-                external_catalog_schemas: Default::default(),
+                external_catalog_tables: Default::default(),
                 backend_type: RefCell::new(backend_type),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -2869,7 +2904,7 @@ impl PySparkSession {
                 external_catalog::PythonExternalCatalogProvider::new(
                     py,
                     provider,
-                    self.external_catalog_schemas.clone(),
+                    self.external_catalog_tables.clone(),
                 )
             })
             .transpose()?
@@ -2877,7 +2912,7 @@ impl PySparkSession {
                 std::sync::Arc::new(provider)
                     as std::sync::Arc<dyn robin_sparkless_core::ExternalCatalogProvider>
             });
-        self.external_catalog_schemas
+        self.external_catalog_tables
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
@@ -3197,7 +3232,7 @@ impl PySparkSession {
         #[cfg(feature = "delta")]
         {
             frame.logical_map_paths =
-                delta_map_paths_for_catalog_table(self, name_or_path).map_err(to_py_err)?;
+                delta_map_paths_for_delta_read(self, name_or_path, None).map_err(to_py_err)?;
         }
         Ok(frame)
     }
@@ -3217,7 +3252,7 @@ impl PySparkSession {
         #[cfg(feature = "delta")]
         {
             frame.logical_map_paths =
-                delta_map_paths_for_catalog_table(self, name_or_path).map_err(to_py_err)?;
+                delta_map_paths_for_delta_read(self, name_or_path, version).map_err(to_py_err)?;
         }
         Ok(frame)
     }

@@ -32,7 +32,7 @@ pub fn logical_map_paths(path: impl AsRef<Path>) -> Result<Vec<String>, PolarsEr
 }
 
 #[cfg(feature = "delta")]
-pub(crate) fn logical_map_paths_with_version(
+pub fn logical_map_paths_with_version(
     path: impl AsRef<Path>,
     version: Option<i64>,
 ) -> Result<Vec<String>, PolarsError> {

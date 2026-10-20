@@ -181,7 +181,8 @@ pub mod delta {
     use std::path::Path;
 
     pub use robin_sparkless_polars::delta::{
-        logical_map_paths, read_delta, read_delta_with_version, write_delta,
+        logical_map_paths, logical_map_paths_with_version, read_delta, read_delta_with_version,
+        write_delta,
     };
 
     /// Read Delta table; returns root-owned DataFrame.

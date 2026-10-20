@@ -400,6 +400,32 @@ def test_python_catalog_retains_map_metadata_for_reads_and_rejects_map_writes(
 
 
 @pytest.mark.delta
+def test_python_catalog_time_travel_uses_snapshot_map_metadata(session, tmp_path):
+    path = str(tmp_path / "evolving_maps")
+    map_schema = T.StructType(
+        [T.StructField("attrs", T.MapType(T.StringType(), T.LongType()))]
+    )
+    initial = session.createDataFrame([({"old": 7},)], map_schema)
+    initial.write.format("delta").mode("overwrite").save(path)
+
+    latest_schema = T.StructType([T.StructField("attrs", T.StringType())])
+    latest = session.createDataFrame([("current",)], latest_schema)
+    latest.write.format("delta").option("overwriteSchema", "true").mode(
+        "overwrite"
+    ).save(path)
+    provider = Provider(replace(descriptor(latest_schema, path), version=1))
+    session.set_external_catalog_provider(provider)
+
+    historical = session.read_delta_with_version(IDENTIFIER, 0)
+    assert type(historical.schema["attrs"].dataType) is T.MapType
+    assert historical.collect()[0]["attrs"] == {"old": 7}
+
+    current = session.read_delta_with_version(IDENTIFIER, 1)
+    assert type(current.schema["attrs"].dataType) is T.StringType
+    assert current.collect()[0]["attrs"] == "current"
+
+
+@pytest.mark.delta
 def test_python_provider_map_metadata_handles_quoted_sql_and_single_lookup(
     session, tmp_path
 ):

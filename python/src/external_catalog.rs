@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-pub(crate) type ResolvedSchemas = Arc<Mutex<HashMap<String, robin_sparkless_core::StructType>>>;
+pub(crate) type ResolvedTables = Arc<Mutex<HashMap<String, ExternalTableDescriptor>>>;
 
 #[cfg(feature = "delta")]
 pub(crate) fn logical_map_paths(schema: &robin_sparkless_core::StructType) -> HashSet<String> {
@@ -52,14 +52,14 @@ pub(crate) fn logical_map_paths(schema: &robin_sparkless_core::StructType) -> Ha
 pub(crate) struct PythonExternalCatalogProvider {
     // Py owns a strong reference and may cross Rust threads; every access acquires the GIL.
     provider: Py<PyAny>,
-    schemas: ResolvedSchemas,
+    tables: ResolvedTables,
 }
 
 impl PythonExternalCatalogProvider {
     pub(crate) fn new(
         py: Python<'_>,
         provider: Py<PyAny>,
-        schemas: ResolvedSchemas,
+        tables: ResolvedTables,
     ) -> PyResult<Self> {
         if !provider.bind(py).getattr("resolve_table")?.is_callable() {
             return Err(PyTypeError::new_err(
@@ -75,7 +75,7 @@ impl PythonExternalCatalogProvider {
             Err(error) if !error.is_instance_of::<PyAttributeError>(py) => return Err(error),
             _ => {}
         }
-        Ok(Self { provider, schemas })
+        Ok(Self { provider, tables })
     }
 }
 
@@ -139,17 +139,17 @@ impl ExternalCatalogProvider for PythonExternalCatalogProvider {
                 .bind(py)
                 .call_method1("resolve_table", (identifier,))?;
             if value.is_none() {
-                self.schemas
+                self.tables
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .remove(identifier);
                 return Ok(None);
             }
             let descriptor = descriptor_from_python(&value)?;
-            self.schemas
+            self.tables
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(identifier.to_string(), descriptor.schema.clone());
+                .insert(identifier.to_string(), descriptor.clone());
             Ok(Some(descriptor))
         })
         .map_err(|error| callback_error("resolve_table", error))
