@@ -5134,7 +5134,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless"
-version = "4.14.0"
+version = "4.14.1"
 dependencies = [
  "chrono",
  "criterion",
@@ -5150,7 +5150,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-core"
-version = "4.14.0"
+version = "4.14.1"
 dependencies = [
  "chrono",
  "serde",
@@ -5161,7 +5161,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-polars"
-version = "4.14.0"
+version = "4.14.1"
 dependencies = [
  "aes-gcm",
  "arrow-array 57.2.0",
@@ -5702,7 +5702,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-native"
-version = "4.14.0"
+version = "4.14.1"
 dependencies = [
  "base64 0.22.1",
  "polars",
