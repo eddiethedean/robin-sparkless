@@ -179,6 +179,45 @@ fn review_external_time_travel_honors_requested_version() {
 }
 
 #[test]
+fn review_external_time_travel_accepts_the_historical_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = SparkSession::default();
+    let version_zero = session
+        .create_dataframe_from_rows(
+            vec![vec![json!(1)]],
+            vec![("id".into(), "bigint".into())],
+            true,
+            false,
+        )
+        .unwrap();
+    version_zero.write_delta(dir.path(), true, false).unwrap();
+    let version_one = session
+        .create_dataframe_from_rows(
+            vec![vec![json!("later")]],
+            vec![("name".into(), "string".into())],
+            true,
+            false,
+        )
+        .unwrap();
+    version_one
+        .write_delta_with_save_options(dir.path(), SaveMode::Overwrite, false, true, &[])
+        .unwrap();
+    attach(
+        &session,
+        dir.path(),
+        version_one.schema().unwrap(),
+        Some(1),
+        false,
+    );
+
+    let historical = session
+        .read_delta_with_version("catalog.schema.orders", Some(0))
+        .unwrap();
+    assert_eq!(historical.schema().unwrap().fields()[0].name, "id");
+    assert_eq!(historical.collect_as_json_rows().unwrap()[0]["id"], 1);
+}
+
+#[test]
 fn review_unqualified_temp_view_does_not_capture_external_insert() {
     let dir = tempfile::tempdir().unwrap();
     let session = SparkSession::default();
@@ -246,6 +285,14 @@ fn review_create_if_not_exists_preserves_external_table() {
             "CREATE TABLE IF NOT EXISTS catalog.schema.orders (id BIGINT, age BIGINT, name STRING)",
         )
         .unwrap();
+    assert!(
+        session
+            .sql("CREATE TABLE `catalog`.`schema`.`orders` (id BIGINT)")
+            .is_err()
+    );
+    session
+        .sql("CREATE TABLE IF NOT EXISTS `catalog`.`schema`.`orders` (id BIGINT)")
+        .unwrap();
     assert_eq!(
         session
             .table("catalog.schema.orders")
@@ -269,10 +316,20 @@ fn review_global_temp_write_does_not_call_external_provider() {
         Some(0),
         false,
     );
-    input
-        .write()
-        .save_as_table(&session, "global_temp.review_global", SaveMode::Append)
-        .unwrap();
+    assert!(
+        input
+            .write()
+            .save_as_table(&session, "global_temp.review_global", SaveMode::Append)
+            .is_err()
+    );
+    assert_eq!(
+        session
+            .table("global_temp.review_global")
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap()[0]["id"],
+        1
+    );
     assert!(provider.writes.lock().unwrap().is_empty());
 }
 

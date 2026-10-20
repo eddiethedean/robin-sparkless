@@ -2871,6 +2871,12 @@ impl<'a> DataFrameWriter<'a> {
         use std::fs;
         use std::path::Path;
 
+        if SparkSession::is_global_temp_name(name) && session.local_table_exists(name) {
+            return Err(PolarsError::InvalidOperation(
+                format!("cannot save a table over global temporary view '{name}'").into(),
+            ));
+        }
+
         let (merge_schema, overwrite_schema, is_delta_format, logical_map_paths) =
             options.map_or((false, false, false, Vec::new()), |opts| {
                 let mut merge_schema = false;

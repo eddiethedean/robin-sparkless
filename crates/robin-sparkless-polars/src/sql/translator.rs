@@ -197,7 +197,7 @@ pub fn translate(
             ))
         }
         Statement::CreateTable(create_table) => {
-            let table_name = create_table.name.to_string();
+            let table_name = table_name_from_object_name(&create_table.name);
             let exists = session.local_table_exists(&table_name)
                 || session
                     .resolve_external_table_descriptor(&table_name)?

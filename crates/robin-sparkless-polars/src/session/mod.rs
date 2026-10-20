@@ -2268,8 +2268,20 @@ impl SparkSession {
         name: &str,
         descriptor: &ExternalTableDescriptor,
     ) -> Result<DataFrame, PolarsError> {
+        self.read_external_table_descriptor_with_schema_validation(name, descriptor, true)
+    }
+
+    fn read_external_table_descriptor_with_schema_validation(
+        &self,
+        name: &str,
+        descriptor: &ExternalTableDescriptor,
+        validate_schema: bool,
+    ) -> Result<DataFrame, PolarsError> {
         let frame = self.read_external_descriptor(descriptor)?;
 
+        if !validate_schema {
+            return Ok(frame);
+        }
         let actual_schema = frame.schema()?;
         #[cfg(feature = "delta")]
         let logical_map_paths = crate::delta::logical_map_paths_with_version(
@@ -3702,10 +3714,15 @@ impl SparkSession {
             }
             let (resolved, has_provider) = self.resolve_external_table_descriptor(name_or_path)?;
             if let Some((_, mut descriptor)) = resolved {
+                let validate_schema = version.is_none() || descriptor.version == version;
                 if version.is_some() {
                     descriptor.version = version;
                 }
-                return self.read_external_table_descriptor(name_or_path, &descriptor);
+                return self.read_external_table_descriptor_with_schema_validation(
+                    name_or_path,
+                    &descriptor,
+                    validate_schema,
+                );
             }
             if has_provider {
                 return self.table_after_external_miss(name_or_path, true);
