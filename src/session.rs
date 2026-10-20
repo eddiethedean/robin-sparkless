@@ -1,6 +1,7 @@
 //! Root-owned Session API; delegates to robin-sparkless-polars for execution.
 
 use crate::EngineError;
+use robin_sparkless_core::engine::ExternalCatalogProvider;
 use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 use robin_sparkless_polars::{
     DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError,
@@ -8,6 +9,7 @@ use robin_sparkless_polars::{
 };
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::dataframe::DataFrame;
 
@@ -94,6 +96,17 @@ impl SparkSession {
 
     pub fn register_table(&self, name: &str, df: DataFrame) {
         self.0.register_table(name, df.0)
+    }
+
+    /// Attach or remove this logical session's external catalog resolver.
+    ///
+    /// Resolver implementations receive exact identifiers from table lookups and return a
+    /// stable table descriptor. A new logical session starts without this resolver.
+    pub fn set_external_catalog_provider(
+        &self,
+        provider: Option<Arc<dyn ExternalCatalogProvider>>,
+    ) -> Result<(), EngineError> {
+        self.0.set_external_catalog_provider(provider)
     }
 
     pub fn register_database(&self, name: &str) {

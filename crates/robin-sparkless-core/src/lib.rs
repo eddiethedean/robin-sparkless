@@ -12,8 +12,9 @@ pub mod schema;
 
 pub use config::SparklessConfig;
 pub use engine::{
-    CollectedRows, DataFrameBackend, DataFrameReaderBackend, GroupedDataBackend, JoinType,
-    PlanExecutor, SparkSessionBackend,
+    CollectedRows, DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider,
+    ExternalTableDescriptor, ExternalTableFormat, GroupedDataBackend, JoinType, PlanExecutor,
+    SparkSessionBackend,
 };
 pub use error::{EngineError, normalize_unresolved_column_message};
 pub use expr::{

@@ -59,6 +59,9 @@ pub use dataframe::{
 pub use error::{EngineError, polars_to_core_error};
 pub use expression::{column_to_expr, lit_bool, lit_f64, lit_i32, lit_i64, lit_str};
 pub use functions::*;
+pub use robin_sparkless_core::engine::{
+    ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
+};
 pub use schema::{DataType, StructField, StructType, StructTypePolarsExt, schema_from_json};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 pub use traits::{FromRobinDf, IntoRobinDf};

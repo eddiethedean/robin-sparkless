@@ -1,8 +1,9 @@
 //! Engine-agnostic SparkSession backend trait.
 
-use crate::engine::{DataFrameBackend, DataFrameReaderBackend};
+use crate::engine::{DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider};
 use crate::error::EngineError;
 use serde_json::Value as JsonValue;
+use std::sync::Arc;
 
 /// Backend for SparkSession: creates readers, tables, and DataFrames from data.
 pub trait SparkSessionBackend: Send + Sync {
@@ -25,6 +26,19 @@ pub trait SparkSessionBackend: Send + Sync {
     ///
     /// Returns [`EngineError::User`] if `df` is not from the same backend as `self`.
     fn register_table(&self, name: &str, df: &dyn DataFrameBackend) -> Result<(), EngineError>;
+    /// Attach an external catalog resolver to this logical session.
+    ///
+    /// Backends that do not implement external catalog resolution may keep the default
+    /// explicit unsupported error. Clones of one session may share this resolver, but a
+    /// backend's `new_session` operation must create an isolated resolver slot.
+    fn set_external_catalog_provider(
+        &self,
+        _provider: Option<Arc<dyn ExternalCatalogProvider>>,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::User(
+            "this SparkSession backend does not support external catalog providers".into(),
+        ))
+    }
     fn is_case_sensitive(&self) -> bool;
     fn get_config(&self) -> &std::collections::HashMap<String, String>;
 }

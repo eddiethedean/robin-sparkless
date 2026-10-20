@@ -16,6 +16,7 @@
 
 mod collected;
 mod dataframe;
+mod external_catalog;
 mod join;
 mod plan;
 mod reader;
@@ -23,6 +24,7 @@ mod session;
 
 pub use collected::CollectedRows;
 pub use dataframe::{DataFrameBackend, GroupedDataBackend};
+pub use external_catalog::{ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat};
 pub use join::JoinType;
 pub use plan::PlanExecutor;
 pub use reader::DataFrameReaderBackend;
