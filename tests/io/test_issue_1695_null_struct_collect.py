@@ -4,7 +4,9 @@ import pytest
 
 
 @pytest.mark.delta
-def test_delta_collect_preserves_valid_all_null_structs_and_null_parents(spark, tmp_path):
+def test_delta_collect_preserves_valid_all_null_structs_and_null_parents(
+    spark, tmp_path
+):
     pa = pytest.importorskip("pyarrow")
     deltalake = pytest.importorskip("deltalake")
 
@@ -25,7 +27,6 @@ def test_delta_collect_preserves_valid_all_null_structs_and_null_parents(spark, 
 
     frame = spark.read.format("delta").load(str(path))
     actual = [
-        {"details": row["details"], "items": row["items"]}
-        for row in frame.collect()
+        {"details": row["details"], "items": row["items"]} for row in frame.collect()
     ]
     assert actual == expected

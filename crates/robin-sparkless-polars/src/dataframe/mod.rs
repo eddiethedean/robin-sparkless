@@ -1616,12 +1616,20 @@ impl DataFrame {
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
-                let jv = any_value_to_json_with_array_struct_override(
-                    &av,
-                    dtype,
-                    array_struct_paths,
-                    &serde_json::to_string(name).expect("field names serialize as JSON strings"),
-                )?;
+                // A struct AnyValue contains its fields but does not retain the parent validity
+                // bit. Read validity from the column so null parents remain distinct from valid
+                // structs whose fields are all null.
+                let jv = if s.is_null().get(i).unwrap_or(false) {
+                    JsonValue::Null
+                } else {
+                    any_value_to_json_with_array_struct_override(
+                        &av,
+                        dtype,
+                        array_struct_paths,
+                        &serde_json::to_string(name)
+                            .expect("field names serialize as JSON strings"),
+                    )?
+                };
                 row.insert(name.clone(), jv);
             }
             rows.push(row);
