@@ -5800,32 +5800,19 @@ fn series_set_nulls_where(series: &Series, mask: &BooleanChunked) -> PolarsResul
                 .map_err(|e| compute_err("with_field mask struct", e))?;
             let len = st.len();
             let fields_series = st.fields_as_series();
-            let all_fields_null: BooleanChunked = fields_series
-                .iter()
-                .map(|s| s.is_null())
-                .fold(None, |acc: Option<BooleanChunked>, field_nulls| {
-                    Some(match acc {
-                        Some(acc) => acc & field_nulls,
-                        None => field_nulls,
-                    })
-                })
-                .unwrap_or_else(|| {
-                    BooleanChunked::from_iter_options(
-                        PlSmallStr::EMPTY,
-                        (0..len).map(|_| Some(false)),
-                    )
-                });
             let masked_fields: Vec<Series> = fields_series
                 .iter()
                 .map(|s| series_set_nulls_where(s, mask).unwrap_or_else(|_| s.clone()))
                 .collect();
-            let parent_null = st.is_null() | all_fields_null | mask_to_use.clone();
+            let parent_null = st.is_null() | mask_to_use.clone();
             let outer_validity: polars_arrow::bitmap::Bitmap = (0..len)
                 .map(|i| !parent_null.get(i).unwrap_or(false))
                 .collect();
-            let out = StructChunked::from_series(name.as_str().into(), len, masked_fields.iter())
-                .map_err(|e| compute_err("with_field rebuild struct", e))?
-                .with_outer_validity(Some(outer_validity));
+            let mut out =
+                StructChunked::from_series(name.as_str().into(), len, masked_fields.iter())
+                    .map_err(|e| compute_err("with_field rebuild struct", e))?;
+            out.rechunk_mut();
+            let out = out.with_outer_validity(Some(outer_validity));
             out.into_series()
         }
         DataType::List(_) => {
@@ -5857,24 +5844,7 @@ pub fn apply_struct_with_field(
         .struct_()
         .map_err(|e| compute_err("with_field: expected struct column", e))?;
     let len = st.len();
-    // Polars can represent null structs as struct-with-all-null-fields; treat those as null (PySpark #1066).
-    let struct_null: BooleanChunked = {
-        let explicit_null = struct_series.is_null();
-        let fields_series_for_mask = st.fields_as_series();
-        let all_fields_null: BooleanChunked = fields_series_for_mask
-            .iter()
-            .map(|s| s.is_null())
-            .fold(None, |acc: Option<BooleanChunked>, m| {
-                Some(match acc {
-                    Some(a) => a & m,
-                    None => m,
-                })
-            })
-            .unwrap_or_else(|| {
-                BooleanChunked::from_iter_options(PlSmallStr::EMPTY, (0..len).map(|_| Some(false)))
-            });
-        explicit_null | all_fields_null
-    };
+    let struct_null = struct_series.is_null();
     let fields_series = st.fields_as_series();
     let mut value_series = value_col.take_materialized_series();
     // Materialize Unknown (literal) so broadcast and mask work (PySpark #1066).
@@ -5950,9 +5920,10 @@ pub fn apply_struct_with_field(
     let outer_validity: polars_arrow::bitmap::Bitmap = (0..len)
         .map(|i| !struct_null.get(i).unwrap_or(false))
         .collect();
-    let out = StructChunked::from_series(name.as_str().into(), len, new_fields.iter())
-        .map_err(|e| compute_err("with_field: build struct", e))?
-        .with_outer_validity(Some(outer_validity));
+    let mut out = StructChunked::from_series(name.as_str().into(), len, new_fields.iter())
+        .map_err(|e| compute_err("with_field: build struct", e))?;
+    out.rechunk_mut();
+    let out = out.with_outer_validity(Some(outer_validity));
     Ok(Some(Column::new(name, out.into_series())))
 }
 

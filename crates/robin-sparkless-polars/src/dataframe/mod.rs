@@ -1607,6 +1607,12 @@ impl DataFrame {
                 }
             })
             .collect::<Result<Vec<(polars::prelude::Column, DataType)>, PolarsError>>()?;
+        // Cache validity once per column. Calling `is_null` in the row loop builds a full
+        // null mask each time, making collection quadratic in the row count.
+        let null_masks = columns_cast
+            .iter()
+            .map(|(s, _)| s.is_null())
+            .collect::<Vec<_>>();
         let nrows = collected.height();
         let mut rows = Vec::with_capacity(nrows);
         for i in 0..nrows {
@@ -1615,11 +1621,14 @@ impl DataFrame {
                 let (s, dtype) = columns_cast
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
+                let null_mask = null_masks
+                    .get(col_idx)
+                    .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
                 // A struct AnyValue contains its fields but does not retain the parent validity
                 // bit. Read validity from the column so null parents remain distinct from valid
                 // structs whose fields are all null.
-                let jv = if s.is_null().get(i).unwrap_or(false) {
+                let jv = if null_mask.get(i).unwrap_or(false) {
                     JsonValue::Null
                 } else {
                     any_value_to_json_with_array_struct_override(
