@@ -128,6 +128,69 @@ def test_python_writer_passes_typed_ipc_and_exact_options(session):
     assert table["details"].to_pylist() == [{"label": "nested"}, {"label": None}]
 
 
+@pytest.mark.parametrize("ingress", ["python_rows", "pyarrow"])
+def test_external_writer_preserves_null_struct_parent_validity(session, ingress):
+    pa = pytest.importorskip("pyarrow")
+    nested = T.StructType([T.StructField("value", T.StringType())])
+    details = T.StructType(
+        [T.StructField("label", T.StringType()), T.StructField("inner", nested)]
+    )
+    item = T.StructType([T.StructField("label", T.StringType())])
+    schema = T.StructType(
+        [T.StructField("details", details), T.StructField("items", T.ArrayType(item))]
+    )
+    expected = [
+        {
+            "details": {"label": "present", "inner": {"value": "deep"}},
+            "items": [{"label": "item"}, None, {"label": None}],
+        },
+        {"details": None, "items": [None, {"label": None}]},
+        {"details": {"label": None, "inner": None}, "items": None},
+    ]
+    if ingress == "pyarrow":
+        arrow_schema = pa.schema(
+            [
+                (
+                    "details",
+                    pa.struct(
+                        [
+                            ("label", pa.string()),
+                            ("inner", pa.struct([("value", pa.string())])),
+                        ]
+                    ),
+                ),
+                (
+                    "items",
+                    pa.list_(pa.struct([("label", pa.string())])),
+                ),
+            ]
+        )
+        data = pa.Table.from_pylist(expected, schema=arrow_schema)
+    else:
+        data = [
+            (row["details"], row["items"])
+            for row in expected
+        ]
+
+    class CaptureThenFail:
+        received = None
+
+        def resolve_table(self, identifier):
+            return descriptor(schema)
+
+        def write_table(self, request):
+            self.received = pa.ipc.open_stream(request.data).read_all().to_pylist()
+            raise RuntimeError("intentional capture stop before commit")
+
+    provider = CaptureThenFail()
+    session.set_external_catalog_provider(provider)
+    frame = session.createDataFrame(data, schema)
+    with pytest.raises(Exception, match="intentional capture stop before commit"):
+        frame.write.mode("append").saveAsTable(IDENTIFIER)
+
+    assert provider.received == expected
+
+
 def test_schema_bridge_preserves_recursive_types_and_integer_widths():
     schema = T.StructType(
         [

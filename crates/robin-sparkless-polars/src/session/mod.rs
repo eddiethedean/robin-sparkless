@@ -14,6 +14,7 @@ use polars::prelude::{
     DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
     Series, TimeUnit,
 };
+use polars_arrow::bitmap::Bitmap;
 use robin_sparkless_core::engine::{
     ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
 };
@@ -736,6 +737,7 @@ fn json_values_to_series(
         let mut field_series_vec: Vec<Vec<Option<JsonValue>>> = (0..fields.len())
             .map(|_| Vec::with_capacity(values.len()))
             .collect();
+        let mut outer_validity = Vec::with_capacity(values.len());
         for v in values.iter() {
             // #610: Accept string that parses as JSON object or array (e.g. Python tuple serialized as "[1, \"y\"]").
             // #691/PR-F: Accept Python dict repr string (e.g. "{'a': 1, 'b': 'x'}").
@@ -760,6 +762,14 @@ fn json_values_to_series(
                 }
                 _ => v.clone(),
             };
+            // StructChunked::from_series only sees the child arrays. When every child is
+            // null it cannot tell a null parent struct from a valid struct whose children
+            // are null, so preserve the parent's validity bitmap separately.
+            outer_validity.push(
+                effective
+                    .as_ref()
+                    .is_some_and(|value| !matches!(value, JsonValue::Null)),
+            );
             if effective
                 .as_ref()
                 .is_none_or(|x| matches!(x, JsonValue::Null))
@@ -836,6 +846,7 @@ fn json_values_to_series(
         let field_refs: Vec<&Series> = series_per_field.iter().collect();
         let st = StructChunked::from_series(name.into(), values.len(), field_refs.iter().copied())
             .map_err(|e| PolarsError::ComputeError(format!("struct column: {e}").into()))?
+            .with_outer_validity(Some(Bitmap::from_iter(outer_validity)))
             .into_series();
         return Ok(st);
     }
