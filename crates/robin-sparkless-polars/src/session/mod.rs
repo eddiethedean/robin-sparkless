@@ -31,6 +31,8 @@ pub use builder::SparkSessionBuilder;
 mod reader;
 pub use reader::DataFrameReader;
 
+type ResolvedExternalTable = (Arc<dyn ExternalCatalogProvider>, ExternalTableDescriptor);
+
 /// Parse "array<element_type>" to get inner type string. Returns None if not array<>.
 fn parse_array_element_type(type_str: &str) -> Option<String> {
     let s = type_str.trim();
@@ -1630,6 +1632,17 @@ impl SparkSession {
         Ok(())
     }
 
+    pub(crate) fn external_catalog_provider(
+        &self,
+    ) -> Result<Option<Arc<dyn ExternalCatalogProvider>>, PolarsError> {
+        self.external_catalog_provider
+            .read()
+            .map(|provider| provider.clone())
+            .map_err(|_| {
+                PolarsError::InvalidOperation("external catalog provider lock poisoned".into())
+            })
+    }
+
     /// Return the current database for this session. Defaults to "default".
     pub fn current_database(&self) -> String {
         match self.current_database.lock() {
@@ -2171,17 +2184,21 @@ impl SparkSession {
     }
 
     fn resolve_external_table(&self, name: &str) -> Result<(Option<DataFrame>, bool), PolarsError> {
-        let provider = self
-            .external_catalog_provider
-            .read()
-            .map_err(|_| {
-                PolarsError::InvalidOperation("external catalog provider lock poisoned".into())
-            })?
-            .clone();
-        let Some(provider) = provider else {
+        let (external_target, has_provider) = self.resolve_external_table_descriptor(name)?;
+        let Some((_, descriptor)) = external_target else {
+            return Ok((None, has_provider));
+        };
+        let frame = self.read_external_table_descriptor(name, &descriptor)?;
+        Ok((Some(frame), true))
+    }
+
+    pub(crate) fn resolve_external_table_descriptor(
+        &self,
+        name: &str,
+    ) -> Result<(Option<ResolvedExternalTable>, bool), PolarsError> {
+        let Some(provider) = self.external_catalog_provider()? else {
             return Ok((None, false));
         };
-
         let Some(descriptor) = provider.resolve_table(name).map_err(|error| {
             PolarsError::InvalidOperation(
                 format!("external catalog provider failed to resolve '{name}': {error}").into(),
@@ -2196,8 +2213,15 @@ impl SparkSession {
                     .into(),
             )
         })?;
+        Ok((Some((provider, descriptor)), true))
+    }
 
-        let frame = self.read_external_descriptor(&descriptor)?;
+    pub(crate) fn read_external_table_descriptor(
+        &self,
+        name: &str,
+        descriptor: &ExternalTableDescriptor,
+    ) -> Result<DataFrame, PolarsError> {
+        let frame = self.read_external_descriptor(descriptor)?;
 
         let actual_schema = frame.schema()?;
         if !external_schemas_match(&descriptor.schema, &actual_schema) {
@@ -2209,7 +2233,7 @@ impl SparkSession {
                 .into(),
             ));
         }
-        Ok((Some(frame), true))
+        Ok(frame)
     }
 
     fn read_external_descriptor(
@@ -2218,10 +2242,14 @@ impl SparkSession {
     ) -> Result<DataFrame, PolarsError> {
         match descriptor.format {
             #[cfg(feature = "delta")]
-            ExternalTableFormat::Delta => self.read_delta_path_with_version(
-                std::path::Path::new(&descriptor.canonical_location),
-                descriptor.version,
-            ),
+            ExternalTableFormat::Delta => {
+                let path = confine_io_path(std::path::Path::new(&descriptor.canonical_location))?;
+                crate::delta::read_delta_snapshot_with_version(
+                    path,
+                    descriptor.version,
+                    self.is_case_sensitive(),
+                )
+            }
             #[cfg(not(feature = "delta"))]
             ExternalTableFormat::Delta => Err(PolarsError::InvalidOperation(
                 "external Delta table reads require the 'delta' feature".into(),
@@ -3741,6 +3769,16 @@ fn external_data_types_match(expected: &CoreDataType, actual: &CoreDataType) -> 
             external_data_types_match(expected_key, actual_key)
                 && external_data_types_match(expected_value, actual_value)
         }
+        (Map(expected_key, expected_value), Array(actual_entries)) => {
+            let Struct(actual_fields) = actual_entries.as_ref() else {
+                return false;
+            };
+            actual_fields.len() == 2
+                && actual_fields[0].name == "key"
+                && actual_fields[1].name == "value"
+                && external_data_types_match(expected_key, &actual_fields[0].data_type)
+                && external_data_types_match(expected_value, &actual_fields[1].data_type)
+        }
         (Struct(expected_fields), Struct(actual_fields)) => {
             expected_fields.len() == actual_fields.len()
                 && expected_fields
@@ -3764,14 +3802,18 @@ impl Default for SparkSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "delta")]
+    use robin_sparkless_core::engine::ExternalTableSaveMode;
     use serde_json::json;
 
     #[derive(Clone)]
     struct TestExternalCatalog {
         identifier: String,
-        descriptor: Option<ExternalTableDescriptor>,
+        descriptor: Arc<Mutex<Option<ExternalTableDescriptor>>>,
         error: Option<String>,
+        write_error: Arc<Mutex<Option<String>>>,
         resolutions: Arc<Mutex<Vec<String>>>,
+        writes: Arc<Mutex<Vec<robin_sparkless_core::engine::ExternalTableWriteRequest>>>,
     }
 
     impl ExternalCatalogProvider for TestExternalCatalog {
@@ -3787,9 +3829,88 @@ mod tests {
                 return Err(EngineError::User(error.clone()));
             }
             if identifier == self.identifier {
-                Ok(self.descriptor.clone())
+                Ok(self
+                    .descriptor
+                    .lock()
+                    .expect("test descriptor lock")
+                    .clone())
             } else {
                 Ok(None)
+            }
+        }
+
+        fn write_table(
+            &self,
+            request: robin_sparkless_core::engine::ExternalTableWriteRequest,
+        ) -> Result<robin_sparkless_core::engine::ExternalTableWriteResult, EngineError> {
+            self.writes
+                .lock()
+                .expect("test write lock")
+                .push(request.clone());
+            if let Some(error) = self
+                .write_error
+                .lock()
+                .expect("test write error lock")
+                .clone()
+            {
+                return Err(EngineError::User(error));
+            }
+
+            #[cfg(feature = "delta")]
+            {
+                use polars::io::ipc::IpcStreamReader;
+                use polars::prelude::SerReader;
+
+                let input = IpcStreamReader::new(std::io::Cursor::new(request.data.bytes))
+                    .finish()
+                    .map_err(|error| EngineError::User(format!("decode Arrow IPC: {error}")))?;
+                let mode = match request.mode {
+                    robin_sparkless_core::engine::ExternalTableSaveMode::Append => {
+                        crate::dataframe::SaveMode::Append
+                    }
+                    robin_sparkless_core::engine::ExternalTableSaveMode::Overwrite => {
+                        crate::dataframe::SaveMode::Overwrite
+                    }
+                    robin_sparkless_core::engine::ExternalTableSaveMode::ErrorIfExists
+                    | robin_sparkless_core::engine::ExternalTableSaveMode::Ignore => {
+                        return Err(EngineError::User(
+                            "test provider received a non-mutating save mode".into(),
+                        ));
+                    }
+                };
+                let option_is_true = |name: &str| {
+                    request.options.iter().rev().any(|(key, value)| {
+                        key.eq_ignore_ascii_case(name) && value.eq_ignore_ascii_case("true")
+                    })
+                };
+                crate::delta::write_delta_with_save_options_and_logical_map_paths_for_catalog(
+                    &input,
+                    &request.table.canonical_location,
+                    mode,
+                    option_is_true("mergeSchema"),
+                    option_is_true("overwriteSchema"),
+                    &request.partition_by,
+                    &[],
+                )
+                .map_err(|error| {
+                    EngineError::User(format!("write local Delta fixture: {error}"))
+                })?;
+
+                let committed_version = request.table.version.unwrap_or(0) + 1;
+                let mut table = request.table;
+                table.version = Some(committed_version);
+                *self.descriptor.lock().expect("test descriptor lock") = Some(table.clone());
+                Ok(robin_sparkless_core::engine::ExternalTableWriteResult {
+                    table,
+                    committed_version,
+                })
+            }
+            #[cfg(not(feature = "delta"))]
+            {
+                let _ = request;
+                Err(EngineError::User(
+                    "test provider requires the delta feature".into(),
+                ))
             }
         }
     }
@@ -3824,6 +3945,32 @@ mod tests {
         schema
     }
 
+    #[cfg(feature = "delta")]
+    fn typed_external_frame(session: &SparkSession, id: i64, amount: &str) -> DataFrame {
+        session
+            .create_dataframe_from_rows(
+                vec![vec![
+                    json!(id),
+                    json!(amount),
+                    json!("2026-10-19"),
+                    json!("2026-10-19 12:34:56"),
+                    json!([id, id + 1]),
+                    json!({"label": "sample", "count": id}),
+                ]],
+                vec![
+                    ("id".into(), "long".into()),
+                    ("amount".into(), "decimal(10,2)".into()),
+                    ("day".into(), "date".into()),
+                    ("created".into(), "timestamp".into()),
+                    ("items".into(), "array<long>".into()),
+                    ("payload".into(), "struct<label:string,count:long>".into()),
+                ],
+                true,
+                false,
+            )
+            .expect("create typed external table fixture")
+    }
+
     fn test_external_catalog(
         identifier: &str,
         descriptor: Option<ExternalTableDescriptor>,
@@ -3832,9 +3979,11 @@ mod tests {
         let resolutions = Arc::new(Mutex::new(Vec::new()));
         let provider = Arc::new(TestExternalCatalog {
             identifier: identifier.to_string(),
-            descriptor,
+            descriptor: Arc::new(Mutex::new(descriptor)),
             error: error.map(str::to_string),
+            write_error: Arc::new(Mutex::new(None)),
             resolutions: resolutions.clone(),
+            writes: Arc::new(Mutex::new(Vec::new())),
         });
         (provider, resolutions)
     }
@@ -5404,6 +5553,173 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "delta")]
+    fn external_catalog_table_writes_delegate_typed_ipc_with_modes_and_options() {
+        use crate::dataframe::SaveMode;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::SerReader;
+        use std::io::Cursor;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("orders");
+        let seed_session = SparkSession::builder()
+            .app_name("external-catalog-write-seed")
+            .get_or_create();
+        let seed = typed_external_frame(&seed_session, 1, "1.25");
+        let schema = seed.schema().unwrap();
+        seed.write_delta(&path, true, false)
+            .expect("write real local Delta seed");
+        let mut descriptor = external_descriptor(&path, schema);
+        descriptor.version = Some(0);
+
+        let identifier = "main.analytics.orders";
+        let (provider, resolutions) = test_external_catalog(identifier, Some(descriptor), None);
+        let session = SparkSession::builder()
+            .app_name("external-catalog-write")
+            .get_or_create();
+        session
+            .set_external_catalog_provider(Some(provider.clone()))
+            .expect("set external provider");
+
+        let input = typed_external_frame(&session, 2, "12.34");
+        let expected = input.collect_inner().unwrap().as_ref().clone();
+        input
+            .write()
+            .option("mergeSchema", "true")
+            .option("user.option", "kept")
+            .option("sparkless.writer.format", "delta")
+            .save_as_table(&session, identifier, SaveMode::Append)
+            .expect("delegate append to the external table provider");
+
+        let writes = provider.writes.lock().expect("test write lock");
+        assert_eq!(writes.len(), 1);
+        let request = &writes[0];
+        assert_eq!(request.identifier, identifier);
+        assert_eq!(request.table.table_id, "table-123");
+        assert_eq!(request.mode, ExternalTableSaveMode::Append);
+        assert_eq!(request.format.as_deref(), Some("delta"));
+        assert!(
+            request
+                .options
+                .iter()
+                .any(|(key, value)| { key.eq_ignore_ascii_case("mergeSchema") && value == "true" })
+        );
+        assert!(
+            request
+                .options
+                .iter()
+                .any(|(key, value)| { key == "user.option" && value == "kept" })
+        );
+        assert!(
+            request
+                .options
+                .iter()
+                .all(|(key, _)| !key.to_ascii_lowercase().starts_with("sparkless."))
+        );
+        assert!(request.partition_by.is_empty());
+
+        let transmitted = IpcStreamReader::new(Cursor::new(request.data.bytes.clone()))
+            .finish()
+            .expect("decode captured Arrow IPC stream");
+        assert_eq!(transmitted.schema(), expected.schema());
+        assert_eq!(expected.column("created").unwrap().null_count(), 0);
+        for name in ["id", "amount", "day", "created", "items", "payload"] {
+            assert!(
+                transmitted
+                    .column(name)
+                    .unwrap()
+                    .equals_missing(expected.column(name).unwrap())
+            );
+        }
+        drop(writes);
+
+        let committed = session
+            .table(identifier)
+            .expect("read the committed external snapshot");
+        assert_eq!(committed.count().unwrap(), 2);
+        assert_eq!(
+            provider
+                .descriptor
+                .lock()
+                .expect("test descriptor lock")
+                .as_ref()
+                .and_then(|table| table.version),
+            Some(1)
+        );
+        assert_eq!(
+            *resolutions.lock().expect("test resolution lock"),
+            vec![identifier.to_string(), identifier.to_string()]
+        );
+
+        let overwrite_input = typed_external_frame(&session, 3, "30.00");
+        overwrite_input
+            .write()
+            .option("sparkless.writer.format", "delta")
+            .save_as_table(&session, identifier, SaveMode::Overwrite)
+            .expect("delegate overwrite to the external table provider");
+        {
+            let writes = provider.writes.lock().expect("test write lock");
+            assert_eq!(writes.len(), 2);
+            assert_eq!(writes[1].mode, ExternalTableSaveMode::Overwrite);
+            assert_eq!(writes[1].table.version, Some(1));
+        }
+        assert_eq!(session.table(identifier).unwrap().count().unwrap(), 1);
+
+        *provider.write_error.lock().expect("test write error lock") =
+            Some("native commit failed".into());
+        let failing_input = typed_external_frame(&session, 4, "99.99");
+        let error = failing_input
+            .write()
+            .mode(crate::dataframe::WriteMode::Append)
+            .save_as_table(&session, identifier, SaveMode::Append)
+            .expect_err("provider error must stop the write without a local fallback");
+        assert!(error.to_string().contains("native commit failed"));
+        assert_eq!(
+            session.table(identifier).unwrap().count().unwrap(),
+            1,
+            "failed delegated write must leave the committed table unchanged"
+        );
+    }
+
+    #[test]
+    fn external_catalog_save_modes_do_not_delegate_non_mutating_modes() {
+        use crate::dataframe::SaveMode;
+
+        let session = SparkSession::builder()
+            .app_name("external-catalog-save-modes")
+            .get_or_create();
+        let frame = session
+            .create_dataframe(vec![(9, 1, "value".into())], vec!["id", "age", "name"])
+            .unwrap();
+        let schema = frame.schema().unwrap();
+        let descriptor =
+            external_descriptor(std::path::Path::new("/unused/external-table"), schema);
+        let (provider, resolutions) =
+            test_external_catalog("main.analytics.orders", Some(descriptor), None);
+        session
+            .set_external_catalog_provider(Some(provider.clone()))
+            .expect("set external provider");
+
+        let error = frame
+            .write()
+            .save_as_table(&session, "main.analytics.orders", SaveMode::ErrorIfExists)
+            .expect_err("ErrorIfExists must reject an existing external table");
+        assert!(error.to_string().contains("SaveMode is ErrorIfExists"));
+        frame
+            .write()
+            .save_as_table(&session, "main.analytics.orders", SaveMode::Ignore)
+            .expect("Ignore leaves an existing external table unchanged");
+        assert!(provider.writes.lock().expect("test write lock").is_empty());
+        assert_eq!(
+            *resolutions.lock().expect("test resolution lock"),
+            vec![
+                "main.analytics.orders".to_string(),
+                "main.analytics.orders".to_string()
+            ]
+        );
+    }
+
+    #[test]
     #[cfg(all(feature = "delta", feature = "sql"))]
     fn sql_reads_external_catalog_relation_through_session_table() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -5430,6 +5746,49 @@ mod tests {
             *resolutions.lock().expect("test resolution lock"),
             vec![identifier.to_string()]
         );
+    }
+
+    #[test]
+    #[cfg(all(feature = "delta", feature = "sql"))]
+    fn sql_insert_into_external_catalog_delegates_a_native_append() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("orders");
+        let seed_session = SparkSession::builder()
+            .app_name("external-catalog-insert-seed")
+            .get_or_create();
+        let seed = seed_session
+            .create_dataframe(
+                vec![(7, 10, "value".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        let schema = seed.schema().unwrap();
+        seed.write_delta(&path, true, false)
+            .expect("write real local Delta seed");
+        let mut descriptor = external_descriptor(&path, schema);
+        descriptor.version = Some(0);
+
+        let identifier = "main.analytics.orders";
+        let (provider, _) = test_external_catalog(identifier, Some(descriptor), None);
+        let session = SparkSession::builder()
+            .app_name("external-catalog-insert")
+            .get_or_create();
+        session
+            .set_external_catalog_provider(Some(provider.clone()))
+            .expect("set external provider");
+
+        let statement = session
+            .sql("INSERT INTO main.analytics.orders VALUES (8, 20, 'added')")
+            .expect("insert into external Delta table");
+        assert_eq!(statement.count().unwrap(), 0);
+        assert_eq!(session.table(identifier).unwrap().count().unwrap(), 2);
+
+        let writes = provider.writes.lock().expect("test write lock");
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].identifier, identifier);
+        assert_eq!(writes[0].mode, ExternalTableSaveMode::Append);
+        assert_eq!(writes[0].table.version, Some(0));
+        assert!(writes[0].options.is_empty());
     }
 
     #[test]

@@ -24,7 +24,10 @@ mod session;
 
 pub use collected::CollectedRows;
 pub use dataframe::{DataFrameBackend, GroupedDataBackend};
-pub use external_catalog::{ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat};
+pub use external_catalog::{
+    ArrowIpcStream, ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
+    ExternalTableSaveMode, ExternalTableWriteRequest, ExternalTableWriteResult,
+};
 pub use join::JoinType;
 pub use plan::PlanExecutor;
 pub use reader::DataFrameReaderBackend;

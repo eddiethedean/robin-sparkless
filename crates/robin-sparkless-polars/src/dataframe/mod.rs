@@ -29,6 +29,10 @@ use polars::prelude::{
     AnyValue, DataFrame as PlDataFrame, DataType, Expr, Field, IntoLazy, LazyFrame, NULL,
     PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
+use robin_sparkless_core::engine::{
+    ArrowIpcStream, ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableSaveMode,
+    ExternalTableWriteRequest,
+};
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -2717,6 +2721,82 @@ impl<'a> DataFrameWriter<'a> {
         )
     }
 
+    pub(crate) fn save_as_external_table_descriptor(
+        &self,
+        name: &str,
+        mode: SaveMode,
+        options: Option<&[(String, String)]>,
+        provider: &dyn ExternalCatalogProvider,
+        descriptor: &ExternalTableDescriptor,
+        logical_map_paths: &[String],
+    ) -> Result<(), PolarsError> {
+        let external_mode = match mode {
+            SaveMode::ErrorIfExists => {
+                return Err(PolarsError::InvalidOperation(
+                    format!("Table or view '{name}' already exists. SaveMode is ErrorIfExists.")
+                        .into(),
+                ));
+            }
+            SaveMode::Ignore => return Ok(()),
+            SaveMode::Append => ExternalTableSaveMode::Append,
+            SaveMode::Overwrite => ExternalTableSaveMode::Overwrite,
+        };
+        if !logical_map_paths.is_empty() {
+            return Err(PolarsError::InvalidOperation(
+                "external catalog Arrow IPC writes do not yet support logical Map columns".into(),
+            ));
+        }
+
+        let table_format = options
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .find(|(key, _)| key.eq_ignore_ascii_case("sparkless.writer.format"))
+            .map(|(_, value)| value.clone());
+        let writer_options = options
+            .unwrap_or_default()
+            .iter()
+            .filter(|(key, _)| !key.to_ascii_lowercase().starts_with("sparkless."))
+            .cloned()
+            .collect();
+        let partition_by = self
+            .partition_by
+            .iter()
+            .map(|column| self.df.resolve_column_name(column))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut materialized = self.df.collect_inner()?.as_ref().clone();
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        {
+            use polars::io::ipc::IpcStreamWriter;
+            use polars::prelude::SerWriter;
+            IpcStreamWriter::new(&mut cursor).finish(&mut materialized)?;
+        }
+        let request = ExternalTableWriteRequest {
+            identifier: name.to_string(),
+            table: descriptor.clone(),
+            data: ArrowIpcStream {
+                bytes: cursor.into_inner(),
+            },
+            mode: external_mode,
+            format: table_format,
+            options: writer_options,
+            partition_by,
+        };
+        let result = provider.write_table(request).map_err(|error| {
+            PolarsError::InvalidOperation(
+                format!("external catalog provider failed to write '{name}': {error}").into(),
+            )
+        })?;
+        result.validate_against(descriptor).map_err(|error| {
+            PolarsError::InvalidOperation(
+                format!("external catalog provider returned an invalid write receipt: {error}")
+                    .into(),
+            )
+        })?;
+        Ok(())
+    }
+
     /// JDBC write (PySpark-style). Requires the `jdbc` or `sqlite` feature.
     #[cfg(any(
         feature = "jdbc",
@@ -2787,6 +2867,38 @@ impl<'a> DataFrameWriter<'a> {
                 }
                 (merge_schema, overwrite_schema, is_delta, logical_map_paths)
             });
+
+        // A session-local table or view shadows the external catalog. Otherwise, an exact
+        // provider hit owns this write; provider errors or unsupported writes must never fall
+        // through into Sparkless' in-memory or warehouse writer.
+        if !session.saved_table_exists(name)
+            && !session.has_temp_view(name)
+            && let Some(provider) = session.external_catalog_provider()?
+        {
+            let descriptor = provider.resolve_table(name).map_err(|error| {
+                PolarsError::InvalidOperation(
+                    format!("external catalog provider failed to resolve '{name}': {error}").into(),
+                )
+            })?;
+            if let Some(descriptor) = descriptor {
+                descriptor.validate().map_err(|error| {
+                    PolarsError::InvalidOperation(
+                        format!(
+                            "external catalog returned an invalid descriptor for '{name}': {error}"
+                        )
+                        .into(),
+                    )
+                })?;
+                return self.save_as_external_table_descriptor(
+                    name,
+                    mode,
+                    options,
+                    provider.as_ref(),
+                    &descriptor,
+                    &logical_map_paths,
+                );
+            }
+        }
 
         // Warehouse paths (disk-backed saveAsTable). For schema-qualified names, allow both:
         // - "{warehouse}/{schema.table}" (single dir)

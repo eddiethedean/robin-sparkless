@@ -54,9 +54,10 @@ pub mod traits;
 /// Prefer these for engine-generic code and embeddings that should not depend on Polars.
 pub mod engine {
     pub use robin_sparkless_core::engine::{
-        CollectedRows, DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider,
-        ExternalTableDescriptor, ExternalTableFormat, GroupedDataBackend, JoinType, PlanExecutor,
-        SparkSessionBackend,
+        ArrowIpcStream, CollectedRows, DataFrameBackend, DataFrameReaderBackend,
+        ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
+        ExternalTableSaveMode, ExternalTableWriteRequest, ExternalTableWriteResult,
+        GroupedDataBackend, JoinType, PlanExecutor, SparkSessionBackend,
     };
     pub use robin_sparkless_core::expr::{
         ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,

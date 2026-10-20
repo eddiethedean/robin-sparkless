@@ -391,7 +391,20 @@ fn translate_insert(
         }
     };
 
-    let target_df = session.table(&table_name)?;
+    let external_target = if table_name
+        .get(.."global_temp.".len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("global_temp."))
+        || session.has_temp_view(&table_name)
+        || session.saved_table_exists(&table_name)
+    {
+        None
+    } else {
+        session.resolve_external_table_descriptor(&table_name)?.0
+    };
+    let target_df = match &external_target {
+        Some((_, descriptor)) => session.read_external_table_descriptor(&table_name, descriptor)?,
+        None => session.table(&table_name)?,
+    };
     let target_schema: StructType = target_df.schema()?;
     let target_cols: Vec<String> = target_schema
         .fields()
@@ -476,6 +489,21 @@ fn translate_insert(
             ));
         }
     };
+
+    if let Some((provider, descriptor)) = external_target {
+        new_rows_df.write().save_as_external_table_descriptor(
+            &table_name,
+            crate::dataframe::SaveMode::Append,
+            None,
+            provider.as_ref(),
+            &descriptor,
+            &[],
+        )?;
+        return Ok(DataFrame::from_polars_with_options(
+            PlDataFrame::empty(),
+            session.is_case_sensitive(),
+        ));
+    }
 
     // Append rows to existing table in the same namespace that provided the target table.
     let appended = target_df.union(&new_rows_df)?;

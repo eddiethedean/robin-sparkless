@@ -455,6 +455,26 @@ pub fn read_delta_with_version(
     version: Option<i64>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
+    read_delta_with_version_and_parquet_fallback(path, version, case_sensitive, true)
+}
+
+/// Read a committed Delta snapshot without accepting the plain-Parquet compatibility fallback.
+#[cfg(feature = "delta")]
+pub(crate) fn read_delta_snapshot_with_version(
+    path: impl AsRef<Path>,
+    version: Option<i64>,
+    case_sensitive: bool,
+) -> Result<DataFrame, PolarsError> {
+    read_delta_with_version_and_parquet_fallback(path, version, case_sensitive, false)
+}
+
+#[cfg(feature = "delta")]
+fn read_delta_with_version_and_parquet_fallback(
+    path: impl AsRef<Path>,
+    version: Option<i64>,
+    case_sensitive: bool,
+    allow_parquet_fallback: bool,
+) -> Result<DataFrame, PolarsError> {
     use deltalake::DeltaTableBuilder;
     use tokio::runtime::Runtime;
 
@@ -687,7 +707,12 @@ pub fn read_delta_with_version(
             let err_msg = e.to_string();
             let is_not_delta =
                 err_msg.contains("No files in log") || err_msg.contains("Not a Delta table");
-            if version.is_none() && is_not_delta && path.exists() && path.is_dir() {
+            if allow_parquet_fallback
+                && version.is_none()
+                && is_not_delta
+                && path.exists()
+                && path.is_dir()
+            {
                 let parquet_paths = collect_parquet_paths_under(path)?;
                 if parquet_paths.is_empty() {
                     return Err(e);
