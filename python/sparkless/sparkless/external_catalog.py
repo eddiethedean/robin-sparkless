@@ -10,16 +10,54 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import List, Optional, Protocol, Tuple
+from enum import Enum
+from typing import List, Optional, Protocol, Tuple, Union
 
 from sparkless.sql import types as T
 
 __all__ = [
     "ExternalCatalogProvider",
+    "WritableExternalCatalogProvider",
+    "ArrowIpcStream",
+    "ExternalTableFormat",
+    "ExternalTableSaveMode",
     "ExternalTableDescriptor",
     "ExternalTableWriteRequest",
     "ExternalTableWriteResult",
 ]
+
+
+class ExternalTableFormat(str, Enum):
+    """Storage formats supported by the native external catalog contract."""
+
+    DELTA = "delta"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class ExternalTableSaveMode(str, Enum):
+    """Save modes accepted by DataFrameWriter.mode()."""
+
+    ERROR_IF_EXISTS = "errorifexists"
+    OVERWRITE = "overwrite"
+    APPEND = "append"
+    IGNORE = "ignore"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class ArrowIpcStream(bytes):
+    """Arrow IPC stream bytes, compatible with Python's buffer protocol.
+
+    This is a bytes subclass so existing ``pyarrow.ipc.open_stream(data)`` calls
+    keep working. ``data.bytes`` exposes the Rust payload's named field as well.
+    """
+
+    @property
+    def bytes(self) -> bytes:
+        return bytes(self)
 
 
 @dataclass
@@ -32,7 +70,13 @@ class ExternalTableDescriptor:
     provider: str
     version: Optional[int] = None
     permissions_context: Optional[str] = None
-    format: str = "delta"
+    format: Union[ExternalTableFormat, str] = ExternalTableFormat.DELTA
+
+    def validate(self) -> None:
+        """Run the native descriptor validator without reading storage."""
+        from sparkless._native import _validate_external_table_descriptor
+
+        _validate_external_table_descriptor(self)
 
 
 @dataclass
@@ -46,8 +90,8 @@ class ExternalTableWriteRequest:
 
     identifier: str
     table: ExternalTableDescriptor
-    data: bytes
-    mode: str
+    data: ArrowIpcStream
+    mode: Union[ExternalTableSaveMode, str]
     format: Optional[str]
     options: List[Tuple[str, str]]
     partition_by: List[str]
@@ -60,6 +104,12 @@ class ExternalTableWriteResult:
     table: ExternalTableDescriptor
     committed_version: int
 
+    def validate_against(self, previous: ExternalTableDescriptor) -> None:
+        """Run the native identity and committed-version receipt checks."""
+        from sparkless._native import _validate_external_table_write_result
+
+        _validate_external_table_write_result(self, previous)
+
 
 class ExternalCatalogProvider(Protocol):
     """Required provider interface.
@@ -70,6 +120,14 @@ class ExternalCatalogProvider(Protocol):
     """
 
     def resolve_table(self, identifier: str) -> Optional[ExternalTableDescriptor]: ...
+
+
+class WritableExternalCatalogProvider(ExternalCatalogProvider, Protocol):
+    """Provider interface including the optional native write hook."""
+
+    def write_table(
+        self, request: ExternalTableWriteRequest
+    ) -> ExternalTableWriteResult: ...
 
 
 # Use the engine's schema wire format rather than StructType.jsonValue(), whose
@@ -158,6 +216,7 @@ def _descriptor_to_json(table):
 
 def _descriptor_from_json(value):
     value = json.loads(value)
+    value["format"] = ExternalTableFormat(value["format"])
     value["schema"] = T.StructType(
         [_field_from_wire(field) for field in value["schema"]["fields"]]
     )

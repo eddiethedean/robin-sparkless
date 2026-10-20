@@ -105,15 +105,18 @@ spark.set_external_catalog_provider(Catalog())
 orders = spark.table("main.analytics.orders")
 ```
 
-`sparkless.external_catalog` exports the `ExternalCatalogProvider` typing protocol and
-the `ExternalTableDescriptor`, `ExternalTableWriteRequest`, and
-`ExternalTableWriteResult` dataclasses. A read-only object may omit `write_table`;
+`sparkless.external_catalog` exports the `ExternalCatalogProvider` and
+`WritableExternalCatalogProvider` typing protocols, the `ExternalTableFormat` and
+`ExternalTableSaveMode` string enums, `ArrowIpcStream`, and the
+`ExternalTableDescriptor`, `ExternalTableWriteRequest`, and `ExternalTableWriteResult`
+dataclasses. A read-only object may omit `write_table`;
 attempted writes then raise an explicit unsupported error.
 
 The write callback receives the exact identifier, resolved descriptor, save mode
 (`"append"` or `"overwrite"`), optional format, ordered option pairs (including
-duplicates), and partition column names. `request.data` is Python `bytes` containing
-an Arrow IPC stream. For example, `pyarrow.ipc.open_stream(request.data).read_all()`
+duplicates), and partition column names. `request.data` is an `ArrowIpcStream`, a
+Python `bytes` subclass with a `.bytes` property matching the Rust payload field.
+For example, `pyarrow.ipc.open_stream(request.data).read_all()`
 decodes it without a JSON row conversion. PyArrow is optional and is not imported by
 the adapter. After committing through its storage backend, the callback must return
 `ExternalTableWriteResult(table=committed_descriptor, committed_version=version)`.
@@ -130,6 +133,55 @@ The adapter owns a strong reference to the Python provider for as long as it is
 attached. Callbacks acquire the Python GIL, including when entered from Rust.
 Existing readers share the session's provider slot. `newSession()` starts without a
 provider; detaching or stopping the Python session releases its provider reference.
+
+## Rust and Python API coverage
+
+Every public catalog operation introduced by this PR has a Python counterpart:
+
+| Rust API or behavior | Python API |
+| --- | --- |
+| `ExternalCatalogProvider::resolve_table` | `ExternalCatalogProvider.resolve_table(identifier)` |
+| `ExternalCatalogProvider::write_table` | Optional `write_table(request)`, typed by `WritableExternalCatalogProvider` |
+| `ExternalTableDescriptor` and every field | `ExternalTableDescriptor` dataclass, using `StructType` for the schema |
+| `ExternalTableDescriptor::validate` | `descriptor.validate()`, invoking the Rust validator |
+| `ExternalTableFormat::Delta` | `ExternalTableFormat.DELTA` (also accepts `"delta"`) |
+| All four `ExternalTableSaveMode` variants | `ExternalTableSaveMode.ERROR_IF_EXISTS`, `.OVERWRITE`, `.APPEND`, `.IGNORE` via `df.write.mode(mode)` |
+| `ArrowIpcStream::bytes` | `request.data.bytes`; `request.data` also works directly as `bytes` |
+| Every `ExternalTableWriteRequest` and `ExternalTableWriteResult` field | Corresponding dataclass attributes |
+| `ExternalTableWriteResult::validate_against` | `receipt.validate_against(previous)`, invoking the Rust validator |
+| Attach/replace/remove provider | `spark.set_external_catalog_provider(provider_or_none)` and `setExternalCatalogProvider(...)` |
+| Native catalog reads | `spark.table(name)`, `spark.read.table(name)`, and SQL relations |
+| Pinned, latest, or explicit Delta snapshot | `descriptor.version = version_or_none`; `spark.read_delta(name)` and `spark.read_delta_with_version(name, version)` |
+| Delegated append/overwrite, options, format, partitions | `df.write.mode(...).format(...).option(...).partitionBy(...).saveAsTable(name)` |
+| Ordered options including duplicate keys | Repeated `.option(key, value)` or `.options([(key, value), ...])`; `request.options` remains an ordered list |
+| SQL inserts from values or a query | `spark.sql("INSERT INTO ... VALUES ...")` / `spark.sql("INSERT INTO ... SELECT ...")` |
+| Catalog existence and safe conditional creation | `spark.catalog.tableExists(name)` and SQL `CREATE TABLE IF NOT EXISTS` |
+| Shared resolver slot and new-session isolation | Existing readers observe replacements; `spark.newSession()` has no provider |
+| Native descriptor/schema/receipt checks, strict Delta reads, path confinement | The same native checks run automatically for Python calls |
+
+The string enums remain compatible with existing string-based writer APIs. Descriptor
+and receipt validation are available before a provider returns metadata, without
+duplicating Rust validation rules in Python. For example:
+
+```python
+from sparkless.external_catalog import ExternalTableFormat, ExternalTableSaveMode
+
+descriptor.validate()
+receipt.validate_against(descriptor)
+df.write.format(ExternalTableFormat.DELTA).mode(
+    ExternalTableSaveMode.APPEND
+).saveAsTable("main.analytics.orders")
+```
+
+For exact-width IPC writes, `spark.createDataFrame(rows, [("id", "int32")])`
+constructs a native 32-bit Integer column. Typed PyArrow inputs also preserve
+`int16`, `int32`, and `int64` columns through the writer. Descriptor schemas use
+`ShortType`, `IntegerType`, and `LongType` for those respective native types.
+
+Named `read_delta` methods are also present in Python builds without Delta support:
+they can resolve local in-memory tables, while attempts to read Delta storage raise
+the native feature-required error. Logical Map writes and async transport have the
+same limits in both languages.
 
 ## Availability
 

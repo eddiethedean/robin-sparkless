@@ -96,6 +96,38 @@ fn callback_error(operation: &str, error: PyErr) -> EngineError {
     EngineError::User(format!("Python external catalog {operation}: {error}"))
 }
 
+fn write_result_from_python(value: &Bound<'_, PyAny>) -> PyResult<ExternalTableWriteResult> {
+    let module = PyModule::import(value.py(), "sparkless.external_catalog")?;
+    let (descriptor_json, committed_version): (String, i64) = module
+        .getattr("_write_result_to_parts")?
+        .call1((value,))?
+        .extract()?;
+    let table = serde_json::from_str(&descriptor_json).map_err(|error| {
+        pyo3::exceptions::PyValueError::new_err(format!("invalid write receipt: {error}"))
+    })?;
+    Ok(ExternalTableWriteResult {
+        table,
+        committed_version,
+    })
+}
+
+#[pyfunction(name = "_validate_external_table_descriptor")]
+pub(crate) fn validate_descriptor(table: &Bound<'_, PyAny>) -> PyResult<()> {
+    descriptor_from_python(table)?
+        .validate()
+        .map_err(super::to_py_err)
+}
+
+#[pyfunction(name = "_validate_external_table_write_result")]
+pub(crate) fn validate_write_result(
+    result: &Bound<'_, PyAny>,
+    previous: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    write_result_from_python(result)?
+        .validate_against(&descriptor_from_python(previous)?)
+        .map_err(super::to_py_err)
+}
+
 impl ExternalCatalogProvider for PythonExternalCatalogProvider {
     fn resolve_table(
         &self,
@@ -156,8 +188,16 @@ impl ExternalCatalogProvider for PythonExternalCatalogProvider {
             let kwargs = PyDict::new(py);
             kwargs.set_item("identifier", request.identifier)?;
             kwargs.set_item("table", table)?;
-            kwargs.set_item("data", PyBytes::new(py, &request.data.bytes))?;
-            kwargs.set_item("mode", mode)?;
+            kwargs.set_item(
+                "data",
+                module
+                    .getattr("ArrowIpcStream")?
+                    .call1((PyBytes::new(py, &request.data.bytes),))?,
+            )?;
+            kwargs.set_item(
+                "mode",
+                module.getattr("ExternalTableSaveMode")?.call1((mode,))?,
+            )?;
             kwargs.set_item("format", request.format)?;
             kwargs.set_item("options", request.options)?;
             kwargs.set_item("partition_by", request.partition_by)?;
@@ -165,17 +205,7 @@ impl ExternalCatalogProvider for PythonExternalCatalogProvider {
                 .getattr("ExternalTableWriteRequest")?
                 .call((), Some(&kwargs))?;
             let result = method.call1((value,))?;
-            let (descriptor_json, committed_version): (String, i64) = module
-                .getattr("_write_result_to_parts")?
-                .call1((result,))?
-                .extract()?;
-            let table = serde_json::from_str(&descriptor_json).map_err(|error| {
-                pyo3::exceptions::PyValueError::new_err(format!("invalid write receipt: {error}"))
-            })?;
-            Ok(ExternalTableWriteResult {
-                table,
-                committed_version,
-            })
+            write_result_from_python(&result)
         })
         .map_err(|error| callback_error("write_table", error))
     }

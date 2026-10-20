@@ -3682,6 +3682,12 @@ impl SparkSession {
         version: Option<i64>,
     ) -> Result<DataFrame, PolarsError> {
         if !Self::looks_like_path(name_or_path) {
+            if Self::parse_global_temp_name(name_or_path).is_some()
+                || self.has_exact_temp_view(name_or_path)
+                || self.saved_table_exists(name_or_path)
+            {
+                return self.table(name_or_path);
+            }
             let (resolved, has_provider) = self.resolve_external_table_descriptor(name_or_path)?;
             if let Some((_, mut descriptor)) = resolved {
                 if version.is_some() {
@@ -3707,15 +3713,12 @@ impl SparkSession {
     /// Stub when `delta` feature is disabled. Still supports reading by table name.
     #[cfg(not(feature = "delta"))]
     pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
-        if let Ok(table) = self.table(name_or_path) {
-            return Ok(table);
+        if !Self::looks_like_path(name_or_path) {
+            return self.table(name_or_path);
         }
-        if Self::looks_like_path(name_or_path) {
-            return Err(PolarsError::InvalidOperation(
-                "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
-            ));
-        }
-        self.table(name_or_path)
+        Err(PolarsError::InvalidOperation(
+            "Delta Lake requires the 'delta' feature. Build with --features delta.".into(),
+        ))
     }
 
     #[cfg(not(feature = "delta"))]

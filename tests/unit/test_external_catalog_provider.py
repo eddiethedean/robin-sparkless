@@ -10,7 +10,10 @@ import pytest
 
 from sparkless import SparkSession
 from sparkless.external_catalog import (
+    ArrowIpcStream,
     ExternalTableDescriptor,
+    ExternalTableFormat,
+    ExternalTableSaveMode,
     ExternalTableWriteRequest,
     ExternalTableWriteResult,
     _descriptor_from_json,
@@ -110,6 +113,10 @@ def test_python_writer_passes_typed_ipc_and_exact_options(session):
     assert type(request.table.schema["id"].dataType) is T.LongType
     assert request.table.schema["id"].nullable is False
     assert isinstance(request.data, bytes)
+    assert isinstance(request.data, ArrowIpcStream)
+    assert request.data.bytes == bytes(request.data)
+    assert request.mode is ExternalTableSaveMode.APPEND
+    assert request.table.format is ExternalTableFormat.DELTA
     table = pa.ipc.open_stream(request.data).read_all()
     assert table["id"].to_pylist() == [2**54 + 3, 4]
     assert table["amount"].type == pa.decimal128(12, 2)
@@ -179,11 +186,15 @@ def test_python_provider_errors_are_surfaced_without_local_write(session):
 
     class Failing(Provider):
         def resolve_table(self, identifier):
+            self.lookups.append(identifier)
             raise LookupError("catalog unavailable")
 
-    session.set_external_catalog_provider(Failing(descriptor(frame.schema)))
-    with pytest.raises(Exception, match="catalog unavailable"):
-        session.table(IDENTIFIER)
+    provider = Failing(descriptor(frame.schema))
+    session.set_external_catalog_provider(provider)
+    for read in (session.table, session.read_delta, session.read_delta_with_version):
+        with pytest.raises(Exception, match="catalog unavailable"):
+            read(IDENTIFIER)
+    assert provider.lookups == [IDENTIFIER] * 3
     with pytest.raises(Exception, match="catalog unavailable"):
         frame.write.mode("overwrite").saveAsTable(IDENTIFIER)
     session.set_external_catalog_provider(None)
@@ -386,3 +397,312 @@ def test_python_catalog_retains_map_metadata_for_reads_and_rejects_map_writes(
     with pytest.raises(Exception, match="logical Map"):
         session.sql(f"INSERT INTO {IDENTIFIER} SELECT * FROM {IDENTIFIER}")
     assert provider.writes == []
+
+
+def test_public_arrow_stream_supports_bytes_and_buffer_consumers():
+    payload = ArrowIpcStream(b"stream-bytes")
+    assert payload.bytes == b"stream-bytes"
+    assert memoryview(payload).tobytes() == b"stream-bytes"
+
+
+@pytest.mark.parametrize("selected_format", [None, "delta", "parquet", "csv", "json"])
+def test_python_writer_reaches_every_native_format(session, selected_format):
+    frame = session.createDataFrame([(1,)], ["id"])
+    provider = Provider(descriptor(frame.schema))
+    session.set_external_catalog_provider(provider)
+    writer = frame.write.mode(ExternalTableSaveMode.APPEND)
+    if selected_format is not None:
+        writer = writer.format(selected_format)
+    writer.save_as_table(IDENTIFIER)
+    assert provider.writes[0].format == selected_format
+
+
+def test_python_bulk_options_retain_order_and_duplicate_keys(session):
+    frame = session.createDataFrame([(1,)], ["id"])
+    provider = Provider(descriptor(frame.schema))
+    session.set_external_catalog_provider(provider)
+    frame.write.mode("append").options(
+        [("mergeSchema", False), ("mergeSchema", True)], overwriteSchema=False
+    ).option("batchSize", 100).saveAsTable(IDENTIFIER)
+    assert provider.writes[0].options == [
+        ("mergeSchema", "false"),
+        ("mergeSchema", "true"),
+        ("overwriteSchema", "false"),
+        ("batchSize", "100"),
+    ]
+    frame.write.mode("append").options({"first": 1}, second=2).saveAsTable(IDENTIFIER)
+    assert provider.writes[1].options == [("first", "1"), ("second", "2")]
+
+
+@pytest.mark.parametrize("mode", list(ExternalTableSaveMode))
+def test_public_save_mode_enums_work_with_python_writer(session, mode):
+    frame = session.createDataFrame([(1,)], ["id"])
+    provider = Provider(descriptor(frame.schema))
+    session.set_external_catalog_provider(provider)
+    writer = frame.write.format(ExternalTableFormat.DELTA).mode(mode)
+    if mode is ExternalTableSaveMode.ERROR_IF_EXISTS:
+        with pytest.raises(Exception, match="already exists"):
+            writer.saveAsTable(IDENTIFIER)
+        assert provider.writes == []
+    else:
+        writer.saveAsTable(IDENTIFIER)
+        if mode is ExternalTableSaveMode.IGNORE:
+            assert provider.writes == []
+        else:
+            request = provider.writes[0]
+            assert request.mode is mode
+            assert request.format == "delta"
+            assert str(request.mode) == mode.value
+
+
+def test_public_validators_accept_all_native_schema_types():
+    schema = T.StructType(
+        [
+            T.StructField("string", T.StringType()),
+            T.StructField("integer", T.IntegerType(), False),
+            T.StructField("short", T.ShortType()),
+            T.StructField("long", T.LongType()),
+            T.StructField("double", T.DoubleType()),
+            T.StructField("decimal", T.DecimalType(18, 3)),
+            T.StructField("boolean", T.BooleanType()),
+            T.StructField("date", T.DateType()),
+            T.StructField("timestamp", T.TimestampType()),
+            T.StructField("binary", T.BinaryType()),
+            T.StructField("array", T.ArrayType(T.LongType())),
+            T.StructField("map", T.MapType(T.StringType(), T.LongType())),
+            T.StructField(
+                "struct", T.StructType([T.StructField("child", T.LongType())])
+            ),
+        ]
+    )
+    table = descriptor(schema)
+    assert table.validate() is None
+    receipt = ExternalTableWriteResult(replace(table, version=1), 1)
+    assert receipt.validate_against(table) is None
+
+
+@pytest.mark.parametrize(
+    "change,match",
+    [
+        ({"table_id": " "}, "table_id"),
+        ({"canonical_location": ""}, "canonical_location"),
+        ({"provider": ""}, "provider"),
+        ({"version": -1}, "negative"),
+        ({"format": "parquet"}, "variant"),
+    ],
+)
+def test_python_descriptor_validate_uses_native_rules(change, match):
+    table = replace(descriptor(T.StructType()), **change)
+    with pytest.raises(Exception, match=match):
+        table.validate()
+
+
+@pytest.mark.parametrize(
+    "change,committed_version,match",
+    [
+        ({"table_id": "other"}, 5, "identity"),
+        ({"canonical_location": "/other"}, 5, "identity"),
+        ({"provider": "other"}, 5, "identity"),
+        ({"version": None}, 5, "committed version"),
+        ({"version": 6}, 5, "committed version"),
+        ({"version": -1}, -1, "negative"),
+        ({"version": 3}, 3, "backwards"),
+    ],
+)
+def test_python_receipt_validate_against_uses_native_rules(
+    change, committed_version, match
+):
+    previous = replace(descriptor(T.StructType()), version=4)
+    receipt_table = replace(previous, version=5)
+    receipt_table = replace(receipt_table, **change)
+    receipt = ExternalTableWriteResult(receipt_table, committed_version)
+    with pytest.raises(Exception, match=match):
+        receipt.validate_against(previous)
+
+
+@pytest.mark.parametrize("source_kind", ["explicit_widths", "arrow"])
+def test_python_ipc_preserves_remaining_native_primitive_types(session, source_kind):
+    pa = pytest.importorskip("pyarrow")
+    schema = T.StructType(
+        [
+            T.StructField("short", T.ShortType()),
+            T.StructField("integer", T.IntegerType()),
+            T.StructField("double", T.DoubleType()),
+            T.StructField("boolean", T.BooleanType()),
+            T.StructField("string", T.StringType()),
+        ]
+    )
+    values = [(123, 2147483647, 1.25, True, "café"), (None,) * 5]
+    if source_kind == "arrow":
+        arrow_schema = pa.schema(
+            [
+                ("short", pa.int16()),
+                ("integer", pa.int32()),
+                ("double", pa.float64()),
+                ("boolean", pa.bool_()),
+                ("string", pa.string()),
+            ]
+        )
+        rows = [dict(zip(schema.fieldNames(), row)) for row in values]
+        frame = session.createDataFrame(pa.Table.from_pylist(rows, schema=arrow_schema))
+    else:
+        frame = session.createDataFrame(
+            values,
+            [
+                ("short", "smallint"),
+                ("integer", "int32"),
+                ("double", "double"),
+                ("boolean", "boolean"),
+                ("string", "str"),
+            ],
+        )
+    provider = Provider(descriptor(schema))
+    session.set_external_catalog_provider(provider)
+    frame.write.mode(ExternalTableSaveMode.APPEND).saveAsTable(IDENTIFIER)
+    table = pa.ipc.open_stream(provider.writes[0].data.bytes).read_all()
+    assert table.schema.types[:4] == [
+        pa.int16(),
+        pa.int32(),
+        pa.float64(),
+        pa.bool_(),
+    ]
+    assert table.to_pylist() == [
+        {
+            "short": 123,
+            "integer": 2147483647,
+            "double": 1.25,
+            "boolean": True,
+            "string": "café",
+        },
+        {
+            "short": None,
+            "integer": None,
+            "double": None,
+            "boolean": None,
+            "string": None,
+        },
+    ]
+
+
+def test_saved_local_table_shadows_python_provider_for_reads_and_writes(session):
+    frame = session.createDataFrame([(99,)], ["id"])
+    frame.write.saveAsTable(IDENTIFIER)
+    provider = Provider(descriptor(frame.schema))
+    session.set_external_catalog_provider(provider)
+    frame.write.mode(ExternalTableSaveMode.APPEND).saveAsTable(IDENTIFIER)
+    assert session.table(IDENTIFIER).count() == 2
+    assert session.read_delta_with_version(IDENTIFIER, 0).count() == 2
+    assert session.catalog.tableExists(IDENTIFIER)
+    assert provider.lookups == []
+    assert provider.writes == []
+
+
+@pytest.mark.delta
+def test_python_reaches_pinned_latest_and_explicit_snapshot_reads(session, tmp_path):
+    path = str(tmp_path / "versions")
+    seed = session.createDataFrame([(1,)], ["id"])
+    seed.write.format("delta").mode("overwrite").save(path)
+    for value in (2, 3):
+        session.createDataFrame([(value,)], ["id"]).write.format("delta").mode(
+            "append"
+        ).save(path)
+    provider = Provider(descriptor(seed.schema, path))
+    session.set_external_catalog_provider(provider)
+    assert session.table(IDENTIFIER).count() == 1
+    assert session.read.table(IDENTIFIER).count() == 1
+    assert session.sql(f"SELECT * FROM {IDENTIFIER}").count() == 1
+    assert session.read_delta(IDENTIFIER).count() == 1
+    assert session.read_delta_with_version(IDENTIFIER).count() == 1
+    assert session.read_delta_with_version(IDENTIFIER, 1).count() == 2
+    provider.table = replace(provider.table, version=None)
+    assert session.table(IDENTIFIER).count() == 3
+    assert session.read_delta_with_version(IDENTIFIER, 0).count() == 1
+    local = session.createDataFrame([(99,)], ["id"])
+    local.createOrReplaceTempView(IDENTIFIER)
+    lookups = list(provider.lookups)
+    assert session.read_delta_with_version(IDENTIFIER, 0).collect()[0]["id"] == 99
+    assert provider.lookups == lookups
+    local.createOrReplaceGlobalTempView("python_catalog_versions")
+    try:
+        assert (
+            session.read_delta_with_version(
+                "global_temp.python_catalog_versions", 0
+            ).collect()[0]["id"]
+            == 99
+        )
+        assert provider.lookups == lookups
+    finally:
+        session.catalog.dropGlobalTempView("python_catalog_versions")
+
+
+@pytest.mark.delta
+def test_python_catalog_exists_create_and_select_insert_and_overwrite(
+    session, tmp_path
+):
+    pa = pytest.importorskip("pyarrow")
+    path = str(tmp_path / "catalog")
+    seed = session.createDataFrame([(1,)], ["id"])
+    seed.write.format("delta").mode("overwrite").save(path)
+
+    class Committing(Provider):
+        def write_table(self, request):
+            table = pa.ipc.open_stream(request.data.bytes).read_all()
+            session.createDataFrame(table).write.format(ExternalTableFormat.DELTA).mode(
+                request.mode
+            ).save(path)
+            return super().write_table(request)
+
+    provider = Committing(descriptor(seed.schema, path))
+    session.set_external_catalog_provider(provider)
+    assert session.catalog.tableExists(IDENTIFIER)
+    assert not session.catalog.tableExists("catalog.schema.absent")
+    session.sql(f"CREATE TABLE IF NOT EXISTS {IDENTIFIER} (id BIGINT)")
+    assert session.table(IDENTIFIER).count() == 1
+    with pytest.raises(Exception, match="already exists"):
+        session.sql(f"CREATE TABLE {IDENTIFIER} (id BIGINT)")
+    session.createDataFrame([(2,)], ["id"]).createOrReplaceTempView(
+        "python_catalog_source"
+    )
+    session.sql(f"INSERT INTO {IDENTIFIER} SELECT id FROM python_catalog_source")
+    assert provider.writes[0].mode is ExternalTableSaveMode.APPEND
+    assert session.table(IDENTIFIER).count() == 2
+    session.createDataFrame([(7,)], ["id"]).write.format(
+        ExternalTableFormat.DELTA
+    ).mode(ExternalTableSaveMode.OVERWRITE).saveAsTable(IDENTIFIER)
+    assert provider.writes[1].mode is ExternalTableSaveMode.OVERWRITE
+    assert session.table(IDENTIFIER).collect()[0]["id"] == 7
+    assert session.read_delta_with_version(IDENTIFIER, 0).collect()[0]["id"] == 1
+
+
+@pytest.mark.delta
+def test_python_catalog_strict_delta_and_descriptor_schema_checks(session, tmp_path):
+    path = tmp_path / "parquet"
+    path.mkdir()
+    seed = session.createDataFrame([(1,)], ["id"])
+    seed.write.parquet(str(path / "part.parquet"))
+    provider = Provider(replace(descriptor(seed.schema, path), version=None))
+    session.set_external_catalog_provider(provider)
+    assert session.read.format("delta").load(str(path)).count() == 1
+    with pytest.raises(Exception):
+        session.table(IDENTIFIER)
+    delta_path = str(tmp_path / "delta")
+    seed.write.format("delta").mode("overwrite").save(delta_path)
+    provider.table = descriptor(
+        T.StructType([T.StructField("wrong", T.LongType())]), delta_path
+    )
+    with pytest.raises(Exception, match="schema mismatch"):
+        session.table(IDENTIFIER)
+
+
+@pytest.mark.delta
+def test_python_catalog_uses_native_path_confinement(session, tmp_path, monkeypatch):
+    path = str(tmp_path / "outside")
+    seed = session.createDataFrame([(1,)], ["id"])
+    seed.write.format("delta").mode("overwrite").save(path)
+    session.set_external_catalog_provider(Provider(descriptor(seed.schema, path)))
+    assert session.table(IDENTIFIER).count() == 1
+    base = tmp_path / "permitted"
+    base.mkdir()
+    monkeypatch.setenv("SPARKLESS_FILES_BASE", str(base))
+    with pytest.raises(Exception, match="outside|escape|base"):
+        session.table(IDENTIFIER)

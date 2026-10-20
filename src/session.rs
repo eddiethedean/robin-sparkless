@@ -335,12 +335,10 @@ impl SparkSession {
             .map(DataFrame)
     }
 
-    #[cfg(feature = "delta")]
     pub fn read_delta(&self, name_or_path: &str) -> Result<DataFrame, PolarsError> {
         self.0.read_delta(name_or_path).map(DataFrame)
     }
 
-    #[cfg(feature = "delta")]
     pub fn read_delta_with_version(
         &self,
         name_or_path: &str,

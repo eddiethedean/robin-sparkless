@@ -3172,32 +3172,38 @@ impl PySparkSession {
             .map_err(to_py_err)
     }
 
-    #[cfg(feature = "delta")]
     fn read_delta(&self, name_or_path: &str) -> PyResult<PyDataFrame> {
+        #[cfg_attr(not(feature = "delta"), allow(unused_mut))]
         let mut frame = self
             .inner
             .read_delta(name_or_path)
             .map(PyDataFrame::wrap)
             .map_err(to_py_err)?;
-        frame.logical_map_paths =
-            delta_map_paths_for_catalog_table(self, name_or_path).map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            frame.logical_map_paths =
+                delta_map_paths_for_catalog_table(self, name_or_path).map_err(to_py_err)?;
+        }
         Ok(frame)
     }
 
-    #[cfg(feature = "delta")]
     #[pyo3(signature = (name_or_path, version=None))]
     fn read_delta_with_version(
         &self,
         name_or_path: &str,
         version: Option<i64>,
     ) -> PyResult<PyDataFrame> {
+        #[cfg_attr(not(feature = "delta"), allow(unused_mut))]
         let mut frame = self
             .inner
             .read_delta_with_version(name_or_path, version)
             .map(PyDataFrame::wrap)
             .map_err(to_py_err)?;
-        frame.logical_map_paths =
-            delta_map_paths_for_catalog_table(self, name_or_path).map_err(to_py_err)?;
+        #[cfg(feature = "delta")]
+        {
+            frame.logical_map_paths =
+                delta_map_paths_for_catalog_table(self, name_or_path).map_err(to_py_err)?;
+        }
         Ok(frame)
     }
 
@@ -9800,9 +9806,42 @@ impl PyDataFrameWriter {
         slf
     }
 
-    fn option<'a>(mut slf: PyRefMut<'a, Self>, key: &str, value: &str) -> PyRefMut<'a, Self> {
-        slf.options.push((key.to_string(), value.to_string()));
-        slf
+    fn option<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        key: &str,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<PyRefMut<'a, Self>> {
+        slf.options
+            .push((key.to_string(), option_value_to_string(value)?));
+        Ok(slf)
+    }
+
+    /// Accept mappings or ordered pairs, preserving duplicate keys like the Rust writer.
+    #[pyo3(signature = (opts=None, **kwargs))]
+    fn options<'a>(
+        mut slf: PyRefMut<'a, Self>,
+        opts: Option<&Bound<'_, PyAny>>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<PyRefMut<'a, Self>> {
+        let mut pairs = Vec::new();
+        if let Some(opts) = opts {
+            if let Ok(mapping) = opts.cast::<PyDict>() {
+                for (key, value) in mapping.iter() {
+                    pairs.push((key.extract::<String>()?, option_value_to_string(&value)?));
+                }
+            } else {
+                for (key, value) in opts.extract::<Vec<(String, Py<PyAny>)>>()? {
+                    pairs.push((key, option_value_to_string(value.bind(slf.py()))?));
+                }
+            }
+        }
+        if let Some(kwargs) = kwargs {
+            for (key, value) in kwargs.iter() {
+                pairs.push((key.extract::<String>()?, option_value_to_string(&value)?));
+            }
+        }
+        slf.options.extend(pairs);
+        Ok(slf)
     }
 
     #[pyo3(name = "partitionBy", signature = (*cols))]
@@ -14315,6 +14354,11 @@ fn configure_for_multiprocessing() {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SparklessError", m.py().get_type::<SparklessError>())?;
+    m.add_function(wrap_pyfunction!(external_catalog::validate_descriptor, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        external_catalog::validate_write_result,
+        m
+    )?)?;
     m.add_class::<PySparkSessionBuilder>()?;
     m.add_class::<PySparkSession>()?;
     m.add_class::<PyDataFrameReader>()?;
