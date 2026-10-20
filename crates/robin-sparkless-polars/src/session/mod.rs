@@ -1341,7 +1341,7 @@ fn parse_timestamp_str_to_micros(s: &str) -> Result<i64, PolarsError> {
 fn json_object_or_array_to_struct_series(
     value: &JsonValue,
     fields: &[(String, String)],
-    _name: &str,
+    name: &str,
 ) -> Result<Option<Series>, PolarsError> {
     use polars::prelude::StructChunked;
     if matches!(value, JsonValue::Null) {
@@ -1390,7 +1390,7 @@ fn json_object_or_array_to_struct_series(
         field_series.push(s);
     }
     let field_refs: Vec<&Series> = field_series.iter().collect();
-    let st = StructChunked::from_series(PlSmallStr::EMPTY, 1, field_refs.iter().copied())
+    let st = StructChunked::from_series(name.into(), 1, field_refs.iter().copied())
         .map_err(|e| PolarsError::ComputeError(format!("struct from value: {e}").into()))?
         .into_series();
     Ok(Some(st))

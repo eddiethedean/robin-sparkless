@@ -135,16 +135,26 @@ def test_external_writer_preserves_null_struct_parent_validity(session, ingress)
     details = T.StructType(
         [T.StructField("label", T.StringType()), T.StructField("inner", nested)]
     )
-    item = T.StructType([T.StructField("label", T.StringType())])
+    item = T.StructType(
+        [T.StructField("label", T.StringType()), T.StructField("inner", nested)]
+    )
     schema = T.StructType(
         [T.StructField("details", details), T.StructField("items", T.ArrayType(item))]
     )
     expected = [
         {
             "details": {"label": "present", "inner": {"value": "deep"}},
-            "items": [{"label": "item"}, None, {"label": None}],
+            "items": [
+                {"label": "item", "inner": {"value": "nested"}},
+                None,
+                {"label": None, "inner": None},
+                {"label": None, "inner": {"value": None}},
+            ],
         },
-        {"details": None, "items": [None, {"label": None}]},
+        {
+            "details": None,
+            "items": [None, {"label": None, "inner": {"value": None}}],
+        },
         {"details": {"label": None, "inner": None}, "items": None},
     ]
     if ingress == "pyarrow":
@@ -161,7 +171,14 @@ def test_external_writer_preserves_null_struct_parent_validity(session, ingress)
                 ),
                 (
                     "items",
-                    pa.list_(pa.struct([("label", pa.string())])),
+                    pa.list_(
+                        pa.struct(
+                            [
+                                ("label", pa.string()),
+                                ("inner", pa.struct([("value", pa.string())])),
+                            ]
+                        )
+                    ),
                 ),
             ]
         )
