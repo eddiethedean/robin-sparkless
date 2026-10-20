@@ -379,7 +379,9 @@ def pytest_collection_modifyitems(
         Path(__file__).resolve(),
         # Sparkless's external provider API has no PySpark counterpart.
         (
-            Path(__file__).resolve().parent / "unit" / "test_external_catalog_provider.py"
+            Path(__file__).resolve().parent
+            / "unit"
+            / "test_external_catalog_provider.py"
         ).resolve(),
         (Path(__file__).resolve().parent / "sql" / "conftest.py").resolve(),
         (
