@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
 
+## [4.14.0] - 2026-10-20
+
+### Added
+
+- **External catalogs** — Add Rust and Python provider hooks for native Delta table reads, delegated writes, SQL inserts, and catalog existence checks.
+
 ## [4.13.4] - 2026-10-19
 
 ### Fixed
