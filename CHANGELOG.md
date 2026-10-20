@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
 
+## [4.14.1] - 2026-10-20
+
+### Fixed
+
+- **Struct ingestion** — Preserve null parent validity and nested struct values in arrays when creating DataFrames from Python or Arrow data (#1694, #1696).
+- **Struct collection** — Preserve valid structs containing only null fields while keeping null parents as `None`, including nested collections and `withField` updates after unions (#1695, #1697).
+- **Dependency security** — Update rustls-webpki and bundled root certificate packages to their fixed patch versions.
+
 ## [4.14.0] - 2026-10-20
 
 ### Added
