@@ -184,10 +184,7 @@ def test_external_writer_preserves_null_struct_parent_validity(session, ingress)
         )
         data = pa.Table.from_pylist(expected, schema=arrow_schema)
     else:
-        data = [
-            (row["details"], row["items"])
-            for row in expected
-        ]
+        data = [(row["details"], row["items"]) for row in expected]
 
     class CaptureThenFail:
         received = None

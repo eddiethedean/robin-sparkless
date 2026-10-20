@@ -24,4 +24,6 @@ ignore = [
     # Transitive via polars -> object_store -> quick-xml 0.39; needs object_store/polars bump to >=0.41.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # webpki-roots 0.26.11 is a compatibility shim; Cargo.lock resolves its re-export to fixed 1.0.10.
+    "RUSTSEC-2026-0381",
 ]
