@@ -4085,15 +4085,11 @@ fn any_value_to_json_with_array_struct_override(
                     ),
                 )?);
             }
-            if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
-                JsonValue::Null
-            } else {
-                let mut obj = Map::new();
-                for (fld, v) in fields.iter().zip(vals) {
-                    obj.insert(fld.name.to_string(), v);
-                }
-                JsonValue::Object(obj)
+            let mut obj = Map::new();
+            for (fld, v) in fields.iter().zip(vals) {
+                obj.insert(fld.name.to_string(), v);
             }
+            JsonValue::Object(obj)
         }
         AnyValue::StructOwned(payload) => {
             let (values, fields) = &**payload;
@@ -4113,15 +4109,11 @@ fn any_value_to_json_with_array_struct_override(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
-                JsonValue::Null
-            } else {
-                let mut obj = Map::new();
-                for (fld, v) in fields.iter().zip(vals) {
-                    obj.insert(fld.name.to_string(), v);
-                }
-                JsonValue::Object(obj)
+            let mut obj = Map::new();
+            for (fld, v) in fields.iter().zip(vals) {
+                obj.insert(fld.name.to_string(), v);
             }
+            JsonValue::Object(obj)
         }
         AnyValue::Date(days) => date_days_to_json(*days),
         AnyValue::Datetime(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
