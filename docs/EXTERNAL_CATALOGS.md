@@ -47,8 +47,8 @@ table path; provider errors and unsupported write hooks are surfaced without fal
 `ErrorIfExists` rejects a resolved external table and `Ignore` leaves it unchanged.
 
 The writer materializes the Sparkless DataFrame and buffers one Arrow IPC stream in
-memory before calling the synchronous Rust provider. This API has no Python binding or
-async transport yet. Path-based `DataFrameWriter.save()`, `insertInto()`, SQL
+memory before calling the synchronous provider. Python providers use the PyO3 adapter
+described below. There is no async transport. Path-based `DataFrameWriter.save()`, `insertInto()`, SQL
 `UPDATE`/`DELETE`, and logical Map writes are not delegated by this hook. Logical Map
 reads can match the Polars array-of-key/value-struct representation; writes carrying
 Sparkless' logical Map metadata fail explicitly.
@@ -76,8 +76,60 @@ schema adapter does not retain Delta nullability metadata. `permissions_context`
 opaque to Sparkless and must not carry credentials or secrets.
 
 `SparkSession` clones share their resolver slot. `new_session()` creates an empty,
-isolated slot. This is a synchronous Rust trait only; no Python callback, async/network
-transport, or cross-thread callback guarantee is included.
+isolated slot. Rust and Python callbacks are synchronous; async/network transport is
+the provider's responsibility.
+
+## Python providers
+
+Python sessions expose `set_external_catalog_provider(provider)` and the camelCase
+alias `setExternalCatalogProvider(provider)`. Pass `None` to detach. Providers implement
+`resolve_table(identifier)` and may also implement `write_table(request)`:
+
+```python
+from sparkless.external_catalog import ExternalTableDescriptor
+from sparkless.sql.types import LongType, StructField, StructType
+
+class Catalog:
+    def resolve_table(self, identifier):
+        if identifier != "main.analytics.orders":
+            return None
+        return ExternalTableDescriptor(
+            table_id="orders-123",
+            canonical_location="/data/orders",
+            schema=StructType([StructField("id", LongType())]),
+            provider="my-catalog",
+            version=None,  # Read the latest committed Delta version.
+        )
+
+spark.set_external_catalog_provider(Catalog())
+orders = spark.table("main.analytics.orders")
+```
+
+`sparkless.external_catalog` exports the `ExternalCatalogProvider` typing protocol and
+the `ExternalTableDescriptor`, `ExternalTableWriteRequest`, and
+`ExternalTableWriteResult` dataclasses. A read-only object may omit `write_table`;
+attempted writes then raise an explicit unsupported error.
+
+The write callback receives the exact identifier, resolved descriptor, save mode
+(`"append"` or `"overwrite"`), optional format, ordered option pairs (including
+duplicates), and partition column names. `request.data` is Python `bytes` containing
+an Arrow IPC stream. For example, `pyarrow.ipc.open_stream(request.data).read_all()`
+decodes it without a JSON row conversion. PyArrow is optional and is not imported by
+the adapter. After committing through its storage backend, the callback must return
+`ExternalTableWriteResult(table=committed_descriptor, committed_version=version)`.
+The native backend validates the receipt's identity and version before reporting
+success. A callback exception, invalid descriptor, or invalid receipt is surfaced as
+a Sparkless error and never triggers a local fallback.
+
+Descriptor schemas use Sparkless `StructType` objects and preserve integer widths,
+decimal precision/scale, nested arrays/maps/structs, and field nullability through
+the binding. The supported primitive types are String, Integer, Short, Long, Double,
+Boolean, Date, Timestamp, and Binary; unsupported schema types fail explicitly.
+
+The adapter owns a strong reference to the Python provider for as long as it is
+attached. Callbacks acquire the Python GIL, including when entered from Rust.
+Existing readers share the session's provider slot. `newSession()` starts without a
+provider; detaching or stopping the Python session releases its provider reference.
 
 ## Availability
 

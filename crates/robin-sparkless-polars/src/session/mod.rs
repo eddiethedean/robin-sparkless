@@ -1628,7 +1628,10 @@ impl SparkSession {
             .external_catalog_provider
             .write()
             .map_err(|_| EngineError::Internal("external catalog provider lock poisoned".into()))?;
-        *current = provider;
+        let previous = std::mem::replace(&mut *current, provider);
+        drop(current);
+        // Provider destruction may execute Python finalizers that re-enter this session.
+        drop(previous);
         Ok(())
     }
 
@@ -3833,7 +3836,7 @@ fn external_data_types_match(
             expected_precision == actual_precision && expected_scale == actual_scale
         }
         (Array(expected), Array(actual)) => {
-            external_data_types_match(expected, actual, path, logical_map_paths)
+            external_data_types_match(expected, actual, &format!("{path}[]"), logical_map_paths)
         }
         (Map(expected_key, expected_value), Map(actual_key, actual_value)) => {
             external_data_types_match(expected_key, actual_key, path, logical_map_paths)

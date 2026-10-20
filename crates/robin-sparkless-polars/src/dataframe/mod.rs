@@ -2744,7 +2744,24 @@ impl<'a> DataFrameWriter<'a> {
             SaveMode::Append => ExternalTableSaveMode::Append,
             SaveMode::Overwrite => ExternalTableSaveMode::Overwrite,
         };
-        if !logical_map_paths.is_empty() {
+        fn contains_map(dtype: &crate::schema::DataType) -> bool {
+            use crate::schema::DataType;
+            match dtype {
+                DataType::Map(_, _) => true,
+                DataType::Array(element) => contains_map(element),
+                DataType::Struct(fields) => {
+                    fields.iter().any(|field| contains_map(&field.data_type))
+                }
+                _ => false,
+            }
+        }
+        if !logical_map_paths.is_empty()
+            || descriptor
+                .schema
+                .fields()
+                .iter()
+                .any(|field| contains_map(&field.data_type))
+        {
             return Err(PolarsError::InvalidOperation(
                 "external catalog Arrow IPC writes do not yet support logical Map columns".into(),
             ));
