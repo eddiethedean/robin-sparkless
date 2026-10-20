@@ -17,7 +17,6 @@ delta = [
     "dep:tokio",
     "dep:futures",
     "dep:parquet",
-    "dep:polars-arrow",
     "dep:arrow-array",
     "dep:arrow-schema",
     "dep:indexmap",
@@ -66,7 +65,7 @@ deltalake = { version = "0.32", optional = true }
 delta_kernel_derive = { package = "buoyant_kernel_derive", version = "=1.0.0", optional = true }
 futures = { version = "0.3", optional = true }
 parquet = { version = "57", optional = true }
-polars-arrow = { version = "0.53", optional = true }
+polars-arrow = { version = "0.53" }
 arrow-array = { version = "57", optional = true, features = ["ffi"] }
 arrow-schema = { version = "57", optional = true, features = ["ffi"] }
 indexmap = { version = "2", optional = true }
