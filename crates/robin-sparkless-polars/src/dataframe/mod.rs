@@ -1607,6 +1607,12 @@ impl DataFrame {
                 }
             })
             .collect::<Result<Vec<(polars::prelude::Column, DataType)>, PolarsError>>()?;
+        // Cache validity once per column. Calling `is_null` in the row loop builds a full
+        // null mask each time, making collection quadratic in the row count.
+        let null_masks = columns_cast
+            .iter()
+            .map(|(s, _)| s.is_null())
+            .collect::<Vec<_>>();
         let nrows = collected.height();
         let mut rows = Vec::with_capacity(nrows);
         for i in 0..nrows {
@@ -1615,13 +1621,24 @@ impl DataFrame {
                 let (s, dtype) = columns_cast
                     .get(col_idx)
                     .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
+                let null_mask = null_masks
+                    .get(col_idx)
+                    .ok_or_else(|| PolarsError::ComputeError("column index out of range".into()))?;
                 let av = s.get(i)?;
-                let jv = any_value_to_json_with_array_struct_override(
-                    &av,
-                    dtype,
-                    array_struct_paths,
-                    &serde_json::to_string(name).expect("field names serialize as JSON strings"),
-                )?;
+                // A struct AnyValue contains its fields but does not retain the parent validity
+                // bit. Read validity from the column so null parents remain distinct from valid
+                // structs whose fields are all null.
+                let jv = if null_mask.get(i).unwrap_or(false) {
+                    JsonValue::Null
+                } else {
+                    any_value_to_json_with_array_struct_override(
+                        &av,
+                        dtype,
+                        array_struct_paths,
+                        &serde_json::to_string(name)
+                            .expect("field names serialize as JSON strings"),
+                    )?
+                };
                 row.insert(name.clone(), jv);
             }
             rows.push(row);
@@ -4085,15 +4102,11 @@ fn any_value_to_json_with_array_struct_override(
                     ),
                 )?);
             }
-            if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
-                JsonValue::Null
-            } else {
-                let mut obj = Map::new();
-                for (fld, v) in fields.iter().zip(vals) {
-                    obj.insert(fld.name.to_string(), v);
-                }
-                JsonValue::Object(obj)
+            let mut obj = Map::new();
+            for (fld, v) in fields.iter().zip(vals) {
+                obj.insert(fld.name.to_string(), v);
             }
+            JsonValue::Object(obj)
         }
         AnyValue::StructOwned(payload) => {
             let (values, fields) = &**payload;
@@ -4113,15 +4126,11 @@ fn any_value_to_json_with_array_struct_override(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            if vals.iter().all(|v| matches!(v, JsonValue::Null)) {
-                JsonValue::Null
-            } else {
-                let mut obj = Map::new();
-                for (fld, v) in fields.iter().zip(vals) {
-                    obj.insert(fld.name.to_string(), v);
-                }
-                JsonValue::Object(obj)
+            let mut obj = Map::new();
+            for (fld, v) in fields.iter().zip(vals) {
+                obj.insert(fld.name.to_string(), v);
             }
+            JsonValue::Object(obj)
         }
         AnyValue::Date(days) => date_days_to_json(*days),
         AnyValue::Datetime(val, unit, _) => datetime_anyvalue_to_json_iso(*val, unit),
