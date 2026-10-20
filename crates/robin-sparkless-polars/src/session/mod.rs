@@ -1997,11 +1997,18 @@ impl SparkSession {
     }
 
     /// Check local catalogs, the warehouse, and the configured external catalog.
+    pub fn try_table_exists(&self, name: &str) -> Result<bool, PolarsError> {
+        if self.local_table_exists(name) {
+            return Ok(true);
+        }
+        let (resolved, _) = self.resolve_external_table_descriptor(name)?;
+        Ok(resolved.is_some())
+    }
+
+    /// Best-effort existence check. Use [`Self::try_table_exists`] when provider errors
+    /// need to be distinguished from a genuine catalog miss.
     pub fn table_exists(&self, name: &str) -> bool {
-        self.local_table_exists(name)
-            || self
-                .resolve_external_table_descriptor(name)
-                .is_ok_and(|(resolved, _)| resolved.is_some())
+        self.try_table_exists(name).unwrap_or(false)
     }
 
     pub(crate) fn is_global_temp_name(name: &str) -> bool {

@@ -133,6 +133,11 @@ impl SparkSession {
         self.0.table_exists(name)
     }
 
+    /// Check local and external catalogs while preserving provider errors.
+    pub fn try_table_exists(&self, name: &str) -> Result<bool, PolarsError> {
+        self.0.try_table_exists(name)
+    }
+
     pub fn list_global_temp_view_names(&self) -> Vec<String> {
         self.0.list_global_temp_view_names()
     }

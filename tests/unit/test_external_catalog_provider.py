@@ -364,6 +364,42 @@ def test_python_provider_miss_and_local_precedence(session, tmp_path):
 
 
 @pytest.mark.delta
+def test_python_sql_local_map_view_shadows_cached_external_columns(session, tmp_path):
+    path = str(tmp_path / "external_columns")
+    external_schema = T.StructType([T.StructField("other", T.StringType())])
+    session.createDataFrame([("external",)], external_schema).write.format(
+        "delta"
+    ).mode("overwrite").save(path)
+    provider = Provider(descriptor(external_schema, path))
+    session.set_external_catalog_provider(provider)
+
+    # Populate the descriptor cache before creating a local view with this identifier.
+    assert session.table(IDENTIFIER).collect()[0]["other"] == "external"
+    local_schema = T.StructType(
+        [T.StructField("attrs", T.MapType(T.StringType(), T.LongType()))]
+    )
+    session.createDataFrame([({"local": 9},)], local_schema).createOrReplaceTempView(
+        IDENTIFIER
+    )
+
+    result = session.sql(f"SELECT * FROM {IDENTIFIER}")
+    assert type(result.schema["attrs"].dataType) is T.MapType
+    assert result.collect()[0]["attrs"] == {"local": 9}
+
+
+def test_python_catalog_existence_checks_surface_provider_errors(session):
+    class UnavailableProvider:
+        def resolve_table(self, identifier):
+            raise RuntimeError("catalog service unavailable")
+
+    session.set_external_catalog_provider(UnavailableProvider())
+    with pytest.raises(Exception, match="catalog service unavailable"):
+        session.catalog.tableExists(IDENTIFIER)
+    with pytest.raises(Exception, match="catalog service unavailable"):
+        session.catalog.getTable(IDENTIFIER)
+
+
+@pytest.mark.delta
 def test_python_catalog_retains_map_metadata_for_reads_and_rejects_map_writes(
     session, tmp_path
 ):

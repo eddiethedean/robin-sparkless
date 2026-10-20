@@ -355,6 +355,25 @@ fn review_external_miss_does_not_make_qualified_local_suffix_exist() {
 }
 
 #[test]
+fn review_table_exists_surfaces_provider_errors() {
+    struct Unavailable;
+    impl ExternalCatalogProvider for Unavailable {
+        fn resolve_table(&self, _: &str) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+            Err(EngineError::User("catalog service unavailable".into()))
+        }
+    }
+
+    let session = SparkSession::default();
+    session
+        .set_external_catalog_provider(Some(Arc::new(Unavailable)))
+        .unwrap();
+    let error = session
+        .try_table_exists("catalog.schema.orders")
+        .expect_err("a catalog failure must not be reported as a table miss");
+    assert!(error.to_string().contains("catalog service unavailable"));
+}
+
+#[test]
 fn review_external_map_validation_uses_the_pinned_delta_schema() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("_delta_log");

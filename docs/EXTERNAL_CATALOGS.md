@@ -45,6 +45,9 @@ SQL `INSERT INTO` delegate writes when the identifier resolves externally. Sessi
 tables and views shadow the external provider. A provider miss allows Sparkless' local
 table path; provider errors and unsupported write hooks are surfaced without fallback.
 `ErrorIfExists` rejects a resolved external table and `Ignore` leaves it unchanged.
+Rust callers that need to distinguish an external provider error from a miss can use
+`SparkSession::try_table_exists`; the legacy boolean `table_exists` remains best-effort.
+Python `catalog.tableExists()` and `catalog.getTable()` surface provider errors.
 
 The writer materializes the Sparkless DataFrame and buffers one Arrow IPC stream in
 memory before calling the synchronous provider. Python providers use the PyO3 adapter

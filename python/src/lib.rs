@@ -1106,21 +1106,29 @@ fn delta_map_paths_for_sql_query(
     }
 
     fn table_columns(session: &PySparkSession, name: &str) -> Vec<String> {
-        if let Some(columns) = session
-            .external_catalog_tables
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(name)
-            .map(|table| {
-                table
-                    .schema
-                    .fields()
-                    .iter()
-                    .map(|field| field.name.clone())
-                    .collect()
-            })
-        {
-            return columns;
+        let exact_local = session.inner.saved_table_exists(name)
+            || session
+                .inner
+                .list_temp_view_names()
+                .iter()
+                .any(|view| view == name);
+        if !exact_local {
+            if let Some(columns) = session
+                .external_catalog_tables
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(name)
+                .map(|table| {
+                    table
+                        .schema
+                        .fields()
+                        .iter()
+                        .map(|field| field.name.clone())
+                        .collect()
+                })
+            {
+                return columns;
+            }
         }
         session
             .inner
@@ -3542,7 +3550,7 @@ impl PyCatalog {
         } else {
             a1
         };
-        Ok(session.inner.table_exists(&full))
+        session.inner.try_table_exists(&full).map_err(to_py_err)
     }
 
     #[pyo3(name = "getTable", signature = (tableName))]
@@ -3559,7 +3567,9 @@ impl PyCatalog {
             ("default".to_string(), tableName.to_string())
         };
         let full = format!("{db}.{tbl}");
-        if !session.inner.table_exists(&full) && !session.inner.table_exists(&tbl) {
+        if !session.inner.try_table_exists(&full).map_err(to_py_err)?
+            && !session.inner.try_table_exists(&tbl).map_err(to_py_err)?
+        {
             return Err(to_py_err(format!("Table not found: {full}")));
         }
         Py::new(
