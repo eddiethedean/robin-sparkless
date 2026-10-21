@@ -130,6 +130,42 @@ def test_python_writer_passes_typed_ipc_and_exact_options(session):
     assert table["details"].to_pylist() == [{"label": "nested"}, {"label": None}]
 
 
+def test_python_batch_writer_receives_bounded_record_batches(session):
+    pytest.importorskip("pyarrow")
+    schema = T.StructType([T.StructField("id", T.LongType(), False)])
+    table = descriptor(schema)
+
+    class BatchProvider:
+        received = None
+
+        def resolve_table(self, identifier):
+            return table
+
+        def write_table_batches(self, request):
+            assert request.data is None
+            self.received = list(request.batches)
+            updated = replace(request.table, version=1)
+            return ExternalTableWriteResult(updated, 1)
+
+    provider = BatchProvider()
+    session.set_external_catalog_provider(provider)
+    frame = session.createDataFrame([(row,) for row in range(7)], schema)
+    (
+        frame.write.mode("append")
+        .option("sparkless.writer.maxRowsPerBatch", "3")
+        .option("sparkless.writer.maxBytesPerBatch", "1024")
+        .saveAsTable(IDENTIFIER)
+    )
+
+    assert [batch.num_rows for batch in provider.received] == [3, 3, 1]
+    assert all(batch.nbytes <= 1024 for batch in provider.received)
+    assert [batch.column(0).to_pylist() for batch in provider.received] == [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6],
+    ]
+
+
 @pytest.mark.parametrize("ingress", ["python_rows", "pyarrow"])
 def test_external_writer_preserves_null_struct_parent_validity(session, ingress):
     pa = pytest.importorskip("pyarrow")
@@ -913,6 +949,7 @@ def test_cancel_during_catalog_resolution_prevents_local_save_as_table():
     frame = spark.createDataFrame([(1,)], ["id"])
     cancellation = spark.cancellation_handle()
     try:
+
         def cancel_from_control_thread():
             assert entered_resolve.wait(timeout=5)
             assert cancellation.cancel_all_active_actions() >= 1
@@ -1014,9 +1051,7 @@ def test_session_cancellation_reaches_aggregate_dataframes(monkeypatch):
 
 
 @pytest.mark.parametrize("method", ["head", "take", "first"])
-def test_convenience_row_actions_use_source_cancellation_registry(
-    method, monkeypatch
-):
+def test_convenience_row_actions_use_source_cancellation_registry(method, monkeypatch):
     spark = SparkSession(f"cancel-{method}-regression")
     frame = spark.createDataFrame([(1,), (2,)], ["id"])
     original_row = T.Row

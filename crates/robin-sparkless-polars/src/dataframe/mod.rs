@@ -26,20 +26,50 @@ use crate::session::SparkSession;
 use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
 use polars::prelude::{
-    AnyValue, DataFrame as PlDataFrame, DataType, Expr, Field, IntoLazy, LazyFrame, NULL,
-    PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
+    AnyValue, CollectBatches, DataFrame as PlDataFrame, DataType, Engine, Expr, Field, IntoLazy,
+    LazyFrame, NULL, PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
 use robin_sparkless_core::engine::{
-    ArrowIpcStream, CancellationToken, ExternalCatalogProvider, ExternalTableDescriptor,
-    ExternalTableSaveMode, ExternalTableWriteRequest,
+    ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, ExternalCatalogProvider,
+    ExternalTableDescriptor, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
+    ExternalTableWriteRequest,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
 
 /// Default for `spark.sql.caseSensitive` (PySpark default is false = case-insensitive).
 const DEFAULT_CASE_SENSITIVE: bool = false;
+const DEFAULT_EXTERNAL_ARROW_BATCH_ROWS: usize = 10_000;
+const DEFAULT_EXTERNAL_ARROW_BATCH_BYTES: usize = 64 * 1024 * 1024;
+
+fn external_arrow_batch_limit(
+    options: Option<&[(String, String)]>,
+    option: &str,
+    default: usize,
+) -> Result<usize, PolarsError> {
+    let Some((_, value)) = options
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .find(|(key, _)| key.eq_ignore_ascii_case(option))
+    else {
+        return Ok(default);
+    };
+    let limit = value.parse::<usize>().map_err(|_| {
+        PolarsError::InvalidOperation(
+            format!("{option} must be a positive integer, got '{value}'").into(),
+        )
+    })?;
+    if limit == 0 {
+        return Err(PolarsError::InvalidOperation(
+            format!("{option} must be greater than zero").into(),
+        ));
+    }
+    Ok(limit)
+}
 
 /// Resolve a column or dotted struct path against a schema.
 /// Resolution order:
@@ -111,6 +141,193 @@ pub(crate) enum DataFrameInner {
     #[allow(dead_code)]
     Eager(Arc<PlDataFrame>),
     Lazy(LazyFrame),
+}
+
+struct PolarsIpcBatchIterator {
+    batches: Option<CollectBatches>,
+    current: Option<PlDataFrame>,
+    current_offset: usize,
+    max_rows: usize,
+    max_bytes: usize,
+    token: CancellationToken,
+    deferred_error: Option<EngineError>,
+    closed: bool,
+}
+
+impl PolarsIpcBatchIterator {
+    fn close(&mut self) {
+        self.batches.take();
+        self.current.take();
+        self.current_offset = 0;
+        self.closed = true;
+    }
+
+    fn next_source_row(&mut self) -> Option<Result<PlDataFrame, polars::prelude::PolarsError>> {
+        if let Some(current) = self.current.as_ref() {
+            let row = current.slice(self.current_offset as i64, 1);
+            self.current_offset += 1;
+            if self.current_offset >= current.height() {
+                self.current.take();
+                self.current_offset = 0;
+            }
+            return Some(Ok(row));
+        }
+        self.batches.as_mut().and_then(Iterator::next)
+    }
+
+    fn combine_rows(rows: &[PlDataFrame]) -> Result<PlDataFrame, polars::prelude::PolarsError> {
+        let mut combined = rows.first().expect("non-empty rows").clone();
+        for row in &rows[1..] {
+            combined.vstack_mut(row)?;
+        }
+        Ok(combined)
+    }
+
+    fn serialize_batch(&self, batch: &mut PlDataFrame) -> Result<Vec<u8>, EngineError> {
+        batch.rechunk_mut();
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        {
+            use polars::io::ipc::IpcStreamWriter;
+            use polars::prelude::SerWriter;
+            IpcStreamWriter::new(&mut cursor)
+                .finish(batch)
+                .map_err(polars_to_core_error)?;
+        }
+        Ok(cursor.into_inner())
+    }
+}
+
+impl Iterator for PolarsIpcBatchIterator {
+    type Item = Result<ArrowIpcStream, EngineError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.closed {
+            return None;
+        }
+        let mut rows = Vec::new();
+        let mut estimated_bytes = 0usize;
+        let mut source_ended = false;
+        loop {
+            if self.current.is_none() {
+                if let Some(error) = self.deferred_error.take() {
+                    if rows.is_empty() {
+                        self.close();
+                        return Some(Err(error));
+                    }
+                    self.deferred_error = Some(error);
+                    break;
+                }
+            }
+            if let Err(error) = self.token.check_cancelled() {
+                self.close();
+                return Some(Err(error));
+            }
+            let row = match self.next_source_row() {
+                Some(Ok(row)) if row.height() > 0 => row,
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => {
+                    let error = polars_to_core_error(error);
+                    if !rows.is_empty() {
+                        self.deferred_error = Some(error);
+                        break;
+                    }
+                    self.close();
+                    return Some(Err(error));
+                }
+                None => {
+                    source_ended = true;
+                    break;
+                }
+            };
+            if let Err(error) = self.token.check_cancelled() {
+                self.close();
+                return Some(Err(error));
+            }
+
+            let row_bytes = row.estimated_size();
+            if !rows.is_empty() && estimated_bytes.saturating_add(row_bytes) > self.max_bytes {
+                self.current = Some(row);
+                self.current_offset = 0;
+                break;
+            }
+            estimated_bytes = estimated_bytes.saturating_add(row_bytes);
+            rows.push(row);
+            if rows.len() >= self.max_rows || estimated_bytes >= self.max_bytes {
+                break;
+            }
+        }
+
+        if rows.is_empty() {
+            if source_ended {
+                self.close();
+            }
+            return None;
+        }
+        let mut combined = match Self::combine_rows(&rows) {
+            Ok(combined) => combined,
+            Err(error) => {
+                self.close();
+                return Some(Err(polars_to_core_error(error)));
+            }
+        };
+        let bytes = match self.serialize_batch(&mut combined) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.close();
+                return Some(Err(error));
+            }
+        };
+        if bytes.len() <= self.max_bytes {
+            if source_ended {
+                self.close();
+            }
+            return Some(Ok(ArrowIpcStream { bytes }));
+        }
+
+        if rows.len() == 1 {
+            let actual_bytes = bytes.len();
+            self.close();
+            return Some(Err(EngineError::User(format!(
+                "a single Arrow IPC row requires {actual_bytes} bytes, exceeding max_bytes={}",
+                self.max_bytes
+            ))));
+        }
+        let mut prefix_rows = rows.len() / 2;
+        while prefix_rows > 0 {
+            let mut prefix = combined.slice(0, prefix_rows);
+            let prefix_bytes = match self.serialize_batch(&mut prefix) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    self.close();
+                    return Some(Err(error));
+                }
+            };
+            if prefix_bytes.len() <= self.max_bytes {
+                let mut pending = combined.slice(prefix_rows as i64, rows.len() - prefix_rows);
+                if let Some(remaining_pending) = self.current.take() {
+                    let remaining_pending = remaining_pending.slice(
+                        self.current_offset as i64,
+                        remaining_pending.height() - self.current_offset,
+                    );
+                    if let Err(error) = pending.vstack_mut(&remaining_pending) {
+                        self.close();
+                        return Some(Err(polars_to_core_error(error)));
+                    }
+                }
+                self.current = Some(pending);
+                self.current_offset = 0;
+                return Some(Ok(ArrowIpcStream {
+                    bytes: prefix_bytes,
+                }));
+            }
+            prefix_rows /= 2;
+        }
+        self.close();
+        Some(Err(EngineError::User(format!(
+            "a single Arrow IPC row exceeds max_bytes={}",
+            self.max_bytes
+        ))))
+    }
 }
 
 /// DataFrame - main tabular data structure.
@@ -1457,6 +1674,58 @@ impl DataFrame {
     /// Collect the DataFrame (action - triggers execution)
     pub fn collect(&self) -> Result<Arc<PlDataFrame>, PolarsError> {
         self.collect_inner()
+    }
+
+    /// Execute this plan as a back-pressured stream of bounded Polars DataFrames.
+    ///
+    /// The iterator starts the query on its first `next()` call. Dropping it closes
+    /// the receiver, which stops the streaming sink when the consumer no longer
+    /// requests batches. `max_rows` controls the maximum number of rows per batch.
+    pub fn collect_batches(&self, max_rows: usize) -> Result<CollectBatches, PolarsError> {
+        let chunk_size = NonZeroUsize::new(max_rows).ok_or_else(|| {
+            PolarsError::InvalidOperation("max_rows must be greater than zero".into())
+        })?;
+        self.lazy_frame()
+            .collect_batches(Engine::Auto, true, Some(chunk_size), true)
+    }
+
+    /// Export the plan as lazy, byte- and row-bounded Arrow IPC batches.
+    ///
+    /// Each iterator item is a standalone Arrow IPC stream containing one batch.
+    /// The plan starts when the consumer requests its first item; dropping the
+    /// iterator stops the producer after its current batch.
+    pub fn to_arrow_ipc_batches_with_cancellation(
+        &self,
+        max_rows: usize,
+        max_bytes: usize,
+        token: &CancellationToken,
+    ) -> Result<ArrowIpcBatchStream, EngineError> {
+        token.check_cancelled()?;
+        if max_rows == 0 {
+            return Err(EngineError::User(
+                "max_rows must be greater than zero".into(),
+            ));
+        }
+        if max_bytes == 0 {
+            return Err(EngineError::User(
+                "max_bytes must be greater than zero".into(),
+            ));
+        }
+        // Row sized source pulls keep the producer's in-flight memory independent of
+        // max_rows/max_bytes. The iterator can only serialize and validate one row at
+        // a time, so a small byte limit cannot arrive after a large Polars chunk has
+        // already been materialized.
+        let batches = self.collect_batches(1).map_err(polars_to_core_error)?;
+        Ok(ArrowIpcBatchStream::new(PolarsIpcBatchIterator {
+            batches: Some(batches),
+            current: None,
+            current_offset: 0,
+            max_rows,
+            max_bytes,
+            token: token.clone(),
+            deferred_error: None,
+            closed: false,
+        }))
     }
 
     /// Materialize this plan while honoring cancellation at the engine boundary.
@@ -2904,6 +3173,49 @@ impl<'a> DataFrameWriter<'a> {
             .iter()
             .map(|column| self.df.resolve_column_name(column))
             .collect::<Result<Vec<_>, _>>()?;
+
+        if provider.supports_batch_writes() {
+            let max_rows = external_arrow_batch_limit(
+                options,
+                "sparkless.writer.maxRowsPerBatch",
+                DEFAULT_EXTERNAL_ARROW_BATCH_ROWS,
+            )?;
+            let max_bytes = external_arrow_batch_limit(
+                options,
+                "sparkless.writer.maxBytesPerBatch",
+                DEFAULT_EXTERNAL_ARROW_BATCH_BYTES,
+            )?;
+            let batches = self
+                .df
+                .to_arrow_ipc_batches_with_cancellation(max_rows, max_bytes, token)
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            let request = ExternalTableWriteBatchRequest {
+                identifier: name.to_string(),
+                table: descriptor.clone(),
+                batches,
+                mode: external_mode,
+                format: table_format,
+                options: writer_options,
+                partition_by,
+            };
+            let result = provider
+                .write_table_batches_with_cancellation(request, token)
+                .map_err(|error| match error {
+                    EngineError::Cancelled(message) => {
+                        PolarsError::ComputeError(format!("cancelled: {message}").into())
+                    }
+                    error => PolarsError::InvalidOperation(
+                        format!("external catalog provider failed to write '{name}': {error}")
+                            .into(),
+                    ),
+                })?;
+            return result.validate_against(descriptor).map_err(|error| {
+                PolarsError::InvalidOperation(
+                    format!("external catalog provider returned an invalid write receipt: {error}")
+                        .into(),
+                )
+            });
+        }
 
         let mut materialized = self
             .df
@@ -4387,6 +4699,20 @@ pub fn broadcast(df: &DataFrame) -> DataFrame {
 mod tests {
     use super::*;
     use polars::prelude::{IntoSeries, NamedFrom, Series};
+
+    #[test]
+    fn arrow_ipc_batches_reject_zero_max_rows() {
+        let series = Series::new("value".into(), &[1i64]);
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![series.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+
+        let result = df.to_arrow_ipc_batches_with_cancellation(0, 1024, &CancellationToken::new());
+
+        assert!(matches!(
+            result,
+            Err(EngineError::User(message)) if message == "max_rows must be greater than zero"
+        ));
+    }
 
     /// Issue #235: root-level string–numeric comparison coercion in filter.
     #[test]

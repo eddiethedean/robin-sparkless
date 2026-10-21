@@ -129,6 +129,24 @@ df.createOrReplaceTempView("employees")
 spark.sql("SELECT name, salary FROM employees WHERE salary > 50000").show()
 ```
 
+### Bounded Arrow export
+
+`toArrow()` still returns a materialized PyArrow Table. Use `toArrowBatches()` to stream
+RecordBatches from the query plan with row and byte limits:
+
+```python
+with df.toArrowBatches(max_rows=1024, max_bytes=8 * 1024 * 1024) as batches:
+    for batch in batches:
+        consume(batch)  # batch is a pyarrow.RecordBatch
+        if should_stop():
+            break
+```
+
+Each batch stays within both values (`max_bytes` is checked against `RecordBatch.nbytes`);
+if a single row is larger than `max_bytes`, iteration raises `ValueError`. The defaults are
+10,000 rows and 64 MiB. Close the iterator (or use it as a context manager) after an early stop
+so the query stops producing batches.
+
 ### JDBC (PostgreSQL, SQLite, MySQL, etc.)
 
 ```python
@@ -149,7 +167,7 @@ Supported: PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2. Same opt
 | Area | Supported |
 |------|-----------|
 | **SparkSession** | `builder`, `createDataFrame`, `table`, `sql`, `range`, `read_csv` / `read_parquet` / `read_json` / `read_delta`, temp/global temp views, `catalog`, `stop` |
-| **DataFrame** | `filter`, `select`, `withColumn`, `show`, `collect`, `count`, `groupBy`, `orderBy`, `limit`, `drop`, `distinct`, `join`, `union`, `unionByName`, `write`, `createOrReplaceTempView` |
+| **DataFrame** | `filter`, `select`, `withColumn`, `show`, `collect`, `toArrow`, `toArrowBatches`, `count`, `groupBy`, `orderBy`, `limit`, `drop`, `distinct`, `join`, `union`, `unionByName`, `write`, `createOrReplaceTempView` |
 | **Column / functions** | `col`, `lit`, `when`/`then`/`otherwise`, comparison/aggregation/string/window functions; `F.col("x") > 1`, `F.upper("name")`, etc. |
 | **GroupedData** | `count`, `sum`, `avg`, `min`, `max`, `agg`, `pivot` |
 | **Read/Write** | Parquet, CSV, JSON, Delta; `saveAsTable`; JDBC with standard options |

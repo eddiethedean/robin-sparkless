@@ -43,6 +43,35 @@ pub struct ArrowIpcStream {
     pub bytes: Vec<u8>,
 }
 
+/// A back-pressured sequence of independently readable Arrow IPC batch streams.
+///
+/// Each item contains one RecordBatch in Arrow IPC streaming format. Dropping the
+/// iterator closes the producer, allowing it to stop execution when a consumer
+/// reads only a prefix.
+pub struct ArrowIpcBatchStream {
+    inner: Box<dyn Iterator<Item = Result<ArrowIpcStream, EngineError>> + Send>,
+}
+
+impl ArrowIpcBatchStream {
+    /// Wrap a lazy IPC batch producer.
+    pub fn new<I>(inner: I) -> Self
+    where
+        I: Iterator<Item = Result<ArrowIpcStream, EngineError>> + Send + 'static,
+    {
+        Self {
+            inner: Box::new(inner),
+        }
+    }
+}
+
+impl Iterator for ArrowIpcBatchStream {
+    type Item = Result<ArrowIpcStream, EngineError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
 /// Save mode for a write to a table already resolved by an external catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -64,6 +93,17 @@ pub struct ExternalTableWriteRequest {
     /// Format selected by the caller, if one was specified.
     pub format: Option<String>,
     /// Caller-specified writer options, preserving order and duplicate keys.
+    pub options: Vec<(String, String)>,
+    pub partition_by: Vec<String>,
+}
+
+/// Metadata and a lazy Arrow batch source for providers that can consume writes incrementally.
+pub struct ExternalTableWriteBatchRequest {
+    pub identifier: String,
+    pub table: ExternalTableDescriptor,
+    pub batches: ArrowIpcBatchStream,
+    pub mode: ExternalTableSaveMode,
+    pub format: Option<String>,
     pub options: Vec<(String, String)>,
     pub partition_by: Vec<String>,
 }
@@ -163,6 +203,34 @@ pub trait ExternalCatalogProvider: Send + Sync {
         Err(EngineError::User(
             "external catalog provider does not support table writes".into(),
         ))
+    }
+
+    /// Whether this provider supports consuming a write as batches.
+    ///
+    /// The default is false so existing implementations keep using the materialized
+    /// `write_table` callback unchanged.
+    fn supports_batch_writes(&self) -> bool {
+        false
+    }
+
+    /// Commit a table write from a lazy sequence of Arrow IPC batches.
+    fn write_table_batches(
+        &self,
+        _request: ExternalTableWriteBatchRequest,
+    ) -> Result<ExternalTableWriteResult, EngineError> {
+        Err(EngineError::User(
+            "external catalog provider does not support batch writes".into(),
+        ))
+    }
+
+    /// Batch-write variant with a caller-owned cancellation token.
+    fn write_table_batches_with_cancellation(
+        &self,
+        request: ExternalTableWriteBatchRequest,
+        token: &CancellationToken,
+    ) -> Result<ExternalTableWriteResult, EngineError> {
+        token.check_cancelled()?;
+        self.write_table_batches(request)
     }
 
     /// Commit a write while honoring cancellation before commit acceptance.

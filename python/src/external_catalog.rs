@@ -3,15 +3,18 @@
 use pyo3::exceptions::{PyAttributeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyModule};
+use pyo3::IntoPyObjectExt;
 use robin_sparkless_core::engine::{
-    ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableSaveMode,
-    ExternalTableWriteRequest, ExternalTableWriteResult,
+    ArrowIpcBatchStream, ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableSaveMode,
+    ExternalTableWriteBatchRequest, ExternalTableWriteRequest, ExternalTableWriteResult,
 };
 use robin_sparkless_core::EngineError;
 use std::collections::HashMap;
 #[cfg(feature = "delta")]
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+
+type PyObject = Py<PyAny>;
 
 pub(crate) type ResolvedTables = Arc<Mutex<HashMap<String, ExternalTableDescriptor>>>;
 
@@ -55,6 +58,70 @@ pub(crate) struct PythonExternalCatalogProvider {
     tables: ResolvedTables,
 }
 
+#[pyclass(module = "sparkless.external_catalog", unsendable)]
+pub(crate) struct PyArrowIpcBatchIterator {
+    batches: Option<ArrowIpcBatchStream>,
+}
+
+#[pymethods]
+impl PyArrowIpcBatchIterator {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        let Some(batches) = self.batches.take() else {
+            return Err(pyo3::exceptions::PyStopIteration::new_err(()));
+        };
+        let (batches, next) = py.detach(move || {
+            let mut batches = batches;
+            let next = batches.next();
+            (batches, next)
+        });
+        self.batches = Some(batches);
+        let Some(next) = next else {
+            self.batches.take();
+            return Err(pyo3::exceptions::PyStopIteration::new_err(()));
+        };
+        let stream = match next {
+            Ok(stream) => stream,
+            Err(error) => {
+                self.batches.take();
+                return Err(super::to_py_err(error));
+            }
+        };
+        let batch = (|| {
+            let pyarrow = PyModule::import(py, "pyarrow")?;
+            let reader = pyarrow
+                .getattr("ipc")?
+                .getattr("open_stream")?
+                .call1((PyBytes::new(py, &stream.bytes),))?;
+            reader.call_method0("read_next_batch")?.into_py_any(py)
+        })();
+        if batch.is_err() {
+            self.batches.take();
+        }
+        batch
+    }
+
+    fn close(&mut self) {
+        self.batches.take();
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: &Bound<'_, PyAny>,
+        _exc_value: &Bound<'_, PyAny>,
+        _traceback: &Bound<'_, PyAny>,
+    ) {
+        self.batches.take();
+    }
+}
+
 impl PythonExternalCatalogProvider {
     pub(crate) fn new(
         py: Python<'_>,
@@ -70,6 +137,15 @@ impl PythonExternalCatalogProvider {
             Ok(method) if !method.is_callable() => {
                 return Err(PyTypeError::new_err(
                     "provider.write_table must be callable",
+                ));
+            }
+            Err(error) if !error.is_instance_of::<PyAttributeError>(py) => return Err(error),
+            _ => {}
+        }
+        match provider.bind(py).getattr("write_table_batches") {
+            Ok(method) if !method.is_callable() => {
+                return Err(PyTypeError::new_err(
+                    "provider.write_table_batches must be callable",
                 ));
             }
             Err(error) if !error.is_instance_of::<PyAttributeError>(py) => return Err(error),
@@ -208,5 +284,65 @@ impl ExternalCatalogProvider for PythonExternalCatalogProvider {
             write_result_from_python(&result)
         })
         .map_err(|error| callback_error("write_table", error))
+    }
+
+    fn supports_batch_writes(&self) -> bool {
+        Python::attach(|py| {
+            self.provider
+                .bind(py)
+                .getattr("write_table_batches")
+                .is_ok_and(|method| method.is_callable())
+        })
+    }
+
+    fn write_table_batches(
+        &self,
+        request: ExternalTableWriteBatchRequest,
+    ) -> Result<ExternalTableWriteResult, EngineError> {
+        Python::attach(|py| -> PyResult<_> {
+            let method = self.provider.bind(py).getattr("write_table_batches")?;
+            let module = PyModule::import(py, "sparkless.external_catalog")?;
+            let descriptor_json = serde_json::to_string(&request.table)
+                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+            let table = module
+                .getattr("_descriptor_from_json")?
+                .call1((descriptor_json,))?;
+            let mode = match request.mode {
+                ExternalTableSaveMode::ErrorIfExists => "errorifexists",
+                ExternalTableSaveMode::Overwrite => "overwrite",
+                ExternalTableSaveMode::Append => "append",
+                ExternalTableSaveMode::Ignore => "ignore",
+            };
+            let batches = Py::new(
+                py,
+                PyArrowIpcBatchIterator {
+                    batches: Some(request.batches),
+                },
+            )?;
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("identifier", request.identifier)?;
+            kwargs.set_item("table", table)?;
+            kwargs.set_item("data", py.None())?;
+            kwargs.set_item("batches", batches.bind(py))?;
+            kwargs.set_item(
+                "mode",
+                module.getattr("ExternalTableSaveMode")?.call1((mode,))?,
+            )?;
+            kwargs.set_item("format", request.format)?;
+            kwargs.set_item("options", request.options)?;
+            kwargs.set_item("partition_by", request.partition_by)?;
+            let write_request = module
+                .getattr("ExternalTableWriteRequest")?
+                .call((), Some(&kwargs))?;
+            let callback_result = method.call1((write_request,));
+            let close_result = batches.bind(py).call_method0("close");
+            let value = match (callback_result, close_result) {
+                (Ok(value), Ok(_)) => value,
+                (Err(error), _) => return Err(error),
+                (Ok(_), Err(error)) => return Err(error),
+            };
+            write_result_from_python(&value)
+        })
+        .map_err(|error| callback_error("write_table_batches", error))
     }
 }
