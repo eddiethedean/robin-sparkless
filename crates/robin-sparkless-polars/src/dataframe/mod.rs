@@ -1633,16 +1633,18 @@ impl DataFrame {
                 "max_bytes must be greater than zero".into(),
             ));
         }
-        let batches = self
-            .collect_batches(max_rows)
-            .map_err(polars_to_core_error)?;
+        // Row sized source pulls keep the producer's in-flight memory independent of
+        // max_rows/max_bytes. The iterator can only serialize and validate one row at
+        // a time, so a small byte limit cannot arrive after a large Polars chunk has
+        // already been materialized.
+        let batches = self.collect_batches(1).map_err(polars_to_core_error)?;
         Ok(ArrowIpcBatchStream::new(PolarsIpcBatchIterator {
             batches: Some(batches),
             current: None,
             offset: 0,
             max_rows,
             max_bytes,
-            target_rows: max_rows,
+            target_rows: 1,
             token: token.clone(),
             closed: false,
         }))

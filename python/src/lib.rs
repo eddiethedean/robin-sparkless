@@ -2325,6 +2325,87 @@ fn arrow_logical_map_paths(
     Ok(paths)
 }
 
+fn arrow_types_compatible(
+    py: Python<'_>,
+    pa: &Bound<'_, PyModule>,
+    source: &Bound<'_, PyAny>,
+    current: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let source_id = source.getattr("id")?.extract::<i32>()?;
+    let current_id = current.getattr("id")?.extract::<i32>()?;
+    if source_id != current_id {
+        return Ok(false);
+    }
+
+    let arrow_types = pa.getattr("types")?;
+    let is_type = |ty: &Bound<'_, PyAny>, predicate: &str| -> PyResult<bool> {
+        arrow_types
+            .getattr(predicate)?
+            .call1((ty,))?
+            .extract::<bool>()
+    };
+    if is_type(source, "is_timestamp")? {
+        return Ok(source.getattr("unit")?.eq(current.getattr("unit")?)?);
+    }
+    if is_type(source, "is_list")?
+        || is_type(source, "is_large_list")?
+        || is_type(source, "is_fixed_size_list")?
+    {
+        if is_type(source, "is_fixed_size_list")?
+            && !source
+                .getattr("list_size")?
+                .eq(current.getattr("list_size")?)?
+        {
+            return Ok(false);
+        }
+        return arrow_types_compatible(
+            py,
+            pa,
+            &source.getattr("value_type")?,
+            &current.getattr("value_type")?,
+        );
+    }
+    if is_type(source, "is_struct")? {
+        let source_count = source.getattr("num_fields")?.extract::<usize>()?;
+        if source_count != current.getattr("num_fields")?.extract::<usize>()? {
+            return Ok(false);
+        }
+        for index in 0..source_count {
+            let source_field = source.call_method1("field", (index,))?;
+            let current_field = current.call_method1("field", (index,))?;
+            if !source_field
+                .getattr("name")?
+                .eq(current_field.getattr("name")?)?
+                || !arrow_types_compatible(
+                    py,
+                    pa,
+                    &source_field.getattr("type")?,
+                    &current_field.getattr("type")?,
+                )?
+            {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
+    if is_type(source, "is_map")? {
+        return Ok(arrow_types_compatible(
+            py,
+            pa,
+            &source.getattr("key_type")?,
+            &current.getattr("key_type")?,
+        )? && arrow_types_compatible(
+            py,
+            pa,
+            &source.getattr("item_type")?,
+            &current.getattr("item_type")?,
+        )?);
+    }
+
+    let _ = py;
+    source.eq(current)
+}
+
 fn spark_type_to_arrow_type(
     py: Python<'_>,
     pa: &Bound<'_, PyModule>,
@@ -6444,6 +6525,8 @@ struct PyDataFrame {
     mixed_row_shape_error_on_collect: bool,
     /// Original PyArrow schema: Polars maps and arrays of key/value structs share a physical dtype.
     arrow_schema_cache: Option<Py<PyAny>>,
+    /// Source Arrow fields whose values or type changed in a derived DataFrame.
+    arrow_schema_invalidated_fields: std::collections::HashSet<String>,
     arrow_array_struct_paths: std::collections::HashSet<String>,
     logical_map_columns: std::collections::HashSet<String>,
     logical_map_paths: std::collections::HashSet<String>,
@@ -7190,6 +7273,7 @@ impl PyDataFrame {
             schema_cache: None,
             mixed_row_shape_error_on_collect: false,
             arrow_schema_cache: None,
+            arrow_schema_invalidated_fields: Default::default(),
             arrow_array_struct_paths: Default::default(),
             logical_map_columns: Default::default(),
             logical_map_paths: Default::default(),
@@ -7224,7 +7308,9 @@ impl PyDataFrame {
             ));
         }
 
-        let batches = self.inner.collect_batches(max_rows).map_err(to_py_err)?;
+        // Fetch one source row at a time so max_bytes is applied before the producer
+        // can materialize a large row batch in memory.
+        let batches = self.inner.collect_batches(1).map_err(to_py_err)?;
         let action = self.begin_action();
         let template = Py::new(py, self.wrap_derived(self.inner.clone()))?;
         Py::new(
@@ -7234,7 +7320,7 @@ impl PyDataFrame {
                 template,
                 max_rows,
                 max_bytes,
-                target_rows: max_rows,
+                target_rows: 1,
                 pending: None,
                 offset: 0,
                 action: Some(action),
@@ -7291,6 +7377,17 @@ impl PyDataFrame {
                 .as_ref()
                 .map(|schema| schema.clone_ref(py));
         });
+        let output_columns = wrapped.inner.columns().ok();
+        wrapped.arrow_schema_invalidated_fields = self
+            .arrow_schema_invalidated_fields
+            .iter()
+            .filter(|name| {
+                output_columns
+                    .as_ref()
+                    .is_some_and(|columns| columns.iter().any(|column| column == *name))
+            })
+            .cloned()
+            .collect();
         wrapped
     }
 
@@ -7482,6 +7579,9 @@ impl PyDataFrame {
     ) -> Self {
         let mut wrapped = self.wrap_derived(df);
         Self::remove_metadata_root(&mut wrapped, name);
+        wrapped
+            .arrow_schema_invalidated_fields
+            .insert(name.to_string());
         if let Some(source) = Self::column_source(expr) {
             self.copy_column_metadata(&source, name, &mut wrapped);
         } else {
@@ -10119,7 +10219,6 @@ impl PyDataFrame {
         let arrays = PyList::empty(py);
         let arrow_fields = PyList::empty(py);
         let mut output_names = Vec::with_capacity(schema.fields().len());
-        let mut all_fields_reused = source_arrow_fields.len() == schema.fields().len();
         for field in schema.fields() {
             token.check_cancelled().map_err(to_py_err)?;
             output_names.push(field.name.clone());
@@ -10189,30 +10288,68 @@ impl PyDataFrame {
                 &field_path,
                 &field_map_paths,
             )?;
-            let source_field = source_arrow_fields.get(&field.name);
-            let reuse_source_field = match source_field {
-                Some(source_field) => {
-                    let source_field = source_field.bind(py);
-                    source_field
-                        .getattr("type")?
-                        .eq(current_arrow_type.bind(py))?
-                }
+            let source_field = source_arrow_fields
+                .get(&field.name)
+                .filter(|_| !self.arrow_schema_invalidated_fields.contains(&field.name));
+            // Constructing with the original Arrow type retains details that Spark's
+            // logical schema cannot express (timezone, nested field nullability and
+            // field metadata). If the source type no longer accepts these values,
+            // fall back to the current logical type.
+            let compatible_source = match source_field {
+                Some(source_field) => arrow_types_compatible(
+                    py,
+                    &pa,
+                    &source_field.bind(py).getattr("type")?,
+                    current_arrow_type.bind(py),
+                )?,
                 None => false,
             };
-            let arrow_type = if reuse_source_field {
-                source_field
-                    .expect("reused source field exists")
-                    .bind(py)
-                    .getattr("type")?
-                    .into_py_any(py)?
+            let source_array = if compatible_source {
+                let source_field = source_field.expect("compatible source field exists");
+                pa.getattr("array")?
+                    .call1((values.clone(), source_field.bind(py).getattr("type")?))
+                    .ok()
             } else {
-                all_fields_reused = false;
-                current_arrow_type.clone_ref(py)
+                None
             };
-            let array = pa.getattr("array")?.call1((values, arrow_type))?;
-            arrays.append(array)?;
-            if reuse_source_field {
+            let (array, arrow_type, reused_source_type) = match source_array {
+                Some(array) => {
+                    let arrow_type = source_field
+                        .expect("source array has source field")
+                        .bind(py)
+                        .getattr("type")?
+                        .into_py_any(py)?;
+                    (array, arrow_type, true)
+                }
+                None => {
+                    let arrow_type = current_arrow_type.clone_ref(py);
+                    let array = pa.getattr("array")?.call1((values, arrow_type.bind(py)))?;
+                    (array, arrow_type, false)
+                }
+            };
+            arrays.append(&array)?;
+            let source_field_nullable = source_field
+                .map(|source_field| source_field.bind(py).getattr("nullable"))
+                .transpose()?
+                .map(|nullable| nullable.extract::<bool>())
+                .transpose()?
+                .unwrap_or(true);
+            let has_nulls = array.getattr("null_count")?.extract::<usize>()? > 0;
+            if reused_source_type && (source_field_nullable || !has_nulls) {
                 arrow_fields.append(source_field.expect("reused source field exists").bind(py))?;
+            } else if reused_source_type && has_nulls {
+                let field_kwargs = PyDict::new(py);
+                field_kwargs.set_item("nullable", true)?;
+                if let Some(source_field) = source_field {
+                    let metadata = source_field.bind(py).getattr("metadata")?;
+                    if !metadata.is_none() {
+                        field_kwargs.set_item("metadata", metadata)?;
+                    }
+                }
+                arrow_fields.append(
+                    pa.getattr("field")?
+                        .call((field.name.as_str(), arrow_type), Some(&field_kwargs))?,
+                )?;
             } else {
                 arrow_fields.append(
                     pa.getattr("field")?
@@ -10222,15 +10359,13 @@ impl PyDataFrame {
         }
         token.check_cancelled().map_err(to_py_err)?;
         let schema_kwargs = PyDict::new(py);
-        if all_fields_reused {
-            if let Some(source_schema) = &self.arrow_schema_cache {
-                let source_schema = source_schema.bind(py);
-                let source_names = source_schema.getattr("names")?.extract::<Vec<String>>()?;
-                if source_names == output_names {
-                    let metadata = source_schema.getattr("metadata")?;
-                    if !metadata.is_none() {
-                        schema_kwargs.set_item("metadata", metadata)?;
-                    }
+        if let Some(source_schema) = &self.arrow_schema_cache {
+            let source_schema = source_schema.bind(py);
+            let source_names = source_schema.getattr("names")?.extract::<Vec<String>>()?;
+            if source_names == output_names {
+                let metadata = source_schema.getattr("metadata")?;
+                if !metadata.is_none() {
+                    schema_kwargs.set_item("metadata", metadata)?;
                 }
             }
         }
