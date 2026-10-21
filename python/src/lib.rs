@@ -10006,12 +10006,13 @@ impl PyDataFrame {
     }
 
     #[pyo3(name = "isEmpty")]
-    fn is_empty(&self) -> PyResult<bool> {
-        self.inner
-            .limit(1)
-            .map_err(to_py_err)?
-            .count()
-            .map(|c| c == 0)
+    fn is_empty(&self, py: Python<'_>) -> PyResult<bool> {
+        self.check_mixed_row_shape()?;
+        let action = self.begin_action();
+        let token = action.token.clone();
+        let limited = self.inner.limit(1).map_err(to_py_err)?;
+        py.detach(move || limited.count_with_cancellation(&token))
+            .map(|count| count == 0)
             .map_err(to_py_err)
     }
 
