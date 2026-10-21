@@ -2,8 +2,9 @@
 
 Attach a provider with ``spark.set_external_catalog_provider(provider)``. Its
 ``resolve_table(identifier)`` method returns an ExternalTableDescriptor or None.
-An optional ``write_table(request)`` method commits Arrow IPC bytes and returns an
-ExternalTableWriteResult. Callbacks are synchronous and run with the Python GIL.
+Providers can implement ``write_table(request)`` for materialized Arrow IPC bytes,
+or ``write_table_batches(request)`` to consume PyArrow RecordBatches on demand.
+Callbacks are synchronous and run with the Python GIL.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Protocol, Tuple, Union
+from typing import Any, Iterator, List, Optional, Protocol, Tuple, Union
 
 from sparkless.sql import types as T
 
@@ -24,6 +25,7 @@ __all__ = [
     "ExternalTableDescriptor",
     "ExternalTableWriteRequest",
     "ExternalTableWriteResult",
+    "BatchWritableExternalCatalogProvider",
 ]
 
 
@@ -81,20 +83,24 @@ class ExternalTableDescriptor:
 
 @dataclass
 class ExternalTableWriteRequest:
-    """A resolved write; ``data`` contains an Arrow IPC stream (not an IPC file).
+    """A resolved write using either a materialized or lazy Arrow payload.
 
-    Decode with ``pyarrow.ipc.open_stream(request.data).read_all()``. Options are
-    ordered pairs so duplicate keys survive. A successful callback must commit
-    the data before returning its receipt.
+    ``write_table`` receives ``data`` as an Arrow IPC stream and ``batches=None``.
+    ``write_table_batches`` receives ``data=None`` and a lazy ``batches`` iterator
+    of PyArrow RecordBatches. Closing or exhausting that iterator releases the
+    producer; a callback may stop early by closing it. Options are ordered pairs
+    so duplicate keys survive. A successful callback must commit the data it
+    accepts before returning its receipt.
     """
 
     identifier: str
     table: ExternalTableDescriptor
-    data: ArrowIpcStream
+    data: Optional[ArrowIpcStream]
     mode: Union[ExternalTableSaveMode, str]
     format: Optional[str]
     options: List[Tuple[str, str]]
     partition_by: List[str]
+    batches: Optional[Iterator[Any]] = None
 
 
 @dataclass
@@ -126,6 +132,14 @@ class WritableExternalCatalogProvider(ExternalCatalogProvider, Protocol):
     """Provider interface including the optional native write hook."""
 
     def write_table(
+        self, request: ExternalTableWriteRequest
+    ) -> ExternalTableWriteResult: ...
+
+
+class BatchWritableExternalCatalogProvider(ExternalCatalogProvider, Protocol):
+    """Provider interface that consumes bounded PyArrow RecordBatches lazily."""
+
+    def write_table_batches(
         self, request: ExternalTableWriteRequest
     ) -> ExternalTableWriteResult: ...
 

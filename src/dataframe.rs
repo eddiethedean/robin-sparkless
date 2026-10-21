@@ -228,6 +228,17 @@ impl DataFrame {
         self.0.collect()
     }
 
+    /// Execute the plan as a back-pressured stream of bounded Polars DataFrames.
+    ///
+    /// The query starts on the first iterator poll. Dropping the iterator closes
+    /// the producer when a consumer stops early.
+    pub fn collect_batches(
+        &self,
+        max_rows: usize,
+    ) -> Result<robin_sparkless_polars::CollectBatches, PolarsError> {
+        self.0.collect_batches(max_rows)
+    }
+
     pub fn collect_as_json_rows_engine(
         &self,
     ) -> Result<Vec<HashMap<String, JsonValue>>, EngineError> {

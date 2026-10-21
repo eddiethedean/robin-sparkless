@@ -23,6 +23,18 @@ pub trait ExternalCatalogProvider: Send + Sync {
             "external catalog provider does not support table writes".into(),
         ))
     }
+
+    fn supports_batch_writes(&self) -> bool {
+        false
+    }
+
+    fn write_table_batches(
+        &self,
+        request: ExternalTableWriteBatchRequest,
+    ) -> Result<ExternalTableWriteResult, EngineError> {
+        // Consume request.batches lazily. Dropping it stops the producer.
+        todo!()
+    }
 }
 
 pub struct ExternalTableDescriptor {
@@ -49,9 +61,12 @@ Rust callers that need to distinguish an external provider error from a miss can
 `SparkSession::try_table_exists`; the legacy boolean `table_exists` remains best-effort.
 Python `catalog.tableExists()` and `catalog.getTable()` surface provider errors.
 
-The writer materializes the Sparkless DataFrame and buffers one Arrow IPC stream in
-memory before calling the synchronous provider. Python providers use the PyO3 adapter
-described below. There is no async transport. Path-based `DataFrameWriter.save()`, `insertInto()`, SQL
+Providers that opt in to batch writes receive a back-pressured sequence of bounded
+Arrow IPC batches. The producer begins on the first read, and dropping it stops query
+production after the current batch. Providers without batch-write support keep the
+existing behavior: Sparkless materializes the DataFrame and buffers one complete Arrow
+IPC stream before calling `write_table`. Python providers use the PyO3 adapter described
+below. There is no async transport. Path-based `DataFrameWriter.save()`, `insertInto()`, SQL
 `UPDATE`/`DELETE`, and logical Map writes are not delegated by this hook. Logical Map
 reads can match the Polars array-of-key/value-struct representation; writes carrying
 Sparkless' logical Map metadata fail explicitly.
@@ -86,7 +101,8 @@ the provider's responsibility.
 
 Python sessions expose `set_external_catalog_provider(provider)` and the camelCase
 alias `setExternalCatalogProvider(provider)`. Pass `None` to detach. Providers implement
-`resolve_table(identifier)` and may also implement `write_table(request)`:
+`resolve_table(identifier)` and may implement either `write_table(request)` or
+`write_table_batches(request)`:
 
 ```python
 from sparkless.external_catalog import ExternalTableDescriptor
@@ -108,20 +124,43 @@ spark.set_external_catalog_provider(Catalog())
 orders = spark.table("main.analytics.orders")
 ```
 
-`sparkless.external_catalog` exports the `ExternalCatalogProvider` and
-`WritableExternalCatalogProvider` typing protocols, the `ExternalTableFormat` and
+`sparkless.external_catalog` exports the `ExternalCatalogProvider`,
+`WritableExternalCatalogProvider`, and `BatchWritableExternalCatalogProvider` typing
+protocols, the `ExternalTableFormat` and
 `ExternalTableSaveMode` string enums, `ArrowIpcStream`, and the
 `ExternalTableDescriptor`, `ExternalTableWriteRequest`, and `ExternalTableWriteResult`
-dataclasses. A read-only object may omit `write_table`;
-attempted writes then raise an explicit unsupported error.
+dataclasses. A read-only object may omit both write methods; attempted writes then raise
+an explicit unsupported error.
 
-The write callback receives the exact identifier, resolved descriptor, save mode
+The materializing `write_table` callback receives the exact identifier, resolved descriptor, save mode
 (`"append"` or `"overwrite"`), optional format, ordered option pairs (including
 duplicates), and partition column names. `request.data` is an `ArrowIpcStream`, a
 Python `bytes` subclass with a `.bytes` property matching the Rust payload field.
 For example, `pyarrow.ipc.open_stream(request.data).read_all()`
 decodes it without a JSON row conversion. PyArrow is optional and is not imported by
-the adapter. After committing through its storage backend, the callback must return
+the adapter on this compatibility path. Batch writers receive `request.data is None`
+and a lazy `request.batches` iterator yielding `pyarrow.RecordBatch` values. Iteration
+starts query execution; calling `request.batches.close()` (or returning from the
+callback) stops an early read. Batches default to 10,000 rows and 64 MiB; set
+`sparkless.writer.maxRowsPerBatch` and `sparkless.writer.maxBytesPerBatch` writer options
+to change these limits. A single row larger than the byte limit raises an error.
+For example, a provider can process only up to its row budget and then close the source:
+
+```python
+def write_table_batches(self, request):
+    rows = 0
+    try:
+        for batch in request.batches:
+            rows += batch.num_rows
+            self.write_batch(batch)
+            if rows >= self.row_limit:
+                break
+    finally:
+        request.batches.close()
+    return self.commit_and_build_receipt(request.table)
+```
+
+After committing through its storage backend, the callback must return
 `ExternalTableWriteResult(table=committed_descriptor, committed_version=version)`.
 The native backend validates the receipt's identity and version before reporting
 success. A callback exception, invalid descriptor, or invalid receipt is surfaced as
@@ -145,11 +184,12 @@ Every public catalog operation introduced by this PR has a Python counterpart:
 | --- | --- |
 | `ExternalCatalogProvider::resolve_table` | `ExternalCatalogProvider.resolve_table(identifier)` |
 | `ExternalCatalogProvider::write_table` | Optional `write_table(request)`, typed by `WritableExternalCatalogProvider` |
+| `ExternalCatalogProvider::write_table_batches` | Optional `write_table_batches(request)`, typed by `BatchWritableExternalCatalogProvider` |
 | `ExternalTableDescriptor` and every field | `ExternalTableDescriptor` dataclass, using `StructType` for the schema |
 | `ExternalTableDescriptor::validate` | `descriptor.validate()`, invoking the Rust validator |
 | `ExternalTableFormat::Delta` | `ExternalTableFormat.DELTA` (also accepts `"delta"`) |
 | All four `ExternalTableSaveMode` variants | `ExternalTableSaveMode.ERROR_IF_EXISTS`, `.OVERWRITE`, `.APPEND`, `.IGNORE` via `df.write.mode(mode)` |
-| `ArrowIpcStream::bytes` | `request.data.bytes`; `request.data` also works directly as `bytes` |
+| `ArrowIpcStream::bytes` | `request.data.bytes` for materialized writes; `request.batches` yields RecordBatches for streaming writes |
 | Every `ExternalTableWriteRequest` and `ExternalTableWriteResult` field | Corresponding dataclass attributes |
 | `ExternalTableWriteResult::validate_against` | `receipt.validate_against(previous)`, invoking the Rust validator |
 | Attach/replace/remove provider | `spark.set_external_catalog_provider(provider_or_none)` and `setExternalCatalogProvider(...)` |

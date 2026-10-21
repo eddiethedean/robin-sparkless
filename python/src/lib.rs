@@ -7,6 +7,7 @@
 
 mod external_catalog;
 
+use polars::prelude::{CollectBatches, DataFrame as PlDataFrame};
 use polars_plan::dsl::AggExpr;
 use pyo3::class::basic::CompareOp;
 use pyo3::create_exception;
@@ -6448,6 +6449,178 @@ struct PyDataFrame {
     logical_map_paths: std::collections::HashSet<String>,
 }
 
+#[pyclass(module = "sparkless.sql.session", unsendable)]
+struct PyArrowBatchIterator {
+    batches: Option<CollectBatches>,
+    template: Py<PyDataFrame>,
+    max_rows: usize,
+    max_bytes: usize,
+    target_rows: usize,
+    pending: Option<PlDataFrame>,
+    offset: usize,
+    action: Option<ActiveAction>,
+    closed: bool,
+}
+
+impl PyArrowBatchIterator {
+    fn next_source_batch(
+        &mut self,
+        py: Python<'_>,
+    ) -> Option<Result<PlDataFrame, polars::prelude::PolarsError>> {
+        let batches = self.batches.take()?;
+        let (batches, next) = py.detach(move || {
+            let mut batches = batches;
+            let next = batches.next();
+            (batches, next)
+        });
+        self.batches = Some(batches);
+        next
+    }
+
+    fn close_inner(&mut self) {
+        if self.closed {
+            return;
+        }
+        if let Some(action) = &self.action {
+            action.token.cancel();
+        }
+        self.batches.take();
+        self.pending.take();
+        self.action.take();
+        self.closed = true;
+    }
+
+    fn export_candidate(&self, py: Python<'_>, rows: usize) -> PyResult<(PyObject, usize)> {
+        let pending = self.pending.as_ref().expect("pending batch is set");
+        let slice = pending.slice(self.offset as i64, rows);
+        let template = self.template.bind(py).borrow();
+        let dataframe = template.wrap_derived(DataFrame::from_polars_with_options(
+            slice,
+            template.inner.is_case_sensitive(),
+        ));
+        drop(template);
+        let dataframe = Py::new(py, dataframe)?;
+        let table = dataframe.bind(py).call_method0("toArrow")?;
+        let batches = table.call_method0("to_batches")?;
+        if batches.len()? == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "PyArrow returned no RecordBatch for a non-empty DataFrame batch",
+            ));
+        }
+        let batch = batches.get_item(0)?;
+        let nbytes = batch.getattr("nbytes")?.extract::<usize>()?;
+        Ok((batch.into_py_any(py)?, nbytes))
+    }
+
+    fn next_batch(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        if self.closed {
+            return Ok(None);
+        }
+
+        loop {
+            let token = self
+                .action
+                .as_ref()
+                .expect("open batch iterators have an action")
+                .token
+                .clone();
+            if let Err(error) = token.check_cancelled() {
+                self.close_inner();
+                return Err(to_py_err(error));
+            }
+
+            if self.pending.is_none() {
+                let next = self.next_source_batch(py);
+                match next {
+                    Some(Ok(batch)) if batch.height() > 0 => {
+                        if token.is_cancelled() {
+                            self.close_inner();
+                            return Err(to_py_err("operation cancelled"));
+                        }
+                        self.offset = 0;
+                        self.target_rows = self.max_rows;
+                        self.pending = Some(batch);
+                    }
+                    Some(Ok(_)) => continue,
+                    Some(Err(error)) => {
+                        self.close_inner();
+                        return Err(to_py_err(error));
+                    }
+                    None => {
+                        self.close_inner();
+                        return Ok(None);
+                    }
+                }
+            }
+
+            let pending = self.pending.as_ref().unwrap();
+            let remaining = pending.height() - self.offset;
+            let mut rows = remaining.min(self.target_rows).min(self.max_rows);
+            let estimated_per_row = pending.estimated_size().div_ceil(pending.height().max(1));
+            if estimated_per_row > 0 {
+                rows = rows.min((self.max_bytes / estimated_per_row).max(1));
+                self.target_rows = rows;
+            }
+            loop {
+                let candidate = self.export_candidate(py, rows);
+                let (batch, nbytes) = match candidate {
+                    Ok(candidate) => candidate,
+                    Err(error) => {
+                        self.close_inner();
+                        return Err(error);
+                    }
+                };
+                if nbytes <= self.max_bytes {
+                    self.offset += rows;
+                    if self.offset >= self.pending.as_ref().unwrap().height() {
+                        self.pending.take();
+                        self.offset = 0;
+                    }
+                    return Ok(Some(batch));
+                }
+                if rows == 1 {
+                    self.close_inner();
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "a single Arrow row requires {nbytes} bytes, exceeding max_bytes={}",
+                        self.max_bytes
+                    )));
+                }
+                rows = (rows / 2).max(1);
+                self.target_rows = rows;
+            }
+        }
+    }
+}
+
+#[pymethods]
+impl PyArrowBatchIterator {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&mut self, py: Python<'_>) -> PyResult<PyObject> {
+        self.next_batch(py)?
+            .ok_or_else(|| pyo3::exceptions::PyStopIteration::new_err(()))
+    }
+
+    fn close(&mut self) {
+        self.close_inner();
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __exit__(
+        &mut self,
+        _exc_type: &Bound<'_, PyAny>,
+        _exc_value: &Bound<'_, PyAny>,
+        _traceback: &Bound<'_, PyAny>,
+    ) {
+        self.close_inner();
+    }
+}
+
 impl PyDataFrame {
     fn union_aligns_by_name(
         &self,
@@ -7031,6 +7204,44 @@ impl PyDataFrame {
 
     fn begin_action(&self) -> ActiveAction {
         ActiveAction::new(&self.active_actions, self.session_actions.as_ref())
+    }
+
+    fn create_arrow_batches(
+        &self,
+        py: Python<'_>,
+        max_rows: usize,
+        max_bytes: usize,
+    ) -> PyResult<PyObject> {
+        self.check_mixed_row_shape()?;
+        if max_rows == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "max_rows must be greater than zero",
+            ));
+        }
+        if max_bytes == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "max_bytes must be greater than zero",
+            ));
+        }
+
+        let batches = self.inner.collect_batches(max_rows).map_err(to_py_err)?;
+        let action = self.begin_action();
+        let template = Py::new(py, self.wrap_derived(self.inner.clone()))?;
+        Py::new(
+            py,
+            PyArrowBatchIterator {
+                batches: Some(batches),
+                template,
+                max_rows,
+                max_bytes,
+                target_rows: max_rows,
+                pending: None,
+                offset: 0,
+                action: Some(action),
+                closed: false,
+            },
+        )?
+        .into_py_any(py)
     }
 
     fn wrap_derived(&self, df: DataFrame) -> Self {
@@ -9897,18 +10108,21 @@ impl PyDataFrame {
         token.check_cancelled().map_err(to_py_err)?;
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
         let pa = PyModule::import(py, "pyarrow")?;
-        let mut source_arrow_types = std::collections::HashMap::new();
+        let mut source_arrow_fields = std::collections::HashMap::new();
         if let Some(source_schema) = &self.arrow_schema_cache {
             for source_field in source_schema.bind(py).try_iter()? {
                 let source_field = source_field?;
                 let name = source_field.getattr("name")?.extract::<String>()?;
-                source_arrow_types.insert(name, source_field.getattr("type")?.unbind());
+                source_arrow_fields.insert(name, source_field.unbind());
             }
         }
         let arrays = PyList::empty(py);
-        let names = PyList::empty(py);
+        let arrow_fields = PyList::empty(py);
+        let mut output_names = Vec::with_capacity(schema.fields().len());
+        let mut all_fields_reused = source_arrow_fields.len() == schema.fields().len();
         for field in schema.fields() {
             token.check_cancelled().map_err(to_py_err)?;
+            output_names.push(field.name.clone());
             let values = PyList::empty(py);
             let field_path = arrow_field_path("", &field.name);
             let map_shaped_dtype = matches!(
@@ -9975,24 +10189,88 @@ impl PyDataFrame {
                 &field_path,
                 &field_map_paths,
             )?;
-            let arrow_type = match source_arrow_types.get(&field.name) {
-                Some(source_type) if source_type.bind(py).eq(current_arrow_type.bind(py))? => {
-                    source_type.clone_ref(py)
+            let source_field = source_arrow_fields.get(&field.name);
+            let reuse_source_field = match source_field {
+                Some(source_field) => {
+                    let source_field = source_field.bind(py);
+                    source_field
+                        .getattr("type")?
+                        .eq(current_arrow_type.bind(py))?
                 }
-                _ => current_arrow_type,
+                None => false,
+            };
+            let arrow_type = if reuse_source_field {
+                source_field
+                    .expect("reused source field exists")
+                    .bind(py)
+                    .getattr("type")?
+                    .into_py_any(py)?
+            } else {
+                all_fields_reused = false;
+                current_arrow_type.clone_ref(py)
             };
             let array = pa.getattr("array")?.call1((values, arrow_type))?;
             arrays.append(array)?;
-            names.append(field.name.as_str())?;
+            if reuse_source_field {
+                arrow_fields.append(source_field.expect("reused source field exists").bind(py))?;
+            } else {
+                arrow_fields.append(
+                    pa.getattr("field")?
+                        .call1((field.name.as_str(), current_arrow_type))?,
+                )?;
+            }
         }
         token.check_cancelled().map_err(to_py_err)?;
+        let schema_kwargs = PyDict::new(py);
+        if all_fields_reused {
+            if let Some(source_schema) = &self.arrow_schema_cache {
+                let source_schema = source_schema.bind(py);
+                let source_names = source_schema.getattr("names")?.extract::<Vec<String>>()?;
+                if source_names == output_names {
+                    let metadata = source_schema.getattr("metadata")?;
+                    if !metadata.is_none() {
+                        schema_kwargs.set_item("metadata", metadata)?;
+                    }
+                }
+            }
+        }
+        let arrow_schema = pa
+            .getattr("schema")?
+            .call((arrow_fields,), Some(&schema_kwargs))?;
+        let table_kwargs = PyDict::new(py);
+        table_kwargs.set_item("schema", arrow_schema)?;
         let table = pa
             .getattr("Table")?
             .getattr("from_arrays")?
-            .call1((arrays, names))?
+            .call((arrays,), Some(&table_kwargs))?
             .into_py_any(py)?;
         token.check_cancelled().map_err(to_py_err)?;
         Ok(table)
+    }
+
+    /// Yield PyArrow RecordBatches without materializing the full DataFrame.
+    ///
+    /// Each returned batch stays within both limits. If one row alone exceeds
+    /// max_bytes, iteration raises ValueError. Call close(), or use the iterator
+    /// as a context manager, to stop the query when the consumer is done early.
+    #[pyo3(name = "toArrowBatches", signature = (max_rows=10000, max_bytes=67108864))]
+    fn to_arrow_batches(
+        &self,
+        py: Python<'_>,
+        max_rows: usize,
+        max_bytes: usize,
+    ) -> PyResult<PyObject> {
+        self.create_arrow_batches(py, max_rows, max_bytes)
+    }
+
+    #[pyo3(name = "to_arrow_batches", signature = (max_rows=10000, max_bytes=67108864))]
+    fn to_arrow_batches_snake(
+        &self,
+        py: Python<'_>,
+        max_rows: usize,
+        max_bytes: usize,
+    ) -> PyResult<PyObject> {
+        self.create_arrow_batches(py, max_rows, max_bytes)
     }
 
     #[getter]
@@ -14702,6 +14980,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySparkSession>()?;
     m.add_class::<PyDataFrameReader>()?;
     m.add_class::<PyDataFrame>()?;
+    m.add_class::<PyArrowBatchIterator>()?;
+    m.add_class::<external_catalog::PyArrowIpcBatchIterator>()?;
     m.add_class::<PyRDD>()?;
     m.add_class::<PyDataFrameWriter>()?;
     m.add_class::<PyStarColumns>()?;
