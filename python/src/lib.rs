@@ -1749,6 +1749,13 @@ impl ActiveAction {
     }
 }
 
+/// Give Python control threads a chance to request cancellation during long result conversion.
+/// Python objects can only be built while holding the GIL, so conversion loops yield between
+/// bounded batches rather than attempting to move Python values across a detached section.
+fn yield_to_python_control_threads(py: Python<'_>) {
+    py.detach(std::thread::yield_now);
+}
+
 #[pyclass(module = "sparkless.sql.session", unsendable)]
 struct PySparkSession {
     inner: SparkSession,
@@ -8494,7 +8501,7 @@ impl PyDataFrame {
 
         // output_names and rows already obtained above with schema.
         let mut out = Vec::with_capacity(rows.len());
-        for row in rows {
+        for (row_index, row) in rows.into_iter().enumerate() {
             token.check_cancelled().map_err(to_py_err)?;
             let kwargs = PyDict::new(py);
             for name in &output_names {
@@ -8524,7 +8531,12 @@ impl PyDataFrame {
             py_row.setattr("_data_dict", kwargs.clone())?;
             token.check_cancelled().map_err(to_py_err)?;
             out.push(py_row.into_py_any(py)?);
+            if row_index % 32 == 31 {
+                yield_to_python_control_threads(py);
+                token.check_cancelled().map_err(to_py_err)?;
+            }
         }
+        yield_to_python_control_threads(py);
         token.check_cancelled().map_err(to_py_err)?;
         Ok(out)
     }
@@ -9849,7 +9861,7 @@ impl PyDataFrame {
         for col_name in &cols {
             token.check_cancelled().map_err(to_py_err)?;
             let vals = PyList::empty(py);
-            for row in &rows {
+            for (row_index, row) in rows.iter().enumerate() {
                 token.check_cancelled().map_err(to_py_err)?;
                 let v = row.get(col_name).unwrap_or(&JsonValue::Null);
                 vals.append(json_value_to_py_with_schema(
@@ -9861,7 +9873,13 @@ impl PyDataFrame {
                     Some(col_name),
                     Some(&cols),
                 )?)?;
+                if row_index % 32 == 31 {
+                    yield_to_python_control_threads(py);
+                    token.check_cancelled().map_err(to_py_err)?;
+                }
             }
+            yield_to_python_control_threads(py);
+            token.check_cancelled().map_err(to_py_err)?;
             data_dict.set_item(col_name, vals)?;
         }
         let df = pd.call_method1("DataFrame", (data_dict,))?;
@@ -9902,13 +9920,17 @@ impl PyDataFrame {
             );
             let map_value_present = if map_shaped_dtype {
                 let mut found = false;
-                for row in &rows {
+                for (row_index, row) in rows.iter().enumerate() {
                     token.check_cancelled().map_err(to_py_err)?;
                     let dict = row.bind(py).call_method0("asDict")?;
                     let value = dict.get_item(field.name.as_str())?;
                     if !value.is_none() {
                         found = value.is_instance_of::<PyDict>();
                         break;
+                    }
+                    if row_index % 32 == 31 {
+                        yield_to_python_control_threads(py);
+                        token.check_cancelled().map_err(to_py_err)?;
                     }
                 }
                 found
@@ -9926,7 +9948,7 @@ impl PyDataFrame {
             if is_map {
                 field_map_paths.insert(field_path.clone());
             }
-            for row in &rows {
+            for (row_index, row) in rows.iter().enumerate() {
                 token.check_cancelled().map_err(to_py_err)?;
                 let row = row.bind(py);
                 let dict = row.call_method0("asDict")?;
@@ -9939,6 +9961,10 @@ impl PyDataFrame {
                     &field_map_paths,
                 )?;
                 values.append(value.bind(py))?;
+                if row_index % 32 == 31 {
+                    yield_to_python_control_threads(py);
+                    token.check_cancelled().map_err(to_py_err)?;
+                }
             }
             let current_arrow_type = spark_type_to_arrow_type_with_maps(
                 py,
