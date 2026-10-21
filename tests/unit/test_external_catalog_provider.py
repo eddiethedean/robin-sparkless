@@ -1067,3 +1067,81 @@ def test_cancellation_during_sql_delta_metadata_processing_is_reported(tmp_path)
         assert provider.calls == 2
     finally:
         spark.stop()
+
+
+@pytest.mark.parametrize("operation", ["with_column", "filter_compare", "filter_bool"])
+def test_session_cancellation_reaches_python_udf_dataframes(operation, monkeypatch):
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.sql import functions as F
+
+    spark = SparkSession(f"cancel-udf-{operation}-regression")
+    source = spark.createDataFrame([(1,), (2,)], ["id"])
+    identity = F.udf(lambda value: value, T.LongType())
+    positive = F.udf(lambda value: value > 0, T.BooleanType())
+    if operation == "with_column":
+        frame = source.withColumn("copy", identity("id"))
+    elif operation == "filter_compare":
+        frame = source.filter(identity("id") > 0)
+    else:
+        frame = source.filter(positive("id"))
+
+    handle = spark.cancellation_handle()
+    original_array = pa.array
+    cancelled = False
+
+    def cancel_during_array(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            assert handle.cancel_all_active_actions() >= 1
+        return original_array(*args, **kwargs)
+
+    monkeypatch.setattr(pa, "array", cancel_during_array)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.toArrow()
+    finally:
+        spark.stop()
+
+
+def test_save_as_table_registers_with_active_target_session():
+    origin = SparkSession("cancel-writer-origin-session")
+    frame = origin.createDataFrame([(1,)], ["id"])
+    target = origin.newSession()
+    handle = target.cancellation_handle()
+
+    class Provider:
+        def resolve_table(self, identifier):
+            assert handle.cancel_all_active_actions() == 1
+            return None
+
+    target.set_external_catalog_provider(Provider())
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.write.mode("overwrite").saveAsTable("cancelled_in_target")
+        with pytest.raises(Exception):
+            target.table("cancelled_in_target")
+    finally:
+        target.stop()
+        origin.stop()
+
+
+def test_empty_collect_checks_cancellation_after_schema_conversion(monkeypatch):
+    spark = SparkSession("cancel-empty-collect-regression")
+    frame = spark.range(0)
+    original_struct_type = T.StructType
+    cancelled = False
+
+    def cancel_during_schema(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            assert frame.cancel() == 1
+        return original_struct_type(*args, **kwargs)
+
+    monkeypatch.setattr(T, "StructType", cancel_during_schema)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.collect()
+    finally:
+        spark.stop()

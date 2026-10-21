@@ -7628,7 +7628,7 @@ impl PyDataFrame {
                 };
                 literals_py.append(item)?;
             }
-            let df_for_callback = PyDataFrame::wrap(df_for_udf);
+            let df_for_callback = slf.wrap_derived(df_for_udf);
             let df_with_col = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<PyDataFrame> {
                 let cb = cell.borrow();
                 let callback = cb.as_ref().ok_or_else(|| {
@@ -7644,14 +7644,15 @@ impl PyDataFrame {
                     literals_py,
                 ))?;
                 let py_df = result.cast::<PyDataFrame>()?;
-                Ok(PyDataFrame::wrap(py_df.borrow().inner.clone()))
+                let py_df = py_df.borrow();
+                Ok(py_df.wrap_derived(py_df.inner.clone()))
             })?;
             let lit_expr = json_str_to_lit_expr(&other_json)?;
             let op: String = udf_filter.getattr("op")?.extract()?;
             let filter_expr = udf_filter_comparison_expr(temp_name.clone(), op.as_str(), lit_expr)?;
             let filtered = df_with_col.inner.filter(filter_expr).map_err(to_py_err)?;
             let out = filtered.drop(vec![temp_name.as_str()]).map_err(to_py_err)?;
-            return Ok(PyDataFrame::wrap(out));
+            return Ok(df_with_col.wrap_derived(out));
         }
         if let Some(py_col) = py_any_to_py_column_ref(condition) {
             let col_ref = py_col.bind(py).borrow();
@@ -7675,7 +7676,7 @@ impl PyDataFrame {
                             Some(c) => c,
                             None => return Ok(None),
                         };
-                        let df_obj = PyDataFrame::wrap(slf.inner.clone());
+                        let df_obj = slf.wrap_derived(slf.inner.clone());
                         let result = callback.bind(py).call1((
                             df_obj,
                             &temp_name,
@@ -7684,13 +7685,14 @@ impl PyDataFrame {
                             literals_py,
                         ))?;
                         let py_df = result.cast::<PyDataFrame>()?;
-                        Ok(Some(PyDataFrame::wrap(py_df.borrow().inner.clone())))
+                        let py_df = py_df.borrow();
+                        Ok(Some(py_df.wrap_derived(py_df.inner.clone())))
                     })?
                 {
                     let filter_expr = robin_sparkless::Column::new(temp_name.clone()).into_expr();
                     let filtered = df_with_col.inner.filter(filter_expr).map_err(to_py_err)?;
                     let out = filtered.drop(vec![temp_name.as_str()]).map_err(to_py_err)?;
-                    return Ok(PyDataFrame::wrap(out));
+                    return Ok(df_with_col.wrap_derived(out));
                 }
             }
             let df = slf
@@ -8044,7 +8046,7 @@ impl PyDataFrame {
                     };
                     literals_py.append(item)?;
                 }
-                let df_for_callback = PyDataFrame::wrap(df_for_udf);
+                let df_for_callback = slf.wrap_derived(df_for_udf);
                 if let Some(result_df) =
                     PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
                         let cb = cell.borrow();
@@ -8060,7 +8062,8 @@ impl PyDataFrame {
                             literals_py,
                         ))?;
                         let py_df = result.cast::<PyDataFrame>()?;
-                        Ok(Some(PyDataFrame::wrap(py_df.borrow().inner.clone())))
+                        let py_df = py_df.borrow();
+                        Ok(Some(py_df.wrap_derived(py_df.inner.clone())))
                     })?
                 {
                     return Ok(result_df);
@@ -8522,6 +8525,7 @@ impl PyDataFrame {
             token.check_cancelled().map_err(to_py_err)?;
             out.push(py_row.into_py_any(py)?);
         }
+        token.check_cancelled().map_err(to_py_err)?;
         Ok(out)
     }
 
@@ -9762,12 +9766,10 @@ impl PyDataFrame {
     fn write(slf: PyRef<Self>) -> PyDataFrameWriter {
         let py = slf.py();
         let active_actions = slf.active_actions.clone();
-        let session_actions = slf.session_actions.clone();
         let df = slf.into_py_any(py).unwrap();
         PyDataFrameWriter {
             df,
             active_actions,
-            session_actions,
             mode: "overwrite".to_string(),
             options: Vec::new(),
             partition_by: Vec::new(),
@@ -10030,7 +10032,6 @@ impl PyDataFrame {
 struct PyDataFrameWriter {
     df: Py<PyAny>,
     active_actions: std::sync::Arc<ActionRegistry>,
-    session_actions: Option<std::sync::Arc<ActionRegistry>>,
     mode: String,
     options: Vec<(String, String)>,
     partition_by: Vec<String>,
@@ -10038,8 +10039,8 @@ struct PyDataFrameWriter {
 }
 
 impl PyDataFrameWriter {
-    fn begin_action(&self) -> ActiveAction {
-        ActiveAction::new(&self.active_actions, self.session_actions.as_ref())
+    fn begin_action(&self, session_actions: &std::sync::Arc<ActionRegistry>) -> ActiveAction {
+        ActiveAction::new(&self.active_actions, Some(session_actions))
     }
 }
 
@@ -10360,14 +10361,18 @@ impl PyDataFrameWriter {
     /// PySpark: saveAsTable(name). mode: "error"|"overwrite"|"append"|"ignore".
     #[pyo3(signature = (name, mode=None))]
     fn save_as_table(&self, py: Python<'_>, name: &str, mode: Option<&str>) -> PyResult<()> {
-        let action = self.begin_action();
+        let session = require_active_session(py)?;
+        let session = session.bind(py).cast::<PySparkSession>()?;
+        let session = session.borrow();
+        let action = self.begin_action(&session.active_actions);
         let token = action.token.clone();
         let df =
             self.df.bind(py).cast::<PyDataFrame>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
             })?;
         let inner = df.borrow();
-        let active = require_active_session(py)?.bind(py).borrow().inner.clone();
+        let active = session.inner.clone();
+        drop(session);
         let save_mode = save_mode_from_str(mode.unwrap_or(self.mode.as_str()));
         if self
             .writer_format
