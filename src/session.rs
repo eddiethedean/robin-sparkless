@@ -316,6 +316,14 @@ impl SparkSession {
         self.0.sql(query).map(DataFrame)
     }
 
+    pub fn sql_with_cancellation(
+        &self,
+        query: &str,
+        token: &robin_sparkless_core::CancellationToken,
+    ) -> Result<DataFrame, EngineError> {
+        self.0.sql_with_cancellation(query, token).map(DataFrame)
+    }
+
     pub fn table_engine(&self, name: &str) -> Result<DataFrame, EngineError> {
         self.0.table_engine(name).map(DataFrame)
     }

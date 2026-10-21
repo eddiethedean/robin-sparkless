@@ -3671,10 +3671,32 @@ impl SparkSession {
         crate::sql::execute_sql(self, query)
     }
 
+    /// Execute SQL while sharing a cancellation signal with eager statement work such as writes.
+    #[cfg(feature = "sql")]
+    pub fn sql_with_cancellation(
+        &self,
+        query: &str,
+        token: &robin_sparkless_core::CancellationToken,
+    ) -> Result<DataFrame, EngineError> {
+        crate::sql::execute_sql_with_cancellation(self, query, token)
+    }
+
     /// Execute a SQL query (stub when `sql` feature is disabled).
     #[cfg(not(feature = "sql"))]
     pub fn sql(&self, _query: &str) -> Result<DataFrame, PolarsError> {
         Err(PolarsError::InvalidOperation(
+            "SQL queries require the 'sql' feature. Build with --features sql.".into(),
+        ))
+    }
+
+    /// SQL is unavailable when the `sql` feature is disabled.
+    #[cfg(not(feature = "sql"))]
+    pub fn sql_with_cancellation(
+        &self,
+        _query: &str,
+        _token: &robin_sparkless_core::CancellationToken,
+    ) -> Result<DataFrame, EngineError> {
+        Err(EngineError::Sql(
             "SQL queries require the 'sql' feature. Build with --features sql.".into(),
         ))
     }

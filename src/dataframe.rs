@@ -3,7 +3,7 @@
 use robin_sparkless_core::EngineError;
 use robin_sparkless_core::engine::{CollectedRows, DataFrameBackend, GroupedDataBackend};
 use robin_sparkless_core::expr::ExprIr;
-use robin_sparkless_core::{DataType, StructType};
+use robin_sparkless_core::{CancellationToken, DataType, StructType};
 use robin_sparkless_polars::dataframe::{
     DataFrameNa as PolarsDataFrameNa, DataFrameStat as PolarsDataFrameStat,
     DataFrameWriter as PolarsDataFrameWriter,
@@ -208,8 +208,20 @@ impl DataFrame {
         self.0.count_engine()
     }
 
+    pub fn count_with_cancellation(&self, token: &CancellationToken) -> Result<usize, EngineError> {
+        self.0.count_with_cancellation(token)
+    }
+
     pub fn show(&self, n: Option<usize>) -> Result<(), PolarsError> {
         self.0.show(n)
+    }
+
+    pub fn show_with_cancellation(
+        &self,
+        n: Option<usize>,
+        token: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        self.0.show_with_cancellation(n, token)
     }
 
     pub fn collect(&self) -> Result<Arc<PlDataFrame>, PolarsError> {
@@ -241,6 +253,19 @@ impl DataFrame {
     ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), PolarsError> {
         self.0
             .collect_as_json_rows_with_names_and_array_struct_columns(array_struct_columns)
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn collect_as_json_rows_with_names_and_array_struct_columns_with_cancellation(
+        &self,
+        array_struct_columns: &std::collections::HashSet<String>,
+        token: &CancellationToken,
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), EngineError> {
+        self.0
+            .collect_as_json_rows_with_names_and_array_struct_columns_with_cancellation(
+                array_struct_columns,
+                token,
+            )
     }
 
     pub fn to_json_rows(&self) -> Result<String, EngineError> {
@@ -912,6 +937,18 @@ impl<'a> DataFrameWriter<'a> {
     ) -> Result<(), PolarsError> {
         self.inner
             .save_as_table_with_options(&session.0, name, mode, options)
+    }
+
+    pub fn save_as_table_with_options_and_cancellation(
+        &self,
+        session: &crate::session::SparkSession,
+        name: &str,
+        mode: SaveMode,
+        options: &[(String, String)],
+        token: &CancellationToken,
+    ) -> Result<(), PolarsError> {
+        self.inner
+            .save_as_table_with_options_and_cancellation(&session.0, name, mode, options, token)
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), PolarsError> {

@@ -12,6 +12,7 @@ use polars::prelude::{
     AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, Scalar, col, lit, when,
 };
 use polars_plan::dsl::functions::nth;
+use robin_sparkless_core::CancellationToken;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
     BinaryOperator, CastKind, ExactNumberInfo, Expr as SqlExpr, FromTable, Function, FunctionArg,
@@ -183,6 +184,17 @@ pub fn translate(
     session: &SparkSession,
     stmt: &Statement,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    translate_with_cancellation(session, stmt, &CancellationToken::new())
+}
+
+/// Translate a statement while checking cancellation before session mutations and provider
+/// commit acceptance.
+pub fn translate_with_cancellation(
+    session: &SparkSession,
+    stmt: &Statement,
+    token: &CancellationToken,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    check_cancellation(token)?;
     set_thread_udf_session(session.clone());
     match stmt {
         Statement::Query(q) => translate_query(session, q.as_ref()),
@@ -190,6 +202,7 @@ pub fn translate(
             // CREATE [OR REPLACE] [TEMP] VIEW name AS SELECT ... (#1011).
             let view_name = table_name_from_object_name(&create_view.name);
             let df = translate_query(session, create_view.query.as_ref())?;
+            check_cancellation(token)?;
             session.create_or_replace_temp_view(&view_name, df);
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
@@ -239,14 +252,16 @@ pub fn translate(
                 false,
                 false,
             )?;
+            check_cancellation(token)?;
             session.register_table(&table_name, df);
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
                 session.is_case_sensitive(),
             ))
         }
-        Statement::Insert(insert) => translate_insert(session, insert),
+        Statement::Insert(insert) => translate_insert(session, insert, token),
         Statement::CreateSchema { schema_name, .. } => {
+            check_cancellation(token)?;
             let name = schema_name.to_string();
             session.register_database(&name);
             Ok(DataFrame::from_polars_with_options(
@@ -255,6 +270,7 @@ pub fn translate(
             ))
         }
         Statement::CreateDatabase { db_name, .. } => {
+            check_cancellation(token)?;
             let name = db_name.to_string();
             session.register_database(&name);
             Ok(DataFrame::from_polars_with_options(
@@ -267,6 +283,7 @@ pub fn translate(
             names,
             ..
         } => {
+            check_cancellation(token)?;
             for obj_name in names {
                 let name = obj_name.to_string();
                 if name.starts_with("global_temp.") {
@@ -287,6 +304,7 @@ pub fn translate(
             names,
             ..
         } => {
+            check_cancellation(token)?;
             for obj_name in names {
                 session.drop_database(&obj_name.to_string());
             }
@@ -300,6 +318,7 @@ pub fn translate(
             names,
             ..
         } => {
+            check_cancellation(token)?;
             for obj_name in names {
                 session.drop_database(&obj_name.to_string());
             }
@@ -309,6 +328,7 @@ pub fn translate(
             ))
         }
         Statement::Drop { names, .. } => {
+            check_cancellation(token)?;
             // Any other DROP (e.g. MaterializedView): treat as table/view drop for parity (#745).
             for obj_name in names {
                 let name = obj_name.to_string();
@@ -325,8 +345,14 @@ pub fn translate(
                 session.is_case_sensitive(),
             ))
         }
-        Statement::Update(u) => translate_update(session, u),
-        Statement::Delete(d) => translate_delete(session, d),
+        Statement::Update(u) => {
+            check_cancellation(token)?;
+            translate_update(session, u)
+        }
+        Statement::Delete(d) => {
+            check_cancellation(token)?;
+            translate_delete(session, d)
+        }
         Statement::ExplainTable { table_name, .. } => translate_describe_table(session, table_name),
         Statement::ShowDatabases { .. } => translate_show_databases(session),
         Statement::ShowTables { .. } => translate_show_tables(session, None),
@@ -385,7 +411,9 @@ fn align_insert_select_to_target(
 fn translate_insert(
     session: &SparkSession,
     insert: &spark_sql_parser::ast::Insert,
+    token: &CancellationToken,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    check_cancellation(token)?;
     // Only support INSERT INTO <table_name> ... (no TABLE FUNCTION targets).
     let table_name = match &insert.table {
         TableObject::TableName(name) => table_name_from_object_name(name),
@@ -504,6 +532,7 @@ fn translate_insert(
             provider.as_ref(),
             &descriptor,
             &[],
+            token,
         )?;
         return Ok(DataFrame::from_polars_with_options(
             PlDataFrame::empty(),
@@ -513,6 +542,7 @@ fn translate_insert(
 
     // Append rows to existing table in the same namespace that provided the target table.
     let appended = target_df.union(&new_rows_df)?;
+    check_cancellation(token)?;
     if session.has_exact_temp_view(&table_name)
         || (!has_provider && session.has_temp_view(&table_name))
     {
@@ -525,6 +555,12 @@ fn translate_insert(
         PlDataFrame::empty(),
         session.is_case_sensitive(),
     ))
+}
+
+fn check_cancellation(token: &CancellationToken) -> Result<(), PolarsError> {
+    token
+        .check_cancelled()
+        .map_err(|error| PolarsError::ComputeError(error.to_string().into()))
 }
 
 /// Convert robin_sparkless_core DataType to schema type string (DESCRIBE / PySpark simpleString).

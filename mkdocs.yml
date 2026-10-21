@@ -53,6 +53,7 @@ nav:
     - Migration: python_migration.md
     - FAQ: FAQ.md
     - Troubleshooting: TROUBLESHOOTING_PYTHON.md
+    - Execution cancellation: EXECUTION_CANCELLATION.md
     - Python API reference: PYTHON_API_REFERENCE.md
   - Rust users:
     - Quickstart: QUICKSTART.md
@@ -60,6 +61,7 @@ nav:
     - Embedding: EMBEDDING.md
     - Persistence guide: PERSISTENCE_GUIDE.md
     - UDF guide: UDF_GUIDE.md
+    - Execution cancellation: EXECUTION_CANCELLATION.md
   - Reference:
     - PySpark differences: PYSPARK_DIFFERENCES.md
     - Parity status: PARITY_STATUS.md

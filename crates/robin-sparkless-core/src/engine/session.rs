@@ -1,6 +1,8 @@
 //! Engine-agnostic SparkSession backend trait.
 
-use crate::engine::{DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider};
+use crate::engine::{
+    CancellationToken, DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider,
+};
 use crate::error::EngineError;
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
@@ -22,6 +24,19 @@ pub trait SparkSessionBackend: Send + Sync {
         column_names: Vec<&str>,
     ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
     fn sql(&self, query: &str) -> Result<Box<dyn DataFrameBackend>, EngineError>;
+    /// Execute SQL while sharing a cancellation signal with any eager statement work.
+    /// The default checks around SQL planning; backends that perform writes during planning
+    /// should override this method and fence cancellation before commit acceptance.
+    fn sql_with_cancellation(
+        &self,
+        query: &str,
+        token: &CancellationToken,
+    ) -> Result<Box<dyn DataFrameBackend>, EngineError> {
+        token.check_cancelled()?;
+        let dataframe = self.sql(query)?;
+        token.check_cancelled()?;
+        Ok(dataframe)
+    }
     /// Register `df` under `name` in the session catalog.
     ///
     /// Returns [`EngineError::User`] if `df` is not from the same backend as `self`.
