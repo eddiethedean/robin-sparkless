@@ -80,7 +80,7 @@ More: [Python getting started](docs/python_getting_started.md) · [Testing guide
 pip install "sparkless>=4,<5"
 ```
 
-Contributors: `pip install ./python` or `cd python && maturin develop` — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributors: follow the [uv environment, native build, and test workflow](CONTRIBUTING.md#setup).
 
 ### Rust engine (optional)
 
@@ -97,7 +97,7 @@ Optional features: `sql`, `delta`, `jdbc`, `sqlite`, `jdbc_mysql`. See [docs/QUI
 
 ## Development
 
-**Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)), Python 3.8+, maturin. Java only for `SPARKLESS_TEST_MODE=pyspark`.
+**Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)), Python 3.8+, uv. The contributor setup installs Maturin. Java only for `SPARKLESS_TEST_MODE=pyspark`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, `make check-full`, pytest, and maturin workflow.
 

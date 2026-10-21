@@ -13,8 +13,9 @@ Thank you for contributing. This repository contains the **Sparkless** Python pa
 ## Prerequisites
 
 - **Rust** — pinned in [rust-toolchain.toml](rust-toolchain.toml) (currently 1.93.x)
-- **Python 3.8+** — for the `sparkless` package and pytest suite
-- **maturin** — for editable Python/native builds (`pip install maturin`)
+- **Python 3.8+** — supported by the package; the contributor commands below use Python 3.11
+- **uv** — for Python environments, dependencies, and commands ([installation](https://docs.astral.sh/uv/getting-started/installation/))
+- **maturin** — for Python/native builds; installed with the development dependencies below
 - **Java** (optional) — only for `SPARKLESS_TEST_MODE=pyspark` parity runs
 
 ## Setup
@@ -23,12 +24,45 @@ Thank you for contributing. This repository contains the **Sparkless** Python pa
 git clone https://github.com/eddiethedean/robin-sparkless.git
 cd robin-sparkless
 
-# Python editable install (rebuilds native extension on changes)
-cd python && maturin develop && cd ..
+# Create the contributor environment at the repository root
+uv venv --python 3.11 .venv
 
-# Or install package from repo root
-pip install "./python[dev]"
+# Install build tools and the dev extra without building the package yet
+uv pip install --python .venv/bin/python \
+  -r python/pyproject.toml --extra dev "maturin>=1.4,<2"
+
+# Build and install the native extension with editable Python sources
+(
+  cd python
+  uv run --no-project --python ../.venv/bin/python \
+    python -m maturin develop --uv --locked --release
+)
 ```
+
+Run these Bash examples from the repository root. No environment activation is required.
+On Windows, use Git Bash and replace `.venv/bin/python` with `.venv/Scripts/python.exe`
+(and adjust the relative path inside `python/` accordingly).
+
+Use `uv pip` to select dependencies and `uv run --no-project` to run commands in this
+environment. The package metadata is in `python/pyproject.toml`; the root
+`pyproject.toml` contains test and lint configuration. Project-wide `uv sync` / `uv run`
+resolution currently fails because the `pyspark` and `pyspark4` extras require incompatible
+Spark versions. `--no-project` skips that automatic project resolution and synchronization.
+
+Rerun the Maturin command after changing Rust or PyO3 code, then run the relevant tests.
+An editable install reflects Python source changes, but the native extension still needs
+an explicit rebuild. To check which package and extension the environment imports:
+
+```bash
+uv run --no-project --python .venv/bin/python python -c \
+  "import sparkless, sparkless._native; print(sparkless.__file__); print(sparkless._native.__file__)"
+```
+
+To build a wheel, replace `maturin develop --uv` in the build command with `maturin build`.
+Maturin prints the wheel path under `target/wheels/`. To test that wheel, install that exact
+path with `uv pip install --python .venv/bin/python --reinstall PATH_TO_WHEEL`, then use
+the test commands below. If uv's cache is on a different filesystem, add `--link-mode=copy`
+to `uv pip install` to avoid the hardlink fallback warning.
 
 ## Checks before opening a PR
 
@@ -45,7 +79,7 @@ Faster subsets:
 ```bash
 make check              # Rust only
 make lint-python        # ruff + mypy on sparkless package
-pytest tests/ -v        # Python tests (sparkless backend)
+uv run --no-project --python .venv/bin/python python -m pytest tests/ -v
 make check-crate CRATE=robin-sparkless-polars   # single crate
 ```
 
@@ -53,14 +87,22 @@ make check-crate CRATE=robin-sparkless-polars   # single crate
 
 ```bash
 # Default: sparkless backend (no JVM)
-pytest tests/ -v
+uv run --no-project --python .venv/bin/python python -m pytest tests/ -v
+
+# Focused test file
+uv run --no-project --python .venv/bin/python \
+  python -m pytest tests/unit/test_external_catalog_provider.py -q
 
 # Parallel
-pytest tests/ -n 12 -v
+uv run --no-project --python .venv/bin/python python -m pytest tests/ -n 12 -v
 
-# Against real PySpark (requires Java + pip install "./python[pyspark]")
-SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
+# Against real PySpark (requires Java; select the PySpark 3 extra only)
+uv pip install --python .venv/bin/python -r python/pyproject.toml --extra pyspark
+SPARKLESS_TEST_MODE=pyspark uv run --no-project --python .venv/bin/python \
+  python -m pytest tests/ -v
 ```
+
+Use a separate environment for the `pyspark4` extra; do not install it alongside `pyspark`.
 
 Parity fixture phases: `make test-parity-phases`
 

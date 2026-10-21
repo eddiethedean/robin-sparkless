@@ -55,10 +55,9 @@ For **development** from the [robin-sparkless](https://github.com/eddiethedean/r
 ```bash
 # From repo root
 pip install ./python
-
-# Or editable install (rebuilds native code on changes)
-cd python && maturin develop
 ```
+
+Contributors should use the [uv setup and native build workflow](../CONTRIBUTING.md#setup).
 
 **Optional extras**
 
@@ -80,7 +79,7 @@ Prebuilt wheels are published for CI targets on each release (see [PyPI files](h
 
 **Python:** 3.8, 3.9, 3.10, 3.11, 3.12 (cp38–cp312 ABI tags on wheels).
 
-If no wheel matches your platform, build from source: `cd python && maturin develop` ([CONTRIBUTING.md](../CONTRIBUTING.md)).
+If no wheel matches your platform, follow the [source build instructions](../CONTRIBUTING.md#setup).
 
 ---
 
@@ -213,14 +212,23 @@ Full details: [TESTING_GUIDE.md](https://github.com/eddiethedean/robin-sparkless
 
 ## Development
 
+Follow [CONTRIBUTING.md](../CONTRIBUTING.md#setup) to create the root `.venv`, install
+development dependencies with `uv`, and build the native extension. From the repository root:
+
 ```bash
-cd python
-maturin develop          # Editable install
-pytest tests -v          # From repo root: run tests (sparkless backend)
-SPARKLESS_TEST_MODE=pyspark pytest tests -v   # With PySpark
+# Rebuild after changing Rust or PyO3 code
+(
+  cd python
+  uv run --no-project --python ../.venv/bin/python \
+    python -m maturin develop --uv --locked --release
+)
+
+# Run a focused test against the rebuilt extension
+uv run --no-project --python .venv/bin/python \
+  python -m pytest tests/unit/test_external_catalog_provider.py -q
 ```
 
-Package wheels: `maturin build` in `python/`.  
+For wheels and PySpark parity runs, see the [contributor guide](../CONTRIBUTING.md).
 Rust engine, UDFs, embedding: see the main [README](https://github.com/eddiethedean/robin-sparkless) and [docs](https://github.com/eddiethedean/robin-sparkless/tree/main/docs).
 
 ---
