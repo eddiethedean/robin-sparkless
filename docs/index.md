@@ -26,6 +26,7 @@ Install Python package: `pip install "sparkless>=4,<5"`
 - [Migration](python_migration.md) — From PySpark or Sparkless 3.x
 - [FAQ](FAQ.md) · [Troubleshooting (Python)](TROUBLESHOOTING_PYTHON.md)
 - [Python API reference (starter)](PYTHON_API_REFERENCE.md)
+- [Execution cancellation](EXECUTION_CANCELLATION.md) — cancel active DataFrame actions and understand safe-point behavior
 - [PySpark differences](PYSPARK_DIFFERENCES.md) · [Parity status](PARITY_STATUS.md)
 
 ## Rust (robin-sparkless)

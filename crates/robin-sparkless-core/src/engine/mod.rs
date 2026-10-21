@@ -14,6 +14,7 @@
 //! execution engines. This keeps core logic open for new backends without changing the
 //! public engine interfaces.
 
+mod cancellation;
 mod collected;
 mod dataframe;
 mod external_catalog;
@@ -22,6 +23,7 @@ mod plan;
 mod reader;
 mod session;
 
+pub use cancellation::CancellationToken;
 pub use collected::CollectedRows;
 pub use dataframe::{DataFrameBackend, GroupedDataBackend};
 pub use external_catalog::{

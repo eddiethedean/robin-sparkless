@@ -33,6 +33,9 @@ pub enum EngineError {
     /// Resource not found (column, table, file).
     #[error("not found: {0}")]
     NotFound(String),
+    /// An action reached a safe point after cancellation was requested.
+    #[error("cancelled: {0}")]
+    Cancelled(String),
     /// Other / unclassified.
     #[error("{0}")]
     Other(String),
@@ -47,6 +50,7 @@ impl EngineError {
             | EngineError::Io(s)
             | EngineError::Sql(s)
             | EngineError::NotFound(s)
+            | EngineError::Cancelled(s)
             | EngineError::Other(s) => s.as_str(),
         }
     }

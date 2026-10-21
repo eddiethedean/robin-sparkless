@@ -1,6 +1,6 @@
 //! Engine-agnostic DataFrame backend trait.
 
-use super::{CollectedRows, JoinType};
+use super::{CancellationToken, CollectedRows, JoinType};
 use crate::error::EngineError;
 use crate::expr::ExprIr;
 use crate::schema::StructType;
@@ -64,7 +64,28 @@ pub trait DataFrameBackend: Send + Sync {
     ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
 
     fn collect(&self) -> Result<CollectedRows, EngineError>;
+    /// Collect while checking a caller-owned cancellation token at backend safe points.
+    ///
+    /// The default checks before and after collection. Engines with finer-grained safe
+    /// points may override this method. Cancellation requested inside a non-interruptible
+    /// engine call is reported only after that call returns.
+    fn collect_with_cancellation(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<CollectedRows, EngineError> {
+        token.check_cancelled()?;
+        let rows = self.collect()?;
+        token.check_cancelled()?;
+        Ok(rows)
+    }
     fn schema(&self) -> Result<StructType, EngineError>;
     fn columns(&self) -> Result<Vec<String>, EngineError>;
     fn count(&self) -> Result<u64, EngineError>;
+    /// Count rows while checking a caller-owned cancellation token at safe points.
+    fn count_with_cancellation(&self, token: &CancellationToken) -> Result<u64, EngineError> {
+        token.check_cancelled()?;
+        let count = self.count()?;
+        token.check_cancelled()?;
+        Ok(count)
+    }
 }

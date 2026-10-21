@@ -18,6 +18,7 @@ from sparkless import (
     DataFrameReader,
     DataFrameWriter,
     SparklessError,
+    SparklessCancelledError,
 )
 from sparkless.sql.types import Row
 
@@ -36,5 +37,6 @@ __all__ = [
     "DataFrameReader",
     "DataFrameWriter",
     "SparklessError",
+    "SparklessCancelledError",
     "Row",
 ]

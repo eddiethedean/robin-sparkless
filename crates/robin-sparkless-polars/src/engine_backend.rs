@@ -17,8 +17,8 @@ use crate::expr_ir::expr_ir_to_expr;
 use crate::session::{DataFrameReader, SparkSession};
 use polars::prelude::PolarsError;
 use robin_sparkless_core::engine::{
-    DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider, GroupedDataBackend,
-    SparkSessionBackend,
+    CancellationToken, DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider,
+    GroupedDataBackend, SparkSessionBackend,
 };
 use robin_sparkless_core::error::EngineError as CoreEngineError;
 use robin_sparkless_core::expr::ExprIr;
@@ -187,6 +187,13 @@ impl DataFrameBackend for DataFrame {
         self.collect_as_json_rows().map_err(map_err)
     }
 
+    fn collect_with_cancellation(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<robin_sparkless_core::engine::CollectedRows, CoreEngineError> {
+        self.collect_as_json_rows_with_cancellation(token)
+    }
+
     fn schema(&self) -> Result<StructType, CoreEngineError> {
         DataFrame::schema(self).map_err(map_err)
     }
@@ -198,6 +205,11 @@ impl DataFrameBackend for DataFrame {
     fn count(&self) -> Result<u64, CoreEngineError> {
         let n = DataFrame::count(self).map_err(map_err)?;
         Ok(n as u64)
+    }
+
+    fn count_with_cancellation(&self, token: &CancellationToken) -> Result<u64, CoreEngineError> {
+        let count = DataFrame::count_with_cancellation(self, token)?;
+        Ok(count as u64)
     }
 }
 
@@ -299,6 +311,15 @@ impl SparkSessionBackend for SparkSession {
 
     fn sql(&self, query: &str) -> Result<Box<dyn DataFrameBackend>, CoreEngineError> {
         let df = self.sql(query).map_err(map_err)?;
+        Ok(Box::new(df))
+    }
+
+    fn sql_with_cancellation(
+        &self,
+        query: &str,
+        token: &CancellationToken,
+    ) -> Result<Box<dyn DataFrameBackend>, CoreEngineError> {
+        let df = SparkSession::sql_with_cancellation(self, query, token)?;
         Ok(Box::new(df))
     }
 

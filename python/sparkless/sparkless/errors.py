@@ -13,11 +13,14 @@ from typing import Type
 try:
     # Native exception provided by the Rust extension.
     from sparkless._native import SparklessError as _SparklessError
+    from sparkless._native import SparklessCancelledError as _SparklessCancelledError
 
     SparklessError = _SparklessError
+    SparklessCancelledError = _SparklessCancelledError
 except ImportError:  # pragma: no cover - exercised implicitly in type-checking tools
     # Fallback used in environments without the native extension.
     SparklessError: Type[BaseException] = RuntimeError
+    SparklessCancelledError: Type[BaseException] = SparklessError
 
 
 AnalysisException: Type[BaseException] = SparklessError
@@ -32,4 +35,5 @@ __all__ = [
     "PySparkTypeError",
     "PySparkRuntimeError",
     "IllegalArgumentException",
+    "SparklessCancelledError",
 ]

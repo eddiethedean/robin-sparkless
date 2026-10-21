@@ -12,7 +12,7 @@ pub mod schema;
 
 pub use config::SparklessConfig;
 pub use engine::{
-    ArrowIpcStream, CollectedRows, DataFrameBackend, DataFrameReaderBackend,
+    ArrowIpcStream, CancellationToken, CollectedRows, DataFrameBackend, DataFrameReaderBackend,
     ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
     ExternalTableWriteRequest, ExternalTableWriteResult, GroupedDataBackend, JoinType,
     PlanExecutor, SparkSessionBackend,

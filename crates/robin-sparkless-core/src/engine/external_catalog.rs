@@ -1,6 +1,7 @@
 //! Engine-neutral descriptors and lookup contract for external catalog tables.
 
 use crate::EngineError;
+use crate::engine::CancellationToken;
 use crate::schema::StructType;
 use serde::{Deserialize, Serialize};
 
@@ -162,6 +163,22 @@ pub trait ExternalCatalogProvider: Send + Sync {
         Err(EngineError::User(
             "external catalog provider does not support table writes".into(),
         ))
+    }
+
+    /// Commit a write while honoring cancellation before commit acceptance.
+    ///
+    /// Providers may override this method to add safe points before their commit. Returning
+    /// [`EngineError::Cancelled`] promises that the provider did not accept the commit. Once
+    /// the provider's commit path begins, a successful receipt or provider error is returned
+    /// unchanged even if cancellation is requested concurrently; this keeps the caller's
+    /// outcome truthful when commit state is known only to the provider.
+    fn write_table_with_cancellation(
+        &self,
+        request: ExternalTableWriteRequest,
+        token: &CancellationToken,
+    ) -> Result<ExternalTableWriteResult, EngineError> {
+        token.check_cancelled()?;
+        self.write_table(request)
     }
 }
 

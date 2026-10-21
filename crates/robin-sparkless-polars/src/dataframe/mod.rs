@@ -30,8 +30,8 @@ use polars::prelude::{
     PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
 use robin_sparkless_core::engine::{
-    ArrowIpcStream, ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableSaveMode,
-    ExternalTableWriteRequest,
+    ArrowIpcStream, CancellationToken, ExternalCatalogProvider, ExternalTableDescriptor,
+    ExternalTableSaveMode, ExternalTableWriteRequest,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -1441,6 +1441,11 @@ impl DataFrame {
         self.count().map_err(polars_to_core_error)
     }
 
+    /// Count rows while honoring cooperative cancellation before and after materialization.
+    pub fn count_with_cancellation(&self, token: &CancellationToken) -> Result<usize, EngineError> {
+        Ok(self.collect_with_cancellation(token)?.height())
+    }
+
     /// Show the first n rows (collects at most `n` rows, not the full DataFrame).
     pub fn show(&self, n: Option<usize>) -> Result<(), PolarsError> {
         let n = n.unwrap_or(20);
@@ -1454,11 +1459,67 @@ impl DataFrame {
         self.collect_inner()
     }
 
+    /// Materialize this plan while honoring cancellation at the engine boundary.
+    /// Polars does not currently accept a per-query cancellation callback, so a request
+    /// made during `LazyFrame::collect` is observed as soon as that call returns.
+    pub fn collect_with_cancellation(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Arc<PlDataFrame>, EngineError> {
+        token.check_cancelled()?;
+        let collected = self.collect_inner().map_err(polars_to_core_error)?;
+        token.check_cancelled()?;
+        Ok(collected)
+    }
+
     /// Same as [`collect_as_json_rows`](Self::collect_as_json_rows) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn collect_as_json_rows_engine(
         &self,
     ) -> Result<Vec<HashMap<String, JsonValue>>, EngineError> {
         self.collect_as_json_rows().map_err(polars_to_core_error)
+    }
+
+    /// Collect JSON rows and check cancellation at the materialization boundary.
+    pub fn collect_as_json_rows_with_cancellation(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Vec<HashMap<String, JsonValue>>, EngineError> {
+        token.check_cancelled()?;
+        let rows = self.collect_as_json_rows().map_err(polars_to_core_error)?;
+        token.check_cancelled()?;
+        Ok(rows)
+    }
+
+    /// Collect named JSON rows and schema while honoring cancellation at materialization
+    /// boundaries. The Polars query itself remains non-interruptible until `collect()` returns.
+    #[allow(clippy::type_complexity)]
+    pub fn collect_as_json_rows_with_names_and_array_struct_columns_with_cancellation(
+        &self,
+        array_struct_paths: &HashSet<String>,
+        token: &CancellationToken,
+    ) -> Result<(Vec<String>, Vec<HashMap<String, JsonValue>>, StructType), EngineError> {
+        token.check_cancelled()?;
+        let rows = self
+            .collect_as_json_rows_with_names_and_array_struct_columns(array_struct_paths)
+            .map_err(polars_to_core_error)?;
+        token.check_cancelled()?;
+        Ok(rows)
+    }
+
+    /// Display a bounded preview while honoring cancellation at materialization boundaries.
+    pub fn show_with_cancellation(
+        &self,
+        n: Option<usize>,
+        token: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        token.check_cancelled()?;
+        let preview = self
+            .clone()
+            .limit(n.unwrap_or(20))
+            .map_err(polars_to_core_error)?;
+        let collected = preview.collect_with_cancellation(token)?;
+        println!("{collected}");
+        Ok(())
     }
 
     /// Collect as rows of column-name -> JSON value. For use by language bindings (Node, etc.).
@@ -2708,6 +2769,17 @@ impl<'a> DataFrameWriter<'a> {
         name: &str,
         mode: SaveMode,
     ) -> Result<(), PolarsError> {
+        self.save_as_table_with_cancellation(session, name, mode, &CancellationToken::new())
+    }
+
+    /// Save a table while honoring cancellation before materialization and commit acceptance.
+    pub fn save_as_table_with_cancellation(
+        &self,
+        session: &SparkSession,
+        name: &str,
+        mode: SaveMode,
+        token: &CancellationToken,
+    ) -> Result<(), PolarsError> {
         let opts: Vec<(String, String)> = self
             .options
             .iter()
@@ -2718,7 +2790,7 @@ impl<'a> DataFrameWriter<'a> {
         } else {
             Some(opts.as_slice())
         };
-        self.save_as_table_impl(session, name, mode, options)
+        self.save_as_table_impl(session, name, mode, options, token)
     }
 
     /// Same as save_as_table but with options passed explicitly (e.g. from Python writer). Issue #1109.
@@ -2729,6 +2801,24 @@ impl<'a> DataFrameWriter<'a> {
         mode: SaveMode,
         options: &[(String, String)],
     ) -> Result<(), PolarsError> {
+        self.save_as_table_with_options_and_cancellation(
+            session,
+            name,
+            mode,
+            options,
+            &CancellationToken::new(),
+        )
+    }
+
+    /// Same as `save_as_table_with_options` with a caller-owned cancellation token.
+    pub fn save_as_table_with_options_and_cancellation(
+        &self,
+        session: &SparkSession,
+        name: &str,
+        mode: SaveMode,
+        options: &[(String, String)],
+        token: &CancellationToken,
+    ) -> Result<(), PolarsError> {
         self.save_as_table_impl(
             session,
             name,
@@ -2738,9 +2828,11 @@ impl<'a> DataFrameWriter<'a> {
             } else {
                 Some(options)
             },
+            token,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn save_as_external_table_descriptor(
         &self,
         name: &str,
@@ -2749,7 +2841,11 @@ impl<'a> DataFrameWriter<'a> {
         provider: &dyn ExternalCatalogProvider,
         descriptor: &ExternalTableDescriptor,
         logical_map_paths: &[String],
+        token: &CancellationToken,
     ) -> Result<(), PolarsError> {
+        token
+            .check_cancelled()
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
         let external_mode = match mode {
             SaveMode::ErrorIfExists => {
                 return Err(PolarsError::InvalidOperation(
@@ -2809,7 +2905,12 @@ impl<'a> DataFrameWriter<'a> {
             .map(|column| self.df.resolve_column_name(column))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let mut materialized = self.df.collect_inner()?.as_ref().clone();
+        let mut materialized = self
+            .df
+            .collect_with_cancellation(token)
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
+            .as_ref()
+            .clone();
         let mut cursor = std::io::Cursor::new(Vec::new());
         {
             use polars::io::ipc::IpcStreamWriter;
@@ -2827,11 +2928,19 @@ impl<'a> DataFrameWriter<'a> {
             options: writer_options,
             partition_by,
         };
-        let result = provider.write_table(request).map_err(|error| {
-            PolarsError::InvalidOperation(
-                format!("external catalog provider failed to write '{name}': {error}").into(),
-            )
-        })?;
+        token
+            .check_cancelled()
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+        let result = provider
+            .write_table_with_cancellation(request, token)
+            .map_err(|error| match error {
+                EngineError::Cancelled(message) => {
+                    PolarsError::ComputeError(format!("cancelled: {message}").into())
+                }
+                error => PolarsError::InvalidOperation(
+                    format!("external catalog provider failed to write '{name}': {error}").into(),
+                ),
+            })?;
         result.validate_against(descriptor).map_err(|error| {
             PolarsError::InvalidOperation(
                 format!("external catalog provider returned an invalid write receipt: {error}")
@@ -2883,10 +2992,15 @@ impl<'a> DataFrameWriter<'a> {
         name: &str,
         mode: SaveMode,
         options: Option<&[(String, String)]>,
+        token: &CancellationToken,
     ) -> Result<(), PolarsError> {
         use polars::prelude::*;
         use std::fs;
         use std::path::Path;
+
+        token
+            .check_cancelled()
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
 
         if SparkSession::is_global_temp_name(name) && session.local_table_exists(name) {
             return Err(PolarsError::InvalidOperation(
@@ -2931,6 +3045,9 @@ impl<'a> DataFrameWriter<'a> {
                     format!("external catalog provider failed to resolve '{name}': {error}").into(),
                 )
             })?;
+            token
+                .check_cancelled()
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
             if let Some(descriptor) = descriptor {
                 descriptor.validate().map_err(|error| {
                     PolarsError::InvalidOperation(
@@ -2947,6 +3064,7 @@ impl<'a> DataFrameWriter<'a> {
                     provider.as_ref(),
                     &descriptor,
                     &logical_map_paths,
+                    token,
                 );
             }
         }
@@ -3003,7 +3121,15 @@ impl<'a> DataFrameWriter<'a> {
                     | SaveMode::Ignore
                     | SaveMode::ErrorIfExists => {}
                 }
-                let pl_df = self.df.collect_inner()?.as_ref().clone();
+                let pl_df = self
+                    .df
+                    .collect_with_cancellation(token)
+                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
+                    .as_ref()
+                    .clone();
+                token
+                    .check_cancelled()
+                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
                 let resolved_partition_by = self
                     .partition_by
                     .iter()
@@ -3054,6 +3180,88 @@ impl<'a> DataFrameWriter<'a> {
                 .save(&file_path)
         }
 
+        fn check_cancelled(token: &CancellationToken) -> Result<(), PolarsError> {
+            token
+                .check_cancelled()
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))
+        }
+
+        fn staging_path(target: &Path) -> std::path::PathBuf {
+            static NEXT_STAGE_ID: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(0);
+            let id = NEXT_STAGE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let parent = target.parent().unwrap_or_else(|| Path::new("."));
+            let name = target
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("table");
+            parent.join(format!(
+                ".{name}.sparkless-stage-{}-{id}",
+                std::process::id()
+            ))
+        }
+
+        fn stage_warehouse_write(
+            df: &crate::dataframe::DataFrame,
+            target: &Path,
+            token: &CancellationToken,
+        ) -> Result<std::path::PathBuf, PolarsError> {
+            let materialized = df
+                .collect_with_cancellation(token)
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            check_cancelled(token)?;
+            let eager = crate::dataframe::DataFrame::from_polars_with_options(
+                materialized.as_ref().clone(),
+                df.case_sensitive,
+            );
+            let stage = staging_path(target);
+            if let Err(error) = persist_to_warehouse(&eager, &stage) {
+                let _ = fs::remove_dir_all(&stage);
+                return Err(error);
+            }
+            if let Err(error) = check_cancelled(token) {
+                let _ = fs::remove_dir_all(&stage);
+                return Err(error);
+            }
+            Ok(stage)
+        }
+
+        fn commit_warehouse_stage(
+            stage: &Path,
+            target: &Path,
+            overwrite: bool,
+        ) -> Result<(), PolarsError> {
+            let backup = staging_path(target);
+            let had_target = target.exists();
+            if had_target && !overwrite {
+                let _ = fs::remove_dir_all(stage);
+                return Err(PolarsError::InvalidOperation(
+                    format!("saveAsTable target already exists: {}", target.display()).into(),
+                ));
+            }
+            if had_target {
+                if let Err(error) = fs::rename(target, &backup) {
+                    let _ = fs::remove_dir_all(stage);
+                    return Err(PolarsError::ComputeError(
+                        format!("saveAsTable: move existing target aside: {error}").into(),
+                    ));
+                }
+            }
+            if let Err(error) = fs::rename(stage, target) {
+                if had_target {
+                    let _ = fs::rename(&backup, target);
+                }
+                let _ = fs::remove_dir_all(stage);
+                return Err(PolarsError::ComputeError(
+                    format!("saveAsTable: commit staged directory: {error}").into(),
+                ));
+            }
+            if had_target {
+                let _ = fs::remove_dir_all(backup);
+            }
+            Ok(())
+        }
+
         let final_df = match mode {
             SaveMode::ErrorIfExists => {
                 if session.saved_table_exists(name) || warehouse_exists {
@@ -3065,14 +3273,17 @@ impl<'a> DataFrameWriter<'a> {
                     ));
                 }
                 if let Some(ref p) = warehouse_path {
-                    persist_to_warehouse(self.df, p)?;
+                    let stage = stage_warehouse_write(self.df, p, token)?;
+                    check_cancelled(token)?;
+                    commit_warehouse_stage(&stage, p, false)?;
                 }
                 self.df.clone()
             }
             SaveMode::Overwrite => {
                 if let Some(ref p) = warehouse_path {
-                    let _ = fs::remove_dir_all(p);
-                    persist_to_warehouse(self.df, p)?;
+                    let stage = stage_warehouse_write(self.df, p, token)?;
+                    check_cancelled(token)?;
+                    commit_warehouse_stage(&stage, p, true)?;
                 }
                 self.df.clone()
             }
@@ -3120,13 +3331,23 @@ impl<'a> DataFrameWriter<'a> {
                     })?
                 } else {
                     // New table
-                    session.register_table(name, self.df.clone());
                     if let Some(ref p) = warehouse_path {
-                        persist_to_warehouse(self.df, p)?;
+                        let stage = stage_warehouse_write(self.df, p, token)?;
+                        check_cancelled(token)?;
+                        commit_warehouse_stage(&stage, p, false)?;
+                    } else {
+                        check_cancelled(token)?;
                     }
+                    session.register_table(name, self.df.clone());
                     return Ok(());
                 };
-                let new_pl = self.df.collect_inner()?.as_ref().clone();
+                let new_pl = self
+                    .df
+                    .collect_with_cancellation(token)
+                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
+                    .as_ref()
+                    .clone();
+                check_cancelled(token)?;
                 let merged = if merge_schema {
                     let (aligned_existing, aligned_new) =
                         align_to_merged_schema_inline(&existing_pl, &new_pl)?;
@@ -3165,8 +3386,9 @@ impl<'a> DataFrameWriter<'a> {
                     )
                 };
                 if let Some(ref p) = warehouse_path {
-                    let _ = fs::remove_dir_all(p);
-                    persist_to_warehouse(&merged, p)?;
+                    let stage = stage_warehouse_write(&merged, p, token)?;
+                    check_cancelled(token)?;
+                    commit_warehouse_stage(&stage, p, true)?;
                 }
                 merged
             }
@@ -3175,11 +3397,16 @@ impl<'a> DataFrameWriter<'a> {
                     return Ok(());
                 }
                 if let Some(ref p) = warehouse_path {
-                    persist_to_warehouse(self.df, p)?;
+                    let stage = stage_warehouse_write(self.df, p, token)?;
+                    check_cancelled(token)?;
+                    commit_warehouse_stage(&stage, p, false)?;
                 }
                 self.df.clone()
             }
         };
+        if warehouse_path.is_none() {
+            check_cancelled(token)?;
+        }
         session.register_table(name, final_df);
         Ok(())
     }

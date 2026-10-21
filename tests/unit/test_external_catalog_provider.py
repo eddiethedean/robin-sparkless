@@ -5,10 +5,12 @@ from datetime import date, datetime
 from decimal import Decimal
 import gc
 import weakref
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 
-from sparkless import SparkSession
+from sparkless import SparklessCancelledError, SparkSession
 from sparkless.external_catalog import (
     ArrowIpcStream,
     ExternalTableDescriptor,
@@ -894,3 +896,252 @@ def test_python_catalog_uses_native_path_confinement(session, tmp_path, monkeypa
     monkeypatch.setenv("SPARKLESS_FILES_BASE", str(base))
     with pytest.raises(Exception, match="outside|escape|base"):
         session.table(IDENTIFIER)
+
+
+def test_cancel_during_catalog_resolution_prevents_local_save_as_table():
+    spark = SparkSession("cancel-write-regression")
+    entered_resolve = Event()
+    continue_resolve = Event()
+
+    class Provider:
+        def resolve_table(self, identifier):
+            entered_resolve.set()
+            assert continue_resolve.wait(timeout=5)
+            return None
+
+    spark.set_external_catalog_provider(Provider())
+    frame = spark.createDataFrame([(1,)], ["id"])
+    cancellation = spark.cancellation_handle()
+    try:
+        def cancel_from_control_thread():
+            assert entered_resolve.wait(timeout=5)
+            assert cancellation.cancel_all_active_actions() >= 1
+            continue_resolve.set()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            control = pool.submit(cancel_from_control_thread)
+            with pytest.raises(SparklessCancelledError):
+                frame.write.format("parquet").saveAsTable("cancelled_local")
+            control.result(timeout=5)
+        with pytest.raises(Exception):
+            spark.table("cancelled_local")
+    finally:
+        continue_resolve.set()
+        spark.stop()
+
+
+def test_cancellation_handle_is_usable_from_another_thread():
+    spark = SparkSession("cancel-handle-thread-regression")
+    try:
+        handle = spark.cancellation_handle()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(handle.cancel_all_active_actions).result() == 0
+    finally:
+        spark.stop()
+
+
+def test_to_arrow_checks_cancellation_during_python_conversion(monkeypatch):
+    pa = pytest.importorskip("pyarrow")
+    spark = SparkSession("cancel-arrow-regression")
+    frame = spark.createDataFrame([(1,)], ["id"])
+    original_array = pa.array
+    cancelled = False
+
+    def cancel_during_array(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            frame.cancel()
+        return original_array(*args, **kwargs)
+
+    monkeypatch.setattr(pa, "array", cancel_during_array)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.toArrow()
+    finally:
+        spark.stop()
+
+
+def test_to_pandas_checks_cancellation_during_python_conversion(monkeypatch):
+    pd = pytest.importorskip("pandas")
+    spark = SparkSession("cancel-pandas-regression")
+    frame = spark.createDataFrame([(1,)], ["id"])
+    original_dataframe = pd.DataFrame
+
+    def cancel_during_dataframe(*args, **kwargs):
+        frame.cancel()
+        return original_dataframe(*args, **kwargs)
+
+    monkeypatch.setattr(pd, "DataFrame", cancel_during_dataframe)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.toPandas()
+    finally:
+        spark.stop()
+
+
+def test_public_cancellation_exception_is_exported():
+    from sparkless import SparklessCancelledError as top_level_error
+    from sparkless.core.exceptions import SparklessCancelledError as core_error
+
+    assert top_level_error is core_error
+
+
+def test_session_cancellation_reaches_aggregate_dataframes(monkeypatch):
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.sql import functions as F
+
+    spark = SparkSession("cancel-aggregate-regression")
+    frame = spark.createDataFrame([(1, "a"), (2, "a")], ["id", "key"])
+    aggregate = frame.groupBy("key").agg(F.sum("id"))
+    handle = spark.cancellation_handle()
+    original_array = pa.array
+    cancelled = False
+
+    def cancel_during_array(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            assert handle.cancel_all_active_actions() >= 1
+        return original_array(*args, **kwargs)
+
+    monkeypatch.setattr(pa, "array", cancel_during_array)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            aggregate.toArrow()
+    finally:
+        spark.stop()
+
+
+@pytest.mark.parametrize("method", ["head", "take", "first"])
+def test_convenience_row_actions_use_source_cancellation_registry(
+    method, monkeypatch
+):
+    spark = SparkSession(f"cancel-{method}-regression")
+    frame = spark.createDataFrame([(1,), (2,)], ["id"])
+    original_row = T.Row
+    cancelled = False
+
+    def cancel_during_row(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            assert frame.cancel() >= 1
+        return original_row(*args, **kwargs)
+
+    monkeypatch.setattr(T, "Row", cancel_during_row)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            if method == "head":
+                frame.head(2)
+            elif method == "take":
+                frame.take(2)
+            else:
+                frame.first()
+    finally:
+        spark.stop()
+
+
+@pytest.mark.delta
+def test_cancellation_during_sql_delta_metadata_processing_is_reported(tmp_path):
+    spark = SparkSession("cancel-sql-metadata-regression")
+    seed = spark.createDataFrame([(1,)], ["id"])
+    path = str(tmp_path / "source")
+    seed.write.format("delta").mode("overwrite").save(path)
+    handle = spark.cancellation_handle()
+
+    class Provider:
+        calls = 0
+
+        def resolve_table(self, identifier):
+            self.calls += 1
+            if self.calls == 2:
+                assert handle.cancel_all_active_actions() >= 1
+            return descriptor(seed.schema, path)
+
+    provider = Provider()
+    spark.set_external_catalog_provider(provider)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            spark.sql("SELECT * FROM (SELECT id FROM external_source) AS q")
+        assert provider.calls == 2
+    finally:
+        spark.stop()
+
+
+@pytest.mark.parametrize("operation", ["with_column", "filter_compare", "filter_bool"])
+def test_session_cancellation_reaches_python_udf_dataframes(operation, monkeypatch):
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.sql import functions as F
+
+    spark = SparkSession(f"cancel-udf-{operation}-regression")
+    source = spark.createDataFrame([(1,), (2,)], ["id"])
+    identity = F.udf(lambda value: value, T.LongType())
+    positive = F.udf(lambda value: value > 0, T.BooleanType())
+    if operation == "with_column":
+        frame = source.withColumn("copy", identity("id"))
+    elif operation == "filter_compare":
+        frame = source.filter(identity("id") > 0)
+    else:
+        frame = source.filter(positive("id"))
+
+    handle = spark.cancellation_handle()
+    original_array = pa.array
+    cancelled = False
+
+    def cancel_during_array(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            assert handle.cancel_all_active_actions() >= 1
+        return original_array(*args, **kwargs)
+
+    monkeypatch.setattr(pa, "array", cancel_during_array)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.toArrow()
+    finally:
+        spark.stop()
+
+
+def test_save_as_table_registers_with_active_target_session():
+    origin = SparkSession("cancel-writer-origin-session")
+    frame = origin.createDataFrame([(1,)], ["id"])
+    target = origin.newSession()
+    handle = target.cancellation_handle()
+
+    class Provider:
+        def resolve_table(self, identifier):
+            assert handle.cancel_all_active_actions() == 1
+            return None
+
+    target.set_external_catalog_provider(Provider())
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.write.mode("overwrite").saveAsTable("cancelled_in_target")
+        with pytest.raises(Exception):
+            target.table("cancelled_in_target")
+    finally:
+        target.stop()
+        origin.stop()
+
+
+def test_empty_collect_checks_cancellation_after_schema_conversion(monkeypatch):
+    spark = SparkSession("cancel-empty-collect-regression")
+    frame = spark.range(0)
+    original_struct_type = T.StructType
+    cancelled = False
+
+    def cancel_during_schema(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            assert frame.cancel() == 1
+        return original_struct_type(*args, **kwargs)
+
+    monkeypatch.setattr(T, "StructType", cancel_during_schema)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.collect()
+    finally:
+        spark.stop()

@@ -6,8 +6,10 @@ mod decimal;
 mod translator;
 
 use crate::dataframe::DataFrame;
+use crate::error::polars_to_core_error;
 use crate::session::SparkSession;
 use polars::prelude::PolarsError;
+use robin_sparkless_core::{CancellationToken, EngineError};
 use spark_sql_parser::SparkStatement;
 /// SQL AST types used by API consumers that inspect parsed statements.
 pub use spark_sql_parser::ast;
@@ -45,7 +47,60 @@ pub fn parse_sql(query: &str) -> Result<Statement, PolarsError> {
 /// WHERE (basic predicates), GROUP BY + aggregates, ORDER BY, LIMIT,
 /// DESCRIBE DETAIL table_name (Delta Lake; requires delta feature).
 pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, PolarsError> {
-    match parse_spark_statement(query)? {
+    execute_sql_inner(session, query, &CancellationToken::new())
+}
+
+/// Execute SQL with a caller-owned cancellation signal. Eager write statements pass the
+/// token to their commit boundary; a cancellation requested after commit acceptance does not
+/// replace the statement's actual result.
+pub fn execute_sql_with_cancellation(
+    session: &SparkSession,
+    query: &str,
+    token: &CancellationToken,
+) -> Result<DataFrame, EngineError> {
+    token.check_cancelled()?;
+    let statement = parse_spark_statement(query).map_err(polars_to_core_error)?;
+    let read_only = is_read_only_statement(&statement);
+    let result = execute_sql_statement(session, statement, token).map_err(|error| {
+        if error.to_string().starts_with("cancelled: ") {
+            EngineError::Cancelled("operation cancelled".into())
+        } else {
+            polars_to_core_error(error)
+        }
+    })?;
+    if read_only {
+        token.check_cancelled()?;
+    }
+    Ok(result)
+}
+
+fn execute_sql_inner(
+    session: &SparkSession,
+    query: &str,
+    token: &CancellationToken,
+) -> Result<DataFrame, PolarsError> {
+    execute_sql_statement(session, parse_spark_statement(query)?, token)
+}
+
+fn is_read_only_statement(statement: &SparkStatement) -> bool {
+    match statement {
+        SparkStatement::DescribeDetail { .. }
+        | SparkStatement::ShowDatabases
+        | SparkStatement::ShowTables { .. }
+        | SparkStatement::Describe { .. } => true,
+        SparkStatement::Sqlparser(statement) => {
+            matches!(statement.as_ref(), Statement::Query(_))
+        }
+        SparkStatement::CreateOrReplaceTableAs { .. } => false,
+    }
+}
+
+fn execute_sql_statement(
+    session: &SparkSession,
+    statement: SparkStatement,
+    token: &CancellationToken,
+) -> Result<DataFrame, PolarsError> {
+    match statement {
         SparkStatement::DescribeDetail { table } => {
             // Preserve Delta/table-not-found error precedence (#768, #773).
             let table_name = table.to_string();
@@ -134,7 +189,10 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                     };
 
                     // Collect the DataFrame and write as Delta
-                    let pl_df = result_df.collect_inner()?;
+                    let pl_df = result_df
+                        .collect_with_cancellation(token)
+                        .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+                    check_cancellation(token)?;
                     crate::delta::write_delta(
                         pl_df.as_ref(),
                         &table_path,
@@ -158,6 +216,7 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                 "parquet" | "csv" | "json" => {
                     // For other formats, register as a temp table (in-memory replacement)
                     // Note: Full file-based persistence for non-Delta formats could be added later
+                    check_cancellation(token)?;
                     session.drop_table(&table_name);
                     session.drop_temp_view(&table_name);
                     session.register_table(&table_name, result_df);
@@ -175,8 +234,16 @@ pub fn execute_sql(session: &SparkSession, query: &str) -> Result<DataFrame, Pol
                 )),
             }
         }
-        SparkStatement::Sqlparser(stmt) => translator::translate(session, stmt.as_ref()),
+        SparkStatement::Sqlparser(stmt) => {
+            translator::translate_with_cancellation(session, stmt.as_ref(), token)
+        }
     }
+}
+
+fn check_cancellation(token: &CancellationToken) -> Result<(), PolarsError> {
+    token
+        .check_cancelled()
+        .map_err(|error| PolarsError::ComputeError(error.to_string().into()))
 }
 
 /// Parse multiple selectExpr strings via SQL (e.g. "upper(Name) as u"). Registers df as __selectexpr_t, parses each expr, then drops the temp view. PySpark selectExpr parity.

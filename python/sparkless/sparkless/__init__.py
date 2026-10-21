@@ -27,6 +27,7 @@ _mod = __import__(
     "sparkless._native",
     fromlist=[
         "SparklessError",
+        "SparklessCancelledError",
         "PySparkSession",
         "PySparkSessionBuilder",
         "PyDataFrame",
@@ -127,6 +128,7 @@ _mod = __import__(
 )
 
 SparklessError = _mod.SparklessError
+SparklessCancelledError = _mod.SparklessCancelledError
 _SparkSession = _mod.PySparkSession
 _SparkSessionBuilder = _mod.PySparkSessionBuilder
 _DataFrame = _mod.PyDataFrame
@@ -479,6 +481,7 @@ def __getattr__(name: str) -> object:
 # PySpark-style: from sparkless.sql import SparkSession
 __all__: List[str] = [
     "SparklessError",
+    "SparklessCancelledError",
     "sql",
     "col",
     "lit",

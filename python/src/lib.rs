@@ -31,7 +31,9 @@ use robin_sparkless::{
     schema_from_json, Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData,
     SelectItem, SparkSession, SparkSessionBuilder, StructField, StructType, StructTypePolarsExt,
 };
-use robin_sparkless_core::{normalize_unresolved_column_message, DataType as CoreDataType};
+use robin_sparkless_core::{
+    normalize_unresolved_column_message, CancellationToken, DataType as CoreDataType,
+};
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
 use std::env;
@@ -288,6 +290,9 @@ fn to_py_err_msg(msg: &str) -> PyErr {
             break;
         }
     }
+    if let Some(message) = msg.strip_prefix("cancelled: ") {
+        return SparklessCancelledError::new_err(message.to_string());
+    }
     let msg = normalize_unresolved_column_message(&msg);
     if msg.contains("to_date requires StringType, TimestampType, or DateType input") {
         return pyo3::exceptions::PyTypeError::new_err(msg);
@@ -373,6 +378,13 @@ create_exception!(
     SparklessError,
     pyo3::exceptions::PyRuntimeError,
     "Sparkless error"
+);
+
+create_exception!(
+    _native,
+    SparklessCancelledError,
+    SparklessError,
+    "Sparkless action cancelled"
 );
 
 /// Convert serde_json::Value to Python object.
@@ -945,6 +957,7 @@ impl PySparkSessionBuilder {
             PySparkSession {
                 inner: session,
                 external_catalog_tables: Default::default(),
+                active_actions: std::sync::Arc::new(ActionRegistry::default()),
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -1645,10 +1658,109 @@ fn delta_map_paths_for_sql_query(
 }
 
 /// #1344: module = "sparkless.sql.session" so type(spark).__module__ identifies engine (not builtins).
+#[derive(Default)]
+struct ActionRegistry {
+    next_id: std::sync::atomic::AtomicU64,
+    active: std::sync::Mutex<std::collections::HashMap<u64, CancellationToken>>,
+}
+
+impl ActionRegistry {
+    fn register(self: &std::sync::Arc<Self>, token: CancellationToken) -> ActionRegistration {
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id, token);
+        ActionRegistration {
+            registry: self.clone(),
+            id,
+        }
+    }
+
+    fn cancel_active(&self) -> usize {
+        let tokens = self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for token in &tokens {
+            token.cancel();
+        }
+        tokens.len()
+    }
+}
+
+/// Shareable cancellation control for a thread-bound SparkSession.
+#[pyclass(module = "sparkless.sql.session", frozen)]
+struct PyCancellationHandle {
+    active_actions: std::sync::Arc<ActionRegistry>,
+}
+
+#[pymethods]
+impl PyCancellationHandle {
+    fn cancel_all_active_actions(&self) -> usize {
+        self.active_actions.cancel_active()
+    }
+
+    #[pyo3(name = "cancelAllActiveJobs")]
+    fn cancel_all_active_jobs(&self) -> usize {
+        self.cancel_all_active_actions()
+    }
+}
+
+struct ActionRegistration {
+    registry: std::sync::Arc<ActionRegistry>,
+    id: u64,
+}
+
+impl Drop for ActionRegistration {
+    fn drop(&mut self) {
+        self.registry
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.id);
+    }
+}
+
+struct ActiveAction {
+    token: CancellationToken,
+    _registrations: Vec<ActionRegistration>,
+}
+
+impl ActiveAction {
+    fn new(
+        local: &std::sync::Arc<ActionRegistry>,
+        session: Option<&std::sync::Arc<ActionRegistry>>,
+    ) -> Self {
+        let token = CancellationToken::new();
+        let mut registrations = vec![local.register(token.clone())];
+        if let Some(session) = session {
+            registrations.push(session.register(token.clone()));
+        }
+        Self {
+            token,
+            _registrations: registrations,
+        }
+    }
+}
+
+/// Give Python control threads a chance to request cancellation during long result conversion.
+/// Python objects can only be built while holding the GIL, so conversion loops yield between
+/// bounded batches rather than attempting to move Python values across a detached section.
+fn yield_to_python_control_threads(py: Python<'_>) {
+    py.detach(std::thread::yield_now);
+}
+
 #[pyclass(module = "sparkless.sql.session", unsendable)]
 struct PySparkSession {
     inner: SparkSession,
     external_catalog_tables: external_catalog::ResolvedTables,
+    active_actions: std::sync::Arc<ActionRegistry>,
     /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
     backend_type: RefCell<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
@@ -2718,6 +2830,7 @@ impl PySparkSession {
             PySparkSession {
                 inner: session,
                 external_catalog_tables: Default::default(),
+                active_actions: std::sync::Arc::new(ActionRegistry::default()),
                 backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -2789,6 +2902,7 @@ impl PySparkSession {
             PySparkSession {
                 inner: session,
                 external_catalog_tables: Default::default(),
+                active_actions: std::sync::Arc::new(ActionRegistry::default()),
                 backend_type: RefCell::new(backend_type),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
@@ -2891,7 +3005,7 @@ impl PySparkSession {
         let mut wrapped = self
             .inner
             .table(name)
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, self.active_actions.clone()))
             .map_err(to_py_err)?;
         #[cfg(feature = "delta")]
         {
@@ -2899,6 +3013,29 @@ impl PySparkSession {
                 delta_map_paths_for_catalog_table(self, name).map_err(to_py_err)?;
         }
         Ok(wrapped)
+    }
+
+    /// Request cancellation for every active action started through this session.
+    /// Actions report cancellation only after reaching an engine safe point.
+    fn cancel_all_active_actions(&self) -> usize {
+        self.active_actions.cancel_active()
+    }
+
+    /// Return a thread-safe handle that can be passed to a control thread.
+    fn cancellation_handle(&self) -> PyCancellationHandle {
+        PyCancellationHandle {
+            active_actions: self.active_actions.clone(),
+        }
+    }
+
+    #[pyo3(name = "cancellationHandle")]
+    fn cancellation_handle_camel(&self) -> PyCancellationHandle {
+        self.cancellation_handle()
+    }
+
+    #[pyo3(name = "cancelAllActiveJobs")]
+    fn cancel_all_active_jobs(&self) -> usize {
+        self.cancel_all_active_actions()
     }
 
     /// Attach a synchronous Python catalog provider, or pass None to remove it.
@@ -2938,16 +3075,31 @@ impl PySparkSession {
         self.set_external_catalog_provider(py, provider)
     }
 
-    fn sql(&self, query: &str) -> PyResult<PyDataFrame> {
-        let mut wrapped = self
-            .inner
-            .sql(query)
-            .map(PyDataFrame::wrap)
+    fn sql(&self, py: Python<'_>, query: &str) -> PyResult<PyDataFrame> {
+        let action = ActiveAction::new(&self.active_actions, None);
+        let token = action.token.clone();
+        let execution_token = token.clone();
+        #[cfg(feature = "delta")]
+        let is_read_only_query = matches!(
+            robin_sparkless::sql::parse_sql(query),
+            Ok(robin_sparkless::sql::Statement::Query(_))
+        );
+        let session = self.inner.clone();
+        let query = query.to_string();
+        let query_for_execution = query.clone();
+        let dataframe = py
+            .detach(move || session.sql_with_cancellation(&query_for_execution, &execution_token))
             .map_err(to_py_err)?;
+        let mut wrapped = PyDataFrame::wrap_with_session(dataframe, self.active_actions.clone());
         #[cfg(feature = "delta")]
         {
             let output_columns = wrapped.inner.columns().map_err(to_py_err)?;
-            wrapped.logical_map_paths = delta_map_paths_for_sql_query(self, query, &output_columns);
+            wrapped.logical_map_paths =
+                delta_map_paths_for_sql_query(self, &query, &output_columns);
+        }
+        #[cfg(feature = "delta")]
+        if is_read_only_query {
+            token.check_cancelled().map_err(to_py_err)?;
         }
         Ok(wrapped)
     }
@@ -2960,7 +3112,7 @@ impl PySparkSession {
         let names: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
         self.inner
             .create_dataframe(data, names)
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, self.active_actions.clone()))
             .map_err(to_py_err)
     }
 
@@ -2998,17 +3150,11 @@ impl PySparkSession {
                                 .inner
                                 .create_dataframe_from_single_column(values, &pairs[0].1)
                                 .map_err(to_py_err)?;
-                            return Ok(PyDataFrame {
-                                inner: df,
-                                schema_cache: schema.and_then(|s| {
-                                    s.getattr("fields").ok().map(|_| s.clone().unbind())
-                                }),
-                                mixed_row_shape_error_on_collect: false,
-                                arrow_schema_cache: None,
-                                arrow_array_struct_paths: Default::default(),
-                                logical_map_columns: Default::default(),
-                                logical_map_paths: Default::default(),
-                            });
+                            let mut wrapped =
+                                PyDataFrame::wrap_with_session(df, self.active_actions.clone());
+                            wrapped.schema_cache = schema
+                                .and_then(|s| s.getattr("fields").ok().map(|_| s.clone().unbind()));
+                            return Ok(wrapped);
                         }
                     }
                 }
@@ -3162,15 +3308,14 @@ impl PySparkSession {
             .inner
             .create_dataframe_from_rows(rows, schema_pairs, verify_schema, schema_was_inferred)
             .map_err(to_py_err)?;
-        Ok(PyDataFrame {
-            inner: df,
-            schema_cache,
-            mixed_row_shape_error_on_collect: mixed_row_kinds && effective_schema.is_none(),
-            arrow_schema_cache,
-            arrow_array_struct_paths,
-            logical_map_columns,
-            logical_map_paths,
-        })
+        let mut wrapped = PyDataFrame::wrap_with_session(df, self.active_actions.clone());
+        wrapped.schema_cache = schema_cache;
+        wrapped.mixed_row_shape_error_on_collect = mixed_row_kinds && effective_schema.is_none();
+        wrapped.arrow_schema_cache = arrow_schema_cache;
+        wrapped.arrow_array_struct_paths = arrow_array_struct_paths;
+        wrapped.logical_map_columns = logical_map_columns;
+        wrapped.logical_map_paths = logical_map_paths;
+        Ok(wrapped)
     }
 
     /// PySpark alias: createDataFrame -> create_dataframe_from_rows. Accepts verify_schema or verifySchema, sampling_ratio or samplingRatio.
@@ -3205,28 +3350,28 @@ impl PySparkSession {
         };
         self.inner
             .range(start, end, step)
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, self.active_actions.clone()))
             .map_err(to_py_err)
     }
 
     fn read_csv(&self, path: &str) -> PyResult<PyDataFrame> {
         self.inner
             .read_csv(Path::new(path))
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, self.active_actions.clone()))
             .map_err(to_py_err)
     }
 
     fn read_parquet(&self, path: &str) -> PyResult<PyDataFrame> {
         self.inner
             .read_parquet(Path::new(path))
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, self.active_actions.clone()))
             .map_err(to_py_err)
     }
 
     fn read_json(&self, path: &str) -> PyResult<PyDataFrame> {
         self.inner
             .read_json(Path::new(path))
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, self.active_actions.clone()))
             .map_err(to_py_err)
     }
 
@@ -3235,7 +3380,7 @@ impl PySparkSession {
         let mut frame = self
             .inner
             .read_delta(name_or_path)
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, self.active_actions.clone()))
             .map_err(to_py_err)?;
         #[cfg(feature = "delta")]
         {
@@ -3255,7 +3400,7 @@ impl PySparkSession {
         let mut frame = self
             .inner
             .read_delta_with_version(name_or_path, version)
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, self.active_actions.clone()))
             .map_err(to_py_err)?;
         #[cfg(feature = "delta")]
         {
@@ -3267,6 +3412,7 @@ impl PySparkSession {
 
     fn stop(slf: PyRef<Self>, py: Python<'_>) -> PyResult<()> {
         slf.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        slf.active_actions.cancel_active();
         slf.set_external_catalog_provider(py, None)?;
         WINDOW_ORDER_SORT_HINT.with(|cell| *cell.borrow_mut() = None);
         slf.inner.stop();
@@ -5669,7 +5815,7 @@ impl PyDataFrameReader {
         }
         let mut wrapped = reader
             .load(Path::new(path))
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, session.active_actions.clone()))
             .map_err(to_py_err)?;
         #[cfg(feature = "delta")]
         if self
@@ -5709,7 +5855,7 @@ impl PyDataFrameReader {
         }
         reader
             .csv(Path::new(path))
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, session.active_actions.clone()))
             .map_err(to_py_err)
     }
 
@@ -5726,7 +5872,7 @@ impl PyDataFrameReader {
         }
         reader
             .parquet(Path::new(path))
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, session.active_actions.clone()))
             .map_err(to_py_err)
     }
 
@@ -5743,7 +5889,7 @@ impl PyDataFrameReader {
         }
         reader
             .json(Path::new(path))
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, session.active_actions.clone()))
             .map_err(to_py_err)
     }
 
@@ -5757,7 +5903,7 @@ impl PyDataFrameReader {
         let mut wrapped = session
             .inner
             .table(name)
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, session.active_actions.clone()))
             .map_err(to_py_err)?;
         #[cfg(feature = "delta")]
         {
@@ -5779,7 +5925,7 @@ impl PyDataFrameReader {
             .inner
             .read()
             .delta(Path::new(path))
-            .map(PyDataFrame::wrap)
+            .map(|df| PyDataFrame::wrap_with_session(df, session.active_actions.clone()))
             .map_err(to_py_err)?;
         wrapped.logical_map_paths = robin_sparkless::delta::logical_map_paths(path)
             .map_err(to_py_err)?
@@ -5861,7 +6007,7 @@ impl PyDataFrameReader {
                 .inner
                 .read()
                 .jdbc(url, table, &props)
-                .map(PyDataFrame::wrap)
+                .map(|df| PyDataFrame::wrap_with_session(df, session.active_actions.clone()))
                 .map_err(to_py_err)
         }
     }
@@ -6288,6 +6434,8 @@ impl PyRDD {
 #[pyclass]
 struct PyDataFrame {
     inner: DataFrame,
+    active_actions: std::sync::Arc<ActionRegistry>,
+    session_actions: Option<std::sync::Arc<ActionRegistry>>,
     /// When set, df.schema returns this (preserves ArrayType.containsNull etc. from createDataFrame(schema=StructType(...))).
     schema_cache: Option<Py<PyAny>>,
     /// When true, count()/collect() should raise an error due to mixed dict/list row shapes in
@@ -6777,6 +6925,7 @@ impl PyDataFrame {
         leading_columns: usize,
     ) -> Self {
         let mut wrapped = Self::wrap(df);
+        wrapped.session_actions = self.session_actions.clone();
         let Some(source_dtype) = self.column_dtype_for_metadata(source) else {
             return wrapped;
         };
@@ -6801,6 +6950,7 @@ impl PyDataFrame {
         leading_columns: usize,
     ) -> Self {
         let mut wrapped = Self::wrap(df);
+        wrapped.session_actions = self.session_actions.clone();
         let outputs = wrapped
             .inner
             .columns()
@@ -6862,6 +7012,8 @@ impl PyDataFrame {
     fn wrap(df: DataFrame) -> Self {
         PyDataFrame {
             inner: df,
+            active_actions: std::sync::Arc::new(ActionRegistry::default()),
+            session_actions: None,
             schema_cache: None,
             mixed_row_shape_error_on_collect: false,
             arrow_schema_cache: None,
@@ -6871,8 +7023,19 @@ impl PyDataFrame {
         }
     }
 
+    fn wrap_with_session(df: DataFrame, session_actions: std::sync::Arc<ActionRegistry>) -> Self {
+        let mut wrapped = Self::wrap(df);
+        wrapped.session_actions = Some(session_actions);
+        wrapped
+    }
+
+    fn begin_action(&self) -> ActiveAction {
+        ActiveAction::new(&self.active_actions, self.session_actions.as_ref())
+    }
+
     fn wrap_derived(&self, df: DataFrame) -> Self {
         let mut wrapped = Self::wrap(df);
+        wrapped.session_actions = self.session_actions.clone();
         if let Ok(columns) = wrapped.inner.columns() {
             let output_names: std::collections::HashSet<&str> =
                 columns.iter().map(String::as_str).collect();
@@ -7472,7 +7635,7 @@ impl PyDataFrame {
                 };
                 literals_py.append(item)?;
             }
-            let df_for_callback = PyDataFrame::wrap(df_for_udf);
+            let df_for_callback = slf.wrap_derived(df_for_udf);
             let df_with_col = PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<PyDataFrame> {
                 let cb = cell.borrow();
                 let callback = cb.as_ref().ok_or_else(|| {
@@ -7488,14 +7651,15 @@ impl PyDataFrame {
                     literals_py,
                 ))?;
                 let py_df = result.cast::<PyDataFrame>()?;
-                Ok(PyDataFrame::wrap(py_df.borrow().inner.clone()))
+                let py_df = py_df.borrow();
+                Ok(py_df.wrap_derived(py_df.inner.clone()))
             })?;
             let lit_expr = json_str_to_lit_expr(&other_json)?;
             let op: String = udf_filter.getattr("op")?.extract()?;
             let filter_expr = udf_filter_comparison_expr(temp_name.clone(), op.as_str(), lit_expr)?;
             let filtered = df_with_col.inner.filter(filter_expr).map_err(to_py_err)?;
             let out = filtered.drop(vec![temp_name.as_str()]).map_err(to_py_err)?;
-            return Ok(PyDataFrame::wrap(out));
+            return Ok(df_with_col.wrap_derived(out));
         }
         if let Some(py_col) = py_any_to_py_column_ref(condition) {
             let col_ref = py_col.bind(py).borrow();
@@ -7519,7 +7683,7 @@ impl PyDataFrame {
                             Some(c) => c,
                             None => return Ok(None),
                         };
-                        let df_obj = PyDataFrame::wrap(slf.inner.clone());
+                        let df_obj = slf.wrap_derived(slf.inner.clone());
                         let result = callback.bind(py).call1((
                             df_obj,
                             &temp_name,
@@ -7528,13 +7692,14 @@ impl PyDataFrame {
                             literals_py,
                         ))?;
                         let py_df = result.cast::<PyDataFrame>()?;
-                        Ok(Some(PyDataFrame::wrap(py_df.borrow().inner.clone())))
+                        let py_df = py_df.borrow();
+                        Ok(Some(py_df.wrap_derived(py_df.inner.clone())))
                     })?
                 {
                     let filter_expr = robin_sparkless::Column::new(temp_name.clone()).into_expr();
                     let filtered = df_with_col.inner.filter(filter_expr).map_err(to_py_err)?;
                     let out = filtered.drop(vec![temp_name.as_str()]).map_err(to_py_err)?;
-                    return Ok(PyDataFrame::wrap(out));
+                    return Ok(df_with_col.wrap_derived(out));
                 }
             }
             let df = slf
@@ -7888,7 +8053,7 @@ impl PyDataFrame {
                     };
                     literals_py.append(item)?;
                 }
-                let df_for_callback = PyDataFrame::wrap(df_for_udf);
+                let df_for_callback = slf.wrap_derived(df_for_udf);
                 if let Some(result_df) =
                     PYTHON_UDF_EXECUTOR.with(|cell| -> PyResult<Option<PyDataFrame>> {
                         let cb = cell.borrow();
@@ -7904,7 +8069,8 @@ impl PyDataFrame {
                             literals_py,
                         ))?;
                         let py_df = result.cast::<PyDataFrame>()?;
-                        Ok(Some(PyDataFrame::wrap(py_df.borrow().inner.clone())))
+                        let py_df = py_df.borrow();
+                        Ok(Some(py_df.wrap_derived(py_df.inner.clone())))
                     })?
                 {
                     return Ok(result_df);
@@ -8061,11 +8227,15 @@ impl PyDataFrame {
     }
 
     #[pyo3(signature = (n=20, truncate=true))]
-    fn show(&self, n: usize, truncate: bool) -> PyResult<()> {
+    fn show(&self, py: Python<'_>, n: usize, truncate: bool) -> PyResult<()> {
         // truncate: PySpark parity (e.g. show(truncate=False)); display layer may use it later
         let _ = truncate;
         self.check_mixed_row_shape()?;
-        self.inner.show(Some(n)).map_err(to_py_err)
+        let action = self.begin_action();
+        let token = action.token.clone();
+        let inner = self.inner.clone();
+        py.detach(move || inner.show_with_cancellation(Some(n), &token))
+            .map_err(to_py_err)
     }
 
     #[getter]
@@ -8211,13 +8381,20 @@ impl PyDataFrame {
     /// one (e.g. coalesce() results or mixed-type array elements stringified by the engine).
     fn collect(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
         self.check_mixed_row_shape()?;
+        let action = self.begin_action();
+        let token = action.token.clone();
+        let materialization_token = token.clone();
+        let inner = self.inner.clone();
+        let array_struct_paths = self.arrow_array_struct_paths.clone();
         // Build a PySpark-like Row with schema attached. Use schema from collected result so
         // get_json_object etc. are string (PySpark parity #1146).
-        let (output_names, rows, schema) = self
-            .inner
-            .collect_as_json_rows_with_names_and_array_struct_columns(
-                &self.arrow_array_struct_paths,
-            )
+        let (output_names, rows, schema) = py
+            .detach(move || {
+                inner.collect_as_json_rows_with_names_and_array_struct_columns_with_cancellation(
+                    &array_struct_paths,
+                    &materialization_token,
+                )
+            })
             .map_err(to_py_err)?;
         let mut dtype_by_name: std::collections::HashMap<String, DataType> =
             std::collections::HashMap::with_capacity(schema.fields().len());
@@ -8324,7 +8501,8 @@ impl PyDataFrame {
 
         // output_names and rows already obtained above with schema.
         let mut out = Vec::with_capacity(rows.len());
-        for row in rows {
+        for (row_index, row) in rows.into_iter().enumerate() {
+            token.check_cancelled().map_err(to_py_err)?;
             let kwargs = PyDict::new(py);
             for name in &output_names {
                 let v = row.get(name).unwrap_or(&JsonValue::Null);
@@ -8351,20 +8529,41 @@ impl PyDataFrame {
             py_row.setattr("_schema", py_schema.clone_ref(py))?;
             // PySpark parity: Row has _data_dict for dict-like access in tests (e.g. "full_name" in result[0].__dict__["_data_dict"]).
             py_row.setattr("_data_dict", kwargs.clone())?;
+            token.check_cancelled().map_err(to_py_err)?;
             out.push(py_row.into_py_any(py)?);
+            if row_index % 32 == 31 {
+                yield_to_python_control_threads(py);
+                token.check_cancelled().map_err(to_py_err)?;
+            }
         }
+        yield_to_python_control_threads(py);
+        token.check_cancelled().map_err(to_py_err)?;
         Ok(out)
     }
 
-    fn count(&self) -> PyResult<usize> {
+    /// Cancel active actions started through this DataFrame object.
+    /// A count is returned so callers can tell whether any work was still active.
+    fn cancel(&self) -> usize {
+        self.active_actions.cancel_active()
+    }
+
+    fn count(&self, py: Python<'_>) -> PyResult<usize> {
         self.check_mixed_row_shape()?;
-        self.inner.count().map_err(to_py_err)
+        let action = self.begin_action();
+        let token = action.token.clone();
+        let inner = self.inner.clone();
+        py.detach(move || inner.count_with_cancellation(&token))
+            .map_err(to_py_err)
     }
 
     /// PySpark parity: len(df) returns row count.
-    fn __len__(&self) -> PyResult<usize> {
+    fn __len__(&self, py: Python<'_>) -> PyResult<usize> {
         self.check_mixed_row_shape()?;
-        self.inner.count().map_err(to_py_err)
+        let action = self.begin_action();
+        let token = action.token.clone();
+        let inner = self.inner.clone();
+        py.detach(move || inner.count_with_cancellation(&token))
+            .map_err(to_py_err)
     }
 
     /// PySpark parity: head() returns the first Row (or None if empty); head(n) returns a list of Row.
@@ -8372,7 +8571,8 @@ impl PyDataFrame {
     fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
         let k = n.unwrap_or(1);
         let limited = self.inner.limit(k).map_err(to_py_err)?;
-        let limited_py = self.wrap_derived(limited);
+        let mut limited_py = self.wrap_derived(limited);
+        limited_py.active_actions = self.active_actions.clone();
         let rows = limited_py.collect(py)?;
         match n {
             Some(_) => Ok(PyList::new(py, rows)?.into_py_any(py)?),
@@ -9366,7 +9566,8 @@ impl PyDataFrame {
     /// Return the first row as a Row, or None if empty (Phase 7.8 / PySpark first() semantics).
     fn first(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         let one = self.inner.first().map_err(to_py_err)?;
-        let wrapper = self.wrap_derived(one);
+        let mut wrapper = self.wrap_derived(one);
+        wrapper.active_actions = self.active_actions.clone();
         let rows = wrapper.collect(py)?;
         Ok(rows.into_iter().next())
     }
@@ -9374,7 +9575,7 @@ impl PyDataFrame {
     fn describe(&self) -> PyResult<PyDataFrame> {
         self.inner
             .describe()
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -9443,7 +9644,7 @@ impl PyDataFrame {
     fn crosstab(&self, col1: &str, col2: &str) -> PyResult<PyDataFrame> {
         self.inner
             .crosstab(col1, col2)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -9452,7 +9653,7 @@ impl PyDataFrame {
         let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
         self.inner
             .freq_items(&cols, support)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -9516,7 +9717,7 @@ impl PyDataFrame {
             .inner
             .create_dataframe_from_rows(rows_data, schema, false, schema_was_inferred)
             .map_err(to_py_err)?;
-        Ok(PyDataFrame::wrap(df))
+        Ok(self.wrap_derived(df))
     }
 
     #[pyo3(name = "flat_map")]
@@ -9576,8 +9777,11 @@ impl PyDataFrame {
     #[getter]
     fn write(slf: PyRef<Self>) -> PyDataFrameWriter {
         let py = slf.py();
+        let active_actions = slf.active_actions.clone();
+        let df = slf.into_py_any(py).unwrap();
         PyDataFrameWriter {
-            df: slf.into_py_any(py).unwrap(),
+            df,
+            active_actions,
             mode: "overwrite".to_string(),
             options: Vec::new(),
             partition_by: Vec::new(),
@@ -9627,15 +9831,25 @@ impl PyDataFrame {
     #[pyo3(name = "toPandas")]
     fn to_pandas(&self, py: Python<'_>) -> PyResult<PyObject> {
         self.check_mixed_row_shape()?;
+        let action = self.begin_action();
+        let token = action.token.clone();
+        let materialization_token = token.clone();
+        let inner = self.inner.clone();
+        let array_struct_paths = self.arrow_array_struct_paths.clone();
         let pd = PyModule::import(py, "pandas")?;
-        let (_, rows, _) = self
-            .inner
-            .collect_as_json_rows_with_names_and_array_struct_columns(
-                &self.arrow_array_struct_paths,
-            )
+        let (_, rows, schema) = py
+            .detach(move || {
+                inner.collect_as_json_rows_with_names_and_array_struct_columns_with_cancellation(
+                    &array_struct_paths,
+                    &materialization_token,
+                )
+            })
             .map_err(to_py_err)?;
-        let cols = self.inner.columns().map_err(to_py_err)?;
-        let schema = self.inner.schema_engine().map_err(to_py_err)?;
+        let cols = schema
+            .fields()
+            .iter()
+            .map(|field| field.name.clone())
+            .collect::<Vec<_>>();
         let dtype_by_name: std::collections::HashMap<String, DataType> = schema
             .fields()
             .iter()
@@ -9645,8 +9859,10 @@ impl PyDataFrame {
         let date_cls = PyModule::import(py, "datetime")?.getattr("date")?;
         let data_dict = PyDict::new(py);
         for col_name in &cols {
+            token.check_cancelled().map_err(to_py_err)?;
             let vals = PyList::empty(py);
-            for row in &rows {
+            for (row_index, row) in rows.iter().enumerate() {
+                token.check_cancelled().map_err(to_py_err)?;
                 let v = row.get(col_name).unwrap_or(&JsonValue::Null);
                 vals.append(json_value_to_py_with_schema(
                     py,
@@ -9657,10 +9873,17 @@ impl PyDataFrame {
                     Some(col_name),
                     Some(&cols),
                 )?)?;
+                if row_index % 32 == 31 {
+                    yield_to_python_control_threads(py);
+                    token.check_cancelled().map_err(to_py_err)?;
+                }
             }
+            yield_to_python_control_threads(py);
+            token.check_cancelled().map_err(to_py_err)?;
             data_dict.set_item(col_name, vals)?;
         }
         let df = pd.call_method1("DataFrame", (data_dict,))?;
+        token.check_cancelled().map_err(to_py_err)?;
         df.into_py_any(py)
     }
 
@@ -9668,7 +9891,10 @@ impl PyDataFrame {
     #[pyo3(name = "toArrow")]
     fn to_arrow(&self, py: Python<'_>) -> PyResult<PyObject> {
         self.check_mixed_row_shape()?;
+        let action = self.begin_action();
+        let token = action.token.clone();
         let rows = self.collect(py)?;
+        token.check_cancelled().map_err(to_py_err)?;
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
         let pa = PyModule::import(py, "pyarrow")?;
         let mut source_arrow_types = std::collections::HashMap::new();
@@ -9682,6 +9908,7 @@ impl PyDataFrame {
         let arrays = PyList::empty(py);
         let names = PyList::empty(py);
         for field in schema.fields() {
+            token.check_cancelled().map_err(to_py_err)?;
             let values = PyList::empty(py);
             let field_path = arrow_field_path("", &field.name);
             let map_shaped_dtype = matches!(
@@ -9693,12 +9920,17 @@ impl PyDataFrame {
             );
             let map_value_present = if map_shaped_dtype {
                 let mut found = false;
-                for row in &rows {
+                for (row_index, row) in rows.iter().enumerate() {
+                    token.check_cancelled().map_err(to_py_err)?;
                     let dict = row.bind(py).call_method0("asDict")?;
                     let value = dict.get_item(field.name.as_str())?;
                     if !value.is_none() {
                         found = value.is_instance_of::<PyDict>();
                         break;
+                    }
+                    if row_index % 32 == 31 {
+                        yield_to_python_control_threads(py);
+                        token.check_cancelled().map_err(to_py_err)?;
                     }
                 }
                 found
@@ -9716,7 +9948,8 @@ impl PyDataFrame {
             if is_map {
                 field_map_paths.insert(field_path.clone());
             }
-            for row in &rows {
+            for (row_index, row) in rows.iter().enumerate() {
+                token.check_cancelled().map_err(to_py_err)?;
                 let row = row.bind(py);
                 let dict = row.call_method0("asDict")?;
                 let value = dict.get_item(field.name.as_str())?;
@@ -9728,7 +9961,13 @@ impl PyDataFrame {
                     &field_map_paths,
                 )?;
                 values.append(value.bind(py))?;
+                if row_index % 32 == 31 {
+                    yield_to_python_control_threads(py);
+                    token.check_cancelled().map_err(to_py_err)?;
+                }
             }
+            yield_to_python_control_threads(py);
+            token.check_cancelled().map_err(to_py_err)?;
             let current_arrow_type = spark_type_to_arrow_type_with_maps(
                 py,
                 &pa,
@@ -9746,10 +9985,14 @@ impl PyDataFrame {
             arrays.append(array)?;
             names.append(field.name.as_str())?;
         }
-        pa.getattr("Table")?
+        token.check_cancelled().map_err(to_py_err)?;
+        let table = pa
+            .getattr("Table")?
             .getattr("from_arrays")?
             .call1((arrays, names))?
-            .into_py_any(py)
+            .into_py_any(py)?;
+        token.check_cancelled().map_err(to_py_err)?;
+        Ok(table)
     }
 
     #[getter]
@@ -9791,18 +10034,20 @@ impl PyDataFrame {
     }
 
     #[pyo3(name = "isEmpty")]
-    fn is_empty(&self) -> PyResult<bool> {
-        self.inner
-            .limit(1)
-            .map_err(to_py_err)?
-            .count()
-            .map(|c| c == 0)
+    fn is_empty(&self, py: Python<'_>) -> PyResult<bool> {
+        self.check_mixed_row_shape()?;
+        let action = self.begin_action();
+        let token = action.token.clone();
+        let limited = self.inner.limit(1).map_err(to_py_err)?;
+        py.detach(move || limited.count_with_cancellation(&token))
+            .map(|count| count == 0)
             .map_err(to_py_err)
     }
 
     fn take(&self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
         let limited = self.inner.limit(n).map_err(to_py_err)?;
-        let df = self.wrap_derived(limited);
+        let mut df = self.wrap_derived(limited);
+        df.active_actions = self.active_actions.clone();
         df.collect(py)
     }
 
@@ -9815,10 +10060,17 @@ impl PyDataFrame {
 #[pyclass]
 struct PyDataFrameWriter {
     df: Py<PyAny>,
+    active_actions: std::sync::Arc<ActionRegistry>,
     mode: String,
     options: Vec<(String, String)>,
     partition_by: Vec<String>,
     writer_format: Option<String>,
+}
+
+impl PyDataFrameWriter {
+    fn begin_action(&self, session_actions: &std::sync::Arc<ActionRegistry>) -> ActiveAction {
+        ActiveAction::new(&self.active_actions, Some(session_actions))
+    }
 }
 
 fn write_mode_from_str(mode: &str) -> WriteMode {
@@ -10138,12 +10390,18 @@ impl PyDataFrameWriter {
     /// PySpark: saveAsTable(name). mode: "error"|"overwrite"|"append"|"ignore".
     #[pyo3(signature = (name, mode=None))]
     fn save_as_table(&self, py: Python<'_>, name: &str, mode: Option<&str>) -> PyResult<()> {
+        let session = require_active_session(py)?;
+        let session = session.bind(py).cast::<PySparkSession>()?;
+        let session = session.borrow();
+        let action = self.begin_action(&session.active_actions);
+        let token = action.token.clone();
         let df =
             self.df.bind(py).cast::<PyDataFrame>().map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("expected DataFrame")
             })?;
         let inner = df.borrow();
-        let active = require_active_session(py)?.bind(py).borrow().inner.clone();
+        let active = session.inner.clone();
+        drop(session);
         let save_mode = save_mode_from_str(mode.unwrap_or(self.mode.as_str()));
         if self
             .writer_format
@@ -10166,13 +10424,20 @@ impl PyDataFrameWriter {
                 serde_json::to_string(&paths).map_err(to_py_err)?,
             ));
         }
-        let mut writer = inner.inner.write();
-        if !self.partition_by.is_empty() {
-            writer = writer.partition_by(self.partition_by.iter().map(|s| s.as_str()));
-        }
-        writer
-            .save_as_table_with_options(&active, name, save_mode, &options)
-            .map_err(to_py_err)
+        let dataframe = inner.inner.clone();
+        drop(inner);
+        let name = name.to_string();
+        let partition_by = self.partition_by.clone();
+        py.detach(move || {
+            let mut writer = dataframe.write();
+            if !partition_by.is_empty() {
+                writer = writer.partition_by(partition_by);
+            }
+            writer.save_as_table_with_options_and_cancellation(
+                &active, &name, save_mode, &options, &token,
+            )
+        })
+        .map_err(to_py_err)
     }
 
     /// PySpark camelCase alias for save_as_table
@@ -11598,7 +11863,7 @@ impl PyDataFrameNaFunctions {
                     .fill(val_expr, Some(vec![col_name.as_str()]))
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame::wrap(current));
+            return Ok(df_ref.wrap_derived(current));
         }
 
         let value_col = py_any_to_column(value)?;
@@ -11625,7 +11890,7 @@ impl PyDataFrameNaFunctions {
         let subset_refs: Option<Vec<&str>> = Some(subset_refs_vec);
         let na = df_ref.inner.na();
         na.fill(value_col.into_expr(), subset_refs)
-            .map(PyDataFrame::wrap)
+            .map(|df| df_ref.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -11649,7 +11914,7 @@ impl PyDataFrameNaFunctions {
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         let na = df_ref.inner.na();
         na.drop(subset_refs, how, thresh)
-            .map(PyDataFrame::wrap)
+            .map(|df| df_ref.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -11694,7 +11959,7 @@ impl PyDataFrameNaFunctions {
                         .replace(old_expr, new_expr, subset_refs.as_ref().map(|v| v.to_vec()))
                         .map_err(to_py_err)?;
                 }
-                return Ok(PyDataFrame::wrap(current));
+                return Ok(df_ref.wrap_derived(current));
             }
             return Err(to_py_err("value is required when to_replace is not a dict"));
         }
@@ -11725,14 +11990,14 @@ impl PyDataFrameNaFunctions {
                         )
                         .map_err(to_py_err)?;
                 }
-                return Ok(PyDataFrame::wrap(current));
+                return Ok(df_ref.wrap_derived(current));
             }
             let old_expr = lit(to_replace)?.inner.into_expr();
             return df_ref
                 .inner
                 .na()
                 .replace(old_expr, null_expr, subset_refs)
-                .map(PyDataFrame::wrap)
+                .map(|df| df_ref.wrap_derived(df))
                 .map_err(to_py_err);
         }
 
@@ -11764,7 +12029,7 @@ impl PyDataFrameNaFunctions {
                     .replace(old_expr, new_expr, subset_refs.as_ref().map(|v| v.to_vec()))
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame::wrap(current));
+            return Ok(df_ref.wrap_derived(current));
         }
 
         // to_replace is list and value is scalar: replace each old with value
@@ -11783,7 +12048,7 @@ impl PyDataFrameNaFunctions {
                     )
                     .map_err(to_py_err)?;
             }
-            return Ok(PyDataFrame::wrap(current));
+            return Ok(df_ref.wrap_derived(current));
         }
 
         // Single scalar/scalar replace
@@ -11793,7 +12058,7 @@ impl PyDataFrameNaFunctions {
             .inner
             .na()
             .replace(old_expr, new_expr, subset_refs)
-            .map(PyDataFrame::wrap)
+            .map(|df| df_ref.wrap_derived(df))
             .map_err(to_py_err)
     }
 }
@@ -11808,14 +12073,17 @@ struct PyCubeRollupData {
 #[pymethods]
 impl PyCubeRollupData {
     fn count(&self) -> PyResult<PyDataFrame> {
-        self.inner.count().map(PyDataFrame::wrap).map_err(to_py_err)
+        self.inner
+            .count()
+            .map(|df| self.source.wrap_derived(df))
+            .map_err(to_py_err)
     }
 
     fn sum(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let name = py_col_to_name(col_name)?;
         self.inner
             .sum(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -11833,7 +12101,7 @@ impl PyCubeRollupData {
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
             .avg(&refs)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -11927,14 +12195,17 @@ struct PyGroupedData {
 #[pymethods]
 impl PyGroupedData {
     fn count(&self) -> PyResult<PyDataFrame> {
-        self.inner.count().map(PyDataFrame::wrap).map_err(to_py_err)
+        self.inner
+            .count()
+            .map(|df| self.source.wrap_derived(df))
+            .map_err(to_py_err)
     }
 
     fn sum(&self, col_name: &Bound<'_, PyAny>) -> PyResult<PyDataFrame> {
         let name = py_col_to_name(col_name)?;
         self.inner
             .sum(&name)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -11952,7 +12223,7 @@ impl PyGroupedData {
         let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
         self.inner
             .avg(&refs)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -12075,14 +12346,14 @@ impl PyPivotedGroupedData {
     fn sum(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .sum(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn avg(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .avg(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -12107,27 +12378,30 @@ impl PyPivotedGroupedData {
     }
 
     fn count(&self) -> PyResult<PyDataFrame> {
-        self.inner.count().map(PyDataFrame::wrap).map_err(to_py_err)
+        self.inner
+            .count()
+            .map(|df| self.source.wrap_derived(df))
+            .map_err(to_py_err)
     }
 
     fn _count_distinct(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._count_distinct(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn _collect_list(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._collect_list(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn _collect_set(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._collect_set(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -12154,21 +12428,21 @@ impl PyPivotedGroupedData {
     fn _stddev(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._stddev(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn _variance(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             ._variance(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
     fn mean(&self, value_col: &str) -> PyResult<PyDataFrame> {
         self.inner
             .mean(value_col)
-            .map(PyDataFrame::wrap)
+            .map(|df| self.source.wrap_derived(df))
             .map_err(to_py_err)
     }
 
@@ -14414,12 +14688,17 @@ fn configure_for_multiprocessing() {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SparklessError", m.py().get_type::<SparklessError>())?;
+    m.add(
+        "SparklessCancelledError",
+        m.py().get_type::<SparklessCancelledError>(),
+    )?;
     m.add_function(wrap_pyfunction!(external_catalog::validate_descriptor, m)?)?;
     m.add_function(wrap_pyfunction!(
         external_catalog::validate_write_result,
         m
     )?)?;
     m.add_class::<PySparkSessionBuilder>()?;
+    m.add_class::<PyCancellationHandle>()?;
     m.add_class::<PySparkSession>()?;
     m.add_class::<PyDataFrameReader>()?;
     m.add_class::<PyDataFrame>()?;
