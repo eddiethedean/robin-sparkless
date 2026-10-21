@@ -2345,7 +2345,7 @@ fn arrow_types_compatible(
             .extract::<bool>()
     };
     if is_type(source, "is_timestamp")? {
-        return Ok(source.getattr("unit")?.eq(current.getattr("unit")?)?);
+        return source.getattr("unit")?.eq(current.getattr("unit")?);
     }
     if is_type(source, "is_list")?
         || is_type(source, "is_large_list")?
