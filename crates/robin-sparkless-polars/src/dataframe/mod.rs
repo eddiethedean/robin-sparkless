@@ -3335,8 +3335,9 @@ impl<'a> DataFrameWriter<'a> {
                         let stage = stage_warehouse_write(self.df, p, token)?;
                         check_cancelled(token)?;
                         commit_warehouse_stage(&stage, p, false)?;
+                    } else {
+                        check_cancelled(token)?;
                     }
-                    check_cancelled(token)?;
                     session.register_table(name, self.df.clone());
                     return Ok(());
                 };

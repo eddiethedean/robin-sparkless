@@ -985,3 +985,85 @@ def test_public_cancellation_exception_is_exported():
     from sparkless.core.exceptions import SparklessCancelledError as core_error
 
     assert top_level_error is core_error
+
+
+def test_session_cancellation_reaches_aggregate_dataframes(monkeypatch):
+    pa = pytest.importorskip("pyarrow")
+    from sparkless.sql import functions as F
+
+    spark = SparkSession("cancel-aggregate-regression")
+    frame = spark.createDataFrame([(1, "a"), (2, "a")], ["id", "key"])
+    aggregate = frame.groupBy("key").agg(F.sum("id"))
+    handle = spark.cancellation_handle()
+    original_array = pa.array
+    cancelled = False
+
+    def cancel_during_array(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            assert handle.cancel_all_active_actions() >= 1
+        return original_array(*args, **kwargs)
+
+    monkeypatch.setattr(pa, "array", cancel_during_array)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            aggregate.toArrow()
+    finally:
+        spark.stop()
+
+
+@pytest.mark.parametrize("method", ["head", "take", "first"])
+def test_convenience_row_actions_use_source_cancellation_registry(
+    method, monkeypatch
+):
+    spark = SparkSession(f"cancel-{method}-regression")
+    frame = spark.createDataFrame([(1,), (2,)], ["id"])
+    original_row = T.Row
+    cancelled = False
+
+    def cancel_during_row(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            assert frame.cancel() >= 1
+        return original_row(*args, **kwargs)
+
+    monkeypatch.setattr(T, "Row", cancel_during_row)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            if method == "head":
+                frame.head(2)
+            elif method == "take":
+                frame.take(2)
+            else:
+                frame.first()
+    finally:
+        spark.stop()
+
+
+@pytest.mark.delta
+def test_cancellation_during_sql_delta_metadata_processing_is_reported(tmp_path):
+    spark = SparkSession("cancel-sql-metadata-regression")
+    seed = spark.createDataFrame([(1,)], ["id"])
+    path = str(tmp_path / "source")
+    seed.write.format("delta").mode("overwrite").save(path)
+    handle = spark.cancellation_handle()
+
+    class Provider:
+        calls = 0
+
+        def resolve_table(self, identifier):
+            self.calls += 1
+            if self.calls == 2:
+                assert handle.cancel_all_active_actions() >= 1
+            return descriptor(seed.schema, path)
+
+    provider = Provider()
+    spark.set_external_catalog_provider(provider)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            spark.sql("SELECT * FROM (SELECT id FROM external_source) AS q")
+        assert provider.calls == 2
+    finally:
+        spark.stop()

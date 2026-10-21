@@ -3071,11 +3071,17 @@ impl PySparkSession {
     fn sql(&self, py: Python<'_>, query: &str) -> PyResult<PyDataFrame> {
         let action = ActiveAction::new(&self.active_actions, None);
         let token = action.token.clone();
+        let execution_token = token.clone();
+        #[cfg(feature = "delta")]
+        let is_read_only_query = matches!(
+            robin_sparkless::sql::parse_sql(query),
+            Ok(robin_sparkless::sql::Statement::Query(_))
+        );
         let session = self.inner.clone();
         let query = query.to_string();
         let query_for_execution = query.clone();
         let dataframe = py
-            .detach(move || session.sql_with_cancellation(&query_for_execution, &token))
+            .detach(move || session.sql_with_cancellation(&query_for_execution, &execution_token))
             .map_err(to_py_err)?;
         let mut wrapped = PyDataFrame::wrap_with_session(dataframe, self.active_actions.clone());
         #[cfg(feature = "delta")]
@@ -3083,6 +3089,10 @@ impl PySparkSession {
             let output_columns = wrapped.inner.columns().map_err(to_py_err)?;
             wrapped.logical_map_paths =
                 delta_map_paths_for_sql_query(self, &query, &output_columns);
+        }
+        #[cfg(feature = "delta")]
+        if is_read_only_query {
+            token.check_cancelled().map_err(to_py_err)?;
         }
         Ok(wrapped)
     }
@@ -6908,6 +6918,7 @@ impl PyDataFrame {
         leading_columns: usize,
     ) -> Self {
         let mut wrapped = Self::wrap(df);
+        wrapped.session_actions = self.session_actions.clone();
         let Some(source_dtype) = self.column_dtype_for_metadata(source) else {
             return wrapped;
         };
@@ -6932,6 +6943,7 @@ impl PyDataFrame {
         leading_columns: usize,
     ) -> Self {
         let mut wrapped = Self::wrap(df);
+        wrapped.session_actions = self.session_actions.clone();
         let outputs = wrapped
             .inner
             .columns()
@@ -8507,6 +8519,7 @@ impl PyDataFrame {
             py_row.setattr("_schema", py_schema.clone_ref(py))?;
             // PySpark parity: Row has _data_dict for dict-like access in tests (e.g. "full_name" in result[0].__dict__["_data_dict"]).
             py_row.setattr("_data_dict", kwargs.clone())?;
+            token.check_cancelled().map_err(to_py_err)?;
             out.push(py_row.into_py_any(py)?);
         }
         Ok(out)
@@ -8542,7 +8555,8 @@ impl PyDataFrame {
     fn head(&self, py: Python<'_>, n: Option<usize>) -> PyResult<PyObject> {
         let k = n.unwrap_or(1);
         let limited = self.inner.limit(k).map_err(to_py_err)?;
-        let limited_py = self.wrap_derived(limited);
+        let mut limited_py = self.wrap_derived(limited);
+        limited_py.active_actions = self.active_actions.clone();
         let rows = limited_py.collect(py)?;
         match n {
             Some(_) => Ok(PyList::new(py, rows)?.into_py_any(py)?),
@@ -9536,7 +9550,8 @@ impl PyDataFrame {
     /// Return the first row as a Row, or None if empty (Phase 7.8 / PySpark first() semantics).
     fn first(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         let one = self.inner.first().map_err(to_py_err)?;
-        let wrapper = self.wrap_derived(one);
+        let mut wrapper = self.wrap_derived(one);
+        wrapper.active_actions = self.active_actions.clone();
         let rows = wrapper.collect(py)?;
         Ok(rows.into_iter().next())
     }
@@ -10000,7 +10015,8 @@ impl PyDataFrame {
 
     fn take(&self, py: Python<'_>, n: usize) -> PyResult<Vec<PyObject>> {
         let limited = self.inner.limit(n).map_err(to_py_err)?;
-        let df = self.wrap_derived(limited);
+        let mut df = self.wrap_derived(limited);
+        df.active_actions = self.active_actions.clone();
         df.collect(py)
     }
 
