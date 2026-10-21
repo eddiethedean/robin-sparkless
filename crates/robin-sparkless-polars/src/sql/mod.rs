@@ -59,13 +59,19 @@ pub fn execute_sql_with_cancellation(
     token: &CancellationToken,
 ) -> Result<DataFrame, EngineError> {
     token.check_cancelled()?;
-    execute_sql_inner(session, query, token).map_err(|error| {
+    let statement = parse_spark_statement(query).map_err(polars_to_core_error)?;
+    let read_only = is_read_only_statement(&statement);
+    let result = execute_sql_statement(session, statement, token).map_err(|error| {
         if error.to_string().starts_with("cancelled: ") {
             EngineError::Cancelled("operation cancelled".into())
         } else {
             polars_to_core_error(error)
         }
-    })
+    })?;
+    if read_only {
+        token.check_cancelled()?;
+    }
+    Ok(result)
 }
 
 fn execute_sql_inner(
@@ -73,7 +79,28 @@ fn execute_sql_inner(
     query: &str,
     token: &CancellationToken,
 ) -> Result<DataFrame, PolarsError> {
-    match parse_spark_statement(query)? {
+    execute_sql_statement(session, parse_spark_statement(query)?, token)
+}
+
+fn is_read_only_statement(statement: &SparkStatement) -> bool {
+    match statement {
+        SparkStatement::DescribeDetail { .. }
+        | SparkStatement::ShowDatabases
+        | SparkStatement::ShowTables { .. }
+        | SparkStatement::Describe { .. } => true,
+        SparkStatement::Sqlparser(statement) => {
+            matches!(statement.as_ref(), Statement::Query(_))
+        }
+        SparkStatement::CreateOrReplaceTableAs { .. } => false,
+    }
+}
+
+fn execute_sql_statement(
+    session: &SparkSession,
+    statement: SparkStatement,
+    token: &CancellationToken,
+) -> Result<DataFrame, PolarsError> {
+    match statement {
         SparkStatement::DescribeDetail { table } => {
             // Preserve Delta/table-not-found error precedence (#768, #773).
             let table_name = table.to_string();

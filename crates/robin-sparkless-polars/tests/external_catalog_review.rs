@@ -457,6 +457,47 @@ fn review_named_delta_read_surfaces_provider_error() {
 }
 
 #[test]
+fn review_cancel_during_read_only_sql_planning_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = SparkSession::default();
+    let input = frame(&session, 1);
+    input.write_delta(dir.path(), true, false).unwrap();
+    let inner = attach(
+        &session,
+        dir.path(),
+        input.schema().unwrap(),
+        Some(0),
+        false,
+    );
+    let token = robin_sparkless_core::CancellationToken::new();
+    struct CancellingProvider {
+        inner: Arc<Provider>,
+        token: robin_sparkless_core::CancellationToken,
+    }
+    impl ExternalCatalogProvider for CancellingProvider {
+        fn resolve_table(
+            &self,
+            identifier: &str,
+        ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+            self.token.cancel();
+            self.inner.resolve_table(identifier)
+        }
+    }
+    session
+        .set_external_catalog_provider(Some(Arc::new(CancellingProvider {
+            inner,
+            token: token.clone(),
+        })))
+        .unwrap();
+
+    let error = match session.sql_with_cancellation("SELECT * FROM catalog.schema.orders", &token) {
+        Ok(_) => panic!("cancellation during read-only SQL planning must be reported"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, EngineError::Cancelled(_)));
+}
+
+#[test]
 fn review_strict_catalog_read_rejects_plain_parquet() {
     let dir = tempfile::tempdir().unwrap();
     let session = SparkSession::default();

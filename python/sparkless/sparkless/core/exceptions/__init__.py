@@ -22,6 +22,7 @@ try:
     PySparkRuntimeError = _PSRE
     PySparkTypeError = _PSTE
     PySparkValueError = _PSVE
+    SparklessCancelledError = _SCE
 except ImportError:
     try:
         from sparkless._native import SparklessCancelledError as _SCE

@@ -3,18 +3,22 @@
 SQL is planned lazily. Cancellation applies when a DataFrame action is running, such as
 `collect()`, `count()`, `show()`, `toPandas()`, `toArrow()`, or `write.saveAsTable()`.
 
-Run an action in a worker thread when the caller needs to cancel it while it is running:
+Plan the DataFrame on the SparkSession's owning thread, then pass a cancellation handle to a
+control thread. `SparkSession` itself remains thread-bound:
 
 ```python
 import sparkless
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
-with ThreadPoolExecutor() as pool:
-    future = pool.submit(lambda: spark.sql("select ...").collect())
+df = spark.sql("select ...")
+cancellation = spark.cancellation_handle()
+
+with ThreadPoolExecutor(max_workers=2) as pool:
+    future = pool.submit(df.collect)
     try:
         rows = future.result(timeout=5)
     except TimeoutError:
-        spark.cancelAllActiveJobs()
+        pool.submit(cancellation.cancel_all_active_actions).result()
         try:
             future.result()
         except sparkless.SparklessCancelledError:
@@ -25,6 +29,10 @@ with ThreadPoolExecutor() as pool:
 object. `SparkSession.cancelAllActiveJobs()` requests cancellation for all active actions
 started through the session and returns the number of active actions signaled. `stop()` also
 signals the session's active actions before it clears session state.
+
+Call `spark.cancellation_handle()` on the owning thread and pass the returned handle to a
+control thread when cancellation must be requested from another thread. The handle can be
+called as `cancel_all_active_actions()` or `cancelAllActiveJobs()`.
 
 Cancellation is cooperative. The Polars backend checks before execution and after lazy
 materialization. It cannot interrupt a `LazyFrame::collect()` call already in progress, so a

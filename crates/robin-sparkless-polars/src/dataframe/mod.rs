@@ -2928,6 +2928,9 @@ impl<'a> DataFrameWriter<'a> {
             options: writer_options,
             partition_by,
         };
+        token
+            .check_cancelled()
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
         let result = provider
             .write_table_with_cancellation(request, token)
             .map_err(|error| match error {
@@ -3042,6 +3045,9 @@ impl<'a> DataFrameWriter<'a> {
                     format!("external catalog provider failed to resolve '{name}': {error}").into(),
                 )
             })?;
+            token
+                .check_cancelled()
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
             if let Some(descriptor) = descriptor {
                 descriptor.validate().map_err(|error| {
                     PolarsError::InvalidOperation(
@@ -3115,7 +3121,15 @@ impl<'a> DataFrameWriter<'a> {
                     | SaveMode::Ignore
                     | SaveMode::ErrorIfExists => {}
                 }
-                let pl_df = self.df.collect_inner()?.as_ref().clone();
+                let pl_df = self
+                    .df
+                    .collect_with_cancellation(token)
+                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
+                    .as_ref()
+                    .clone();
+                token
+                    .check_cancelled()
+                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
                 let resolved_partition_by = self
                     .partition_by
                     .iter()
@@ -3166,6 +3180,88 @@ impl<'a> DataFrameWriter<'a> {
                 .save(&file_path)
         }
 
+        fn check_cancelled(token: &CancellationToken) -> Result<(), PolarsError> {
+            token
+                .check_cancelled()
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))
+        }
+
+        fn staging_path(target: &Path) -> std::path::PathBuf {
+            static NEXT_STAGE_ID: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(0);
+            let id = NEXT_STAGE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let parent = target.parent().unwrap_or_else(|| Path::new("."));
+            let name = target
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("table");
+            parent.join(format!(
+                ".{name}.sparkless-stage-{}-{id}",
+                std::process::id()
+            ))
+        }
+
+        fn stage_warehouse_write(
+            df: &crate::dataframe::DataFrame,
+            target: &Path,
+            token: &CancellationToken,
+        ) -> Result<std::path::PathBuf, PolarsError> {
+            let materialized = df
+                .collect_with_cancellation(token)
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            check_cancelled(token)?;
+            let eager = crate::dataframe::DataFrame::from_polars_with_options(
+                materialized.as_ref().clone(),
+                df.case_sensitive,
+            );
+            let stage = staging_path(target);
+            if let Err(error) = persist_to_warehouse(&eager, &stage) {
+                let _ = fs::remove_dir_all(&stage);
+                return Err(error);
+            }
+            if let Err(error) = check_cancelled(token) {
+                let _ = fs::remove_dir_all(&stage);
+                return Err(error);
+            }
+            Ok(stage)
+        }
+
+        fn commit_warehouse_stage(
+            stage: &Path,
+            target: &Path,
+            overwrite: bool,
+        ) -> Result<(), PolarsError> {
+            let backup = staging_path(target);
+            let had_target = target.exists();
+            if had_target && !overwrite {
+                let _ = fs::remove_dir_all(stage);
+                return Err(PolarsError::InvalidOperation(
+                    format!("saveAsTable target already exists: {}", target.display()).into(),
+                ));
+            }
+            if had_target {
+                if let Err(error) = fs::rename(target, &backup) {
+                    let _ = fs::remove_dir_all(stage);
+                    return Err(PolarsError::ComputeError(
+                        format!("saveAsTable: move existing target aside: {error}").into(),
+                    ));
+                }
+            }
+            if let Err(error) = fs::rename(stage, target) {
+                if had_target {
+                    let _ = fs::rename(&backup, target);
+                }
+                let _ = fs::remove_dir_all(stage);
+                return Err(PolarsError::ComputeError(
+                    format!("saveAsTable: commit staged directory: {error}").into(),
+                ));
+            }
+            if had_target {
+                let _ = fs::remove_dir_all(backup);
+            }
+            Ok(())
+        }
+
         let final_df = match mode {
             SaveMode::ErrorIfExists => {
                 if session.saved_table_exists(name) || warehouse_exists {
@@ -3177,14 +3273,17 @@ impl<'a> DataFrameWriter<'a> {
                     ));
                 }
                 if let Some(ref p) = warehouse_path {
-                    persist_to_warehouse(self.df, p)?;
+                    let stage = stage_warehouse_write(self.df, p, token)?;
+                    check_cancelled(token)?;
+                    commit_warehouse_stage(&stage, p, false)?;
                 }
                 self.df.clone()
             }
             SaveMode::Overwrite => {
                 if let Some(ref p) = warehouse_path {
-                    let _ = fs::remove_dir_all(p);
-                    persist_to_warehouse(self.df, p)?;
+                    let stage = stage_warehouse_write(self.df, p, token)?;
+                    check_cancelled(token)?;
+                    commit_warehouse_stage(&stage, p, true)?;
                 }
                 self.df.clone()
             }
@@ -3232,13 +3331,22 @@ impl<'a> DataFrameWriter<'a> {
                     })?
                 } else {
                     // New table
-                    session.register_table(name, self.df.clone());
                     if let Some(ref p) = warehouse_path {
-                        persist_to_warehouse(self.df, p)?;
+                        let stage = stage_warehouse_write(self.df, p, token)?;
+                        check_cancelled(token)?;
+                        commit_warehouse_stage(&stage, p, false)?;
                     }
+                    check_cancelled(token)?;
+                    session.register_table(name, self.df.clone());
                     return Ok(());
                 };
-                let new_pl = self.df.collect_inner()?.as_ref().clone();
+                let new_pl = self
+                    .df
+                    .collect_with_cancellation(token)
+                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
+                    .as_ref()
+                    .clone();
+                check_cancelled(token)?;
                 let merged = if merge_schema {
                     let (aligned_existing, aligned_new) =
                         align_to_merged_schema_inline(&existing_pl, &new_pl)?;
@@ -3277,8 +3385,9 @@ impl<'a> DataFrameWriter<'a> {
                     )
                 };
                 if let Some(ref p) = warehouse_path {
-                    let _ = fs::remove_dir_all(p);
-                    persist_to_warehouse(&merged, p)?;
+                    let stage = stage_warehouse_write(&merged, p, token)?;
+                    check_cancelled(token)?;
+                    commit_warehouse_stage(&stage, p, true)?;
                 }
                 merged
             }
@@ -3287,11 +3396,16 @@ impl<'a> DataFrameWriter<'a> {
                     return Ok(());
                 }
                 if let Some(ref p) = warehouse_path {
-                    persist_to_warehouse(self.df, p)?;
+                    let stage = stage_warehouse_write(self.df, p, token)?;
+                    check_cancelled(token)?;
+                    commit_warehouse_stage(&stage, p, false)?;
                 }
                 self.df.clone()
             }
         };
+        if warehouse_path.is_none() {
+            check_cancelled(token)?;
+        }
         session.register_table(name, final_df);
         Ok(())
     }

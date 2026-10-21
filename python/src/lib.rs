@@ -1694,6 +1694,24 @@ impl ActionRegistry {
     }
 }
 
+/// Shareable cancellation control for a thread-bound SparkSession.
+#[pyclass(module = "sparkless.sql.session", frozen)]
+struct PyCancellationHandle {
+    active_actions: std::sync::Arc<ActionRegistry>,
+}
+
+#[pymethods]
+impl PyCancellationHandle {
+    fn cancel_all_active_actions(&self) -> usize {
+        self.active_actions.cancel_active()
+    }
+
+    #[pyo3(name = "cancelAllActiveJobs")]
+    fn cancel_all_active_jobs(&self) -> usize {
+        self.cancel_all_active_actions()
+    }
+}
+
 struct ActionRegistration {
     registry: std::sync::Arc<ActionRegistry>,
     id: u64,
@@ -2994,6 +3012,18 @@ impl PySparkSession {
     /// Actions report cancellation only after reaching an engine safe point.
     fn cancel_all_active_actions(&self) -> usize {
         self.active_actions.cancel_active()
+    }
+
+    /// Return a thread-safe handle that can be passed to a control thread.
+    fn cancellation_handle(&self) -> PyCancellationHandle {
+        PyCancellationHandle {
+            active_actions: self.active_actions.clone(),
+        }
+    }
+
+    #[pyo3(name = "cancellationHandle")]
+    fn cancellation_handle_camel(&self) -> PyCancellationHandle {
+        self.cancellation_handle()
     }
 
     #[pyo3(name = "cancelAllActiveJobs")]
@@ -8331,6 +8361,7 @@ impl PyDataFrame {
         self.check_mixed_row_shape()?;
         let action = self.begin_action();
         let token = action.token.clone();
+        let materialization_token = token.clone();
         let inner = self.inner.clone();
         let array_struct_paths = self.arrow_array_struct_paths.clone();
         // Build a PySpark-like Row with schema attached. Use schema from collected result so
@@ -8339,7 +8370,7 @@ impl PyDataFrame {
             .detach(move || {
                 inner.collect_as_json_rows_with_names_and_array_struct_columns_with_cancellation(
                     &array_struct_paths,
-                    &token,
+                    &materialization_token,
                 )
             })
             .map_err(to_py_err)?;
@@ -8449,6 +8480,7 @@ impl PyDataFrame {
         // output_names and rows already obtained above with schema.
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
+            token.check_cancelled().map_err(to_py_err)?;
             let kwargs = PyDict::new(py);
             for name in &output_names {
                 let v = row.get(name).unwrap_or(&JsonValue::Null);
@@ -9772,6 +9804,7 @@ impl PyDataFrame {
         self.check_mixed_row_shape()?;
         let action = self.begin_action();
         let token = action.token.clone();
+        let materialization_token = token.clone();
         let inner = self.inner.clone();
         let array_struct_paths = self.arrow_array_struct_paths.clone();
         let pd = PyModule::import(py, "pandas")?;
@@ -9779,7 +9812,7 @@ impl PyDataFrame {
             .detach(move || {
                 inner.collect_as_json_rows_with_names_and_array_struct_columns_with_cancellation(
                     &array_struct_paths,
-                    &token,
+                    &materialization_token,
                 )
             })
             .map_err(to_py_err)?;
@@ -9797,8 +9830,10 @@ impl PyDataFrame {
         let date_cls = PyModule::import(py, "datetime")?.getattr("date")?;
         let data_dict = PyDict::new(py);
         for col_name in &cols {
+            token.check_cancelled().map_err(to_py_err)?;
             let vals = PyList::empty(py);
             for row in &rows {
+                token.check_cancelled().map_err(to_py_err)?;
                 let v = row.get(col_name).unwrap_or(&JsonValue::Null);
                 vals.append(json_value_to_py_with_schema(
                     py,
@@ -9813,6 +9848,7 @@ impl PyDataFrame {
             data_dict.set_item(col_name, vals)?;
         }
         let df = pd.call_method1("DataFrame", (data_dict,))?;
+        token.check_cancelled().map_err(to_py_err)?;
         df.into_py_any(py)
     }
 
@@ -9820,8 +9856,10 @@ impl PyDataFrame {
     #[pyo3(name = "toArrow")]
     fn to_arrow(&self, py: Python<'_>) -> PyResult<PyObject> {
         self.check_mixed_row_shape()?;
-        let _action = self.begin_action();
+        let action = self.begin_action();
+        let token = action.token.clone();
         let rows = self.collect(py)?;
+        token.check_cancelled().map_err(to_py_err)?;
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
         let pa = PyModule::import(py, "pyarrow")?;
         let mut source_arrow_types = std::collections::HashMap::new();
@@ -9835,6 +9873,7 @@ impl PyDataFrame {
         let arrays = PyList::empty(py);
         let names = PyList::empty(py);
         for field in schema.fields() {
+            token.check_cancelled().map_err(to_py_err)?;
             let values = PyList::empty(py);
             let field_path = arrow_field_path("", &field.name);
             let map_shaped_dtype = matches!(
@@ -9847,6 +9886,7 @@ impl PyDataFrame {
             let map_value_present = if map_shaped_dtype {
                 let mut found = false;
                 for row in &rows {
+                    token.check_cancelled().map_err(to_py_err)?;
                     let dict = row.bind(py).call_method0("asDict")?;
                     let value = dict.get_item(field.name.as_str())?;
                     if !value.is_none() {
@@ -9870,6 +9910,7 @@ impl PyDataFrame {
                 field_map_paths.insert(field_path.clone());
             }
             for row in &rows {
+                token.check_cancelled().map_err(to_py_err)?;
                 let row = row.bind(py);
                 let dict = row.call_method0("asDict")?;
                 let value = dict.get_item(field.name.as_str())?;
@@ -9899,10 +9940,14 @@ impl PyDataFrame {
             arrays.append(array)?;
             names.append(field.name.as_str())?;
         }
-        pa.getattr("Table")?
+        token.check_cancelled().map_err(to_py_err)?;
+        let table = pa
+            .getattr("Table")?
             .getattr("from_arrays")?
             .call1((arrays, names))?
-            .into_py_any(py)
+            .into_py_any(py)?;
+        token.check_cancelled().map_err(to_py_err)?;
+        Ok(table)
     }
 
     #[getter]
@@ -14603,6 +14648,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_class::<PySparkSessionBuilder>()?;
+    m.add_class::<PyCancellationHandle>()?;
     m.add_class::<PySparkSession>()?;
     m.add_class::<PyDataFrameReader>()?;
     m.add_class::<PyDataFrame>()?;

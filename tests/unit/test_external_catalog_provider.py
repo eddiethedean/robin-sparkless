@@ -5,10 +5,12 @@ from datetime import date, datetime
 from decimal import Decimal
 import gc
 import weakref
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 
-from sparkless import SparkSession
+from sparkless import SparklessCancelledError, SparkSession
 from sparkless.external_catalog import (
     ArrowIpcStream,
     ExternalTableDescriptor,
@@ -894,3 +896,92 @@ def test_python_catalog_uses_native_path_confinement(session, tmp_path, monkeypa
     monkeypatch.setenv("SPARKLESS_FILES_BASE", str(base))
     with pytest.raises(Exception, match="outside|escape|base"):
         session.table(IDENTIFIER)
+
+
+def test_cancel_during_catalog_resolution_prevents_local_save_as_table():
+    spark = SparkSession("cancel-write-regression")
+    entered_resolve = Event()
+    continue_resolve = Event()
+
+    class Provider:
+        def resolve_table(self, identifier):
+            entered_resolve.set()
+            assert continue_resolve.wait(timeout=5)
+            return None
+
+    spark.set_external_catalog_provider(Provider())
+    frame = spark.createDataFrame([(1,)], ["id"])
+    cancellation = spark.cancellation_handle()
+    try:
+        def cancel_from_control_thread():
+            assert entered_resolve.wait(timeout=5)
+            assert cancellation.cancel_all_active_actions() >= 1
+            continue_resolve.set()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            control = pool.submit(cancel_from_control_thread)
+            with pytest.raises(SparklessCancelledError):
+                frame.write.format("parquet").saveAsTable("cancelled_local")
+            control.result(timeout=5)
+        with pytest.raises(Exception):
+            spark.table("cancelled_local")
+    finally:
+        continue_resolve.set()
+        spark.stop()
+
+
+def test_cancellation_handle_is_usable_from_another_thread():
+    spark = SparkSession("cancel-handle-thread-regression")
+    try:
+        handle = spark.cancellation_handle()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(handle.cancel_all_active_actions).result() == 0
+    finally:
+        spark.stop()
+
+
+def test_to_arrow_checks_cancellation_during_python_conversion(monkeypatch):
+    pa = pytest.importorskip("pyarrow")
+    spark = SparkSession("cancel-arrow-regression")
+    frame = spark.createDataFrame([(1,)], ["id"])
+    original_array = pa.array
+    cancelled = False
+
+    def cancel_during_array(*args, **kwargs):
+        nonlocal cancelled
+        if not cancelled:
+            cancelled = True
+            frame.cancel()
+        return original_array(*args, **kwargs)
+
+    monkeypatch.setattr(pa, "array", cancel_during_array)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.toArrow()
+    finally:
+        spark.stop()
+
+
+def test_to_pandas_checks_cancellation_during_python_conversion(monkeypatch):
+    pd = pytest.importorskip("pandas")
+    spark = SparkSession("cancel-pandas-regression")
+    frame = spark.createDataFrame([(1,)], ["id"])
+    original_dataframe = pd.DataFrame
+
+    def cancel_during_dataframe(*args, **kwargs):
+        frame.cancel()
+        return original_dataframe(*args, **kwargs)
+
+    monkeypatch.setattr(pd, "DataFrame", cancel_during_dataframe)
+    try:
+        with pytest.raises(SparklessCancelledError):
+            frame.toPandas()
+    finally:
+        spark.stop()
+
+
+def test_public_cancellation_exception_is_exported():
+    from sparkless import SparklessCancelledError as top_level_error
+    from sparkless.core.exceptions import SparklessCancelledError as core_error
+
+    assert top_level_error is core_error
