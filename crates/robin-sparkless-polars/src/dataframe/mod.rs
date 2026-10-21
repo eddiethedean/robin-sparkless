@@ -2832,6 +2832,7 @@ impl<'a> DataFrameWriter<'a> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn save_as_external_table_descriptor(
         &self,
         name: &str,
