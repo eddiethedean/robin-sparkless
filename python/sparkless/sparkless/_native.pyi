@@ -1,6 +1,7 @@
 """Type stub for sparkless._native (PyO3 extension)."""
 
 from typing import Any, List, Optional, Tuple
+
 from sparkless.external_catalog import (
     ExternalCatalogProvider,
     ExternalTableDescriptor,
@@ -10,6 +11,17 @@ from sparkless.sql.types import StructType
 
 class SparklessError(RuntimeError): ...
 class SparklessCancelledError(SparklessError): ...
+
+class SparklessExternalCatalogError(SparklessError):
+    operation: Optional[str]
+    category: Optional[str]
+    code: Optional[str]
+    identifier: Optional[str]
+    version: Optional[int]
+    expected_version: Optional[int]
+    actual_version: Optional[int]
+    retryability: Optional[str]
+    provider_error_type: Optional[str]
 
 class PySparkSessionBuilder:
     def app_name(self, name: str) -> PySparkSessionBuilder: ...

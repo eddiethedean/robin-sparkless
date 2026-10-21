@@ -5711,6 +5711,7 @@ dependencies = [
  "pyo3",
  "robin-sparkless",
  "robin-sparkless-core",
+ "serde",
  "serde_json",
  "uuid",
 ]

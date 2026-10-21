@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Iterator, List, Optional, Protocol, Tuple, Union
 
+from sparkless.errors import SparklessExternalCatalogError
 from sparkless.sql import types as T
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "ExternalTableWriteRequest",
     "ExternalTableWriteResult",
     "BatchWritableExternalCatalogProvider",
+    "SparklessExternalCatalogError",
 ]
 
 
