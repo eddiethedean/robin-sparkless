@@ -146,11 +146,11 @@ pub(crate) enum DataFrameInner {
 struct PolarsIpcBatchIterator {
     batches: Option<CollectBatches>,
     current: Option<PlDataFrame>,
-    offset: usize,
+    current_offset: usize,
     max_rows: usize,
     max_bytes: usize,
-    target_rows: usize,
     token: CancellationToken,
+    deferred_error: Option<EngineError>,
     closed: bool,
 }
 
@@ -158,25 +158,39 @@ impl PolarsIpcBatchIterator {
     fn close(&mut self) {
         self.batches.take();
         self.current.take();
+        self.current_offset = 0;
         self.closed = true;
     }
 
-    fn serialize_slice(&self, rows: usize) -> Result<Vec<u8>, EngineError> {
-        let offset = i64::try_from(self.offset).map_err(|_| {
-            EngineError::User("Arrow batch offset exceeds the Polars slice range".into())
-        })?;
-        let mut batch = self
-            .current
-            .as_ref()
-            .expect("current batch is set")
-            .slice(offset, rows);
+    fn next_source_row(&mut self) -> Option<Result<PlDataFrame, polars::prelude::PolarsError>> {
+        if let Some(current) = self.current.as_ref() {
+            let row = current.slice(self.current_offset as i64, 1);
+            self.current_offset += 1;
+            if self.current_offset >= current.height() {
+                self.current.take();
+                self.current_offset = 0;
+            }
+            return Some(Ok(row));
+        }
+        self.batches.as_mut().and_then(Iterator::next)
+    }
+
+    fn combine_rows(rows: &[PlDataFrame]) -> Result<PlDataFrame, polars::prelude::PolarsError> {
+        let mut combined = rows.first().expect("non-empty rows").clone();
+        for row in &rows[1..] {
+            combined.vstack_mut(row)?;
+        }
+        Ok(combined)
+    }
+
+    fn serialize_batch(&self, batch: &mut PlDataFrame) -> Result<Vec<u8>, EngineError> {
         batch.rechunk_mut();
         let mut cursor = std::io::Cursor::new(Vec::new());
         {
             use polars::io::ipc::IpcStreamWriter;
             use polars::prelude::SerWriter;
             IpcStreamWriter::new(&mut cursor)
-                .finish(&mut batch)
+                .finish(batch)
                 .map_err(polars_to_core_error)?;
         }
         Ok(cursor.into_inner())
@@ -190,70 +204,129 @@ impl Iterator for PolarsIpcBatchIterator {
         if self.closed {
             return None;
         }
+        let mut rows = Vec::new();
+        let mut estimated_bytes = 0usize;
+        let mut source_ended = false;
         loop {
+            if self.current.is_none() {
+                if let Some(error) = self.deferred_error.take() {
+                    if rows.is_empty() {
+                        self.close();
+                        return Some(Err(error));
+                    }
+                    self.deferred_error = Some(error);
+                    break;
+                }
+            }
             if let Err(error) = self.token.check_cancelled() {
                 self.close();
                 return Some(Err(error));
             }
-            if self.current.is_none() {
-                match self.batches.as_mut().and_then(Iterator::next) {
-                    Some(Ok(batch)) if batch.height() > 0 => {
-                        if let Err(error) = self.token.check_cancelled() {
-                            self.close();
-                            return Some(Err(error));
-                        }
-                        self.current = Some(batch);
-                        self.offset = 0;
-                        self.target_rows = self.max_rows;
+            let row = match self.next_source_row() {
+                Some(Ok(row)) if row.height() > 0 => row,
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => {
+                    let error = polars_to_core_error(error);
+                    if !rows.is_empty() {
+                        self.deferred_error = Some(error);
+                        break;
                     }
-                    Some(Ok(_)) => continue,
-                    Some(Err(error)) => {
+                    self.close();
+                    return Some(Err(error));
+                }
+                None => {
+                    source_ended = true;
+                    break;
+                }
+            };
+            if let Err(error) = self.token.check_cancelled() {
+                self.close();
+                return Some(Err(error));
+            }
+
+            let row_bytes = row.estimated_size();
+            if !rows.is_empty() && estimated_bytes.saturating_add(row_bytes) > self.max_bytes {
+                self.current = Some(row);
+                self.current_offset = 0;
+                break;
+            }
+            estimated_bytes = estimated_bytes.saturating_add(row_bytes);
+            rows.push(row);
+            if rows.len() >= self.max_rows || estimated_bytes >= self.max_bytes {
+                break;
+            }
+        }
+
+        if rows.is_empty() {
+            if source_ended {
+                self.close();
+            }
+            return None;
+        }
+        let mut combined = match Self::combine_rows(&rows) {
+            Ok(combined) => combined,
+            Err(error) => {
+                self.close();
+                return Some(Err(polars_to_core_error(error)));
+            }
+        };
+        let bytes = match self.serialize_batch(&mut combined) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.close();
+                return Some(Err(error));
+            }
+        };
+        if bytes.len() <= self.max_bytes {
+            if source_ended {
+                self.close();
+            }
+            return Some(Ok(ArrowIpcStream { bytes }));
+        }
+
+        if rows.len() == 1 {
+            let actual_bytes = bytes.len();
+            self.close();
+            return Some(Err(EngineError::User(format!(
+                "a single Arrow IPC row requires {actual_bytes} bytes, exceeding max_bytes={}",
+                self.max_bytes
+            ))));
+        }
+        let mut prefix_rows = rows.len() / 2;
+        while prefix_rows > 0 {
+            let mut prefix = combined.slice(0, prefix_rows);
+            let prefix_bytes = match self.serialize_batch(&mut prefix) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    self.close();
+                    return Some(Err(error));
+                }
+            };
+            if prefix_bytes.len() <= self.max_bytes {
+                let mut pending = combined.slice(prefix_rows as i64, rows.len() - prefix_rows);
+                if let Some(remaining_pending) = self.current.take() {
+                    let remaining_pending = remaining_pending.slice(
+                        self.current_offset as i64,
+                        remaining_pending.height() - self.current_offset,
+                    );
+                    if let Err(error) = pending.vstack_mut(&remaining_pending) {
                         self.close();
                         return Some(Err(polars_to_core_error(error)));
                     }
-                    None => {
-                        self.close();
-                        return None;
-                    }
                 }
+                self.current = Some(pending);
+                self.current_offset = 0;
+                return Some(Ok(ArrowIpcStream {
+                    bytes: prefix_bytes,
+                }));
             }
-
-            let current = self.current.as_ref().unwrap();
-            let remaining = current.height() - self.offset;
-            let mut rows = remaining.min(self.target_rows).min(self.max_rows);
-            let estimated_per_row = current.estimated_size().div_ceil(current.height().max(1));
-            if estimated_per_row > 0 {
-                rows = rows.min((self.max_bytes / estimated_per_row).max(1));
-                self.target_rows = rows;
-            }
-            loop {
-                let bytes = match self.serialize_slice(rows) {
-                    Ok(bytes) => bytes,
-                    Err(error) => {
-                        self.close();
-                        return Some(Err(error));
-                    }
-                };
-                if bytes.len() <= self.max_bytes {
-                    self.offset += rows;
-                    if self.offset >= self.current.as_ref().unwrap().height() {
-                        self.current.take();
-                        self.offset = 0;
-                    }
-                    return Some(Ok(ArrowIpcStream { bytes }));
-                }
-                if rows == 1 {
-                    let actual_bytes = bytes.len();
-                    self.close();
-                    return Some(Err(EngineError::User(format!(
-                        "a single Arrow IPC row requires {actual_bytes} bytes, exceeding max_bytes={}",
-                        self.max_bytes
-                    ))));
-                }
-                rows = (rows / 2).max(1);
-                self.target_rows = rows;
-            }
+            prefix_rows /= 2;
         }
+        self.close();
+        Some(Err(EngineError::User(format!(
+            "a single Arrow IPC row exceeds max_bytes={}",
+            self.max_bytes
+        ))))
     }
 }
 
@@ -1641,11 +1714,11 @@ impl DataFrame {
         Ok(ArrowIpcBatchStream::new(PolarsIpcBatchIterator {
             batches: Some(batches),
             current: None,
-            offset: 0,
+            current_offset: 0,
             max_rows,
             max_bytes,
-            target_rows: 1,
             token: token.clone(),
+            deferred_error: None,
             closed: false,
         }))
     }

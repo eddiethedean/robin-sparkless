@@ -6538,9 +6538,9 @@ struct PyArrowBatchIterator {
     template: Py<PyDataFrame>,
     max_rows: usize,
     max_bytes: usize,
-    target_rows: usize,
     pending: Option<PlDataFrame>,
-    offset: usize,
+    pending_offset: usize,
+    deferred_error: Option<PyErr>,
     action: Option<ActiveAction>,
     closed: bool,
 }
@@ -6569,16 +6569,39 @@ impl PyArrowBatchIterator {
         }
         self.batches.take();
         self.pending.take();
+        self.pending_offset = 0;
         self.action.take();
         self.closed = true;
     }
 
-    fn export_candidate(&self, py: Python<'_>, rows: usize) -> PyResult<(PyObject, usize)> {
-        let pending = self.pending.as_ref().expect("pending batch is set");
-        let slice = pending.slice(self.offset as i64, rows);
+    fn next_source_row(
+        &mut self,
+        py: Python<'_>,
+    ) -> Option<Result<PlDataFrame, polars::prelude::PolarsError>> {
+        if let Some(pending) = self.pending.as_ref() {
+            let row = pending.slice(self.pending_offset as i64, 1);
+            self.pending_offset += 1;
+            if self.pending_offset >= pending.height() {
+                self.pending.take();
+                self.pending_offset = 0;
+            }
+            return Some(Ok(row));
+        }
+        self.next_source_batch(py)
+    }
+
+    fn combine_rows(rows: &[PlDataFrame]) -> Result<PlDataFrame, polars::prelude::PolarsError> {
+        let mut combined = rows.first().expect("non-empty rows").clone();
+        for row in &rows[1..] {
+            combined.vstack_mut(row)?;
+        }
+        Ok(combined)
+    }
+
+    fn export_candidate(&self, py: Python<'_>, batch: &PlDataFrame) -> PyResult<(PyObject, usize)> {
         let template = self.template.bind(py).borrow();
         let dataframe = template.wrap_derived(DataFrame::from_polars_with_options(
-            slice,
+            batch.clone(),
             template.inner.is_case_sensitive(),
         ));
         drop(template);
@@ -6600,7 +6623,27 @@ impl PyArrowBatchIterator {
             return Ok(None);
         }
 
+        if self.pending.is_none() {
+            if let Some(error) = self.deferred_error.take() {
+                self.close_inner();
+                return Err(error);
+            }
+        }
+
+        let mut rows = Vec::new();
+        let mut estimated_bytes = 0usize;
+        let mut source_ended = false;
         loop {
+            if self.pending.is_none() {
+                if let Some(error) = self.deferred_error.take() {
+                    if rows.is_empty() {
+                        self.close_inner();
+                        return Err(error);
+                    }
+                    self.deferred_error = Some(error);
+                    break;
+                }
+            }
             let token = self
                 .action
                 .as_ref()
@@ -6612,66 +6655,108 @@ impl PyArrowBatchIterator {
                 return Err(to_py_err(error));
             }
 
-            if self.pending.is_none() {
-                let next = self.next_source_batch(py);
-                match next {
-                    Some(Ok(batch)) if batch.height() > 0 => {
-                        if token.is_cancelled() {
-                            self.close_inner();
-                            return Err(to_py_err("operation cancelled"));
-                        }
-                        self.offset = 0;
-                        self.target_rows = self.max_rows;
-                        self.pending = Some(batch);
+            let row = match self.next_source_row(py) {
+                Some(Ok(batch)) if batch.height() > 0 => batch,
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => {
+                    if !rows.is_empty() {
+                        self.deferred_error = Some(to_py_err(error));
+                        break;
                     }
-                    Some(Ok(_)) => continue,
-                    Some(Err(error)) => {
+                    self.close_inner();
+                    return Err(to_py_err(error));
+                }
+                None => {
+                    source_ended = true;
+                    break;
+                }
+            };
+            if token.is_cancelled() {
+                self.close_inner();
+                return Err(to_py_err("operation cancelled"));
+            }
+
+            let row_bytes = row.estimated_size();
+            if !rows.is_empty() && estimated_bytes.saturating_add(row_bytes) > self.max_bytes {
+                self.pending = Some(row);
+                self.pending_offset = 0;
+                break;
+            }
+            estimated_bytes = estimated_bytes.saturating_add(row_bytes);
+            rows.push(row);
+            if rows.len() >= self.max_rows || estimated_bytes >= self.max_bytes {
+                break;
+            }
+        }
+
+        if rows.is_empty() {
+            if source_ended {
+                self.close_inner();
+            }
+            return Ok(None);
+        }
+
+        let combined = match Self::combine_rows(&rows) {
+            Ok(combined) => combined,
+            Err(error) => {
+                self.close_inner();
+                return Err(to_py_err(error));
+            }
+        };
+        let (batch, nbytes) = match self.export_candidate(py, &combined) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                self.close_inner();
+                return Err(error);
+            }
+        };
+        if nbytes <= self.max_bytes {
+            if source_ended {
+                self.close_inner();
+            }
+            return Ok(Some(batch));
+        }
+
+        if rows.len() == 1 {
+            self.close_inner();
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "a single Arrow row requires {nbytes} bytes, exceeding max_bytes={}",
+                self.max_bytes
+            )));
+        }
+        let mut prefix_rows = rows.len() / 2;
+        while prefix_rows > 0 {
+            let prefix = combined.slice(0, prefix_rows);
+            let (batch, prefix_bytes) = match self.export_candidate(py, &prefix) {
+                Ok(candidate) => candidate,
+                Err(error) => {
+                    self.close_inner();
+                    return Err(error);
+                }
+            };
+            if prefix_bytes <= self.max_bytes {
+                let mut pending = combined.slice(prefix_rows as i64, rows.len() - prefix_rows);
+                if let Some(remaining_pending) = self.pending.take() {
+                    let remaining_pending = remaining_pending.slice(
+                        self.pending_offset as i64,
+                        remaining_pending.height() - self.pending_offset,
+                    );
+                    if let Err(error) = pending.vstack_mut(&remaining_pending) {
                         self.close_inner();
                         return Err(to_py_err(error));
                     }
-                    None => {
-                        self.close_inner();
-                        return Ok(None);
-                    }
                 }
+                self.pending = Some(pending);
+                self.pending_offset = 0;
+                return Ok(Some(batch));
             }
-
-            let pending = self.pending.as_ref().unwrap();
-            let remaining = pending.height() - self.offset;
-            let mut rows = remaining.min(self.target_rows).min(self.max_rows);
-            let estimated_per_row = pending.estimated_size().div_ceil(pending.height().max(1));
-            if estimated_per_row > 0 {
-                rows = rows.min((self.max_bytes / estimated_per_row).max(1));
-                self.target_rows = rows;
-            }
-            loop {
-                let candidate = self.export_candidate(py, rows);
-                let (batch, nbytes) = match candidate {
-                    Ok(candidate) => candidate,
-                    Err(error) => {
-                        self.close_inner();
-                        return Err(error);
-                    }
-                };
-                if nbytes <= self.max_bytes {
-                    self.offset += rows;
-                    if self.offset >= self.pending.as_ref().unwrap().height() {
-                        self.pending.take();
-                        self.offset = 0;
-                    }
-                    return Ok(Some(batch));
-                }
-                if rows == 1 {
-                    self.close_inner();
-                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "a single Arrow row requires {nbytes} bytes, exceeding max_bytes={}",
-                        self.max_bytes
-                    )));
-                }
-                rows = (rows / 2).max(1);
-                self.target_rows = rows;
-            }
+            prefix_rows /= 2;
         }
+        self.close_inner();
+        Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "a single Arrow row exceeds max_bytes={}",
+            self.max_bytes
+        )))
     }
 }
 
@@ -7320,9 +7405,9 @@ impl PyDataFrame {
                 template,
                 max_rows,
                 max_bytes,
-                target_rows: 1,
                 pending: None,
-                offset: 0,
+                pending_offset: 0,
+                deferred_error: None,
                 action: Some(action),
                 closed: false,
             },

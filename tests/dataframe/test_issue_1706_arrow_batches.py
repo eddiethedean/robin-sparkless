@@ -12,10 +12,18 @@ def test_to_arrow_batches_respects_limits_and_closes(spark) -> None:
 
     exported = list(batches)
     assert sum(batch.num_rows for batch in exported) == 7
+    assert [batch.num_rows for batch in exported] == [3, 3, 1]
     assert all(0 < batch.num_rows <= 3 for batch in exported)
     assert all(batch.nbytes <= 1024 for batch in exported)
     batches.close()
     assert list(batches) == []
+
+
+def test_to_arrow_batches_splits_at_byte_limit(spark) -> None:
+    exported = list(spark.range(7).toArrowBatches(max_rows=5, max_bytes=16))
+
+    assert [batch.num_rows for batch in exported] == [2, 2, 2, 1]
+    assert all(batch.nbytes <= 16 for batch in exported)
 
 
 def test_to_arrow_batches_preserves_arrow_schema_details(spark) -> None:

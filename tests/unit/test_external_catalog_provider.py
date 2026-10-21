@@ -130,6 +130,42 @@ def test_python_writer_passes_typed_ipc_and_exact_options(session):
     assert table["details"].to_pylist() == [{"label": "nested"}, {"label": None}]
 
 
+def test_python_batch_writer_receives_bounded_record_batches(session):
+    pytest.importorskip("pyarrow")
+    schema = T.StructType([T.StructField("id", T.LongType(), False)])
+    table = descriptor(schema)
+
+    class BatchProvider:
+        received = None
+
+        def resolve_table(self, identifier):
+            return table
+
+        def write_table_batches(self, request):
+            assert request.data is None
+            self.received = list(request.batches)
+            updated = replace(request.table, version=1)
+            return ExternalTableWriteResult(updated, 1)
+
+    provider = BatchProvider()
+    session.set_external_catalog_provider(provider)
+    frame = session.createDataFrame([(row,) for row in range(7)], schema)
+    (
+        frame.write.mode("append")
+        .option("sparkless.writer.maxRowsPerBatch", "3")
+        .option("sparkless.writer.maxBytesPerBatch", "1024")
+        .saveAsTable(IDENTIFIER)
+    )
+
+    assert [batch.num_rows for batch in provider.received] == [3, 3, 1]
+    assert all(batch.nbytes <= 1024 for batch in provider.received)
+    assert [batch.column(0).to_pylist() for batch in provider.received] == [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6],
+    ]
+
+
 @pytest.mark.parametrize("ingress", ["python_rows", "pyarrow"])
 def test_external_writer_preserves_null_struct_parent_validity(session, ingress):
     pa = pytest.importorskip("pyarrow")
