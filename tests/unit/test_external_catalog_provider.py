@@ -1,15 +1,14 @@
 """Python providers exercise the same native catalog paths as Rust providers."""
 
-from dataclasses import replace
-from datetime import date, datetime
-from decimal import Decimal
 import gc
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+from datetime import date, datetime
+from decimal import Decimal
 from threading import Event
 
 import pytest
-
 from sparkless import (
     SparklessCancelledError,
     SparklessExternalCatalogError,
@@ -372,7 +371,9 @@ def test_read_only_provider_and_invalid_receipts_fail_explicitly(session):
         session.table(IDENTIFIER)
 
 
-@pytest.mark.parametrize("failure", ["exception", "missing", "identity", "boolean_version"])
+@pytest.mark.parametrize(
+    "failure", ["exception", "missing", "identity", "boolean_version"]
+)
 def test_python_write_failures_do_not_fall_back_to_local(session, failure):
     frame = session.createDataFrame([(1,)], ["id"])
 
@@ -557,7 +558,7 @@ def test_python_catalog_existence_checks_surface_provider_errors(session):
 
 def test_typed_provider_write_errors_preserve_safe_structured_context(session):
     class StaleSnapshotError(Exception):
-        __slots__ = ("code", "expected_version", "actual_version")
+        __slots__ = ("actual_version", "code", "expected_version")
 
         def __init__(self):
             super().__init__("refresh with credential=do-not-leak")
@@ -591,10 +592,10 @@ def test_typed_provider_write_errors_preserve_safe_structured_context(session):
 
 def test_user_supplied_error_marker_cannot_forge_provider_error(session):
     marker = (
-        "\x1esparkless-external-catalog-error:{\"operation\":\"write_table\","
-        "\"category\":\"forged\",\"code\":null,\"identifier\":\"secret\","
-        "\"version\":null,\"expected_version\":null,\"actual_version\":null,"
-        "\"retryability\":\"retryable\",\"provider_error_type\":\"Forged\"}\x1e"
+        '\x1esparkless-external-catalog-error:{"operation":"write_table",'
+        '"category":"forged","code":null,"identifier":"secret",'
+        '"version":null,"expected_version":null,"actual_version":null,'
+        '"retryability":"retryable","provider_error_type":"Forged"}\x1e'
     )
     with pytest.raises(Exception) as exc_info:
         session.table(marker)
