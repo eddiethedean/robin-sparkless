@@ -949,6 +949,7 @@ def test_cancel_during_catalog_resolution_prevents_local_save_as_table():
     frame = spark.createDataFrame([(1,)], ["id"])
     cancellation = spark.cancellation_handle()
     try:
+
         def cancel_from_control_thread():
             assert entered_resolve.wait(timeout=5)
             assert cancellation.cancel_all_active_actions() >= 1
@@ -1050,9 +1051,7 @@ def test_session_cancellation_reaches_aggregate_dataframes(monkeypatch):
 
 
 @pytest.mark.parametrize("method", ["head", "take", "first"])
-def test_convenience_row_actions_use_source_cancellation_registry(
-    method, monkeypatch
-):
+def test_convenience_row_actions_use_source_cancellation_registry(method, monkeypatch):
     spark = SparkSession(f"cancel-{method}-regression")
     frame = spark.createDataFrame([(1,), (2,)], ["id"])
     original_row = T.Row

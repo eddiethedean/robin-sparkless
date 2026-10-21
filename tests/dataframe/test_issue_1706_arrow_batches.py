@@ -40,7 +40,9 @@ def test_to_arrow_batches_preserves_arrow_schema_details(spark) -> None:
         metadata={b"schema": b"preserved"},
     )
     source = pa.Table.from_pylist([{"values": [1, 2]}, {"values": None}], schema=schema)
-    exported = list(spark.createDataFrame(source).toArrowBatches(max_rows=2, max_bytes=1024))
+    exported = list(
+        spark.createDataFrame(source).toArrowBatches(max_rows=2, max_bytes=1024)
+    )
 
     assert pa.schema(exported[0].schema, metadata=schema.metadata) == schema
     assert exported[0].schema.field("values").metadata == {b"field": b"preserved"}
