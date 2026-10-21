@@ -1401,6 +1401,35 @@ fn sql_expr_to_polars(
         }) => Ok(lit(s.as_str())),
         SqlExpr::Value(ValueWithSpan { value: Value::Boolean(b), .. }) => Ok(lit(*b)),
         SqlExpr::Value(ValueWithSpan { value: Value::Null, .. }) => Ok(lit(polars::prelude::NULL)),
+        SqlExpr::TypedString(typed) => {
+            use spark_sql_parser::ast::DataType as SqlDataType;
+
+            let value = match &typed.value.value {
+                Value::SingleQuotedString(value) | Value::DoubleQuotedString(value) => value,
+                _ => {
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: invalid typed literal value: {:?}", typed.value.value)
+                            .into(),
+                    ));
+                }
+            };
+            let dtype = match &typed.data_type {
+                SqlDataType::Date => polars::prelude::DataType::Date,
+                SqlDataType::Timestamp(_, _) => polars::prelude::DataType::Datetime(
+                    polars::prelude::TimeUnit::Microseconds,
+                    None,
+                ),
+                _ => {
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: unsupported typed literal type: {}", typed.data_type)
+                            .into(),
+                    ));
+                }
+            };
+            // Keep SQL typed literals as literal Cast expressions so comparison
+            // coercion can identify their temporal type before lazy evaluation.
+            Ok(lit(value.as_str()).cast(dtype))
+        }
         SqlExpr::BinaryOp { left, op, right } => {
             let mut l = sql_expr_to_polars(left, session, df, having_agg_map, having_agg_list)?;
             let mut r = sql_expr_to_polars(right, session, df, having_agg_map, having_agg_list)?;

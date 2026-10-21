@@ -812,6 +812,11 @@ impl DataFrame {
             })
         }
 
+        fn is_temporal_literal(expr: &Expr) -> bool {
+            literal_dtype(expr)
+                .is_some_and(|dt| matches!(dt, DataType::Date | DataType::Datetime(_, _)))
+        }
+
         /// Aliases do not alter evaluation.  Casts do, so keep them in the
         /// comparison expression even when they annotate a literal.
         fn peel_aliases(expr: &Expr) -> &Expr {
@@ -871,6 +876,8 @@ impl DataFrame {
                 let right_is_col = matches!(right_inner, Expr::Column(_));
                 let left_is_numeric_lit = is_numeric_literal(left_inner);
                 let right_is_numeric_lit = is_numeric_literal(right_inner);
+                let left_is_temporal_lit = is_temporal_literal(left_inner);
+                let right_is_temporal_lit = is_temporal_literal(right_inner);
                 let left_is_string_lit = literal_dtype(left_inner) == Some(DataType::String);
                 let right_is_string_lit = literal_dtype(right_inner) == Some(DataType::String);
                 let root_is_col_vs_numeric = is_comparison_op
@@ -1006,6 +1013,55 @@ impl DataFrame {
                     }
                     expr_to_coerce.clone()
                 } else if is_comparison_op
+                    && ((left_is_col && right_is_temporal_lit)
+                        || (right_is_col && left_is_temporal_lit))
+                {
+                    let col_name = if left_is_col {
+                        match left_inner {
+                            Expr::Column(n) => n.as_str(),
+                            _ => unreachable!("column check above"),
+                        }
+                    } else {
+                        match right_inner {
+                            Expr::Column(n) => n.as_str(),
+                            _ => unreachable!("column check above"),
+                        }
+                    };
+                    if let Some(col_type) = self
+                        .get_column_dtype(col_name)
+                        .filter(|dtype| matches!(dtype, DataType::Date | DataType::Datetime(_, _)))
+                    {
+                        let literal_type = if left_is_col {
+                            literal_dtype(right_inner)
+                        } else {
+                            literal_dtype(left_inner)
+                        };
+                        if let Some(literal_type) = literal_type {
+                            let (left_type, right_type) = if left_is_col {
+                                (col_type, literal_type)
+                            } else {
+                                (literal_type, col_type)
+                            };
+                            let (new_left, new_right) = coerce_for_pyspark_comparison(
+                                left_inner.clone(),
+                                right_inner.clone(),
+                                &left_type,
+                                &right_type,
+                                op,
+                            )
+                            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+                            Expr::BinaryExpr {
+                                left: Arc::new(new_left),
+                                op: *op,
+                                right: Arc::new(new_right),
+                            }
+                        } else {
+                            expr_to_coerce.clone()
+                        }
+                    } else {
+                        expr_to_coerce.clone()
+                    }
+                } else if is_comparison_op
                     && ((left_is_string_lit && !right_is_string_lit && !right_is_col)
                         || (right_is_string_lit && !left_is_string_lit && !left_is_col))
                 {
@@ -1104,6 +1160,8 @@ impl DataFrame {
 
                 let left_is_numeric_lit = is_numeric_literal(left_peeled);
                 let right_is_numeric_lit = is_numeric_literal(right_peeled);
+                let left_is_temporal_lit = is_temporal_literal(left_peeled);
+                let right_is_temporal_lit = is_temporal_literal(right_peeled);
 
                 // Column-vs-numeric-literal: use column dtype; String (or unknown) -> try_to_number then compare (PySpark #235, #602).
                 let (new_left, new_right) = if left_is_col && right_is_numeric_lit {
@@ -1142,6 +1200,44 @@ impl DataFrame {
                         &op,
                     )
                     .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
+                } else if (left_is_col && right_is_temporal_lit)
+                    || (right_is_col && left_is_temporal_lit)
+                {
+                    let (col_expr, literal_expr, col_on_left) = if left_is_col {
+                        ((*left).clone(), (*right).clone(), true)
+                    } else {
+                        ((*right).clone(), (*left).clone(), false)
+                    };
+                    let col_name = match peel_aliases(&col_expr) {
+                        Expr::Column(name) => name.as_str(),
+                        _ => return Ok(Expr::BinaryExpr { left, op, right }),
+                    };
+                    if let Some(col_type) = get_col_dtype(col_name)
+                        .filter(|dtype| matches!(dtype, DataType::Date | DataType::Datetime(_, _)))
+                    {
+                        let Some(literal_type) = literal_dtype(peel_aliases(&literal_expr)) else {
+                            return Ok(Expr::BinaryExpr { left, op, right });
+                        };
+                        let (left_type, right_type) = if col_on_left {
+                            (col_type, literal_type)
+                        } else {
+                            (literal_type, col_type)
+                        };
+                        let (new_left, new_right) = coerce_for_pyspark_comparison(
+                            (*left).clone(),
+                            (*right).clone(),
+                            &left_type,
+                            &right_type,
+                            &op,
+                        )
+                        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+                        return Ok(Expr::BinaryExpr {
+                            left: Arc::new(new_left),
+                            op,
+                            right: Arc::new(new_right),
+                        });
+                    }
+                    return Ok(Expr::BinaryExpr { left, op, right });
                 } else if (left_is_col && right_is_string_lit)
                     || (right_is_col && left_is_string_lit)
                 {
