@@ -9,7 +9,7 @@ The repository is a **Cargo workspace** with members: `robin-sparkless` (root, m
 
 ## Released versions
 
-**4.13.3** was tagged on 2026-09-14 at commit `55d27019`. The [release workflow](https://github.com/eddiethedean/robin-sparkless/actions/runs/34905423487) completed successfully across all 36 jobs, including Rust checks, multiplatform wheel builds and tests, crates.io publication, and PyPI publication.
+**4.14.1** was tagged on 2026-10-20 at commit `ad1b9445`. The [release workflow](https://github.com/eddiethedean/robin-sparkless/actions/runs/39518668130) completed successfully across all 35 jobs, including Rust checks, multiplatform wheel builds and tests, crates.io publication, and PyPI publication.
 
 ## Version pinning (CI and local)
 

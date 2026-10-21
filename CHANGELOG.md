@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
 
+## [4.15.0] - 2026-10-21
+
+### Added
+
+- **Cooperative cancellation** — Cancel active SQL and DataFrame execution, including Python callback and result-conversion paths (#1708).
+- **Bounded Arrow exports** — Stream external-catalog writes as bounded Arrow record batches, with row and byte limits and early close support (#1711).
+
+### Fixed
+
+- **External catalog errors** — Preserve structured provider error metadata across Python callbacks and redact provider messages and sensitive identifiers (#1712).
+
 ## [4.14.1] - 2026-10-20
 
 ### Fixed

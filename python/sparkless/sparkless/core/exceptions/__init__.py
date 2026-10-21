@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 AnalysisException: type[BaseException]
 IllegalArgumentException: type[BaseException]
 PySparkRuntimeError: type[BaseException]
