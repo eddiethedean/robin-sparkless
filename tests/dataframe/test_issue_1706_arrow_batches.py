@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import pyarrow as pa
-import pyarrow.parquet as pq
+import pytest
+
+pa = pytest.importorskip("pyarrow")
+pq = pytest.importorskip("pyarrow.parquet")
 
 
 def test_to_arrow_batches_respects_limits_and_closes(spark) -> None:
