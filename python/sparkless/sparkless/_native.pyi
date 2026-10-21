@@ -10,6 +10,16 @@ from sparkless.sql.types import StructType
 
 class SparklessError(RuntimeError): ...
 class SparklessCancelledError(SparklessError): ...
+class SparklessExternalCatalogError(SparklessError):
+    operation: str
+    category: str
+    code: Optional[str]
+    identifier: str
+    version: Optional[int]
+    expected_version: Optional[int]
+    actual_version: Optional[int]
+    retryability: str
+    provider_error_type: str
 
 class PySparkSessionBuilder:
     def app_name(self, name: str) -> PySparkSessionBuilder: ...

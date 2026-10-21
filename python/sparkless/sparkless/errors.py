@@ -17,11 +17,14 @@ try:
     SparklessError = _SparklessError
     SparklessCancelledError = _SparklessCancelledError
     try:
-        from sparkless._native import SparklessExternalCatalogError as _SparklessExternalCatalogError
+        from sparkless._native import (
+            SparklessExternalCatalogError as _SparklessExternalCatalogError,
+        )
 
         SparklessExternalCatalogError = _SparklessExternalCatalogError
     except ImportError:
-        SparklessExternalCatalogError = SparklessError
+        # Older native builds do not expose the specialized exception.
+        SparklessExternalCatalogError = SparklessError  # type: ignore[misc, assignment]
 except ImportError:  # pragma: no cover - exercised implicitly in type-checking tools
     # Fallback used in environments without the native extension.
     SparklessError: Type[BaseException] = RuntimeError
