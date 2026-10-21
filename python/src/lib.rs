@@ -15205,10 +15205,21 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "SparklessCancelledError",
         m.py().get_type::<SparklessCancelledError>(),
     )?;
-    m.add(
-        "SparklessExternalCatalogError",
-        m.py().get_type::<SparklessExternalCatalogError>(),
-    )?;
+    let external_catalog_error = m.py().get_type::<SparklessExternalCatalogError>();
+    for field in [
+        "operation",
+        "category",
+        "code",
+        "identifier",
+        "version",
+        "expected_version",
+        "actual_version",
+        "retryability",
+        "provider_error_type",
+    ] {
+        external_catalog_error.setattr(field, m.py().None())?;
+    }
+    m.add("SparklessExternalCatalogError", external_catalog_error)?;
     m.add_function(wrap_pyfunction!(external_catalog::validate_descriptor, m)?)?;
     m.add_function(wrap_pyfunction!(
         external_catalog::validate_write_result,

@@ -31,6 +31,22 @@ pytestmark = pytest.mark.sparkless_only
 IDENTIFIER = "catalog.schema.orders"
 
 
+def test_external_catalog_error_defaults_are_present():
+    error = SparklessExternalCatalogError("manually constructed")
+    for field in (
+        "operation",
+        "category",
+        "code",
+        "identifier",
+        "version",
+        "expected_version",
+        "actual_version",
+        "retryability",
+        "provider_error_type",
+    ):
+        assert getattr(error, field) is None
+
+
 @pytest.fixture
 def session():
     spark = SparkSession("python-external-catalog")

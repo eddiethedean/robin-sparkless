@@ -11,15 +11,15 @@ from sparkless.sql.types import StructType
 class SparklessError(RuntimeError): ...
 class SparklessCancelledError(SparklessError): ...
 class SparklessExternalCatalogError(SparklessError):
-    operation: str
-    category: str
+    operation: Optional[str]
+    category: Optional[str]
     code: Optional[str]
-    identifier: str
+    identifier: Optional[str]
     version: Optional[int]
     expected_version: Optional[int]
     actual_version: Optional[int]
-    retryability: str
-    provider_error_type: str
+    retryability: Optional[str]
+    provider_error_type: Optional[str]
 
 class PySparkSessionBuilder:
     def app_name(self, name: str) -> PySparkSessionBuilder: ...
