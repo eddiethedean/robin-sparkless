@@ -169,8 +169,17 @@ fn descriptor_from_python(value: &Bound<'_, PyAny>) -> PyResult<ExternalTableDes
     })
 }
 
-const CALLBACK_ERROR_PREFIX: &str = "\u{1e}sparkless-external-catalog-error:";
 const CALLBACK_ERROR_SUFFIX: &str = "\u{1e}";
+
+fn callback_error_prefix() -> &'static str {
+    static PREFIX: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PREFIX.get_or_init(|| {
+        format!(
+            "\u{1e}sparkless-external-catalog-error:{}:",
+            uuid::Uuid::new_v4().simple()
+        )
+    })
+}
 
 /// This wire payload crosses Polars' string-only error boundary. It is intentionally private;
 /// Python callers receive the native SparklessExternalCatalogError class instead.
@@ -253,13 +262,20 @@ fn safe_token(value: &Bound<'_, PyAny>) -> Option<String> {
 
 fn safe_instance_field<'py>(
     instance_fields: Option<&Bound<'py, PyDict>>,
+    exception: &Bound<'py, PyAny>,
     key: &str,
 ) -> Option<Bound<'py, PyAny>> {
-    instance_fields?.get_item(key).ok().flatten()
+    instance_fields
+        .and_then(|fields| fields.get_item(key).ok().flatten())
+        .or_else(|| exception.getattr(key).ok())
 }
 
-fn safe_version_field(instance_fields: Option<&Bound<'_, PyDict>>, key: &str) -> Option<i64> {
-    let value = safe_instance_field(instance_fields, key)?;
+fn safe_version_field(
+    instance_fields: Option<&Bound<'_, PyDict>>,
+    exception: &Bound<'_, PyAny>,
+    key: &str,
+) -> Option<i64> {
+    let value = safe_instance_field(instance_fields, exception, key)?;
     if value.is_instance_of::<PyBool>() {
         return None;
     }
@@ -317,10 +333,10 @@ fn callback_failure(
         .and_then(|fields| fields.cast_into::<PyDict>().ok());
     let instance_fields = instance_fields.as_ref();
 
-    let explicit_category = safe_instance_field(instance_fields, "category")
+    let explicit_category = safe_instance_field(instance_fields, exception, "category")
         .as_ref()
         .and_then(safe_token);
-    let code = safe_instance_field(instance_fields, "code")
+    let code = safe_instance_field(instance_fields, exception, "code")
         .as_ref()
         .and_then(safe_token);
     let category = explicit_category.unwrap_or_else(|| {
@@ -334,12 +350,12 @@ fn callback_failure(
             "provider_failure".into()
         }
     });
-    let retryability = safe_instance_field(instance_fields, "retryability")
+    let retryability = safe_instance_field(instance_fields, exception, "retryability")
         .as_ref()
         .and_then(safe_token)
         .filter(|value| matches!(value.as_str(), "retryable" | "terminal" | "uncertain"))
         .or_else(|| {
-            safe_instance_field(instance_fields, "retryable")
+            safe_instance_field(instance_fields, exception, "retryable")
                 .filter(|value| value.is_instance_of::<PyBool>())
                 .and_then(|value| value.extract::<bool>().ok())
                 .map(|retryable| if retryable { "retryable" } else { "terminal" }.to_string())
@@ -358,8 +374,8 @@ fn callback_failure(
         code,
         identifier: safe_identifier(identifier),
         version,
-        expected_version: safe_version_field(instance_fields, "expected_version"),
-        actual_version: safe_version_field(instance_fields, "actual_version"),
+        expected_version: safe_version_field(instance_fields, exception, "expected_version"),
+        actual_version: safe_version_field(instance_fields, exception, "actual_version"),
         retryability,
         provider_error_type,
     }
@@ -375,13 +391,15 @@ fn callback_error(
     let failure = callback_failure(py, operation, identifier, version, &error);
     let serialized = serde_json::to_string(&failure).unwrap_or_else(|_| "{}".into());
     EngineError::User(format!(
-        "{} {CALLBACK_ERROR_PREFIX}{serialized}{CALLBACK_ERROR_SUFFIX}",
-        failure.message()
+        "{} {}{serialized}{CALLBACK_ERROR_SUFFIX}",
+        failure.message(),
+        callback_error_prefix()
     ))
 }
 
 pub(crate) fn callback_failure_from_message(py: Python<'_>, message: &str) -> Option<PyErr> {
-    let start = message.find(CALLBACK_ERROR_PREFIX)? + CALLBACK_ERROR_PREFIX.len();
+    let prefix = callback_error_prefix();
+    let start = message.find(prefix)? + prefix.len();
     let end = message[start..].find(CALLBACK_ERROR_SUFFIX)? + start;
     let failure = serde_json::from_str::<CallbackFailure>(&message[start..end]).ok()?;
     let error = super::SparklessExternalCatalogError::new_err(failure.message());

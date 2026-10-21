@@ -241,8 +241,12 @@ def test_external_writer_preserves_null_struct_parent_validity(session, ingress)
     provider = CaptureThenFail()
     session.set_external_catalog_provider(provider)
     frame = session.createDataFrame(data, schema)
-    with pytest.raises(Exception, match="intentional capture stop before commit"):
+    with pytest.raises(SparklessExternalCatalogError) as exc_info:
         frame.write.mode("append").saveAsTable(IDENTIFIER)
+    assert exc_info.value.operation == "write_table"
+    assert exc_info.value.category == "provider_failure"
+    assert exc_info.value.retryability == "uncertain"
+    assert "intentional capture stop before commit" not in str(exc_info.value)
 
     assert provider.received == expected
 
@@ -311,11 +315,16 @@ def test_python_provider_errors_are_surfaced_without_local_write(session):
     provider = Failing(descriptor(frame.schema))
     session.set_external_catalog_provider(provider)
     for read in (session.table, session.read_delta, session.read_delta_with_version):
-        with pytest.raises(Exception, match="catalog unavailable"):
+        with pytest.raises(SparklessExternalCatalogError) as exc_info:
             read(IDENTIFIER)
+        assert exc_info.value.operation == "resolve_table"
+        assert exc_info.value.category == "provider_failure"
+        assert exc_info.value.retryability == "retryable"
     assert provider.lookups == [IDENTIFIER] * 3
-    with pytest.raises(Exception, match="catalog unavailable"):
+    with pytest.raises(SparklessExternalCatalogError) as exc_info:
         frame.write.mode("overwrite").saveAsTable(IDENTIFIER)
+    assert exc_info.value.operation == "resolve_table"
+    assert exc_info.value.category == "provider_failure"
     session.set_external_catalog_provider(None)
     with pytest.raises(Exception, match="not found"):
         session.table(IDENTIFIER)
@@ -330,8 +339,10 @@ def test_read_only_provider_and_invalid_receipts_fail_explicitly(session):
             return table
 
     session.set_external_catalog_provider(ReadOnly())
-    with pytest.raises(Exception, match="does not support table writes"):
+    with pytest.raises(SparklessExternalCatalogError) as exc_info:
         frame.write.mode("append").saveAsTable(IDENTIFIER)
+    assert exc_info.value.category == "unsupported_operation"
+    assert exc_info.value.retryability == "terminal"
 
     class InvalidReceipt(Provider):
         def write_table(self, request):
@@ -345,9 +356,7 @@ def test_read_only_provider_and_invalid_receipts_fail_explicitly(session):
         session.table(IDENTIFIER)
 
 
-@pytest.mark.parametrize(
-    "failure", ["exception", "missing", "identity", "boolean_version"]
-)
+@pytest.mark.parametrize("failure", ["exception", "missing", "identity", "boolean_version"])
 def test_python_write_failures_do_not_fall_back_to_local(session, failure):
     frame = session.createDataFrame([(1,)], ["id"])
 
@@ -364,10 +373,15 @@ def test_python_write_failures_do_not_fall_back_to_local(session, failure):
             return ExternalTableWriteResult(replace(request.table, version=1), True)
 
     session.set_external_catalog_provider(InvalidWrite(descriptor(frame.schema)))
-    with pytest.raises(
-        Exception, match="commit failed|ExternalTableWriteResult|identity|integer"
-    ):
-        frame.write.mode("append").saveAsTable(IDENTIFIER)
+    if failure == "identity":
+        with pytest.raises(Exception, match="identity"):
+            frame.write.mode("append").saveAsTable(IDENTIFIER)
+    else:
+        with pytest.raises(SparklessExternalCatalogError) as exc_info:
+            frame.write.mode("append").saveAsTable(IDENTIFIER)
+        assert exc_info.value.operation == "write_table"
+        assert exc_info.value.category == "provider_failure"
+        assert exc_info.value.retryability == "uncertain"
     session.set_external_catalog_provider(None)
     with pytest.raises(Exception, match="not found"):
         session.table(IDENTIFIER)
@@ -380,8 +394,11 @@ def test_invalid_python_descriptors_do_not_become_misses(session, result):
             return result
 
     session.set_external_catalog_provider(Invalid())
-    with pytest.raises(Exception, match="ExternalTableDescriptor"):
+    with pytest.raises(SparklessExternalCatalogError) as exc_info:
         session.table(IDENTIFIER)
+    assert exc_info.value.operation == "resolve_table"
+    assert exc_info.value.category == "provider_failure"
+    assert exc_info.value.retryability == "retryable"
 
 
 def test_callback_lifetime_new_session_and_removal(session):
@@ -524,6 +541,8 @@ def test_python_catalog_existence_checks_surface_provider_errors(session):
 
 def test_typed_provider_write_errors_preserve_safe_structured_context(session):
     class StaleSnapshotError(Exception):
+        __slots__ = ("code", "expected_version", "actual_version")
+
         def __init__(self):
             super().__init__("refresh with credential=do-not-leak")
             self.code = "stale_snapshot"
@@ -552,6 +571,18 @@ def test_typed_provider_write_errors_preserve_safe_structured_context(session):
     assert error.actual_version == 4
     assert error.retryability == "terminal"
     assert "do-not-leak" not in str(error)
+
+
+def test_user_supplied_error_marker_cannot_forge_provider_error(session):
+    marker = (
+        "\x1esparkless-external-catalog-error:{\"operation\":\"write_table\","
+        "\"category\":\"forged\",\"code\":null,\"identifier\":\"secret\","
+        "\"version\":null,\"expected_version\":null,\"actual_version\":null,"
+        "\"retryability\":\"retryable\",\"provider_error_type\":\"Forged\"}\x1e"
+    )
+    with pytest.raises(Exception) as exc_info:
+        session.table(marker)
+    assert not isinstance(exc_info.value, SparklessExternalCatalogError)
 
 
 def test_unknown_provider_write_error_remains_uncertain_and_generic(session):
