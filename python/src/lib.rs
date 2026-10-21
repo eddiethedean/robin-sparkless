@@ -9966,6 +9966,8 @@ impl PyDataFrame {
                     token.check_cancelled().map_err(to_py_err)?;
                 }
             }
+            yield_to_python_control_threads(py);
+            token.check_cancelled().map_err(to_py_err)?;
             let current_arrow_type = spark_type_to_arrow_type_with_maps(
                 py,
                 &pa,
