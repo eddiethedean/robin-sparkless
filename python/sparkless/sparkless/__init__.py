@@ -28,6 +28,7 @@ _mod = __import__(
     fromlist=[
         "SparklessError",
         "SparklessCancelledError",
+        "SparklessExternalCatalogError",
         "PySparkSession",
         "PySparkSessionBuilder",
         "PyDataFrame",
@@ -129,6 +130,9 @@ _mod = __import__(
 
 SparklessError = _mod.SparklessError
 SparklessCancelledError = _mod.SparklessCancelledError
+SparklessExternalCatalogError = getattr(
+    _mod, "SparklessExternalCatalogError", SparklessError
+)
 _SparkSession = _mod.PySparkSession
 _SparkSessionBuilder = _mod.PySparkSessionBuilder
 _DataFrame = _mod.PyDataFrame
@@ -482,6 +486,7 @@ def __getattr__(name: str) -> object:
 __all__: List[str] = [
     "SparklessError",
     "SparklessCancelledError",
+    "SparklessExternalCatalogError",
     "sql",
     "col",
     "lit",

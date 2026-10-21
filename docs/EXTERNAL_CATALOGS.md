@@ -129,8 +129,9 @@ orders = spark.table("main.analytics.orders")
 protocols, the `ExternalTableFormat` and
 `ExternalTableSaveMode` string enums, `ArrowIpcStream`, and the
 `ExternalTableDescriptor`, `ExternalTableWriteRequest`, and `ExternalTableWriteResult`
-dataclasses. A read-only object may omit both write methods; attempted writes then raise
-an explicit unsupported error.
+dataclasses. It also exports `SparklessExternalCatalogError`, available from
+`sparkless` and `sparkless.errors`. A read-only object may omit both write methods;
+attempted writes then raise an explicit unsupported error.
 
 The materializing `write_table` callback receives the exact identifier, resolved descriptor, save mode
 (`"append"` or `"overwrite"`), optional format, ordered option pairs (including
@@ -164,7 +165,31 @@ After committing through its storage backend, the callback must return
 `ExternalTableWriteResult(table=committed_descriptor, committed_version=version)`.
 The native backend validates the receipt's identity and version before reporting
 success. A callback exception, invalid descriptor, or invalid receipt is surfaced as
-a Sparkless error and never triggers a local fallback.
+a Sparkless error and never triggers a local fallback. A Python callback exception is
+surfaced as `SparklessExternalCatalogError`, a subclass of `SparklessError`. The public
+exception has `operation`, `category`, `code`, `identifier`, `version`,
+`expected_version`, `actual_version`, `retryability`, and `provider_error_type`
+attributes. `operation` is `resolve_table`, `write_table`, or
+`write_table_batches`. Provider exceptions may set `category`, `code`, `retryability`,
+`expected_version`, and `actual_version` as plain instance attributes. Categories and
+codes must be stable, non-sensitive tokens; `retryability` accepts `"retryable"`,
+`"terminal"`, or `"uncertain"`. If no category is provided, a custom exception class
+name such as `StaleSnapshotError` becomes `stale_snapshot`; built-in exceptions such as
+`RuntimeError` become `provider_failure` unless they provide a code, which is used as
+the category. The original exception message is not copied to the Sparkless error,
+because provider messages can contain credentials. URI identifiers are reduced to
+scheme and host; query and fragment components are removed. Non-URI identifiers with
+characters outside the table-name set are redacted.
+
+The default retryability describes the current operation with the same request: a stale
+snapshot, schema mismatch, or unsupported operation is `terminal`; a failed lookup is
+`retryable` because it has no write side effect; and an unclassified write failure is
+`uncertain` because the provider may have committed before raising. A terminal stale
+snapshot can be retried after resolving a fresh descriptor and building a new write. For
+an uncertain write, inspect or reconcile provider state before retrying. Sparkless does
+not retry provider callbacks automatically. Providers can set `retryability` when they
+know a more specific outcome, or set the boolean `retryable` attribute (`True` maps to
+`retryable`; `False` maps to `terminal`).
 
 Descriptor schemas use Sparkless `StructType` objects and preserve integer widths,
 decimal precision/scale, nested arrays/maps/structs, and field nullability through

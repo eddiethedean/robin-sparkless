@@ -10,7 +10,11 @@ from threading import Event
 
 import pytest
 
-from sparkless import SparklessCancelledError, SparkSession
+from sparkless import (
+    SparklessCancelledError,
+    SparklessExternalCatalogError,
+    SparkSession,
+)
 from sparkless.external_catalog import (
     ArrowIpcStream,
     ExternalTableDescriptor,
@@ -508,10 +512,67 @@ def test_python_catalog_existence_checks_surface_provider_errors(session):
             raise RuntimeError("catalog service unavailable")
 
     session.set_external_catalog_provider(UnavailableProvider())
-    with pytest.raises(Exception, match="catalog service unavailable"):
+    with pytest.raises(SparklessExternalCatalogError) as exc_info:
         session.catalog.tableExists(IDENTIFIER)
-    with pytest.raises(Exception, match="catalog service unavailable"):
+    assert exc_info.value.operation == "resolve_table"
+    assert exc_info.value.category == "provider_failure"
+    assert exc_info.value.retryability == "retryable"
+    assert "catalog service unavailable" not in str(exc_info.value)
+    with pytest.raises(SparklessExternalCatalogError):
         session.catalog.getTable(IDENTIFIER)
+
+
+def test_typed_provider_write_errors_preserve_safe_structured_context(session):
+    class StaleSnapshotError(Exception):
+        def __init__(self):
+            super().__init__("refresh with credential=do-not-leak")
+            self.code = "stale_snapshot"
+            self.expected_version = 3
+            self.actual_version = 4
+
+    class StaleProvider(Provider):
+        def write_table(self, request):
+            raise StaleSnapshotError()
+
+    schema = T.StructType([T.StructField("id", T.LongType(), False)])
+    table = replace(descriptor(schema), version=3)
+    session.set_external_catalog_provider(StaleProvider(table))
+    frame = session.createDataFrame([(1,)], schema)
+
+    with pytest.raises(SparklessExternalCatalogError) as exc_info:
+        frame.write.mode("append").saveAsTable(IDENTIFIER)
+
+    error = exc_info.value
+    assert error.operation == "write_table"
+    assert error.category == "stale_snapshot"
+    assert error.code == "stale_snapshot"
+    assert error.identifier == IDENTIFIER
+    assert error.version == 3
+    assert error.expected_version == 3
+    assert error.actual_version == 4
+    assert error.retryability == "terminal"
+    assert "do-not-leak" not in str(error)
+
+
+def test_unknown_provider_write_error_remains_uncertain_and_generic(session):
+    class UnavailableProvider(Provider):
+        def write_table(self, request):
+            raise RuntimeError("token=do-not-leak")
+
+    schema = T.StructType([T.StructField("id", T.LongType(), False)])
+    session.set_external_catalog_provider(UnavailableProvider(descriptor(schema)))
+    frame = session.createDataFrame([(1,)], schema)
+
+    with pytest.raises(SparklessExternalCatalogError) as exc_info:
+        frame.write.mode("append").saveAsTable(IDENTIFIER)
+
+    error = exc_info.value
+    assert error.operation == "write_table"
+    assert error.category == "provider_failure"
+    assert error.code is None
+    assert error.provider_error_type == "RuntimeError"
+    assert error.retryability == "uncertain"
+    assert "do-not-leak" not in str(error)
 
 
 @pytest.mark.delta

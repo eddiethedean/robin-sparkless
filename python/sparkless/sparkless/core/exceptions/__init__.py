@@ -6,6 +6,7 @@ PySparkValueError: type[BaseException]
 
 SparklessError: type[BaseException]
 SparklessCancelledError: type[BaseException]
+SparklessExternalCatalogError: type[BaseException]
 
 try:
     from sparkless.errors import (
@@ -15,6 +16,7 @@ try:
         PySparkTypeError as _PSTE,
         PySparkValueError as _PSVE,
         SparklessCancelledError as _SCE,
+        SparklessExternalCatalogError as _SECE,
     )
 
     AnalysisException = _AE
@@ -23,16 +25,20 @@ try:
     PySparkTypeError = _PSTE
     PySparkValueError = _PSVE
     SparklessCancelledError = _SCE
+    SparklessExternalCatalogError = _SECE
 except ImportError:
     try:
         from sparkless._native import SparklessCancelledError as _SCE
         from sparkless._native import SparklessError as _SparklessError
+        from sparkless._native import SparklessExternalCatalogError as _SECE
 
         SparklessError = _SparklessError
         SparklessCancelledError = _SCE
+        SparklessExternalCatalogError = _SECE
     except ImportError:
         SparklessError = RuntimeError
         SparklessCancelledError = SparklessError
+        SparklessExternalCatalogError = SparklessError
     AnalysisException = SparklessError
     IllegalArgumentException = SparklessError
     PySparkRuntimeError = SparklessError
@@ -46,4 +52,5 @@ __all__ = [
     "PySparkTypeError",
     "PySparkRuntimeError",
     "SparklessCancelledError",
+    "SparklessExternalCatalogError",
 ]

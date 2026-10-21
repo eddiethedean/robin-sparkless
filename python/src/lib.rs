@@ -278,6 +278,11 @@ fn to_py_err(e: impl std::fmt::Display) -> PyErr {
 }
 
 fn to_py_err_msg(msg: &str) -> PyErr {
+    if let Some(error) =
+        Python::attach(|py| external_catalog::callback_failure_from_message(py, msg))
+    {
+        return error;
+    }
     let mut msg = msg.to_string();
     for prefix in [
         "user error: ",
@@ -386,6 +391,13 @@ create_exception!(
     SparklessCancelledError,
     SparklessError,
     "Sparkless action cancelled"
+);
+
+create_exception!(
+    _native,
+    SparklessExternalCatalogError,
+    SparklessError,
+    "External catalog provider callback failed"
 );
 
 /// Convert serde_json::Value to Python object.
@@ -15192,6 +15204,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add(
         "SparklessCancelledError",
         m.py().get_type::<SparklessCancelledError>(),
+    )?;
+    m.add(
+        "SparklessExternalCatalogError",
+        m.py().get_type::<SparklessExternalCatalogError>(),
     )?;
     m.add_function(wrap_pyfunction!(external_catalog::validate_descriptor, m)?)?;
     m.add_function(wrap_pyfunction!(
