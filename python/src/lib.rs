@@ -7689,6 +7689,9 @@ impl PyDataFrame {
         let mut wrapped = self.wrap_derived(df);
         for (name, column) in expressions {
             Self::remove_metadata_root(&mut wrapped, name);
+            wrapped
+                .arrow_schema_invalidated_fields
+                .insert(name.to_string());
             if let Some(source) = Self::column_source(column.expr()) {
                 self.copy_column_metadata(&source, name, &mut wrapped);
             } else {

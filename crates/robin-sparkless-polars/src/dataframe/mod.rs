@@ -1701,6 +1701,11 @@ impl DataFrame {
         token: &CancellationToken,
     ) -> Result<ArrowIpcBatchStream, EngineError> {
         token.check_cancelled()?;
+        if max_rows == 0 {
+            return Err(EngineError::User(
+                "max_rows must be greater than zero".into(),
+            ));
+        }
         if max_bytes == 0 {
             return Err(EngineError::User(
                 "max_bytes must be greater than zero".into(),
@@ -4694,6 +4699,20 @@ pub fn broadcast(df: &DataFrame) -> DataFrame {
 mod tests {
     use super::*;
     use polars::prelude::{IntoSeries, NamedFrom, Series};
+
+    #[test]
+    fn arrow_ipc_batches_reject_zero_max_rows() {
+        let series = Series::new("value".into(), &[1i64]);
+        let pl_df = polars::prelude::DataFrame::new_infer_height(vec![series.into()]).unwrap();
+        let df = DataFrame::from_polars(pl_df);
+
+        let result = df.to_arrow_ipc_batches_with_cancellation(0, 1024, &CancellationToken::new());
+
+        assert!(matches!(
+            result,
+            Err(EngineError::User(message)) if message == "max_rows must be greater than zero"
+        ));
+    }
 
     /// Issue #235: root-level string–numeric comparison coercion in filter.
     #[test]

@@ -62,3 +62,15 @@ def test_replaced_arrow_column_does_not_reuse_non_nullable_field(spark) -> None:
     assert exported.schema.field("id").nullable
     sink = pa.BufferOutputStream()
     pq.write_table(exported, sink)
+
+
+def test_with_columns_replaced_arrow_column_drops_stale_field_metadata(spark) -> None:
+    from sparkless.testing import get_imports
+
+    F = get_imports().functions
+    schema = pa.schema([pa.field("id", pa.int64(), metadata={b"field": b"stale"})])
+    source = pa.Table.from_pylist([{"id": 1}], schema=schema)
+    frame = spark.createDataFrame(source).withColumns({"id": F.lit(9)})
+
+    exported = frame.toArrow()
+    assert exported.schema.field("id").metadata is None
