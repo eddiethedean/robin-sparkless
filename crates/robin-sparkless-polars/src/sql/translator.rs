@@ -1567,6 +1567,34 @@ fn any_value_to_lit(av: AnyValue) -> Result<Expr, PolarsError> {
     })
 }
 
+/// Build a nested-field expression when a multipart SQL identifier points into a
+/// struct column. SQL also uses multipart identifiers for table aliases, so only
+/// interpret a path as struct access when its root resolves to a struct in the
+/// current DataFrame schema.
+fn sql_struct_field_expr(parts: &[spark_sql_parser::ast::Ident], df: &DataFrame) -> Option<Expr> {
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let names: Vec<&str> = parts.iter().map(|part| part.value.as_str()).collect();
+    // A table alias can prefix its columns (e.g. `o_details`), while a regular
+    // struct path starts at the first segment (`details.coupon`). Try each
+    // possible root in source order and join any alias prefix with underscores.
+    for start in 0..names.len() - 1 {
+        for end in start + 1..names.len() {
+            let root = names[start..end].join("_");
+            if matches!(
+                df.get_column_dtype(&root),
+                Some(polars::prelude::DataType::Struct(_))
+            ) {
+                let field_path = names[end..].join(".");
+                return Some(col(format!("{root}.{field_path}").as_str()));
+            }
+        }
+    }
+    None
+}
+
 fn sql_expr_to_polars(
     expr: &SqlExpr,
     session: &SparkSession,
@@ -1584,6 +1612,11 @@ fn sql_expr_to_polars(
             Ok(col(resolved.as_str()))
         }
         SqlExpr::CompoundIdentifier(parts) => {
+            if let Some(df) = df {
+                if let Some(expr) = sql_struct_field_expr(parts, df) {
+                    return Ok(expr);
+                }
+            }
             // Qualified column (e.g. e.salary): try alias_column form (e_salary) first for aliased
             // joins, then fall back to bare column name (salary). This matches the projection logic
             // in apply_projection and is required for table-prefixed SQL in WHERE / JOIN / GROUP BY.
@@ -2431,22 +2464,30 @@ fn apply_projection(
                 ProjItem::Expr(col(resolved.as_str()), name.to_string())
             }
             SelectItem::UnnamedExpr(SqlExpr::CompoundIdentifier(parts)) => {
-                // Qualified column (e.g. e.name): try alias_column form (e_name) first for aliased JOIN (#152); else bare column.
-                let qualified = parts
-                    .iter()
-                    .map(|i| i.value.as_str())
-                    .collect::<Vec<_>>()
-                    .join("_");
-                let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                let resolved = df
-                    .resolve_column_name(&qualified)
-                    .or_else(|_| df.resolve_column_name(last))?;
-                let output_name = if df.resolve_column_name(&qualified).is_ok() {
-                    qualified
+                if let Some(expr) = sql_struct_field_expr(parts, df) {
+                    let output_name = parts
+                        .last()
+                        .map(|part| part.value.clone())
+                        .unwrap_or_default();
+                    ProjItem::Expr(expr, output_name)
                 } else {
-                    last.to_string()
-                };
-                ProjItem::Expr(col(resolved.as_str()), output_name)
+                    // Qualified column (e.g. e.name): try alias_column form (e_name) first for aliased JOIN (#152); else bare column.
+                    let qualified = parts
+                        .iter()
+                        .map(|i| i.value.as_str())
+                        .collect::<Vec<_>>()
+                        .join("_");
+                    let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                    let resolved = df
+                        .resolve_column_name(&qualified)
+                        .or_else(|_| df.resolve_column_name(last))?;
+                    let output_name = if df.resolve_column_name(&qualified).is_ok() {
+                        qualified
+                    } else {
+                        last.to_string()
+                    };
+                    ProjItem::Expr(col(resolved.as_str()), output_name)
+                }
             }
             SelectItem::UnnamedExpr(SqlExpr::Function(func)) => {
                 projection_function_to_item(func, session, Some(df))?
@@ -2460,16 +2501,20 @@ fn apply_projection(
                         ProjItem::Expr(col(resolved.as_str()), alias_str)
                     }
                     SqlExpr::CompoundIdentifier(parts) => {
-                        let qualified = parts
-                            .iter()
-                            .map(|i| i.value.as_str())
-                            .collect::<Vec<_>>()
-                            .join("_");
-                        let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                        let resolved = df
-                            .resolve_column_name(&qualified)
-                            .or_else(|_| df.resolve_column_name(last))?;
-                        ProjItem::Expr(col(resolved.as_str()), alias_str)
+                        if let Some(expr) = sql_struct_field_expr(parts, df) {
+                            ProjItem::Expr(expr, alias_str)
+                        } else {
+                            let qualified = parts
+                                .iter()
+                                .map(|i| i.value.as_str())
+                                .collect::<Vec<_>>()
+                                .join("_");
+                            let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                            let resolved = df
+                                .resolve_column_name(&qualified)
+                                .or_else(|_| df.resolve_column_name(last))?;
+                            ProjItem::Expr(col(resolved.as_str()), alias_str)
+                        }
                     }
                     SqlExpr::Function(func) => {
                         let mut item = projection_function_to_item(func, session, Some(df))?;
