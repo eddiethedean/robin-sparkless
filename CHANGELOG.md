@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.15.2] - 2026-10-22
 
+### Release
+
+- Published Rust crates to crates.io and Python distributions to PyPI from tag `v4.15.2`.
+
 ### Fixed
 
 - **SQL timestamp comparisons and casts** — Compare UTC Delta timestamps with `CAST('...' AS TIMESTAMP)` expressions without a timezone-type mismatch, including SQL rendered by BrickHouse. Timestamp, date, and timestamp-without-time-zone cast chains preserve session-local values; string casts retain fractional seconds and explicit offsets. Malformed Unicode offsets no longer panic, and timestamp casts continue accepting negative years and flexible whitespace (#1720).
