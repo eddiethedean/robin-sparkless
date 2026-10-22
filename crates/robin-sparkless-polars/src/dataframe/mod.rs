@@ -1013,50 +1013,43 @@ impl DataFrame {
                     }
                     expr_to_coerce.clone()
                 } else if is_comparison_op
-                    && ((left_is_col && right_is_temporal_lit)
-                        || (right_is_col && left_is_temporal_lit))
+                    && ((right_is_temporal_lit && !left_is_temporal_lit)
+                        || (left_is_temporal_lit && !right_is_temporal_lit))
                 {
-                    let col_name = if left_is_col {
-                        match left_inner {
-                            Expr::Column(n) => n.as_str(),
-                            _ => unreachable!("column check above"),
-                        }
+                    // The non-literal side may be a cast or a function, not only
+                    // a bare column. Resolve its output type from the lazy schema
+                    // so temporal coercion also covers expressions such as
+                    // CAST(event_ts AS TIMESTAMP) = TIMESTAMP '...'.
+                    let (value_expr, literal_expr, value_on_left) = if right_is_temporal_lit {
+                        (left_inner, right_inner, true)
                     } else {
-                        match right_inner {
-                            Expr::Column(n) => n.as_str(),
-                            _ => unreachable!("column check above"),
-                        }
+                        (right_inner, left_inner, false)
                     };
-                    if let Some(col_type) = self
-                        .get_column_dtype(col_name)
-                        .filter(|dtype| matches!(dtype, DataType::Date | DataType::Datetime(_, _)))
+                    let value_type = match value_expr {
+                        Expr::Column(name) => self.get_column_dtype(name.as_str()),
+                        _ => self.get_expr_output_dtype(value_expr),
+                    };
+                    if let (Some(value_type), Some(literal_type)) =
+                        (value_type, literal_dtype(literal_expr))
+                        && matches!(value_type, DataType::Date | DataType::Datetime(_, _))
                     {
-                        let literal_type = if left_is_col {
-                            literal_dtype(right_inner)
+                        let (left_type, right_type) = if value_on_left {
+                            (value_type, literal_type)
                         } else {
-                            literal_dtype(left_inner)
+                            (literal_type, value_type)
                         };
-                        if let Some(literal_type) = literal_type {
-                            let (left_type, right_type) = if left_is_col {
-                                (col_type, literal_type)
-                            } else {
-                                (literal_type, col_type)
-                            };
-                            let (new_left, new_right) = coerce_for_pyspark_comparison(
-                                left_inner.clone(),
-                                right_inner.clone(),
-                                &left_type,
-                                &right_type,
-                                op,
-                            )
-                            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
-                            Expr::BinaryExpr {
-                                left: Arc::new(new_left),
-                                op: *op,
-                                right: Arc::new(new_right),
-                            }
-                        } else {
-                            expr_to_coerce.clone()
+                        let (new_left, new_right) = coerce_for_pyspark_comparison(
+                            left_inner.clone(),
+                            right_inner.clone(),
+                            &left_type,
+                            &right_type,
+                            op,
+                        )
+                        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+                        Expr::BinaryExpr {
+                            left: Arc::new(new_left),
+                            op: *op,
+                            right: Arc::new(new_right),
                         }
                     } else {
                         expr_to_coerce.clone()

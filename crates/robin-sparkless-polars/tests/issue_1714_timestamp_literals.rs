@@ -158,3 +158,63 @@ fn hour_only_timestamp_defaults_minutes_and_seconds() {
 
     assert_eq!(rows[0]["ts"], "2026-10-18T03:00:00.000000");
 }
+
+#[test]
+fn explicit_region_timezone_after_fraction_is_honored() {
+    let session = session_with_timestamp("2026-10-18 07:30:00", "UTC");
+    let rows = session
+        .sql("SELECT TIMESTAMP '2026-10-18 03:30:00.123456America/New_York' AS ts FROM orders")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows[0]["ts"], "2026-10-18T07:30:00.123456");
+
+    let rows = session
+        .sql("SELECT TIMESTAMP '2026-10-18 03:30:00+04:00' AS ts FROM orders")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows[0]["ts"], "2026-10-17T23:30:00.000000");
+}
+
+#[test]
+fn date_literal_uses_session_timezone_when_compared_with_timestamp() {
+    let session = session_with_timestamp("2026-10-18 04:00:00", "America/New_York");
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE event_ts = DATE '2026-10-18'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn cast_timestamp_expression_compares_with_typed_literal() {
+    let session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE CAST(event_ts AS TIMESTAMP) = TIMESTAMP '2026-10-18 03:30:00'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn non_utc_column_timezone_compares_by_instant() {
+    let session = session_with_timestamp_dtype(
+        "2026-10-18 07:30:00",
+        "America/New_York",
+        TimeUnit::Microseconds,
+        TimeZone::opt_try_new(Some("America/New_York")).unwrap(),
+    );
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE event_ts = TIMESTAMP '2026-10-18 03:30:00'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}

@@ -718,20 +718,18 @@ pub fn coerce_for_pyspark_comparison(
         && matches!(right_type, DataType::Datetime(_, _)))
         || (matches!(left_type, DataType::Datetime(_, _)) && right_type == &DataType::Date);
     if date_vs_datetime {
-        let target_dt = if matches!(left_type, DataType::Datetime(_, _)) {
-            left_type.clone()
-        } else {
-            right_type.clone()
-        };
+        // A Spark DATE becomes midnight in the session timezone when compared
+        // with a timestamp. Compare physical microseconds so timezone metadata
+        // cannot make otherwise equal instants incompatible in Polars.
         let left_out = if left_type == &DataType::Date {
-            coerce_to_type(left, target_dt.clone())
+            date_to_session_timestamp_micros(left)
         } else {
-            left
+            datetime_to_micros(left, left_type)
         };
         let right_out = if right_type == &DataType::Date {
-            coerce_to_type(right, target_dt)
+            date_to_session_timestamp_micros(right)
         } else {
-            right
+            datetime_to_micros(right, right_type)
         };
         return Ok((left_out, right_out));
     }
@@ -741,31 +739,14 @@ pub fn coerce_for_pyspark_comparison(
     // outside the nanosecond epoch range. When only one operand has timezone
     // metadata, drop that metadata while preserving its epoch value; both sides
     // then compare on the same instant representation.
-    if let (
-        DataType::Datetime(left_unit, left_timezone),
-        DataType::Datetime(right_unit, right_timezone),
-    ) = (left_type, right_type)
-    {
-        if left_unit == right_unit && left_timezone == right_timezone {
-            return Ok((left, right));
-        }
-        let common_unit = TimeUnit::Microseconds;
-        let common_timezone = match (left_timezone, right_timezone) {
-            (Some(left_timezone), Some(_)) => Some(left_timezone.clone()),
-            _ => None,
-        };
-        let common_type = DataType::Datetime(common_unit, common_timezone);
-        let left = if left_type == &common_type {
-            left
-        } else {
-            coerce_to_type(left, common_type.clone())
-        };
-        let right = if right_type == &common_type {
-            right
-        } else {
-            coerce_to_type(right, common_type)
-        };
-        return Ok((left, right));
+    if matches!(
+        (left_type, right_type),
+        (DataType::Datetime(_, _), DataType::Datetime(_, _))
+    ) {
+        return Ok((
+            datetime_to_micros(left, left_type),
+            datetime_to_micros(right, right_type),
+        ));
     }
 
     // Equal non-numeric types: leave as-is for now.
@@ -775,6 +756,119 @@ pub fn coerce_for_pyspark_comparison(
 
     // Fallback to generic comparison coercion (may error with a clear message).
     coerce_for_comparison(left, right, left_type, right_type)
+}
+
+fn datetime_to_micros(expr: Expr, dtype: &DataType) -> Expr {
+    let DataType::Datetime(_, timezone) = dtype else {
+        return expr;
+    };
+    // Keep the source zone while changing units; the final integer cast strips
+    // zone metadata without changing the represented epoch instant.
+    expr.cast(DataType::Datetime(TimeUnit::Microseconds, timezone.clone()))
+        .cast(DataType::Int64)
+}
+
+fn date_to_session_timestamp_micros(expr: Expr) -> Expr {
+    let timezone = crate::get_thread_session_time_zone();
+    expr.map(
+        move |column| {
+            use chrono::TimeZone;
+
+            let tz = timezone.parse::<chrono_tz::Tz>().ok();
+            let fixed = parse_comparison_fixed_offset(&timezone);
+            let mut micros = Vec::with_capacity(column.len());
+            for index in 0..column.len() {
+                let days = match column.get(index)? {
+                    AnyValue::Date(days) => Some(days),
+                    AnyValue::Int32(days) => Some(days),
+                    AnyValue::Null => None,
+                    other => {
+                        return Err(PolarsError::ComputeError(
+                            format!("expected DATE value, found {other:?}").into(),
+                        ));
+                    }
+                };
+                let Some(days) = days else {
+                    micros.push(None);
+                    continue;
+                };
+                let Some(date) = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).and_then(|epoch| {
+                    epoch.checked_add_signed(chrono::TimeDelta::days(i64::from(days)))
+                }) else {
+                    micros.push(None);
+                    continue;
+                };
+                let naive = date.and_hms_opt(0, 0, 0).expect("midnight is valid");
+                let value = if let Some(tz) = tz {
+                    match tz.from_local_datetime(&naive) {
+                        chrono::LocalResult::Single(value) => Some(value.timestamp_micros()),
+                        chrono::LocalResult::Ambiguous(first, second) => {
+                            Some(first.min(second).timestamp_micros())
+                        }
+                        chrono::LocalResult::None => None,
+                    }
+                } else if let Some(offset) = fixed {
+                    offset
+                        .from_local_datetime(&naive)
+                        .single()
+                        .map(|value| value.timestamp_micros())
+                } else {
+                    return Err(PolarsError::ComputeError(
+                        format!("invalid session timezone {timezone:?}").into(),
+                    ));
+                };
+                micros.push(value);
+            }
+            Ok(
+                Int64Chunked::from_iter_options(column.name().clone(), micros.iter().copied())
+                    .into_series()
+                    .into(),
+            )
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
+    )
+}
+
+fn parse_comparison_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
+    let value = ["UTC", "GMT", "UT"]
+        .iter()
+        .find_map(|prefix| {
+            value
+                .strip_prefix(prefix)
+                .filter(|rest| rest.starts_with('+') || rest.starts_with('-'))
+        })
+        .unwrap_or(value);
+    if value == "UTC" || value == "Z" {
+        return chrono::FixedOffset::east_opt(0);
+    }
+    let (sign, value) = match value.as_bytes().first()? {
+        b'+' => (1, &value[1..]),
+        b'-' => (-1, &value[1..]),
+        _ => return None,
+    };
+    let mut parts = value.split(':');
+    let hours = parts.next()?.parse::<i32>().ok()?;
+    let minutes = parts
+        .next()
+        .map(str::parse::<i32>)
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
+    let seconds = parts
+        .next()
+        .map(str::parse::<i32>)
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
+    if parts.next().is_some()
+        || hours > 18
+        || minutes > 59
+        || seconds > 59
+        || (hours == 18 && (minutes != 0 || seconds != 0))
+    {
+        return None;
+    }
+    chrono::FixedOffset::east_opt(sign * (hours * 3600 + minutes * 60 + seconds))
 }
 
 /// Infer DataType from an expression when it is a literal (for coercion heuristics).

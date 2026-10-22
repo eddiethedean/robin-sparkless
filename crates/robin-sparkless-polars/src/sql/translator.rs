@@ -184,12 +184,18 @@ fn parse_sql_timestamp_micros(value: &str, session_timezone: &str) -> Result<i64
     if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(value) {
         return Ok(datetime.timestamp_micros());
     }
-    let naive = parse_sql_date_time(value).ok_or_else(|| {
+    // Spark permits an explicit region or UTC offset after the timestamp body,
+    // including after fractional seconds (for example `...00.123456America/New_York`).
+    // Parse that suffix before parsing the fractional part so it cannot be silently
+    // truncated as excess fractional digits.
+    let (local_value, explicit_timezone) = split_sql_timestamp_timezone(value);
+    let naive = parse_sql_date_time(local_value).ok_or_else(|| {
         PolarsError::InvalidOperation(format!("SQL: invalid TIMESTAMP literal {value:?}").into())
     })?;
 
     use chrono::TimeZone;
-    if let Ok(timezone) = session_timezone.parse::<chrono_tz::Tz>() {
+    let timezone_name = explicit_timezone.unwrap_or(session_timezone);
+    if let Ok(timezone) = timezone_name.parse::<chrono_tz::Tz>() {
         return match timezone.from_local_datetime(&naive) {
             chrono::LocalResult::Single(datetime) => Ok(datetime.timestamp_micros()),
             chrono::LocalResult::Ambiguous(first, _) => Ok(first.timestamp_micros()),
@@ -198,7 +204,7 @@ fn parse_sql_timestamp_micros(value: &str, session_timezone: &str) -> Result<i64
             )),
         };
     }
-    if let Some(offset) = parse_sql_fixed_offset(session_timezone) {
+    if let Some(offset) = parse_sql_fixed_offset(timezone_name) {
         return Ok(offset
             .from_local_datetime(&naive)
             .single()
@@ -206,8 +212,30 @@ fn parse_sql_timestamp_micros(value: &str, session_timezone: &str) -> Result<i64
             .timestamp_micros());
     }
     Err(PolarsError::InvalidOperation(
-        format!("SQL: invalid session timezone {session_timezone:?}").into(),
+        format!("SQL: invalid timezone {timezone_name:?} in TIMESTAMP literal").into(),
     ))
+}
+
+fn split_sql_timestamp_timezone(value: &str) -> (&str, Option<&str>) {
+    // Region IDs and Spark's UTC/GMT/UT-prefixed offsets are adjacent to the
+    // timestamp body in SQL literals. Find the first suffix candidate whose
+    // prefix is itself a complete local timestamp.
+    for (index, ch) in value.char_indices() {
+        let prefix = &value[..index];
+        let has_time = prefix.contains(['T', ' ']);
+        if index == 0
+            || !(ch.is_ascii_alphabetic() || ch == '/' || (has_time && matches!(ch, '+' | '-')))
+        {
+            continue;
+        }
+        let suffix = &value[index..];
+        let valid =
+            suffix.parse::<chrono_tz::Tz>().is_ok() || parse_sql_fixed_offset(suffix).is_some();
+        if valid && parse_sql_date_time(prefix).is_some() {
+            return (prefix, Some(suffix));
+        }
+    }
+    (value, None)
 }
 
 /// Map SQL AST data types to PySpark-style cast type names.
