@@ -1413,22 +1413,73 @@ fn sql_expr_to_polars(
                     ));
                 }
             };
-            let dtype = match &typed.data_type {
-                SqlDataType::Date => polars::prelude::DataType::Date,
-                SqlDataType::Timestamp(_, _) => polars::prelude::DataType::Datetime(
-                    polars::prelude::TimeUnit::Microseconds,
-                    None,
-                ),
+            match &typed.data_type {
+                SqlDataType::Date => {
+                    let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(
+                        |error| {
+                            PolarsError::InvalidOperation(
+                                format!("SQL: invalid DATE literal {value:?}: {error}").into(),
+                            )
+                        },
+                    )?;
+                    let days = (date - chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
+                        .num_days() as i32;
+                    Ok(lit(days).cast(polars::prelude::DataType::Date))
+                }
+                SqlDataType::Timestamp(_, _) => {
+                    let parsed_with_offset = chrono::DateTime::parse_from_rfc3339(value).ok();
+                    let micros = if let Some(datetime) = parsed_with_offset {
+                        datetime.timestamp_micros()
+                    } else {
+                        let naive = [
+                            "%Y-%m-%d %H:%M:%S%.f",
+                            "%Y-%m-%dT%H:%M:%S%.f",
+                            "%Y-%m-%d %H:%M:%S",
+                            "%Y-%m-%dT%H:%M:%S",
+                        ]
+                        .iter()
+                        .find_map(|format| {
+                            chrono::NaiveDateTime::parse_from_str(value, format).ok()
+                        })
+                        .ok_or_else(|| {
+                            PolarsError::InvalidOperation(
+                                format!("SQL: invalid TIMESTAMP literal {value:?}").into(),
+                            )
+                        })?;
+                        let timezone = session
+                            .get_config()
+                            .get("spark.sql.session.timeZone")
+                            .map(String::as_str)
+                            .unwrap_or("UTC");
+                        let timezone: chrono_tz::Tz = timezone.parse().map_err(|_| {
+                            PolarsError::InvalidOperation(
+                                format!("SQL: invalid session timezone {timezone:?}").into(),
+                            )
+                        })?;
+                        use chrono::TimeZone;
+                        match timezone.from_local_datetime(&naive) {
+                            chrono::LocalResult::Single(datetime) => datetime.timestamp_micros(),
+                            chrono::LocalResult::Ambiguous(first, _) => first.timestamp_micros(),
+                            chrono::LocalResult::None => {
+                                return Err(PolarsError::InvalidOperation(
+                                    format!("SQL: TIMESTAMP literal {value:?} falls in a timezone gap")
+                                        .into(),
+                                ));
+                            }
+                        }
+                    };
+                    Ok(lit(micros).cast(polars::prelude::DataType::Datetime(
+                        polars::prelude::TimeUnit::Microseconds,
+                        Some(polars::prelude::TimeZone::UTC),
+                    )))
+                }
                 _ => {
-                    return Err(PolarsError::InvalidOperation(
+                    Err(PolarsError::InvalidOperation(
                         format!("SQL: unsupported typed literal type: {}", typed.data_type)
                             .into(),
-                    ));
+                    ))
                 }
-            };
-            // Keep SQL typed literals as literal Cast expressions so comparison
-            // coercion can identify their temporal type before lazy evaluation.
-            Ok(lit(value.as_str()).cast(dtype))
+            }
         }
         SqlExpr::BinaryOp { left, op, right } => {
             let mut l = sql_expr_to_polars(left, session, df, having_agg_map, having_agg_list)?;
