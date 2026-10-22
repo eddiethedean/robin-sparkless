@@ -98,6 +98,31 @@ fn fixed_offset_session_timezone_is_supported() {
 }
 
 #[test]
+fn fixed_offset_session_timezone_is_supported_for_timestamp_casts() {
+    let session = session_with_timestamp("2026-10-18 03:30:00", "+05:30");
+    let rows = session
+        .sql(
+            "SELECT CAST(event_ts AS TIMESTAMP_NTZ) = \
+             CAST('2026-10-18 09:00:00' AS TIMESTAMP_NTZ) AS same_local_time, \
+             CAST(CAST('2026-10-18 09:00:00' AS TIMESTAMP_NTZ) AS TIMESTAMP) = event_ts \
+             AS same_instant, \
+             CAST(CAST(event_ts AS TIMESTAMP) AS STRING) AS timestamp_string, \
+             CAST(CAST('2026-10-18 09:00:00' AS TIMESTAMP) AS STRING) AS cast_string, \
+             CAST(CAST('2026-10-18 09:00:00' AS TIMESTAMP_NTZ) AS STRING) AS ntz_string \
+             FROM orders",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows[0]["same_local_time"], serde_json::Value::Bool(true));
+    assert_eq!(rows[0]["same_instant"], serde_json::Value::Bool(true));
+    assert_eq!(rows[0]["timestamp_string"], "2026-10-18 09:00:00.000000");
+    assert_eq!(rows[0]["cast_string"], "2026-10-18 09:00:00.000000");
+    assert_eq!(rows[0]["ntz_string"], "2026-10-18 09:00:00.000000");
+}
+
+#[test]
 fn compact_fixed_offset_session_timezone_is_supported() {
     let session = session_with_timestamp("2026-10-17 18:30:00", "UTC+0530");
     let rows = session
@@ -211,6 +236,161 @@ fn cast_timestamp_expression_compares_with_typed_literal() {
         .unwrap();
 
     assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn timestamp_cast_comparisons_cover_reversed_nested_and_null_expressions() {
+    let session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    let rows = session
+        .sql(
+            "SELECT event_ts = CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS equal, \
+             CAST('2026-10-18 03:30:00' AS TIMESTAMP) > event_ts AS before, \
+             NOT (event_ts < CAST('2026-10-18 03:30:00' AS TIMESTAMP)) AS at_or_after, \
+             event_ts = TRY_CAST('invalid' AS TIMESTAMP) AS invalid \
+             FROM orders",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["equal"], true);
+    assert_eq!(rows[0]["before"], false);
+    assert_eq!(rows[0]["at_or_after"], true);
+    assert!(rows[0]["invalid"].is_null());
+
+    let rows = session
+        .sql(
+            "SELECT order_id FROM orders \
+             WHERE NOT (event_ts < CAST('2026-10-18 03:30:00' AS TIMESTAMP))",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn timestamp_cast_binds_timezone_before_execution_and_preserves_ntz() {
+    let mut session = session_with_timestamp("2026-10-18 07:30:00", "America/New_York");
+    let query = "SELECT CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS instant, \
+                 CAST('2026-10-18 03:30:00' AS TIMESTAMP_NTZ) AS local_time FROM orders";
+    let new_york = session.sql(query).unwrap();
+    session.set_config("spark.sql.session.timeZone", "UTC");
+    let utc = session.sql(query).unwrap();
+
+    let rows = new_york.collect_as_json_rows().unwrap();
+    assert_eq!(rows[0]["instant"], "2026-10-18T07:30:00.000000");
+    assert_eq!(rows[0]["local_time"], "2026-10-18T03:30:00.000000");
+    let rows = utc.collect_as_json_rows().unwrap();
+    assert_eq!(rows[0]["instant"], "2026-10-18T03:30:00.000000");
+    assert_eq!(rows[0]["local_time"], "2026-10-18T03:30:00.000000");
+}
+
+#[test]
+fn timestamp_cast_rejects_invalid_suffixes_and_preserves_nulls() {
+    let mut session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    session.set_config("spark.sql.ansi.enabled", "true");
+    for value in ["not-a-timestamp", "2026-10-18 03:30:00.123456Invalid/Zone"] {
+        let result = session
+            .sql(&format!(
+                "SELECT CAST('{value}' AS TIMESTAMP) AS ts FROM orders"
+            ))
+            .and_then(|frame| frame.collect_as_json_rows());
+        assert!(result.is_err(), "CAST accepted {value:?}");
+        let rows = session
+            .sql(&format!(
+                "SELECT TRY_CAST('{value}' AS TIMESTAMP) AS ts FROM orders"
+            ))
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert!(rows[0]["ts"].is_null());
+    }
+    session.set_config("spark.sql.ansi.enabled", "false");
+    let rows = session
+        .sql("SELECT CAST('invalid' AS TIMESTAMP) AS invalid, CAST(NULL AS TIMESTAMP) AS missing FROM orders")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert!(rows[0]["invalid"].is_null());
+    assert!(rows[0]["missing"].is_null());
+}
+
+#[test]
+fn timestamp_cast_handles_unicode_offsets_and_legacy_datetime_formats() {
+    let mut session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    session.set_config("spark.sql.ansi.enabled", "true");
+    for value in [
+        "2026-10-18 03:30:00+1€",
+        "-0044-03-15 12:34:56",
+        "-0001-01-01T00:00:00",
+        "2026-10-18   03:30:00",
+        "2026-10-18\t03:30:00",
+    ] {
+        let rows = session
+            .sql(&format!(
+                "SELECT CAST(CAST('{value}' AS TIMESTAMP) AS STRING) AS ts FROM orders"
+            ))
+            .and_then(|frame| frame.collect_as_json_rows());
+        if value.contains('€') {
+            assert!(rows.is_err(), "CAST accepted malformed offset {value:?}");
+            let rows = session
+                .sql(&format!(
+                    "SELECT TRY_CAST('{value}' AS TIMESTAMP) AS ts FROM orders"
+                ))
+                .unwrap()
+                .collect_as_json_rows()
+                .unwrap();
+            assert!(rows[0]["ts"].is_null());
+        } else {
+            assert!(
+                rows.is_ok(),
+                "CAST rejected previously accepted value {value:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn timestamp_cast_chains_preserve_session_local_and_ntz_values() {
+    let session = session_with_timestamp("2026-10-18 07:30:00", "America/New_York");
+    let rows = session
+        .sql(
+            "SELECT CAST(DATE '2026-10-18' AS TIMESTAMP) = CAST('2026-10-18' AS TIMESTAMP) AS same_date, \
+             CAST(CAST(CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS TIMESTAMP_NTZ) AS TIMESTAMP) = CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS ntz_round_trip, \
+             CAST(CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS STRING) AS timestamp_string, \
+             CAST(CAST(CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS TIMESTAMP_NTZ) AS STRING) AS ntz_string \
+             FROM orders",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows[0]["same_date"], true);
+    assert_eq!(rows[0]["ntz_round_trip"], true);
+    assert_eq!(rows[0]["timestamp_string"], "2026-10-18 03:30:00.000000");
+    assert_eq!(rows[0]["ntz_string"], "2026-10-18 03:30:00.000000");
+}
+
+#[test]
+fn casting_spark_timestamp_with_naive_polars_dtype_preserves_its_instant() {
+    let session = session_with_timestamp_dtype(
+        "2026-10-18 03:30:00",
+        "America/New_York",
+        TimeUnit::Microseconds,
+        None,
+    );
+    let rows = session
+        .sql(
+            "SELECT event_ts = CAST(event_ts AS TIMESTAMP) AS unchanged, \
+             CAST(event_ts AS TIMESTAMP) = TIMESTAMP '2026-10-17 23:30:00' AS same_instant \
+             FROM orders",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows[0]["unchanged"], true);
+    assert_eq!(rows[0]["same_instant"], true);
 }
 
 #[test]

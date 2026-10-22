@@ -198,6 +198,20 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
     let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
     expr.try_map_expr(|expr| {
         if let Expr::AnonymousFunction { input, fmt_str, .. } = &expr {
+            if matches!(
+                fmt_str.as_str(),
+                "cast_timestamp"
+                    | "try_cast_timestamp"
+                    | "cast_timestamp_ntz"
+                    | "try_cast_timestamp_ntz"
+            ) && input.len() == 1
+            {
+                return Ok(timestamp_cast_expr(
+                    input[0].clone(),
+                    fmt_str.as_str().starts_with("cast_"),
+                    fmt_str.as_str().ends_with("_ntz"),
+                ));
+            }
             if let Some(op) =
                 crate::decimal_arithmetic::BinaryOp::from_engine_expr_marker(fmt_str.as_str())
                 && input.len() == 2
@@ -2877,6 +2891,47 @@ fn decimal_value_to_scaled(
     }
 }
 
+fn timestamp_cast_expr(input: Expr, strict: bool, timestamp_ntz: bool) -> Expr {
+    // Bind the session configuration while analyzing the plan. The closure may
+    // run on a Polars worker without the originating thread's UDF context.
+    let timezone = crate::get_thread_session_time_zone();
+    let ansi_strict = strict && crate::udf_context::get_thread_ansi_enabled();
+    let source_timestamp_ntz = is_timestamp_ntz_expression(&input);
+    let output_timezone =
+        (!timestamp_ntz && timezone.parse::<chrono_tz::Tz>().is_ok()).then(|| timezone.clone());
+    input.map_with_fmt_str(
+        move |column| {
+            crate::column::expect_col(crate::udfs::apply_cast_to_timestamp(
+                column,
+                ansi_strict,
+                &timezone,
+                timestamp_ntz,
+                source_timestamp_ntz,
+            ))
+        },
+        move |_schema, field| {
+            let timezone = output_timezone
+                .as_deref()
+                .map(|timezone| TimeZone::opt_try_new(Some(timezone.to_owned())))
+                .transpose()?
+                .flatten();
+            Ok(Field::new(
+                field.name().clone(),
+                DataType::Datetime(TimeUnit::Microseconds, timezone),
+            ))
+        },
+        if timestamp_ntz && strict {
+            "cast_timestamp_ntz"
+        } else if timestamp_ntz {
+            "try_cast_timestamp_ntz"
+        } else if strict {
+            "cast_timestamp"
+        } else {
+            "try_cast_timestamp"
+        },
+    )
+}
+
 fn cast_impl(
     column: &Column,
     type_name: &str,
@@ -2929,18 +2984,8 @@ fn cast_impl(
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if matches!(dtype, DataType::Datetime(_, _)) {
-        use polars::datatypes::TimeUnit;
-        let expr = column.expr().clone().map(
-            move |col| {
-                crate::column::expect_col(crate::udfs::apply_string_to_datetime(col, ansi_strict))
-            },
-            |_schema, field| {
-                Ok(Field::new(
-                    field.name().clone(),
-                    DataType::Datetime(TimeUnit::Microseconds, None),
-                ))
-            },
-        );
+        let timestamp_ntz = type_name.trim().eq_ignore_ascii_case("timestamp_ntz");
+        let expr = timestamp_cast_expr(column.expr().clone(), strict, timestamp_ntz);
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if dtype == DataType::Int32 || dtype == DataType::Int64 || dtype == DataType::Int16 {
@@ -2981,14 +3026,22 @@ fn cast_impl(
     if dtype == DataType::String {
         // Use strict_cast when expr is not a plain column (e.g. aggregate) so we get a Cast node
         // and PySpark-style column name "CAST(avg(value) AS STRING)" in groupby agg (issue #1255, #265).
+        let is_timestamp_cast = is_timestamp_cast_expression(column.expr());
         let is_plain_column = matches!(column.expr(), Expr::Column(_));
-        if !is_plain_column {
+        if !is_timestamp_cast && !is_plain_column {
             let expr = column.expr().clone().strict_cast(dtype);
             return Ok(Column::from_expr(expr, Some(base_name)));
         }
+        let timezone = is_timestamp_cast.then(crate::get_thread_session_time_zone);
+        let timestamp_ntz = is_timestamp_cast && is_timestamp_ntz_expression(column.expr());
         let expr = column.expr().clone().map(
             move |col| {
-                crate::column::expect_col(crate::udfs::apply_cast_to_string(col, ansi_strict))
+                crate::column::expect_col(crate::udfs::apply_cast_to_string_with_timezone(
+                    col,
+                    ansi_strict,
+                    timezone.as_deref(),
+                    timestamp_ntz,
+                ))
             },
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );
@@ -3001,6 +3054,35 @@ fn cast_impl(
     };
     // PySpark / #1110: preserve column name (or alias) after cast so filter/select on alias work.
     Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)))
+}
+
+fn is_timestamp_cast_expression(expr: &Expr) -> bool {
+    match expr {
+        Expr::AnonymousFunction { fmt_str, .. } => matches!(
+            fmt_str.as_str(),
+            "cast_timestamp"
+                | "try_cast_timestamp"
+                | "cast_timestamp_ntz"
+                | "try_cast_timestamp_ntz"
+        ),
+        Expr::Alias(inner, _) | Expr::Cast { expr: inner, .. } => {
+            is_timestamp_cast_expression(inner)
+        }
+        _ => false,
+    }
+}
+
+fn is_timestamp_ntz_expression(expr: &Expr) -> bool {
+    match expr {
+        Expr::AnonymousFunction { fmt_str, .. } => matches!(
+            fmt_str.as_str(),
+            "cast_timestamp_ntz" | "try_cast_timestamp_ntz"
+        ),
+        Expr::Alias(inner, _) | Expr::Cast { expr: inner, .. } => {
+            is_timestamp_ntz_expression(inner)
+        }
+        _ => false,
+    }
 }
 
 /// Cast column to the given type (PySpark cast).
