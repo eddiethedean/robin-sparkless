@@ -736,10 +736,11 @@ pub fn coerce_for_pyspark_comparison(
         return Ok((left_out, right_out));
     }
 
-    // Datetime columns from Arrow/Delta can carry a timezone while SQL TIMESTAMP
-    // literals are timezone-naive. Compare both values at the finest unit and in
-    // the timezone carried by either operand. In particular, a UTC-aware column
-    // and a naive TIMESTAMP literal then share the same UTC instant representation.
+    // Spark timestamps have microsecond precision. Normalize differing Polars
+    // units to microseconds so a nanosecond column can still compare with values
+    // outside the nanosecond epoch range. When only one operand has timezone
+    // metadata, drop that metadata while preserving its epoch value; both sides
+    // then compare on the same instant representation.
     if let (
         DataType::Datetime(left_unit, left_timezone),
         DataType::Datetime(right_unit, right_timezone),
@@ -748,12 +749,11 @@ pub fn coerce_for_pyspark_comparison(
         if left_unit == right_unit && left_timezone == right_timezone {
             return Ok((left, right));
         }
-        let common_unit = match (left_unit, right_unit) {
-            (TimeUnit::Nanoseconds, _) | (_, TimeUnit::Nanoseconds) => TimeUnit::Nanoseconds,
-            (TimeUnit::Microseconds, _) | (_, TimeUnit::Microseconds) => TimeUnit::Microseconds,
-            _ => TimeUnit::Milliseconds,
+        let common_unit = TimeUnit::Microseconds;
+        let common_timezone = match (left_timezone, right_timezone) {
+            (Some(left_timezone), Some(_)) => Some(left_timezone.clone()),
+            _ => None,
         };
-        let common_timezone = left_timezone.clone().or_else(|| right_timezone.clone());
         let common_type = DataType::Datetime(common_unit, common_timezone);
         let left = if left_type == &common_type {
             left

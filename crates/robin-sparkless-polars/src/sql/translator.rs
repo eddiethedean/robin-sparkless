@@ -81,14 +81,8 @@ fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
     }
 }
 
-fn parse_sql_date_time(value: &str) -> Option<chrono::NaiveDateTime> {
-    let value = value.trim();
-    let (date_part, time_part) = value
-        .split_once('T')
-        .or_else(|| value.split_once(' '))
-        .map_or((value, None), |(date, time)| (date, Some(time)));
-
-    let mut date_parts = date_part.split('-');
+fn parse_sql_date(value: &str) -> Option<chrono::NaiveDate> {
+    let mut date_parts = value.trim().split('-');
     let year = date_parts.next()?.parse::<i32>().ok()?;
     let month = match date_parts.next() {
         Some(month) => month.parse::<u32>().ok()?,
@@ -101,7 +95,16 @@ fn parse_sql_date_time(value: &str) -> Option<chrono::NaiveDateTime> {
     if date_parts.next().is_some() {
         return None;
     }
-    let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    chrono::NaiveDate::from_ymd_opt(year, month, day)
+}
+
+fn parse_sql_date_time(value: &str) -> Option<chrono::NaiveDateTime> {
+    let value = value.trim();
+    let (date_part, time_part) = value
+        .split_once('T')
+        .or_else(|| value.split_once(' '))
+        .map_or((value, None), |(date, time)| (date, Some(time)));
+    let date = parse_sql_date(date_part)?;
 
     let Some(time_part) = time_part else {
         return date.and_hms_opt(0, 0, 0);
@@ -109,12 +112,31 @@ fn parse_sql_date_time(value: &str) -> Option<chrono::NaiveDateTime> {
     if time_part.is_empty() {
         return date.and_hms_opt(0, 0, 0);
     }
-    for format in ["%H:%M:%S%.f", "%H:%M:%S", "%H:%M", "%H"] {
-        if let Ok(time) = chrono::NaiveTime::parse_from_str(time_part, format) {
-            return Some(date.and_time(time));
+    let mut time_parts = time_part.split(':');
+    let hour = time_parts.next()?.parse::<u32>().ok()?;
+    let minute = match time_parts.next() {
+        Some(minute) => minute.parse::<u32>().ok()?,
+        None => 0,
+    };
+    let (second, micros) = match time_parts.next() {
+        Some(seconds) => {
+            let (whole, fraction) = seconds.split_once('.').unwrap_or((seconds, ""));
+            let second = whole.parse::<u32>().ok()?;
+            let fraction = if fraction.is_empty() {
+                0
+            } else {
+                let digits = fraction.chars().take(6).collect::<String>();
+                let parsed = digits.parse::<u32>().ok()?;
+                parsed * 10_u32.pow((6 - digits.len()) as u32)
+            };
+            (second, fraction)
         }
+        None => (0, 0),
+    };
+    if time_parts.next().is_some() {
+        return None;
     }
-    None
+    date.and_hms_micro_opt(hour, minute, second, micros)
 }
 
 fn parse_sql_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
@@ -1522,13 +1544,11 @@ fn sql_expr_to_polars(
             };
             match &typed.data_type {
                 SqlDataType::Date => {
-                    let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(
-                        |error| {
-                            PolarsError::InvalidOperation(
-                                format!("SQL: invalid DATE literal {value:?}: {error}").into(),
-                            )
-                        },
-                    )?;
+                    let date = parse_sql_date(value).ok_or_else(|| {
+                        PolarsError::InvalidOperation(
+                            format!("SQL: invalid DATE literal {value:?}").into(),
+                        )
+                    })?;
                     let days = (date - chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
                         .num_days() as i32;
                     Ok(lit(Scalar::new_date(days)))
