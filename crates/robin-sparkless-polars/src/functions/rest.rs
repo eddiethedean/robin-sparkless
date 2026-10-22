@@ -2896,6 +2896,7 @@ fn timestamp_cast_expr(input: Expr, strict: bool, timestamp_ntz: bool) -> Expr {
     // run on a Polars worker without the originating thread's UDF context.
     let timezone = crate::get_thread_session_time_zone();
     let ansi_strict = strict && crate::udf_context::get_thread_ansi_enabled();
+    let source_timestamp_ntz = is_timestamp_ntz_expression(&input);
     let output_timezone =
         (!timestamp_ntz && timezone.parse::<chrono_tz::Tz>().is_ok()).then(|| timezone.clone());
     input.map_with_fmt_str(
@@ -2905,6 +2906,7 @@ fn timestamp_cast_expr(input: Expr, strict: bool, timestamp_ntz: bool) -> Expr {
                 ansi_strict,
                 &timezone,
                 timestamp_ntz,
+                source_timestamp_ntz,
             ))
         },
         move |_schema, field| {
@@ -3056,6 +3058,19 @@ fn is_timestamp_cast_expression(expr: &Expr) -> bool {
         ),
         Expr::Alias(inner, _) | Expr::Cast { expr: inner, .. } => {
             is_timestamp_cast_expression(inner)
+        }
+        _ => false,
+    }
+}
+
+fn is_timestamp_ntz_expression(expr: &Expr) -> bool {
+    match expr {
+        Expr::AnonymousFunction { fmt_str, .. } => matches!(
+            fmt_str.as_str(),
+            "cast_timestamp_ntz" | "try_cast_timestamp_ntz"
+        ),
+        Expr::Alias(inner, _) | Expr::Cast { expr: inner, .. } => {
+            is_timestamp_ntz_expression(inner)
         }
         _ => false,
     }

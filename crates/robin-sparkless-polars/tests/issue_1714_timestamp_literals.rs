@@ -347,6 +347,28 @@ fn timestamp_cast_chains_preserve_session_local_and_ntz_values() {
 }
 
 #[test]
+fn casting_spark_timestamp_with_naive_polars_dtype_preserves_its_instant() {
+    let session = session_with_timestamp_dtype(
+        "2026-10-18 03:30:00",
+        "America/New_York",
+        TimeUnit::Microseconds,
+        None,
+    );
+    let rows = session
+        .sql(
+            "SELECT event_ts = CAST(event_ts AS TIMESTAMP) AS unchanged, \
+             CAST(event_ts AS TIMESTAMP) = TIMESTAMP '2026-10-17 23:30:00' AS same_instant \
+             FROM orders",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows[0]["unchanged"], true);
+    assert_eq!(rows[0]["same_instant"], true);
+}
+
+#[test]
 fn non_utc_column_timezone_compares_by_instant() {
     let session = session_with_timestamp_dtype(
         "2026-10-18 07:30:00",

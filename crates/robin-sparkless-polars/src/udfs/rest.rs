@@ -6654,7 +6654,7 @@ pub(crate) fn apply_string_to_datetime_with_timezone(
     session_timezone: Option<&str>,
 ) -> PolarsResult<Option<Column>> {
     if let Some(timezone) = session_timezone {
-        return apply_cast_to_timestamp(column, strict, timezone, false);
+        return apply_cast_to_timestamp(column, strict, timezone, false, false);
     }
     apply_cast_to_timestamp_legacy(column, strict)
 }
@@ -6664,6 +6664,7 @@ pub(crate) fn apply_cast_to_timestamp(
     strict: bool,
     session_timezone: &str,
     timestamp_ntz: bool,
+    source_timestamp_ntz: bool,
 ) -> PolarsResult<Option<Column>> {
     use polars::datatypes::TimeUnit;
     let name = column.field().into_owned().name;
@@ -6710,13 +6711,12 @@ pub(crate) fn apply_cast_to_timestamp(
         DataType::Datetime(source_unit, source_timezone) => {
             let physical = series.cast(&DataType::Int64)?;
             let values = physical.i64()?;
-            let timezone = if timestamp_ntz {
-                if source_timezone.is_some() {
-                    session_timezone.parse::<Tz>().ok()
-                } else {
-                    None
-                }
-            } else if source_timezone.is_none() {
+            let needs_timezone_conversion = if timestamp_ntz {
+                !source_timestamp_ntz || source_timezone.is_some()
+            } else {
+                source_timestamp_ntz && source_timezone.is_none()
+            };
+            let timezone = if needs_timezone_conversion {
                 Some(session_timezone.parse::<Tz>().map_err(|error| {
                     PolarsError::ComputeError(format!("invalid session timezone: {error}").into())
                 })?)
@@ -6732,11 +6732,11 @@ pub(crate) fn apply_cast_to_timestamp(
                             TimeUnit::Microseconds => value,
                             TimeUnit::Milliseconds => value.checked_mul(1_000)?,
                         };
-                        match (timestamp_ntz, source_timezone.is_some(), timezone) {
-                            (true, true, Some(timezone)) => {
+                        match (timestamp_ntz, source_timestamp_ntz, timezone) {
+                            (true, false, Some(timezone)) => {
                                 utc_micros_to_local_naive_micros(micros, timezone)
                             }
-                            (false, false, Some(timezone)) => {
+                            (false, true, Some(timezone)) => {
                                 local_naive_micros_to_utc(micros, timezone)
                             }
                             _ => Some(micros),
