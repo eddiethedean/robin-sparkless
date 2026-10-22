@@ -98,6 +98,24 @@ fn fixed_offset_session_timezone_is_supported() {
 }
 
 #[test]
+fn fixed_offset_session_timezone_is_supported_for_timestamp_casts() {
+    let session = session_with_timestamp("2026-10-18 03:30:00", "+05:30");
+    let rows = session
+        .sql(
+            "SELECT CAST(event_ts AS TIMESTAMP_NTZ) = \
+             CAST('2026-10-18 09:00:00' AS TIMESTAMP_NTZ) AS same_local_time, \
+             CAST(CAST('2026-10-18 09:00:00' AS TIMESTAMP_NTZ) AS TIMESTAMP) = event_ts \
+             AS same_instant FROM orders",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows[0]["same_local_time"], serde_json::Value::Bool(true));
+    assert_eq!(rows[0]["same_instant"], serde_json::Value::Bool(true));
+}
+
+#[test]
 fn compact_fixed_offset_session_timezone_is_supported() {
     let session = session_with_timestamp("2026-10-17 18:30:00", "UTC+0530");
     let rows = session

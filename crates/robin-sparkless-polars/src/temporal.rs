@@ -70,7 +70,7 @@ fn parse_sql_date_time(value: &str) -> Option<chrono::NaiveDateTime> {
     date.and_hms_micro_opt(hour, minute, second, micros)
 }
 
-fn parse_sql_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
+pub(crate) fn parse_sql_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
     let offset = ["UTC", "GMT", "UT"]
         .iter()
         .find_map(|prefix| {

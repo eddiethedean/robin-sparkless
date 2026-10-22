@@ -6717,8 +6717,10 @@ pub(crate) fn apply_cast_to_timestamp(
                 source_timestamp_ntz && source_timezone.is_none()
             };
             let timezone = if needs_timezone_conversion {
-                Some(session_timezone.parse::<Tz>().map_err(|error| {
-                    PolarsError::ComputeError(format!("invalid session timezone: {error}").into())
+                Some(parse_cast_timezone(session_timezone).ok_or_else(|| {
+                    PolarsError::ComputeError(
+                        format!("invalid session timezone: {session_timezone}").into(),
+                    )
                 })?)
             } else {
                 None
@@ -6783,14 +6785,42 @@ pub(crate) fn apply_cast_to_timestamp(
     Ok(Some(Column::new(name, out)))
 }
 
-fn local_naive_micros_to_utc(micros: i64, timezone: Tz) -> Option<i64> {
-    let naive = chrono::DateTime::from_timestamp_micros(micros)?.naive_utc();
-    crate::temporal::resolve_local_timestamp(timezone, &naive)
+#[derive(Clone, Copy)]
+enum CastTimezone {
+    Region(Tz),
+    Fixed(chrono::FixedOffset),
 }
 
-fn utc_micros_to_local_naive_micros(micros: i64, timezone: Tz) -> Option<i64> {
-    let local = chrono::DateTime::from_timestamp_micros(micros)?.with_timezone(&timezone);
-    Some(local.naive_local().and_utc().timestamp_micros())
+fn parse_cast_timezone(value: &str) -> Option<CastTimezone> {
+    value
+        .parse::<Tz>()
+        .map(CastTimezone::Region)
+        .ok()
+        .or_else(|| crate::temporal::parse_sql_fixed_offset(value).map(CastTimezone::Fixed))
+}
+
+fn local_naive_micros_to_utc(micros: i64, timezone: CastTimezone) -> Option<i64> {
+    let naive = chrono::DateTime::from_timestamp_micros(micros)?.naive_utc();
+    match timezone {
+        CastTimezone::Region(timezone) => {
+            crate::temporal::resolve_local_timestamp(timezone, &naive)
+        }
+        CastTimezone::Fixed(timezone) => Some(
+            timezone
+                .from_local_datetime(&naive)
+                .single()?
+                .timestamp_micros(),
+        ),
+    }
+}
+
+fn utc_micros_to_local_naive_micros(micros: i64, timezone: CastTimezone) -> Option<i64> {
+    let utc = chrono::DateTime::from_timestamp_micros(micros)?;
+    let local = match timezone {
+        CastTimezone::Region(timezone) => utc.with_timezone(&timezone).naive_local(),
+        CastTimezone::Fixed(timezone) => utc.with_timezone(&timezone).naive_local(),
+    };
+    Some(local.and_utc().timestamp_micros())
 }
 
 fn apply_cast_to_timestamp_legacy(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
