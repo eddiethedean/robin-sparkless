@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
 
+## [4.15.1] - 2026-10-21
+
+### Fixed
+
+- **Nested SQL struct fields** — Resolve dot notation such as `payload.name` as nested struct access when the schema identifies a struct root, while preserving qualified table aliases (#1715).
+
 ## [4.15.0] - 2026-10-21
 
 ### Added
