@@ -2863,7 +2863,14 @@ fn push_agg_function(
                     "SQL: COUNT takes at most one argument.".into(),
                 ));
             };
-            (e, "count".to_string())
+            // Spark's Count expression has LongType semantics. Polars' `len()`
+            // and `count()` expressions use a narrower integer type unless we
+            // cast explicitly, which made SQL COUNT disagree with DataFrame
+            // aggregations and Spark's BIGINT result.
+            (
+                e.cast(polars::prelude::DataType::Int64),
+                "count".to_string(),
+            )
         }
         "SUM" => {
             if let Some(spark_sql_parser::ast::FunctionArg::Unnamed(FunctionArgExpr::Expr(
