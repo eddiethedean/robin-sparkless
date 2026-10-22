@@ -1028,7 +1028,10 @@ impl DataFrame {
                     });
                     if let (Some(value_type), Some(literal_type)) =
                         (value_type, literal_dtype(literal_expr))
-                        && matches!(value_type, DataType::Date | DataType::Datetime(_, _))
+                        && matches!(
+                            value_type,
+                            DataType::Date | DataType::Datetime(_, _) | DataType::String
+                        )
                     {
                         let (left_type, right_type) = if value_on_left {
                             (value_type, literal_type)
@@ -1204,7 +1207,10 @@ impl DataFrame {
                     };
                     if let (Some(value_type), Some(literal_type)) =
                         (value_type, literal_dtype(peel_aliases(&literal_expr)))
-                        && matches!(value_type, DataType::Date | DataType::Datetime(_, _))
+                        && matches!(
+                            value_type,
+                            DataType::Date | DataType::Datetime(_, _) | DataType::String
+                        )
                     {
                         let (left_type, right_type) = if value_on_left {
                             (value_type, literal_type)

@@ -98,6 +98,17 @@ fn fixed_offset_session_timezone_is_supported() {
 }
 
 #[test]
+fn compact_fixed_offset_session_timezone_is_supported() {
+    let session = session_with_timestamp("2026-10-17 18:30:00", "UTC+0530");
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE event_ts = DATE '2026-10-18'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
 fn date_only_timestamp_literal_defaults_to_midnight() {
     let session = session_with_timestamp("2026-10-18 00:00:00", "UTC");
     let rows = session
@@ -276,4 +287,50 @@ fn invalid_timezone_after_fraction_is_rejected() {
         session.sql("SELECT TIMESTAMP '2026-10-18 03:30:00.123456Invalid/Zone' AS ts FROM orders");
 
     assert!(result.is_err());
+}
+
+#[test]
+fn string_timestamp_column_compares_using_session_timezone() {
+    let mut session = SparkSession::default();
+    session.set_config("spark.sql.session.timeZone", "America/New_York");
+    let frame = DataFrame::new(
+        1,
+        vec![
+            Series::new("order_id".into(), [1i64]).into(),
+            Series::new("event_ts".into(), ["2026-10-18 03:30:00"]).into(),
+        ],
+    )
+    .unwrap();
+    session.create_or_replace_temp_view("orders", session.create_dataframe_from_polars(frame));
+
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE event_ts = TIMESTAMP '2026-10-18 07:30:00Z'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn timestamp_literal_accepts_compact_utc_offset_suffix() {
+    let session = session_with_timestamp("2026-10-17 22:00:00", "UTC");
+    let rows = session
+        .sql("SELECT TIMESTAMP '2026-10-18 03:30:00.123456UTC+0530' AS ts FROM orders")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows[0]["ts"], "2026-10-17T22:00:00.123456");
+}
+
+#[test]
+fn date_midnight_gap_resolves_to_first_valid_local_instant() {
+    // Toronto's 1919 spring transition began at 23:30 on the previous date and
+    // ended at 00:30, so the start of March 31 was 00:30 rather than 01:00.
+    let session = session_with_timestamp("1919-03-31 04:30:00", "America/Toronto");
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE event_ts = DATE '1919-03-31'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
 }

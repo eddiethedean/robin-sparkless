@@ -159,7 +159,25 @@ fn parse_sql_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
         b'-' => (-1, &offset[1..]),
         _ => return None,
     };
-    let parts = magnitude.split(':').collect::<Vec<_>>();
+    let compact = !magnitude.contains(':') && magnitude.len() > 2;
+    let compact_parts = if compact {
+        match magnitude.len() {
+            4 => Some((&magnitude[..2], Some(&magnitude[2..]), None)),
+            6 => Some((
+                &magnitude[..2],
+                Some(&magnitude[2..4]),
+                Some(&magnitude[4..]),
+            )),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let parts = if let Some((hours, minutes, seconds)) = compact_parts {
+        vec![hours, minutes.unwrap_or("0"), seconds.unwrap_or("0")]
+    } else {
+        magnitude.split(':').collect::<Vec<_>>()
+    };
     if parts.is_empty() || parts.len() > 3 {
         return None;
     }
@@ -183,7 +201,10 @@ fn parse_sql_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
     chrono::FixedOffset::east_opt(sign * (hours * 3600 + minutes * 60 + seconds))
 }
 
-fn parse_sql_timestamp_micros(value: &str, session_timezone: &str) -> Result<i64, PolarsError> {
+pub(crate) fn parse_sql_timestamp_micros(
+    value: &str,
+    session_timezone: &str,
+) -> Result<i64, PolarsError> {
     if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(value) {
         return Ok(datetime.timestamp_micros());
     }

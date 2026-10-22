@@ -699,6 +699,19 @@ pub fn coerce_for_pyspark_comparison(
         || (left_type == &DataType::String && is_date_or_datetime(right_type));
 
     if temporal_string {
+        // Spark parses strings compared with timestamps in the session timezone.
+        // Parse the column values with the same literal parser, then compare epoch
+        // microseconds so Polars timezone metadata cannot affect the result.
+        if matches!(left_type, DataType::Datetime(_, _)) && right_type == &DataType::String {
+            let left = datetime_to_micros(left, left_type);
+            let right = string_to_session_timestamp_micros(right);
+            return Ok((left, right));
+        }
+        if left_type == &DataType::String && matches!(right_type, DataType::Datetime(_, _)) {
+            let left = string_to_session_timestamp_micros(left);
+            let right = datetime_to_micros(right, right_type);
+            return Ok((left, right));
+        }
         let left_out = if left_type == &DataType::String {
             wrap_try_to_temporal(left, right_type)?
         } else {
@@ -756,6 +769,38 @@ pub fn coerce_for_pyspark_comparison(
 
     // Fallback to generic comparison coercion (may error with a clear message).
     coerce_for_comparison(left, right, left_type, right_type)
+}
+
+fn string_to_session_timestamp_micros(expr: Expr) -> Expr {
+    let timezone = crate::get_thread_session_time_zone();
+    expr.map(
+        move |column| {
+            let mut micros = Vec::with_capacity(column.len());
+            for index in 0..column.len() {
+                let parsed = match column.get(index)? {
+                    AnyValue::String(value) => {
+                        crate::sql::translator::parse_sql_timestamp_micros(value, &timezone).ok()
+                    }
+                    AnyValue::StringOwned(value) => {
+                        crate::sql::translator::parse_sql_timestamp_micros(&value, &timezone).ok()
+                    }
+                    AnyValue::Null => None,
+                    other => {
+                        return Err(PolarsError::ComputeError(
+                            format!("expected STRING timestamp, found {other:?}").into(),
+                        ));
+                    }
+                };
+                micros.push(parsed);
+            }
+            Ok(
+                Int64Chunked::from_iter_options(column.name().clone(), micros.iter().copied())
+                    .into_series()
+                    .into(),
+            )
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
+    )
 }
 
 fn datetime_to_micros(expr: Expr, dtype: &DataType) -> Expr {
@@ -827,7 +872,7 @@ fn session_local_datetime_micros(
     timezone: chrono_tz::Tz,
     naive: &chrono::NaiveDateTime,
 ) -> Option<i64> {
-    use chrono::{Offset, TimeZone};
+    use chrono::TimeZone;
 
     let instant = |local: &chrono::NaiveDateTime| match timezone.from_local_datetime(local) {
         chrono::LocalResult::Single(value) => Some(value.timestamp_micros()),
@@ -840,28 +885,23 @@ fn session_local_datetime_micros(
         return Some(value);
     }
 
-    // Match Spark's atStartOfDay behavior when midnight lies in a clock gap:
-    // move forward by the timezone offset change to the first valid local time.
-    let before = naive.checked_sub_signed(chrono::TimeDelta::days(2))?;
-    let after = naive.checked_add_signed(chrono::TimeDelta::days(2))?;
-    let offset_before = timezone
-        .from_local_datetime(&before)
-        .earliest()?
-        .offset()
-        .fix()
-        .local_minus_utc();
-    let offset_after = timezone
-        .from_local_datetime(&after)
-        .earliest()?
-        .offset()
-        .fix()
-        .local_minus_utc();
-    let gap_seconds = offset_after - offset_before;
-    if gap_seconds <= 0 {
-        return None;
+    // atStartOfDay resolves to the first valid local time on or after midnight.
+    // A gap can begin on the previous date and end after midnight, so shifting
+    // midnight by the full offset change can land too late in the day.
+    let mut low = 0_i64;
+    let mut high = chrono::TimeDelta::days(2).num_nanoseconds()?;
+    let upper = naive.checked_add_signed(chrono::TimeDelta::nanoseconds(high))?;
+    instant(&upper)?;
+    while low < high {
+        let mid = low + (high - low) / 2;
+        let candidate = naive.checked_add_signed(chrono::TimeDelta::nanoseconds(mid))?;
+        if instant(&candidate).is_some() {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
     }
-    let shifted = naive.checked_add_signed(chrono::TimeDelta::seconds(i64::from(gap_seconds)))?;
-    instant(&shifted)
+    instant(&naive.checked_add_signed(chrono::TimeDelta::nanoseconds(low))?)
 }
 
 fn parse_comparison_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
@@ -881,21 +921,34 @@ fn parse_comparison_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
         b'-' => (-1, &value[1..]),
         _ => return None,
     };
-    let mut parts = value.split(':');
-    let hours = parts.next()?.parse::<i32>().ok()?;
+    let compact = !value.contains(':') && value.len() > 2;
+    let parts = if compact {
+        match value.len() {
+            4 => vec![&value[..2], &value[2..], "0"],
+            6 => vec![&value[..2], &value[2..4], &value[4..]],
+            _ => return None,
+        }
+    } else {
+        let parts = value.split(':').collect::<Vec<_>>();
+        if parts.len() > 3 {
+            return None;
+        }
+        parts
+    };
+    let hours = parts.first()?.parse::<i32>().ok()?;
     let minutes = parts
-        .next()
-        .map(str::parse::<i32>)
+        .get(1)
+        .map(|s| s.parse::<i32>())
         .transpose()
         .ok()?
         .unwrap_or(0);
     let seconds = parts
-        .next()
-        .map(str::parse::<i32>)
+        .get(2)
+        .map(|s| s.parse::<i32>())
         .transpose()
         .ok()?
         .unwrap_or(0);
-    if parts.next().is_some()
+    if parts.len() > 3
         || hours > 18
         || minutes > 59
         || seconds > 59
