@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **SQL timestamp comparisons and casts** — Compare UTC Delta timestamps with `CAST('...' AS TIMESTAMP)` expressions without a timezone-type mismatch, including SQL rendered by BrickHouse. Timestamp, date, and timestamp-without-time-zone cast chains preserve session-local values; string casts retain fractional seconds and explicit offsets. Malformed Unicode offsets no longer panic, and timestamp casts continue accepting negative years and flexible whitespace (#1720).
-
 ### Breaking
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
+
+## [4.15.2] - 2026-10-22
+
+### Fixed
+
+- **SQL timestamp comparisons and casts** — Compare UTC Delta timestamps with `CAST('...' AS TIMESTAMP)` expressions without a timezone-type mismatch, including SQL rendered by BrickHouse. Timestamp, date, and timestamp-without-time-zone cast chains preserve session-local values; string casts retain fractional seconds and explicit offsets. Malformed Unicode offsets no longer panic, and timestamp casts continue accepting negative years and flexible whitespace (#1720).
 
 ## [4.15.1] - 2026-10-21
 
