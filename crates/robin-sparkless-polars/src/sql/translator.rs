@@ -1128,6 +1128,11 @@ fn translate_select_body(
             .collect::<Result<Vec<_>, PolarsError>>()?;
         let (group_exprs_polars, group_cols): (Vec<Expr>, Vec<String>) = pairs.into_iter().unzip();
         let grouped = df.group_by_exprs(group_exprs_polars, group_cols.clone())?;
+        if body.having.is_some() {
+            for (expr, name) in group_exprs.iter().zip(&group_cols) {
+                having_agg_map.insert(having_group_expr_key(expr), name.clone());
+            }
+        }
         let mut agg_exprs = projection_to_agg_exprs(
             &body.projection,
             group_exprs,
@@ -1148,10 +1153,11 @@ fn translate_select_body(
                     &mut agg_exprs,
                 )?;
             }
-            having_agg_map = having_list
-                .iter()
-                .filter_map(|(f, alias)| agg_function_key(f).map(|k| (k, alias.clone())))
-                .collect();
+            having_agg_map.extend(
+                having_list
+                    .iter()
+                    .filter_map(|(f, alias)| agg_function_key(f).map(|k| (k, alias.clone()))),
+            );
         }
         if agg_exprs.is_empty() {
             df = grouped.count()?;
@@ -1793,6 +1799,11 @@ fn sql_expr_to_polars_with_qualifiers(
     having_agg_list: Option<&[(Function, String)]>,
     relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Expr, PolarsError> {
+    if let Some(grouped_name) = having_agg_map.and_then(|map| map.get(&having_group_expr_key(expr)))
+    {
+        return Ok(col(grouped_name.as_str()));
+    }
+
     match expr {
         SqlExpr::Identifier(ident) => {
             let name = ident.value.as_str();
@@ -3485,6 +3496,10 @@ fn projection_to_agg_exprs(
         }
     }
     Ok(agg)
+}
+
+fn having_group_expr_key(expr: &SqlExpr) -> (String, String) {
+    ("__group_expression".to_string(), format!("{expr:?}"))
 }
 
 fn sql_limit_to_usize(expr: &SqlExpr) -> Result<usize, PolarsError> {
