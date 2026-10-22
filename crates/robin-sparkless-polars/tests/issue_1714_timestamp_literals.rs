@@ -245,6 +245,53 @@ fn timestamp_cast_comparisons_cover_reversed_nested_and_null_expressions() {
 }
 
 #[test]
+fn timestamp_cast_binds_timezone_before_execution_and_preserves_ntz() {
+    let mut session = session_with_timestamp("2026-10-18 07:30:00", "America/New_York");
+    let query = "SELECT CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS instant, \
+                 CAST('2026-10-18 03:30:00' AS TIMESTAMP_NTZ) AS local_time FROM orders";
+    let new_york = session.sql(query).unwrap();
+    session.set_config("spark.sql.session.timeZone", "UTC");
+    let utc = session.sql(query).unwrap();
+
+    let rows = new_york.collect_as_json_rows().unwrap();
+    assert_eq!(rows[0]["instant"], "2026-10-18T07:30:00.000000");
+    assert_eq!(rows[0]["local_time"], "2026-10-18T03:30:00.000000");
+    let rows = utc.collect_as_json_rows().unwrap();
+    assert_eq!(rows[0]["instant"], "2026-10-18T03:30:00.000000");
+    assert_eq!(rows[0]["local_time"], "2026-10-18T03:30:00.000000");
+}
+
+#[test]
+fn timestamp_cast_rejects_invalid_suffixes_and_preserves_nulls() {
+    let mut session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    session.set_config("spark.sql.ansi.enabled", "true");
+    for value in ["not-a-timestamp", "2026-10-18 03:30:00.123456Invalid/Zone"] {
+        let result = session
+            .sql(&format!(
+                "SELECT CAST('{value}' AS TIMESTAMP) AS ts FROM orders"
+            ))
+            .and_then(|frame| frame.collect_as_json_rows());
+        assert!(result.is_err(), "CAST accepted {value:?}");
+        let rows = session
+            .sql(&format!(
+                "SELECT TRY_CAST('{value}' AS TIMESTAMP) AS ts FROM orders"
+            ))
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert!(rows[0]["ts"].is_null());
+    }
+    session.set_config("spark.sql.ansi.enabled", "false");
+    let rows = session
+        .sql("SELECT CAST('invalid' AS TIMESTAMP) AS invalid, CAST(NULL AS TIMESTAMP) AS missing FROM orders")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert!(rows[0]["invalid"].is_null());
+    assert!(rows[0]["missing"].is_null());
+}
+
+#[test]
 fn non_utc_column_timezone_compares_by_instant() {
     let session = session_with_timestamp_dtype(
         "2026-10-18 07:30:00",

@@ -198,6 +198,14 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
     let allow_precision_loss = crate::udf_context::get_thread_decimal_allow_precision_loss();
     expr.try_map_expr(|expr| {
         if let Expr::AnonymousFunction { input, fmt_str, .. } = &expr {
+            if matches!(fmt_str.as_str(), "cast_timestamp" | "try_cast_timestamp")
+                && input.len() == 1
+            {
+                return Ok(timestamp_cast_expr(
+                    input[0].clone(),
+                    fmt_str.as_str() == "cast_timestamp",
+                ));
+            }
             if let Some(op) =
                 crate::decimal_arithmetic::BinaryOp::from_engine_expr_marker(fmt_str.as_str())
                 && input.len() == 2
@@ -2877,6 +2885,33 @@ fn decimal_value_to_scaled(
     }
 }
 
+fn timestamp_cast_expr(input: Expr, strict: bool) -> Expr {
+    // Bind the session configuration while analyzing the plan. The closure may
+    // run on a Polars worker without the originating thread's UDF context.
+    let timezone = crate::get_thread_session_time_zone();
+    let ansi_strict = strict && crate::udf_context::get_thread_ansi_enabled();
+    input.map_with_fmt_str(
+        move |column| {
+            crate::column::expect_col(crate::udfs::apply_string_to_datetime_with_timezone(
+                column,
+                ansi_strict,
+                Some(&timezone),
+            ))
+        },
+        |_schema, field| {
+            Ok(Field::new(
+                field.name().clone(),
+                DataType::Datetime(TimeUnit::Microseconds, None),
+            ))
+        },
+        if strict {
+            "cast_timestamp"
+        } else {
+            "try_cast_timestamp"
+        },
+    )
+}
+
 fn cast_impl(
     column: &Column,
     type_name: &str,
@@ -2929,6 +2964,10 @@ fn cast_impl(
         return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
     }
     if matches!(dtype, DataType::Datetime(_, _)) {
+        if !type_name.trim().eq_ignore_ascii_case("timestamp_ntz") {
+            let expr = timestamp_cast_expr(column.expr().clone(), strict);
+            return Ok(Column::from_expr(expr.alias(&base_name), Some(base_name)));
+        }
         use polars::datatypes::TimeUnit;
         let expr = column.expr().clone().map(
             move |col| {

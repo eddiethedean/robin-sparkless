@@ -779,10 +779,10 @@ fn string_to_session_timestamp_micros(expr: Expr) -> Expr {
             for index in 0..column.len() {
                 let parsed = match column.get(index)? {
                     AnyValue::String(value) => {
-                        crate::sql::translator::parse_sql_timestamp_micros(value, &timezone).ok()
+                        crate::temporal::parse_sql_timestamp_micros(value, &timezone).ok()
                     }
                     AnyValue::StringOwned(value) => {
-                        crate::sql::translator::parse_sql_timestamp_micros(&value, &timezone).ok()
+                        crate::temporal::parse_sql_timestamp_micros(&value, &timezone).ok()
                     }
                     AnyValue::Null => None,
                     other => {

@@ -15,6 +15,7 @@ pub mod plan;
 pub mod schema;
 pub(crate) mod schema_conv;
 pub mod session;
+mod temporal;
 pub mod traits;
 
 pub mod ansi;

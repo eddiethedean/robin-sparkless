@@ -6612,6 +6612,14 @@ pub fn apply_string_to_date(column: Column, strict: bool) -> PolarsResult<Option
 
 /// Apply string-to-datetime cast (#982). Handles string (parse common formats); passes through Datetime; Date->Datetime at midnight; others error (cast) or null (try_cast).
 pub fn apply_string_to_datetime(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
+    apply_string_to_datetime_with_timezone(column, strict, None)
+}
+
+pub(crate) fn apply_string_to_datetime_with_timezone(
+    column: Column,
+    strict: bool,
+    session_timezone: Option<&str>,
+) -> PolarsResult<Option<Column>> {
     use polars::datatypes::TimeUnit;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
@@ -6623,7 +6631,12 @@ pub fn apply_string_to_datetime(column: Column, strict: bool) -> PolarsResult<Op
                 .map_err(|e| compute_err("string to datetime", e))?;
             let mut results = Vec::with_capacity(ca.len());
             for opt_s in ca.into_iter() {
-                let v = opt_s.and_then(parse_str_to_datetime_micros);
+                let v = opt_s.and_then(|value| match session_timezone {
+                    Some(timezone) => {
+                        crate::temporal::parse_sql_timestamp_micros(value, timezone).ok()
+                    }
+                    None => parse_str_to_datetime_micros(value),
+                });
                 if strict {
                     if let Some(s) = opt_s {
                         if v.is_none() {

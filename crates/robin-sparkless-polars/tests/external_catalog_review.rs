@@ -76,13 +76,37 @@ fn frame(session: &SparkSession, id: i64) -> robin_sparkless_polars::DataFrame {
 
 #[test]
 fn review_external_delta_timestamp_predicate_uses_physical_instant() {
+    for (timezone, instant, value) in [
+        ("UTC", "2026-10-18T03:30:00Z", "2026-10-18 03:30:00"),
+        (
+            "UTC",
+            "2026-10-18T03:30:00.123456Z",
+            "2026-10-18 03:30:00.123456",
+        ),
+        ("UTC", "2026-10-18T03:30:00Z", "2026-10-17T23:30:00-04:00"),
+        (
+            "America/New_York",
+            "2026-10-18T07:30:00Z",
+            "2026-10-18 03:30:00",
+        ),
+        (
+            "America/New_York",
+            "2026-03-08T07:30:00Z",
+            "2026-03-08 02:30:00",
+        ),
+        ("+05:30", "2026-10-18T03:30:00Z", "2026-10-18 09:00:00"),
+    ] {
+        check_external_timestamp_boundary(timezone, instant, value);
+    }
+}
+
+fn check_external_timestamp_boundary(timezone: &str, instant: &str, value: &str) {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SparkSession::default();
-    session.set_config("spark.sql.session.timeZone", "UTC");
+    session.set_config("spark.sql.session.timeZone", timezone);
 
-    let micros = chrono::NaiveDateTime::parse_from_str("2026-10-18 03:30:00", "%Y-%m-%d %H:%M:%S")
+    let micros = chrono::DateTime::parse_from_rfc3339(instant)
         .unwrap()
-        .and_utc()
         .timestamp_micros();
     let event_ts = PlSeries::new("event_ts".into(), [micros])
         .i64()
@@ -110,18 +134,20 @@ fn review_external_delta_timestamp_predicate_uses_physical_instant() {
 
     // BrickHouse's SQLGlot renderer turns the typed literal into a CAST.
     for boundary in [
-        "TIMESTAMP '2026-10-18 03:30:00'",
-        "CAST('2026-10-18 03:30:00' AS TIMESTAMP)",
+        format!("TIMESTAMP '{value}'"),
+        format!("CAST('{value}' AS TIMESTAMP)"),
     ] {
-        let rows = session
-            .sql(&format!(
-                "SELECT order_id FROM catalog.schema.orders WHERE event_ts >= {boundary}"
-            ))
-            .unwrap()
-            .collect_as_json_rows()
-            .unwrap();
-        assert_eq!(rows.len(), 1, "boundary: {boundary}");
-        assert_eq!(rows[0]["order_id"], 1);
+        for op in ["=", ">="] {
+            let rows = session
+                .sql(&format!(
+                    "SELECT order_id FROM catalog.schema.orders WHERE event_ts {op} {boundary}"
+                ))
+                .unwrap()
+                .collect_as_json_rows()
+                .unwrap();
+            assert_eq!(rows.len(), 1, "{timezone}: {op} {boundary}");
+            assert_eq!(rows[0]["order_id"], 1);
+        }
 
         let rows = session
             .sql(&format!(
