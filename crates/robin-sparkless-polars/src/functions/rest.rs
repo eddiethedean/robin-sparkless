@@ -3026,18 +3026,20 @@ fn cast_impl(
     if dtype == DataType::String {
         // Use strict_cast when expr is not a plain column (e.g. aggregate) so we get a Cast node
         // and PySpark-style column name "CAST(avg(value) AS STRING)" in groupby agg (issue #1255, #265).
-        if !is_timestamp_cast_expression(column.expr()) {
+        let is_timestamp_cast = is_timestamp_cast_expression(column.expr());
+        let is_plain_column = matches!(column.expr(), Expr::Column(_));
+        if !is_timestamp_cast && !is_plain_column {
             let expr = column.expr().clone().strict_cast(dtype);
             return Ok(Column::from_expr(expr, Some(base_name)));
         }
-        let timezone = crate::get_thread_session_time_zone();
-        let timestamp_ntz = is_timestamp_ntz_expression(column.expr());
+        let timezone = is_timestamp_cast.then(crate::get_thread_session_time_zone);
+        let timestamp_ntz = is_timestamp_cast && is_timestamp_ntz_expression(column.expr());
         let expr = column.expr().clone().map(
             move |col| {
                 crate::column::expect_col(crate::udfs::apply_cast_to_string_with_timezone(
                     col,
                     ansi_strict,
-                    Some(&timezone),
+                    timezone.as_deref(),
                     timestamp_ntz,
                 ))
             },
