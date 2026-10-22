@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SQL timestamp comparisons** — Compare UTC Delta timestamps with `CAST('...' AS TIMESTAMP)` expressions without a timezone-type mismatch, including SQL rendered by BrickHouse (#1720).
+
 ### Breaking
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.

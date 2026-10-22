@@ -1118,6 +1118,18 @@ impl DataFrame {
                         }
                     }
                     expr_to_coerce.clone()
+                } else if is_comparison_op {
+                    if let Some((new_left, new_right)) =
+                        self.coerce_temporal_expressions(left_inner, right_inner, op)?
+                    {
+                        Expr::BinaryExpr {
+                            left: Arc::new(new_left),
+                            op: *op,
+                            right: Arc::new(new_right),
+                        }
+                    } else {
+                        expr_to_coerce.clone()
+                    }
                 } else {
                     expr_to_coerce.clone()
                 }
@@ -1316,7 +1328,15 @@ impl DataFrame {
                     }
                     return Ok(Expr::BinaryExpr { left, op, right });
                 } else {
-                    // Leave other comparison forms (col-col, lit-lit, non-numeric) unchanged.
+                    if let Some((new_left, new_right)) =
+                        self.coerce_temporal_expressions(&left, &right, &op)?
+                    {
+                        return Ok(Expr::BinaryExpr {
+                            left: Arc::new(new_left),
+                            op,
+                            right: Arc::new(new_right),
+                        });
+                    }
                     return Ok(Expr::BinaryExpr { left, op, right });
                 };
 
@@ -1674,6 +1694,31 @@ impl DataFrame {
             .collect_schema()
             .ok()?;
         schema.get(PROBE).cloned()
+    }
+
+    /// Casts to DATE/TIMESTAMP use map expressions, so they are not recognized
+    /// by literal_dtype. Resolve their output types before comparing them with
+    /// temporal columns (e.g. a UTC Delta column vs CAST('...' AS TIMESTAMP)).
+    fn coerce_temporal_expressions(
+        &self,
+        left: &Expr,
+        right: &Expr,
+        op: &polars::prelude::Operator,
+    ) -> Result<Option<(Expr, Expr)>, PolarsError> {
+        let Some(left_type) = self
+            .get_expr_output_dtype(left)
+            .filter(|dt| matches!(dt, DataType::Date | DataType::Datetime(_, _)))
+        else {
+            return Ok(None);
+        };
+        let Some(right_type) = self
+            .get_expr_output_dtype(right)
+            .filter(|dt| matches!(dt, DataType::Date | DataType::Datetime(_, _)))
+        else {
+            return Ok(None);
+        };
+        coerce_for_pyspark_comparison(left.clone(), right.clone(), &left_type, &right_type, op)
+            .map(Some)
     }
 
     /// Coerce temporal expression vs string literal (e.g. to_date(col) == "9999-12-31", #1589).

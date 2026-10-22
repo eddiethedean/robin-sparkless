@@ -214,6 +214,37 @@ fn cast_timestamp_expression_compares_with_typed_literal() {
 }
 
 #[test]
+fn timestamp_cast_comparisons_cover_reversed_nested_and_null_expressions() {
+    let session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    let rows = session
+        .sql(
+            "SELECT event_ts = CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS equal, \
+             CAST('2026-10-18 03:30:00' AS TIMESTAMP) > event_ts AS before, \
+             NOT (event_ts < CAST('2026-10-18 03:30:00' AS TIMESTAMP)) AS at_or_after, \
+             event_ts = TRY_CAST('invalid' AS TIMESTAMP) AS invalid \
+             FROM orders",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["equal"], true);
+    assert_eq!(rows[0]["before"], false);
+    assert_eq!(rows[0]["at_or_after"], true);
+    assert!(rows[0]["invalid"].is_null());
+
+    let rows = session
+        .sql(
+            "SELECT order_id FROM orders \
+             WHERE NOT (event_ts < CAST('2026-10-18 03:30:00' AS TIMESTAMP))",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
 fn non_utc_column_timezone_compares_by_instant() {
     let session = session_with_timestamp_dtype(
         "2026-10-18 07:30:00",

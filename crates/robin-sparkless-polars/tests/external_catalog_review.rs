@@ -108,26 +108,30 @@ fn review_external_delta_timestamp_predicate_uses_physical_instant() {
         false,
     );
 
-    let rows = session
-        .sql(
-            "SELECT order_id FROM catalog.schema.orders \
-             WHERE event_ts >= TIMESTAMP '2026-10-18 03:30:00'",
-        )
-        .unwrap()
-        .collect_as_json_rows()
-        .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["order_id"], 1);
+    // BrickHouse's SQLGlot renderer turns the typed literal into a CAST.
+    for boundary in [
+        "TIMESTAMP '2026-10-18 03:30:00'",
+        "CAST('2026-10-18 03:30:00' AS TIMESTAMP)",
+    ] {
+        let rows = session
+            .sql(&format!(
+                "SELECT order_id FROM catalog.schema.orders WHERE event_ts >= {boundary}"
+            ))
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert_eq!(rows.len(), 1, "boundary: {boundary}");
+        assert_eq!(rows[0]["order_id"], 1);
 
-    let rows = session
-        .sql(
-            "SELECT order_id FROM catalog.schema.orders \
-             WHERE event_ts < TIMESTAMP '2026-10-18 03:30:00'",
-        )
-        .unwrap()
-        .collect_as_json_rows()
-        .unwrap();
-    assert!(rows.is_empty());
+        let rows = session
+            .sql(&format!(
+                "SELECT order_id FROM catalog.schema.orders WHERE event_ts < {boundary}"
+            ))
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert!(rows.is_empty(), "boundary: {boundary}");
+    }
 }
 
 #[test]
