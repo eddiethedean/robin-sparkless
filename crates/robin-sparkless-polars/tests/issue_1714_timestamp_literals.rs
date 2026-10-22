@@ -218,3 +218,62 @@ fn non_utc_column_timezone_compares_by_instant() {
 
     assert_eq!(rows.len(), 1);
 }
+
+#[test]
+fn date_and_timestamp_literals_compare_in_session_timezone() {
+    let session = session_with_timestamp("2026-10-18 04:00:00", "America/New_York");
+    let rows = session
+        .sql(
+            "SELECT order_id FROM orders WHERE DATE '2026-10-18' = TIMESTAMP '2026-10-18 00:00:00'",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn cast_timestamp_expression_compares_inside_not() {
+    let session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE NOT (CAST(event_ts AS TIMESTAMP) < TIMESTAMP '2026-10-18 03:30:00')")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn date_at_midnight_timezone_gap_resolves_to_first_valid_instant() {
+    let session = session_with_timestamp("2018-11-04 03:00:00", "America/Sao_Paulo");
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE event_ts = DATE '2018-11-04'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn timestamp_inside_timezone_gap_shifts_forward_by_gap() {
+    let session = session_with_timestamp("2026-03-08 07:30:00", "America/New_York");
+    let rows = session
+        .sql("SELECT TIMESTAMP '2026-03-08 02:30:00' AS ts FROM orders")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows[0]["ts"], "2026-03-08T07:30:00.000000");
+}
+
+#[test]
+fn invalid_timezone_after_fraction_is_rejected() {
+    let session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    let result =
+        session.sql("SELECT TIMESTAMP '2026-10-18 03:30:00.123456Invalid/Zone' AS ts FROM orders");
+
+    assert!(result.is_err());
+}

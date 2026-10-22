@@ -800,13 +800,7 @@ fn date_to_session_timestamp_micros(expr: Expr) -> Expr {
                 };
                 let naive = date.and_hms_opt(0, 0, 0).expect("midnight is valid");
                 let value = if let Some(tz) = tz {
-                    match tz.from_local_datetime(&naive) {
-                        chrono::LocalResult::Single(value) => Some(value.timestamp_micros()),
-                        chrono::LocalResult::Ambiguous(first, second) => {
-                            Some(first.min(second).timestamp_micros())
-                        }
-                        chrono::LocalResult::None => None,
-                    }
+                    session_local_datetime_micros(tz, &naive)
                 } else if let Some(offset) = fixed {
                     offset
                         .from_local_datetime(&naive)
@@ -827,6 +821,47 @@ fn date_to_session_timestamp_micros(expr: Expr) -> Expr {
         },
         |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
     )
+}
+
+fn session_local_datetime_micros(
+    timezone: chrono_tz::Tz,
+    naive: &chrono::NaiveDateTime,
+) -> Option<i64> {
+    use chrono::{Offset, TimeZone};
+
+    let instant = |local: &chrono::NaiveDateTime| match timezone.from_local_datetime(local) {
+        chrono::LocalResult::Single(value) => Some(value.timestamp_micros()),
+        chrono::LocalResult::Ambiguous(first, second) => {
+            Some(first.timestamp_micros().min(second.timestamp_micros()))
+        }
+        chrono::LocalResult::None => None,
+    };
+    if let Some(value) = instant(naive) {
+        return Some(value);
+    }
+
+    // Match Spark's atStartOfDay behavior when midnight lies in a clock gap:
+    // move forward by the timezone offset change to the first valid local time.
+    let before = naive.checked_sub_signed(chrono::TimeDelta::days(2))?;
+    let after = naive.checked_add_signed(chrono::TimeDelta::days(2))?;
+    let offset_before = timezone
+        .from_local_datetime(&before)
+        .earliest()?
+        .offset()
+        .fix()
+        .local_minus_utc();
+    let offset_after = timezone
+        .from_local_datetime(&after)
+        .earliest()?
+        .offset()
+        .fix()
+        .local_minus_utc();
+    let gap_seconds = offset_after - offset_before;
+    if gap_seconds <= 0 {
+        return None;
+    }
+    let shifted = naive.checked_add_signed(chrono::TimeDelta::seconds(i64::from(gap_seconds)))?;
+    instant(&shifted)
 }
 
 fn parse_comparison_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {

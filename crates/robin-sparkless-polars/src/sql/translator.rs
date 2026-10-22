@@ -125,6 +125,9 @@ fn parse_sql_date_time(value: &str) -> Option<chrono::NaiveDateTime> {
             let fraction = if fraction.is_empty() {
                 0
             } else {
+                if !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return None;
+                }
                 let digits = fraction.chars().take(6).collect::<String>();
                 let parsed = digits.parse::<u32>().ok()?;
                 parsed * 10_u32.pow((6 - digits.len()) as u32)
@@ -196,13 +199,11 @@ fn parse_sql_timestamp_micros(value: &str, session_timezone: &str) -> Result<i64
     use chrono::TimeZone;
     let timezone_name = explicit_timezone.unwrap_or(session_timezone);
     if let Ok(timezone) = timezone_name.parse::<chrono_tz::Tz>() {
-        return match timezone.from_local_datetime(&naive) {
-            chrono::LocalResult::Single(datetime) => Ok(datetime.timestamp_micros()),
-            chrono::LocalResult::Ambiguous(first, _) => Ok(first.timestamp_micros()),
-            chrono::LocalResult::None => Err(PolarsError::InvalidOperation(
-                format!("SQL: TIMESTAMP literal {value:?} falls in a timezone gap").into(),
-            )),
-        };
+        return resolve_local_timestamp(timezone, &naive).ok_or_else(|| {
+            PolarsError::InvalidOperation(
+                format!("SQL: TIMESTAMP literal {value:?} cannot be resolved in timezone {timezone_name:?}").into(),
+            )
+        });
     }
     if let Some(offset) = parse_sql_fixed_offset(timezone_name) {
         return Ok(offset
@@ -214,6 +215,44 @@ fn parse_sql_timestamp_micros(value: &str, session_timezone: &str) -> Result<i64
     Err(PolarsError::InvalidOperation(
         format!("SQL: invalid timezone {timezone_name:?} in TIMESTAMP literal").into(),
     ))
+}
+
+fn resolve_local_timestamp(timezone: chrono_tz::Tz, naive: &chrono::NaiveDateTime) -> Option<i64> {
+    use chrono::{Offset, TimeZone};
+
+    let instant = |local: &chrono::NaiveDateTime| match timezone.from_local_datetime(local) {
+        chrono::LocalResult::Single(value) => Some(value.timestamp_micros()),
+        chrono::LocalResult::Ambiguous(first, second) => {
+            Some(first.timestamp_micros().min(second.timestamp_micros()))
+        }
+        chrono::LocalResult::None => None,
+    };
+    if let Some(value) = instant(naive) {
+        return Some(value);
+    }
+
+    // Spark resolves a local time inside a daylight saving gap by shifting it
+    // forward by the gap size (02:30 becomes 03:30 for a one-hour gap).
+    let before = naive.checked_sub_signed(chrono::TimeDelta::days(2))?;
+    let after = naive.checked_add_signed(chrono::TimeDelta::days(2))?;
+    let offset_before = timezone
+        .from_local_datetime(&before)
+        .earliest()?
+        .offset()
+        .fix()
+        .local_minus_utc();
+    let offset_after = timezone
+        .from_local_datetime(&after)
+        .earliest()?
+        .offset()
+        .fix()
+        .local_minus_utc();
+    let gap_seconds = offset_after - offset_before;
+    if gap_seconds <= 0 {
+        return None;
+    }
+    let shifted = naive.checked_add_signed(chrono::TimeDelta::seconds(i64::from(gap_seconds)))?;
+    instant(&shifted)
 }
 
 fn split_sql_timestamp_timezone(value: &str) -> (&str, Option<&str>) {
