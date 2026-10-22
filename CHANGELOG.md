@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
 
+## [4.15.3] - 2026-10-22
+
+### Fixed
+
+- **SQL COUNT result type** — Return Spark-compatible `BIGINT` values for SQL `COUNT`, matching DataFrame aggregations and Arrow `int64` output (#1723).
+
 ## [4.15.2] - 2026-10-22
 
 ### Release
