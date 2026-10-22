@@ -60,6 +60,8 @@ def test_sql_count_long_schema_and_values(count_results, spark_imports):
 def test_sql_count_arrow_int64_schema_and_values(count_results):
     pa = pytest.importorskip("pyarrow")
     sql_result, frame_result, expected = count_results
+    if not hasattr(type(sql_result), "toArrow"):
+        pytest.skip("DataFrame.toArrow() requires PySpark 4.0 or newer")
 
     for result in (sql_result, frame_result):
         arrow = result.toArrow()
