@@ -702,15 +702,18 @@ pub fn coerce_for_pyspark_comparison(
         // Spark parses strings compared with timestamps in the session timezone.
         // Parse the column values with the same literal parser, then compare epoch
         // microseconds so Polars timezone metadata cannot affect the result.
-        if matches!(left_type, DataType::Datetime(_, _)) && right_type == &DataType::String {
-            let left = datetime_to_micros(left, left_type);
-            let right = string_to_session_timestamp_micros(right);
-            return Ok((left, right));
-        }
-        if left_type == &DataType::String && matches!(right_type, DataType::Datetime(_, _)) {
-            let left = string_to_session_timestamp_micros(left);
-            let right = datetime_to_micros(right, right_type);
-            return Ok((left, right));
+        #[cfg(feature = "sql")]
+        {
+            if matches!(left_type, DataType::Datetime(_, _)) && right_type == &DataType::String {
+                let left = datetime_to_micros(left, left_type);
+                let right = string_to_session_timestamp_micros(right);
+                return Ok((left, right));
+            }
+            if left_type == &DataType::String && matches!(right_type, DataType::Datetime(_, _)) {
+                let left = string_to_session_timestamp_micros(left);
+                let right = datetime_to_micros(right, right_type);
+                return Ok((left, right));
+            }
         }
         let left_out = if left_type == &DataType::String {
             wrap_try_to_temporal(left, right_type)?
@@ -771,6 +774,7 @@ pub fn coerce_for_pyspark_comparison(
     coerce_for_comparison(left, right, left_type, right_type)
 }
 
+#[cfg(feature = "sql")]
 fn string_to_session_timestamp_micros(expr: Expr) -> Expr {
     let timezone = crate::get_thread_session_time_zone();
     expr.map(
