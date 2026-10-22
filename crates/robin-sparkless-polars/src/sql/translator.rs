@@ -81,6 +81,113 @@ fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
     }
 }
 
+fn parse_sql_date_time(value: &str) -> Option<chrono::NaiveDateTime> {
+    let value = value.trim();
+    let (date_part, time_part) = value
+        .split_once('T')
+        .or_else(|| value.split_once(' '))
+        .map_or((value, None), |(date, time)| (date, Some(time)));
+
+    let mut date_parts = date_part.split('-');
+    let year = date_parts.next()?.parse::<i32>().ok()?;
+    let month = match date_parts.next() {
+        Some(month) => month.parse::<u32>().ok()?,
+        None => 1,
+    };
+    let day = match date_parts.next() {
+        Some(day) => day.parse::<u32>().ok()?,
+        None => 1,
+    };
+    if date_parts.next().is_some() {
+        return None;
+    }
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+
+    let Some(time_part) = time_part else {
+        return date.and_hms_opt(0, 0, 0);
+    };
+    if time_part.is_empty() {
+        return date.and_hms_opt(0, 0, 0);
+    }
+    for format in ["%H:%M:%S%.f", "%H:%M:%S", "%H:%M", "%H"] {
+        if let Ok(time) = chrono::NaiveTime::parse_from_str(time_part, format) {
+            return Some(date.and_time(time));
+        }
+    }
+    None
+}
+
+fn parse_sql_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
+    let offset = ["UTC", "GMT", "UT"]
+        .iter()
+        .find_map(|prefix| {
+            value
+                .strip_prefix(prefix)
+                .filter(|rest| rest.starts_with('+') || rest.starts_with('-'))
+        })
+        .unwrap_or(value);
+    if value == "Z" {
+        return chrono::FixedOffset::east_opt(0);
+    }
+    let (sign, magnitude) = match offset.as_bytes().first()? {
+        b'+' => (1, &offset[1..]),
+        b'-' => (-1, &offset[1..]),
+        _ => return None,
+    };
+    let parts = magnitude.split(':').collect::<Vec<_>>();
+    if parts.is_empty() || parts.len() > 3 {
+        return None;
+    }
+    let hours = parts[0].parse::<i32>().ok()?;
+    let minutes = parts
+        .get(1)
+        .map(|s| s.parse::<i32>())
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
+    let seconds = parts
+        .get(2)
+        .map(|s| s.parse::<i32>())
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
+    if hours > 18 || minutes > 59 || seconds > 59 || (hours == 18 && (minutes != 0 || seconds != 0))
+    {
+        return None;
+    }
+    chrono::FixedOffset::east_opt(sign * (hours * 3600 + minutes * 60 + seconds))
+}
+
+fn parse_sql_timestamp_micros(value: &str, session_timezone: &str) -> Result<i64, PolarsError> {
+    if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Ok(datetime.timestamp_micros());
+    }
+    let naive = parse_sql_date_time(value).ok_or_else(|| {
+        PolarsError::InvalidOperation(format!("SQL: invalid TIMESTAMP literal {value:?}").into())
+    })?;
+
+    use chrono::TimeZone;
+    if let Ok(timezone) = session_timezone.parse::<chrono_tz::Tz>() {
+        return match timezone.from_local_datetime(&naive) {
+            chrono::LocalResult::Single(datetime) => Ok(datetime.timestamp_micros()),
+            chrono::LocalResult::Ambiguous(first, _) => Ok(first.timestamp_micros()),
+            chrono::LocalResult::None => Err(PolarsError::InvalidOperation(
+                format!("SQL: TIMESTAMP literal {value:?} falls in a timezone gap").into(),
+            )),
+        };
+    }
+    if let Some(offset) = parse_sql_fixed_offset(session_timezone) {
+        return Ok(offset
+            .from_local_datetime(&naive)
+            .single()
+            .unwrap()
+            .timestamp_micros());
+    }
+    Err(PolarsError::InvalidOperation(
+        format!("SQL: invalid session timezone {session_timezone:?}").into(),
+    ))
+}
+
 /// Map SQL AST data types to PySpark-style cast type names.
 fn sql_ast_data_type_to_cast_name(dt: &spark_sql_parser::ast::DataType) -> String {
     use spark_sql_parser::ast::DataType as SqlDataType;
@@ -1424,51 +1531,17 @@ fn sql_expr_to_polars(
                     )?;
                     let days = (date - chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
                         .num_days() as i32;
-                    Ok(lit(days).cast(polars::prelude::DataType::Date))
+                    Ok(lit(Scalar::new_date(days)))
                 }
                 SqlDataType::Timestamp(_, _) => {
-                    let parsed_with_offset = chrono::DateTime::parse_from_rfc3339(value).ok();
-                    let micros = if let Some(datetime) = parsed_with_offset {
-                        datetime.timestamp_micros()
-                    } else {
-                        let naive = [
-                            "%Y-%m-%d %H:%M:%S%.f",
-                            "%Y-%m-%dT%H:%M:%S%.f",
-                            "%Y-%m-%d %H:%M:%S",
-                            "%Y-%m-%dT%H:%M:%S",
-                        ]
-                        .iter()
-                        .find_map(|format| {
-                            chrono::NaiveDateTime::parse_from_str(value, format).ok()
-                        })
-                        .ok_or_else(|| {
-                            PolarsError::InvalidOperation(
-                                format!("SQL: invalid TIMESTAMP literal {value:?}").into(),
-                            )
-                        })?;
-                        let timezone = session
-                            .get_config()
-                            .get("spark.sql.session.timeZone")
-                            .map(String::as_str)
-                            .unwrap_or("UTC");
-                        let timezone: chrono_tz::Tz = timezone.parse().map_err(|_| {
-                            PolarsError::InvalidOperation(
-                                format!("SQL: invalid session timezone {timezone:?}").into(),
-                            )
-                        })?;
-                        use chrono::TimeZone;
-                        match timezone.from_local_datetime(&naive) {
-                            chrono::LocalResult::Single(datetime) => datetime.timestamp_micros(),
-                            chrono::LocalResult::Ambiguous(first, _) => first.timestamp_micros(),
-                            chrono::LocalResult::None => {
-                                return Err(PolarsError::InvalidOperation(
-                                    format!("SQL: TIMESTAMP literal {value:?} falls in a timezone gap")
-                                        .into(),
-                                ));
-                            }
-                        }
-                    };
-                    Ok(lit(micros).cast(polars::prelude::DataType::Datetime(
+                    let timezone = session
+                        .get_config()
+                        .get("spark.sql.session.timeZone")
+                        .map(String::as_str)
+                        .unwrap_or("UTC");
+                    let micros = parse_sql_timestamp_micros(value, timezone)?;
+                    Ok(lit(Scalar::new_datetime(
+                        micros,
                         polars::prelude::TimeUnit::Microseconds,
                         Some(polars::prelude::TimeZone::UTC),
                     )))

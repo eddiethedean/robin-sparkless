@@ -4,16 +4,29 @@ use polars::prelude::*;
 use robin_sparkless_polars::SparkSession;
 
 fn session_with_timestamp(timestamp: &str, timezone: &str) -> SparkSession {
+    session_with_timestamp_unit(timestamp, timezone, TimeUnit::Microseconds)
+}
+
+fn session_with_timestamp_unit(timestamp: &str, timezone: &str, unit: TimeUnit) -> SparkSession {
     let micros = chrono::NaiveDateTime::parse_from_str(timestamp, "%Y-%m-%d %H:%M:%S")
         .unwrap()
         .and_utc()
         .timestamp_micros();
-    let event_ts = Series::new("event_ts".into(), [micros])
-        .cast(&DataType::Datetime(
-            TimeUnit::Microseconds,
-            Some(TimeZone::UTC),
-        ))
-        .unwrap();
+    let ticks = match unit {
+        TimeUnit::Milliseconds => micros / 1_000,
+        TimeUnit::Microseconds => micros,
+        TimeUnit::Nanoseconds => micros * 1_000,
+    };
+    let event_ts = Series::new("event_ts".into(), [ticks])
+        .i64()
+        .unwrap()
+        .clone()
+        .into_datetime(unit, Some(TimeZone::UTC))
+        .into_series();
+    assert_eq!(
+        event_ts.dtype(),
+        &DataType::Datetime(unit, Some(TimeZone::UTC))
+    );
     let frame = DataFrame::new(
         1,
         vec![
@@ -59,4 +72,41 @@ fn zone_free_timestamp_literal_uses_session_timezone() {
         .unwrap();
 
     assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn fixed_offset_session_timezone_is_supported() {
+    let session = session_with_timestamp("2026-10-18 03:30:00", "+05:30");
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE event_ts = TIMESTAMP '2026-10-18 09:00:00'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn date_only_timestamp_literal_defaults_to_midnight() {
+    let session = session_with_timestamp("2026-10-18 00:00:00", "UTC");
+    let rows = session
+        .sql("SELECT order_id FROM orders WHERE event_ts = TIMESTAMP '2026-10-18'")
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn timestamp_comparison_preserves_other_time_units() {
+    for unit in [TimeUnit::Milliseconds, TimeUnit::Nanoseconds] {
+        let session = session_with_timestamp_unit("2026-10-18 03:30:00", "UTC", unit);
+        let rows = session
+            .sql("SELECT order_id FROM orders WHERE event_ts = TIMESTAMP '2026-10-18 03:30:00'")
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert_eq!(rows.len(), 1, "comparison failed for {unit:?}");
+    }
 }

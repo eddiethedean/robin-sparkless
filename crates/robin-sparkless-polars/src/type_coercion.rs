@@ -755,10 +755,17 @@ pub fn coerce_for_pyspark_comparison(
         };
         let common_timezone = left_timezone.clone().or_else(|| right_timezone.clone());
         let common_type = DataType::Datetime(common_unit, common_timezone);
-        return Ok((
-            coerce_to_type(left, common_type.clone()),
-            coerce_to_type(right, common_type),
-        ));
+        let left = if left_type == &common_type {
+            left
+        } else {
+            coerce_to_type(left, common_type.clone())
+        };
+        let right = if right_type == &common_type {
+            right
+        } else {
+            coerce_to_type(right, common_type)
+        };
+        return Ok((left, right));
     }
 
     // Equal non-numeric types: leave as-is for now.
