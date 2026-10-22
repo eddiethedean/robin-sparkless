@@ -1661,13 +1661,13 @@ fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
                         }
                     }
                 }
-                TableFactor::Derived { alias, .. } => {
-                    if let Some(alias) = alias {
-                        qualifiers.push(SqlRelationQualifier {
-                            parts: vec![alias.name.value.clone()],
-                            column_prefix: None,
-                        });
-                    }
+                TableFactor::Derived {
+                    alias: Some(alias), ..
+                } => {
+                    qualifiers.push(SqlRelationQualifier {
+                        parts: vec![alias.name.value.clone()],
+                        column_prefix: None,
+                    });
                 }
                 _ => {}
             }
