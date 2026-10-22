@@ -1,7 +1,7 @@
 //! Translate sqlparser AST to DataFrame operations.
 //! Resolves unknown functions as UDFs from the session registry.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::column::Column;
 use crate::dataframe::{DataFrame, JoinOptions, JoinType, disambiguate_agg_output_names, join};
@@ -1056,7 +1056,7 @@ fn translate_select_body(
             Some(&df),
             None,
             None,
-            Some(&relation_qualifiers),
+            Some(relation_qualifiers.as_slice()),
         )?;
         df = df.filter(expr)?;
     }
@@ -1088,21 +1088,38 @@ fn translate_select_body(
                         (col(resolved.as_str()), resolved)
                     }
                     SqlExpr::CompoundIdentifier(parts) => {
-                        // Qualified column (e.g. d.dept_name): mirror sql_expr_to_polars behavior
-                        // and try alias_column form (d_dept_name) first, then bare column.
-                        let qualified = parts
-                            .iter()
-                            .map(|i| i.value.as_str())
-                            .collect::<Vec<_>>()
-                            .join("_");
-                        let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                        let resolved = df
-                            .resolve_column_name(&qualified)
-                            .or_else(|_| df.resolve_column_name(last))?;
-                        (col(resolved.as_str()), resolved)
+                        if let Some(expr) =
+                            sql_struct_field_expr(parts, &df, Some(relation_qualifiers.as_slice()))?
+                        {
+                            let name = parts
+                                .last()
+                                .map(|part| part.value.clone())
+                                .unwrap_or_default();
+                            (expr.alias(&name), name)
+                        } else {
+                            // Qualified column (e.g. d.dept_name): try the alias_column
+                            // form first, then fall back to the bare column name.
+                            let qualified = parts
+                                .iter()
+                                .map(|i| i.value.as_str())
+                                .collect::<Vec<_>>()
+                                .join("_");
+                            let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
+                            let resolved = df
+                                .resolve_column_name(&qualified)
+                                .or_else(|_| df.resolve_column_name(last))?;
+                            (col(resolved.as_str()), resolved)
+                        }
                     }
                     _ => {
-                        let expr = sql_expr_to_polars(e, session, Some(&df), None, None)?;
+                        let expr = sql_expr_to_polars_with_qualifiers(
+                            e,
+                            session,
+                            Some(&df),
+                            None,
+                            None,
+                            Some(relation_qualifiers.as_slice()),
+                        )?;
                         let name = format!("group_{}", i);
                         (expr.alias(&name), name)
                     }
@@ -1116,7 +1133,7 @@ fn translate_select_body(
             &group_cols,
             session,
             &df,
-            Some(&relation_qualifiers),
+            Some(relation_qualifiers.as_slice()),
         )?;
         if let Some(_having_expr) = &body.having {
             for (func, alias) in &having_list {
@@ -1126,7 +1143,7 @@ fn translate_select_body(
                     session,
                     &df,
                     Some(alias.as_str()),
-                    Some(&relation_qualifiers),
+                    Some(relation_qualifiers.as_slice()),
                     &mut agg_exprs,
                 )?;
             }
@@ -1177,7 +1194,7 @@ fn translate_select_body(
             &[],
             session,
             &df,
-            Some(&relation_qualifiers),
+            Some(relation_qualifiers.as_slice()),
         )?;
         let agg_exprs = disambiguate_agg_output_names(agg_exprs);
         let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
@@ -1588,8 +1605,14 @@ fn any_value_to_lit(av: AnyValue) -> Result<Expr, PolarsError> {
     })
 }
 
-fn sql_relation_qualifiers(select: &Select) -> HashSet<String> {
-    let mut qualifiers = HashSet::new();
+#[derive(Clone, Debug)]
+struct SqlRelationQualifier {
+    parts: Vec<String>,
+    column_prefix: Option<String>,
+}
+
+fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
+    let mut qualifiers = Vec::new();
     for table_with_joins in &select.from {
         let mut relations = vec![&table_with_joins.relation];
         relations.extend(table_with_joins.joins.iter().map(|join| &join.relation));
@@ -1597,17 +1620,38 @@ fn sql_relation_qualifiers(select: &Select) -> HashSet<String> {
             match relation {
                 TableFactor::Table { name, alias, .. } => {
                     if let Some(alias) = alias {
-                        qualifiers.insert(alias.name.value.clone());
+                        let column_prefix = table_alias_from_factor(relation)
+                            .filter(|_| should_prefix_columns(relation));
+                        qualifiers.push(SqlRelationQualifier {
+                            parts: vec![alias.name.value.clone()],
+                            column_prefix,
+                        });
                     } else {
-                        qualifiers.insert(table_name_from_object_name(name));
-                        if let Some(last) = name.0.last().and_then(|part| part.as_ident()) {
-                            qualifiers.insert(last.value.clone());
+                        let parts = name
+                            .0
+                            .iter()
+                            .filter_map(|part| part.as_ident().map(|ident| ident.value.clone()))
+                            .collect::<Vec<_>>();
+                        if !parts.is_empty() {
+                            qualifiers.push(SqlRelationQualifier {
+                                parts: parts.clone(),
+                                column_prefix: None,
+                            });
+                            if parts.len() > 1 {
+                                qualifiers.push(SqlRelationQualifier {
+                                    parts: vec![parts.last().unwrap().clone()],
+                                    column_prefix: None,
+                                });
+                            }
                         }
                     }
                 }
                 TableFactor::Derived { alias, .. } => {
                     if let Some(alias) = alias {
-                        qualifiers.insert(alias.name.value.clone());
+                        qualifiers.push(SqlRelationQualifier {
+                            parts: vec![alias.name.value.clone()],
+                            column_prefix: None,
+                        });
                     }
                 }
                 _ => {}
@@ -1623,78 +1667,103 @@ fn sql_relation_qualifiers(select: &Select) -> HashSet<String> {
 fn sql_struct_field_expr(
     parts: &[spark_sql_parser::ast::Ident],
     df: &DataFrame,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Option<Expr>, PolarsError> {
     if parts.len() < 2 {
         return Ok(None);
     }
 
     let names: Vec<&str> = parts.iter().map(|part| part.value.as_str()).collect();
+    if let Some((qualifier, qualifier_len)) = relation_qualifiers.and_then(|qualifiers| {
+        qualifiers
+            .iter()
+            .filter(|qualifier| {
+                qualifier.parts.len() < names.len()
+                    && qualifier.parts.iter().zip(&names).all(|(left, right)| {
+                        if df.case_sensitive {
+                            left == right
+                        } else {
+                            left.eq_ignore_ascii_case(right)
+                        }
+                    })
+            })
+            .max_by_key(|qualifier| qualifier.parts.len())
+            .map(|qualifier| (qualifier, qualifier.parts.len()))
+    }) {
+        let column = names[qualifier_len];
+        let root = qualifier
+            .column_prefix
+            .as_ref()
+            .map(|prefix| format!("{prefix}_{column}"))
+            .unwrap_or_else(|| column.to_string());
+        return sql_struct_path_expr(&root, &names[qualifier_len + 1..], df);
+    }
+
     for start in 0..names.len() - 1 {
         for end in start + 1..names.len() {
-            let qualifier_prefix = names[..end].join(".");
-            if start == 0
-                && relation_qualifiers.is_some_and(|qualifiers| {
-                    if df.case_sensitive {
-                        qualifiers.contains(&qualifier_prefix)
-                    } else {
-                        qualifiers
-                            .iter()
-                            .any(|qualifier| qualifier.eq_ignore_ascii_case(&qualifier_prefix))
-                    }
-                })
-            {
-                continue;
-            }
             let root = names[start..end].join("_");
-            let Some(mut dtype) = df.get_column_dtype(&root) else {
-                continue;
-            };
-            let Some(resolved_root) = df.resolve_column_name(&root).ok() else {
-                continue;
-            };
-            let mut expr = col(resolved_root.as_str());
-            let mut context = resolved_root;
-            for requested in &names[end..] {
-                let polars::prelude::DataType::Struct(fields) = &dtype else {
-                    return Err(PolarsError::ColumnNotFound(
-                        format!("cannot resolve: expected struct at '{context}'").into(),
-                    ));
-                };
-                let field = fields
-                    .iter()
-                    .find(|field| field.name().as_str() == *requested)
-                    .or_else(|| {
-                        (!df.case_sensitive).then(|| {
-                            fields.iter().find(|field| {
-                                field.name().as_str().eq_ignore_ascii_case(requested)
-                            })
-                        })
-                        .flatten()
-                    })
-                    .ok_or_else(|| {
-                        let available = fields
-                            .iter()
-                            .map(|field| field.name().to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        PolarsError::ColumnNotFound(
-                            format!(
-                                "cannot resolve: Struct field '{}' not found in '{}'. Available: [{}].",
-                                requested, context, available
-                            )
-                            .into(),
-                        )
-                    })?;
-                let field_name = field.name().to_string();
-                dtype = field.dtype().clone();
-                expr = expr.struct_().field_by_name(&field_name);
-                context = format!("{context}.{field_name}");
+            if let Some(expr) = sql_struct_path_expr(&root, &names[end..], df)? {
+                return Ok(Some(expr));
             }
-            return Ok(Some(expr));
         }
     }
     Ok(None)
+}
+
+fn sql_struct_path_expr(
+    root: &str,
+    field_path: &[&str],
+    df: &DataFrame,
+) -> Result<Option<Expr>, PolarsError> {
+    if field_path.is_empty() {
+        return Ok(None);
+    }
+    let Some(mut dtype) = df.get_column_dtype(root) else {
+        return Ok(None);
+    };
+    let Some(resolved_root) = df.resolve_column_name(root).ok() else {
+        return Ok(None);
+    };
+    let mut expr = col(resolved_root.as_str());
+    let mut context = resolved_root;
+    for requested in field_path {
+        let polars::prelude::DataType::Struct(fields) = &dtype else {
+            return Err(PolarsError::ColumnNotFound(
+                format!("cannot resolve: expected struct at '{context}'").into(),
+            ));
+        };
+        let field = fields
+            .iter()
+            .find(|field| field.name().as_str() == *requested)
+            .or_else(|| {
+                (!df.case_sensitive)
+                    .then(|| {
+                        fields
+                            .iter()
+                            .find(|field| field.name().as_str().eq_ignore_ascii_case(requested))
+                    })
+                    .flatten()
+            })
+            .ok_or_else(|| {
+                let available = fields
+                    .iter()
+                    .map(|field| field.name().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                PolarsError::ColumnNotFound(
+                    format!(
+                        "cannot resolve: Struct field '{}' not found in '{}'. Available: [{}].",
+                        requested, context, available
+                    )
+                    .into(),
+                )
+            })?;
+        let field_name = field.name().to_string();
+        dtype = field.dtype().clone();
+        expr = expr.struct_().field_by_name(&field_name);
+        context = format!("{context}.{field_name}");
+    }
+    Ok(Some(expr))
 }
 
 fn sql_expr_to_polars(
@@ -1713,7 +1782,7 @@ fn sql_expr_to_polars_with_qualifiers(
     df: Option<&DataFrame>,
     having_agg_map: Option<&HashMap<(String, String), String>>,
     having_agg_list: Option<&[(Function, String)]>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Expr, PolarsError> {
     match expr {
         SqlExpr::Identifier(ident) => {
@@ -2120,7 +2189,7 @@ fn sql_function_to_expr(
     func: &Function,
     session: &SparkSession,
     df: Option<&DataFrame>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Expr, PolarsError> {
     let func_name = func
         .name
@@ -2204,7 +2273,7 @@ fn sql_function_args_to_columns(
     func: &Function,
     session: &SparkSession,
     df: Option<&DataFrame>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Vec<Column>, PolarsError> {
     let mut cols = Vec::new();
     for arg in function_args_slice(&func.args) {
@@ -2341,7 +2410,7 @@ fn sql_to_timestamp_from_function(
     func: &Function,
     session: &SparkSession,
     df: Option<&DataFrame>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Expr, PolarsError> {
     let args = function_args_slice(&func.args);
     if args.is_empty() || args.len() > 2 {
@@ -2370,7 +2439,7 @@ fn sql_to_date_from_function(
     func: &Function,
     session: &SparkSession,
     df: Option<&DataFrame>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Expr, PolarsError> {
     let args = function_args_slice(&func.args);
     if args.is_empty() || args.len() > 2 {
@@ -2447,7 +2516,7 @@ fn sql_expr_to_datetime_expr(
     expr: &SqlExpr,
     session: &SparkSession,
     df: Option<&DataFrame>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Expr, PolarsError> {
     if let SqlExpr::Function(func) = expr {
         let name = func
@@ -2478,7 +2547,7 @@ fn sql_date_add_from_function(
     func: &Function,
     session: &SparkSession,
     df: Option<&DataFrame>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Expr, PolarsError> {
     let args = function_args_slice(&func.args);
     match args.len() {
@@ -2573,7 +2642,7 @@ fn apply_projection(
     df: &crate::dataframe::DataFrame,
     projection: &[SelectItem],
     session: &SparkSession,
-    relation_qualifiers: &HashSet<String>,
+    relation_qualifiers: &[SqlRelationQualifier],
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     // Wildcard: expand to all columns (disambiguate if JOIN produced duplicate names)
     for item in projection {
@@ -2789,7 +2858,7 @@ fn projection_function_to_item(
     func: &Function,
     session: &SparkSession,
     df: Option<&DataFrame>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<ProjItem, PolarsError> {
     let func_name = func
         .name
@@ -2865,7 +2934,7 @@ fn push_agg_function(
     session: &SparkSession,
     df: &DataFrame,
     alias_override: Option<&str>,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
     agg: &mut Vec<Expr>,
 ) -> Result<(), PolarsError> {
     use polars::prelude::len;
@@ -2895,6 +2964,15 @@ fn push_agg_function(
                                 let resolved = df.resolve_column_name(ident.value.as_str())?;
                                 col(resolved.as_str()).count()
                             }
+                            SqlExpr::CompoundIdentifier(_) => sql_expr_to_polars_with_qualifiers(
+                                expr,
+                                session,
+                                Some(df),
+                                None,
+                                None,
+                                relation_qualifiers,
+                            )?
+                            .count(),
                             _ => len(), // COUNT(1) etc.
                         }
                     }
@@ -3289,7 +3367,7 @@ fn projection_to_agg_exprs(
     group_cols: &[String],
     session: &SparkSession,
     df: &DataFrame,
-    relation_qualifiers: Option<&HashSet<String>>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
 ) -> Result<Vec<Expr>, PolarsError> {
     let mut agg = Vec::new();
     for item in projection {
