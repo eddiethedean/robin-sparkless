@@ -1,5 +1,8 @@
 #![cfg(all(feature = "delta", feature = "sql"))]
 
+use polars::prelude::{
+    DataFrame as PlDataFrame, IntoSeries, NamedFrom, Series as PlSeries, TimeUnit, TimeZone,
+};
 use robin_sparkless_polars::{
     DataType, EngineError, ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
     ExternalTableWriteRequest, ExternalTableWriteResult, SaveMode, SparkSession, StructField,
@@ -69,6 +72,62 @@ fn frame(session: &SparkSession, id: i64) -> robin_sparkless_polars::DataFrame {
     session
         .create_dataframe(vec![(id, 2, "x".to_string())], vec!["id", "age", "name"])
         .unwrap()
+}
+
+#[test]
+fn review_external_delta_timestamp_predicate_uses_physical_instant() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SparkSession::default();
+    session.set_config("spark.sql.session.timeZone", "UTC");
+
+    let micros = chrono::NaiveDateTime::parse_from_str("2026-10-18 03:30:00", "%Y-%m-%d %H:%M:%S")
+        .unwrap()
+        .and_utc()
+        .timestamp_micros();
+    let event_ts = PlSeries::new("event_ts".into(), [micros])
+        .i64()
+        .unwrap()
+        .clone()
+        .into_datetime(TimeUnit::Microseconds, Some(TimeZone::UTC))
+        .into_series();
+    let polars_frame = PlDataFrame::new(
+        1,
+        vec![
+            PlSeries::new("order_id".into(), [1i64]).into(),
+            event_ts.into(),
+        ],
+    )
+    .unwrap();
+    let input = session.create_dataframe_from_polars(polars_frame);
+    input.write_delta(dir.path(), true, false).unwrap();
+    attach(
+        &session,
+        dir.path(),
+        input.schema().unwrap(),
+        Some(0),
+        false,
+    );
+
+    let rows = session
+        .sql(
+            "SELECT order_id FROM catalog.schema.orders \
+             WHERE event_ts >= TIMESTAMP '2026-10-18 03:30:00'",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["order_id"], 1);
+
+    let rows = session
+        .sql(
+            "SELECT order_id FROM catalog.schema.orders \
+             WHERE event_ts < TIMESTAMP '2026-10-18 03:30:00'",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert!(rows.is_empty());
 }
 
 #[test]
