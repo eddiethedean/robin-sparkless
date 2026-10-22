@@ -6524,6 +6524,15 @@ fn format_list_row_as_pyspark_string(inner: Series) -> PolarsResult<String> {
 
 /// Cast column to string (PySpark parity). List columns stringify as `[elem1, elem2]` (#1594).
 pub fn apply_cast_to_string(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
+    apply_cast_to_string_with_timezone(column, strict, None, false)
+}
+
+pub(crate) fn apply_cast_to_string_with_timezone(
+    column: Column,
+    strict: bool,
+    session_timezone: Option<&str>,
+    timestamp_ntz: bool,
+) -> PolarsResult<Option<Column>> {
     use polars::chunked_array::builder::StringChunkedBuilder;
 
     let name = column.field().into_owned().name;
@@ -6545,13 +6554,17 @@ pub fn apply_cast_to_string(column: Column, strict: bool) -> PolarsResult<Option
         DataType::Datetime(unit, timezone) => {
             let values = series.cast(&DataType::Int64)?;
             let values = values.i64()?;
-            let timezone = timezone
-                .as_ref()
-                .map(|timezone| timezone.to_string().parse::<Tz>())
-                .transpose()
-                .map_err(|error| {
-                    PolarsError::ComputeError(format!("invalid timestamp timezone: {error}").into())
-                })?;
+            let timezone = if let Some(timezone) = timezone.as_ref() {
+                Some(parse_cast_timezone(&timezone.to_string()).ok_or_else(|| {
+                    PolarsError::ComputeError(
+                        format!("invalid timestamp timezone: {timezone}").into(),
+                    )
+                })?)
+            } else if !timestamp_ntz {
+                session_timezone.and_then(parse_cast_timezone)
+            } else {
+                None
+            };
             let mut builder = StringChunkedBuilder::new(name.as_str().into(), values.len());
             for value in values.into_iter() {
                 let micros = value.and_then(|value| match unit {
@@ -6560,11 +6573,14 @@ pub fn apply_cast_to_string(column: Column, strict: bool) -> PolarsResult<Option
                     TimeUnit::Milliseconds => value.checked_mul(1_000),
                 });
                 let formatted = micros.and_then(|micros| {
-                    chrono::DateTime::from_timestamp_micros(micros).map(|timestamp| {
-                        let local = timezone
-                            .map(|timezone| timestamp.with_timezone(&timezone).naive_local())
-                            .unwrap_or_else(|| timestamp.naive_utc());
-                        local.format("%Y-%m-%d %H:%M:%S%.6f").to_string()
+                    let local_micros = timezone
+                        .map(|timezone| utc_micros_to_local_naive_micros(micros, timezone))
+                        .unwrap_or(Some(micros))?;
+                    chrono::DateTime::from_timestamp_micros(local_micros).map(|local| {
+                        local
+                            .naive_utc()
+                            .format("%Y-%m-%d %H:%M:%S%.6f")
+                            .to_string()
                     })
                 });
                 if let Some(formatted) = formatted {

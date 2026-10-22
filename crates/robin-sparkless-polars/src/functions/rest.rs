@@ -3030,9 +3030,16 @@ fn cast_impl(
             let expr = column.expr().clone().strict_cast(dtype);
             return Ok(Column::from_expr(expr, Some(base_name)));
         }
+        let timezone = crate::get_thread_session_time_zone();
+        let timestamp_ntz = is_timestamp_ntz_expression(column.expr());
         let expr = column.expr().clone().map(
             move |col| {
-                crate::column::expect_col(crate::udfs::apply_cast_to_string(col, ansi_strict))
+                crate::column::expect_col(crate::udfs::apply_cast_to_string_with_timezone(
+                    col,
+                    ansi_strict,
+                    Some(&timezone),
+                    timestamp_ntz,
+                ))
             },
             |_schema, field| Ok(Field::new(field.name().clone(), DataType::String)),
         );

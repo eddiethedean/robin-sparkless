@@ -105,7 +105,11 @@ fn fixed_offset_session_timezone_is_supported_for_timestamp_casts() {
             "SELECT CAST(event_ts AS TIMESTAMP_NTZ) = \
              CAST('2026-10-18 09:00:00' AS TIMESTAMP_NTZ) AS same_local_time, \
              CAST(CAST('2026-10-18 09:00:00' AS TIMESTAMP_NTZ) AS TIMESTAMP) = event_ts \
-             AS same_instant FROM orders",
+             AS same_instant, \
+             CAST(CAST(event_ts AS TIMESTAMP) AS STRING) AS timestamp_string, \
+             CAST(CAST('2026-10-18 09:00:00' AS TIMESTAMP) AS STRING) AS cast_string, \
+             CAST(CAST('2026-10-18 09:00:00' AS TIMESTAMP_NTZ) AS STRING) AS ntz_string \
+             FROM orders",
         )
         .unwrap()
         .collect_as_json_rows()
@@ -113,6 +117,9 @@ fn fixed_offset_session_timezone_is_supported_for_timestamp_casts() {
 
     assert_eq!(rows[0]["same_local_time"], serde_json::Value::Bool(true));
     assert_eq!(rows[0]["same_instant"], serde_json::Value::Bool(true));
+    assert_eq!(rows[0]["timestamp_string"], "2026-10-18 09:00:00.000000");
+    assert_eq!(rows[0]["cast_string"], "2026-10-18 09:00:00.000000");
+    assert_eq!(rows[0]["ntz_string"], "2026-10-18 09:00:00.000000");
 }
 
 #[test]
