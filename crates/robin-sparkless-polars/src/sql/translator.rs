@@ -1996,7 +1996,14 @@ fn sql_expr_to_polars_with_qualifiers(
                     }
                 }
             }
-            sql_function_to_expr(func, session, df, relation_qualifiers)
+            sql_function_to_expr(
+                func,
+                session,
+                df,
+                relation_qualifiers,
+                having_agg_map,
+                having_agg_list,
+            )
         }
         SqlExpr::Like {
             negated,
@@ -2210,6 +2217,8 @@ fn sql_function_to_expr(
     session: &SparkSession,
     df: Option<&DataFrame>,
     relation_qualifiers: Option<&[SqlRelationQualifier]>,
+    having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
 ) -> Result<Expr, PolarsError> {
     let func_name = func
         .name
@@ -2220,15 +2229,36 @@ fn sql_function_to_expr(
         .unwrap_or("");
 
     if func_name.eq_ignore_ascii_case("TO_DATE") {
-        return sql_to_date_from_function(func, session, df, relation_qualifiers);
+        return sql_to_date_from_function(
+            func,
+            session,
+            df,
+            relation_qualifiers,
+            having_agg_map,
+            having_agg_list,
+        );
     }
 
     if func_name.eq_ignore_ascii_case("TO_TIMESTAMP") {
-        return sql_to_timestamp_from_function(func, session, df, relation_qualifiers);
+        return sql_to_timestamp_from_function(
+            func,
+            session,
+            df,
+            relation_qualifiers,
+            having_agg_map,
+            having_agg_list,
+        );
     }
 
     if func_name.eq_ignore_ascii_case("DATE_ADD") || func_name.eq_ignore_ascii_case("DATEADD") {
-        return sql_date_add_from_function(func, session, df, relation_qualifiers);
+        return sql_date_add_from_function(
+            func,
+            session,
+            df,
+            relation_qualifiers,
+            having_agg_map,
+            having_agg_list,
+        );
     }
 
     if matches!(
@@ -2247,7 +2277,14 @@ fn sql_function_to_expr(
         return Ok(functions::current_timestamp().expr().clone());
     }
 
-    let args = sql_function_args_to_columns(func, session, df, relation_qualifiers)?;
+    let args = sql_function_args_to_columns(
+        func,
+        session,
+        df,
+        relation_qualifiers,
+        having_agg_map,
+        having_agg_list,
+    )?;
 
     let case_sensitive = session.is_case_sensitive();
 
@@ -2294,6 +2331,8 @@ fn sql_function_args_to_columns(
     session: &SparkSession,
     df: Option<&DataFrame>,
     relation_qualifiers: Option<&[SqlRelationQualifier]>,
+    having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
 ) -> Result<Vec<Column>, PolarsError> {
     let mut cols = Vec::new();
     for arg in function_args_slice(&func.args) {
@@ -2302,8 +2341,8 @@ fn sql_function_args_to_columns(
                 expr,
                 session,
                 df,
-                None,
-                None,
+                having_agg_map,
+                having_agg_list,
                 relation_qualifiers,
             )?;
             cols.push(Column::from_expr(e, None));
@@ -2431,6 +2470,8 @@ fn sql_to_timestamp_from_function(
     session: &SparkSession,
     df: Option<&DataFrame>,
     relation_qualifiers: Option<&[SqlRelationQualifier]>,
+    having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
 ) -> Result<Expr, PolarsError> {
     let args = function_args_slice(&func.args);
     if args.is_empty() || args.len() > 2 {
@@ -2439,8 +2480,14 @@ fn sql_to_timestamp_from_function(
         ));
     }
     let col_expr = sql_function_unnamed_expr(args, 0)?;
-    let e =
-        sql_expr_to_polars_with_qualifiers(col_expr, session, df, None, None, relation_qualifiers)?;
+    let e = sql_expr_to_polars_with_qualifiers(
+        col_expr,
+        session,
+        df,
+        having_agg_map,
+        having_agg_list,
+        relation_qualifiers,
+    )?;
     let col = Column::from_expr(e, None);
     let format = if args.len() == 2 {
         Some(sql_expr_to_string_literal(sql_function_unnamed_expr(
@@ -2460,6 +2507,8 @@ fn sql_to_date_from_function(
     session: &SparkSession,
     df: Option<&DataFrame>,
     relation_qualifiers: Option<&[SqlRelationQualifier]>,
+    having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
 ) -> Result<Expr, PolarsError> {
     let args = function_args_slice(&func.args);
     if args.is_empty() || args.len() > 2 {
@@ -2468,8 +2517,14 @@ fn sql_to_date_from_function(
         ));
     }
     let col_expr = sql_function_unnamed_expr(args, 0)?;
-    let e =
-        sql_expr_to_polars_with_qualifiers(col_expr, session, df, None, None, relation_qualifiers)?;
+    let e = sql_expr_to_polars_with_qualifiers(
+        col_expr,
+        session,
+        df,
+        having_agg_map,
+        having_agg_list,
+        relation_qualifiers,
+    )?;
     let col = Column::from_expr(e, None);
     let format = if args.len() == 2 {
         Some(sql_expr_to_string_literal(sql_function_unnamed_expr(
@@ -2537,6 +2592,8 @@ fn sql_expr_to_datetime_expr(
     session: &SparkSession,
     df: Option<&DataFrame>,
     relation_qualifiers: Option<&[SqlRelationQualifier]>,
+    having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
 ) -> Result<Expr, PolarsError> {
     if let SqlExpr::Function(func) = expr {
         let name = func
@@ -2559,7 +2616,14 @@ fn sql_expr_to_datetime_expr(
             return Ok(functions::current_timestamp().expr().clone());
         }
     }
-    sql_expr_to_polars_with_qualifiers(expr, session, df, None, None, relation_qualifiers)
+    sql_expr_to_polars_with_qualifiers(
+        expr,
+        session,
+        df,
+        having_agg_map,
+        having_agg_list,
+        relation_qualifiers,
+    )
 }
 
 /// PySpark `date_add(start, days)` or `date_add(unit, quantity, start)` in SQL (#1569).
@@ -2568,6 +2632,8 @@ fn sql_date_add_from_function(
     session: &SparkSession,
     df: Option<&DataFrame>,
     relation_qualifiers: Option<&[SqlRelationQualifier]>,
+    having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
 ) -> Result<Expr, PolarsError> {
     let args = function_args_slice(&func.args);
     match args.len() {
@@ -2577,6 +2643,8 @@ fn sql_date_add_from_function(
                 session,
                 df,
                 relation_qualifiers,
+                having_agg_map,
+                having_agg_list,
             )?;
             let n = sql_parse_int_literal(sql_function_unnamed_expr(args, 1)?)?;
             let start_col = Column::from_expr(start_expr, None);
@@ -2600,6 +2668,8 @@ fn sql_date_add_from_function(
                 session,
                 df,
                 relation_qualifiers,
+                having_agg_map,
+                having_agg_list,
             )?;
             let start_col = Column::from_expr(start_expr, None);
             let result_col = match unit.as_str() {
@@ -2891,12 +2961,12 @@ fn projection_function_to_item(
     let alias = sql_function_alias(func);
 
     if func_name.eq_ignore_ascii_case("TO_DATE") {
-        let e = sql_to_date_from_function(func, session, df, relation_qualifiers)?;
+        let e = sql_to_date_from_function(func, session, df, relation_qualifiers, None, None)?;
         return Ok(ProjItem::Expr(e.alias(&alias), alias));
     }
 
     if func_name.eq_ignore_ascii_case("DATE_ADD") || func_name.eq_ignore_ascii_case("DATEADD") {
-        let e = sql_date_add_from_function(func, session, df, relation_qualifiers)?;
+        let e = sql_date_add_from_function(func, session, df, relation_qualifiers, None, None)?;
         return Ok(ProjItem::Expr(e.alias(&alias), alias));
     }
 
@@ -2922,7 +2992,7 @@ fn projection_function_to_item(
         ));
     }
 
-    let args = sql_function_args_to_columns(func, session, df, relation_qualifiers)?;
+    let args = sql_function_args_to_columns(func, session, df, relation_qualifiers, None, None)?;
 
     if let Some(e) = sql_scalar_builtin_to_expr(func_name, func, &args)? {
         return Ok(ProjItem::Expr(e.alias(&alias), alias));
