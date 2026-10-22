@@ -6542,6 +6542,39 @@ pub fn apply_cast_to_string(column: Column, strict: bool) -> PolarsResult<Option
             }
             builder.finish().into_series()
         }
+        DataType::Datetime(unit, timezone) => {
+            let values = series.cast(&DataType::Int64)?;
+            let values = values.i64()?;
+            let timezone = timezone
+                .as_ref()
+                .map(|timezone| timezone.to_string().parse::<Tz>())
+                .transpose()
+                .map_err(|error| {
+                    PolarsError::ComputeError(format!("invalid timestamp timezone: {error}").into())
+                })?;
+            let mut builder = StringChunkedBuilder::new(name.as_str().into(), values.len());
+            for value in values.into_iter() {
+                let micros = value.and_then(|value| match unit {
+                    TimeUnit::Nanoseconds => value.checked_div(1_000),
+                    TimeUnit::Microseconds => Some(value),
+                    TimeUnit::Milliseconds => value.checked_mul(1_000),
+                });
+                let formatted = micros.and_then(|micros| {
+                    chrono::DateTime::from_timestamp_micros(micros).map(|timestamp| {
+                        let local = timezone
+                            .map(|timezone| timestamp.with_timezone(&timezone).naive_local())
+                            .unwrap_or_else(|| timestamp.naive_utc());
+                        local.format("%Y-%m-%d %H:%M:%S%.6f").to_string()
+                    })
+                });
+                if let Some(formatted) = formatted {
+                    builder.append_value(formatted);
+                } else {
+                    builder.append_null();
+                }
+            }
+            builder.finish().into_series()
+        }
         _ => {
             if strict {
                 series.strict_cast(&DataType::String)?
@@ -6620,10 +6653,27 @@ pub(crate) fn apply_string_to_datetime_with_timezone(
     strict: bool,
     session_timezone: Option<&str>,
 ) -> PolarsResult<Option<Column>> {
+    if let Some(timezone) = session_timezone {
+        return apply_cast_to_timestamp(column, strict, timezone, false);
+    }
+    apply_cast_to_timestamp_legacy(column, strict)
+}
+
+pub(crate) fn apply_cast_to_timestamp(
+    column: Column,
+    strict: bool,
+    session_timezone: &str,
+    timestamp_ntz: bool,
+) -> PolarsResult<Option<Column>> {
     use polars::datatypes::TimeUnit;
     let name = column.field().into_owned().name;
     let series = column.take_materialized_series();
-    let dtype_out = DataType::Datetime(TimeUnit::Microseconds, None);
+    let output_timezone = if timestamp_ntz || session_timezone.parse::<Tz>().is_err() {
+        None
+    } else {
+        polars::prelude::TimeZone::opt_try_new(Some(session_timezone.to_owned()))?
+    };
+    let dtype_out = DataType::Datetime(TimeUnit::Microseconds, output_timezone);
     let out: Series = match series.dtype() {
         DataType::String => {
             let ca = series
@@ -6631,11 +6681,12 @@ pub(crate) fn apply_string_to_datetime_with_timezone(
                 .map_err(|e| compute_err("string to datetime", e))?;
             let mut results = Vec::with_capacity(ca.len());
             for opt_s in ca.into_iter() {
-                let v = opt_s.and_then(|value| match session_timezone {
-                    Some(timezone) => {
-                        crate::temporal::parse_sql_timestamp_micros(value, timezone).ok()
+                let v = opt_s.and_then(|value| {
+                    if timestamp_ntz {
+                        parse_str_to_datetime_micros(value)
+                    } else {
+                        crate::temporal::parse_sql_timestamp_micros(value, session_timezone).ok()
                     }
-                    None => parse_str_to_datetime_micros(value),
                 });
                 if strict {
                     if let Some(s) = opt_s {
@@ -6656,8 +6707,59 @@ pub(crate) fn apply_string_to_datetime_with_timezone(
                 Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter());
             chunked.into_series().cast(&dtype_out)?
         }
-        DataType::Datetime(_, _) => series.cast(&dtype_out)?,
-        DataType::Date => series.cast(&dtype_out)?,
+        DataType::Datetime(source_unit, source_timezone) => {
+            let physical = series.cast(&DataType::Int64)?;
+            let values = physical.i64()?;
+            let timezone = if timestamp_ntz {
+                if source_timezone.is_some() {
+                    session_timezone.parse::<Tz>().ok()
+                } else {
+                    None
+                }
+            } else if source_timezone.is_none() {
+                Some(session_timezone.parse::<Tz>().map_err(|error| {
+                    PolarsError::ComputeError(format!("invalid session timezone: {error}").into())
+                })?)
+            } else {
+                None
+            };
+            let converted = Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                values.into_iter().map(|value| {
+                    value.and_then(|value| {
+                        let micros = match source_unit {
+                            TimeUnit::Nanoseconds => value / 1_000,
+                            TimeUnit::Microseconds => value,
+                            TimeUnit::Milliseconds => value.checked_mul(1_000)?,
+                        };
+                        match (timestamp_ntz, source_timezone.is_some(), timezone) {
+                            (true, true, Some(timezone)) => {
+                                utc_micros_to_local_naive_micros(micros, timezone)
+                            }
+                            (false, false, Some(timezone)) => {
+                                local_naive_micros_to_utc(micros, timezone)
+                            }
+                            _ => Some(micros),
+                        }
+                    })
+                }),
+            );
+            converted.into_series().cast(&dtype_out)?
+        }
+        DataType::Date if timestamp_ntz => series.cast(&dtype_out)?,
+        DataType::Date => {
+            let dates = series.cast(&DataType::String)?;
+            let values = dates.str()?;
+            let micros = Int64Chunked::from_iter_options(
+                name.as_str().into(),
+                values.into_iter().map(|value| {
+                    value.and_then(|value| {
+                        crate::temporal::parse_sql_timestamp_micros(value, session_timezone).ok()
+                    })
+                }),
+            );
+            micros.into_series().cast(&dtype_out)?
+        }
         DataType::Null => {
             let micros = Int64Chunked::from_iter_options(
                 name.as_str().into(),
@@ -6676,6 +6778,60 @@ pub(crate) fn apply_string_to_datetime_with_timezone(
                 (0..series.len()).map(|_| None::<i64>),
             );
             micros.into_series().cast(&dtype_out)?
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
+fn local_naive_micros_to_utc(micros: i64, timezone: Tz) -> Option<i64> {
+    let naive = chrono::DateTime::from_timestamp_micros(micros)?.naive_utc();
+    crate::temporal::resolve_local_timestamp(timezone, &naive)
+}
+
+fn utc_micros_to_local_naive_micros(micros: i64, timezone: Tz) -> Option<i64> {
+    let local = chrono::DateTime::from_timestamp_micros(micros)?.with_timezone(&timezone);
+    Some(local.naive_local().and_utc().timestamp_micros())
+}
+
+fn apply_cast_to_timestamp_legacy(column: Column, strict: bool) -> PolarsResult<Option<Column>> {
+    use polars::datatypes::TimeUnit;
+    let name = column.field().into_owned().name;
+    let series = column.take_materialized_series();
+    let dtype_out = DataType::Datetime(TimeUnit::Microseconds, None);
+    let out = match series.dtype() {
+        DataType::String => {
+            let ca = series
+                .str()
+                .map_err(|e| compute_err("string to datetime", e))?;
+            let mut results = Vec::with_capacity(ca.len());
+            for opt_s in ca.into_iter() {
+                let value = opt_s.and_then(parse_str_to_datetime_micros);
+                if strict && opt_s.is_some() && value.is_none() {
+                    return Err(PolarsError::ComputeError(
+                        format!(
+                            "conversion from `str` to `datetime` failed in column '{}'",
+                            name.as_str()
+                        )
+                        .into(),
+                    ));
+                }
+                results.push(value);
+            }
+            Int64Chunked::from_iter_options(name.as_str().into(), results.into_iter())
+                .into_series()
+                .cast(&dtype_out)?
+        }
+        DataType::Datetime(_, _) | DataType::Date => series.cast(&dtype_out)?,
+        DataType::Null => Int64Chunked::full_null(name.as_str().into(), series.len())
+            .into_series()
+            .cast(&dtype_out)?,
+        _ if !strict => Int64Chunked::full_null(name.as_str().into(), series.len())
+            .into_series()
+            .cast(&dtype_out)?,
+        _ => {
+            return Err(PolarsError::ComputeError(
+                format!("casting from {} to datetime not supported", series.dtype()).into(),
+            ));
         }
     };
     Ok(Some(Column::new(name, out)))

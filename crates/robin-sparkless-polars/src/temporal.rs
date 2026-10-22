@@ -3,8 +3,13 @@
 use polars::prelude::PolarsError;
 
 pub(crate) fn parse_sql_date(value: &str) -> Option<chrono::NaiveDate> {
-    let mut date_parts = value.trim().split('-');
-    let year = date_parts.next()?.parse::<i32>().ok()?;
+    let value = value.trim();
+    let (unsigned, sign) = value
+        .strip_prefix('-')
+        .map_or((value, 1), |unsigned| (unsigned, -1));
+    let (year, rest) = unsigned.split_once('-')?;
+    let year = year.parse::<i32>().ok()?.checked_mul(sign)?;
+    let mut date_parts = rest.split('-');
     let month = match date_parts.next() {
         Some(month) => month.parse::<u32>().ok()?,
         None => 1,
@@ -21,10 +26,12 @@ pub(crate) fn parse_sql_date(value: &str) -> Option<chrono::NaiveDate> {
 
 fn parse_sql_date_time(value: &str) -> Option<chrono::NaiveDateTime> {
     let value = value.trim();
-    let (date_part, time_part) = value
-        .split_once('T')
-        .or_else(|| value.split_once(' '))
-        .map_or((value, None), |(date, time)| (date, Some(time)));
+    let separator = value
+        .char_indices()
+        .find(|(_, ch)| *ch == 'T' || ch.is_ascii_whitespace());
+    let (date_part, time_part) = separator.map_or((value, None), |(index, ch)| {
+        (&value[..index], Some(value[index + ch.len_utf8()..].trim()))
+    });
     let date = parse_sql_date(date_part)?;
 
     let Some(time_part) = time_part else {
@@ -80,6 +87,13 @@ fn parse_sql_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
         b'-' => (-1, &offset[1..]),
         _ => return None,
     };
+    if !magnitude.is_ascii()
+        || !magnitude
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b':')
+    {
+        return None;
+    }
     let compact = !magnitude.contains(':') && magnitude.len() > 2;
     let compact_parts = if compact {
         match magnitude.len() {
@@ -160,7 +174,10 @@ pub(crate) fn parse_sql_timestamp_micros(
     ))
 }
 
-fn resolve_local_timestamp(timezone: chrono_tz::Tz, naive: &chrono::NaiveDateTime) -> Option<i64> {
+pub(crate) fn resolve_local_timestamp(
+    timezone: chrono_tz::Tz,
+    naive: &chrono::NaiveDateTime,
+) -> Option<i64> {
     use chrono::{Offset, TimeZone};
 
     let instant = |local: &chrono::NaiveDateTime| match timezone.from_local_datetime(local) {

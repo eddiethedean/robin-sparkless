@@ -292,6 +292,61 @@ fn timestamp_cast_rejects_invalid_suffixes_and_preserves_nulls() {
 }
 
 #[test]
+fn timestamp_cast_handles_unicode_offsets_and_legacy_datetime_formats() {
+    let mut session = session_with_timestamp("2026-10-18 03:30:00", "UTC");
+    session.set_config("spark.sql.ansi.enabled", "true");
+    for value in [
+        "2026-10-18 03:30:00+1€",
+        "-0044-03-15 12:34:56",
+        "-0001-01-01T00:00:00",
+        "2026-10-18   03:30:00",
+        "2026-10-18\t03:30:00",
+    ] {
+        let rows = session
+            .sql(&format!(
+                "SELECT CAST(CAST('{value}' AS TIMESTAMP) AS STRING) AS ts FROM orders"
+            ))
+            .and_then(|frame| frame.collect_as_json_rows());
+        if value.contains('€') {
+            assert!(rows.is_err(), "CAST accepted malformed offset {value:?}");
+            let rows = session
+                .sql(&format!(
+                    "SELECT TRY_CAST('{value}' AS TIMESTAMP) AS ts FROM orders"
+                ))
+                .unwrap()
+                .collect_as_json_rows()
+                .unwrap();
+            assert!(rows[0]["ts"].is_null());
+        } else {
+            assert!(
+                rows.is_ok(),
+                "CAST rejected previously accepted value {value:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn timestamp_cast_chains_preserve_session_local_and_ntz_values() {
+    let session = session_with_timestamp("2026-10-18 07:30:00", "America/New_York");
+    let rows = session
+        .sql(
+            "SELECT CAST(DATE '2026-10-18' AS TIMESTAMP) = CAST('2026-10-18' AS TIMESTAMP) AS same_date, \
+             CAST(CAST(CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS TIMESTAMP_NTZ) AS TIMESTAMP) = CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS ntz_round_trip, \
+             CAST(CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS STRING) AS timestamp_string, \
+             CAST(CAST(CAST('2026-10-18 03:30:00' AS TIMESTAMP) AS TIMESTAMP_NTZ) AS STRING) AS ntz_string \
+             FROM orders",
+        )
+        .unwrap()
+        .collect_as_json_rows()
+        .unwrap();
+    assert_eq!(rows[0]["same_date"], true);
+    assert_eq!(rows[0]["ntz_round_trip"], true);
+    assert_eq!(rows[0]["timestamp_string"], "2026-10-18 03:30:00.000000");
+    assert_eq!(rows[0]["ntz_string"], "2026-10-18 03:30:00.000000");
+}
+
+#[test]
 fn non_utc_column_timezone_compares_by_instant() {
     let session = session_with_timestamp_dtype(
         "2026-10-18 07:30:00",

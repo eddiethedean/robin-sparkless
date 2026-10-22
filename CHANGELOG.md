@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **SQL timestamp comparisons** — Compare UTC Delta timestamps with `CAST('...' AS TIMESTAMP)` expressions without a timezone-type mismatch, including SQL rendered by BrickHouse. String casts preserve fractional seconds and explicit offsets and interpret local values in the session timezone (#1720).
+- **SQL timestamp comparisons and casts** — Compare UTC Delta timestamps with `CAST('...' AS TIMESTAMP)` expressions without a timezone-type mismatch, including SQL rendered by BrickHouse. Timestamp, date, and timestamp-without-time-zone cast chains preserve session-local values; string casts retain fractional seconds and explicit offsets. Malformed Unicode offsets no longer panic, and timestamp casts continue accepting negative years and flexible whitespace (#1720).
 
 ### Breaking
 
