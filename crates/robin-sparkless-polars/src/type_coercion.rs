@@ -699,6 +699,19 @@ pub fn coerce_for_pyspark_comparison(
         || (left_type == &DataType::String && is_date_or_datetime(right_type));
 
     if temporal_string {
+        // Spark parses strings compared with timestamps in the session timezone.
+        // Parse the column values with the same literal parser, then compare epoch
+        // microseconds so Polars timezone metadata cannot affect the result.
+        if matches!(left_type, DataType::Datetime(_, _)) && right_type == &DataType::String {
+            let left = datetime_to_micros(left, left_type);
+            let right = string_to_session_timestamp_micros(right);
+            return Ok((left, right));
+        }
+        if left_type == &DataType::String && matches!(right_type, DataType::Datetime(_, _)) {
+            let left = string_to_session_timestamp_micros(left);
+            let right = datetime_to_micros(right, right_type);
+            return Ok((left, right));
+        }
         let left_out = if left_type == &DataType::String {
             wrap_try_to_temporal(left, right_type)?
         } else {
@@ -718,22 +731,35 @@ pub fn coerce_for_pyspark_comparison(
         && matches!(right_type, DataType::Datetime(_, _)))
         || (matches!(left_type, DataType::Datetime(_, _)) && right_type == &DataType::Date);
     if date_vs_datetime {
-        let target_dt = if matches!(left_type, DataType::Datetime(_, _)) {
-            left_type.clone()
-        } else {
-            right_type.clone()
-        };
+        // A Spark DATE becomes midnight in the session timezone when compared
+        // with a timestamp. Compare physical microseconds so timezone metadata
+        // cannot make otherwise equal instants incompatible in Polars.
         let left_out = if left_type == &DataType::Date {
-            coerce_to_type(left, target_dt.clone())
+            date_to_session_timestamp_micros(left)
         } else {
-            left
+            datetime_to_micros(left, left_type)
         };
         let right_out = if right_type == &DataType::Date {
-            coerce_to_type(right, target_dt)
+            date_to_session_timestamp_micros(right)
         } else {
-            right
+            datetime_to_micros(right, right_type)
         };
         return Ok((left_out, right_out));
+    }
+
+    // Spark timestamps have microsecond precision. Normalize differing Polars
+    // units to microseconds so a nanosecond column can still compare with values
+    // outside the nanosecond epoch range. When only one operand has timezone
+    // metadata, drop that metadata while preserving its epoch value; both sides
+    // then compare on the same instant representation.
+    if matches!(
+        (left_type, right_type),
+        (DataType::Datetime(_, _), DataType::Datetime(_, _))
+    ) {
+        return Ok((
+            datetime_to_micros(left, left_type),
+            datetime_to_micros(right, right_type),
+        ));
     }
 
     // Equal non-numeric types: leave as-is for now.
@@ -743,6 +769,194 @@ pub fn coerce_for_pyspark_comparison(
 
     // Fallback to generic comparison coercion (may error with a clear message).
     coerce_for_comparison(left, right, left_type, right_type)
+}
+
+fn string_to_session_timestamp_micros(expr: Expr) -> Expr {
+    let timezone = crate::get_thread_session_time_zone();
+    expr.map(
+        move |column| {
+            let mut micros = Vec::with_capacity(column.len());
+            for index in 0..column.len() {
+                let parsed = match column.get(index)? {
+                    AnyValue::String(value) => {
+                        crate::sql::translator::parse_sql_timestamp_micros(value, &timezone).ok()
+                    }
+                    AnyValue::StringOwned(value) => {
+                        crate::sql::translator::parse_sql_timestamp_micros(&value, &timezone).ok()
+                    }
+                    AnyValue::Null => None,
+                    other => {
+                        return Err(PolarsError::ComputeError(
+                            format!("expected STRING timestamp, found {other:?}").into(),
+                        ));
+                    }
+                };
+                micros.push(parsed);
+            }
+            Ok(
+                Int64Chunked::from_iter_options(column.name().clone(), micros.iter().copied())
+                    .into_series()
+                    .into(),
+            )
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
+    )
+}
+
+fn datetime_to_micros(expr: Expr, dtype: &DataType) -> Expr {
+    let DataType::Datetime(_, timezone) = dtype else {
+        return expr;
+    };
+    // Keep the source zone while changing units; the final integer cast strips
+    // zone metadata without changing the represented epoch instant.
+    expr.cast(DataType::Datetime(TimeUnit::Microseconds, timezone.clone()))
+        .cast(DataType::Int64)
+}
+
+fn date_to_session_timestamp_micros(expr: Expr) -> Expr {
+    let timezone = crate::get_thread_session_time_zone();
+    expr.map(
+        move |column| {
+            use chrono::TimeZone;
+
+            let tz = timezone.parse::<chrono_tz::Tz>().ok();
+            let fixed = parse_comparison_fixed_offset(&timezone);
+            let mut micros = Vec::with_capacity(column.len());
+            for index in 0..column.len() {
+                let days = match column.get(index)? {
+                    AnyValue::Date(days) => Some(days),
+                    AnyValue::Int32(days) => Some(days),
+                    AnyValue::Null => None,
+                    other => {
+                        return Err(PolarsError::ComputeError(
+                            format!("expected DATE value, found {other:?}").into(),
+                        ));
+                    }
+                };
+                let Some(days) = days else {
+                    micros.push(None);
+                    continue;
+                };
+                let Some(date) = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).and_then(|epoch| {
+                    epoch.checked_add_signed(chrono::TimeDelta::days(i64::from(days)))
+                }) else {
+                    micros.push(None);
+                    continue;
+                };
+                let naive = date.and_hms_opt(0, 0, 0).expect("midnight is valid");
+                let value = if let Some(tz) = tz {
+                    session_local_datetime_micros(tz, &naive)
+                } else if let Some(offset) = fixed {
+                    offset
+                        .from_local_datetime(&naive)
+                        .single()
+                        .map(|value| value.timestamp_micros())
+                } else {
+                    return Err(PolarsError::ComputeError(
+                        format!("invalid session timezone {timezone:?}").into(),
+                    ));
+                };
+                micros.push(value);
+            }
+            Ok(
+                Int64Chunked::from_iter_options(column.name().clone(), micros.iter().copied())
+                    .into_series()
+                    .into(),
+            )
+        },
+        |_schema, field| Ok(Field::new(field.name().clone(), DataType::Int64)),
+    )
+}
+
+fn session_local_datetime_micros(
+    timezone: chrono_tz::Tz,
+    naive: &chrono::NaiveDateTime,
+) -> Option<i64> {
+    use chrono::TimeZone;
+
+    let instant = |local: &chrono::NaiveDateTime| match timezone.from_local_datetime(local) {
+        chrono::LocalResult::Single(value) => Some(value.timestamp_micros()),
+        chrono::LocalResult::Ambiguous(first, second) => {
+            Some(first.timestamp_micros().min(second.timestamp_micros()))
+        }
+        chrono::LocalResult::None => None,
+    };
+    if let Some(value) = instant(naive) {
+        return Some(value);
+    }
+
+    // atStartOfDay resolves to the first valid local time on or after midnight.
+    // A gap can begin on the previous date and end after midnight, so shifting
+    // midnight by the full offset change can land too late in the day.
+    let mut low = 0_i64;
+    let mut high = chrono::TimeDelta::days(2).num_nanoseconds()?;
+    let upper = naive.checked_add_signed(chrono::TimeDelta::nanoseconds(high))?;
+    instant(&upper)?;
+    while low < high {
+        let mid = low + (high - low) / 2;
+        let candidate = naive.checked_add_signed(chrono::TimeDelta::nanoseconds(mid))?;
+        if instant(&candidate).is_some() {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    instant(&naive.checked_add_signed(chrono::TimeDelta::nanoseconds(low))?)
+}
+
+fn parse_comparison_fixed_offset(value: &str) -> Option<chrono::FixedOffset> {
+    let value = ["UTC", "GMT", "UT"]
+        .iter()
+        .find_map(|prefix| {
+            value
+                .strip_prefix(prefix)
+                .filter(|rest| rest.starts_with('+') || rest.starts_with('-'))
+        })
+        .unwrap_or(value);
+    if value == "UTC" || value == "Z" {
+        return chrono::FixedOffset::east_opt(0);
+    }
+    let (sign, value) = match value.as_bytes().first()? {
+        b'+' => (1, &value[1..]),
+        b'-' => (-1, &value[1..]),
+        _ => return None,
+    };
+    let compact = !value.contains(':') && value.len() > 2;
+    let parts = if compact {
+        match value.len() {
+            4 => vec![&value[..2], &value[2..], "0"],
+            6 => vec![&value[..2], &value[2..4], &value[4..]],
+            _ => return None,
+        }
+    } else {
+        let parts = value.split(':').collect::<Vec<_>>();
+        if parts.len() > 3 {
+            return None;
+        }
+        parts
+    };
+    let hours = parts.first()?.parse::<i32>().ok()?;
+    let minutes = parts
+        .get(1)
+        .map(|s| s.parse::<i32>())
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
+    let seconds = parts
+        .get(2)
+        .map(|s| s.parse::<i32>())
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
+    if parts.len() > 3
+        || hours > 18
+        || minutes > 59
+        || seconds > 59
+        || (hours == 18 && (minutes != 0 || seconds != 0))
+    {
+        return None;
+    }
+    chrono::FixedOffset::east_opt(sign * (hours * 3600 + minutes * 60 + seconds))
 }
 
 /// Infer DataType from an expression when it is a literal (for coercion heuristics).

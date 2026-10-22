@@ -3,7 +3,7 @@
 //! Compiled only when the `sql` feature is enabled.
 
 mod decimal;
-mod translator;
+pub(crate) mod translator;
 
 use crate::dataframe::DataFrame;
 use crate::error::polars_to_core_error;
