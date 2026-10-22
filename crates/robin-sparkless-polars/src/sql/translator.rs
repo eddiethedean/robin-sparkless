@@ -1091,10 +1091,10 @@ fn translate_select_body(
                         if let Some(expr) =
                             sql_struct_field_expr(parts, &df, Some(relation_qualifiers.as_slice()))?
                         {
-                            let name = parts
-                                .last()
-                                .map(|part| part.value.clone())
-                                .unwrap_or_default();
+                            // Nested fields can share a leaf name (for example
+                            // billing.coupon and shipping.coupon), so give each
+                            // grouping expression a unique internal name.
+                            let name = format!("__sql_group_{i}");
                             (expr.alias(&name), name)
                         } else {
                             // Qualified column (e.g. d.dept_name): try the alias_column
@@ -1130,6 +1130,7 @@ fn translate_select_body(
         let grouped = df.group_by_exprs(group_exprs_polars, group_cols.clone())?;
         let mut agg_exprs = projection_to_agg_exprs(
             &body.projection,
+            group_exprs,
             &group_cols,
             session,
             &df,
@@ -1170,12 +1171,19 @@ fn translate_select_body(
         }
         // PySpark parity: output only columns in the SELECT list; order by first group key
         // descending so boolean groups match (e.g. (age > 30) true then false -> count 1, 2).
-        let out_names = projection_output_names_for_group_by(&body.projection, &group_cols, &df)?;
+        let out_names =
+            projection_output_names_for_group_by(&body.projection, group_exprs, &group_cols, &df)?;
         let result_cols = df.columns()?;
-        let keep: Vec<&str> = out_names
+        let keep: Vec<Expr> = out_names
             .iter()
-            .filter(|n| result_cols.iter().any(|c| c == *n))
-            .map(|s| s.as_str())
+            .filter(|(source, _)| result_cols.iter().any(|c| c == source))
+            .map(|(source, target)| {
+                if source == target {
+                    col(source.as_str())
+                } else {
+                    col(source.as_str()).alias(target.as_str())
+                }
+            })
             .collect();
         if keep.len() < result_cols.len() && !group_cols.is_empty() {
             // Order by first group column descending so (age > 30) true comes first (issue #1108).
@@ -1185,12 +1193,13 @@ fn translate_select_body(
             }
         }
         if !keep.is_empty() {
-            df = df.select(keep)?;
+            df = df.select_exprs(keep)?;
         }
     } else if projection_is_scalar_aggregate(&body.projection) {
         // SELECT AVG(salary) FROM t (no GROUP BY) — scalar aggregation (issue #587).
         let agg_exprs = projection_to_agg_exprs(
             &body.projection,
+            &[],
             &[],
             session,
             &df,
@@ -3247,52 +3256,47 @@ fn extract_having_agg_calls(expr: &SqlExpr) -> Vec<(Function, String)> {
 /// only requested columns and match PySpark (e.g. SELECT COUNT(*) as count -> ["count"]).
 fn projection_output_names_for_group_by(
     projection: &[SelectItem],
+    group_exprs: &[SqlExpr],
     group_cols: &[String],
     df: &DataFrame,
-) -> Result<Vec<String>, PolarsError> {
+) -> Result<Vec<(String, String)>, PolarsError> {
     let mut out = Vec::new();
     for item in projection {
         match item {
             SelectItem::UnnamedExpr(SqlExpr::Identifier(ident)) => {
                 let resolved = df.resolve_column_name(ident.value.as_str())?;
                 if group_cols.iter().any(|c| c == &resolved) {
-                    out.push(resolved);
+                    out.push((resolved.clone(), resolved));
                 }
             }
             SelectItem::UnnamedExpr(SqlExpr::CompoundIdentifier(parts)) => {
-                let qualified = parts
-                    .iter()
-                    .map(|i| i.value.as_str())
-                    .collect::<Vec<_>>()
-                    .join("_");
                 let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                if let Some(c) = group_cols.iter().find(|c| *c == &qualified || *c == last) {
-                    out.push(c.clone());
+                if let Some(index) = grouped_compound_expr_index(
+                    &SqlExpr::CompoundIdentifier(parts.clone()),
+                    group_exprs,
+                ) {
+                    out.push((group_cols[index].clone(), last.to_string()));
                 }
             }
             SelectItem::UnnamedExpr(SqlExpr::Function(f)) => {
-                out.push(default_agg_alias(f)?);
+                let name = default_agg_alias(f)?;
+                out.push((name.clone(), name));
             }
             SelectItem::ExprWithAlias { expr, alias } => match expr {
                 SqlExpr::Identifier(ident) => {
                     let resolved = df.resolve_column_name(ident.value.as_str())?;
                     if group_cols.iter().any(|c| c == &resolved) {
-                        out.push(resolved);
+                        out.push((resolved.clone(), resolved));
                     }
                 }
-                SqlExpr::CompoundIdentifier(parts) => {
-                    let qualified = parts
-                        .iter()
-                        .map(|i| i.value.as_str())
-                        .collect::<Vec<_>>()
-                        .join("_");
-                    let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                    if let Some(c) = group_cols.iter().find(|c| *c == &qualified || *c == last) {
-                        out.push(c.clone());
+                SqlExpr::CompoundIdentifier(_) => {
+                    if let Some(index) = grouped_compound_expr_index(expr, group_exprs) {
+                        out.push((group_cols[index].clone(), alias.value.clone()));
                     }
                 }
                 SqlExpr::Function(_f) => {
-                    out.push(alias.value.to_string());
+                    let name = alias.value.to_string();
+                    out.push((name.clone(), name));
                 }
                 _ => {}
             },
@@ -3300,6 +3304,10 @@ fn projection_output_names_for_group_by(
         }
     }
     Ok(out)
+}
+
+fn grouped_compound_expr_index(expr: &SqlExpr, group_exprs: &[SqlExpr]) -> Option<usize> {
+    group_exprs.iter().position(|group_expr| group_expr == expr)
 }
 
 fn default_agg_alias(func: &Function) -> Result<String, PolarsError> {
@@ -3364,6 +3372,7 @@ fn default_agg_alias(func: &Function) -> Result<String, PolarsError> {
 
 fn projection_to_agg_exprs(
     projection: &[SelectItem],
+    group_exprs: &[SqlExpr],
     group_cols: &[String],
     session: &SparkSession,
     df: &DataFrame,
@@ -3385,16 +3394,12 @@ fn projection_to_agg_exprs(
                 }
             }
             SelectItem::UnnamedExpr(SqlExpr::CompoundIdentifier(parts)) => {
-                // Qualified column (e.g. d.dept_name): treat as grouped when either the fully
-                // qualified name (d_dept_name) or the simple name (dept_name) appears in
-                // the grouping columns, matching the resolution used in translate_select_body.
-                let qualified = parts
-                    .iter()
-                    .map(|i| i.value.as_str())
-                    .collect::<Vec<_>>()
-                    .join("_");
                 let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                let in_group = group_cols.iter().any(|c| c == &qualified || c == last);
+                let in_group = grouped_compound_expr_index(
+                    &SqlExpr::CompoundIdentifier(parts.clone()),
+                    group_exprs,
+                )
+                .is_some();
                 if !in_group {
                     return Err(PolarsError::InvalidOperation(
                         format!(
@@ -3433,13 +3438,8 @@ fn projection_to_agg_exprs(
                         // Group column with alias (e.g. grp AS g): validation only; result keeps group column name from frame.
                     }
                     SqlExpr::CompoundIdentifier(parts) => {
-                        let qualified = parts
-                            .iter()
-                            .map(|i| i.value.as_str())
-                            .collect::<Vec<_>>()
-                            .join("_");
                         let last = parts.last().map(|i| i.value.as_str()).unwrap_or("");
-                        let in_group = group_cols.iter().any(|c| c == &qualified || c == last);
+                        let in_group = grouped_compound_expr_index(expr, group_exprs).is_some();
                         if !in_group {
                             return Err(PolarsError::InvalidOperation(
                                 format!(
