@@ -1,6 +1,6 @@
 # SS-06: Python launcher and binary packaging
 
-> **Status: planned; owner unassigned.** Phase: 0B; supported Spark Connect URL in 2.
+> **Status: source implemented; lifecycle/platform evidence pending.** Phase: 0B; supported Spark Connect URL in 2.
 > [Index](README.md) · [Epic contract](EPIC.md#python-lifecycle-api) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Outcome
@@ -45,4 +45,4 @@ Resolve or explicitly defer D05, D06 in the [decision register](DECISIONS.md). R
 
 ## Scope notes
 
-Async subprocess lifecycle does not make the synchronous PySpark DataFrame API asynchronous. GC/atexit are fallback cleanup only.
+Async subprocess lifecycle does not make the synchronous PySpark DataFrame API asynchronous. GC/atexit are fallback cleanup only. The current binary wheel workflow produces platform wheels on its configured runners; launcher lifecycle acceptance remains unverified.

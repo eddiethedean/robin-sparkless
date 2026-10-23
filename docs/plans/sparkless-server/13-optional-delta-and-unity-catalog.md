@@ -27,11 +27,16 @@ Plan numbers are workstream identifiers, not a strict execution order. Only the 
 
 6. Document supported storage/network policy and enabled-image dependencies while preserving the default lightweight native service.
 
+7. Implement the [SS-14 MiniLake adapter](14-minilake-interoperability.md#catalog-and-storage-contract) in Rust using existing `ExternalCatalogProvider` and UC HTTP endpoints. Start with EXTERNAL DELTA tables on a shared local `/data` volume, not Java connectors, managed DuckDB files, or assumed cloud storage support. Verify provider installation per session, exact schemas/snapshot identity, missing/error distinctions, and drop/recreate behavior.
+
+8. Validate path write → separate SDK registration → MiniLake/DuckDB read → native named-table read. Define committed-but-unregistered recovery; provider hooks alone do not implement remote writer commands or creation/DDL. MiniLake-generated classic Delta DML remains unsupported unless a structured native delegation hook is agreed and V36 passes.
+
 ## Acceptance criteria
 
 - [ ] Independent readers validate schema and transactions, including decimals and time types.
 - [ ] Unsupported DDL/writes cannot return success; conflicts and partial failures have truthful outcomes.
 - [ ] Core releases remain usable without enabling Delta/UC or Python workers.
+- [ ] If advertising MiniLake shared data/catalogs, V34–V35 independently prove interoperability without MiniLake catalog changes or Java/JVM. V36 gates optional MiniLake SQL Delta DML; no silent Spark fallback.
 
 ## Decisions and implementation touchpoints
 

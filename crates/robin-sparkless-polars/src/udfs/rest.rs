@@ -4342,6 +4342,11 @@ fn ansi_checked_i64_op(
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, op_name)?;
+    let (a_s, b_s) = match (a_s.dtype(), b_s.dtype()) {
+        (DataType::Int32, DataType::Int64) => (a_s.cast(&DataType::Int64)?, b_s),
+        (DataType::Int64, DataType::Int32) => (a_s, b_s.cast(&DataType::Int64)?),
+        _ => (a_s, b_s),
+    };
     let out = if matches!(
         (a_s.dtype(), b_s.dtype()),
         (DataType::Int32, DataType::Int32)
@@ -4373,6 +4378,125 @@ fn ansi_checked_i64_op(
             }
         }
         Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
+/// ANSI SQL remainder. Rust's `%` and Spark's `mod` both retain the dividend's sign.
+pub fn apply_ansi_modulo(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.len() < 2 {
+        return Err(PolarsError::ComputeError(
+            "ansi_modulo needs two columns".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
+    let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "ansi_modulo")?;
+    let (a_s, b_s) = match (a_s.dtype(), b_s.dtype()) {
+        (DataType::Int32, DataType::Int64) => (a_s.cast(&DataType::Int64)?, b_s),
+        (DataType::Int64, DataType::Int32) => (a_s, b_s.cast(&DataType::Int64)?),
+        _ => (a_s, b_s),
+    };
+    let zero_error = || {
+        PolarsError::ComputeError("[DIVIDE_BY_ZERO] division by zero in remainder operation".into())
+    };
+    let out = match (a_s.dtype(), b_s.dtype()) {
+        (DataType::Int32, DataType::Int32) => {
+            let (a, b) = binary_series_i32(&a_s, &b_s, "ansi_modulo")?;
+            let mut values = Vec::with_capacity(a.len());
+            for (a, b) in a.into_iter().zip(&b) {
+                values.push(match (a, b) {
+                    (Some(_), Some(0)) => return Err(zero_error()),
+                    (Some(a), Some(b)) => Some(a.checked_rem(b).ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            "[ARITHMETIC_OVERFLOW] integer overflow in remainder operation".into(),
+                        )
+                    })?),
+                    _ => None,
+                });
+            }
+            Int32Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+        }
+        (DataType::Int64, DataType::Int64) => {
+            let (a, b) = binary_series_i64(&a_s, &b_s, "ansi_modulo")?;
+            let mut values = Vec::with_capacity(a.len());
+            for (a, b) in a.into_iter().zip(&b) {
+                values.push(match (a, b) {
+                    (Some(_), Some(0)) => return Err(zero_error()),
+                    (Some(a), Some(b)) => Some(a.checked_rem(b).ok_or_else(|| {
+                        PolarsError::ComputeError(
+                            "[ARITHMETIC_OVERFLOW] integer overflow in remainder operation".into(),
+                        )
+                    })?),
+                    _ => None,
+                });
+            }
+            Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+        }
+        _ => {
+            let (a, b) = binary_series_f64(&a_s, &b_s, "ansi_modulo")?;
+            let mut values = Vec::with_capacity(a.len());
+            for (a, b) in a.into_iter().zip(&b) {
+                values.push(match (a, b) {
+                    (Some(_), Some(0.0)) => return Err(zero_error()),
+                    (Some(a), Some(b)) => Some(a % b),
+                    _ => None,
+                });
+            }
+            Float64Chunked::from_iter_options(name.as_str().into(), values.into_iter())
+                .into_series()
+        }
+    };
+    Ok(Some(Column::new(name, out)))
+}
+
+/// Checked negation for integral SQL expressions. SMALLINT is promoted to INT.
+pub fn apply_ansi_negate(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.is_empty() {
+        return Err(PolarsError::ComputeError(
+            "ansi_negate needs one column".into(),
+        ));
+    }
+    let name = columns[0].field().into_owned().name;
+    let series = std::mem::take(&mut columns[0]).take_materialized_series();
+    let overflow = || {
+        PolarsError::ComputeError("[ARITHMETIC_OVERFLOW] integer overflow in unary negation".into())
+    };
+    let out = match series.dtype() {
+        DataType::Int16 => {
+            let values = series
+                .i16()?
+                .into_iter()
+                .map(|value| value.map(|value| -i32::from(value)))
+                .collect::<Vec<_>>();
+            Int32Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+        }
+        DataType::Int32 => {
+            let mut values = Vec::with_capacity(series.len());
+            for value in series.i32()?.into_iter() {
+                values.push(match value {
+                    Some(value) => Some(value.checked_neg().ok_or_else(overflow)?),
+                    None => None,
+                });
+            }
+            Int32Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+        }
+        DataType::Int64 => {
+            let mut values = Vec::with_capacity(series.len());
+            for value in series.i64()?.into_iter() {
+                values.push(match value {
+                    Some(value) => Some(value.checked_neg().ok_or_else(overflow)?),
+                    None => None,
+                });
+            }
+            Int64Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
+        }
+        _ => {
+            return Err(PolarsError::InvalidOperation(
+                format!("ansi_negate does not accept {:?}", series.dtype()).into(),
+            ));
+        }
     };
     Ok(Some(Column::new(name, out)))
 }

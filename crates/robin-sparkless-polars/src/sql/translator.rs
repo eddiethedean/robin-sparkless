@@ -29,7 +29,7 @@ enum SqlNumberVal {
 }
 
 fn parse_sql_number_val(s: &str, context: &str) -> Result<SqlNumberVal, PolarsError> {
-    if s.contains('.') {
+    if s.contains('.') || s.contains(['e', 'E']) {
         let v: f64 = s.parse().map_err(|_| {
             PolarsError::InvalidOperation(format!("SQL: invalid number {} '{}'", context, s).into())
         })?;
@@ -41,6 +41,19 @@ fn parse_sql_number_val(s: &str, context: &str) -> Result<SqlNumberVal, PolarsEr
             )
         })?;
         Ok(SqlNumberVal::Int(v))
+    }
+}
+
+fn sql_integer_literal(value: i64) -> Expr {
+    match i32::try_from(value) {
+        Ok(value) => lit(Scalar::new(
+            polars::prelude::DataType::Int32,
+            AnyValue::Int32(value),
+        )),
+        Err(_) => lit(Scalar::new(
+            polars::prelude::DataType::Int64,
+            AnyValue::Int64(value),
+        )),
     }
 }
 
@@ -77,7 +90,7 @@ fn parse_sql_number_expr(s: &str) -> Result<Expr, PolarsError> {
         }
     }
     match parse_sql_number_val(s, "literal")? {
-        SqlNumberVal::Int(i) => Ok(lit(i)),
+        SqlNumberVal::Int(i) => Ok(sql_integer_literal(i)),
         SqlNumberVal::Float(f) => Ok(lit(f)),
     }
 }
@@ -102,10 +115,12 @@ fn sql_ast_data_type_to_cast_name(dt: &spark_sql_parser::ast::DataType) -> Strin
     }
 
     let s = dt.to_string().to_lowercase();
-    if s.starts_with("int") || s.starts_with("integer") || s == "int4" {
-        "int".to_string()
+    if s.starts_with("smallint") || s == "int2" || s == "short" {
+        "short".to_string()
     } else if s.starts_with("bigint") || s == "int8" || s == "long" {
         "long".to_string()
+    } else if s.starts_with("int") || s.starts_with("integer") {
+        "int".to_string()
     } else if s.starts_with("double") {
         "double".to_string()
     } else if s.starts_with("float") {
@@ -1027,18 +1042,28 @@ pub(crate) fn translate_query(
     if let Some(order_by) = &query.order_by {
         if let OrderByKind::Expressions(exprs) = &order_by.kind {
             if !exprs.is_empty() {
-                let pairs: Vec<(String, bool)> = exprs
+                let sort_orders: Vec<crate::functions::SortOrder> = exprs
                     .iter()
                     .map(|o| {
                         let col_name = sql_expr_to_col_name(&o.expr)?;
                         let resolved = df.resolve_column_name(&col_name)?;
                         let ascending = o.options.asc.unwrap_or(true);
-                        Ok((resolved, ascending))
+                        let nulls_first = o.options.nulls_first.unwrap_or(ascending);
+                        let column = crate::column::Column::from_expr(col(&resolved), None);
+                        Ok(if ascending {
+                            if nulls_first {
+                                functions::asc_nulls_first(&column)
+                            } else {
+                                functions::asc_nulls_last(&column)
+                            }
+                        } else if nulls_first {
+                            functions::desc_nulls_first(&column)
+                        } else {
+                            functions::desc_nulls_last(&column)
+                        })
                     })
                     .collect::<Result<Vec<_>, PolarsError>>()?;
-                let (cols, asc): (Vec<String>, Vec<bool>) = pairs.into_iter().unzip();
-                let col_refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-                df = df.order_by(col_refs, asc)?;
+                df = df.order_by_exprs(sort_orders)?;
             }
         }
     }
@@ -1686,6 +1711,7 @@ fn sql_expr_to_polars_with_qualifiers(
         SqlExpr::BinaryOp { left, op, right } => {
             let mut l = sql_expr_to_polars_with_qualifiers(left, session, df, having_agg_map, having_agg_list, relation_qualifiers)?;
             let mut r = sql_expr_to_polars_with_qualifiers(right, session, df, having_agg_map, having_agg_list, relation_qualifiers)?;
+            let mut use_integral_ansi_arithmetic = false;
             if matches!(
                 op,
                 BinaryOperator::Plus | BinaryOperator::Minus
@@ -1710,7 +1736,31 @@ fn sql_expr_to_polars_with_qualifiers(
                     l = coerced_l;
                     r = coerced_r;
                 }
+                if matches!(
+                    op,
+                    BinaryOperator::Plus
+                        | BinaryOperator::Minus
+                        | BinaryOperator::Multiply
+                        | BinaryOperator::Modulo
+                ) {
+                    let left_type = l.to_field(&schema)?.dtype().clone();
+                    let right_type = r.to_field(&schema)?.dtype().clone();
+                    use_integral_ansi_arithmetic = !matches!(op, BinaryOperator::Modulo)
+                        && left_type.is_integer()
+                        && right_type.is_integer();
+                    use polars::prelude::DataType;
+                    let int64 = left_type == DataType::Int64 || right_type == DataType::Int64;
+                    let target = if int64 { DataType::Int64 } else { DataType::Int32 };
+                    if left_type.is_integer() && left_type != target {
+                        l = l.cast(target.clone());
+                    }
+                    if right_type.is_integer() && right_type != target {
+                        r = r.cast(target);
+                    }
+                }
             }
+            let left_column = Column::from_expr(l.clone(), None);
+            let right_column = Column::from_expr(r.clone(), None);
             match op {
                 BinaryOperator::Eq => Ok(l.eq(r)),
                 BinaryOperator::NotEq => Ok(l.neq(r)),
@@ -1720,10 +1770,44 @@ fn sql_expr_to_polars_with_qualifiers(
                 BinaryOperator::LtEq => Ok(l.lt_eq(r)),
                 BinaryOperator::And => Ok(l.and(r)),
                 BinaryOperator::Or => Ok(l.or(r)),
+                BinaryOperator::Plus if use_integral_ansi_arithmetic => {
+                    Ok(left_column.add(&right_column).expr().clone())
+                }
                 BinaryOperator::Plus => Ok(l + r),
+                BinaryOperator::Minus if use_integral_ansi_arithmetic => {
+                    Ok(left_column.subtract(&right_column).expr().clone())
+                }
                 BinaryOperator::Minus => Ok(l - r),
+                BinaryOperator::Multiply if use_integral_ansi_arithmetic => {
+                    Ok(left_column.multiply(&right_column).expr().clone())
+                }
                 BinaryOperator::Multiply => Ok(l * r),
-                BinaryOperator::Divide => Ok(l / r),
+                BinaryOperator::Divide => Ok(left_column
+                    .divide_pyspark(&right_column)
+                    .expr()
+                    .clone()),
+                BinaryOperator::Modulo => {
+                    let args = [r.clone()];
+                    let modulo = l.clone().map_many(
+                        |cols| crate::column::expect_col(crate::udfs::apply_ansi_modulo(cols)),
+                        &args,
+                        |_schema, fields| Ok(polars::prelude::Field::new(
+                            fields[0].name().clone(),
+                            if fields[0].dtype() == &polars::prelude::DataType::Float64
+                                || fields[1].dtype() == &polars::prelude::DataType::Float64
+                            {
+                                polars::prelude::DataType::Float64
+                            } else if fields[0].dtype() == &polars::prelude::DataType::Int64
+                                || fields[1].dtype() == &polars::prelude::DataType::Int64
+                            {
+                                polars::prelude::DataType::Int64
+                            } else {
+                                polars::prelude::DataType::Int32
+                            },
+                        )),
+                    );
+                    Ok(modulo)
+                }
                 _ => Err(PolarsError::InvalidOperation(
                     format!("SQL: unsupported operator in WHERE: {:?}. Use =, <>, <, <=, >, >=, AND, OR, +, -, *, /.", op).into(),
                 )),
@@ -1735,7 +1819,38 @@ fn sql_expr_to_polars_with_qualifiers(
         SqlExpr::UnaryOp { op, expr } => {
             let e = sql_expr_to_polars_with_qualifiers(expr, session, df, having_agg_map, having_agg_list, relation_qualifiers)?;
             match op {
-                spark_sql_parser::ast::UnaryOperator::Minus => Ok(-e),
+                spark_sql_parser::ast::UnaryOperator::Minus => {
+                    use polars::prelude::DataType;
+                    let schema = df
+                        .map(|df| df.lazy_frame().collect_schema())
+                        .transpose()?
+                        .unwrap_or_default();
+                    let dtype = e.to_field(&schema)?.dtype().clone();
+                    let output_type = match dtype {
+                        DataType::Int16 => Some(DataType::Int32),
+                        DataType::Int32 | DataType::Int64 => Some(dtype),
+                        _ => None,
+                    };
+                    if let Some(output_type) = output_type {
+                        let output_field_type = output_type.clone();
+                        let args: [Expr; 0] = [];
+                        Ok(e.map_many(
+                            |columns| {
+                                crate::column::expect_col(crate::udfs::apply_ansi_negate(columns))
+                            },
+                            &args,
+                            move |_schema, fields| {
+                                Ok(polars::prelude::Field::new(
+                                    fields[0].name().clone(),
+                                    output_field_type.clone(),
+                                ))
+                            },
+                        ))
+                    } else {
+                        Ok(-e)
+                    }
+                }
+                spark_sql_parser::ast::UnaryOperator::Plus => Ok(e),
                 spark_sql_parser::ast::UnaryOperator::Not => Ok(e.not()),
                 spark_sql_parser::ast::UnaryOperator::BitwiseNot => {
                     let col = Column::from_expr(e, None);

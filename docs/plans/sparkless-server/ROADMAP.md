@@ -42,7 +42,7 @@ All rows are planned. Release scope is cumulative: each release retains and regr
 
 ## 4.16.0 — HTTP service, launcher, and unified distribution
 
-Complete **Phase 0A before the Phase 0B release gate**. The early Connect experiment informs the architecture but remains experimental; it is not advertised as supported Spark Connect in 4.16.0.
+The 4.16 publication gate covers native HTTP, launcher, and distributions. Phase 0A upstream certification and the early Connect experiment are optional and do not block Phase 0B publication. Public Spark Connect remains unsupported in 4.16.0.
 
 The [detailed 4.16 implementation plan](RELEASE_4_16.md) specifies the SQL/type subset, proposed limits, ownership/control behavior, package-installation checks, and ordered delivery slices.
 
@@ -50,17 +50,18 @@ The [detailed 4.16 implementation plan](RELEASE_4_16.md) specifies the SQL/type 
 
 | Slices | Result | Dependency to advance |
 | --- | --- | --- |
-| 416-01–416-03 | Frozen contracts, minimal crate, real Connect feasibility | Unmodified-client compute/empty/reconnect/release evidence; external emulator prerequisite tracked |
+| 416-01–416-02 | Frozen native contracts and minimal crate | Native SQL/result/control contracts and package inventory |
+| 416-03 (optional) | Native Connect feasibility | Independent unmodified-client compute/empty/reconnect/release evidence; no publication dependency |
 | 416-04–416-05 | Bounded execution/session ownership and exact scalar/SQL path | Native ownership, limits, logical schema, positional values, and allowlist checks |
 | 416-06–416-07 | HTTP agent and sync/async owned-process launcher | Direct-agent plus lifecycle/platform gates |
-| 416-08 | Integrated SDK route and complete candidate distribution | Corrected pinned emulator, V01–V14 and V29, all packages prepared at 4.16.0 |
+| 416-08 | Complete native candidate distribution | V05–V14 and V29, all packages prepared at 4.16.0 |
 | 416-09 | Coordinated publication | Fresh public installation/artifact verification in V30 |
 
-Runtime/schema work and the external adapter fix can proceed independently after contracts/scaffolding; final readiness requires their combined evidence. Public support remains HTTP-only even though the early native Connect experiment is required.
+Runtime/schema work and external integration evaluation proceed independently. Final 4.16 readiness requires native V05–V14 and V29 evidence; public support remains HTTP-only.
 
 ### Scope
 
-- Lock client/protocol/SDK/emulator test versions and SQL semantics; resolve the emulator's typed-result mapping and BIGINT preservation prerequisite.
+- Freeze native SQL/result/control semantics and package metadata. Track client/protocol/SDK/emulator evaluation independently as optional integration work.
 - Add the native server workspace crate, CLI, feature boundaries, tested binaries, and Python/JVM-free container.
 - Implement read-only HTTP SQL, typed positional results, readiness/capabilities, explicit unsupported errors, and minimum session ownership/TTL/close behavior.
 - Include bounded admission, queues, result production, cooperative cancellation accounting, and graceful shutdown.
@@ -72,8 +73,8 @@ Primary plans: [SS-01](01-compatibility-and-emulator.md), [SS-02](02-crate-cli-a
 
 ### Release gate
 
-- [ ] Validation **V01–V14** passes, including the corrected pinned emulator and public SDK result/schema fields.
-- [ ] Direct HTTP and SDK tests preserve `9007199254740993`, high-precision decimals, typed nulls, empty-result schema, and declared date/time semantics.
+- [ ] Native validation **V05–V14** passes; upstream V01–V04 and SDK/emulator certification are optional.
+- [ ] Direct native HTTP tests preserve `9007199254740993`, high-precision decimals, typed nulls, empty-result schema, and declared date/time semantics.
 - [ ] Launcher failure, cancellation, multiple-instance, restart, and cleanup tests pass on every advertised platform.
 - [ ] Timed-out native work retains its admission permit until it actually finishes; health traffic progresses under load.
 - [ ] Metadata checks cover the parser, server, binary Python distribution, existing Rust packages, Python package, and native extension.
@@ -117,16 +118,18 @@ Complete **Phase 2**, with standalone client conformance followed by the separat
 - Support stable session/operation/response identity, completion markers, bounded replay, reattachment, release, interruption, expiry, and restart behavior.
 - Enable `spark_connect_url` only for a ready, supported endpoint.
 - Verify the emulator's gRPC transport/authentication/session route separately after standalone conformance.
+- Add the separately certified [MiniLake Jobs route](14-minilake-interoperability.md) using our Python-only runner image and existing MiniLake seams, with no Java/JVM anywhere in its deployment. It does not require Sparkless-hosted Python workers or shared Delta/catalog support.
 
 Primary plans: [SS-09](09-connect-plans-and-analysis.md), [SS-10](10-arrow-replay-and-connect-conformance.md), and endpoint/release work in [SS-06](06-python-launcher.md) and [SS-11](11-proxy-benchmarks-and-release.md).
 
 ### Release gate
 
-- [ ] Prior supported surfaces still pass; **V18–V25** passes for the published Connect matrix, including proxy certification for the planned proxy route.
+- [ ] Prior supported surfaces still pass; **V18–V24** pass for the published native Connect matrix. V25 is required only before advertising the optional emulator proxy route; upstream proxy changes do not block the native release.
 - [ ] The unmodified JVM-free client computes `spark.range(10).filter("id > 5").count() == 4` through the native engine, alongside the complete declared conformance suite.
 - [ ] Reconnection after delivered batches does not rerun the plan; release/expiry/capacity-pressure tests demonstrate bounded retention.
 - [ ] Multiple real client processes produce independent correct results while health traffic progresses.
 - [ ] **V26** records reproducible concurrent-client benchmarks and limitations, without unmeasured speedup claims.
+- [ ] If advertising MiniLake Jobs, **V31–V33** pass independently with pinned runner/MiniLake artifacts and truthful timeout/cancellation behavior. Omit an unverified optional route from supported claims; do not replace the existing proxy gate.
 - [ ] All packages/artifacts are published and verified at **4.18.0**.
 
 ## 4.19.0 — Optional isolated Python workers
@@ -151,7 +154,10 @@ Primary plan: [SS-13](13-optional-delta-and-unity-catalog.md).
 - [ ] Pass **V28** using an independent reader for schema, decimal precision, data files, and `_delta_log` transactions.
 - [ ] Verify concurrent writers, cancellation/failure near commit, and explicit unsupported DDL/DML errors.
 - [ ] Preserve previously shipped capabilities and keep Delta/UC optional; no Python worker dependency is introduced.
+- [ ] If advertising MiniLake shared Delta/catalogs, **V34–V35** verify our native adapter and independent DuckDB reads through existing MiniLake APIs. MiniLake SQL Delta DML stays unsupported unless a structured native hook and **V36** pass. No Java connector or Spark fallback is permitted.
 - [ ] Publish and verify all participating packages at **4.20.0**.
+
+MiniLake integration is specified in [SS-14](14-minilake-interoperability.md). Contract preparation can start earlier, but it adds no 4.16 gate, does not replace the `calvinchengx/databricks-emulator` HTTP/proxy requirements, and needs no MiniLake source changes for initial Jobs/external-table reads. Any first-party runner package/image introduced for a release joins the coordinated inventory at that release version.
 
 ## Publication checklist for every release
 

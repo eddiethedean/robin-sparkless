@@ -134,6 +134,77 @@ jobs:
         env:
           CARGO_BUILD_JOBS: 1
 
+  server-package:
+    name: Native server and Python binary wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the native HTTP server
+        run: cargo build --locked --release -p sparkless-server
+        env:
+          CARGO_BUILD_JOBS: 1
+      - name: Run native HTTP acceptance tests
+        run: python -m unittest discover -s scripts/server-tests -v
+        env:
+          SPARKLESS_SERVER_BINARY: ${{ github.workspace }}/target/release/sparkless-server
+      - name: Build the platform binary wheel
+        run: |
+          python -m pip install --upgrade build
+          SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
+            python -m build --wheel python/server-bin
+      - name: Build the native container image
+        run: docker build --file crates/sparkless-server/Dockerfile --tag sparkless-server:ci .
+      - name: Run native container health and SQL smoke tests
+        run: |
+          docker run --rm --entrypoint /bin/sh sparkless-server:ci -ec '
+            if command -v python3 >/dev/null 2>&1; then exit 1; fi
+            if command -v java >/dev/null 2>&1; then exit 1; fi
+          '
+          docker run --detach --rm --name sparkless-server-ci -p 127.0.0.1:18099:8099 sparkless-server:ci
+          cleanup() { docker stop sparkless-server-ci >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          base_url = "http://127.0.0.1:18099"
+          deadline = time.monotonic() + 60
+          while True:
+              try:
+                  with urllib.request.urlopen(base_url + "/health", timeout=2) as response:
+                      assert response.status == 200
+                  break
+              except (OSError, urllib.error.URLError):
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(0.5)
+
+          request = urllib.request.Request(
+              base_url + "/statements",
+              data=json.dumps({
+                  "session": "container-smoke",
+                  "kind": "sql",
+                  "code": "SELECT CAST(9007199254740993 AS BIGINT) AS n",
+              }).encode(),
+              headers={"Content-Type": "application/json"},
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              result = json.load(response)
+          payload = result["data"]["application/json"]
+          assert payload["data"] == [[9007199254740993]], result
+          assert payload["schema"]["fields"][0]["type"] == "long", result
+          PY
+
   test:
     name: Rust tests (sql)
     runs-on: ubuntu-latest
@@ -219,6 +290,7 @@ jobs:
           .venv/bin/python scripts/test_installed_package_version.py
           .venv/bin/python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short
           .venv/bin/python -m pytest tests/parity/ -v --tb=short
+          .venv/bin/python -m unittest discover -s scripts/server-tests
         timeout-minutes: 15
         # Job fails if pytest exits non-zero (no continue-on-error)
 

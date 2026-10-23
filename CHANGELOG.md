@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
 
+## [4.16.0] - 2026-10-23
+
+### Added
+
+- **Native SQL server** — Add the optional `sparkless-server` HTTP SQL service, bounded read-only query execution, session lifecycle, readiness/control protocol, and sync/async `SparklessServer` launcher.
+- **Server distributions** — Add platform-specific `sparkless-server-bin` wheels, a JVM-free Linux container build, and 4.16.0 release metadata checks.
+
+### Changed
+
+- Align all first-party Rust and Python package versions at 4.16.0, including the SQL parser.
+
+The source implementation is present; native HTTP/launcher, platform lifecycle, candidate-artifact, and publication evidence remains pending. Upstream SDK/emulator and experimental Connect certification is optional and does not block the native HTTP release.
+
 ## [4.15.3] - 2026-10-22
 
 ### Fixed

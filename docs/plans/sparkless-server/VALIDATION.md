@@ -2,19 +2,19 @@
 
 [Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
 
-**Status: planned. No implementation tests or release gates below have been run for this server plan.** Every evidence field is pending. Documentation checks do not establish server conformance.
+**Status: source implementation is present; local preflight tests have run (recorded below), while required native V05–V14/V29 acceptance gates remain pending.** The 4.16 publication scope is the native HTTP service, launcher, and distributions. SDK/emulator and experimental Connect certification (V01–V04) is optional and does not block release. Platform and native acceptance evidence is still required.
 
-For each gate record the native commit, client/SDK version, emulator/oracle revision and digest where applicable, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep separate results for direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect.
+For each gate record the native commit, client/SDK version, emulator/oracle revision and digest where applicable, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep separate results for direct HTTP, SDK/emulator, standalone Connect, emulator-proxied Connect, MiniLake Jobs, and optional MiniLake shared Delta/catalog/DML routes. MiniLake's DuckDB SQL success cannot prove native execution or replace an agent/proxy gate.
 
 ## Gate matrix
 
 | Gate | Phase / owner | Required scenario | Assertion / evidence |
 | --- | --- | --- | --- |
-| V01 | 0A / SS-01 | Locked compatibility/semantic manifest | Exact client/proto/oracle/runtime versions and settings; no unresolved test pins |
-| V02 | 0A / SS-01 | SDK decoding of agent result mapped by emulator | Public data_array and manifest.schema retain exact values, order, nulls and empty schema; upstream fix tracked |
-| V03 | 0A / SS-03 | Default-client native feasibility | Range/filter/count returns 4; empty typed result; initialization and release trace |
-| V04 | 0A / SS-03 | Disconnect after a response | Client reattaches with defaults enabled; native plan is not rerun |
-| V05 | 0B / SS-05 | SELECT 1 AS result | Value and schema via direct agent and public SDK through corrected pinned emulator |
+| V01 | Optional integration / SS-01 | Locked compatibility/semantic manifest | Exact client/proto/oracle/runtime versions and settings; no unresolved test pins |
+| V02 | Optional integration / SS-01 | SDK decoding of agent result mapped by emulator | Public data_array and manifest.schema retain exact values, order, nulls and empty schema; upstream fix tracked |
+| V03 | Optional integration / SS-03 | Default-client native feasibility | Range/filter/count returns 4; empty typed result; initialization and release trace |
+| V04 | Optional integration / SS-03 | Disconnect after a response | Client reattaches with defaults enabled; native plan is not rerun |
+| V05 | 0B / SS-05 | SELECT 1 AS result | Value and schema via the direct native HTTP agent |
 | V06 | 0B / SS-05, SS-08 | BIGINT 9007199254740993 and high-precision DECIMAL | No intermediate binary64 conversion; exact value and declared logical type/precision/scale |
 | V07 | 0B / SS-05, SS-08 | Typed null, empty result, date/timestamp | Correct null representation, schema on zero rows, declared units/timezone |
 | V08 | 0B / SS-05 | Column order, duplicate labels, malformed and unsupported requests | Positional values survive; unsupported kind/Python/SQL/type/write cannot return success |
@@ -41,17 +41,77 @@ For each gate record the native commit, client/SDK version, emulator/oracle revi
 | V29 | 0B / SS-02, SS-06, SS-11 | Complete 4.16.0 candidate inventory and isolated consumer installs | Parser/server/binary-extra and existing packages align; archives/wheels install without checkout paths or inherited root Cargo patches; experimental gRPC absent from normal artifacts |
 | V30 | 4.16 release completion / SS-11 | Public registry/binary/container verification after publication | Fresh exact-version installs and functional witnesses pass; hashes/digests, binary metadata and every inventory item match 4.16.0 |
 
+## MiniLake route gates (SS-14)
+
+These are planned, independently recorded integration gates. V31–V33 apply only when advertising Phase 2 MiniLake Jobs; V34–V35 require optional Phase 4 native storage/catalog capabilities, and V36 applies only if the additional MiniLake SQL DML route is enabled. None adds a 4.16 requirement or depends on Sparkless-hosted Python workers.
+
+| Gate | Phase / owner | Required scenario | Assertion / evidence |
+| --- | --- | --- | --- |
+| V31 | 2 route / SS-11, SS-14 | SDK/CLI workspace import and MiniLake Jobs → Python-only runner → native Connect | Range/filter/count returns 4; public run/output and native trace agree; unavailable server fails instead of local fallback; inspect all integration build stages/images/processes/pulls for absence of Java/JRE/JVM/Apache Spark |
+| V32 | 2 route / SS-09, SS-14 | Real scripts, arguments, task env/secret references, result/error/type boundaries and unsupported packages/config | Pinned unmodified client; correct stdout/stderr/exit status and supported schemas; no secret leakage; Maven/JVM options and unsupported plans fail without dropped options or success placeholders; MCP helper certified separately if advertised |
+| V33 | 2 route / SS-04, SS-10, SS-14 | Concurrent tasks, exception, task timeout, runner death, server outage, close/reattach/expiry | Independent sessions; truthful native commit/cancel state and eventual bounded cleanup; runner exit is not proof of compute cancellation; current MiniLake Jobs cancel is documented as between tasks unless upstream active cancellation exists |
+| V34 | 4 optional / SS-13, SS-14 | Native path write → separate SDK registration → MiniLake/DuckDB read → native path read on shared local volume | Independently verified Delta rows/schema/decimal/time/commit versions; consistent actual files at /data; append/restart and registration-failure recovery; no atomic registration+commit or cloud-storage claim |
+| V35 | 4 optional / SS-07, SS-13, SS-14 | Native named-table lookup through existing MiniLake UC API | Stable/drop-recreate IDs, exact ordered schema and snapshot consistency, per-session provider installation and bounded lookup; managed DuckDB/unsupported formats, misses, HTTP errors, stale metadata and denied paths fail without silent local fallback |
+| V36 | 4 optional DML / SS-13, SS-14 | Agreed structured MiniLake SQL external-Delta write delegation | Pin actual upstream hook/native capability; independent reader verifies insert/update/delete for each enabled operation; operation identity, deadline, input lifetime, conflict/retry/unknown-commit outcomes and cleanup; no generated classic Spark/JVM fallback |
+
+All evidence remains pending. Record MiniLake, runner, native binary, client/SDK, DuckDB/Delta dependencies, wheel hashes, image digests, exact commands, and enabled capability matrix. Register-only, TCP-only, Jobs-status-only, or DuckDB-only witnesses do not satisfy native route certification.
+
 ## 4.16 execution order
 
-Follow [416-01 through 416-09](RELEASE_4_16.md#ordered-delivery-slices). V01–V04 establish Phase 0A, V05–V14 establish the integrated HTTP/launcher surface, and V29 checks the complete packaged candidate. These must pass before the release is ready to publish. V30 runs after publication and establishes release completion. Keep the SDK/emulator and experimental Connect traces separate from the public HTTP-only capability claim.
+Follow the native delivery slices in [the 4.16 plan](RELEASE_4_16.md#ordered-delivery-slices). V05–V14 validate the direct HTTP/launcher surface and V29 checks the complete packaged candidate; these are the pre-publication requirements. V01–V04 certify optional upstream integrations and experimental Connect independently. V30 runs after publication and establishes release completion. Advertise external routes only after their separate certification passes.
 
 The exact SQL golden corpus, proposed resource defaults, and negative cases are in the [4.16 implementation plan](RELEASE_4_16.md). Boundary tests should use smaller configured limits for determinism as well as confirming the selected production defaults; a request that times out must not release its live compute lease.
+
+## 4.16 release publication gate
+
+Only the native V05–V14 and V29 gates below are required before any 4.16.0 artifact is published. Change a status to `passed` only after recording its evidence. V05–V08 apply to direct HTTP values and schemas; SDK/emulator results are outside these publication gates.
+
+| Gate | Status |
+| --- | --- |
+| V05 | pending |
+| V06 | pending |
+| V07 | pending |
+| V08 | pending |
+| V09 | pending |
+| V10 | pending |
+| V11 | pending |
+| V12 | pending |
+| V13 | pending |
+| V14 | pending |
+| V29 | pending |
+
+V05–V14 and V29 remain pending until their native scenarios and cross-platform artifacts are recorded. Removing upstream dependencies does not mark these native gates as passed.
+
+## Optional integration status
+
+V01–V04 remain uncertified: the Sparkless Connect feasibility endpoint/harness is absent, the inspected emulator commit returns `result.text`, and no corrected immutable emulator image is recorded. These limitations restrict integration claims and do not block 4.16 publication. SDK model fixtures live in `scripts/server-integration-tests/` and run independently from the standard server acceptance suite.
+
+## Local preflight evidence
+
+The following checks ran in the local `Darwin arm64` worktree at source revision `375d83d8` on 2026-10-23. They check the current implementation and release machinery but do not substitute for any V05–V14 or V29 publication gate above. The worktree also contains uncommitted changes, so this revision identifies the base checkout rather than a release candidate.
+
+| Check | Result / command |
+| --- | --- |
+| Rust workspace | Passed: `cargo test --locked --workspace --features sql,delta --lib --tests` (release workflow command) |
+| Rust static checks | Passed: `cargo fmt --all -- --check`; `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` |
+| Release metadata | Passed: `python3 -m unittest discover -s scripts -p 'test_*release*.py'` (15 tests, including optional upstream and mandatory native gate cases); `python3 scripts/check_release_versions.py --tag v4.16.0` |
+| Server HTTP/launcher preflight | Passed: `SPARKLESS_SERVER_BINARY=target/debug/sparkless-server python3 -W error::ResourceWarning -m unittest discover -s scripts/server-tests -v` (20 direct HTTP/launcher tests; exact BIGINT/decimal/date/timestamp, null/empty schema, duplicate labels, unsupported/write failures, body/SQL/cell/response/session limits, session close/reopen, sync/async cleanup/restart/nesting, port collision, and diagnostic redaction). The optional SDK fixtures are now run separately from this release suite. |
+| Session ownership unit checks | Passed: `cargo test --locked -p sparkless-server sessions::tests --lib` (close cancels registered work while keeping shared references alive; idle reaper retains referenced sessions and expires them after release) |
+| Workflow syntax | Parsed: `.github/workflows/release.yml` and `.github/workflows/ci.yml` with Ruby `YAML.load_file` |
+| Candidate release wheel | Passed locally: built with `MACOSX_DEPLOYMENT_TARGET=15.0`, installed `sparkless_server_bin-4.16.0-py3-none-macosx_15_0_arm64.whl`, and passed all 7 server/launcher acceptance tests against its executable |
+| Other wheel platforms | Pending CI matrix; local arm64 macOS run does not validate Linux, x86_64 macOS, or Windows artifacts |
+| Native container image | Passed locally on `linux/arm64`: `docker build --platform linux/arm64 --file crates/sparkless-server/Dockerfile --tag sparkless-server:4.16.0-preflight .`; image manifest digest `sha256:94fa2972d79d12d9ad9e905075f535150d71f0d5001e145433fe20e91b6c19fe`; runtime has no Python/Java, health returns ready, and HTTP SQL preserves BIGINT `9007199254740993` and `long` schema |
+| Compatibility candidate environment | Passed install/import in `/tmp/sparkless-connect-4.0.4` on CPython 3.11/macOS arm64 from `scripts/server-tests/requirements-connect-4.0.4.lock`; imports `pyspark-client==4.0.4` and `databricks-sdk==0.156.0`. This does not exercise Spark Connect or the emulator result route. |
+| Public SDK model fixtures | Passed: `/tmp/sparkless-connect-4.0.4/bin/python -m unittest discover -s scripts/server-integration-tests -p 'test_sdk_model_contract.py' -v` (2 tests; exact JSON_ARRAY BIGINT/DECIMAL strings, null, duplicate column labels, and typed empty schema). This does not exercise the emulator adapter. |
+| Dependency audit and policy | Passed: `cargo audit` and `cargo deny check advisories bans sources`; `Cargo.lock` now resolves Tokio 1.54.1, ctutils 0.4.4, and chacha20 0.10.2 |
+| Python type check | Passed: `cd python && mypy sparkless` |
+| SDK/emulator and Connect traces | Blocked: candidate client/protocol/SDK pins exist, but Sparkless has no Connect feasibility endpoint and no corrected emulator image/owner-tracked fix is available; no integration trace recorded |
 
 ## Test implementation guidance
 
 Use native unit/integration tests for schema mappings, admission ownership, state transitions, and error propagation. Add property/fuzz tests where malformed nested protocols or state-machine races justify them. Integration tests must use real engine computation, not programmed success responses.
 
-Use separate client and server environments to demonstrate runtime independence. The launcher/SDK/Connect Python environment is allowed to contain Python; the native service image must not require it. Reference Spark may use Java in its own oracle environment, which does not invalidate a separate JVM-free native service/client witness.
+Use separate client and server environments to demonstrate runtime independence. The launcher/SDK/Connect Python environment is allowed to contain Python; the native service image must not require it. Reference Spark may use Java in its own oracle environment, which does not invalidate a separate JVM-free native service/client witness. The MiniLake V31 deployment and its image-build recipe must contain no Java/JVM at any stage; never include that reference environment or classic-Spark fallback in the claimed MiniLake deployment.
 
 Inspect actual public client outputs and transport traces. Do not patch SDK models, parse result.text as a substitute for normal SDK data, disable client reattachment, or accept schema-less success as conformance.
 
@@ -59,7 +119,7 @@ For concurrency/cancellation, use controlled blocking/safe-point scenarios to es
 
 ## Release commands to add with implementation
 
-The server crate does not yet exist as part of this documentation change. Once added, CI should use targeted format/clippy/tests for its supported feature combinations, launcher tests on supported Python/platform versions, and the four distinct end-to-end routes. Record the actual commands and lockfile paths beside their evidence; do not provide fictional runnable commands or report these planned checks as passed.
+Server source is present, but passing integration/release evidence is still required. Publication CI should use targeted format/clippy/tests for supported feature combinations, direct HTTP acceptance, and launcher/package tests on supported Python/platform versions. Run external routes and SS-14 MiniLake certification in separate optional lanes when those capabilities are evaluated. Record the actual commands and lockfile paths beside their evidence; do not provide fictional runnable commands or report these planned checks as passed.
 
 ## Evidence record template
 
@@ -72,4 +132,4 @@ The server crate does not yet exist as part of this documentation change. Once a
 - Test output / logs / measured results:
 - Limitations or blocker:
 
-A blocked emulator prerequisite leaves the integrated 0B gate incomplete even when direct HTTP passes. Optional Phase 3/4 evidence is not a prerequisite for shipping the explicitly limited Phase 0/1/2 surfaces.
+Upstream emulator, SDK, and experimental Connect failures affect only their optional route certification. They do not block the native HTTP release. Optional Phase 3/4 evidence is required only when shipping those capabilities.

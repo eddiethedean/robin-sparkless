@@ -1,6 +1,6 @@
 [project]
 name = "sparkless"
-version = "4.15.3"
+version = "4.16.0"
 description = "PySpark-like DataFrame API in Python—no JVM. Uses robin-sparkless (Rust/Polars) as the execution engine."
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,6 +38,7 @@ jdbc = [
     "pymssql",          # SQL Server
     "oracledb",         # Oracle
 ]
+server = ["sparkless-server-bin==4.16.0"]
 # Run Python tests with real PySpark (SPARKLESS_TEST_BACKEND=pyspark or MOCK_SPARK_TEST_BACKEND=pyspark); requires Java.
 pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
 # PySpark 4.x oracle (Java 17, Python 3.10+)
@@ -81,6 +82,12 @@ follow_imports = "skip"
 [[tool.mypy.overrides]]
 module = ["delta", "delta.*"]
 ignore_missing_imports = true
+
+# matplotlib currently contains syntax newer than the package's Python 3.8
+# support floor; plotting calls are dynamically delegated to that dependency.
+[[tool.mypy.overrides]]
+module = ["matplotlib", "matplotlib.*"]
+follow_imports = "skip"
 
 
 [tool.pyright]

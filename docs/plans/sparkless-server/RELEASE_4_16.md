@@ -1,14 +1,16 @@
 # 4.16.0 implementation and release plan
 
-**Status: planned; no implementation or release gates completed.** This plan refines Phase 0A + 0B into reviewable delivery slices. Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.16.0**.
+**Status: native HTTP/launcher source, container build, and release jobs are implemented in this checkout; local preflight checks are recorded and required acceptance gates remain pending.** The direct HTTP route, bounded runtime/session lifecycle, SQL scalar allowlist, Rust CLI, owned-process Python launcher, platform-wheel build path, and JVM-free Linux image have source implementations. A macOS arm64 wheel and a linux/arm64 image passed local smoke checks; other platform artifacts and native publication gates remain unverified. SDK/emulator integration and Connect feasibility are optional certifications. Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) is versioned at **4.16.0**.
 
-[Roadmap](ROADMAP.md#4160-http-service-launcher-and-unified-distribution) · [Epic](EPIC.md) · [Workstreams](README.md#workstreams) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
+[Roadmap](ROADMAP.md#4160--http-service-launcher-and-unified-distribution) · [Epic](EPIC.md) · [Workstreams](README.md#workstreams) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Release outcome
 
-A fresh `sparkless[server]==4.16.0` installation on an advertised platform can launch an owned native Rust child, execute the declared read-only SQL subset through HTTP, and clean up with synchronous or asynchronous lifecycle methods. An unmodified Databricks SDK receives exact values and schema through the corrected pinned emulator. Non-Python consumers can install the Rust CLI or use its native image.
+A fresh `sparkless[server]==4.16.0` installation on an advertised platform can launch an owned native Rust child, execute the declared read-only SQL subset through HTTP, and clean up with synchronous or asynchronous lifecycle methods. Databricks SDK/emulator interoperability is an optional certification and is not part of 4.16 publication readiness. Non-Python consumers can install the Rust CLI or use its native image.
 
-The public server has no supported Spark Connect endpoint in 4.16.0. The required Phase 0A Connect experiment remains test-only and feature-gated. Catalog mutations, file/network readers, Python execution, nested types, and production gRPC remain assigned to their later gates. Existing embedded Rust/Python APIs retain their supported behavior; the restricted surface applies to remote server execution.
+The public server has no supported Spark Connect endpoint in 4.16.0. The optional Phase 0A Connect experiment remains test-only and feature-gated; it does not block this release. Catalog mutations, file/network readers, Python execution, nested types, and production gRPC remain assigned to their later gates. Existing embedded Rust/Python APIs retain their supported behavior; the restricted surface applies to remote server execution.
+
+MiniLake is a separate planned integration in [SS-14](14-minilake-interoperability.md): Phase 2 Connect Jobs and Phase 4 optional shared Delta/catalogs. It does not consume the current HTTP-agent/proxy settings, replace optional emulator SDK certification, enable public Connect in 4.16, or add a 4.16 release gate. Its complete deployment and runner image-build recipe must be Java/JVM-free.
 
 ## Implementation baseline
 
@@ -35,25 +37,25 @@ Slice IDs are implementation planning IDs, not GitHub issues or claims of merged
 
 | Slice | Deliverable | Dependencies | Exit evidence |
 | --- | --- | --- | --- |
-| **416-01** | Freeze compatibility, SQL/result contract, package inventory, and external emulator work | None | D01–D04 baseline; SDK decoding fixtures; upstream owner/issue/PR recorded |
+| **416-01** | Freeze native SQL/result semantics, transport contracts, and package inventory | None | D02/D04 baseline and native artifact inventory; external compatibility work tracked separately |
 | **416-02** | Minimal server crate, CLI/config types, protocol-generation test boundary | 416-01 | Direct Rust linkage, feature separation, clean-package build investigation |
-| **416-03** | Native Connect feasibility with the unmodified client defaults | 416-01, 416-02 | V03/V04: computed witness, typed empty result, reconnect, release trace |
-| **416-04** | Bounded executor, operation ownership, read-only sessions, drain/control state | 416-02; incorporate 416-03 findings before freezing interfaces | V09–V11 core tests; a timed-out native task retains its permit |
+| **416-03 (optional)** | Native Connect feasibility with the unmodified client defaults | Optional client/protocol pins and 416-02 | V03/V04: computed witness, typed empty result, reconnect, release trace; does not block HTTP delivery or publication |
+| **416-04** | Bounded executor, operation ownership, read-only sessions, drain/control state | 416-02; native HTTP ownership contract | V09–V11 core tests; a timed-out native task retains its permit |
 | **416-05** | Scalar logical schema/positional export and SQL allowlist | 416-01, 416-02 | Engine fixture corpus passes, including duplicate labels and exact decimals/BIGINT |
-| **416-06** | HTTP agent wired to the real engine/runtime | 416-04, 416-05; 416-03 feasibility complete | V05–V11 direct-agent tests; readiness follows a real native witness |
+| **416-06** | HTTP agent wired to the real engine/runtime | 416-04, 416-05 | V05–V11 direct-agent tests; readiness follows a real native witness |
 | **416-07** | Sync/async launcher and binary distribution | 416-02 control contract, 416-04 shutdown, 416-06 readiness | V12–V14 across advertised launcher/binary platforms |
-| **416-08** | Integrated SDK/emulator, locked release inventory, candidate artifacts/CI | Corrected emulator; 416-01 through 416-07 | V01–V14 plus V29; all 4.16.0 candidate artifacts install and run |
+| **416-08** | Locked release inventory, native candidate artifacts/CI | 416-01, 416-02, 416-04 through 416-07 | V05–V14 plus V29; all 4.16.0 candidate artifacts install and run |
 | **416-09** | Coordinated publication and public artifact verification | 416-08 and every pre-publication gate | V30: all inventoried artifacts published and verified at 4.16.0 |
 
-After 416-02, runtime work, native schema work, and the external emulator fix can proceed independently. The launcher can develop against the agreed control contract before HTTP completion; its end-to-end gate waits for 416-06. The Connect feasibility test must not expand into the full Phase 2 translator or replay implementation.
+After 416-02, runtime work, native schema work, and the external emulator fix can proceed independently. The launcher can develop against the agreed control contract before HTTP completion; its end-to-end gate waits for 416-06. The optional Connect feasibility test is independent of HTTP release readiness and must not expand into the full Phase 2 translator or replay implementation.
 
-## 416-01: compatibility and external dependency
+## 416-01: native contracts and optional compatibility work
 
-Record one exact client/proto tag for the feasibility test, one exact SDK version, the emulator source revision/image digest, and reference-engine settings in [D01–D04](DECISIONS.md). Distinguish the server version from its semantic and transport compatibility identifiers.
+Freeze the native SQL, scalar/result, launcher/control, and package contracts in D02/D04–D09/D11. For optional integration evaluation, record the client/proto tag, SDK version, emulator revision/image digest, and reference-engine settings in [D01/D03](DECISIONS.md). Distinguish the server version from its semantic and transport compatibility identifiers.
 
-The external emulator change must preserve the agent's schema and exact cells, then construct public `manifest.schema` and `result.data_array`. Use real SDK model decoding in fixtures, including BIGINT `9007199254740993`, a 38-digit decimal, null, zero rows, and duplicate column names. Neither `result.text` decoding nor a fixture that bypasses the emulator adapter satisfies the gate.
+The external emulator change must preserve the agent's schema and exact cells, then construct public `manifest.schema` and `result.data_array`. Use real SDK model decoding in fixtures, including BIGINT `9007199254740993`, a 38-digit decimal, null, zero rows, and duplicate column names. Neither `result.text` decoding nor a fixture that bypasses the emulator adapter establishes optional route certification.
 
-Track the external implementation and its immutable test revision as a release dependency. Direct-agent work can continue while it is pending, but **4.16.0 is not ready to publish until the integrated SDK gate passes**.
+Track the external implementation and its immutable test revision as an optional integration dependency. V01–V04 and SDK/emulator certification do not block 4.16.0 tagging or publication. Require this evidence before advertising the external route as certified.
 
 ## 416-04: runtime, sessions, and bounded defaults
 
@@ -125,7 +127,7 @@ The agent JSON contains exact integer numbers, booleans, strings, null, decimal 
 | Cast failure / division by zero / overflow | Declared ANSI behavior; no fabricated null/success |
 | Read query containing a rejected descendant or unsupported clause | Named error before engine execution |
 
-Run each applicable golden case through direct HTTP and the real SDK/emulator route. Compare logical schemas against the pinned reference settings; normalize only documented transport representation differences. Record discovered native fixes rather than weakening the expected schema.
+Run every applicable golden case through direct HTTP for release acceptance. Run the SDK/emulator route separately when certifying that optional integration. Compare logical schemas against the pinned reference settings; normalize only documented transport representation differences. Record discovered native fixes rather than weakening the expected schema.
 
 ## 416-06: HTTP behavior
 
@@ -164,22 +166,21 @@ Run the following independent CI lanes on the integrated candidate:
 
 1. Native crate/feature/dependency isolation and existing embedded-engine regression checks.
 2. Direct HTTP, logical schema, admission/session/deadline/shutdown checks.
-3. Experimental Connect feasibility with pinned unmodified client defaults; no experimental gRPC in normal artifacts.
-4. Unmodified SDK through the corrected immutable emulator build, with actual value/schema assertions.
-5. Sync/async launcher and package-resource installation on each advertised binary platform, plus existing Python wheel regression coverage.
-6. Native image and fresh candidate-package consumer tests, complete metadata inventory, checksums, and platform wheel tags.
+3. Verify that normal binaries/images exclude experimental gRPC.
+4. Sync/async launcher and package-resource installation on each advertised binary platform, plus existing Python wheel regression coverage.
+5. Native image and fresh candidate-package consumer tests, complete metadata inventory, checksums, and platform wheel tags.
 
-Keep exact client/emulator versions and D01–D09/D11 evidence in the decision/validation records. HTTP/binary/launcher failures cannot be masked by a passing embedded-engine suite. Third-party pins remain open until tested; all first-party candidate package versions are 4.16.0.
+Run experimental Connect and corrected-emulator SDK evaluation as optional integration lanes, with exact client/emulator versions and their own evidence. Keep native D02/D04–D09/D11 evidence in the decision/validation records. HTTP/binary/launcher failures cannot be masked by a passing embedded-engine suite. Third-party pins remain open until tested; all first-party candidate package versions are 4.16.0.
 
 ## Release readiness versus completion
 
-**Ready to tag/publish:** 416-01 through 416-08 are complete; V01–V14 and V29 pass against one integrated candidate and the corrected emulator; all platforms/artifacts in the inventory are built and verified. No publication is needed to prove these pre-publication gates.
+**Ready to tag/publish:** the native slices 416-01, 416-02, and 416-04 through 416-08 are complete; V05–V14 and V29 pass against one candidate; all platforms/artifacts in the inventory are built and verified. Upstream emulator/SDK work and optional 416-03 Connect feasibility do not block publication. No publication is needed to prove these pre-publication gates.
 
 **Released:** publish in dependency order, verify package registries plus binaries/container, and pass V30 using fresh public installs. Only then mark 4.16.0 complete. A partial registry publication is an incomplete release. Resume only missing verified artifacts; if existing published contents require correction, issue a coordinated new patch version instead of overwriting artifacts.
 
-- [ ] 416-01–416-03: contracts and feasibility complete (Phase 0A).
+- [ ] 416-01–416-02: native contracts, package inventory, and server scaffold complete.
 - [ ] 416-04–416-07: native HTTP, bounded runtime, schema, and owned launcher complete.
-- [ ] 416-08: integrated SDK and all candidate distribution gates pass (Phase 0B ready).
+- [ ] 416-08: native HTTP/launcher and all candidate distribution gates pass (Phase 0B ready).
 - [ ] 416-09: complete 4.16.0 inventory published and verified.
 
-This refinement creates implementation instructions only. Native changes, version bumps, external repository changes, and publication happen in the corresponding delivery slices, with evidence recorded before advancing their gates.
+The source implementation and configured release jobs are not proof that their acceptance criteria pass. Native build checks and the complete 0B verification matrix are still required before this release is ready to publish. External emulator/SDK and Connect feasibility evidence remains tracked separately. Mark native release checkboxes complete only after their own immutable evidence is recorded.

@@ -1,6 +1,6 @@
 # SS-02: Rust crate, CLI, and native distribution
 
-> **Status: planned; owner unassigned.** Phase: Minimal scaffolding in 0A; supported CLI/image in 0B.
+> **Status: source implemented; platform and release evidence pending.** Phase: Minimal scaffolding in 0A; supported CLI/image in 0B.
 > [Index](README.md) · [Epic contract](EPIC.md#workspace-build-and-distribution) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Outcome
@@ -45,4 +45,4 @@ Resolve or explicitly defer D05, D06 in the [decision register](DECISIONS.md). R
 
 ## Scope notes
 
-All server paths here are proposed. No server scaffold or release automation is created by this planning change.
+The crate, CLI, feature-gated HTTP surface, control protocol, binary-wheel workflow, native image, and GHCR publication job are implemented in the source tree. Clean consumer installs and platform-specific release evidence remain pending.

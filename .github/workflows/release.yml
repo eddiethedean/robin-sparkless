@@ -191,9 +191,26 @@ jobs:
 
   publish:
     name: Build docs and publish to crates.io
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_rust && github.ref == 'refs/heads/main')
+    if: >-
+      always() && (
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') &&
+          needs.publish-server-bin.result == 'success' && needs.publish-container.result == 'success' &&
+          needs.publish-pypi-manylinux-x86_64.result == 'success' &&
+          needs.publish-pypi-manylinux-aarch64.result == 'success' &&
+          needs.publish-pypi-mac.result == 'success' &&
+          needs.publish-pypi-musllinux-x86_64.result == 'success' &&
+          needs.publish-pypi-musllinux-aarch64.result == 'success' &&
+          needs.publish-pypi-windows-x86_64.result == 'success' &&
+          needs.publish-pypi-windows-arm64.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && inputs.publish_rust && github.ref == 'refs/heads/main' &&
+          needs.validate-server-bin.result == 'success' && needs.release-readiness.result == 'success' &&
+          needs.format.result == 'success' && needs.clippy.result == 'success' &&
+          needs.audit.result == 'success' && needs.deny.result == 'success' &&
+          needs.build.result == 'success' && needs.test.result == 'success' &&
+          needs.python-lint.result == 'success' && needs.python-tests.result == 'success')
+      )
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, validate-server-bin, release-readiness, publish-server-bin, publish-container, publish-pypi-manylinux-x86_64, publish-pypi-manylinux-aarch64, publish-pypi-mac, publish-pypi-musllinux-x86_64, publish-pypi-musllinux-aarch64, publish-pypi-windows-x86_64, publish-pypi-windows-arm64]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -210,7 +227,7 @@ jobs:
             ${{ runner.os }}-cargo-
       - name: Build docs
         run: cargo doc --locked --workspace --no-deps
-      - name: "Publish to crates.io (dependency order: spark-sql-parser, core, polars, main)"
+      - name: "Publish to crates.io (dependency order: parser, core, polars, facade, server)"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
@@ -239,8 +256,9 @@ jobs:
           publish_one robin-sparkless-core
           publish_one robin-sparkless-polars
           publish_one robin-sparkless
+          publish_one sparkless-server
        
-  # --- Python (lint + tests, then PyPI publish for 3.8+) ---
+  # --- Python (lint + tests, binary wheel, then PyPI publish for 3.8+) ---
   python-lint:
     name: Python (mypy)
     needs: [release-metadata]
@@ -349,14 +367,195 @@ jobs:
         run: |
           $PY -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90
           $PY -m pytest tests/parity/ -v --tb=short --timeout 90
+          $PY -m unittest discover -s scripts/server-tests
         timeout-minutes: 20
+
+  validate-server-bin:
+    name: Build and validate sparkless-server-bin (${{ matrix.os }})
+    if: >-
+      (github.event_name == 'push' &&
+        (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_rust && github.ref == 'refs/heads/main')
+    runs-on: ${{ matrix.os }}
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            wheel_platform: manylinux_2_35_x86_64
+            macos_deployment_target: ""
+          - os: macos-15
+            wheel_platform: macosx_15_0_arm64
+            macos_deployment_target: "15.0"
+          - os: macos-15-intel
+            wheel_platform: macosx_15_0_x86_64
+            macos_deployment_target: "15.0"
+          - os: windows-latest
+            wheel_platform: ""
+            macos_deployment_target: ""
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Build the native HTTP server
+        run: cargo build --locked --release -p sparkless-server
+        env:
+          CARGO_BUILD_JOBS: 1
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_deployment_target }}
+      - name: Build platform wheel
+        env:
+          SPARKLESS_SERVER_BINARY: ${{ github.workspace }}/target/release/sparkless-server${{ runner.os == 'Windows' && '.exe' || '' }}
+          SPARKLESS_SERVER_WHEEL_PLAT_NAME: ${{ matrix.wheel_platform }}
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel python/server-bin
+      - name: Install and run the packaged server binary
+        shell: bash
+        run: |
+          python -m pip install --target "$RUNNER_TEMP/server-bin-install" python/server-bin/dist/*.whl
+          python - <<'PY'
+          import importlib.resources
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import sys
+          import types
+          import urllib.request
+
+          package = importlib.resources.files("sparkless_server_bin")
+          name = "sparkless-server.exe" if os.name == "nt" else "sparkless-server"
+          binary = package.joinpath(name)
+          result = subprocess.run([str(binary), "--version"], check=True, capture_output=True, text=True)
+          assert result.stdout.strip() or result.stderr.strip()
+          sparkless_package = types.ModuleType("sparkless")
+          sparkless_package.__path__ = [str(pathlib.Path("python/sparkless/sparkless").resolve())]
+          sparkless_package.__version__ = "4.16.0"
+          sys.modules["sparkless"] = sparkless_package
+          from sparkless.server import SparklessServer
+
+          with SparklessServer(executable=str(binary), port=0, startup_timeout=90) as server:
+              with urllib.request.urlopen(server.http_url + "/health", timeout=10) as response:
+                  assert response.status == 200
+              request = urllib.request.Request(
+                  server.http_url + "/statements",
+                  data=json.dumps({"session": "release-smoke", "kind": "sql", "code": "SELECT 1 AS n"}).encode(),
+                  headers={"Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.load(response)
+              assert result["status"] == "ok", result
+              assert result["data"]["application/json"]["data"] == [[1]], result
+          PY
+        env:
+          PYTHONPATH: ${{ runner.temp }}/server-bin-install
+      - name: Run native HTTP acceptance tests
+        run: python -m unittest discover -s scripts/server-tests -v
+        env:
+          SPARKLESS_SERVER_BINARY: ${{ runner.temp }}/server-bin-install/sparkless_server_bin/sparkless-server${{ runner.os == 'Windows' && '.exe' || '' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-server-bin-${{ matrix.os }}-${{ matrix.wheel_platform || 'native' }}
+          path: python/server-bin/dist/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+  release-readiness:
+    name: Verify required server release evidence
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_rust && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    needs: [validate-server-bin]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require passing native HTTP/launcher V05-V14 and V29 evidence
+        run: python3 scripts/check_server_release_readiness.py
+
+  publish-server-bin:
+    name: Publish sparkless-server-bin (${{ matrix.os }})
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [validate-server-bin, release-readiness]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            wheel_platform: manylinux_2_35_x86_64
+          - os: macos-15
+            wheel_platform: macosx_15_0_arm64
+          - os: macos-15-intel
+            wheel_platform: macosx_15_0_x86_64
+          - os: windows-latest
+            wheel_platform: native
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-bin-${{ matrix.os }}-${{ matrix.wheel_platform }}
+          path: dist
+      - name: Publish validated platform wheel
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine upload --skip-existing dist/*.whl
+
+  publish-container:
+    name: Publish native server image to GHCR
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, publish-server-bin]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare image name and version
+        id: image
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          echo "name=ghcr.io/${REPOSITORY_OWNER,,}/sparkless-server" >> "$GITHUB_OUTPUT"
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+        shell: bash
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish the versioned image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/sparkless-server/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
+            ${{ steps.image.outputs.name }}:latest
 
   # PyPI: build and publish wheels (Python 3.8+), after all checks pass
   publish-pypi-manylinux-x86_64:
     name: PyPI manylinux x86_64 + sdist
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, publish-server-bin, publish-container]
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (maturin)
@@ -374,7 +573,7 @@ jobs:
     name: PyPI manylinux aarch64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04-arm
-    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, publish-server-bin, publish-container]
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (maturin)
@@ -392,7 +591,7 @@ jobs:
     name: PyPI macOS ${{ matrix.target }}
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
-    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, publish-server-bin, publish-container]
     strategy:
       fail-fast: false
       matrix:
@@ -412,7 +611,7 @@ jobs:
     name: PyPI musllinux x86_64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, publish-server-bin, publish-container]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python 3.8
@@ -432,7 +631,7 @@ jobs:
     name: PyPI musllinux aarch64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04-arm
-    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, publish-server-bin, publish-container]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python 3.8
@@ -462,7 +661,7 @@ jobs:
     name: PyPI Windows x86_64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
-    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, publish-server-bin, publish-container]
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (maturin)
@@ -478,7 +677,7 @@ jobs:
     name: PyPI Windows aarch64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-11-arm
-    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests]
+    needs: [format, clippy, audit, deny, build, test, python-lint, python-tests, publish-server-bin, publish-container]
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (maturin)

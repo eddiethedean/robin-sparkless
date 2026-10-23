@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=70.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sparkless-server-bin"
+version = "4.16.0"
+description = "Platform-specific native server executable for sparkless[server]."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [{ name = "Robin Sparkless contributors" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[tool.setuptools]
+packages = ["sparkless_server_bin"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+sparkless_server_bin = ["sparkless-server", "sparkless-server.exe"]

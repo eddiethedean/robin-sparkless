@@ -43,6 +43,7 @@ pub type Expr = polars::prelude::Expr;
 pub type LiteralValue = polars::prelude::LiteralValue;
 /// Re-export for root crate and API that returns Polars errors.
 pub use polars::error::PolarsError;
+pub use polars::prelude::AnyValue;
 pub use polars::prelude::CollectBatches;
 /// Re-export for root DataFrame::from_polars.
 pub use polars::prelude::DataFrame as PlDataFrame;
@@ -52,6 +53,8 @@ pub use polars::prelude::DataType as PlDataType;
 pub use polars::prelude::LazyFrame;
 /// Re-export for root SparkSession::register_udf.
 pub use polars::prelude::Series;
+pub use polars::prelude::TimeUnit;
+pub use polars::prelude::TimeZone;
 
 pub use column::Column;
 pub use dataframe::{

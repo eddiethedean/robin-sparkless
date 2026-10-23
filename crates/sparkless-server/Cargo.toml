@@ -1,0 +1,46 @@
+[package]
+name = "sparkless-server"
+version = "4.16.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Native read-only HTTP SQL service for Robin Sparkless."
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+keywords = ["spark", "sql", "http", "server"]
+categories = ["database", "web-programming"]
+
+[[bin]]
+name = "sparkless-server"
+path = "src/main.rs"
+required-features = ["http"]
+
+[features]
+default = ["http"]
+http = [
+    "dep:bytes",
+    "dep:clap",
+    "dep:http",
+    "dep:http-body",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:tokio",
+    "dep:uuid",
+]
+
+[dependencies]
+bytes = { version = "1.11.1", optional = true }
+chrono = "0.4"
+clap = { version = "4", features = ["derive"], optional = true }
+http = { version = "1", optional = true }
+http-body = { version = "1", optional = true }
+http-body-util = { version = "0.1", optional = true }
+hyper = { version = "1", features = ["http1", "server"], optional = true }
+hyper-util = { version = "0.1", features = ["http1", "server", "service", "tokio"], optional = true }
+robin-sparkless = { version = "4.16.0", path = "../..", features = ["sql"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+spark-sql-parser = { version = "4.16.0", path = "../spark-sql-parser" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "io-util", "io-std"], optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }

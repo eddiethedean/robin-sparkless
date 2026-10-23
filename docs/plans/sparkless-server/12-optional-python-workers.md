@@ -42,3 +42,5 @@ Resolve or explicitly defer D10, D12 in the [decision register](DECISIONS.md). R
 ## Scope notes
 
 No Python-worker implementation is required for Phase 0/1/2 SQL or DataFrame gates. Separate interpreters alone do not constitute a security sandbox.
+
+[MiniLake interoperability](14-minilake-interoperability.md) uses MiniLake-owned external Python task processes with a pure Connect client. It does not require this Sparkless-hosted worker capability or enable `kind=python` in the native service. The entire MiniLake deployment and runner build remain Java/JVM-free; do not introduce a classic Spark fallback.

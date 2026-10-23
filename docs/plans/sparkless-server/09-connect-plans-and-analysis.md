@@ -47,3 +47,5 @@ Resolve or explicitly defer D01, D02, D04, D11 in the [decision register](DECISI
 ## Scope notes
 
 SS-09 and SS-10 share an interface design and can develop against agreed fixtures; their release gates require both implementations.
+
+[SS-14](14-minilake-interoperability.md) adds a separately certified MiniLake Jobs client route after standalone conformance. Its Python runner does not require SS-12. Named-table/file-source reads and write commands for shared Delta remain explicitly enabled SS-13/14 capabilities; neither the initial range/filter/count witness nor standard Connect support establishes Delta Connect extension compatibility.

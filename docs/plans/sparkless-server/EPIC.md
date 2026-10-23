@@ -1,6 +1,6 @@
 # Rust-native sparkless-server epic
 
-> **Status: planned.** Imported from [issue #1726](https://github.com/eddiethedean/robin-sparkless/issues/1726) on 2026-10-23; source issue updated 2026-10-23T13:23:06Z. These are requirements, not claims of implemented support.
+> **Status: phased implementation in progress.** The 4.16 HTTP/launcher source is present; Phase 0A and 0B acceptance remains unverified. Imported from [issue #1726](https://github.com/eddiethedean/robin-sparkless/issues/1726) on 2026-10-23; source issue updated 2026-10-23T13:23:06Z. These are requirements, not claims of supported release compatibility.
 >
 > Start with the [plan index](README.md). This file preserves the revised issue body as the baseline; workstream plans add implementation sequencing. Update this baseline and affected workstream/decision/validation documents together when requirements change, and synchronize the GitHub epic deliberately.
 
@@ -10,10 +10,13 @@ Add **`sparkless-server`**, an independently distributable native Rust library/e
 
 1. **HTTP statement-agent compatibility** for `databricks-emulator`.
 2. **Real Spark Connect gRPC** for an unmodified JVM-free `pyspark-client`.
+3. **MiniLake interoperability** through a Sparkless-owned Python-only Connect task runner and optional native external-Delta/catalog adapter; MiniLake remains the orchestrator and DuckDB SQL warehouse.
 
 Both transports use the same native execution, session, catalog, and result services. The initial service is single-node and intended for trusted local development and tests. Sail and real Spark remain independent compatibility/reference backends.
 
 **Non-negotiable:** call the Rust engine directly. The service execution path must not import Python, wrap the PyO3 extension, require Java/Py4J, or run an Apache Spark server. Arbitrary `kind=python` statements and notebooks return explicit unsupported errors until separately packaged, isolated Python workers exist. Those workers remain optional and out of process.
+
+The [MiniLake workstream](14-minilake-interoperability.md) additionally requires no Java/JVM anywhere in its deployment or image-build recipe. Its external Python client runner does not put Python inside the native service or depend on the optional Sparkless-hosted worker phase.
 
 This epic covers the complete direction. Each phase has its own supported surface and release gate; a passing smoke query does not establish general Spark or Databricks compatibility.
 
@@ -21,14 +24,14 @@ This epic covers the complete direction. Each phase has its own supported surfac
 
 | Stage | Deliverable | Required dependency / gate |
 | --- | --- | --- |
-| **Phase 0A** | Versioned contracts, engine gap inventory, emulator result fix, and a narrow native Spark Connect feasibility test | Verify SDK result decoding and the real client's execution lifecycle before expanding transport implementation |
-| **Phase 0B** | Read-only HTTP SQL service, minimum bounded runtime/session management, sync/async Python launcher, native image | Exact values and schemas through both direct HTTP and the unmodified SDK using the corrected, pinned emulator |
+| **Phase 0A (optional certification)** | Client/protocol inventory, emulator result integration, and native Spark Connect feasibility | Required only before claiming the corresponding external integration or Connect compatibility |
+| **Phase 0B** | Read-only HTTP SQL service, minimum bounded runtime/session management, sync/async Python launcher, native image | Exact values and schemas through direct native HTTP; native lifecycle and artifact evidence |
 | **Phase 1** | Shared catalog ownership, controlled mutations, richer logical types, lazy execution improvements | Visibility, concurrency, mutation outcomes, type fidelity, and resource-accounting tests |
 | **Phase 2** | Supported Spark Connect release with Arrow streaming and resumable executions | Pinned unmodified client, lifecycle/conformance suite, then a separate emulator gRPC proxy gate |
 | **Phase 3** | Optional isolated Python workers | Separate trust, packaging, resource, and lifecycle contract |
 | **Phase 4** | Optional Delta Lake / Unity Catalog | Verified native transactions and interoperability |
 
-Phase 0 means **0A and 0B are complete**. Admission control, bounded queues/results, session ownership, cancellation accounting, and shutdown are Phase 0 prerequisites, not later hardening.
+The 4.16 release requires **Phase 0B native HTTP/launcher/distribution gates**. Phase 0A external certification is optional and does not block publication. Admission control, bounded queues/results, session ownership, cancellation accounting, and shutdown are Phase 0 prerequisites, not later hardening.
 
 Phase 0B accepts an explicitly enumerated **read-only SQL subset**. Mutating SQL, client-selected file/network readers, UDF execution, and arbitrary Python are rejected before execution. Phase 1 enables selected mutations only after their catalog and retry semantics are implemented.
 
@@ -80,15 +83,15 @@ crates/sparkless-server/
 - [ ] Record separate versions for the launcher control protocol, HTTP agent envelope, binary package, Spark Connect protocol, and engine semantics. Do not equate these version numbers or advertise a Spark version as the native engine's product version.
 - [ ] Proto generation must be reproducible, with imports, compiler versions, source provenance, and required license notices included.
 
-### Resolve the emulator dependency
+### Certify the optional emulator integration
 
 The current emulator adapter reads the agent's typed JSON into generic Go values, and its statement endpoint returns it as `result.text`. The SDK expects `result.data_array` and `manifest.schema`; its normal result decoder does not expose that `text` field. Generic Go JSON decoding also converts numbers to `float64`, risking BIGINT precision loss.
 
-- [ ] Track an explicit **cross-repository prerequisite** in `calvinchengx/databricks-emulator`: preserve the typed agent result, map it to the Statement Execution API's schema/data fields, and retain exact numeric values.
+- [ ] Track an explicit **optional integration dependency** in `calvinchengx/databricks-emulator`: preserve the typed agent result, map it to the Statement Execution API's schema/data fields, and retain exact numeric values.
 - [ ] Use typed decoding, `json.Number`, or preserved raw JSON so numeric cells never pass through `float64` merely for transport. Translate to the SDK's documented string-valued non-null JSON_ARRAY cells at the API boundary.
 - [ ] Preserve column order, duplicate labels by position, nulls, empty-result schemas, decimal precision/scale, row counts, and structured failure information.
 - [ ] Include fixtures that exercise the real SDK's `StatementResponse` decoding. Tests must inspect `result.data_array` and `manifest.schema`, not custom parsing of `result.text` or private/raw SDK response access.
-- [ ] The integrated Phase 0 gate requires a pinned emulator build containing these changes. A direct agent test may pass earlier, but does not satisfy that gate. If the upstream change cannot ship, record the blocker explicitly.
+- [ ] Certifying this optional SDK route requires a pinned emulator build containing these changes. Record unresolved upstream work as an integration limitation; it does not block the native HTTP release.
 - [ ] Document the emulator's SQL rewriting and shared warehouse session behavior. Test the SQL it actually forwards, not only the original SDK request.
 
 ### Narrow Spark Connect feasibility test
@@ -108,7 +111,7 @@ The internal request is:
 {"session":"sql-warehouse","kind":"sql","code":"SELECT 1 AS result"}
 ```
 
-Configure the emulator with **`DATABRICKS_SPARK_CONNECT_URL=http://sparkless-server:8099`**. Despite its name, this variable identifies the HTTP agent, not Spark Connect gRPC.
+Configure `calvinchengx/databricks-emulator` with **`DATABRICKS_SPARK_CONNECT_URL=http://sparkless-server:8099`**. Despite its name, this variable identifies the HTTP agent, not Spark Connect gRPC. MiniLake does not consume this setting or agent envelope; its initial integration uses Jobs plus a direct Connect client. Emulator SDK certification is optional and independent of the native Phase 0B release gates.
 
 ### Endpoints and envelopes
 
@@ -223,6 +226,16 @@ The reviewed Spark 4.0 client enables reattachable execution by default. Impleme
 
 Only after standalone conformance passes, test the emulator proxy using **`DATABRICKS_SPARK_CONNECT_GRPC_URL=http://sparkless-server:15002`**. Its h2c transport, authentication boundary, cluster/session handle, and streaming behavior are a separate integration gate.
 
+## MiniLake integration contract
+
+[SS-14](14-minilake-interoperability.md) owns the detailed source baseline, deployment, boundaries, and staged acceptance criteria. Minimize MiniLake changes: use existing `MINILAKE_SPARK_IMAGE`, task `new_cluster.spark_env_vars`, and volume/network settings with our Python-only launcher image. Its compatibility executable accepts the current fixed Spark command path without installing Apache Spark; reject unsupported Maven/JVM options and never fall back to Java. Build the MiniLake service from its Python wheel instead of its upstream Spark/JAR-warming stages.
+
+MiniLake's SDK/CLI Jobs path stages scripts, schedules tasks, and records their logs/exit status; Python sends supported plans directly to `sc://sparkless-server:15002`. This is not an emulator gRPC proxy. Its SQL statements and SQL tasks continue executing through DuckDB. Phase 2 Jobs certification requires standalone Connect conformance plus V31–V33 and does not depend on Phase 3 workers. It is a separate advertised route, not a substitute for V25 or a new 4.16 prerequisite.
+
+Phase 4 optionally shares local Delta files at identical `/data` paths and resolves external Delta tables through a Rust adapter over MiniLake's existing UC API and our `ExternalCatalogProvider`. MiniLake owns registrations; native Delta owns committed data. Require V34–V35, explicit file-policy capabilities, exact schema/snapshot handling, and rejection of managed DuckDB tables. Registration and commits are separate operations; no cross-engine transaction or cloud storage support is implied.
+
+MiniLake-generated SQL Delta DML scripts use classic Spark configuration/Delta APIs and are unsupported initially. Only claim that route after an agreed structured native-write delegation hook and V36; no hook or Delta Connect extension is assumed implemented. Current MiniLake Jobs cancellation is between tasks, and runner death does not prove native work stopped. Document/test interruption, detached retention, and cleanup without overstating cancellation guarantees.
+
 ## Python lifecycle API
 
 Expose **`from sparkless.server import SparklessServer`** from the existing Python package as an optional launcher for an owned native executable. It must support synchronous and asynchronous context managers and explicit `start()/stop()`, `async_start()/async_stop()`.
@@ -287,7 +300,9 @@ Before Phase 2 is enabled, `spark_connect_url` raises a descriptive unsupported 
 
 ## Acceptance and release gates
 
-### Phase 0A
+### Phase 0A optional certification
+
+These criteria certify external routes and experimental Connect; they do not block 4.16 publication.
 
 - [ ] Version/semantics/transport/type contracts are written and pinned for testing.
 - [ ] Emulator SDK mapping and exact-number handling have a concrete tracked implementation and verified fixtures.
@@ -297,7 +312,7 @@ Before Phase 2 is enabled, `spark_connect_url` raises a descriptive unsupported 
 ### Phase 0B
 
 - [ ] Workspace crate, native CLI/image, HTTP transport, minimum bounded runtime/session manager, and complete sync/async launcher.
-- [ ] Direct HTTP and **unmodified SDK through the corrected pinned emulator** assert both values and schemas for: `SELECT 1 AS result`, BIGINT `9007199254740993`, a high-precision DECIMAL, typed null, and an empty result with schema.
+- [ ] Direct native HTTP tests assert both values and schemas for: `SELECT 1 AS result`, BIGINT `9007199254740993`, a high-precision DECIMAL, typed null, and an empty result with schema.
 - [ ] Verify column order/duplicate labels, date/timestamp encoding, invalid SQL/kinds, rejected mutations/Python/types, and row/byte/input/admission limits.
 - [ ] Saturate compute while health requests continue making progress. Demonstrate that timed-out native work still occupies its permit until completion.
 - [ ] Verify session TTL/close, isolation of declared session state, startup failure, graceful/forced shutdown, async cancellation, and no child-process leaks.
@@ -318,17 +333,18 @@ Before Phase 2 is enabled, `spark_connect_url` raises a descriptive unsupported 
 - [ ] Multiple clients get independent correct results while health I/O progresses; unsupported features fail truthfully.
 - [ ] The public launcher enables `spark_connect_url` only for a ready supported endpoint.
 - [ ] Emulator gRPC proxy is separately verified before advertising that route.
+- [ ] If advertising MiniLake Jobs, V31–V33 independently verify the JVM-free runner/native route; no Delta/catalog or Sparkless-hosted Python-worker support is implied.
 
 ### Optional phases
 
 - **Phase 3:** isolated Python worker packaging, code trust, quotas, environment/secrets handling, output/errors, Jobs/notebook behavior, and worker cleanup. Core SQL/Connect images remain free of Python.
-- **Phase 4:** native Delta/UC integration with independent-reader verification of schema and transactions, decimal preservation, and explicit rejection of unsupported writes/DDL.
+- **Phase 4:** native Delta/UC integration with independent-reader verification of schema and transactions, decimal preservation, and explicit rejection of unsupported writes/DDL. MiniLake shared files/catalogs additionally require V34–V35; its optional native SQL Delta DML route requires V36.
 
 ### Common release checks
 
 - Cargo format/clippy/tests using the pinned toolchain; feature-isolation/build checks and supported platform tests.
 - Targeted unit/property/fuzz coverage for decoders, plan/type mappings, state transitions, and limit/error paths.
-- Golden contracts use the actual SDK/client encoders and decoders. Differential tests pin oracle versions and settings.
+- Native HTTP golden contracts validate the published JSON envelope. Optional SDK/client certification uses the actual upstream encoders and decoders; differential evaluation pins oracle versions and settings.
 - Benchmark correctness, cold start, throughput, p50/p95 latency, peak RSS, CPU, and streaming behavior at 1/2/4/8+ clients. Record hardware, versions, workloads, warmup, and commands; separate I/O responsiveness from CPU parallelism.
 - Publish supported SQL/RPC/type/configuration matrices, resource-limit semantics, persistence behavior, installation instructions, and limitations.
 - Explicit limitations: single-node; partial Spark compatibility; no Photon/Databricks Runtime; no arbitrary Python without optional workers.
@@ -337,7 +353,7 @@ Before Phase 2 is enabled, `spark_connect_url` raises a descriptive unsupported 
 
 Split this epic into focused issues for:
 
-1. Compatibility/version contracts and emulator typed-result/SDK prerequisite.
+1. Native compatibility/version contracts and optional emulator typed-result/SDK certification.
 2. Workspace crate, CLI, native packaging, and feature isolation.
 3. Early Spark Connect client lifecycle feasibility.
 4. Admission, operation state, cooperative cancellation accounting, and shutdown.
@@ -349,6 +365,7 @@ Split this epic into focused issues for:
 10. Arrow streaming, bounded replay, reattachment/release, and client conformance.
 11. Emulator gRPC integration and reproducible benchmarks.
 12. Optional isolated Python workers; optional Delta/UC interoperability.
+13. MiniLake JVM-free Jobs runner, native catalog/storage adapter, and separately gated minimal upstream hooks (SS-14).
 
 Record cross-repository owners and immutable test revisions in those issues. Do not close this epic based only on crate scaffolding or the two smoke-query witnesses.
 

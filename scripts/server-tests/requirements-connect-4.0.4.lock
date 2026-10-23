@@ -1,0 +1,26 @@
+# Test-only compatibility lock resolved on CPython 3.11 / macOS arm64.
+# This selects an exact candidate environment; it is not V01/V02 evidence.
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+cryptography==50.0.2
+databricks-sdk==0.156.0
+google-auth==2.62.0
+googleapis-common-protos==1.76.0
+grpcio==1.84.1
+grpcio-status==1.84.1
+idna==3.20
+numpy==2.4.6
+pandas==3.1.0
+protobuf==7.36.2
+pyarrow==26.0.0
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+pycparser==3.12
+pyspark-client==4.0.4
+python-dateutil==3.0.0
+requests==2.34.2
+six==1.17.0
+typing-extensions==4.16.0
+tzdata==2026.5
+urllib3==2.8.0

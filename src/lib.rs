@@ -53,6 +53,7 @@ pub mod traits;
 /// Engine-agnostic types, traits, and expression IR re-exported from `robin-sparkless-core`.
 /// Prefer these for engine-generic code and embeddings that should not depend on Polars.
 pub mod engine {
+    pub use robin_sparkless_core::CancellationToken;
     pub use robin_sparkless_core::engine::{
         ArrowIpcBatchStream, ArrowIpcStream, CollectedRows, DataFrameBackend,
         DataFrameReaderBackend, ExternalCatalogProvider, ExternalTableDescriptor,
@@ -75,8 +76,8 @@ pub mod engine {
 pub mod polars {
     pub use robin_sparkless_polars::functions::{SortOrder, *};
     pub use robin_sparkless_polars::{
-        Column, Expr, PlDataFrame, PlDataType, PolarsError, RustUdf, StructTypePolarsExt,
-        UdfRegistry, broadcast, expression, schema_from_json,
+        AnyValue, Column, Expr, PlDataFrame, PlDataType, PolarsError, RustUdf, StructTypePolarsExt,
+        TimeUnit, TimeZone, UdfRegistry, broadcast, expression, schema_from_json,
     };
     pub use robin_sparkless_polars::{column, error, functions, type_coercion};
 }
@@ -94,9 +95,10 @@ pub use engine::{
     try_sum, var_pop, var_samp, variance, when,
 };
 pub use polars::{
-    Column, Expr, PolarsError, RustUdf, StructTypePolarsExt, UdfRegistry, broadcast, expression,
-    schema_from_json,
+    AnyValue, Column, Expr, PlDataType, PolarsError, RustUdf, StructTypePolarsExt, TimeUnit,
+    TimeZone, UdfRegistry, broadcast, expression, schema_from_json,
 };
+pub use robin_sparkless_core::CancellationToken;
 /// Backwards-compatible module re-export so `robin_sparkless::functions::*` continues to work.
 pub use robin_sparkless_polars::functions;
 pub use robin_sparkless_polars::functions::{SortOrder, *};
@@ -154,10 +156,21 @@ pub mod sql {
     use robin_sparkless_polars::PolarsError;
 
     pub use robin_sparkless_polars::sql::{
-        Statement, ast, execute_sql, join_condition_to_on_columns, parse_sql,
-        select_expr_map_value_reference_parts, select_expr_map_value_references,
-        select_expr_metadata, select_expr_preserves_map_value, select_expr_source,
+        Statement, ast, execute_query_ast_with_cancellation, execute_sql,
+        join_condition_to_on_columns, parse_sql, select_expr_map_value_reference_parts,
+        select_expr_map_value_references, select_expr_metadata, select_expr_preserves_map_value,
+        select_expr_source,
     };
+
+    /// Execute an already parsed query using this root crate's session and DataFrame wrappers.
+    pub fn execute_query_ast_with_cancellation_root(
+        session: &SparkSession,
+        query: &ast::Query,
+        token: &robin_sparkless_core::CancellationToken,
+    ) -> Result<DataFrame, robin_sparkless_core::EngineError> {
+        robin_sparkless_polars::sql::execute_query_ast_with_cancellation(&session.0, query, token)
+            .map(DataFrame)
+    }
 
     /// Parse a single SQL expression string to Polars Expr using the session and DataFrame for resolution.
     pub fn expr_string_to_polars(

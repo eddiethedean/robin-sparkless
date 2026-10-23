@@ -29,14 +29,14 @@ Plan numbers are workstream identifiers, not a strict execution order. Only the 
 
 6. Use status:error envelopes with HTTP 200 for valid requests that fail execution/unsupported-kind checks. Document transport/oversize/admission HTTP failures separately.
 
-7. Run direct HTTP tests and the unmodified SDK route through the pinned corrected emulator; validate values and schemas in both.
+7. Run direct HTTP value/schema tests for native release acceptance. Evaluate the unmodified SDK route through a pinned corrected emulator separately for optional integration certification.
 
 ## Acceptance criteria
 
 - [ ] SELECT 1, large BIGINT, decimal, typed null, date/time, and empty result fixtures return exact schemas and values.
 - [ ] Invalid input, unsupported operations, output-limit and queue-limit errors are explicit; successful truncation is impossible.
 - [ ] Remote SQL remains read-only in Phase 0B; capabilities match enabled paths.
-- [ ] The SDK integration gate passes via public result fields, not text-only fallback.
+- [ ] For optional SDK certification, integration tests pass via public result fields; this does not block native HTTP publication.
 
 ## Decisions and implementation touchpoints
 
@@ -49,3 +49,5 @@ Resolve or explicitly defer D02, D03, D04, D08 in the [decision register](DECISI
 ## Scope notes
 
 DATABRICKS_SPARK_CONNECT_URL is the HTTP agent address. It must not be described as a Spark Connect gRPC endpoint.
+
+The HTTP agent adapter targets `calvinchengx/databricks-emulator`. [MiniLake](14-minilake-interoperability.md) currently neither forwards this envelope nor consumes that variable; its SQL API stays on DuckDB. Do not claim native HTTP-agent execution based on a passing MiniLake SQL query or claim optional SDK integration certification without its separate evidence.

@@ -1,0 +1,52 @@
+{
+  "release": "4.16.0",
+  "spark_connect_feasibility": {
+    "pyspark_client": "4.0.4",
+    "pyspark_client_sdist_sha256": "88f2bf867db6d3a9b7b88672cf27a0f796e42928956a74621f01da211d2af72f",
+    "pyspark_client_requires_python": ">=3.9",
+    "test_python": "3.11",
+    "protocol_source": "apache/spark",
+    "protocol_ref": "v4.0.4",
+    "protocol_commit": "c7d67e3f5d4c9d88a480367b44fc54d26adf99ab",
+    "dependency_lock": "../../../scripts/server-tests/requirements-connect-4.0.4.lock",
+    "reference_spark": "4.0.4",
+    "reference_spark_commit": "c7d67e3f5d4c9d88a480367b44fc54d26adf99ab",
+    "reference_spark_container_digest": null,
+    "semantic_settings": {
+      "spark.sql.ansi.enabled": true,
+      "spark.sql.caseSensitive": false,
+      "spark.sql.session.timeZone": "UTC"
+    },
+    "status": "pinned; not yet exercised against a Sparkless Connect feasibility endpoint",
+    "release_blocking": false
+  },
+  "statement_sdk": {
+    "databricks_sdk": "0.156.0",
+    "databricks_sdk_wheel_sha256": "1aa5e0cabfc5626a886c9fa42bc1ce14a6166e8167ef34026dcc41f3c99e2a5a",
+    "requires_python": ">=3.10",
+    "test_python": "3.11",
+    "status": "pinned; corrected-emulator integration remains blocked",
+    "release_blocking": false
+  },
+  "emulator": {
+    "repository": "calvinchengx/databricks-emulator",
+    "inspected_commit": "05044929caf78a7f2155d8de218d3e3e4c53a173",
+    "image_digest": null,
+    "typed_result_fix": false,
+    "status": "blocked: inspected adapter serializes application/json into result.text and does not populate manifest.schema/data_array",
+    "release_blocking": false
+  },
+  "publication_gates": [
+    "V05",
+    "V06",
+    "V07",
+    "V08",
+    "V09",
+    "V10",
+    "V11",
+    "V12",
+    "V13",
+    "V14",
+    "V29"
+  ]
+}

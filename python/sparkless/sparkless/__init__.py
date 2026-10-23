@@ -20,7 +20,9 @@ from typing import Dict, List, Sequence, Tuple, Union, cast as _cast
 
 from sparkless._native import PyColumn as _ColumnType
 
-__version__ = "4.15.3"
+__version__ = "4.16.0"
+
+from .server import SparklessServer
 
 
 _mod = __import__(
@@ -487,6 +489,7 @@ __all__: List[str] = [
     "SparklessError",
     "SparklessCancelledError",
     "SparklessExternalCatalogError",
+    "SparklessServer",
     "sql",
     "col",
     "lit",

@@ -68,11 +68,14 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
     facade = read_toml(root / "Cargo.toml")
     core = read_toml(root / "crates/robin-sparkless-core/Cargo.toml")
     polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
+    parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
+    server = read_toml(root / "crates/sparkless-server/Cargo.toml")
     native = read_toml(root / "python/Cargo.toml")
     project = read_toml(root / "python/pyproject.toml")["project"]
+    server_binary = read_toml(root / "python/server-bin/pyproject.toml")["project"]
     packages = {
         manifest["package"]["name"]: manifest["package"]["version"]
-        for manifest in (facade, core, polars, native)
+        for manifest in (facade, core, polars, parser, server, native)
     }
     packages["sparkless"] = project["version"]
     lock_versions = {
@@ -85,6 +88,11 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         "facade/core": facade["dependencies"]["robin-sparkless-core"]["version"],
         "facade/polars": facade["dependencies"]["robin-sparkless-polars"]["version"],
         "polars/core": polars["dependencies"]["robin-sparkless-core"]["version"],
+        "polars/parser": polars["dependencies"]["spark-sql-parser"]["version"],
+        "server/facade": server["dependencies"]["robin-sparkless"]["version"],
+        "server/parser": server["dependencies"]["spark-sql-parser"]["version"],
+        "native/facade": native["dependencies"]["robin-sparkless"]["version"],
+        "native/core": native["dependencies"]["robin-sparkless-core"]["version"],
     }
     module = ast.parse((root / "python/sparkless/sparkless/__init__.py").read_text())
     python_version = next(
@@ -98,7 +106,7 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         and isinstance(node.value, ast.Constant)
         and isinstance(node.value.value, str)
     )
-    return validate_versions(
+    errors = validate_versions(
         packages,
         dependencies,
         lock_versions,
@@ -106,6 +114,35 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         (root / "CHANGELOG.md").read_text(),
         tag,
     )
+    binary_version = server_binary["version"]
+    if binary_version != packages["robin-sparkless"]:
+        errors.append(
+            "sparkless-server-bin: version {} does not match {}".format(
+                binary_version, packages["robin-sparkless"]
+            )
+        )
+    expected_extra = "sparkless-server-bin=={}".format(binary_version)
+    if project["optional-dependencies"].get("server") != [expected_extra]:
+        errors.append(
+            "sparkless[server] must pin exactly {}".format(expected_extra)
+        )
+    container = (root / "crates/sparkless-server/Dockerfile").read_text()
+    release_workflow = (root / ".github/workflows/release.yml").read_text()
+    if "cargo build --locked --release" not in container or "ENTRYPOINT [\"sparkless-server\"]" not in container:
+        errors.append("sparkless-server Dockerfile must build and launch the native server")
+    for required in (
+        "publish_one sparkless-server",
+        "publish-container:",
+        "ghcr.io/${REPOSITORY_OWNER,,}/sparkless-server",
+        'version=${RELEASE_TAG#v}',
+        "manylinux_2_35_x86_64",
+        "macosx_15_0_arm64",
+        "macosx_15_0_x86_64",
+    ):
+        if required not in release_workflow:
+            errors.append("release workflow is missing a required native publication target")
+            break
+    return errors
 
 
 def main() -> int:
@@ -121,7 +158,7 @@ def main() -> int:
             print(f"ERROR: {error}")
         return 1
     print(
-        "Release manifests, dependency versions, lockfile, Python version, and changelog agree"
+        "Release manifests, first-party dependency versions, lockfile, server wheel pin, Python version, and changelog agree"
     )
     return 0
 

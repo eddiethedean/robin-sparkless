@@ -92,6 +92,60 @@ fn parse_one_statement_with_dialect(
     Ok(stmts.into_iter().next().expect("len == 1"))
 }
 
+fn parse_one_statement_with_recursion_limit(
+    query: &str,
+    dialect: &dyn sqlparser::dialect::Dialect,
+    recursion_limit: usize,
+) -> Result<Statement, ParseError> {
+    let mut parser = Parser::new(dialect)
+        .with_recursion_limit(recursion_limit)
+        .try_with_sql(query)
+        .map_err(|e| {
+            ParseError(format!(
+                "SQL parse error: {}. Hint: supported statements include SELECT and read-only queries.",
+                e
+            ))
+        })?;
+    let statements = parser.parse_statements().map_err(|e| {
+        ParseError(format!(
+            "SQL parse error: {}. Hint: supported statements include SELECT and read-only queries.",
+            e
+        ))
+    })?;
+    if statements.len() != 1 {
+        return Err(ParseError(format!(
+            "SQL: expected exactly one statement, got {}. Hint: run one statement at a time.",
+            statements.len()
+        )));
+    }
+    Ok(statements.into_iter().next().expect("len == 1"))
+}
+
+/// Parse exactly one statement with an explicit maximum parser recursion depth.
+///
+/// This is intended for network-facing adapters that must apply a parser budget
+/// before constructing a deeply nested AST. Query statements use the same MySQL
+/// dialect as [`parse_spark_sql`]; other statements use the generic dialect.
+pub fn parse_spark_sql_with_recursion_limit(
+    query: &str,
+    recursion_limit: usize,
+) -> Result<SparkStatement, ParseError> {
+    if recursion_limit == 0 {
+        return Err(ParseError(
+            "SQL recursion limit must be greater than zero.".into(),
+        ));
+    }
+    let generic =
+        parse_one_statement_with_recursion_limit(query, &GenericDialect {}, recursion_limit)?;
+    let statement = match generic {
+        Statement::Query(_) => {
+            parse_one_statement_with_recursion_limit(query, &MySqlDialect {}, recursion_limit)?
+        }
+        other => other,
+    };
+    Ok(SparkStatement::Sqlparser(Box::new(statement)))
+}
+
 fn strip_backticks(part: &str) -> &str {
     let p = part.trim();
     if p.len() >= 2 && p.starts_with('`') && p.ends_with('`') {

@@ -74,6 +74,26 @@ pub fn execute_sql_with_cancellation(
     Ok(result)
 }
 
+/// Execute an already parsed query AST while honoring cooperative cancellation.
+///
+/// Server adapters use this entry point after validating the same AST against an
+/// explicit remote SQL allowlist. Accepting the AST avoids validating one parse
+/// and then reparsing a potentially different interpretation for execution.
+pub fn execute_query_ast_with_cancellation(
+    session: &SparkSession,
+    query: &spark_sql_parser::ast::Query,
+    token: &CancellationToken,
+) -> Result<DataFrame, EngineError> {
+    token.check_cancelled()?;
+    // The direct AST entry point bypasses `translate`, so install the session's
+    // ANSI, timezone, and decimal settings before building expressions with
+    // session-dependent UDFs.
+    crate::session::set_thread_udf_session(session.clone());
+    let result = translator::translate_query(session, query).map_err(polars_to_core_error)?;
+    token.check_cancelled()?;
+    Ok(result)
+}
+
 fn execute_sql_inner(
     session: &SparkSession,
     query: &str,

@@ -1,6 +1,6 @@
 [package]
 name = "robin-sparkless-core"
-version = "4.15.3"
+version = "4.16.0"
 edition = "2024"
 rust-version = "1.93"
 description = "Shared types, config, and error for robin-sparkless (no Polars)."
