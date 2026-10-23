@@ -2,7 +2,7 @@
 
 [Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
 
-**Status: source implementation is present; local preflight tests have run (recorded below), while required native V05–V14/V29 acceptance gates remain pending.** The 4.16 publication scope is the native HTTP service, launcher, and distributions. SDK/emulator and experimental Connect certification (V01–V04) is optional and does not block release. Platform and native acceptance evidence is still required.
+**Status: required native V05–V14/V29 pre-publication gates passed for the 4.16.0 candidate.** Evidence combines the passing cross-platform GitHub Actions run, installed-consumer and Linux container checks, and the direct native acceptance tests recorded below. The 4.16 publication scope is the native HTTP service, launcher, and distributions. SDK/emulator and experimental Connect certification (V01–V04) is optional and does not block release.
 
 For each gate record the native commit, client/SDK version, emulator/oracle revision and digest where applicable, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep separate results for direct HTTP, SDK/emulator, standalone Connect, emulator-proxied Connect, MiniLake Jobs, and optional MiniLake shared Delta/catalog/DML routes. MiniLake's DuckDB SQL success cannot prove native execution or replace an agent/proxy gate.
 
@@ -68,19 +68,30 @@ Only the native V05–V14 and V29 gates below are required before any 4.16.0 art
 
 | Gate | Status |
 | --- | --- |
-| V05 | pending |
-| V06 | pending |
-| V07 | pending |
-| V08 | pending |
-| V09 | pending |
-| V10 | pending |
-| V11 | pending |
-| V12 | pending |
-| V13 | pending |
-| V14 | pending |
-| V29 | pending |
+| V05 | passed |
+| V06 | passed |
+| V07 | passed |
+| V08 | passed |
+| V09 | passed |
+| V10 | passed |
+| V11 | passed |
+| V12 | passed |
+| V13 | passed |
+| V14 | passed |
+| V29 | passed |
 
-V05–V14 and V29 remain pending until their native scenarios and cross-platform artifacts are recorded. Removing upstream dependencies does not mark these native gates as passed.
+### Recorded 4.16.0 candidate evidence
+
+- Cross-platform release workflow [run 40009112934](https://github.com/eddiethedean/robin-sparkless/actions/runs/40009112934) passed on candidate commit `9f82adcb58f34cd3d0850bf521883233753cc07c`: 30 jobs succeeded, including the native server wheel matrix on Ubuntu 22.04 x86_64, macOS 15 arm64, macOS 15 Intel, and Windows. Each platform installed its wheel outside the checkout, ran `--version`, started the binary, checked `/health` and `SELECT 1`, then ran the direct HTTP/launcher suite. The same run passed all 15 Python compatibility jobs, Rust tests, format, clippy, audit, deny, and release metadata checks. The release-readiness job now also runs on `codex/release-*` candidate pushes.
+- V05–V08: direct HTTP assertions passed for `SELECT 1 AS result`, exact BIGINT `9007199254740993`, high-precision DECIMAL precision/scale, typed null and empty schema, date/timestamp, ordered duplicate labels, and fail-closed malformed, unsupported, multiple-statement, and write requests. The local command `SPARKLESS_SERVER_BINARY="$PWD/target/debug/sparkless-server" PYTHONPATH="$PWD/python/sparkless" python3 -W error::ResourceWarning -m unittest discover -s scripts/server-tests -v` passed all 25 tests on Darwin arm64 (2026-10-23).
+- V09: direct HTTP tests passed request-body, SQL, cell, whole-response, row, column, and session-cap rejection without truncation. `cargo test --locked -p sparkless-server --lib http::tests` passed the queue-deadline test with operation capacity saturated.
+- V10: the same Rust unit target passed a controlled blocking native worker scenario: the response deadline elapsed and cancellation was signaled, the compute permit remained held while the worker was alive, `/health` stayed ready, and the permit drained only after the worker exited. Health handling does not acquire compute capacity.
+- V11: the direct suite passed idempotent close and session reopen/isolation checks; `cargo test --locked -p sparkless-server sessions::tests --lib` passed the ownership and idle-reaper tests (recorded local preflight below).
+- V12–V13: direct launcher tests passed sync and async normal/exception cleanup, async startup cancellation, sync startup timeout, startup port collision/crash, binary-version mismatch, restart with a new launch identity, nested distinct launchers, same-object re-entry rejection, and child reaping. Diagnostic tests passed split-chunk secret redaction and oversized-line truncation.
+- V14: the four-platform workflow matrix above built and executed platform-native wheels and their SQL smoke tests. A local `linux/arm64` container build and run passed without Python or Java/JVM in the runtime image; `/health` returned ready and BIGINT value/schema were exact. Image digest: `sha256:94fa2972d79d12d9ad9e905075f535150d71f0d5001e145433fe20e91b6c19fe`.
+- V29: clean consumer installation outside the checkout combined the candidate root and server wheels on Darwin arm64. Root wheel SHA-256: `bb200ee2ca7967bbc208e1c3a1d0a1c0b774a9adf18c8eb011d4eab95515c9f7`; server wheel SHA-256: `53d482bd59e4d6cb1ad30de00632af35e4056607279ed019b21f8338f29555cc`. `sparkless[server]` installed both exact 4.16.0 packages with no source checkout; the installed launcher resolved and ran the server, `/health` passed, and exact BIGINT/schema passed. The clean environment had neither gRPC nor PySpark importable. The server extra pins `sparkless-server-bin==4.16.0`; gRPC occurs only in the separate optional Connect test lock. Root Cargo patches are not used when consuming the prebuilt wheel.
+
+These statuses certify the native 4.16 HTTP release scope only. They do not certify SDK/emulator, experimental Connect, or any optional MiniLake route. V30 remains a post-publication verification gate.
 
 ## Optional integration status
 

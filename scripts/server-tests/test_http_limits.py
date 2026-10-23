@@ -22,6 +22,8 @@ class BoundedHttpContractTests(unittest.TestCase):
             "SPARKLESS_SERVER_MAX_SQL_BYTES": "256",
             "SPARKLESS_SERVER_MAX_RESPONSE_BYTES": "256",
             "SPARKLESS_SERVER_MAX_CELL_BYTES": "64",
+            "SPARKLESS_SERVER_MAX_ROWS": "2",
+            "SPARKLESS_SERVER_MAX_COLUMNS": "2",
         }
         original = {key: os.environ.get(key) for key in overrides}
         try:
@@ -90,6 +92,22 @@ class BoundedHttpContractTests(unittest.TestCase):
     def test_cell_and_full_response_limits_are_named_errors(self) -> None:
         status, result = self.statement(
             "release-limit-cell", "SELECT '" + "a" * 70 + "' AS value"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["ename"], "ResultLimitExceeded")
+
+    def test_row_and_column_limits_reject_without_truncation(self) -> None:
+        status, result = self.statement(
+            "release-limit-rows",
+            "SELECT 1 AS n UNION ALL SELECT 2 AS n UNION ALL SELECT 3 AS n",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["ename"], "ResultLimitExceeded")
+
+        status, result = self.statement(
+            "release-limit-columns", "SELECT 1 AS a, 2 AS b, 3 AS c"
         )
         self.assertEqual(status, 200)
         self.assertEqual(result["status"], "error")

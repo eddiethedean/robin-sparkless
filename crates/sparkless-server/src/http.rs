@@ -345,21 +345,7 @@ async fn handle_request(
         (&Method::GET, "/live") => control_route(&state, || {
             (StatusCode::OK, serde_json::json!({"status": "alive"}))
         }),
-        (&Method::GET, "/health") => control_route(&state, || {
-            if state.is_ready() {
-                (StatusCode::OK, serde_json::json!({"status": "ready"}))
-            } else if state.is_draining() {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    serde_json::json!({"status": "draining"}),
-                )
-            } else {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    serde_json::json!({"status": "starting"}),
-                )
-            }
-        }),
+        (&Method::GET, "/health") => health_route(&state),
         (&Method::GET, "/capabilities") => control_route(&state, || {
             if state.is_draining() {
                 (
@@ -402,6 +388,24 @@ fn control_route(
         Some(permit),
         Duration::from_secs(state.config.limits.result_send_timeout_secs),
     )
+}
+
+fn health_route(state: &RuntimeState) -> Response<ServerBody> {
+    control_route(state, || {
+        if state.is_ready() {
+            (StatusCode::OK, serde_json::json!({"status": "ready"}))
+        } else if state.is_draining() {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({"status": "draining"}),
+            )
+        } else {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({"status": "starting"}),
+            )
+        }
+    })
 }
 
 async fn statement_route(
@@ -1215,4 +1219,89 @@ fn write_control_record(record: &impl serde::Serialize) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     stdout.write_all(b"\n").map_err(|error| error.to_string())?;
     stdout.flush().map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Limits;
+    use http_body_util::BodyExt;
+    use tokio::sync::oneshot;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn health_stays_ready_while_timed_out_native_work_retains_its_permit() {
+        let state = RuntimeState::new(ServerConfig {
+            limits: Limits {
+                max_active_operations: 1,
+                ..Limits::default()
+            },
+            ..ServerConfig::default()
+        });
+        state.set_ready(true);
+
+        let permit = Arc::clone(&state.compute)
+            .acquire_owned()
+            .await
+            .expect("initial compute permit");
+        let token = CancellationToken::new();
+        let worker_token = token.clone();
+        let (started_tx, started_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel::<()>();
+        let mut worker = tokio::task::spawn_blocking(move || {
+            let _compute_permit = permit;
+            let _worker_token = worker_token;
+            let _ = started_tx.send(());
+            let _ = finish_rx.recv();
+        });
+        started_rx.await.expect("blocking worker started");
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), &mut worker)
+                .await
+                .is_err(),
+            "the controlled native producer should outlive the response deadline"
+        );
+        token.cancel();
+        assert_eq!(state.compute.available_permits(), 0);
+        assert!(Arc::clone(&state.compute).try_acquire_owned().is_err());
+
+        let response = health_route(&state);
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("health response body")
+            .to_bytes();
+        let value: Value = serde_json::from_slice(&body).expect("health JSON");
+        assert_eq!(value["status"], "ready");
+        assert_eq!(state.compute.available_permits(), 0);
+
+        drop(finish_tx);
+        worker.await.expect("native producer exits");
+        assert!(state.wait_for_compute_drain(Duration::from_secs(1)).await);
+    }
+
+    #[tokio::test]
+    async fn operation_queue_wait_obeys_deadline_while_capacity_is_exhausted() {
+        let state = RuntimeState::new(ServerConfig {
+            limits: Limits {
+                max_active_operations: 1,
+                ..Limits::default()
+            },
+            ..ServerConfig::default()
+        });
+        let _compute_permit = Arc::clone(&state.compute)
+            .acquire_owned()
+            .await
+            .expect("initial compute permit");
+        let compute = Arc::clone(&state.compute);
+        let result = wait_for_queue(
+            async move { compute.acquire_owned().await },
+            CancellationToken::new(),
+            Instant::now() + Duration::from_millis(10),
+        )
+        .await;
+        assert!(matches!(result, Err(QueueWaitFailure::TimedOut)));
+    }
 }
