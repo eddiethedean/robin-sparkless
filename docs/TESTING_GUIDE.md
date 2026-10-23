@@ -617,4 +617,4 @@ SPARKLESS_SHARED_SESSION=1 SPARKLESS_TEST_MODE=pyspark pytest tests/
 
 - [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) - Known differences from PySpark
 - [PARITY_STATUS.md](PARITY_STATUS.md) - PySpark parity coverage
-- [Python README](../python/README.md) - Sparkless Python package
+- [Python README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) - Sparkless Python package

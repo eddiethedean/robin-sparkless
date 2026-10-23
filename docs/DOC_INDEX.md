@@ -25,6 +25,7 @@ Documentation for the Python package mirrors the [Sparkless](https://sparkless.r
 | [JDBC_TESTING](JDBC_TESTING.md) | JDBC setup for all backends (PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2), Docker Compose, env vars, PySpark-compatible options |
 | [EMBEDDING](EMBEDDING.md) | Embedding and bindings: prelude::embed, *_engine() API, schema helpers, traits; minimal FFI surface |
 | [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
+| [sparkless-server plans](plans/sparkless-server/README.md) | Issue #1726: native HTTP/Connect service epic, workstreams, decisions, and release gates (planned) |
 | [RELEASING](RELEASING.md) | How to cut a release (version bump, tag, crates.io publish) |
 | [CHANGELOG](https://github.com/eddiethedean/robin-sparkless/blob/main/CHANGELOG.md) | Version history and release notes |
 | [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (212+ JSON fixtures; plan fixtures; phases A–G) |

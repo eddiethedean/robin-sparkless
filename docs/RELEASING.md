@@ -1,5 +1,7 @@
 # Releasing robin-sparkless
 
+> **4.16+ planned release policy:** follow the [sparkless-server release roadmap](plans/sparkless-server/ROADMAP.md). All first-party packages publish at the same version, starting at **4.16.0**, including `spark-sql-parser` and the new server distributions. This supersedes the parser's independent-version exception below for 4.16 and later. The existing workflow and metadata checker described here must be extended for that inventory before the 4.16.0 release.
+
 This document describes how to cut a release and publish:
 
 - Rust crates to [crates.io](https://crates.io) and

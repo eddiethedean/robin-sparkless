@@ -1,0 +1,75 @@
+# Validation and release evidence
+
+[Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
+
+**Status: planned. No implementation tests or release gates below have been run for this server plan.** Every evidence field is pending. Documentation checks do not establish server conformance.
+
+For each gate record the native commit, client/SDK version, emulator/oracle revision and digest where applicable, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep separate results for direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect.
+
+## Gate matrix
+
+| Gate | Phase / owner | Required scenario | Assertion / evidence |
+| --- | --- | --- | --- |
+| V01 | 0A / SS-01 | Locked compatibility/semantic manifest | Exact client/proto/oracle/runtime versions and settings; no unresolved test pins |
+| V02 | 0A / SS-01 | SDK decoding of agent result mapped by emulator | Public data_array and manifest.schema retain exact values, order, nulls and empty schema; upstream fix tracked |
+| V03 | 0A / SS-03 | Default-client native feasibility | Range/filter/count returns 4; empty typed result; initialization and release trace |
+| V04 | 0A / SS-03 | Disconnect after a response | Client reattaches with defaults enabled; native plan is not rerun |
+| V05 | 0B / SS-05 | SELECT 1 AS result | Value and schema via direct agent and public SDK through corrected pinned emulator |
+| V06 | 0B / SS-05, SS-08 | BIGINT 9007199254740993 and high-precision DECIMAL | No intermediate binary64 conversion; exact value and declared logical type/precision/scale |
+| V07 | 0B / SS-05, SS-08 | Typed null, empty result, date/timestamp | Correct null representation, schema on zero rows, declared units/timezone |
+| V08 | 0B / SS-05 | Column order, duplicate labels, malformed and unsupported requests | Positional values survive; unsupported kind/Python/SQL/type/write cannot return success |
+| V09 | 0B / SS-04, SS-05 | Input/decoded/output/individual-value/queue limits | Bounded rejection, no successful truncation, no unbounded waiting queue |
+| V10 | 0B / SS-04 | Saturated native work plus health traffic | Health progresses; timed-out work keeps permit until producer actually terminates |
+| V11 | 0B / SS-07 | Session TTL/close during active work | Session isolation matches declared scope; active references and shared ownership remain safe |
+| V12 | 0B / SS-06 | Sync/async launcher normal and exception exits | Owned children reaped; endpoints valid only while ready; same-object re-entry rejected |
+| V13 | 0B / SS-06 | Startup cancellation, timeout/crash, noisy logs, port collision, binary mismatch, restart, nested instances | Bounded diagnostics, responsive event loop, deterministic cleanup, no orphan or unrelated-process termination |
+| V14 | 0B / SS-02, SS-11 | Native packaging/platform/feature checks | Real SQL runs without Python/JVM in server image; tested platform matrix and dependency isolation |
+| V15 | 1 / SS-07 | Cross-session tables/temp views plus close/restart | Defined catalog visibility and durability; no accidental process-global view leakage |
+| V16 | 1 / SS-07 | Concurrent DML/DDL, duplicate IDs, disconnect near commit, restart | No duplicate live operation effects; truthful committed/unknown/cancelled outcome within documented guarantees |
+| V17 | 1–2 / SS-08 | Large range/count and expensive planning | Chosen lazy/bounded behavior verified; allocation/execution occurs under compute admission |
+| V18 | 1–2 / SS-08 | Enabled scalar/nested logical types and Arrow | Logical/analysis/payload schema agree, including nullability and timestamps; unsupported types fail |
+| V19 | 2 / SS-09 | Enabled relations/expressions/config/analysis | Unmodified client and matched reference semantics; unsupported nodes/config/artifacts fail clearly |
+| V20 | 2 / SS-10 | Multi-batch and empty streams | Correct schema, offsets, IDs, completion markers, and batch byte bounds |
+| V21 | 2 / SS-10 | Execute/reattach/release/interrupt/session-release races | No reexecution; prefix/all release is idempotent; restarted/lost sessions cannot silently resume as new executions |
+| V22 | 2 / SS-10 | Detached operations, replay expiry/capacity pressure | Finite retention; explicit failure/expiry instead of silent eviction; permits/resources eventually reclaimed |
+| V23 | 2 / SS-09, SS-10 | Multiple real client processes | Independent results and forward progress without server-side Python/JVM; clean cancellation/shutdown |
+| V24 | 2 / SS-06 | Public spark_connect_url | Exposed only for a ready endpoint whose supported client suite passed |
+| V25 | 2 / SS-11 | Emulator gRPC route after standalone suite passes | h2c/auth/cluster-session/metadata/streaming/reconnect correctness through actual proxy |
+| V26 | Release / SS-11 | 1/2/4/8+ client benchmarks | Correct outputs, reproducible commands, throughput/latency/RSS/CPU and hardware/version evidence |
+| V27 | 3 / SS-12 | Optional Python worker Jobs/notebooks and failures | Isolation, redaction, quotas, process-tree cleanup; disabled core remains Python-free |
+| V28 | 4 / SS-13 | Native Delta/UC writes and independent reads | Schema/decimal/transaction/recovery validation; explicit unsupported/conflict outcomes |
+| V29 | 0B / SS-02, SS-06, SS-11 | Complete 4.16.0 candidate inventory and isolated consumer installs | Parser/server/binary-extra and existing packages align; archives/wheels install without checkout paths or inherited root Cargo patches; experimental gRPC absent from normal artifacts |
+| V30 | 4.16 release completion / SS-11 | Public registry/binary/container verification after publication | Fresh exact-version installs and functional witnesses pass; hashes/digests, binary metadata and every inventory item match 4.16.0 |
+
+## 4.16 execution order
+
+Follow [416-01 through 416-09](RELEASE_4_16.md#ordered-delivery-slices). V01–V04 establish Phase 0A, V05–V14 establish the integrated HTTP/launcher surface, and V29 checks the complete packaged candidate. These must pass before the release is ready to publish. V30 runs after publication and establishes release completion. Keep the SDK/emulator and experimental Connect traces separate from the public HTTP-only capability claim.
+
+The exact SQL golden corpus, proposed resource defaults, and negative cases are in the [4.16 implementation plan](RELEASE_4_16.md). Boundary tests should use smaller configured limits for determinism as well as confirming the selected production defaults; a request that times out must not release its live compute lease.
+
+## Test implementation guidance
+
+Use native unit/integration tests for schema mappings, admission ownership, state transitions, and error propagation. Add property/fuzz tests where malformed nested protocols or state-machine races justify them. Integration tests must use real engine computation, not programmed success responses.
+
+Use separate client and server environments to demonstrate runtime independence. The launcher/SDK/Connect Python environment is allowed to contain Python; the native service image must not require it. Reference Spark may use Java in its own oracle environment, which does not invalidate a separate JVM-free native service/client witness.
+
+Inspect actual public client outputs and transport traces. Do not patch SDK models, parse result.text as a substitute for normal SDK data, disable client reattachment, or accept schema-less success as conformance.
+
+For concurrency/cancellation, use controlled blocking/safe-point scenarios to establish ownership semantics and real workloads to establish integration behavior. A response deadline is not proof that compute stopped. Benchmark memory includes intermediates and replay buffers.
+
+## Release commands to add with implementation
+
+The server crate does not yet exist as part of this documentation change. Once added, CI should use targeted format/clippy/tests for its supported feature combinations, launcher tests on supported Python/platform versions, and the four distinct end-to-end routes. Record the actual commands and lockfile paths beside their evidence; do not provide fictional runnable commands or report these planned checks as passed.
+
+## Evidence record template
+
+- Gate ID / result (pending, passed, failed, or blocked):
+- Owner / implementation issue or PR:
+- Native commit and enabled features:
+- Client/SDK/emulator/oracle versions and digests:
+- Semantic settings and resource limits:
+- Platform/hardware and exact command:
+- Test output / logs / measured results:
+- Limitations or blocker:
+
+A blocked emulator prerequisite leaves the integrated 0B gate incomplete even when direct HTTP passes. Optional Phase 3/4 evidence is not a prerequisite for shipping the explicitly limited Phase 0/1/2 surfaces.

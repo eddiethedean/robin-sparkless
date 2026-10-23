@@ -2,6 +2,23 @@
 
 > **Historical maintainer doc.** Sparkless v4 integration is complete; this roadmap tracks engine phases and parity history. For current status see [Parity status](PARITY_STATUS.md). For adoption see [Before you adopt](BEFORE_YOU_ADOPT.md).
 
+## Current release roadmap: Sparkless Server 4.16+
+
+The current product release plan adds the native Sparkless Server to the existing Sparkless and robin-sparkless packages. These milestones are planned scope, not calendar commitments. The [Sparkless Server release roadmap](plans/sparkless-server/ROADMAP.md) is the detailed source for phase scope, dependencies, and release gates; the [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md) details the first release.
+
+| Release | Shared version | Planned scope |
+| --- | --- | --- |
+| **4.16** | **4.16.0** | Read-only native HTTP SQL service, exact SDK results, bounded runtime, sync/async launcher, and unified package distribution |
+| **4.17** | **4.17.0** | Shared catalog ownership, controlled mutations, richer logical schemas, and lazy native execution improvements |
+| **4.18** | **4.18.0** | Supported JVM-free Spark Connect, typed Arrow streaming, replay/release lifecycle, and separately verified emulator route |
+| **4.19** | **4.19.0** | Optional isolated Python workers for the declared Jobs/notebook subset |
+| **4.20** | **4.20.0** | Optional native Delta Lake / Unity Catalog interoperability |
+| **4.21+** | **4.N.0** | Follow-on conformance, type/operation support, and measured performance work to be defined |
+
+Starting with 4.16.0, every first-party package in the release inventory is published at the same version, including packages unchanged in that release. This includes `spark-sql-parser`, which moves from its independent 0.x version to **4.16.0**. Coordinated patch releases follow the same rule. The 4.16 release supports HTTP only; Spark Connect is not supported until its 4.18 gates pass. Optional worker and Delta/Unity Catalog capabilities remain opt-in.
+
+The older phase-based crate publication and Sparkless integration plan below records the parity roadmap that led to the current packages. Its Phase 26/27 milestones do not define the 4.16+ release cadence or publication inventory; use the linked release roadmap for those decisions.
+
 ## Core Principle: PySpark Parity on a Polars Backend
 
 **Primary Goal**: Implement a Rust crate whose behavior closely emulates PySpark's `SparkSession` / `DataFrame` / `Column` semantics, but runs entirely in Rust with Polars as the execution engine (no JVM, no Python runtime).

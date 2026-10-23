@@ -27,7 +27,7 @@
 | **Parity oracle (fixtures)** | PySpark **3.5.x** (`tests/gen_pyspark_cases.py`, `tests/requirements-pyspark.txt`) |
 | **Parity fixtures** | **212** JSON fixtures passing ([PARITY_STATUS.md](PARITY_STATUS.md)) |
 | **Dual-mode pytest** | `sparkless` (default) vs `SPARKLESS_TEST_BACKEND=pyspark` |
-| **Version matrix (Docker)** | Python 3.9–3.13 × PySpark **3.2, 3.3, 3.4, 3.5** ([tests/compatibility_matrix/](tests/compatibility_matrix/README.md)) |
+| **Version matrix (Docker)** | Python 3.9–3.13 × PySpark **3.2, 3.3, 3.4, 3.5** ([compatibility matrix files](https://github.com/eddiethedean/robin-sparkless/tree/main/tests/compatibility_matrix)) |
 | **API gap vs PySpark repo** | ~120 functions/methods still partial or missing ([FULL_PARITY_ROADMAP.md](FULL_PARITY_ROADMAP.md), [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md)) |
 | **Signature alignment** | Largely complete for 3.5 ([SIGNATURE_GAP_ANALYSIS.md](SIGNATURE_GAP_ANALYSIS.md)); re-baseline needed for 4.x |
 | **Documented divergences** | [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) |
@@ -276,7 +276,7 @@ Section **§5** is the researched catalog; this table is the maintainer quick vi
 
 ### API surface audit (unchanged process)
 
-Run periodic extraction (extend [scripts/extract_pyspark_tests.py](scripts/extract_pyspark_tests.py) / gap scripts):
+Run periodic API extraction with [the repository's PySpark API extractor](https://github.com/eddiethedean/robin-sparkless/blob/main/scripts/extract_pyspark_api_from_repo.py) and the current gap scripts:
 
 - Re-point [GAP_ANALYSIS_PYSPARK_REPO.md](GAP_ANALYSIS_PYSPARK_REPO.md) from `v3.5.0` to `v4.1.x` branch.
 - Refresh [signatures_pyspark.json](signatures_pyspark.json) and [SIGNATURE_GAP_ANALYSIS.md](SIGNATURE_GAP_ANALYSIS.md).
@@ -303,7 +303,7 @@ Run periodic extraction (extend [scripts/extract_pyspark_tests.py](scripts/extra
 
 ### 5.2 Compatibility matrix
 
-Extend [run_matrix_tests.py](tests/compatibility_matrix/run_matrix_tests.py):
+Extend [run_matrix_tests.py](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/compatibility_matrix/run_matrix_tests.py):
 
 | Python | PySpark | Status |
 |--------|---------|--------|
@@ -322,7 +322,7 @@ Define pytest markers (document in [TESTING_GUIDE.md](TESTING_GUIDE.md)):
 
 ### 5.4 sparkless.testing dual mode
 
-Extend [sparkless.testing](python/sparkless/sparkless/testing/) (see [TESTING_GUIDE.md](TESTING_GUIDE.md)):
+Extend [sparkless.testing](https://github.com/eddiethedean/robin-sparkless/tree/main/python/sparkless/sparkless/testing) (see [TESTING_GUIDE.md](TESTING_GUIDE.md)):
 
 ```bash
 # Today
@@ -426,7 +426,7 @@ Continue [FULL_PARITY_ROADMAP.md](FULL_PARITY_ROADMAP.md) remaining items:
 
 ### M2 — Upstream test port
 
-- [scripts/extract_pyspark_tests.py](scripts/extract_pyspark_tests.py) — branch `v4.1.x`; translate to issue tests ([PYSPARK_TEST_TRANSLATION.md](PYSPARK_TEST_TRANSLATION.md)).
+- **Proposed upstream test extraction utility (not implemented):** target branch `v4.1.x` and translate selected upstream cases to issue tests ([PYSPARK_TEST_TRANSLATION.md](PYSPARK_TEST_TRANSLATION.md)). The existing [PySpark API extractor](https://github.com/eddiethedean/robin-sparkless/blob/main/scripts/extract_pyspark_api_from_repo.py) inventories APIs but does not extract tests.
 - Prioritize: ANSI, try_*, map, interval, createDataFrame.
 
 ### M3 — Issue-driven backlog
@@ -524,7 +524,7 @@ Historical sequence: 4.8.0 (baseline) → 4.9.0   plan complete, opt-in PySpark 
 | [TESTING_GUIDE.md](TESTING_GUIDE.md) | Dual-backend testing |
 | [GAP_ANALYSIS_PYSPARK_REPO.md](GAP_ANALYSIS_PYSPARK_REPO.md) | Re-run for v4.1 |
 | [CREATEDATAFRAME_GAPS.md](CREATEDATAFRAME_GAPS.md) | PyArrow / schema gaps |
-| [tests/compatibility_matrix/README.md](tests/compatibility_matrix/README.md) | Version matrix extension |
+| [Compatibility matrix README](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/compatibility_matrix/README.md) | Version matrix extension |
 
 **External (breaking-change research)**
 
