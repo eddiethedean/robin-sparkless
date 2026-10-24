@@ -645,7 +645,7 @@ impl Server {
             },
             "cancellation": "cooperative; native work retains admission until it returns",
             "catalog_lifetime": "in-memory for this server instance",
-            "catalog_byte_accounting": "Polars estimated_size for committed saved tables plus the staged candidate; lazy temporary views and versions pinned by in-flight snapshots are not charged, and this is not an RSS limit"
+            "catalog_byte_accounting": "Polars estimated_size for committed saved tables, materialized session-local view snapshots, staged candidates, and saved/view versions pinned by active statement snapshots; shared buffers can be counted conservatively more than once, and this is not an RSS limit"
         })
     }
 
@@ -1784,6 +1784,13 @@ fn execute_statement(
     limits: ExecutionLimits,
     token: &CancellationToken,
 ) -> Result<JsonValue, ExecutionFailure> {
+    let _catalog_read_lease = if action == "read" {
+        session
+            .begin_catalog_read_snapshot()
+            .map_err(|error| execution_failure("CatalogSnapshotError", &error.to_string()))?
+    } else {
+        None
+    };
     if action == "use" {
         let use_db = target
             .ok_or_else(|| execution_failure("QueryError", "USE requires a database name"))?;

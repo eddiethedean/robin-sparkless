@@ -220,13 +220,42 @@ pub fn translate_with_cancellation(
                     "CatalogCapacityExceeded: session temporary-view limit reached".into(),
                 ));
             }
+            if !session.uses_shared_catalog() {
+                let planned = translate_query(session, create_view.query.as_ref())?;
+                let _schema = planned.schema()?;
+                check_cancellation(token)?;
+                session.create_or_replace_temp_view(&view_name, planned);
+                return Ok(DataFrame::from_polars_with_options(
+                    PlDataFrame::empty(),
+                    session.is_case_sensitive(),
+                ));
+            }
+            // Pin source versions before resolving the query. Release the catalog writer before
+            // materializing the view, then reserve and publish its native snapshot atomically.
+            let _snapshot_lease = session
+                .begin_catalog_read_snapshot()
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            let resolve_guard = session
+                .shared_catalog_guard()
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
             let planned = translate_query(session, create_view.query.as_ref())?;
-            // Resolve and retain the creation-time schema while still keeping the view lazy.
-            // Relation plans already contain the immutable table DataFrames resolved under the
-            // shared-catalog guard, so later drop/recreate operations cannot rebind this view.
-            let _schema = planned.schema()?;
+            drop(resolve_guard);
+            let schema = planned.schema()?;
             check_cancellation(token)?;
-            session.create_or_replace_temp_view(&view_name, planned);
+            let collected = planned
+                .collect_with_cancellation(token)
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            let mut snapshot = DataFrame::from_eager_with_options(
+                collected.as_ref().clone(),
+                session.is_case_sensitive(),
+            );
+            snapshot = snapshot.with_logical_schema(schema)?;
+            let accounted_bytes = snapshot.estimated_size()?;
+            check_cancellation(token)?;
+            let _publish_guard = session
+                .shared_catalog_guard()
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            session.register_temp_view_during_sql(&view_name, snapshot, accounted_bytes)?;
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
                 session.is_case_sensitive(),
@@ -392,7 +421,7 @@ pub fn translate_with_cancellation(
                         format!("SQL: temporary view does not exist: {name}").into(),
                     ));
                 }
-                session.drop_temp_view(&name);
+                session.drop_temp_view_during_sql(&name);
             }
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
@@ -477,7 +506,7 @@ pub fn translate_with_cancellation(
                         session.drop_global_temp_view_during_sql(suffix);
                     }
                 }
-                let _ = session.drop_temp_view(&name);
+                let _ = session.drop_temp_view_during_sql(&name);
                 session.drop_table_during_sql(&name);
             }
             Ok(DataFrame::from_polars_with_options(
@@ -708,7 +737,15 @@ fn translate_insert(
     if session.has_exact_temp_view(&table_name)
         || (!has_provider && session.has_temp_view(&table_name))
     {
-        session.create_or_replace_temp_view(&table_name, appended);
+        if session.uses_shared_catalog() {
+            let accounted_bytes = appended.estimated_size()?;
+            let _publication_guard = session
+                .shared_catalog_guard()
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            session.register_temp_view_during_sql(&table_name, appended, accounted_bytes)?;
+        } else {
+            session.create_or_replace_temp_view(&table_name, appended);
+        }
     } else {
         let _publication_guard = session
             .shared_catalog_guard()

@@ -5,7 +5,8 @@ use robin_sparkless_core::engine::ExternalCatalogProvider;
 use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 use robin_sparkless_polars::{
     DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError, SharedCatalog,
-    SparkSession as PolarsSparkSession, SparkSessionBuilder as PolarsSparkSessionBuilder,
+    SharedCatalogReadLease, SparkSession as PolarsSparkSession,
+    SparkSessionBuilder as PolarsSparkSessionBuilder,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -78,6 +79,13 @@ impl SparkSession {
 
     pub fn read(&self) -> DataFrameReader {
         DataFrameReader(PolarsDataFrameReader::new(self.0.clone()))
+    }
+
+    /// Retain shared-catalog versions visible to a server statement until its result is encoded.
+    pub fn begin_catalog_read_snapshot(
+        &self,
+    ) -> Result<Option<SharedCatalogReadLease>, EngineError> {
+        self.0.begin_catalog_read_snapshot()
     }
 
     pub fn create_or_replace_temp_view(&self, name: &str, df: DataFrame) {

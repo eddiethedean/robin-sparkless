@@ -62,6 +62,7 @@ pub fn execute_sql_with_cancellation(
     let statement = parse_spark_statement(query).map_err(polars_to_core_error)?;
     let read_only = is_read_only_statement(&statement);
     let staged_insert = is_staged_insert(&statement);
+    let staged_temp_view = is_staged_temp_view(&statement);
     let _mutation_guard = if read_only {
         None
     } else {
@@ -70,7 +71,7 @@ pub fn execute_sql_with_cancellation(
     // Reads resolve every relation against one catalog publication point. INSERT takes its
     // own short guard around snapshot capture and publication, leaving readers free to use the
     // committed version while the candidate append is materialized.
-    let _shared_catalog_guard = if staged_insert {
+    let _shared_catalog_guard = if staged_insert || staged_temp_view {
         None
     } else {
         session.shared_catalog_guard()?
@@ -96,6 +97,7 @@ fn execute_sql_inner(
     let statement = parse_spark_statement(query)?;
     let read_only = is_read_only_statement(&statement);
     let staged_insert = is_staged_insert(&statement);
+    let staged_temp_view = is_staged_temp_view(&statement);
     let _mutation_guard = if read_only {
         None
     } else {
@@ -103,7 +105,7 @@ fn execute_sql_inner(
             .shared_catalog_mutation_guard()
             .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
     };
-    let _shared_catalog_guard = if staged_insert {
+    let _shared_catalog_guard = if staged_insert || staged_temp_view {
         None
     } else {
         session
@@ -118,6 +120,14 @@ fn is_staged_insert(statement: &SparkStatement) -> bool {
         statement,
         SparkStatement::Sqlparser(statement)
             if matches!(statement.as_ref(), Statement::Insert(_))
+    )
+}
+
+fn is_staged_temp_view(statement: &SparkStatement) -> bool {
+    matches!(
+        statement,
+        SparkStatement::Sqlparser(statement)
+            if matches!(statement.as_ref(), Statement::CreateView(_))
     )
 }
 
@@ -257,7 +267,7 @@ fn execute_sql_statement(
                     // Note: Full file-based persistence for non-Delta formats could be added later
                     check_cancellation(token)?;
                     session.drop_table_during_sql(&table_name);
-                    session.drop_temp_view(&table_name);
+                    session.drop_temp_view_during_sql(&table_name);
                     session.register_table_during_sql(&table_name, result_df);
                     Ok(DataFrame::from_polars_with_options(
                         polars::prelude::DataFrame::empty(),

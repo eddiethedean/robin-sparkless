@@ -26,6 +26,7 @@ use robin_sparkless_core::{
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 mod builder;
@@ -1578,6 +1579,11 @@ pub(crate) fn clear_thread_udf_session() {
 /// Catalog of global temporary views (process-scoped). Persists across sessions within the same process.
 /// PySpark: createOrReplaceGlobalTempView / spark.table("global_temp.name").
 static GLOBAL_TEMP_CATALOG: OnceLock<Arc<Mutex<HashMap<String, DataFrame>>>> = OnceLock::new();
+static NEXT_TEMP_VIEW_SCOPE_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_temp_view_scope_id() -> u64 {
+    NEXT_TEMP_VIEW_SCOPE_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 fn global_temp_catalog() -> Arc<Mutex<HashMap<String, DataFrame>>> {
     GLOBAL_TEMP_CATALOG
@@ -1610,6 +1616,11 @@ pub struct SharedCatalog {
     global_temp_views: TempViewCatalog,
     writer: Arc<Mutex<()>>,
     mutation_lane: Arc<Mutex<()>>,
+    /// Accounted sizes for session-local views. The view frames remain on their owning session.
+    view_accounting: Arc<Mutex<HashMap<u64, HashMap<String, usize>>>>,
+    /// Old table/view versions retained while a statement may still reference them.
+    pinned_versions: Arc<Mutex<Vec<(DataFrame, usize)>>>,
+    active_readers: Arc<AtomicUsize>,
 }
 
 impl Default for SharedCatalog {
@@ -1620,6 +1631,30 @@ impl Default for SharedCatalog {
             global_temp_views: Arc::new(Mutex::new(HashMap::new())),
             writer: Arc::new(Mutex::new(())),
             mutation_lane: Arc::new(Mutex::new(())),
+            view_accounting: Arc::new(Mutex::new(HashMap::new())),
+            pinned_versions: Arc::new(Mutex::new(Vec::new())),
+            active_readers: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+/// A catalog read lease keeps versions that were visible to a statement charged until its
+/// execution and result encoding have finished.
+pub struct SharedCatalogReadLease {
+    catalog: SharedCatalog,
+}
+
+impl Drop for SharedCatalogReadLease {
+    fn drop(&mut self) {
+        let Ok(_writer) = self.catalog.writer.lock() else {
+            // Keeping the pins is the safe outcome if the publication lock is poisoned.
+            return;
+        };
+        let previous = self.catalog.active_readers.fetch_sub(1, Ordering::AcqRel);
+        if previous == 1
+            && let Ok(mut pinned) = self.catalog.pinned_versions.lock()
+        {
+            pinned.clear();
         }
     }
 }
@@ -1656,6 +1691,8 @@ pub struct SparkSession {
     external_catalog_provider: Arc<RwLock<Option<Arc<dyn ExternalCatalogProvider>>>>,
     /// Optional application catalog shared by sessions created from this session.
     shared_catalog: Option<SharedCatalog>,
+    /// Stable identifier shared by clones of one logical session, but unique for new sessions.
+    temp_view_scope_id: u64,
 }
 
 impl SparkSession {
@@ -1684,6 +1721,7 @@ impl SparkSession {
             cached_tables: Arc::new(Mutex::new(HashSet::new())),
             external_catalog_provider: Arc::new(RwLock::new(None)),
             shared_catalog: None,
+            temp_view_scope_id: next_temp_view_scope_id(),
         }
     }
 
@@ -1719,6 +1757,7 @@ impl SparkSession {
             // A new logical session never inherits external catalog callbacks.
             external_catalog_provider: Arc::new(RwLock::new(None)),
             shared_catalog: self.shared_catalog.clone(),
+            temp_view_scope_id: next_temp_view_scope_id(),
         }
     }
 
@@ -1731,7 +1770,25 @@ impl SparkSession {
         self.tables = catalog.tables.clone();
         self.databases = catalog.databases.clone();
         self.shared_catalog = Some(catalog);
+        self.temp_view_scope_id = next_temp_view_scope_id();
         self
+    }
+
+    /// Begin a statement-wide read snapshot for a shared catalog. The returned lease must live
+    /// through execution and result encoding so concurrent drops/replacements remain accounted.
+    pub fn begin_catalog_read_snapshot(
+        &self,
+    ) -> Result<Option<SharedCatalogReadLease>, EngineError> {
+        let Some(catalog) = self.shared_catalog.clone() else {
+            return Ok(None);
+        };
+        let _writer = catalog
+            .writer
+            .lock()
+            .map_err(|_| EngineError::User("shared catalog writer lock is poisoned".into()))?;
+        catalog.active_readers.fetch_add(1, Ordering::AcqRel);
+        drop(_writer);
+        Ok(Some(SharedCatalogReadLease { catalog }))
     }
 
     #[cfg(feature = "sql")]
@@ -1862,6 +1919,14 @@ impl SparkSession {
         }
     }
 
+    fn temp_view_accounting_key(&self, name: &str) -> String {
+        if self.is_case_sensitive() {
+            name.to_string()
+        } else {
+            name.to_ascii_lowercase()
+        }
+    }
+
     pub(crate) fn check_saved_table_database(&self, name: &str) -> Result<(), PolarsError> {
         if self.shared_catalog.is_none() {
             return Ok(());
@@ -1956,6 +2021,7 @@ impl SparkSession {
                 ));
             }
         }
+        staged_total = staged_total.saturating_add(self.catalog_auxiliary_bytes()?);
         if staged_total > max_catalog_bytes {
             return Err(PolarsError::ComputeError(
                 format!(
@@ -1965,6 +2031,98 @@ impl SparkSession {
             ));
         }
         Ok(())
+    }
+
+    /// Validate a materialized session-view snapshot against the shared catalog byte budget.
+    /// The caller holds the catalog writer guard through validation and registration.
+    #[cfg(feature = "sql")]
+    pub(crate) fn check_catalog_temp_view_growth(
+        &self,
+        name: &str,
+        candidate_bytes: usize,
+    ) -> Result<(), PolarsError> {
+        if self.shared_catalog.is_none() {
+            return Ok(());
+        }
+        let max_catalog_bytes = self
+            .configured_catalog_limit("sparkless.server.max_catalog_bytes")
+            .unwrap_or(usize::MAX);
+        let target = self.temp_view_accounting_key(name);
+        let current_view_bytes = self
+            .shared_catalog
+            .as_ref()
+            .expect("checked above")
+            .view_accounting
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("view accounting lock poisoned".into()))?
+            .get(&self.temp_view_scope_id)
+            .and_then(|views| views.get(&target))
+            .copied()
+            .unwrap_or(0);
+        let tables = self
+            .tables
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut staged_total = candidate_bytes
+            .saturating_add(self.catalog_auxiliary_bytes()?)
+            .saturating_sub(current_view_bytes);
+        for frame in tables {
+            staged_total = staged_total.saturating_add(frame.estimated_size()?);
+            if staged_total > max_catalog_bytes {
+                return Err(PolarsError::ComputeError(
+                    format!(
+                        "CatalogCapacityExceeded: staged catalog would exceed {max_catalog_bytes} bytes"
+                    )
+                    .into(),
+                ));
+            }
+        }
+        if staged_total > max_catalog_bytes {
+            return Err(PolarsError::ComputeError(
+                format!(
+                    "CatalogCapacityExceeded: staged catalog would exceed {max_catalog_bytes} bytes"
+                )
+                .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn catalog_auxiliary_bytes(&self) -> Result<usize, PolarsError> {
+        let Some(catalog) = &self.shared_catalog else {
+            return Ok(0);
+        };
+        let views = catalog
+            .view_accounting
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("view accounting lock poisoned".into()))?
+            .values()
+            .flat_map(|views| views.values().copied())
+            .fold(0usize, usize::saturating_add);
+        let pinned = catalog
+            .pinned_versions
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("pinned-version lock poisoned".into()))?
+            .iter()
+            .map(|(_, bytes)| *bytes)
+            .fold(0usize, usize::saturating_add);
+        Ok(views.saturating_add(pinned))
+    }
+
+    fn retain_catalog_version_if_readers(&self, frame: DataFrame, accounted_bytes: Option<usize>) {
+        let Some(catalog) = &self.shared_catalog else {
+            return;
+        };
+        if catalog.active_readers.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        let bytes = accounted_bytes.unwrap_or_else(|| frame.estimated_size().unwrap_or(usize::MAX));
+        if let Ok(mut pinned) = catalog.pinned_versions.lock() {
+            pinned.push((frame, bytes));
+        }
     }
 
     #[cfg(feature = "sql")]
@@ -2030,6 +2188,26 @@ impl SparkSession {
     /// The view is session-scoped and is dropped when the session is dropped.
     /// If the catalog lock is poisoned (e.g. a thread panicked while holding it), the operation is best-effort and a message is emitted to stderr.
     pub fn create_or_replace_temp_view(&self, name: &str, df: DataFrame) {
+        if self.shared_catalog.is_some() {
+            let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+                Ok(guards) => guards,
+                Err(error) => {
+                    eprintln!("robin-sparkless-polars: {error}");
+                    return;
+                }
+            };
+            let bytes = match df.estimated_size() {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    eprintln!("robin-sparkless-polars: temporary view sizing failed: {error}");
+                    return;
+                }
+            };
+            if let Err(error) = self.register_temp_view_during_sql(name, df, bytes) {
+                eprintln!("robin-sparkless-polars: {error}");
+            }
+            return;
+        }
         match self.catalog.lock() {
             Ok(mut m) => {
                 if self.is_case_sensitive() {
@@ -2050,6 +2228,50 @@ impl SparkSession {
                 );
             }
         }
+    }
+
+    /// Register a session-local view while the caller holds the shared catalog writer guard.
+    /// The provided byte count is the materialized native size reserved for this view snapshot.
+    #[cfg(feature = "sql")]
+    pub(crate) fn register_temp_view_during_sql(
+        &self,
+        name: &str,
+        df: DataFrame,
+        accounted_bytes: usize,
+    ) -> Result<(), PolarsError> {
+        self.check_catalog_temp_view_growth(name, accounted_bytes)?;
+        let Some(shared) = &self.shared_catalog else {
+            self.create_or_replace_temp_view(name, df);
+            return Ok(());
+        };
+        let normalized = self.temp_view_accounting_key(name);
+        let mut accounting = shared
+            .view_accounting
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("view accounting lock poisoned".into()))?;
+        let mut views = self
+            .catalog
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("session view lock poisoned".into()))?;
+        let key = if self.is_case_sensitive() {
+            name.to_string()
+        } else {
+            views
+                .keys()
+                .find(|existing| existing.eq_ignore_ascii_case(name))
+                .cloned()
+                .unwrap_or_else(|| name.to_string())
+        };
+        let previous = views.insert(key, df);
+        let session_sizes = accounting.entry(self.temp_view_scope_id).or_default();
+        let previous_size = session_sizes.remove(&normalized);
+        session_sizes.insert(normalized, accounted_bytes);
+        drop(views);
+        drop(accounting);
+        if let Some(previous) = previous {
+            self.retain_catalog_version_if_readers(previous, previous_size);
+        }
+        Ok(())
     }
 
     /// Global temp view (PySpark: createGlobalTempView). Persists across sessions within the same process.
@@ -2142,27 +2364,77 @@ impl SparkSession {
     /// Returns true if a view was removed; false if not present.
     /// If the catalog lock is poisoned, returns false and a message is emitted to stderr.
     pub fn drop_temp_view(&self, name: &str) -> bool {
-        match self.catalog.lock() {
-            Ok(mut m) => {
-                if self.is_case_sensitive() {
-                    m.remove(name).is_some()
-                } else {
-                    let existing = m
-                        .keys()
-                        .find(|view_name| view_name.eq_ignore_ascii_case(name))
-                        .cloned();
-                    existing
-                        .and_then(|view_name| m.remove(&view_name))
-                        .is_some()
+        if self.shared_catalog.is_some() {
+            let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+                Ok(guards) => guards,
+                Err(error) => {
+                    eprintln!("robin-sparkless-polars: {error}");
+                    return false;
                 }
-            }
-            Err(_) => {
-                eprintln!(
-                    "robin-sparkless-polars: catalog lock poisoned, drop_temp_view may have failed"
-                );
-                false
-            }
+            };
+            return self.drop_temp_view_during_sql(name);
         }
+        self.drop_temp_view_during_sql(name)
+    }
+
+    /// Drop a temporary view while the caller already owns the shared catalog mutation lane.
+    pub(crate) fn drop_temp_view_during_sql(&self, name: &str) -> bool {
+        let normalized = self.temp_view_accounting_key(name);
+        let removed = if let Some(shared) = &self.shared_catalog {
+            let mut accounting = match shared.view_accounting.lock() {
+                Ok(accounting) => accounting,
+                Err(_) => return false,
+            };
+            let mut views = match self.catalog.lock() {
+                Ok(views) => views,
+                Err(_) => return false,
+            };
+            let key = if self.is_case_sensitive() {
+                name.to_string()
+            } else {
+                match views
+                    .keys()
+                    .find(|view_name| view_name.eq_ignore_ascii_case(name))
+                    .cloned()
+                {
+                    Some(key) => key,
+                    None => return false,
+                }
+            };
+            let Some(frame) = views.remove(&key) else {
+                return false;
+            };
+            let size = accounting
+                .get_mut(&self.temp_view_scope_id)
+                .and_then(|sizes| sizes.remove(&normalized));
+            if accounting
+                .get(&self.temp_view_scope_id)
+                .is_some_and(HashMap::is_empty)
+            {
+                accounting.remove(&self.temp_view_scope_id);
+            }
+            drop(views);
+            drop(accounting);
+            self.retain_catalog_version_if_readers(frame, size);
+            true
+        } else {
+            match self.catalog.lock() {
+                Ok(mut views) => {
+                    if self.is_case_sensitive() {
+                        views.remove(name)
+                    } else {
+                        let key = views
+                            .keys()
+                            .find(|view_name| view_name.eq_ignore_ascii_case(name))
+                            .cloned();
+                        key.and_then(|key| views.remove(&key))
+                    }
+                }
+                Err(_) => None,
+            }
+            .is_some()
+        };
+        removed
     }
 
     /// Drop a global temporary view (PySpark: catalog.dropGlobalTempView). Removes from process-wide catalog.
@@ -2207,15 +2479,17 @@ impl SparkSession {
     /// Register a table while the caller already holds the catalog writer guard.
     pub(crate) fn register_table_during_sql(&self, name: &str, df: DataFrame) {
         let key = self.saved_table_key(name);
-        match self.tables.lock() {
-            Ok(mut m) => {
-                m.insert(key, df);
-            }
+        let previous = match self.tables.lock() {
+            Ok(mut m) => m.insert(key, df),
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: tables lock poisoned, register_table may have failed"
                 );
+                None
             }
+        };
+        if let Some(previous) = previous {
+            self.retain_catalog_version_if_readers(previous, None);
         }
     }
 
@@ -2501,14 +2775,20 @@ impl SparkSession {
     /// Drop a saved table while the caller already holds the catalog writer guard.
     pub(crate) fn drop_table_during_sql(&self, name: &str) -> bool {
         let key = self.saved_table_key(name);
-        match self.tables.lock() {
-            Ok(mut m) => m.remove(&key).is_some(),
+        let removed = match self.tables.lock() {
+            Ok(mut m) => m.remove(&key),
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: tables lock poisoned, drop_table may have failed"
                 );
-                false
+                None
             }
+        };
+        if let Some(frame) = removed {
+            self.retain_catalog_version_if_readers(frame, None);
+            true
+        } else {
+            false
         }
     }
 
@@ -4268,11 +4548,43 @@ impl SparkSession {
     /// Stop the session (cleanup resources)
     /// Best-effort cleanup. If any catalog lock is poisoned, a message is emitted to stderr and cleanup may be partial.
     pub fn stop(&self) {
-        match self.catalog.lock() {
-            Ok(mut m) => m.clear(),
-            Err(_) => eprintln!(
-                "robin-sparkless-polars: catalog lock poisoned, stop() cleanup may be partial"
-            ),
+        let views = if let Some(shared) = &self.shared_catalog {
+            let mut accounting = shared.view_accounting.lock().ok();
+            let sizes = accounting
+                .as_mut()
+                .and_then(|accounting| accounting.remove(&self.temp_view_scope_id))
+                .unwrap_or_default();
+            match self.catalog.lock() {
+                Ok(mut views) => std::mem::take(&mut *views)
+                    .into_iter()
+                    .map(|(name, frame)| {
+                        let bytes = sizes.get(&self.temp_view_accounting_key(&name)).copied();
+                        (frame, bytes)
+                    })
+                    .collect::<Vec<_>>(),
+                Err(_) => {
+                    eprintln!(
+                        "robin-sparkless-polars: catalog lock poisoned, stop() cleanup may be partial"
+                    );
+                    Vec::new()
+                }
+            }
+        } else {
+            match self.catalog.lock() {
+                Ok(mut m) => {
+                    m.clear();
+                    Vec::new()
+                }
+                Err(_) => {
+                    eprintln!(
+                        "robin-sparkless-polars: catalog lock poisoned, stop() cleanup may be partial"
+                    );
+                    Vec::new()
+                }
+            }
+        };
+        for (frame, bytes) in views {
+            self.retain_catalog_version_if_readers(frame, bytes);
         }
         if self.shared_catalog.is_none() {
             match self.tables.lock() {
@@ -4310,6 +4622,7 @@ impl SparkSession {
             cached_tables: self.cached_tables.clone(),
             external_catalog_provider: self.external_catalog_provider.clone(),
             shared_catalog: self.shared_catalog.clone(),
+            temp_view_scope_id: self.temp_view_scope_id,
         })
     }
 }
@@ -4425,6 +4738,92 @@ mod tests {
     #[cfg(feature = "delta")]
     use robin_sparkless_core::engine::ExternalTableSaveMode;
     use serde_json::json;
+
+    fn catalog_test_frame() -> DataFrame {
+        let values = vec!["x".repeat(128); 64];
+        let physical = PlDataFrame::new(
+            values.len(),
+            vec![Series::new("payload".into(), values).into()],
+        )
+        .unwrap();
+        DataFrame::from_polars_with_options(physical, false)
+    }
+
+    fn catalog_test_session(max_catalog_bytes: usize) -> SparkSession {
+        let mut config = HashMap::new();
+        config.insert(
+            "sparkless.server.max_catalog_bytes".to_string(),
+            max_catalog_bytes.to_string(),
+        );
+        config.insert(
+            "sparkless.server.max_table_bytes".to_string(),
+            usize::MAX.to_string(),
+        );
+        SparkSession::new(Some("catalog-accounting-test".into()), None, config)
+            .with_shared_catalog(SharedCatalog::new())
+    }
+
+    #[test]
+    fn shared_catalog_charges_pinned_versions_until_last_read_finishes() {
+        let original = catalog_test_frame();
+        let bytes = original.estimated_size().unwrap();
+        let session = catalog_test_session(bytes.saturating_mul(2));
+        session.register_table("t", original.clone());
+        let read_lease = session.begin_catalog_read_snapshot().unwrap().unwrap();
+
+        let replacement = catalog_test_frame();
+        let _mutation = session.shared_catalog_mutation_guard().unwrap();
+        let _writer = session.shared_catalog_guard().unwrap();
+        session
+            .check_catalog_table_growth("t", &replacement)
+            .unwrap();
+        session.register_table_during_sql("t", replacement.clone());
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), bytes);
+        assert!(
+            session
+                .check_catalog_table_growth("t", &catalog_test_frame())
+                .unwrap_err()
+                .to_string()
+                .contains("CatalogCapacityExceeded")
+        );
+
+        drop(_writer);
+        drop(_mutation);
+        drop(read_lease);
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), 0);
+        let next = catalog_test_frame();
+        let _mutation = session.shared_catalog_mutation_guard().unwrap();
+        let _writer = session.shared_catalog_guard().unwrap();
+        session.check_catalog_table_growth("t", &next).unwrap();
+    }
+
+    #[test]
+    fn shared_catalog_charges_temp_view_snapshots_and_releases_dropped_views() {
+        let table = catalog_test_frame();
+        let bytes = table.estimated_size().unwrap();
+        let session = catalog_test_session(bytes.saturating_mul(2));
+        session.register_table("t", table.clone());
+
+        let _mutation = session.shared_catalog_mutation_guard().unwrap();
+        let _writer = session.shared_catalog_guard().unwrap();
+        session
+            .register_temp_view_during_sql("first", table.clone(), bytes)
+            .unwrap();
+        assert!(
+            session
+                .register_temp_view_during_sql("second", table.clone(), bytes)
+                .unwrap_err()
+                .to_string()
+                .contains("CatalogCapacityExceeded")
+        );
+        assert!(session.drop_temp_view_during_sql("first"));
+        session
+            .register_temp_view_during_sql("second", table, bytes)
+            .unwrap();
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), bytes);
+        session.stop();
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), 0);
+    }
 
     #[test]
     fn range_uses_lazy_source_with_checked_signed_cardinality() {
