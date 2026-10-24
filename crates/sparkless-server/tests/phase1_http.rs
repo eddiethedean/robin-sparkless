@@ -155,6 +155,23 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{created_table}");
     assert_eq!(created_table["status"], "ok");
 
+    let (status, created_default_items) = statement(
+        &server,
+        "owner",
+        "CREATE TABLE default.items (id BIGINT, note STRING)",
+        Some("create-default-items"),
+    );
+    assert_eq!(status, 200, "{created_default_items}");
+    assert_eq!(created_default_items["status"], "ok");
+    let (status, inserted_default_item) = statement(
+        &server,
+        "owner",
+        "INSERT INTO default.items VALUES (99, 'default')",
+        Some("insert-default-item"),
+    );
+    assert_eq!(status, 200, "{inserted_default_item}");
+    assert_eq!(inserted_default_item["status"], "ok");
+
     let (status, created_integer_table) = statement(
         &server,
         "owner",
@@ -386,6 +403,29 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert!(submissions.iter().all(|(_, response)| {
         response["status"] == "ok" || response["ename"] == "OperationInProgress"
     }));
+
+    let (status, selected_database) = statement(
+        &server,
+        "owner",
+        "USE phase_http",
+        Some("use-phase-http-owner"),
+    );
+    assert_eq!(status, 200, "{selected_database}");
+    assert_eq!(selected_database["status"], "ok");
+    let (status, owner_unqualified_read) =
+        statement(&server, "owner", "SELECT id, note FROM items", None);
+    assert_eq!(status, 200, "{owner_unqualified_read}");
+    assert_eq!(
+        owner_unqualified_read["data"]["application/json"]["data"],
+        json!([[7, "seven"]])
+    );
+    let (status, reader_unqualified_read) =
+        statement(&server, "reader", "SELECT id, note FROM items", None);
+    assert_eq!(status, 200, "{reader_unqualified_read}");
+    assert_eq!(
+        reader_unqualified_read["data"]["application/json"]["data"],
+        json!([[99, "default"]])
+    );
 
     let (status, view) = statement(
         &server,
