@@ -2555,6 +2555,104 @@ mod tests {
         server_task.await.unwrap().unwrap();
     }
 
+    #[tokio::test]
+    async fn separate_server_instances_own_isolated_catalogs() {
+        async fn start_test_server(
+            server: Server,
+        ) -> (
+            SocketAddr,
+            oneshot::Sender<()>,
+            tokio::task::JoinHandle<Result<(), ServerError>>,
+        ) {
+            server.startup_check().await.unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            server.inner.ready.store(true, Ordering::Release);
+            let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+            let task = tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            });
+            (address, shutdown_tx, task)
+        }
+
+        let first = Server::new(ServerConfig::default()).unwrap();
+        let second = Server::new(ServerConfig::default()).unwrap();
+        assert_ne!(first.instance_id(), second.instance_id());
+        let first_instance = first.instance_id().to_owned();
+        let second_instance = second.instance_id().to_owned();
+        let (first_address, stop_first, first_task) = start_test_server(first).await;
+        let (second_address, stop_second, second_task) = start_test_server(second).await;
+
+        for (address, instance, value, suffix) in [
+            (first_address, first_instance.as_str(), 1, "first"),
+            (second_address, second_instance.as_str(), 2, "second"),
+        ] {
+            for (operation, sql) in [
+                ("create-database", "CREATE DATABASE isolated".to_owned()),
+                (
+                    "create-table",
+                    "CREATE TABLE isolated.items (id BIGINT)".to_owned(),
+                ),
+                (
+                    "append",
+                    format!("INSERT INTO isolated.items VALUES ({value})"),
+                ),
+            ] {
+                let body = json!({
+                    "session":format!("{suffix}-writer"),
+                    "kind":"sql",
+                    "code":sql,
+                    "server_instance_id":instance,
+                    "operation_id":format!("{suffix}-{operation}")
+                });
+                let (status, result) = request_json(address, "POST", "/statements", &body).await;
+                assert_eq!(status, StatusCode::OK, "{result}");
+                assert_eq!(result["status"], "ok", "{result}");
+            }
+        }
+
+        for (address, instance, expected, suffix) in [
+            (first_address, first_instance.as_str(), 1, "first"),
+            (second_address, second_instance.as_str(), 2, "second"),
+        ] {
+            let result = statement_request(
+                address,
+                instance,
+                &format!("{suffix}-reader"),
+                &format!("{suffix}-read"),
+                "SELECT id FROM isolated.items",
+            )
+            .await;
+            assert_eq!(result["status"], "ok", "{result}");
+            assert_eq!(
+                result["data"]["application/json"]["data"],
+                json!([[expected]])
+            );
+        }
+
+        let _ = stop_first.send(());
+        first_task.await.unwrap().unwrap();
+        let remaining_catalog = statement_request(
+            second_address,
+            &second_instance,
+            "second-reader",
+            "second-read-after-close",
+            "SELECT id FROM isolated.items",
+        )
+        .await;
+        assert_eq!(
+            remaining_catalog["data"]["application/json"]["data"],
+            json!([[2]])
+        );
+
+        let _ = stop_second.send(());
+        second_task.await.unwrap().unwrap();
+    }
+
     #[test]
     fn idle_session_ttl_stops_only_ordinary_idle_sessions() {
         let server = Server::new(ServerConfig {

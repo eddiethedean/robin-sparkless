@@ -231,7 +231,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: eddiethedean/minilake
-          ref: 5c56cfdd5f6a772c8fd56d9dd0d87e5cdf821f63
+          ref: 173abd57195243f6a93a434ffec46bf185d1a0d7
           path: minilake
       - name: Install Python and uv
         uses: actions/setup-python@v5
@@ -893,7 +893,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: eddiethedean/minilake
-          ref: 5c56cfdd5f6a772c8fd56d9dd0d87e5cdf821f63
+          ref: 173abd57195243f6a93a434ffec46bf185d1a0d7
           path: minilake
       - uses: actions/setup-python@v5
         with:
