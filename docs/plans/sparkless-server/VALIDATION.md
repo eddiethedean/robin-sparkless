@@ -71,7 +71,8 @@ For concurrency/cancellation, use controlled blocking/safe-point scenarios to es
 
 These are local component checks, not passing release gates. The current work has run strict server clippy, server control-protocol integration, Polars SQL unit/integration tests, Python launcher tests, release-inventory tests, Ruff, mypy, and a locally built/installed macOS arm64 server wheel. Record exact final command output, source commit, platform, and artifacts when adding evidence; do not infer V12–V18 or V29–V32 from these checks.
 
-- `cargo test --release --locked -p sparkless-server -p robin-sparkless-polars --features sql` — passed, including 314 Polars library tests, the server unit/control-protocol tests, and doctests.
+- `cargo test --release --locked -p sparkless-server -p robin-sparkless-polars --features sql` — passed, including 314 Polars library tests, the server unit and integration tests (`control_protocol` and `phase1_http`), and doctests.
+- `cargo test --locked -p sparkless-server --test phase1_http -- --nocapture` and `cargo test --release --locked -p sparkless-server --test phase1_http -- --nocapture` — passed on macOS arm64 (debug and release profiles; final release test completed in 7.99 seconds). This launches the native server twice and exercises shared saved-table reads, session-local temporary views, simultaneous duplicate mutation submission, replay/conflict/status after close, old-instance rejection, and fresh-catalog behavior after restart over TCP/HTTP. It is a focused partial V15/V16 witness, not complete gate evidence.
 - `cargo clippy --locked -p sparkless-server --all-features --all-targets -- -D warnings` — passed.
 - `cargo clippy --locked -p robin-sparkless-polars --features sql --all-targets -- -D warnings` — passed.
 - `PYTHONPATH=python/sparkless .venv/bin/python -m pytest tests/server/test_launcher.py -q` — 5 passed.
