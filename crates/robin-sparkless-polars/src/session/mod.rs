@@ -5064,6 +5064,26 @@ mod tests {
     }
 
     #[test]
+    fn shared_catalog_database_limit_includes_default_without_losing_last_slot() {
+        let mut config = HashMap::new();
+        config.insert(
+            "sparkless.server.max_databases".to_string(),
+            "2".to_string(),
+        );
+        let session = SparkSession::new(Some("database-limit-test".into()), None, config)
+            .with_shared_catalog(SharedCatalog::new());
+
+        assert!(session.database_exists("default"));
+        assert!(session.check_database_capacity().is_ok());
+        session.register_database("last_slot");
+        assert_eq!(session.databases.lock().unwrap().len(), 1);
+
+        let error = session.check_database_capacity().unwrap_err();
+        assert!(error.to_string().contains("CatalogCapacityExceeded"));
+        assert!(!session.database_exists("next_database"));
+    }
+
+    #[test]
     fn shared_catalog_charges_pinned_versions_until_last_read_finishes() {
         let original = catalog_test_frame();
         let bytes = original.estimated_size().unwrap();
