@@ -2647,6 +2647,92 @@ mod tests {
         server_task.await.unwrap().unwrap();
     }
 
+    #[tokio::test]
+    async fn disconnected_mutation_response_keeps_committed_status_and_receipt() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let body = serde_json::to_vec(&json!({
+            "session":"disconnect-writer",
+            "kind":"sql",
+            "code":"CREATE DATABASE disconnected_db",
+            "server_instance_id":instance,
+            "operation_id":"disconnect-create"
+        }))
+        .unwrap();
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        let headers = format!(
+            "POST /statements HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(headers.as_bytes()).await.unwrap();
+        stream.write_all(&body).await.unwrap();
+        stream.flush().await.unwrap();
+
+        let operation = timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(operation) = server.inner.operation("disconnect-create") {
+                    break operation;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("server must accept the mutation before the response is discarded");
+        drop(stream);
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(record) = operation.lock()
+                    && record.execution_state != "running"
+                {
+                    assert_eq!(record.effect_outcome, "committed");
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("accepted mutation must establish an outcome after disconnect");
+        assert!(server.inner.root_session.database_exists("disconnected_db"));
+
+        let (status, operation_status) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({
+                "server_instance_id":instance,
+                "operation_id":"disconnect-create"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{operation_status}");
+        assert_eq!(operation_status["effect_outcome"], "committed");
+        assert_eq!(operation_status["receipt"]["kind"], "create_database");
+        assert_eq!(operation_status["receipt"]["name"], "disconnected_db");
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
     #[test]
     fn result_schema_preserves_metadata_and_keeps_native_extensions_disabled() {
         let metadata = [("owner".to_string(), json!("analytics"))]
