@@ -279,7 +279,7 @@ jobs:
         run: |
           set -euo pipefail
           PY=/opt/python/cp311-cp311/bin/python
-          "$PY" -m pip install wheel auditwheel
+          "$PY" -m pip install wheel auditwheel setuptools
           mkdir -p dist
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
@@ -320,7 +320,7 @@ jobs:
       - name: Build and verify macOS wheel
         run: |
           set -euo pipefail
-          python3 -m pip install wheel
+          python3 -m pip install wheel setuptools
           mkdir -p dist
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
