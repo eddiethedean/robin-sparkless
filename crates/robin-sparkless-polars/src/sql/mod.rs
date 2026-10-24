@@ -472,7 +472,8 @@ pub fn select_expr_map_value_reference_parts(
 
 #[cfg(test)]
 mod tests {
-    use crate::SparkSession;
+    use crate::{SharedCatalog, SparkSession};
+    use std::collections::HashMap;
 
     #[test]
     fn test_sql_select_where_without_from() {
@@ -1163,6 +1164,42 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].get("id"), Some(&serde_json::json!(2)));
         assert_eq!(rows[0].get("label"), Some(&serde_json::json!("y")));
+    }
+
+    #[test]
+    fn test_sql_shared_catalog_temp_view_limit_and_replacement() {
+        let mut config = HashMap::new();
+        config.insert(
+            "sparkless.server.max_temp_views".to_string(),
+            "1".to_string(),
+        );
+        config.insert(
+            "sparkless.server.max_catalog_bytes".to_string(),
+            usize::MAX.to_string(),
+        );
+        let session = SparkSession::new(Some("sql-temp-view-limit-test".into()), None, config)
+            .with_shared_catalog(SharedCatalog::new());
+
+        session
+            .sql("CREATE TEMP VIEW only_view AS SELECT 1 AS id")
+            .unwrap();
+        let error = session
+            .sql("CREATE TEMP VIEW over_limit AS SELECT 2 AS id")
+            .err()
+            .expect("view over the configured limit must fail");
+        assert!(error.to_string().contains("CatalogCapacityExceeded"));
+        assert_eq!(session.list_temp_view_names(), vec!["only_view"]);
+
+        session
+            .sql("CREATE OR REPLACE TEMP VIEW only_view AS SELECT 3 AS id")
+            .unwrap();
+        let rows = session
+            .sql("SELECT id FROM only_view")
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("id"), Some(&serde_json::json!(3)));
     }
 
     #[test]

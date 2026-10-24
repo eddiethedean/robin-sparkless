@@ -2497,14 +2497,23 @@ impl SparkSession {
             .lock()
             .map_err(|_| PolarsError::InvalidOperation("session view lock poisoned".into()))?;
         let key = if self.is_case_sensitive() {
-            name.to_string()
+            views.contains_key(name).then(|| name.to_string())
         } else {
             views
                 .keys()
                 .find(|existing| existing.eq_ignore_ascii_case(name))
                 .cloned()
-                .unwrap_or_else(|| name.to_string())
         };
+        if key.is_none()
+            && self
+                .configured_catalog_limit("sparkless.server.max_temp_views")
+                .is_some_and(|limit| views.len() >= limit)
+        {
+            return Err(PolarsError::ComputeError(
+                "CatalogCapacityExceeded: session temporary-view limit reached".into(),
+            ));
+        }
+        let key = key.unwrap_or_else(|| name.to_string());
         let previous = views.insert(key, df.clone());
         let session_sizes = accounting.entry(self.temp_view_scope_id).or_default();
         let previous_snapshot = session_sizes.remove(&normalized);
@@ -5081,6 +5090,122 @@ mod tests {
         let error = session.check_database_capacity().unwrap_err();
         assert!(error.to_string().contains("CatalogCapacityExceeded"));
         assert!(!session.database_exists("next_database"));
+    }
+
+    #[test]
+    fn shared_catalog_saved_table_limit_rejects_new_tables_but_allows_replacement() {
+        let mut config = HashMap::new();
+        config.insert("sparkless.server.max_tables".to_string(), "1".to_string());
+        config.insert(
+            "sparkless.server.max_catalog_bytes".to_string(),
+            usize::MAX.to_string(),
+        );
+        config.insert(
+            "sparkless.server.max_table_bytes".to_string(),
+            usize::MAX.to_string(),
+        );
+        let session = SparkSession::new(Some("table-limit-test".into()), None, config)
+            .with_shared_catalog(SharedCatalog::new());
+        let first = catalog_test_frame();
+
+        {
+            let _mutation = session.shared_catalog_mutation_guard().unwrap();
+            let _writer = session.shared_catalog_guard().unwrap();
+            session.check_catalog_table_growth("first", &first).unwrap();
+            session.register_table_during_sql("first", first.clone());
+
+            let error = session
+                .check_catalog_table_growth("second", &catalog_test_frame())
+                .unwrap_err();
+            assert!(error.to_string().contains("CatalogCapacityExceeded"));
+            assert_eq!(session.list_table_names(), vec!["default.first"]);
+
+            let replacement = catalog_test_frame();
+            session
+                .check_catalog_table_growth("first", &replacement)
+                .unwrap();
+            session.register_table_during_sql("first", replacement);
+            assert_eq!(session.list_table_names(), vec!["default.first"]);
+        }
+    }
+
+    #[test]
+    fn shared_catalog_temp_view_limit_is_per_session_and_allows_replacement() {
+        let mut config = HashMap::new();
+        config.insert(
+            "sparkless.server.max_temp_views".to_string(),
+            "1".to_string(),
+        );
+        config.insert(
+            "sparkless.server.max_catalog_bytes".to_string(),
+            usize::MAX.to_string(),
+        );
+        let session = SparkSession::new(Some("temp-view-limit-test".into()), None, config)
+            .with_shared_catalog(SharedCatalog::new());
+        let sibling = session.new_session();
+
+        {
+            let _mutation = session.shared_catalog_mutation_guard().unwrap();
+            let _writer = session.shared_catalog_guard().unwrap();
+            session
+                .register_temp_view_during_sql("first", catalog_test_frame())
+                .unwrap();
+            let error = session
+                .register_temp_view_during_sql("second", catalog_test_frame())
+                .unwrap_err();
+            assert!(error.to_string().contains("CatalogCapacityExceeded"));
+
+            // Replacing an existing binding consumes no additional view slot.
+            session
+                .register_temp_view_during_sql("first", catalog_test_frame())
+                .unwrap();
+        }
+
+        // The sibling shares saved catalog data, but its temporary-view quota is independent.
+        let _mutation = sibling.shared_catalog_mutation_guard().unwrap();
+        let _writer = sibling.shared_catalog_guard().unwrap();
+        sibling
+            .register_temp_view_during_sql("sibling_view", catalog_test_frame())
+            .unwrap();
+        assert_eq!(session.list_temp_view_names(), vec!["first"]);
+        assert_eq!(sibling.list_temp_view_names(), vec!["sibling_view"]);
+    }
+
+    #[test]
+    fn shared_catalog_temp_view_limit_serializes_competing_publications() {
+        let mut config = HashMap::new();
+        config.insert(
+            "sparkless.server.max_temp_views".to_string(),
+            "1".to_string(),
+        );
+        config.insert(
+            "sparkless.server.max_catalog_bytes".to_string(),
+            usize::MAX.to_string(),
+        );
+        let session = SparkSession::new(Some("temp-view-race-test".into()), None, config)
+            .with_shared_catalog(SharedCatalog::new());
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let joins = ["first", "second"].map(|name| {
+            let session = session.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let candidate = catalog_test_frame();
+                barrier.wait();
+                let _mutation = session.shared_catalog_mutation_guard().unwrap();
+                let _writer = session.shared_catalog_guard().unwrap();
+                session
+                    .register_temp_view_during_sql(name, candidate)
+                    .is_ok()
+            })
+        });
+        barrier.wait();
+        let accepted = joins
+            .into_iter()
+            .map(|join| join.join().unwrap())
+            .filter(|accepted| *accepted)
+            .count();
+        assert_eq!(accepted, 1);
+        assert_eq!(session.list_temp_view_names().len(), 1);
     }
 
     #[test]
