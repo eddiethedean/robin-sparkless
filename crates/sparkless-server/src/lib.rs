@@ -2482,6 +2482,91 @@ mod tests {
             .unwrap();
     }
 
+    #[tokio::test]
+    async fn queued_mutation_keeps_reads_and_health_responsive() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_active_operations: 1,
+            queue_timeout: Duration::from_secs(3),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let held_lane = Arc::clone(&server.inner.mutation_lane).lock_owned().await;
+        let instance = server.instance_id().to_string();
+        let mutation = tokio::spawn(async move {
+            statement_request(
+                address,
+                &instance,
+                "queued-writer",
+                "queued-create",
+                "CREATE DATABASE queued_db",
+            )
+            .await
+        });
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if server.inner.operation("queued-create").is_some() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let (read_status, read_response) = timeout(
+            Duration::from_secs(1),
+            request_json(
+                address,
+                "POST",
+                "/statements",
+                &json!({"session":"reader","kind":"sql","code":"SELECT 1 AS ready"}),
+            ),
+        )
+        .await
+        .expect("read should not queue behind a waiting writer");
+        assert_eq!(read_status, StatusCode::OK);
+        assert_eq!(
+            read_response["data"]["application/json"]["data"],
+            json!([[1]])
+        );
+
+        let (health_status, _) = timeout(
+            Duration::from_secs(1),
+            request_json(address, "GET", "/health", &json!({})),
+        )
+        .await
+        .expect("health should remain responsive while a writer is queued");
+        assert_eq!(health_status, StatusCode::OK);
+
+        drop(held_lane);
+        let accepted = timeout(Duration::from_secs(1), mutation)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(accepted["status"], "ok");
+        assert_eq!(accepted["operation"]["effect_outcome"], "committed");
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
     #[test]
     fn result_schema_preserves_metadata_and_keeps_native_extensions_disabled() {
         let metadata = [("owner".to_string(), json!("analytics"))]
