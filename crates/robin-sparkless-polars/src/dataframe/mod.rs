@@ -522,6 +522,7 @@ pub(crate) enum DataFrameInner {
 
 struct PolarsIpcBatchIterator {
     source: Option<IpcBatchSource>,
+    empty_schema: Arc<Schema>,
     current: Option<PlDataFrame>,
     current_offset: usize,
     max_rows: usize,
@@ -529,6 +530,7 @@ struct PolarsIpcBatchIterator {
     logical_schema_json: Option<String>,
     token: CancellationToken,
     deferred_error: Option<EngineError>,
+    emitted_empty: bool,
     closed: bool,
 }
 
@@ -645,6 +647,26 @@ impl Iterator for PolarsIpcBatchIterator {
 
         if rows.is_empty() {
             if source_ended {
+                if !self.emitted_empty {
+                    self.emitted_empty = true;
+                    let mut empty = PlDataFrame::empty_with_schema(&self.empty_schema);
+                    let bytes = match self.serialize_batch(&mut empty) {
+                        Ok(bytes) => bytes,
+                        Err(error) => {
+                            self.close();
+                            return Some(Err(error));
+                        }
+                    };
+                    self.close();
+                    if bytes.len() > self.max_bytes {
+                        return Some(Err(EngineError::User(format!(
+                            "an empty Arrow IPC schema requires {} bytes, exceeding max_bytes={}",
+                            bytes.len(),
+                            self.max_bytes
+                        ))));
+                    }
+                    return Some(Ok(ArrowIpcStream { bytes }));
+                }
                 self.close();
             }
             return None;
@@ -2691,6 +2713,7 @@ impl DataFrame {
                 "max_bytes must be greater than zero".into(),
             ));
         }
+        let empty_schema = self.schema_or_collect().map_err(polars_to_core_error)?;
         // Row-sized source pulls keep in-flight memory independent of max_rows/max_bytes.
         // Range plans use the native operation pipeline with a one-row source chunk so a
         // small byte limit is checked before a larger chunk is retained.
@@ -2714,6 +2737,7 @@ impl DataFrame {
             })?;
         Ok(ArrowIpcBatchStream::new(PolarsIpcBatchIterator {
             source: Some(source),
+            empty_schema,
             current: None,
             current_offset: 0,
             max_rows,
@@ -2721,6 +2745,7 @@ impl DataFrame {
             logical_schema_json,
             token: token.clone(),
             deferred_error: None,
+            emitted_empty: false,
             closed: false,
         }))
     }
@@ -6454,6 +6479,34 @@ mod tests {
             fields.field_by_name("label").unwrap().str().unwrap().get(3),
             Some("third")
         );
+
+        let empty = source_frame().limit(0).unwrap();
+        let empty_schema = empty.schema().unwrap();
+        let expected_empty_schema = empty_schema.to_json().unwrap();
+        let mut empty_batches = empty
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap();
+        let empty_batch = empty_batches
+            .next()
+            .expect("empty IPC result must carry its schema")
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(empty_batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_empty_schema.as_str()));
+        assert_eq!(reader.finish().unwrap().height(), 0);
+        assert!(empty_batches.next().is_none());
+
+        let mut undersized_empty_batch = empty
+            .to_arrow_ipc_batches_with_cancellation(8, 1, &CancellationToken::new())
+            .unwrap();
+        assert!(matches!(
+            undersized_empty_batch.next().unwrap(),
+            Err(EngineError::User(message)) if message.contains("empty Arrow IPC schema")
+        ));
     }
 
     /// Issue #235: root-level string–numeric comparison coercion in filter.
