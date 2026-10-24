@@ -6684,6 +6684,106 @@ mod tests {
     }
 
     #[test]
+    fn nested_array_of_struct_schema_and_ipc_survive_transformations() {
+        use polars::chunked_array::StructChunked;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{IntoSeries, ListChunked, NamedFrom, SerReader, Series};
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let first_id = Series::new("id".into(), [1_i32, 2]);
+        let first_label = Series::new("label".into(), ["one", "two"]);
+        let first =
+            StructChunked::from_series("element".into(), 2, [&first_id, &first_label].into_iter())
+                .unwrap()
+                .into_series();
+        let last_id = Series::new("id".into(), [3_i32]);
+        let last_label = Series::new("label".into(), ["three"]);
+        let last =
+            StructChunked::from_series("element".into(), 1, [&last_id, &last_label].into_iter())
+                .unwrap()
+                .into_series();
+        let elements = ListChunked::from_iter([Some(first), None, Some(last)])
+            .with_name("elements".into())
+            .into_series();
+        let physical = PlDataFrame::new_infer_height(vec![elements.into()]).unwrap();
+        let nested_metadata = [("origin".to_string(), serde_json::json!("nested IPC"))]
+            .into_iter()
+            .collect();
+        let logical = StructType::new(vec![StructField::new(
+            "elements".into(),
+            LogicalDataType::ArrayWithNullability {
+                element_type: Box::new(LogicalDataType::Struct(vec![
+                    StructField::new("id".into(), LogicalDataType::Integer, false)
+                        .with_metadata(nested_metadata),
+                    StructField::new("label".into(), LogicalDataType::String, true),
+                ])),
+                contains_null: false,
+            },
+            true,
+        )]);
+        assert!(logical.try_to_polars_schema().is_err());
+
+        let source = DataFrame::from_polars(physical)
+            .with_logical_schema(logical.clone())
+            .unwrap();
+        let filtered = source.filter(col("elements").is_not_null()).unwrap();
+        let projected = filtered
+            .select_exprs(vec![col("elements").alias("payload")])
+            .unwrap();
+        let transformed = projected.union(&projected).unwrap();
+        assert_eq!(transformed.count().unwrap(), 4);
+        let transformed_schema = transformed.schema().unwrap();
+        let LogicalDataType::ArrayWithNullability {
+            element_type,
+            contains_null,
+        } = &transformed_schema.fields()[0].data_type
+        else {
+            panic!("array-of-struct logical type must survive transformations");
+        };
+        assert_eq!(transformed_schema.fields()[0].name, "payload");
+        assert!(!contains_null);
+        let LogicalDataType::Struct(nested_fields) = element_type.as_ref() else {
+            panic!("array element must retain its logical struct schema");
+        };
+        assert!(!nested_fields[0].nullable);
+        assert_eq!(nested_fields[0].metadata["origin"], "nested IPC");
+
+        let expected_schema = transformed_schema.to_json().unwrap();
+        let batch = transformed
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        let rows = decoded.column("payload").unwrap().list().unwrap();
+        for row in 0..4 {
+            let values = rows.get_as_series(row).unwrap();
+            let fields = values.struct_().unwrap();
+            let expected_id = if row % 2 == 0 { 1 } else { 3 };
+            assert_eq!(
+                fields.field_by_name("id").unwrap().i32().unwrap().get(0),
+                Some(expected_id)
+            );
+            let label_series = fields.field_by_name("label").unwrap();
+            let labels = label_series.str().unwrap();
+            if row % 2 == 0 {
+                assert_eq!(labels.get(1), Some("two"));
+            } else {
+                assert_eq!(labels.get(0), Some("three"));
+            }
+        }
+    }
+
+    #[test]
     fn nonnullable_array_elements_survive_logical_sidecar_and_ipc() {
         use polars::io::ipc::IpcStreamReader;
         use polars::prelude::{IntoSeries, ListChunked, SerReader, Series};
