@@ -1,0 +1,155 @@
+# 4.17.0 implementation and release plan
+
+**Status: planned; no implementation or release gates completed.** This plan refines **Phase 1**, following the [4.16 implementation plan](RELEASE_4_16.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes again at **4.17.0**, including unchanged packages. Owners, implementation issues/PRs, and test evidence remain unassigned.
+
+[Plan index](README.md) · [Epic](EPIC.md) · [Release roadmap](ROADMAP.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
+
+## Release outcome and prerequisites
+
+Two HTTP sessions in the same trusted service scope can create, populate, and read shared native tables. Closing either session leaves saved objects available to the other; temporary views and current-database state remain session-local. Supported mutations have one execution per accepted operation identity within a running server instance, with queryable commit outcomes after a lost response. Restart creates an empty catalog and a new instance identity.
+
+Logical schemas preserve declared types, nullability, and metadata through the enabled native transformations. Range construction and aggregate count avoid whole-input materialization on their declared paths, with allocation and scheduler evidence. Public HTTP/SDK results retain the exact 4.16 contract.
+
+Implementation can begin after the relevant 4.16 interfaces settle, but **4.17 cannot ship before 4.16 is complete**. Rerun its applicable regression gates against the 4.17 candidate. HTTP remains the supported transport; `spark_connect_url` still rejects unsupported use. Durable storage, external table writes, production Connect/replay, Python workers, and Delta/Unity Catalog are outside this release. Existing embedded APIs retain their supported behavior.
+
+## Proposed Phase 1 baseline
+
+These are choices to verify and record in D02–D04 and D07–D11, not resolved decisions or evidence of implementation. Change the affected contracts and tests together if implementation requires a different baseline.
+
+| Area | 4.17 baseline |
+| --- | --- |
+| Catalog ownership | One explicit in-memory catalog per trusted server service scope; fresh catalog for each server instance |
+| Lifetime | Saved tables/databases survive session close/TTL; all shared and temporary data disappears on restart |
+| Names | One implicit catalog; `database.table` or unqualified table in the session's current database; identifier/case rules follow the pinned semantic profile |
+| Read visibility | Statement snapshots of immutable committed table versions; one snapshot covers all table resolutions in the statement |
+| Write visibility | One catalog mutation at a time; staged changes become visible at one atomic publication point |
+| Initial writes | Enumerated managed in-memory DDL, append, and session-local view/database commands below; no arbitrary provider/file options |
+| Mutation identity | Versioned HTTP extension carrying server-instance and operation identity; retained outcomes independent of session/transport lifetime |
+| Retry guarantee | Same-instance deduplication while records remain retained; old-instance requests are rejected after restart |
+| Types | Required native logical-schema repairs; remote type expansion requires separate encoding/SDK evidence for each type |
+| Execution | Lazy native range source and aggregate count; all expensive planning/execution/encoding under bounded admission |
+
+The existing emulator uses a shared `sql-warehouse` session and carries no authenticated caller identity. Shared catalog visibility does not add per-user isolation. Keep loopback/trusted-service defaults; client-supplied session or operation IDs are not authorization.
+
+## Ordered delivery slices
+
+Slice IDs are local planning IDs. Assign each an owner, reviewable change, and immutable evidence when implementation starts.
+
+| Slice | Deliverable | Dependencies | Exit evidence |
+| --- | --- | --- | --- |
+| **417-01** | Freeze catalog, SQL, mutation identity/outcomes, type matrix, and external adapter contract | Applicable 416-01/04/05/06 contracts | Staged D02–D04/D07–D11 records; SDK fixtures; external owner/issue and required revision tracked |
+| **417-02** | Native shared-catalog hooks, isolated session state, statement snapshots | 417-01; 416-04 ownership | V15: cross-session visibility, shadowing, close/TTL/restart, separate service instances |
+| **417-03** | Serialized mutations, staged commit, bounded catalog accounting | 417-02 | Native V16 concurrency/atomicity/failure tests; unsupported AST descendants rejected |
+| **417-04** | HTTP operation identity/status and emulator mutation integration | 417-01, 417-03; SS-04 accounting | V16 direct HTTP and SDK/emulator duplicate/disconnect/close/deadline/restart evidence |
+| **417-05** | Logical-schema representation and checked native/IPC conversions | 417-01; 416-05 scalar path | V18 Phase 1 matrix, schema compatibility fixtures, empty/nonempty value round-trips |
+| **417-06** | Lazy range, aggregate count, planning/scheduler audit | 417-01; 416-04 scheduler | V17 correctness, allocation/RSS measurements, cancellation and health progress |
+| **417-07** | Integrated regression suite, capabilities/docs, complete candidate distribution | 417-02–417-06; corrected pinned adapter | Prior gates plus V15–V18 and V31; all 4.17.0 artifacts installed and verified |
+| **417-08** | Coordinated publication and public artifact verification | 417-07 and all pre-publication gates | V32: complete 4.17.0 inventory verified through fresh public installs |
+
+After contract freeze, schema and lazy execution can proceed independently of catalog work. A native catalog test does not complete HTTP/SDK mutation integration. Phase 2 analysis/Arrow client conformance remains separate from the native IPC checks here.
+
+## 417-02: catalog and session ownership
+
+Introduce a native catalog interface that accepts the server-owned shared catalog while preserving embedded-session defaults. Current `SparkSession` clones share session resources, `new_session()` allocates fresh saved-table/database maps, and `GLOBAL_TEMP_CATALOG` is process-wide. Neither operation supplies the desired service boundary. Existing `ExternalCatalogProvider` resolution/write hooks are useful components but do not supply shared namespace ownership or the service's mutation coordinator.
+
+The catalog owns database metadata, stable table identity, immutable versions, logical schemas, and retained data. Drop/recreate allocates a new table identity even when the name is reused. Each session owns temporary views, current database, and configuration. An unqualified relation first resolves a local temporary view, then a saved table in the current database; a qualified name resolves only a saved table. Writes target saved tables explicitly and never fall through to a temporary view. Reject global temporary views, additional catalog qualifiers, and client-selected storage/provider locations. Two server instances in one process must not share catalogs or views accidentally.
+
+Under a short catalog lock, acquire a statement-wide snapshot of all referenced objects, then release the lock before expensive planning/execution. Readers that acquired a version before append/drop finish against that version. Readers acquiring a snapshot after publication see the new version or a missing object. Do not resolve different tables against unrelated publication moments within one statement. Publication includes table data and schema together.
+
+Preserve 4.16 session generations, active references, reserved warehouse lifetime, and idempotent close. Closing/expiring a session drops its temporary state only after active references are released; it never drops saved objects or mutation outcomes. Dropping a database is restricted to an empty database and cannot remove `default`; a session whose current database was dropped gets an explicit missing-database error until `USE` selects an existing one. Startup always creates a fresh instance and empty `default` database; do not reopen files or promise recovery.
+
+## 417-03: explicit mutation subset and commit boundary
+
+Keep the complete 4.16 query subset and add named managed-table reads, projections (including `*`), and `COUNT(*)` over those relations. Validate every expression/descendant using the existing allowlist. Add exactly these commands:
+
+| Command | Required behavior |
+| --- | --- |
+| `CREATE DATABASE/SCHEMA [IF NOT EXISTS] name` | Publish database metadata; existence behavior follows the declared clause |
+| `CREATE TABLE [IF NOT EXISTS] db.table (columns...)` | Empty managed in-memory table with explicit supported scalar schema and unique column names |
+| `INSERT INTO db.table [(columns...)] VALUES ...` or `SELECT ...` | Atomic append from bounded literals or the supported read subset; checked casts/nullability; no partial append |
+| `DROP TABLE [IF EXISTS] db.table` | Remove saved binding atomically; active snapshot readers retain their data |
+| `DROP DATABASE/SCHEMA [IF EXISTS] name` | Restrict to empty databases; reject cascade and dropping `default` |
+| `CREATE [OR REPLACE] TEMP VIEW name AS SELECT ...`; `DROP VIEW [IF EXISTS] name` | Affect only that session; retain creation-time schema and relation snapshots so later catalog changes cannot silently rebind the view |
+| `USE database` | Change only that session's current database after existence validation |
+
+`CREATE TABLE AS SELECT`, replace/overwrite, UPDATE, DELETE, MERGE, transactions, permanent/global views, ALTER, cache commands, UDFs, arbitrary functions/readers, and file/network/provider options remain unsupported. Reject constraints/options not implemented, rather than ignoring them. Table columns use the proven remote scalar matrix; nested and newly represented native types remain unavailable remotely until their separate gates pass. Maintain statement atomicity on cast, nullability, size, and cancellation failures. Unsupported mutation tests assert zero catalog effects.
+
+Use one writer lane per catalog, covering validation against current state, source snapshot capture, staging, and commit. Waiting for the writer lane consumes bounded pending capacity, not a blocked compute thread. Serialize session-local state changes with that session's work. Define lock ordering in implementation and never hold catalog/session mutexes across expensive computation or transport I/O. Readers can continue on snapshots while a writer stages data.
+
+Stage the complete candidate update, validate limits and schema, and reserve a bounded commit receipt before atomic publication. After publication, record the committed table identity/version (or namespace/session-state change) without a fallible result-serialization step. Cancellation before publication discards staging and can report `cancelled` only after establishing no effects; cancellation, close, or disconnect after publication retains `committed`. A precommit failure is `failed` with no effects. If commit certainty cannot be established, retain `unknown`, block automatic retry, and mark the test/release gate failed for this in-memory baseline.
+
+### Additional limits to validate
+
+Retain 4.16 transport, active/queue, result, session, and deadline limits. Propose 128 databases (including `default`), 1,024 saved tables, 128 temporary views per session, 64 MiB accounted data per table, and 256 MiB per catalog including staged and snapshot-pinned data. Account temporary-view snapshots too; dropping a binding cannot free bytes still pinned by a reader/view. Enforce reservations before publication and release only when owners finish. Reject growth with named capacity errors and no partial changes.
+
+Define accounted data using a documented native buffer-size measure, counting shared buffers once, and test staging/pinned-version pressure. This is a catalog retention budget, not a hard RSS bound: operators, allocator overhead, and transient staging allocations still require measurement. Do not describe a small encoded input or result as proof of bounded native memory.
+
+## 417-04: mutation identity, outcomes, and adapter integration
+
+Specify a new agent contract version before enabling writes. Proposed mutation requests extend `session/kind/code` with required `server_instance_id` and `operation_id`. Read-only 4.16 requests continue to work; a legacy request containing a mutation fails before execution with `OperationIdentityRequired`. Readiness/capabilities expose the instance identity and exact enabled command/version matrix. The adapter must obtain that identity before submission and carry one stable operation ID through all retries of a statement. Separate intentional submissions receive distinct IDs even if SQL/session bytes match; deriving an ID only from SQL text would incorrectly suppress repeated appends.
+
+Use a key of trusted catalog scope, server instance, protocol, and operation ID. Bind it to a fingerprint of exact SQL bytes, kind, session ID/generation, and the semantic/current-database context captured on first acceptance. Bound identifiers (proposed 128 UTF-8 bytes each) and reject malformed identities. Freeze canonical fingerprint construction and digest algorithm in D10; no SQL normalization or ambiguous field concatenation. Resolve an existing key before checking current session state, so a retry/status lookup can recover the original outcome after close; do not recapture changed session settings for a duplicate. Different request content or a different session using that key gets `OperationIdentityConflict` without execution.
+
+Reserve the operation record atomically before starting any effects. A duplicate attaches to the existing record or returns its bounded state/receipt; it never queues a second mutation. Proposed `POST /operations/status` accepts the instance and operation identity within the same trusted scope and only observes retained state. It must never create a missing operation or execute SQL. Keep execution state, transport deadline, and effect outcome separate. A deadline/disconnect while commit is pending reports a pending/unknown-to-caller outcome plus operation identity, rather than claiming rollback; status eventually reports the established outcome.
+
+Mutation responses/status carry instance/operation IDs, execution state, effect outcome, and a bounded receipt with affected object identity/version where applicable. Successful no-ops also have a receipt. Freeze exact envelope/error/status mappings with the emulator's public SDK decoding before enabling writes. Preserve these small records independently from ordinary result envelopes, session close, and disconnected transports. A failed response send cannot turn a recorded commit into a failed mutation.
+
+Propose a process-lifetime capacity of **1,024 accepted mutation records and 4 MiB reserved receipt/fingerprint storage**, with at most 4 KiB per record. Retain all accepted identities, including failures/cancellations, until instance shutdown; do not evict or reuse keys. When full, reject new identities with HTTP 429 and a named retention-capacity error before any effects; existing status/duplicate requests remain serviceable within bounded transport limits. Record the operational cost of this conservative baseline in capabilities. Any later expiry/release policy needs tombstone/reuse semantics and new tests before replacing it.
+
+Restart loses both catalog and records and creates a new instance identity. Old-instance mutation/status requests return `ServerInstanceMismatch`, including requests never accepted previously; missing same-instance records return an explicit unknown-operation error. Do not retry automatically under the new instance or promise durable exactly-once behavior. Forced process termination has the same boundary.
+
+The external emulator must add identity propagation, outcome/status mapping, bounded retry behavior, and capability negotiation. Track its owner, issue/PR, immutable revision/image, and SDK pin in D03/D10. Direct HTTP can develop while that work is pending, but supported SDK writes and the 4.17 integrated release gate wait for real public SDK tests. SQL remains read-only on adapters lacking the extension; transport success alone is insufficient.
+
+## 417-05: required logical-schema and native type work
+
+The current core has field nullability but no field metadata, BYTE/FLOAT32/NTZ distinctions, array element-nullability, or map value-nullability representation. Polars conversion reconstructs nullable fields and falls back to string for some unsupported mappings. Add an explicit logical-schema representation and checked conversion path instead of deriving declarations from observed values or physical schemas alone.
+
+| Matrix | Required Phase 1 evidence | Remote exposure |
+| --- | --- | --- |
+| Existing 4.16 scalars | Exact values/types/decimal scale/time units, field order/nullability/metadata through table/view/read/append/projection/cast/filter/union/count | Required HTTP and public SDK regression corpus |
+| BYTE, FLOAT32, binary, TIMESTAMP_NTZ | Distinct native logical types; checked physical/IPC round-trip; timestamp versus NTZ and signed/unsigned boundaries remain explicit | Disabled by default; each addition needs frozen JSON/SDK encoding and its own empty/nonempty fixtures |
+| Struct/array/map schema | Preserve nested field metadata/nullability, array `containsNull`, map `valueContainsNull` and non-null keys; unsupported physical maps fail explicitly | Nested HTTP values remain disabled; no production Connect claim |
+
+Preserve logical declarations through serialization and supported plan transformations, including zero-row results and duplicate public labels. For nested forms, test native schema round-trips and checked rejection wherever value conversion is not implemented; do not claim value support from schema representation alone. Metadata uses bounded JSON-compatible values with explicit depth/byte limits under the existing request budget. Record those limits and propagation rules per transform in D11.
+
+Existing serialized core schemas and `StructField` construction are public compatibility surfaces. Choose additive/defaulted metadata or a separate logical descriptor with explicit migration fixtures; do not silently reinterpret old timestamp/array/map forms. Preserve existing embedded behavior while ensuring the server uses checked mappings. Test unsigned overflow, non-finite values, decimal limits, microsecond precision, nested nullability, and unsupported physical types without default stringification.
+
+Compare native logical schema, native IPC schema, and decoded payloads for supported mappings. HTTP continues positional export, preserving exact integers/decimals and typed empty results. AnalyzePlan and client Arrow streaming conformance remain Phase 2 requirements; these native checks prepare their boundary without claiming those endpoints work.
+
+## 417-06: lazy execution and scheduler evidence
+
+Current native `range()` fills a `Vec<i64>` eagerly and both ordinary and cancellation-aware count paths collect before counting. Implement a deferred range source with bounded batch production, plus aggregate count that does not collect all input rows. A cardinality shortcut is valid only when the plan proves it; filters and nullable `COUNT(column)` must retain their semantics. Required HTTP `COUNT(*)` returns BIGINT; preserve checked conversions for existing native count APIs.
+
+Required witnesses include positive/negative steps, empty ranges, zero-step rejection, near-i64 bounds, cardinality overflow, `range(0,10,1).filter(id > 5).count() == 4`, and a large range with small LIMIT. Keep existing configurable range guards unless an explicit, tested policy replaces them; configure the large-range test deliberately. Range construction and schema inspection must not allocate an input-sized vector. Count must avoid whole-input materialization; a filtered count may scan bounded batches rather than running in constant time.
+
+Audit exposed table/view resolution, SQL parsing, schema inference, range creation, count, staging, and result encoding. All expensive paths run under SS-04 admission/compute ownership, including native producers spawned by batch APIs. Cancellation/disconnect/deadline retains compute and snapshot leases until work actually stops. Health/control requests progress under a long count or writer; waiting writers cannot exhaust compute workers.
+
+Measure allocations, peak RSS, retained snapshot/staging bytes, and elapsed time on the same hardware/settings for at least three increasing cardinalities. Record construction separately from actions, expected count/value/schema, output size, and the execution strategy. Acceptance requires construction memory independent of row count, bounded range batch buffers, and no input-sized row collection for count. Set reproducible workload sizes and numeric regression budgets in D08 before recording V17 as passed. Tiny output, batching alone, or a fast small query is insufficient; no general hard-memory or speedup claim follows.
+
+## Validation corpus and release gates
+
+| Scenario | Required assertion | Gate |
+| --- | --- | --- |
+| A creates `db.t`, appends 1 and 2; B reads/counts | Exact rows/schema and BIGINT count 2; no table seeding through a test-only remote endpoint | V15/V16 |
+| A shadows `t` with a temp view; B reads; A closes/expires | Local shadowing only; qualified saved reads unchanged; saved data and receipts survive close | V15 |
+| Two catalogs in one process; session close/recreate; process restart | No global-view leakage; fresh session generation; restart loses catalog and rejects old instance IDs | V15/V16 |
+| Two appends; append/drop/read races; failed cast or capacity overflow | Serialized effects, complete statement snapshots, no partial writes; unsupported UPDATE/DDL has zero effects | V16 |
+| Same-ID simultaneous submission, changed SQL/session, response loss after commit | One effect; conflict on changed request; status recovers committed receipt through direct HTTP and SDK/emulator | V16 |
+| Cancel/close/deadline before publication, during staging, and after publication | No false cancellation/rollback; records and live leases survive transport/session cleanup | V16 |
+| Fill record/catalog budgets; pin a dropped version; retry after session close/restart | Prompt bounded rejection, no early reclamation or silent record eviction, explicit restart mismatch | V15/V16 |
+| Scalar corpus through tables/views/transforms; nested schema and unsupported mappings | Exact declared schemas on empty/nonempty data; migration fixtures and checked failures | V18 |
+| Large range/limit/count and saturated scheduler | Correct results, measured allocation/RSS, deferred construction, health progress, retained cancellation permits | V17 |
+
+Run controlled races around the actual publication point as well as real concurrent workloads. SDK tests inspect public values/schema and outcome behavior through the pinned adapter. Test read-only legacy clients and unsupported operations too. V18 here covers the Phase 1 native/HTTP matrix; V18–V25 Connect evidence remains required in 4.18.
+
+**Ready to tag/publish:** 417-01–417-07 complete; prior applicable 4.16 gates and V15–V18 pass on one integrated candidate; **V31** verifies the complete 4.17.0 candidate inventory and fresh isolated consumer installs. Reuse the 4.16 packaging method without inheriting root Cargo patches/local paths. Check every manifest/dependency/lockfile/runtime/binary/wheel version, launcher binary coupling, native image, platform target, and disabled-feature boundary.
+
+**Released:** 417-08 and **V32** verify every public package, binary, wheel/sdist, container digest, and `v4.17.0` tag using fresh exact-version installs and functional witnesses. Partial publication remains incomplete; corrections to already published contents require a coordinated patch version. Keep capability/SQL/type/limit/lifetime documentation synchronized with the tested artifacts.
+
+- [ ] 417-01: contracts and external adapter prerequisite recorded.
+- [ ] 417-02–417-04: catalog, coordinated writes, and direct/SDK outcomes verified.
+- [ ] 417-05–417-06: logical schemas and lazy native execution verified.
+- [ ] 417-07: regression and V31 candidate gates pass.
+- [ ] 417-08: V32 public inventory verification completes 4.17.0.
+
+This refinement supplies implementation instructions only. It does not add server code, bump versions, change the external emulator, publish packages, or complete any validation gate.

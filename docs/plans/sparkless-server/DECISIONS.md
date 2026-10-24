@@ -10,6 +10,20 @@ Do not replace an unresolved value with a guessed version or silently treat a re
 
 The [4.16 implementation plan](RELEASE_4_16.md) proposes concrete choices for D02/D04 (restricted SQL, explicit server semantics, exact scalar results), D06 (owned JSON-lines control), D07/D08 (operation accounting and bounded defaults), D09 (read-only ephemeral sessions), and the HTTP scalar slice of D11. These are design baselines to verify in slices 416-01 through 416-08, not completed compatibility decisions or test evidence. Record deviations and their impact before freezing the contracts. All unrelated platform/version choices remain open; the shared 4.16.0 package-version policy is already fixed.
 
+## 4.17 implementation baseline
+
+The [4.17 implementation plan](RELEASE_4_17.md) proposes staged extensions to the 4.16 contracts. None is resolved or tested by this documentation change. Freeze deviations and their validation impact in 417-01 before enabling writes or additional types.
+
+| Decisions | Phase 1 choices to verify | Required evidence |
+| --- | --- | --- |
+| D02–D04 | Identifier/current-database rules, managed-table SQL allowlist, agent version, exact mutation receipts and SDK outcome mapping | Golden AST rejection/effect tests; immutable external adapter revision and public SDK fixtures |
+| D07, D10 | Instance-scoped operation keys/fingerprints; status-only lookup; commit versus transport state; process-lifetime retention without eviction | Duplicate/conflict/close/disconnect/deadline/restart tests; atomic commit/receipt boundary; no automatic retry after unknown outcomes |
+| D08 | Writer scheduling; catalog/snapshot/staging budgets; proposed 1,024 records/4 MiB outcome storage; lazy execution workloads and numeric allocation/RSS regression budgets | Saturation and pinned-version accounting; health progress; reproducible construction/action memory measurements |
+| D09 | Ephemeral shared catalog, isolated temp views, statement snapshots, saved data surviving close/TTL but lost on restart | Cross-session and separate-service isolation, read/write/drop races, fresh-instance rejection of old IDs |
+| D11 | Logical metadata and BYTE/FLOAT32/NTZ distinctions, nested nullability, checked physical/IPC conversions, old-schema compatibility and per-transform propagation/metadata limits | Phase 1 native schema/value matrix and HTTP scalar regressions; per-type remote encoding gates remain explicit |
+
+D05/D06 also require the complete 4.17.0 candidate inventory, exact launcher/binary coupling, platform evidence, and public-install verification in V31/V32. Retain the independent protocol versions and coordinated package-version policy. Phase 2 replay/analysis/Arrow client decisions remain open.
+
 ## Decisions required by milestones
 
 | ID | Decision | Required by | Responsible workstream | Resolution requirements |
@@ -17,14 +31,14 @@ The [4.16 implementation plan](RELEASE_4_16.md) proposes concrete choices for D0
 | D01 | Client/proto/oracle compatibility manifest | 0A | SS-01, SS-03 | Exact pyspark-client release, matching proto tag/commit, Python range, gRPC/protobuf/PyArrow locks, generator version, reference Spark/Sail versions and settings |
 | D02 | SQL/configuration semantics | 0A | SS-01, SS-08 | Explicit engine profile, ANSI/case sensitivity/timezone/decimal behavior; mutable versus read-only configuration; unsupported keys fail |
 | D03 | Emulator prerequisite and trust scope | 0A tracking; 0B integration | SS-01, SS-07 | External owner and issue/PR, typed-result fix, exact revision/image digest and SDK version; shared sql-warehouse identity limitations |
-| D04 | Supported SQL/type/JSON contract | 0A specification; 0B verification | SS-01, SS-05, SS-08 | Allowlisted read-only nodes/functions, logical schema JSON, exact integer/decimal/date/time/null encodings, duplicate labels, non-finite float policy |
+| D04 | Supported SQL/type/JSON contract | 0A specification; 0B verification; mutation extension in 1 | SS-01, SS-05, SS-07, SS-08 | Allowlisted read-only nodes/functions, Phase 1 managed SQL/identity/status extension, logical schema JSON, exact integer/decimal/date/time/null encodings, duplicate labels, non-finite float policy |
 | D05 | Binary/platform/release matrix | 0B | SS-02, SS-06, SS-11 | Supported OS/arch/libc targets, runtime dependencies, artifact verification, package publishing order and binary-extra compatibility |
 | D06 | Launcher control and compatibility | 0B | SS-02, SS-06 | Message framing/size, per-launch identity, endpoint readiness, version negotiation, Windows/POSIX graceful shutdown, cleanup and fork restrictions |
-| D07 | Operation/transport state and retention | Prototype in 0A; production base in 0B; replay in 2 | SS-03, SS-04, SS-10 | State transitions, actual completion ownership, deadlines, stable identities, reattach/release, expiry and restart behavior |
-| D08 | Resource limits and enforcement | 0B base; replay extension before 2 | SS-04, SS-10, SS-11 | Concrete defaults for sessions/active work/queues/input/decoded data/output; Polars thread sizing; enforced versus cooperative budgets; replay byte/TTL limits |
+| D07 | Operation/transport state and retention | Prototype in 0A; production base in 0B; mutation outcomes in 1; replay in 2 | SS-03, SS-04, SS-07, SS-10 | State transitions, actual completion ownership, deadlines, stable identities, mutation outcome retention, reattach/release, expiry and restart behavior |
+| D08 | Resource limits and enforcement | 0B base; catalog/outcome extension in 1; replay extension before 2 | SS-04, SS-07, SS-08, SS-10, SS-11 | Concrete defaults for sessions/active work/queues/input/decoded data/output; catalog/staging/snapshot and outcome capacity; lazy execution measurement budgets; Polars thread sizing; enforced versus cooperative budgets; replay byte/TTL limits |
 | D09 | Catalog lifetime and persistence | Session slice in 0B; shared catalog in 1 | SS-07, SS-13 | Reserved session lifetime, catalog scope, temp-view isolation, storage/metadata ownership, visibility, restart durability and recovery |
 | D10 | Mutation outcomes and retries | Before enabling writes in 1 | SS-07 | Operation/idempotency identity, duplicate handling, catalog locking/snapshots, commit receipts, unknown outcome and restart limits; external adapter extension |
-| D11 | Logical schema and Arrow boundary | Minimal scalar path in 0B; full enabled matrix before 2 | SS-08, SS-09, SS-10 | Metadata preservation, physical/logical mapping, IPC implementation/version, empty batches, byte limits, local relation decode expansion/artifact threshold |
+| D11 | Logical schema and Arrow boundary | Minimal scalar path in 0B; native schema/type repairs in 1; full enabled matrix before 2 | SS-08, SS-09, SS-10 | Metadata preservation, schema migration/propagation rules, physical/logical mapping, IPC implementation/version, empty batches, byte limits, local relation decode expansion/artifact threshold |
 | D12 | Python worker security and packaging | Before Phase 3 implementation | SS-12 | Explicit opt-in scope, worker API, code trust, OS isolation, quotas, credentials, environment, results, and process-tree ownership |
 | D13 | Native Delta/UC compatibility | Before Phase 4 implementation | SS-13 | Library/storage/catalog versions, credentials policy, supported operations, conflict/transaction semantics and independent reader |
 

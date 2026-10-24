@@ -88,10 +88,22 @@ Remote mutations, arbitrary Python, and production Spark Connect remain unsuppor
 
 Build on the 4.16.0 service with **Phase 1** capabilities, then publish all packages again at **4.17.0**.
 
+The [detailed 4.17 implementation plan](RELEASE_4_17.md) specifies the proposed ephemeral catalog, statement snapshots, initial mutation allowlist, HTTP identity/status extension, bounded outcome retention, native type matrix, and lazy execution evidence. These are implementation baselines to verify, not completed capabilities.
+
+### Delivery sequence
+
+| Slices | Result | Dependency to advance |
+| --- | --- | --- |
+| 417-01–417-02 | Frozen Phase 1 contracts, shared native catalog, isolated session state | V15 visibility/close/TTL/restart and snapshot ownership evidence |
+| 417-03–417-04 | Atomic coordinated mutations and HTTP/SDK identity/outcome integration | V16 concurrency, duplicate/disconnect/commit/restart evidence; corrected pinned adapter |
+| 417-05–417-06 | Logical-schema repairs and lazy range/count/planning | Phase 1 V18 type/schema matrix and V17 allocation/scheduler evidence |
+| 417-07 | Integrated candidate and complete 4.17.0 distribution | Prior applicable gates, V15–V18, and V31 |
+| 417-08 | Coordinated publication | V32 fresh public installation/artifact verification |
+
 ### Scope
 
 - Separate shared saved tables/database metadata from session-local temporary views/configuration.
-- Implement declared catalog lifetime and persistence behavior, including close and restart semantics.
+- Implement declared catalog lifetime and persistence behavior, including close and restart semantics. The proposed baseline survives session close/TTL within one server instance and starts empty on restart; durability remains unadvertised.
 - Enable only the mutations whose coordination, visibility, operation identity, retry, and commit-outcome contracts pass their tests.
 - Extend logical type/nullability metadata and the native schema path; reject unsupported mappings explicitly.
 - Improve lazy range/count and expensive planning behavior under the compute scheduler.
@@ -100,11 +112,13 @@ Primary plans: [SS-07](07-sessions-catalogs-and-mutations.md), [SS-08](08-native
 
 ### Release gate
 
-- [ ] Prior 4.16 gates still pass; **V15–V18** pass for the enabled Phase 1 surface.
+- [ ] 4.16 is complete, its applicable regression gates still pass, and **V15–V18** pass for the enabled Phase 1 surface; production Connect checks remain in 4.18.
 - [ ] Concurrent mutation, duplicate operation, disconnect near commit, and restart tests match the documented guarantees.
+- [ ] Versioned HTTP identity/status and the corrected pinned emulator preserve outcomes through real public SDK tests; legacy requests remain read-only.
 - [ ] Catalog objects survive session close according to policy; temporary state remains isolated.
 - [ ] Schema fidelity and lazy execution are demonstrated, with intermediate-memory measurements.
-- [ ] All packages/artifacts are published and verified at **4.17.0**.
+- [ ] **V31** verifies every 4.17.0 candidate artifact and isolated consumer installation before tagging/publication.
+- [ ] All packages/artifacts are published and verified at **4.17.0** through **V32** fresh public installs.
 
 ## 4.18.0 — Supported Spark Connect and Arrow execution
 

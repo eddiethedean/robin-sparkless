@@ -7,6 +7,8 @@
 
 Provide reproducible release evidence for each supported route and measure performance without unsupported claims.
 
+For [4.17](RELEASE_4_17.md), 417-07/08 require prior applicable regressions plus V15–V18, V31 isolated candidate installs, and V32 fresh public-artifact verification. Catalog/mutation tests cover both direct HTTP and the corrected pinned SDK/emulator route; native schema/laziness evidence and bounded retention claims need measured results. Republish the complete inventory at 4.17.0 while production gRPC remains unsupported.
+
 ## Dependencies and delivery slices
 
 HTTP release needs SS-01–08 applicable 0B slices; gRPC proxy certification requires standalone SS-09/10 conformance.

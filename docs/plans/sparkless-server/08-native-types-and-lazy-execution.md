@@ -7,6 +7,8 @@
 
 Make the existing engine's schema and execution behavior sufficient for truthful protocol adapters.
 
+The [4.17 implementation plan](RELEASE_4_17.md) defines 417-05/06: required logical metadata/type/nullability repairs and checked conversions, explicit native versus remote type gates, old-schema compatibility, deferred range construction, aggregate count, and reproducible allocation/RSS/scheduler checks. Phase 1 native IPC evidence does not complete Phase 2 AnalyzePlan or client Arrow conformance.
+
 ## Dependencies and delivery slices
 
 SS-01 supported semantics; SS-03 observed Connect requirements. Coordinate with SS-05/09/10 before advertising types.

@@ -7,6 +7,8 @@
 
 Own compute admission and actual native work independently of the lifetime of an HTTP response or gRPC stream.
 
+For Phase 1, follow [417-03/04](RELEASE_4_17.md): bounded writer waiting, catalog/snapshot/staging accounting, and retained mutation outcomes have distinct ownership from compute and response buffers. Session close or a response deadline cannot discard a commit receipt or release a still-running producer's lease.
+
 ## Dependencies and delivery slices
 
 SS-01/02 define contracts/configuration; SS-03 informs later operation protocol needs.

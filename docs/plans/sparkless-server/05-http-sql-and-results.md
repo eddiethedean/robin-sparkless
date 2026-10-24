@@ -9,6 +9,8 @@ Expose actual read-only native SQL through the existing agent envelope with exac
 
 The [4.16 implementation plan](RELEASE_4_16.md#416-05-explicit-read-only-sql-and-result-contract) defines the first release's explicit SQL allowlist, scalar encodings, and golden corpus. Its schema/positional export work is required before HTTP release; the current name-keyed JSON APIs are not sufficient for duplicate labels.
 
+The [4.17 extension](RELEASE_4_17.md) adds only its enumerated managed-table reads/mutations and session commands after SS-07 coordination and HTTP identity/status gates pass. Legacy mutation requests remain rejected. Keep the 4.16 exact scalar/result and bounded-response behavior as regression requirements.
+
 ## Dependencies and delivery slices
 
 SS-01 contracts/emulator mapping; SS-02 transport; SS-04 runtime; SS-07 minimum sessions; SS-08 minimum scalar/schema repairs.

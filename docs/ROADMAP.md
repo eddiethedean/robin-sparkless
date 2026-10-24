@@ -4,7 +4,7 @@
 
 ## Current release roadmap: Sparkless Server 4.16+
 
-The current product release plan adds the native Sparkless Server to the existing Sparkless and robin-sparkless packages. These milestones are planned scope, not calendar commitments. The [Sparkless Server release roadmap](plans/sparkless-server/ROADMAP.md) is the detailed source for phase scope, dependencies, and release gates; the [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md) details the first release.
+The current product release plan adds the native Sparkless Server to the existing Sparkless and robin-sparkless packages. These milestones are planned scope, not calendar commitments. The [Sparkless Server release roadmap](plans/sparkless-server/ROADMAP.md) is the detailed source for phase scope, dependencies, and release gates; the [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md) details the first release and the [4.17 implementation plan](plans/sparkless-server/RELEASE_4_17.md) refines shared catalogs, controlled mutations, logical schemas, and lazy execution.
 
 | Release | Shared version | Planned scope |
 | --- | --- | --- |

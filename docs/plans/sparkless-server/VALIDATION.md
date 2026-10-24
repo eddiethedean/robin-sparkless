@@ -24,10 +24,10 @@ For each gate record the native commit, client/SDK version, emulator/oracle revi
 | V12 | 0B / SS-06 | Sync/async launcher normal and exception exits | Owned children reaped; endpoints valid only while ready; same-object re-entry rejected |
 | V13 | 0B / SS-06 | Startup cancellation, timeout/crash, noisy logs, port collision, binary mismatch, restart, nested instances | Bounded diagnostics, responsive event loop, deterministic cleanup, no orphan or unrelated-process termination |
 | V14 | 0B / SS-02, SS-11 | Native packaging/platform/feature checks | Real SQL runs without Python/JVM in server image; tested platform matrix and dependency isolation |
-| V15 | 1 / SS-07 | Cross-session tables/temp views plus close/restart | Defined catalog visibility and durability; no accidental process-global view leakage |
-| V16 | 1 / SS-07 | Concurrent DML/DDL, duplicate IDs, disconnect near commit, restart | No duplicate live operation effects; truthful committed/unknown/cancelled outcome within documented guarantees |
-| V17 | 1–2 / SS-08 | Large range/count and expensive planning | Chosen lazy/bounded behavior verified; allocation/execution occurs under compute admission |
-| V18 | 1–2 / SS-08 | Enabled scalar/nested logical types and Arrow | Logical/analysis/payload schema agree, including nullability and timestamps; unsupported types fail |
+| V15 | 1 / SS-07 | Cross-session saved tables/temp views, statement snapshots, close/TTL/restart, separate service instances | Saved data outlives sessions, local shadowing stays isolated, pinned dropped versions remain safe, ephemeral restart is explicit; no global view leakage |
+| V16 | 1 / SS-04, SS-07 | Serialized DDL/append, duplicate/conflicting IDs, status after close, commit/disconnect/deadline races, capacity and restart | One effect per accepted same-instance identity; atomic publication/receipt, no false rollback, bounded records without eviction; direct HTTP plus corrected public SDK/emulator route |
+| V17 | 1–2 / SS-04, SS-08 | Large range/limit/count and expensive planning | Deferred construction, bounded range batches, aggregate count without whole-input row collection; allocation/RSS budgets and scheduler/health evidence |
+| V18 | 1–2 / SS-08 | Enabled scalar/nested logical types and Arrow | Phase 1: logical/native IPC/payload agreement, migration and metadata/nullability/NTZ fidelity, HTTP scalar regressions and explicit unsupported mappings; Phase 2 additionally verifies client analysis/Arrow |
 | V19 | 2 / SS-09 | Enabled relations/expressions/config/analysis | Unmodified client and matched reference semantics; unsupported nodes/config/artifacts fail clearly |
 | V20 | 2 / SS-10 | Multi-batch and empty streams | Correct schema, offsets, IDs, completion markers, and batch byte bounds |
 | V21 | 2 / SS-10 | Execute/reattach/release/interrupt/session-release races | No reexecution; prefix/all release is idempotent; restarted/lost sessions cannot silently resume as new executions |
@@ -40,12 +40,22 @@ For each gate record the native commit, client/SDK version, emulator/oracle revi
 | V28 | 4 / SS-13 | Native Delta/UC writes and independent reads | Schema/decimal/transaction/recovery validation; explicit unsupported/conflict outcomes |
 | V29 | 0B / SS-02, SS-06, SS-11 | Complete 4.16.0 candidate inventory and isolated consumer installs | Parser/server/binary-extra and existing packages align; archives/wheels install without checkout paths or inherited root Cargo patches; experimental gRPC absent from normal artifacts |
 | V30 | 4.16 release completion / SS-11 | Public registry/binary/container verification after publication | Fresh exact-version installs and functional witnesses pass; hashes/digests, binary metadata and every inventory item match 4.16.0 |
+| V31 | 4.17 candidate / SS-02, SS-06, SS-11 | Complete 4.17.0 inventory, isolated consumer installs and prior applicable regressions plus V15–V18 | All packages/dependencies/binaries align, launcher and enabled capabilities match; no checkout paths/root Cargo patches; SDK mutation adapter pinned and tested; unsupported gRPC absent |
+| V32 | 4.17 release completion / SS-11 | Public registry/binary/container verification after publication | Fresh exact-version installs exercise shared catalog writes/reads and owned launcher; complete inventory, hashes/digests and metadata match 4.17.0 |
 
 ## 4.16 execution order
 
 Follow [416-01 through 416-09](RELEASE_4_16.md#ordered-delivery-slices). V01–V04 establish Phase 0A, V05–V14 establish the integrated HTTP/launcher surface, and V29 checks the complete packaged candidate. These must pass before the release is ready to publish. V30 runs after publication and establishes release completion. Keep the SDK/emulator and experimental Connect traces separate from the public HTTP-only capability claim.
 
 The exact SQL golden corpus, proposed resource defaults, and negative cases are in the [4.16 implementation plan](RELEASE_4_16.md). Boundary tests should use smaller configured limits for determinism as well as confirming the selected production defaults; a request that times out must not release its live compute lease.
+
+## 4.17 execution order
+
+Follow [417-01 through 417-08](RELEASE_4_17.md#ordered-delivery-slices). Complete the 4.16 prerequisite and rerun applicable regression gates on the 4.17 candidate. V15/V16 establish shared ownership, statement snapshots, coordinated mutations, bounded identity/status retention, and direct/SDK outcome behavior. V17 and the Phase 1 portion of V18 establish native execution/schema changes; they do not certify production Connect.
+
+Use the [4.17 validation corpus](RELEASE_4_17.md#validation-corpus-and-release-gates), including controlled commit races, full retention/catalog budgets, session close and instance restart, unsupported mutation rejection with zero effects, and measured range/count allocation. Record exact workload sizes, settings, native/adapter revisions, and numeric regression budgets before passing a gate. Nested schema preservation alone does not establish nested value/transport support.
+
+V31 checks the complete 4.17.0 candidate before tagging/publication; V32 establishes completion after fresh public installs. A passing direct mutation test cannot substitute for the external adapter/public SDK gate. All evidence remains pending until implementation runs these checks.
 
 ## Test implementation guidance
 

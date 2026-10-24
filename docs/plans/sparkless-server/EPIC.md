@@ -305,6 +305,8 @@ Before Phase 2 is enabled, `spark_connect_url` raises a descriptive unsupported 
 
 ### Phase 1
 
+The [4.17 implementation plan](RELEASE_4_17.md) refines this phase into delivery slices, proposed ephemeral catalog and mutation contracts, type/execution checks, and coordinated candidate/publication gates. Its choices remain baselines to validate; none of the criteria below is completed by planning documentation.
+
 - [ ] Catalog ownership and configured persistence model pass cross-session visibility and close/restart tests.
 - [ ] Mutation concurrency, idempotency scope, commit outcomes, and failure boundaries are verified before exposing writes.
 - [ ] Logical schema fidelity and lazy range/count/planning behavior meet the enabled capability matrix.

@@ -8,6 +8,7 @@ Build a single-node Rust service in `crates/sparkless-server/` that calls Robin'
 
 - [Release roadmap](ROADMAP.md): 4.16.0 and later release scope, coordinated package versions, and publication gates.
 - [4.16 implementation plan](RELEASE_4_16.md): ordered delivery slices, SQL/type boundary, proposed limits, lifecycle/control design, and package/release checks.
+- [4.17 implementation plan](RELEASE_4_17.md): shared catalog/snapshot ownership, controlled mutation identities and outcomes, logical schemas, lazy execution, and coordinated release checks.
 - [Full revised epic](EPIC.md): baseline architecture, contracts, limitations, and phase gates.
 - [Decision register](DECISIONS.md): unresolved choices, required milestones, and evidence to record.
 - [Validation matrix](VALIDATION.md): concrete release evidence required for each milestone.
