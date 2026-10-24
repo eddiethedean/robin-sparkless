@@ -3026,6 +3026,134 @@ mod tests {
         server_task.await.unwrap().unwrap();
     }
 
+    #[tokio::test]
+    async fn close_during_queued_mutation_preserves_commit_and_operation_status() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            queue_timeout: Duration::from_secs(3),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let held_lane = Arc::clone(&server.inner.mutation_lane).lock_owned().await;
+        let instance = server.instance_id().to_string();
+        let mutation = tokio::spawn(async move {
+            statement_request(
+                address,
+                &instance,
+                "close_active_writer",
+                "close_active_operation",
+                "CREATE DATABASE close_active_database",
+            )
+            .await
+        });
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if server.inner.operation("close_active_operation").is_some() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("operation identity must be retained before waiting on the writer lane");
+
+        let (close_status, close_response) = request_json(
+            address,
+            "POST",
+            "/close",
+            &json!({"session":"close_active_writer"}),
+        )
+        .await;
+        assert_eq!(close_status, StatusCode::OK, "{close_response}");
+
+        let (new_work_status, new_work_response) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"close_active_writer",
+                "kind":"sql",
+                "code":"SELECT 1 AS should_not_run"
+            }),
+        )
+        .await;
+        assert_eq!(new_work_status, StatusCode::CONFLICT, "{new_work_response}");
+        assert_eq!(new_work_response["ename"], "SessionClosing");
+
+        drop(held_lane);
+        let accepted = timeout(Duration::from_secs(2), mutation)
+            .await
+            .expect("accepted mutation should finish after its writer slot opens")
+            .unwrap();
+        assert_eq!(accepted["status"], "ok", "{accepted}");
+        assert_eq!(accepted["operation"]["effect_outcome"], "committed");
+        assert!(
+            server
+                .inner
+                .root_session
+                .database_exists("close_active_database")
+        );
+        assert!(
+            !server
+                .inner
+                .sessions
+                .lock()
+                .unwrap()
+                .contains_key("close_active_writer"),
+            "closed generation should be removed after its accepted reference exits"
+        );
+
+        let (status_status, status_response) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({
+                "server_instance_id":server.instance_id(),
+                "operation_id":"close_active_operation"
+            }),
+        )
+        .await;
+        assert_eq!(status_status, StatusCode::OK, "{status_response}");
+        assert_eq!(status_response["effect_outcome"], "committed");
+        assert_eq!(status_response["receipt"]["name"], "close_active_database");
+
+        let replay = statement_request(
+            address,
+            server.instance_id(),
+            "close_active_writer",
+            "close_active_operation",
+            "CREATE DATABASE close_active_database",
+        )
+        .await;
+        assert_eq!(replay["status"], "ok", "{replay}");
+        assert_eq!(replay["operation"]["effect_outcome"], "committed");
+        assert!(
+            server
+                .inner
+                .root_session
+                .database_exists("close_active_database")
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn long_filtered_count_keeps_health_responsive_while_compute_is_occupied() {
         let server = Server::new(ServerConfig {
