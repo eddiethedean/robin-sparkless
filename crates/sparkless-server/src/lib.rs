@@ -4486,16 +4486,109 @@ mod tests {
             .await["status"],
             "ok"
         );
+        let session_lease = server.inner.session_lease("s_write").unwrap();
+        let held_session_lane = session_lease.0.serial.clone().lock_owned().await;
+        let use_task = {
+            let server_id = server_id.clone();
+            tokio::spawn(async move {
+                statement_request(
+                    address,
+                    &server_id,
+                    "s_write",
+                    "use-phase-db",
+                    "USE phase_db",
+                )
+                .await
+            })
+        };
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if server.inner.operation("use-phase-db").is_some() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("USE should be retained while waiting on the session lane");
+
+        let view_sql = "CREATE TEMP VIEW current_db_view AS SELECT id FROM common";
+        let view_task = {
+            let server_id = server_id.clone();
+            tokio::spawn(async move {
+                statement_request(
+                    address,
+                    &server_id,
+                    "s_write",
+                    "create-view-current-db",
+                    view_sql,
+                )
+                .await
+            })
+        };
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if server.inner.operation("create-view-current-db").is_some() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("view creation should queue behind USE in the same session");
+        drop(held_session_lane);
+        drop(session_lease);
+
+        let use_result = timeout(Duration::from_secs(2), use_task)
+            .await
+            .expect("queued USE should complete")
+            .unwrap();
+        assert_eq!(use_result["status"], "ok");
+        let view_result = timeout(Duration::from_secs(2), view_task)
+            .await
+            .expect("queued view creation should complete")
+            .unwrap();
+        assert_eq!(view_result["status"], "ok", "{view_result}");
+
+        let view_operation = server.inner.operation("create-view-current-db").unwrap();
+        let (view_generation, saved_semantic_fingerprint) = {
+            let record = view_operation.lock().unwrap();
+            (record.session_generation, record.semantic_fingerprint)
+        };
+        let view_request_fingerprint = request_fingerprint(&StatementRequest {
+            session: "s_write".into(),
+            kind: "sql".into(),
+            code: view_sql.into(),
+            server_instance_id: Some(server_id.clone()),
+            operation_id: Some("create-view-current-db".into()),
+        });
         assert_eq!(
-            statement_request(
-                address,
-                &server_id,
-                "s_write",
-                "use-phase-db",
-                "USE phase_db",
-            )
-            .await["status"],
-            "ok"
+            saved_semantic_fingerprint,
+            Some(semantic_operation_fingerprint(
+                view_request_fingerprint,
+                view_generation,
+                "phase_db",
+            ))
+        );
+        assert_ne!(
+            saved_semantic_fingerprint,
+            Some(semantic_operation_fingerprint(
+                view_request_fingerprint,
+                view_generation,
+                "default",
+            ))
+        );
+
+        let created_view_read = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({"session":"s_write","kind":"sql","code":"SELECT id FROM current_db_view"}),
+        )
+        .await;
+        assert_eq!(
+            created_view_read.1["data"]["application/json"]["data"],
+            json!([[2]])
         );
         let current_database_read = request_json(
             address,
