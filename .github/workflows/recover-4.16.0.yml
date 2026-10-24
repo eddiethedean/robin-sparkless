@@ -106,42 +106,42 @@ jobs:
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             manylinux: "2_17"
-            args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
+            args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
           - key: manylinux-aarch64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             manylinux: "2_28"
-            args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
+            args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
           - key: macos-x86_64
             runner: macos-15
             target: x86_64-apple-darwin
             manylinux: auto
-            args: --locked --manifest-path python/Cargo.toml -i 3.8 --out dist
+            args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
           - key: macos-arm64
             runner: macos-15
             target: aarch64-apple-darwin
             manylinux: auto
-            args: --locked --manifest-path python/Cargo.toml -i 3.8 --out dist
+            args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
           - key: musllinux-x86_64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
             manylinux: auto
-            args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
+            args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
           - key: musllinux-aarch64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             manylinux: auto
-            args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
+            args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
           - key: windows-x86_64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             manylinux: auto
-            args: --locked --manifest-path python/Cargo.toml -i 3.8 --out dist
+            args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
           - key: windows-arm64
             runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             manylinux: auto
-            args: --locked --manifest-path python/Cargo.toml -i 3.8 --out dist
+            args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
     defaults:
       run:
         shell: bash
@@ -229,6 +229,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
+          skip-existing: true
 
   publish-sparkless:
     name: Publish sparkless to PyPI
@@ -248,6 +249,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
+          skip-existing: true
 
   publish-rust:
     name: Publish Rust crates to crates.io
