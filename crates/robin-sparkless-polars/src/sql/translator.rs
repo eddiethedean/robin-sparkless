@@ -1325,6 +1325,8 @@ fn translate_select_from(
     }
     let first_tj = &select.from[0];
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
+    #[cfg(test)]
+    test_hooks::after_first_relation_resolution();
     let left_alias_opt = table_alias_from_factor(&first_tj.relation);
     if let Some(ref prefix) = left_alias_opt {
         if should_prefix_columns(&first_tj.relation) {
@@ -3609,5 +3611,141 @@ fn sql_limit_to_usize(expr: &SqlExpr) -> Result<usize, PolarsError> {
         _ => Err(PolarsError::InvalidOperation(
             "SQL: LIMIT must be a literal integer.".into(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod test_hooks {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static AFTER_FIRST_RELATION_RESOLUTION: RefCell<Option<Box<dyn FnOnce() + Send>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn set_after_first_relation_resolution(hook: impl FnOnce() + Send + 'static) {
+        AFTER_FIRST_RELATION_RESOLUTION.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(hook));
+        });
+    }
+
+    pub(super) fn after_first_relation_resolution() {
+        AFTER_FIRST_RELATION_RESOLUTION.with(|slot| {
+            if let Some(hook) = slot.borrow_mut().take() {
+                hook();
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use std::collections::HashMap;
+    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::thread;
+    use std::time::Duration;
+
+    use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
+    use serde_json::json;
+
+    use crate::dataframe::DataFrame;
+    use crate::session::{SharedCatalog, SparkSession};
+
+    use super::test_hooks;
+
+    fn frame(id: i64) -> DataFrame {
+        let physical = PlDataFrame::new(1, vec![Series::new("id".into(), [id]).into()]).unwrap();
+        DataFrame::from_eager_with_options(physical, false)
+    }
+
+    #[test]
+    fn statement_join_blocks_publication_between_relation_resolutions() {
+        let session = SparkSession::new(
+            Some("statement-snapshot-race-test".into()),
+            None,
+            HashMap::new(),
+        )
+        .with_shared_catalog(SharedCatalog::new());
+        session.register_table("left_items", frame(1));
+        session.register_table("right_items", frame(10));
+
+        let (paused_tx, paused_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let reader_session = session.clone();
+        let reader = thread::spawn(move || {
+            test_hooks::set_after_first_relation_resolution(move || {
+                paused_tx.send(()).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            });
+            let _read_lease = reader_session
+                .begin_catalog_read_snapshot()
+                .unwrap()
+                .unwrap();
+            reader_session
+                .sql(
+                    "SELECT l.id AS left_id, r.id AS right_id \
+                     FROM left_items l CROSS JOIN right_items r",
+                )
+                .unwrap()
+                .collect_as_json_rows()
+                .unwrap()
+        });
+
+        paused_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("reader should pause after resolving the left relation");
+        let (attempting_tx, attempting_rx) = mpsc::channel();
+        let (published_tx, published_rx) = mpsc::channel();
+        let writer_session = session.clone();
+        let writer = thread::spawn(move || {
+            let _mutation = writer_session
+                .shared_catalog_mutation_guard()
+                .unwrap()
+                .unwrap();
+            attempting_tx
+                .send(writer_session.shared_catalog_writer_lock_is_contended_for_test())
+                .unwrap();
+            let _writer = writer_session.shared_catalog_guard().unwrap().unwrap();
+            let left_replacement = frame(2);
+            writer_session
+                .check_catalog_table_growth("left_items", &left_replacement)
+                .unwrap();
+            writer_session.register_table_during_sql("left_items", left_replacement);
+            let right_replacement = frame(20);
+            writer_session
+                .check_catalog_table_growth("right_items", &right_replacement)
+                .unwrap();
+            writer_session.register_table_during_sql("right_items", right_replacement);
+            published_tx.send(()).unwrap();
+        });
+        let writer_saw_reader_guard = attempting_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer should reach the catalog publication lock");
+        assert!(writer_saw_reader_guard);
+        assert!(matches!(
+            published_rx.recv_timeout(Duration::from_millis(50)),
+            Err(RecvTimeoutError::Timeout)
+        ));
+
+        resume_tx.send(()).unwrap();
+        let old_rows = reader.join().unwrap();
+        assert_eq!(old_rows.len(), 1);
+        assert_eq!(old_rows[0].get("left_id"), Some(&json!(1)));
+        assert_eq!(old_rows[0].get("right_id"), Some(&json!(10)));
+        published_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer should publish after relation resolution finishes");
+        writer.join().unwrap();
+
+        let new_rows = session
+            .sql(
+                "SELECT l.id AS left_id, r.id AS right_id \
+                 FROM left_items l CROSS JOIN right_items r",
+            )
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert_eq!(new_rows.len(), 1);
+        assert_eq!(new_rows[0].get("left_id"), Some(&json!(2)));
+        assert_eq!(new_rows[0].get("right_id"), Some(&json!(20)));
     }
 }

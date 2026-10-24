@@ -2058,6 +2058,16 @@ impl SparkSession {
             .transpose()
     }
 
+    #[cfg(test)]
+    pub(crate) fn shared_catalog_writer_lock_is_contended_for_test(&self) -> bool {
+        self.shared_catalog.as_ref().is_some_and(|catalog| {
+            matches!(
+                catalog.writer.try_lock(),
+                Err(std::sync::TryLockError::WouldBlock)
+            )
+        })
+    }
+
     /// Serialize shared-catalog mutations while allowing readers to resolve snapshots during
     /// staged data work. The catalog writer mutex remains the short publication/resolution lock.
     pub(crate) fn shared_catalog_mutation_guard(
