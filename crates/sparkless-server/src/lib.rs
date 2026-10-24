@@ -7,6 +7,7 @@
 mod config;
 
 pub use config::ServerConfig;
+use config::{MIN_MUTATION_RECORD_BYTES, MUTATION_RECORD_BASE_BYTES};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -194,7 +195,10 @@ impl Server {
             && config.max_active_operations > 0
             && config.max_sessions > 0
             && config.max_mutation_records > 0
-            && config.max_mutation_bytes >= config.max_mutation_records.saturating_mul(256)
+            && config.max_mutation_bytes
+                >= config
+                    .max_mutation_records
+                    .saturating_mul(MIN_MUTATION_RECORD_BYTES)
             && !config.body_read_timeout.is_zero()
             && !config.queue_timeout.is_zero()
             && !config.response_timeout.is_zero();
@@ -484,7 +488,7 @@ impl ServerInner {
             drop(record);
             return ReserveOperation::Existing(Arc::clone(existing));
         }
-        let estimated_record_bytes = 2048usize
+        let estimated_record_bytes = MUTATION_RECORD_BASE_BYTES
             .saturating_add(id.len())
             .saturating_add(session.len());
         if registry.records.len() >= self.config.max_mutation_records
@@ -2331,6 +2335,82 @@ mod tests {
         assert!(validate_statement("SELECT TRY_CAST('1' AS BIGINT)").is_err());
         assert!(validate_statement("SELECT CAST('1' AS ARRAY<INT>)").is_err());
         assert!(validate_statement("SELECT CAST(1 AS BIGINT)").is_ok());
+    }
+
+    #[tokio::test]
+    async fn mutation_retention_capacity_rejects_before_catalog_effects() {
+        let undersized = ServerConfig {
+            max_mutation_records: 1,
+            max_mutation_bytes: 256,
+            ..ServerConfig::default()
+        };
+        assert!(Server::new(undersized).is_err());
+
+        let config = ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_mutation_records: 1,
+            max_mutation_bytes: 4096,
+            ..ServerConfig::default()
+        };
+        let server = Server::new(config).unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let accepted = statement_request(
+            address,
+            &instance,
+            "writer",
+            "retained-create",
+            "CREATE DATABASE retained_db",
+        )
+        .await;
+        assert_eq!(accepted["status"], "ok");
+        assert_eq!(accepted["operation"]["effect_outcome"], "committed");
+
+        let (status, rejected) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"writer",
+                "kind":"sql",
+                "code":"CREATE DATABASE must_not_exist",
+                "server_instance_id":instance,
+                "operation_id":"rejected-create"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(rejected["ename"], "MutationRetentionCapacityExceeded");
+        assert!(!server.inner.root_session.database_exists("must_not_exist"));
+
+        let (status, retained_status) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({"server_instance_id":instance,"operation_id":"retained-create"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(retained_status["effect_outcome"], "committed");
+        assert!(server.inner.operation("rejected-create").is_none());
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
     }
 
     #[test]

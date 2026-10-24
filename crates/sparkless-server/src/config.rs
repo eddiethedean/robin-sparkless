@@ -1,6 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
+pub(crate) const MUTATION_RECORD_BASE_BYTES: usize = 2048;
+pub(crate) const MIN_MUTATION_RECORD_BYTES: usize = MUTATION_RECORD_BASE_BYTES + 2;
+
 /// Enforced transport and admission limits. CPU and intermediate native memory remain
 /// cooperative budgets because a Polars call cannot be forcibly interrupted in-process.
 #[derive(Debug, Clone)]
@@ -98,7 +101,11 @@ impl ServerConfig {
         if config.max_active_operations == 0 || config.max_sessions == 0 {
             return Err("active operation and session limits must be positive".to_string());
         }
-        if config.max_mutation_bytes < config.max_mutation_records.saturating_mul(256) {
+        if config.max_mutation_bytes
+            < config
+                .max_mutation_records
+                .saturating_mul(MIN_MUTATION_RECORD_BYTES)
+        {
             return Err("mutation retention byte and record limits are contradictory".to_string());
         }
         Ok(config)
