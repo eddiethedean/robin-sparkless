@@ -5660,7 +5660,7 @@ mod tests {
             .app_name("bounded-range-batches")
             .get_or_create();
         let frame = session
-            .range(0, 1_000_000, 1)
+            .range(0, 10_000_000, 1)
             .unwrap()
             .filter(col("id").gt(5i64))
             .unwrap();
@@ -5682,7 +5682,7 @@ mod tests {
         assert!(result.is_ok(), "range batch scan returned an error");
         assert!(batch_count > 1, "large input must be split into batches");
         assert!(largest_batch <= RANGE_EXECUTION_BATCH_ROWS);
-        assert_eq!(matched_rows, 999_994);
+        assert_eq!(matched_rows, 9_999_994);
         assert_eq!(frame.count().unwrap(), matched_rows as usize);
     }
 
