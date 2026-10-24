@@ -320,13 +320,15 @@ jobs:
       - name: Build and verify macOS wheel
         run: |
           set -euo pipefail
-          python3 -m pip install wheel setuptools
+          python3 -m venv .venv-server-wheel
+          SPARKLESS_WHEEL_PYTHON=.venv-server-wheel/bin/python
+          "$SPARKLESS_WHEEL_PYTHON" -m pip install wheel setuptools
           mkdir -p dist
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
-            python3 -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
+            "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
           wheel=(dist/*.whl)
-          python3 scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64
+          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64
       - name: Upload macOS server wheel
         uses: actions/upload-artifact@v4
         with:
