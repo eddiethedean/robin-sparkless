@@ -359,6 +359,11 @@ jobs:
         with:
           ref: v4.16.0
           path: source
+      - name: Checkout the current HTTP smoke-test helper
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: validation
       - name: Build the release image from the immutable tag
         working-directory: source
         run: >-
@@ -384,7 +389,7 @@ jobs:
             docker rm -f "$name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          python3 source/scripts/verify_server_http.py http://127.0.0.1:18099
+          python3 validation/scripts/verify_server_http.py http://127.0.0.1:18099
           docker stop --time 10 "$name"
           test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" = 0
       - name: Push version and latest tags to GHCR
