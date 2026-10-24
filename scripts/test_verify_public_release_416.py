@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from verify_public_release_416 import (
-    PYPI_PLATFORMS,
+    PYPI_PLATFORMS_BY_VERSION,
     preserve_existing_pypi_files,
     validate_crate_release,
     validate_pypi_release,
@@ -14,12 +14,13 @@ from verify_public_release_416 import (
 
 
 def release_metadata(project, version="4.16.0"):
-    suffixes = sorted(PYPI_PLATFORMS[project])
+    suffixes = sorted(PYPI_PLATFORMS_BY_VERSION[version][project])
     wheel_project = project.replace("-", "_")
+    wheel_python_abi = "py3-none" if project == "sparkless-server-bin" else "cp38-abi3"
     urls = [
         {
-            "filename": "{}-{}-cp38-abi3-{}.whl".format(
-                wheel_project, version, platform
+            "filename": "{}-{}-{}-{}.whl".format(
+                wheel_project, version, wheel_python_abi, platform
             ),
             "digests": {"sha256": "a" * 64},
         }
@@ -43,6 +44,39 @@ class VerifyPublicRelease416Test(unittest.TestCase):
 
     def test_accepts_complete_sparkless_inventory(self):
         validate_pypi_release(release_metadata("sparkless"), "sparkless")
+
+    def test_accepts_the_staged_417_server_binary_platforms(self):
+        metadata = release_metadata("sparkless-server-bin", "4.17.0")
+        validate_pypi_release(metadata, "sparkless-server-bin", version="4.17.0")
+
+    def test_accepts_the_corrective_4161_server_binary_platforms(self):
+        metadata = release_metadata("sparkless-server-bin", "4.16.1")
+        validate_pypi_release(metadata, "sparkless-server-bin", version="4.16.1")
+
+    def test_417_inventory_requires_exact_published_build_hashes(self):
+        metadata = release_metadata("sparkless-server-bin", "4.17.0")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for entry in metadata["urls"]:
+                path = directory / entry["filename"]
+                path.write_bytes(entry["filename"].encode("utf-8"))
+                entry["digests"]["sha256"] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+            validate_pypi_release(
+                metadata,
+                "sparkless-server-bin",
+                version="4.17.0",
+                local_directory=directory,
+            )
+            metadata["urls"][0]["digests"]["sha256"] = "a" * 64
+            with self.assertRaisesRegex(ValueError, "differ from verified inputs"):
+                validate_pypi_release(
+                    metadata,
+                    "sparkless-server-bin",
+                    version="4.17.0",
+                    local_directory=directory,
+                )
 
     def test_rejects_missing_wheel_platform(self):
         metadata = release_metadata("sparkless")

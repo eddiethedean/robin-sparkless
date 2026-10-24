@@ -422,9 +422,18 @@ jobs:
 
   publish:
     name: Build docs and publish to crates.io
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_rust && github.ref == 'refs/heads/main')
+    if: >-
+      ${{
+        always() &&
+        !contains(needs.*.result, 'failure') &&
+        !contains(needs.*.result, 'cancelled') &&
+        (
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.verify-candidate-distributions.result == 'success') ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish_rust && github.ref == 'refs/heads/main')
+        )
+      }}
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, rust-package-archives]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, rust-package-archives, verify-candidate-distributions]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -476,30 +485,23 @@ jobs:
     name: Publish server binary wheels to PyPI
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [publish, server-container, server-extra-consumer, server-bin-manylinux-x86_64, server-bin-macos-arm64]
+    needs: [publish, verify-candidate-distributions, server-container, server-extra-consumer, server-bin-manylinux-x86_64, server-bin-macos-arm64]
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Download verified Linux server wheel
+      - name: Download verified server binary distributions
         uses: actions/download-artifact@v4
         with:
-          name: sparkless-server-bin-manylinux-2-28-x86_64
-          path: dist/linux
-      - name: Download verified macOS server wheel
-        uses: actions/download-artifact@v4
+          name: verified-server-bin-candidate
+          path: dist
+      - name: Publish server binary distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          name: sparkless-server-bin-macosx-14-0-arm64
-          path: dist/macos
-      - name: Check and publish server binary wheels
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: |
-          python -m pip install twine
-          python -m twine check dist/linux/*.whl dist/macos/*.whl
-          python -m twine upload --non-interactive --skip-existing dist/linux/*.whl dist/macos/*.whl
+          packages-dir: dist/
+          skip-existing: true
 
   publish-server-container:
     name: Publish verified native server container
@@ -651,150 +653,280 @@ jobs:
           $PY -m pytest tests/parity/ -v --tb=short --timeout 90
         timeout-minutes: 20
 
-  # PyPI: build and publish wheels (Python 3.8+), after all checks pass
-  publish-pypi-manylinux-x86_64:
-    name: PyPI manylinux x86_64 + sdist
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  # Build every PyPI artifact on a release-candidate branch. The centralized
+  # publish jobs below use OIDC only after the inventory has been verified.
+  build-pypi-manylinux-x86_64:
+    name: Build PyPI manylinux x86_64 + sdist
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container]
     steps:
       - uses: actions/checkout@v4
-      - name: Publish to PyPI (maturin)
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Build wheel (maturin)
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64-unknown-linux-gnu
-          command: publish
-          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --skip-existing
+          command: build
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
           manylinux: "2_17"
           container: off
+          rust-toolchain: 1.93.1
+      - name: Build source distribution
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          command: sdist
+          args: --manifest-path python/Cargo.toml --out dist
+          container: off
+          rust-toolchain: 1.93.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-dist-manylinux-x86_64
+          path: dist/*
+          if-no-files-found: error
 
-  publish-pypi-manylinux-aarch64:
-    name: PyPI manylinux aarch64
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  build-pypi-manylinux-aarch64:
+    name: Build PyPI manylinux aarch64
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
     runs-on: ubuntu-24.04-arm
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container]
     steps:
       - uses: actions/checkout@v4
-      - name: Publish to PyPI (maturin)
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Build wheel (maturin)
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: aarch64-unknown-linux-gnu
-          command: publish
-          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --skip-existing
+          command: build
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
           manylinux: "2_28"
           container: off
+          rust-toolchain: 1.93.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-dist-manylinux-aarch64
+          path: dist/*.whl
+          if-no-files-found: error
 
-  publish-pypi-mac:
-    name: PyPI macOS ${{ matrix.target }}
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  build-pypi-mac:
+    name: Build PyPI macOS ${{ matrix.target }}
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
     runs-on: macos-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container]
     strategy:
       fail-fast: false
       matrix:
         target: [x86_64-apple-darwin, aarch64-apple-darwin]
     steps:
       - uses: actions/checkout@v4
-      - name: Publish to PyPI (maturin)
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Build wheel (maturin)
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          command: publish
-          args: --locked --manifest-path python/Cargo.toml -i 3.8 --skip-existing
+          command: build
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
+          rust-toolchain: 1.93.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-dist-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
 
-  publish-pypi-musllinux-x86_64:
-    name: PyPI musllinux x86_64
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  build-pypi-musllinux-x86_64:
+    name: Build PyPI musllinux x86_64
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container]
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.8"
-      - name: Publish to PyPI (maturin)
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Build wheel (maturin)
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64-unknown-linux-musl
-          command: publish
-          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
+          command: build
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
+          rust-toolchain: 1.93.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-dist-musllinux-x86_64
+          path: dist/*.whl
+          if-no-files-found: error
 
-  publish-pypi-musllinux-aarch64:
-    name: PyPI musllinux aarch64
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  build-pypi-musllinux-aarch64:
+    name: Build PyPI musllinux aarch64
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
     runs-on: ubuntu-24.04-arm
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container]
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.8"
-      - name: Publish to PyPI (maturin)
-        id: publish_first
-        continue-on-error: true
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Build wheel (maturin)
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: aarch64-unknown-linux-musl
-          command: publish
-          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
-      - name: Retry publish to PyPI (maturin)
-        id: publish_retry
-        if: steps.publish_first.outcome == 'failure'
-        continue-on-error: true
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          command: build
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
+          rust-toolchain: 1.93.1
+      - uses: actions/upload-artifact@v4
         with:
-          target: aarch64-unknown-linux-musl
-          command: publish
-          args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
-      - name: Fail if both PyPI publication attempts failed
-        if: steps.publish_first.outcome == 'failure' && steps.publish_retry.outcome == 'failure'
-        run: exit 1
+          name: sparkless-dist-musllinux-aarch64
+          path: dist/*.whl
+          if-no-files-found: error
 
-  publish-pypi-windows-x86_64:
-    name: PyPI Windows x86_64
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  build-pypi-windows-x86_64:
+    name: Build PyPI Windows x86_64
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
     runs-on: windows-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container]
     steps:
       - uses: actions/checkout@v4
-      - name: Publish to PyPI (maturin)
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Build wheel (maturin)
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64-pc-windows-msvc
-          command: publish
-          args: --locked --manifest-path python/Cargo.toml -i 3.8 --skip-existing
+          command: build
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
+          rust-toolchain: 1.93.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-dist-windows-x86_64
+          path: dist/*.whl
+          if-no-files-found: error
 
-  publish-pypi-windows-arm64:
-    name: PyPI Windows aarch64
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  build-pypi-windows-arm64:
+    name: Build PyPI Windows aarch64
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
     runs-on: windows-11-arm
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container]
     steps:
       - uses: actions/checkout@v4
-      - name: Publish to PyPI (maturin)
-        uses: messense/maturin-action@v1
-        env:
-          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Build wheel (maturin)
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: aarch64-pc-windows-msvc
-          command: publish
-          args: --locked --manifest-path python/Cargo.toml -i 3.8 --skip-existing
+          command: build
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
+          rust-toolchain: 1.93.1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-dist-windows-arm64
+          path: dist/*.whl
+          if-no-files-found: error
+
+  verify-candidate-distributions:
+    name: Verify complete candidate PyPI inventory (V31)
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
+    runs-on: ubuntu-latest
+    needs:
+      - format
+      - clippy
+      - audit
+      - deny
+      - build
+      - test
+      - phase1-sdk-integration
+      - python-lint
+      - python-tests
+      - server-bin-manylinux-x86_64
+      - server-bin-macos-arm64
+      - server-extra-consumer
+      - server-container
+      - build-pypi-manylinux-x86_64
+      - build-pypi-manylinux-aarch64
+      - build-pypi-mac
+      - build-pypi-musllinux-x86_64
+      - build-pypi-musllinux-aarch64
+      - build-pypi-windows-x86_64
+      - build-pypi-windows-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download all candidate sparkless distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sparkless-dist-*
+          path: dist/sparkless
+          merge-multiple: true
+      - name: Download tested server binary wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-bin-manylinux-2-28-x86_64
+          path: dist/server-bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-bin-macosx-14-0-arm64
+          path: dist/server-bin
+      - name: Verify complete wheel and source distribution inventory
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python3 scripts/verify_release_distributions.py \
+            --directory dist/sparkless \
+            --project sparkless \
+            --version "$version" \
+            --wheels 8 \
+            --sdists 1 \
+            --platform macosx_10_12_x86_64 \
+            --platform macosx_11_0_arm64 \
+            --platform manylinux_2_17_x86_64.manylinux2014_x86_64 \
+            --platform manylinux_2_28_aarch64 \
+            --platform musllinux_1_2_aarch64 \
+            --platform musllinux_1_2_x86_64 \
+            --platform win_amd64 \
+            --platform win_arm64
+          python3 scripts/verify_release_distributions.py \
+            --directory dist/server-bin \
+            --project sparkless-server-bin \
+            --version "$version" \
+            --wheels 2 \
+            --sdists 0 \
+            --platform manylinux_2_28_x86_64 \
+            --platform macosx_14_0_arm64
+      - name: Check candidate distributions
+        run: |
+          python3 -m pip install twine
+          python3 -m twine check dist/sparkless/* dist/server-bin/*
+      - name: Preserve the exact verified distributions for publication and V32
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-sparkless-candidate
+          path: dist/sparkless/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-server-bin-candidate
+          path: dist/server-bin/*
+          if-no-files-found: error
+
+  publish-sparkless:
+    name: Publish sparkless distributions to PyPI
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs:
+      - publish
+      - publish-server-bin
+      - publish-server-container
+      - verify-candidate-distributions
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-sparkless-candidate
+          path: dist
+      - name: Publish sparkless distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          skip-existing: true
 
   verify-public-release:
     name: Verify public release inventory and fresh installs (V32)
@@ -805,16 +937,11 @@ jobs:
       contents: read
       packages: read
     needs:
+      - verify-candidate-distributions
       - publish
       - publish-server-bin
       - publish-server-container
-      - publish-pypi-manylinux-x86_64
-      - publish-pypi-manylinux-aarch64
-      - publish-pypi-mac
-      - publish-pypi-musllinux-x86_64
-      - publish-pypi-musllinux-aarch64
-      - publish-pypi-windows-x86_64
-      - publish-pypi-windows-arm64
+      - publish-sparkless
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -832,66 +959,26 @@ jobs:
             exit 1
           fi
           echo "$actual"
-      - name: Download the tested public server-wheel inputs
+      - name: Download the exact verified server binary distributions
         uses: actions/download-artifact@v4
         with:
-          name: sparkless-server-bin-manylinux-2-28-x86_64
-          path: public-server-wheels/linux
-      - uses: actions/download-artifact@v4
+          name: verified-server-bin-candidate
+          path: public-distributions/server-bin
+      - name: Download the exact verified sparkless distributions
+        uses: actions/download-artifact@v4
         with:
-          name: sparkless-server-bin-macosx-14-0-arm64
-          path: public-server-wheels/macos
-      - name: Verify public Python release files and hashes
+          name: verified-sparkless-candidate
+          path: public-distributions/sparkless
+      - name: Verify public package inventory, build hashes, and crates.io versions
         env:
-          VERSION: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
-          VERSION="${VERSION#v}" python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import re
-          import urllib.request
-          from pathlib import Path
-
-          version = os.environ["VERSION"]
-          expected = {
-              "sparkless": ("bdist_wheel", "sdist"),
-              "sparkless-server-bin": ("manylinux_2_28_x86_64", "macosx_14_0_arm64"),
-          }
-          for project, markers in expected.items():
-              url = "https://pypi.org/pypi/{}/{}/json".format(project, version)
-              request = urllib.request.Request(url, headers={"User-Agent": "sparkless-release-verification"})
-              with urllib.request.urlopen(request, timeout=20) as response:
-                  release = json.load(response)
-              if release["info"]["version"] != version:
-                  raise SystemExit("{} published version does not match {}".format(project, version))
-              files = release["urls"]
-              names = [entry["filename"] for entry in files]
-              for marker in markers:
-                  present = (
-                      any(entry["packagetype"] == marker for entry in files)
-                      if marker in {"bdist_wheel", "sdist"}
-                      else any(marker in name for name in names)
-                  )
-                  if not present:
-                      raise SystemExit("{} {} artifact is missing from PyPI".format(project, marker))
-              for entry in files:
-                  if not re.fullmatch(r"[0-9a-f]{64}", entry["digests"]["sha256"]):
-                      raise SystemExit("{} has a malformed SHA-256 digest".format(entry["filename"]))
-              if project == "sparkless-server-bin":
-                  for directory in (Path("public-server-wheels/linux"), Path("public-server-wheels/macos")):
-                      wheels = list(directory.glob("*.whl"))
-                      if len(wheels) != 1:
-                          raise SystemExit("{} did not provide exactly one tested wheel".format(directory))
-                      wheel = wheels[0]
-                      published = next((entry for entry in files if entry["filename"] == wheel.name), None)
-                      if published is None:
-                          raise SystemExit("tested wheel {} is missing from PyPI".format(wheel.name))
-                      local_digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
-                      if local_digest != published["digests"]["sha256"]:
-                          raise SystemExit("published wheel {} differs from its tested build".format(wheel.name))
-          print("PyPI versions, required server wheels, sdist, and file hashes are present")
-          PY
+          set -euo pipefail
+          version="${RELEASE_VERSION#v}"
+          python3 scripts/verify_public_release_416.py \
+            --version "$version" \
+            --server-bin-directory public-distributions/server-bin \
+            --sparkless-directory public-distributions/sparkless
       - uses: actions/checkout@v4
         with:
           repository: eddiethedean/minilake

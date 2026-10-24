@@ -4,6 +4,8 @@
 
 **Status: implementation checks in progress; no release gates below are marked passed.** Targeted native, launcher, release-inventory, and packaging checks have run locally; they do not establish release-gate conformance. Every gate evidence field remains pending until its complete scenario and required artifact are recorded. Documentation checks do not establish server conformance.
 
+The public 4.16.0 registries currently contain the expected PyPI inventories (nine `sparkless` files and four `sparkless-server-bin` wheels), all five first-party crates, and the GHCR image. The guarded [4.16.0 recovery run](https://github.com/eddiethedean/robin-sparkless/actions/runs/40143218104) failed its final fresh-install gate because the published server-binary package lacks `executable_path`; V29/V30 remain incomplete and no GitHub Release record exists. A successful [main-branch workflow dispatch](https://github.com/eddiethedean/robin-sparkless/actions/runs/40102266143) passed the current native, Python, SDK/MiniLake, wheel, and container jobs, but it did not validate a coordinated 4.17.0 candidate or run publication/V32 jobs.
+
 For each gate record the native commit, client/SDK version, emulator/oracle revision and digest where applicable, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep separate results for direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect.
 
 ## Gate matrix

@@ -1,4 +1,4 @@
-"""Verify the public 4.16.0 package inventory after recovery publication."""
+"""Verify coordinated Sparkless package inventories after publication."""
 
 from __future__ import annotations
 
@@ -33,6 +33,23 @@ PYPI_PLATFORMS = {
         "musllinux_1_2_x86_64",
         "win_amd64",
         "win_arm64",
+    },
+}
+PYPI_PLATFORMS_BY_VERSION = {
+    VERSION: PYPI_PLATFORMS,
+    "4.16.1": {
+        "sparkless-server-bin": {
+            "manylinux_2_28_x86_64",
+            "macosx_14_0_arm64",
+        },
+        "sparkless": PYPI_PLATFORMS["sparkless"],
+    },
+    "4.17.0": {
+        "sparkless-server-bin": {
+            "manylinux_2_28_x86_64",
+            "macosx_14_0_arm64",
+        },
+        "sparkless": PYPI_PLATFORMS["sparkless"],
     },
 }
 CRATES = (
@@ -136,7 +153,18 @@ def validate_pypi_release(
             "PyPI returned metadata for the wrong project: {}".format(project)
         )
 
-    expected_platforms = PYPI_PLATFORMS[project]
+    if version.startswith("4.16.") and version != "4.16.0":
+        inventory_version = "4.16.1"
+    elif version.startswith("4.17."):
+        inventory_version = "4.17.0"
+    else:
+        inventory_version = version
+    try:
+        expected_platforms = PYPI_PLATFORMS_BY_VERSION[inventory_version][project]
+    except KeyError as error:
+        raise ValueError(
+            "no PyPI platform inventory is recorded for {} {}".format(project, version)
+        ) from error
     wheel_platforms = set()
     sdist_count = 0
     files = data.get("urls", [])
@@ -222,10 +250,10 @@ def _retry(check, attempts: int = 20, interval: float = 5.0) -> None:
 
 
 def verify_public_release(
-    server_bin_directory: Path, sparkless_directory: Path
+    server_bin_directory: Path, sparkless_directory: Path, version: str = VERSION
 ) -> None:
     for project in ("sparkless-server-bin", "sparkless"):
-        url = "https://pypi.org/pypi/{}/{}/json".format(project, VERSION)
+        url = "https://pypi.org/pypi/{}/{}/json".format(project, version)
         local_directory = {
             "sparkless-server-bin": server_bin_directory,
             "sparkless": sparkless_directory,
@@ -233,31 +261,41 @@ def verify_public_release(
 
         def check_pypi(project=project, url=url, local_directory=local_directory):
             validate_pypi_release(
-                _fetch_json(url), project, local_directory=local_directory
+                _fetch_json(url),
+                project,
+                version=version,
+                local_directory=local_directory,
             )
 
         _retry(check_pypi)
 
     for crate in CRATES:
-        url = "https://crates.io/api/v1/crates/{}/{}".format(crate, VERSION)
+        url = "https://crates.io/api/v1/crates/{}/{}".format(crate, version)
 
         def check_crate(url=url, crate=crate):
-            validate_crate_release(_fetch_json(url), crate)
+            validate_crate_release(_fetch_json(url), crate, version=version)
 
         _retry(check_crate)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", default=VERSION)
     parser.add_argument("--server-bin-directory", type=Path, required=True)
     parser.add_argument("--sparkless-directory", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        verify_public_release(args.server_bin_directory, args.sparkless_directory)
+        verify_public_release(
+            args.server_bin_directory, args.sparkless_directory, args.version
+        )
     except (OSError, RuntimeError, ValueError, urllib.error.URLError) as error:
         print("public release verification failed: {}".format(error))
         return 1
-    print("verified 4.16.0 PyPI file hashes and crates.io release artifacts")
+    print(
+        "verified {} PyPI file hashes and crates.io release artifacts".format(
+            args.version
+        )
+    )
     return 0
 
 
