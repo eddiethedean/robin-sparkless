@@ -5719,6 +5719,62 @@ mod tests {
         assert_eq!(reader.finish().unwrap().height(), 2);
     }
 
+    #[test]
+    fn nested_array_ipc_roundtrip_preserves_values_and_logical_schema() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{IntoSeries, ListChunked, SerReader};
+
+        let items = ListChunked::from_iter([
+            Some(Series::new("".into(), vec![Some(1_i32), None])),
+            None,
+            Some(Series::new("".into(), vec![Some(3_i32)])),
+        ])
+        .with_name("items".into())
+        .into_series();
+        let physical = polars::prelude::DataFrame::new_infer_height(vec![items.into()]).unwrap();
+        let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
+            .into_iter()
+            .collect();
+        let logical = StructType::new(vec![
+            StructField::new(
+                "items".into(),
+                robin_sparkless_core::DataType::ArrayWithNullability {
+                    element_type: Box::new(robin_sparkless_core::DataType::Integer),
+                    contains_null: true,
+                },
+                true,
+            )
+            .with_metadata(metadata),
+        ]);
+        let source = DataFrame::from_polars(physical)
+            .with_logical_schema(logical.clone())
+            .unwrap();
+        let expected_schema = logical.to_json().unwrap();
+        let batch = source
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        let arrays = decoded.column("items").unwrap().list().unwrap();
+        let first = arrays.get_as_series(0).unwrap();
+        let first = first.i32().unwrap();
+        assert_eq!(first.get(0), Some(1));
+        assert_eq!(first.get(1), None);
+        assert!(arrays.get_as_series(1).is_none());
+        let third = arrays.get_as_series(2).unwrap();
+        assert_eq!(third.i32().unwrap().get(0), Some(3));
+    }
+
     /// Issue #235: root-level string–numeric comparison coercion in filter.
     #[test]
     fn coerce_string_numeric_root_in_filter() {
