@@ -4260,6 +4260,29 @@ mod tests {
         assert_eq!(retained.semantic_fingerprint, Some(bound_fingerprint));
     }
 
+    #[test]
+    fn request_fingerprint_length_prefixes_prevent_field_boundary_collisions() {
+        let first = StatementRequest {
+            session: "a".into(),
+            kind: "bc".into(),
+            code: "d".into(),
+            server_instance_id: None,
+            operation_id: None,
+        };
+        let second = StatementRequest {
+            session: "ab".into(),
+            kind: "c".into(),
+            code: "d".into(),
+            server_instance_id: None,
+            operation_id: None,
+        };
+        assert_eq!(
+            format!("{}{}{}", first.session, first.kind, first.code),
+            format!("{}{}{}", second.session, second.kind, second.code)
+        );
+        assert_ne!(request_fingerprint(&first), request_fingerprint(&second));
+    }
+
     #[tokio::test]
     async fn shared_catalog_and_mutation_replay_are_scoped_to_server_instance() {
         let config = ServerConfig {
