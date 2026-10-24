@@ -5084,6 +5084,58 @@ mod tests {
     }
 
     #[test]
+    fn shared_catalog_reader_keeps_resolved_table_version_across_publication() {
+        let session = catalog_test_session(usize::MAX);
+        let make_frame = |values: Vec<i64>| {
+            let id = Series::new("id".into(), values);
+            let physical = PlDataFrame::new_infer_height(vec![id.into()]).unwrap();
+            DataFrame::from_polars(physical)
+        };
+        let original = make_frame(vec![1]);
+        let original_bytes = original.estimated_size().unwrap();
+        session.register_table("items", original);
+
+        let read_lease = session.begin_catalog_read_snapshot().unwrap().unwrap();
+        let resolved_reader = session.table("items").unwrap();
+        let replacement = make_frame(vec![1, 2]);
+        {
+            let _mutation = session.shared_catalog_mutation_guard().unwrap();
+            let _writer = session.shared_catalog_guard().unwrap();
+            session
+                .check_catalog_table_growth("items", &replacement)
+                .unwrap();
+            session.register_table_during_sql("items", replacement);
+        }
+
+        let old_values = resolved_reader
+            .collect()
+            .unwrap()
+            .column("id")
+            .unwrap()
+            .i64()
+            .unwrap()
+            .into_no_null_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(old_values, vec![1]);
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), original_bytes);
+        let new_values = session
+            .table("items")
+            .unwrap()
+            .collect()
+            .unwrap()
+            .column("id")
+            .unwrap()
+            .i64()
+            .unwrap()
+            .into_no_null_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(new_values, vec![1, 2]);
+
+        drop(read_lease);
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), 0);
+    }
+
+    #[test]
     fn shared_catalog_charges_pinned_versions_until_last_read_finishes() {
         let original = catalog_test_frame();
         let bytes = original.estimated_size().unwrap();
