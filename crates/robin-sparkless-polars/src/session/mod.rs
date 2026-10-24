@@ -5314,6 +5314,34 @@ mod tests {
     }
 
     #[test]
+    fn shared_catalog_drop_keeps_resolved_reader_alive_until_lease_release() {
+        let session = catalog_test_session(usize::MAX);
+        let id = Series::new("id".into(), [4_i64, 5_i64]);
+        let physical = PlDataFrame::new_infer_height(vec![id.into()]).unwrap();
+        let original = DataFrame::from_polars(physical);
+        let original_bytes = original.estimated_size().unwrap();
+        session.register_table("drop_snapshot", original);
+
+        let read_lease = session.begin_catalog_read_snapshot().unwrap().unwrap();
+        let resolved_reader = session
+            .sql("SELECT id FROM drop_snapshot ORDER BY id")
+            .unwrap();
+        session.sql("DROP TABLE drop_snapshot").unwrap();
+        assert!(!session.saved_table_exists("drop_snapshot"));
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), original_bytes);
+
+        let rows = resolved_reader.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].get("id"), Some(&serde_json::json!(4)));
+        assert_eq!(rows[1].get("id"), Some(&serde_json::json!(5)));
+
+        let missing = session.sql("SELECT id FROM drop_snapshot");
+        assert!(missing.is_err());
+        drop(read_lease);
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), 0);
+    }
+
+    #[test]
     fn shared_catalog_charges_pinned_versions_until_last_read_finishes() {
         let original = catalog_test_frame();
         let bytes = original.estimated_size().unwrap();
