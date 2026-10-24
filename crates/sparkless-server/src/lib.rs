@@ -3237,6 +3237,103 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn multiple_http_clients_queue_without_blocking_health_or_losing_results() {
+        const CLIENTS: usize = 4;
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_active_operations: 1,
+            max_pending_operations: CLIENTS,
+            queue_timeout: Duration::from_secs(5),
+            response_timeout: Duration::from_secs(30),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let range = server.inner.root_session.range(0, 10_000_000, 1).unwrap();
+        server
+            .inner
+            .root_session
+            .register_table("multi_client_scheduler_range", range);
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        // Hold the sole compute slot to make the multi-client pending state deterministic.
+        let held_compute = Arc::clone(&server.inner.admission.active)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let start = Arc::new(tokio::sync::Barrier::new(CLIENTS + 1));
+        let clients = (0..CLIENTS)
+            .map(|index| {
+                let start = Arc::clone(&start);
+                tokio::spawn(async move {
+                    start.wait().await;
+                    request_json(
+                        address,
+                        "POST",
+                        "/statements",
+                        &json!({
+                            "session":format!("scheduler-client-{index}"),
+                            "kind":"sql",
+                            "code":"SELECT COUNT(*) AS n FROM multi_client_scheduler_range WHERE id > 5"
+                        }),
+                    )
+                    .await
+                })
+            })
+            .collect::<Vec<_>>();
+        start.wait().await;
+
+        timeout(Duration::from_secs(2), async {
+            while server.inner.admission.accepted.load(Ordering::Acquire) != CLIENTS {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("all independent clients should be retained as bounded pending operations");
+        assert_eq!(server.inner.admission.active.available_permits(), 0);
+
+        let (health_status, health_response) = timeout(
+            Duration::from_secs(1),
+            request_json(address, "GET", "/health", &json!({})),
+        )
+        .await
+        .expect("health should progress while multiple clients wait for compute");
+        assert_eq!(health_status, StatusCode::OK, "{health_response}");
+        assert_eq!(health_response["status"], "ready");
+
+        drop(held_compute);
+        for client in clients {
+            let (status, response) = timeout(Duration::from_secs(30), client)
+                .await
+                .expect("queued client should finish after compute becomes available")
+                .unwrap();
+            assert_eq!(status, StatusCode::OK, "{response}");
+            assert_eq!(response["status"], "ok", "{response}");
+            assert_eq!(
+                response["data"]["application/json"]["data"],
+                json!([[9_999_994]])
+            );
+        }
+        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn long_filtered_count_keeps_health_responsive_while_compute_is_occupied() {
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
