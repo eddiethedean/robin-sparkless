@@ -2,7 +2,7 @@
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Validation](VALIDATION.md)
 
-**Status:** decisions below are open except for D05's coordinated package-version policy, resolved by the [4.16+ release roadmap](ROADMAP.md). All first-party packages publish together at 4.16.0, then 4.17.0, and so forth, including `spark-sql-parser`. The initial server-extra target set is staged below, but its release-run evidence, broader package platform matrix, publication, and remaining D05 choices are still open. Owners and implementation issue/PR links are unassigned. The Spark 4.0 family is an evaluation target, not a declared tested patch version.
+**Status:** D05's coordinated package-version policy is resolved by the [4.16+ release roadmap](ROADMAP.md); a staged native D10 fingerprint record appears below. The remaining decisions, complete 4.17 SDK acceptance, package platform matrix, and release evidence remain open. All first-party packages publish together at 4.16.0, then 4.17.0, and so forth, including `spark-sql-parser`. Owners and implementation issue/PR links are unassigned. The Spark 4.0 family is an evaluation target, not a declared tested patch version.
 
 Do not replace an unresolved value with a guessed version or silently treat a recommendation as implemented. Record resolution date, owner, exact immutable revisions, rationale, impacted plans, and validation evidence here.
 
@@ -12,15 +12,24 @@ The [4.16 implementation plan](RELEASE_4_16.md) proposes concrete choices for D0
 
 ## 4.17 implementation baseline
 
-The [4.17 implementation plan](RELEASE_4_17.md) proposes staged extensions to the 4.16 contracts. None is resolved or tested by this documentation change. Freeze deviations and their validation impact in 417-01 before enabling writes or additional types.
+The [4.17 implementation plan](RELEASE_4_17.md) proposes staged extensions to the 4.16 contracts. The native D10 fingerprint construction is recorded below at an implementation stage; the other 417-01 choices and external adapter acceptance remain unresolved. Component evidence does not pass the release gates.
 
 | Decisions | Phase 1 choices to verify | Required evidence |
 | --- | --- | --- |
 | D02–D04 | Identifier/current-database rules, managed-table SQL allowlist, agent version, exact mutation receipts and SDK outcome mapping | Golden AST rejection/effect tests; immutable external adapter revision and public SDK fixtures |
-| D07, D10 | Instance-scoped operation keys/fingerprints; status-only lookup; commit versus transport state; process-lifetime retention without eviction | Duplicate/conflict/close/disconnect/deadline/restart tests; atomic commit/receipt boundary; no automatic retry after unknown outcomes |
+| D07, D10 | Instance-scoped operation keys/fingerprints; status-only lookup; commit versus transport state; process-lifetime retention without eviction. Native D10 digest construction is staged below; outcome and SDK acceptance remain open. | Duplicate/conflict/close/disconnect/deadline/restart tests; atomic commit/receipt boundary; no automatic retry after unknown outcomes |
 | D08 | Writer scheduling; catalog/snapshot/staging budgets; proposed 1,024 records/4 MiB outcome storage; lazy execution workloads. Provisional local range budgets: construction at 10k/1m/10m rows stays below 1 MiB cumulative Rust-global allocation and 256 KiB live peak; filtered `id > 5` count at 10m stays below 1 MiB live peak and 250 ms; `LIMIT 10` stays below 16 MiB live peak; the standalone range benchmark stays below 64 MiB max RSS; the exact 256-request sustained HTTP lazy-count test stays below 256 MiB max RSS for its release-test process on macOS arm64. | Saturation and pinned-version accounting; health progress; reproducible construction/action memory measurements. These are one-host regression thresholds, not hard memory bounds or a V17 pass; the allocator counter excludes native allocator overhead and RSS is measured externally. |
 | D09 | Ephemeral shared catalog, isolated temp views, statement snapshots, saved data surviving close/TTL but lost on restart | Cross-session and separate-service isolation, read/write/drop races, fresh-instance rejection of old IDs |
 | D11 | Logical metadata and BYTE/FLOAT32/NTZ distinctions, nested nullability, checked physical/IPC conversions, old-schema compatibility and per-transform propagation; metadata is bounded to 32 KiB per schema and depth 16 | Phase 1 native schema/value matrix and HTTP scalar regressions; per-type remote encoding gates remain explicit |
+
+
+### D10 staged native fingerprint record
+
+Owner remains unassigned. Recorded 2026-10-24 at source commit [`07353b9e3ea6c004afb092d34b5fc487efced774`](https://github.com/eddiethedean/robin-sparkless/commit/07353b9e3ea6c004afb092d34b5fc487efced774).
+
+The native server computes a SHA-256 request digest over the exact UTF-8 `session`, `kind`, and SQL `code`, each preceded by its 64-bit big-endian byte length. After acquiring the per-session serial lane, before the catalog writer lane or execution, it computes an immutable semantic digest over length-prefixed agent and mutation protocol versions, the 32-byte request digest, the 64-bit big-endian session generation, and the length-prefixed current database. No SQL normalization is applied. This captures the context in which the statement will execute, including changes from an earlier queued `USE`.
+
+Duplicate lookup intentionally uses the request digest and session ID, rejecting a generation mismatch when that session ID is live. If the session is closed, it can return the retained operation without reacquiring a session lease. Lookup does not recompute the semantic digest. The focused test verifies the semantic digest changes with database or generation and stays fixed after the session database changes. This resolves only the native digest-construction stage of D10; the full mutation outcome/capacity matrix and external SDK acceptance remain open.
 
 D05/D06 also require the complete 4.17.0 candidate inventory, exact launcher/binary coupling, platform evidence, and public-install verification in V31/V32. Retain the independent protocol versions and coordinated package-version policy. Phase 2 replay/analysis/Arrow client decisions remain open.
 
