@@ -259,12 +259,11 @@ pub fn translate_with_cancellation(
                 session.is_case_sensitive(),
             );
             snapshot = snapshot.with_logical_schema(schema)?;
-            let accounted_bytes = snapshot.estimated_size()?;
             check_cancellation(token)?;
             let _publish_guard = session
                 .shared_catalog_guard()
                 .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-            session.register_temp_view_during_sql(&view_name, snapshot, accounted_bytes)?;
+            session.register_temp_view_during_sql(&view_name, snapshot)?;
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
                 session.is_case_sensitive(),
@@ -754,11 +753,10 @@ fn translate_insert(
         || (!has_provider && session.has_temp_view(&table_name))
     {
         if session.uses_shared_catalog() {
-            let accounted_bytes = appended.estimated_size()?;
             let _publication_guard = session
                 .shared_catalog_guard()
                 .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-            session.register_temp_view_during_sql(&table_name, appended, accounted_bytes)?;
+            session.register_temp_view_during_sql(&table_name, appended)?;
         } else {
             session.create_or_replace_temp_view(&table_name, appended);
         }

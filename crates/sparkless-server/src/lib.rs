@@ -746,7 +746,7 @@ impl Server {
             },
             "cancellation": "cooperative; native work retains admission until it returns",
             "catalog_lifetime": "in-memory for this server instance",
-            "catalog_byte_accounting": "Polars estimated_size for committed saved tables, materialized session-local view snapshots, staged candidates, and saved/view versions pinned by active statement snapshots; shared buffers can be counted conservatively more than once, and this is not an RSS limit"
+            "catalog_byte_accounting": "visible Arrow buffer address ranges are deduplicated across committed saved tables, materialized session-local view snapshots, staged candidates, and saved/view versions pinned by active statement snapshots; unused buffer capacity and allocator overhead are not measured, some sliced nested buffers can still be counted conservatively, and this is not an RSS limit"
         })
     }
 

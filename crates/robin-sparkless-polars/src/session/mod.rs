@@ -10,12 +10,17 @@ use crate::udf_registry::UdfRegistry;
 use base64::Engine;
 use polars::chunked_array::StructChunked;
 use polars::chunked_array::builder::get_list_builder;
+use polars::polars_utils;
 use polars::prelude::{
     AnonymousScan, AnonymousScanArgs, DataFrame as PlDataFrame, DataType, Field, IntoSeries,
     LazyFrame, NamedFrom, PlSmallStr, PolarsError, ScanArgsAnonymous, Schema, Series, TimeUnit,
     TimeZone,
 };
+use polars_arrow::array::*;
 use polars_arrow::bitmap::Bitmap;
+use polars_arrow::datatypes::{PhysicalType, PrimitiveType};
+use polars_arrow::match_integer_type;
+use polars_arrow::with_match_primitive_type_full;
 use robin_sparkless_core::engine::{
     ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
 };
@@ -1660,6 +1665,181 @@ pub type TableCatalog = Arc<Mutex<HashMap<String, DataFrame>>>;
 /// Names of databases/schemas created via CREATE DATABASE / CREATE SCHEMA (session-scoped). Persisted when SQL DDL runs.
 pub type DatabaseCatalog = Arc<Mutex<HashSet<String>>>;
 
+/// Estimate retained catalog data by unioning the visible Arrow buffer address ranges across
+/// columns, table versions, temporary-view snapshots, and statement-pinned versions. Materialized
+/// frames stay alive for the full calculation so allocator address reuse cannot make two unrelated
+/// allocations appear identical.
+fn deduplicated_catalog_bytes(frames: &[DataFrame]) -> Result<usize, PolarsError> {
+    let materialized = frames
+        .iter()
+        .map(DataFrame::collect_inner)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut ranges = Vec::new();
+    for frame in &materialized {
+        for column in frame.columns() {
+            for chunk in column.as_materialized_series().chunks() {
+                add_array_buffer_ranges(chunk.as_ref(), &mut ranges);
+            }
+        }
+    }
+    ranges.sort_unstable_by_key(|(start, _)| *start);
+    let mut total = 0usize;
+    let mut current: Option<(usize, usize)> = None;
+    for (start, end) in ranges {
+        match current {
+            Some((current_start, current_end)) if start <= current_end => {
+                current = Some((current_start, current_end.max(end)));
+            }
+            Some((current_start, current_end)) => {
+                total = total.saturating_add(current_end.saturating_sub(current_start));
+                current = Some((start, end));
+            }
+            None => current = Some((start, end)),
+        }
+    }
+    if let Some((start, end)) = current {
+        total = total.saturating_add(end.saturating_sub(start));
+    }
+    Ok(total)
+}
+
+fn add_buffer_range<T>(values: &[T], ranges: &mut Vec<(usize, usize)>) {
+    let start = values.as_ptr() as usize;
+    let end = start.saturating_add(std::mem::size_of_val(values));
+    if start < end {
+        ranges.push((start, end));
+    }
+}
+
+fn add_bitmap_range(bitmap: Option<&Bitmap>, ranges: &mut Vec<(usize, usize)>) {
+    if let Some(bitmap) = bitmap {
+        let (bytes, _, _) = bitmap.as_slice();
+        add_buffer_range(bytes, ranges);
+    }
+}
+
+fn add_array_buffer_ranges(array: &dyn Array, ranges: &mut Vec<(usize, usize)>) {
+    use PhysicalType::*;
+    add_bitmap_range(array.validity(), ranges);
+    match array.dtype().to_physical_type() {
+        Null => {}
+        Boolean => {
+            let array = array.as_any().downcast_ref::<BooleanArray>().unwrap();
+            let (bytes, _, _) = array.values().as_slice();
+            add_buffer_range(bytes, ranges);
+        }
+        Primitive(PrimitiveType::DaysMs) => {
+            let array = array.as_any().downcast_ref::<DaysMsArray>().unwrap();
+            add_buffer_range(array.values().as_slice(), ranges);
+        }
+        Primitive(primitive) => {
+            with_match_primitive_type_full!(primitive, |$T| {
+                let array = array.as_any().downcast_ref::<PrimitiveArray<$T>>().unwrap();
+                add_buffer_range(array.values().as_slice(), ranges);
+            });
+        }
+        Binary => add_binary_ranges::<i32>(array, ranges),
+        LargeBinary => add_binary_ranges::<i64>(array, ranges),
+        Utf8 => add_utf8_ranges::<i32>(array, ranges),
+        LargeUtf8 => add_utf8_ranges::<i64>(array, ranges),
+        FixedSizeBinary => {
+            let array = array
+                .as_any()
+                .downcast_ref::<FixedSizeBinaryArray>()
+                .unwrap();
+            add_buffer_range(array.values().as_slice(), ranges);
+        }
+        List => {
+            let array = array.as_any().downcast_ref::<ListArray<i32>>().unwrap();
+            add_buffer_range(array.offsets().buffer().as_slice(), ranges);
+            add_array_buffer_ranges(array.values().as_ref(), ranges);
+        }
+        LargeList => {
+            let array = array.as_any().downcast_ref::<ListArray<i64>>().unwrap();
+            add_buffer_range(array.offsets().buffer().as_slice(), ranges);
+            add_array_buffer_ranges(array.values().as_ref(), ranges);
+        }
+        FixedSizeList => {
+            let array = array.as_any().downcast_ref::<FixedSizeListArray>().unwrap();
+            add_array_buffer_ranges(array.values().as_ref(), ranges);
+        }
+        Struct => {
+            let array = array.as_any().downcast_ref::<StructArray>().unwrap();
+            for field in array.values() {
+                add_array_buffer_ranges(field.as_ref(), ranges);
+            }
+        }
+        Map => {
+            let array = array.as_any().downcast_ref::<MapArray>().unwrap();
+            add_buffer_range(array.offsets().buffer().as_slice(), ranges);
+            add_array_buffer_ranges(array.field().as_ref(), ranges);
+        }
+        Union => {
+            let array = array.as_any().downcast_ref::<UnionArray>().unwrap();
+            add_buffer_range(array.types().as_slice(), ranges);
+            if let Some(offsets) = array.offsets() {
+                add_buffer_range(offsets.as_slice(), ranges);
+            }
+            for field in array.fields() {
+                add_array_buffer_ranges(field.as_ref(), ranges);
+            }
+        }
+        Dictionary(key_type) => {
+            match_integer_type!(key_type, |$T| {
+                let array = array.as_any().downcast_ref::<DictionaryArray<$T>>().unwrap();
+                add_array_buffer_ranges(array.keys(), ranges);
+                add_array_buffer_ranges(array.values().as_ref(), ranges);
+            });
+        }
+        Utf8View => {
+            add_binview_ranges::<str>(array, ranges);
+        }
+        BinaryView => {
+            add_binview_ranges::<[u8]>(array, ranges);
+        }
+    }
+}
+
+fn add_binview_ranges<T: ViewType + ?Sized>(array: &dyn Array, ranges: &mut Vec<(usize, usize)>) {
+    let array = array
+        .as_any()
+        .downcast_ref::<BinaryViewArrayGeneric<T>>()
+        .unwrap();
+    for (index, view) in array.views().iter().enumerate() {
+        if !array.is_valid(index) {
+            continue;
+        }
+        if let Some(bytes) = view.get_inlined_slice() {
+            add_buffer_range(bytes, ranges);
+        } else if let Some(buffer) = array.data_buffers().get(view.buffer_idx as usize) {
+            let buffer = buffer.as_slice();
+            let start = view.offset as usize;
+            let end = start.saturating_add(view.length as usize);
+            if end <= buffer.len() {
+                add_buffer_range(&buffer[start..end], ranges);
+            }
+        }
+    }
+}
+
+fn add_binary_ranges<O: polars_arrow::types::Offset>(
+    array: &dyn Array,
+    ranges: &mut Vec<(usize, usize)>,
+) {
+    let array = array.as_any().downcast_ref::<BinaryArray<O>>().unwrap();
+    add_buffer_range(array.offsets().buffer().as_slice(), ranges);
+    add_buffer_range(array.values().as_slice(), ranges);
+}
+
+fn add_utf8_ranges<O: polars_arrow::types::Offset>(
+    array: &dyn Array,
+    ranges: &mut Vec<(usize, usize)>,
+) {
+    let array = array.as_any().downcast_ref::<Utf8Array<O>>().unwrap();
+    add_buffer_range(array.offsets().buffer().as_slice(), ranges);
+    add_buffer_range(array.values().as_slice(), ranges);
+}
+
 type SharedCatalogMutationWriterGuards<'a> = (
     Option<std::sync::MutexGuard<'a, ()>>,
     Option<std::sync::MutexGuard<'a, ()>>,
@@ -1676,10 +1856,11 @@ pub struct SharedCatalog {
     global_temp_views: TempViewCatalog,
     writer: Arc<Mutex<()>>,
     mutation_lane: Arc<Mutex<()>>,
-    /// Accounted sizes for session-local views. The view frames remain on their owning session.
-    view_accounting: Arc<Mutex<HashMap<u64, HashMap<String, usize>>>>,
+    /// Shared references to session-local view snapshots for catalog-wide buffer accounting.
+    /// The owning session remains responsible for resolving and removing each view.
+    view_accounting: Arc<Mutex<HashMap<u64, HashMap<String, DataFrame>>>>,
     /// Old table/view versions retained while a statement may still reference them.
-    pinned_versions: Arc<Mutex<Vec<(DataFrame, usize)>>>,
+    pinned_versions: Arc<Mutex<Vec<DataFrame>>>,
     active_readers: Arc<AtomicUsize>,
 }
 
@@ -2067,21 +2248,15 @@ impl SparkSession {
                 format!("CatalogCapacityExceeded: saved-table limit is {max_tables}").into(),
             ));
         }
-        // Count the staged version alongside committed versions. This reserves space for
-        // publication without treating a replacement as though it freed the old buffers first.
-        let mut staged_total = candidate_bytes;
-        for (_, frame) in tables {
-            staged_total = staged_total.saturating_add(frame.estimated_size()?);
-            if staged_total > max_catalog_bytes {
-                return Err(PolarsError::ComputeError(
-                    format!(
-                        "CatalogCapacityExceeded: staged catalog would exceed {max_catalog_bytes} bytes"
-                    )
-                    .into(),
-                ));
-            }
-        }
-        staged_total = staged_total.saturating_add(self.catalog_auxiliary_bytes()?);
+        // Count the staged version alongside committed and pinned versions. Shared Arrow chunks
+        // count once, while a replacement that needs new buffers must fit before publication.
+        let mut frames = tables
+            .into_iter()
+            .map(|(_, frame)| frame)
+            .collect::<Vec<_>>();
+        frames.extend(self.catalog_auxiliary_frames()?);
+        frames.push(candidate.clone());
+        let staged_total = deduplicated_catalog_bytes(&frames)?;
         if staged_total > max_catalog_bytes {
             return Err(PolarsError::ComputeError(
                 format!(
@@ -2099,7 +2274,7 @@ impl SparkSession {
     pub(crate) fn check_catalog_temp_view_growth(
         &self,
         name: &str,
-        candidate_bytes: usize,
+        candidate: &DataFrame,
     ) -> Result<(), PolarsError> {
         if self.shared_catalog.is_none() {
             return Ok(());
@@ -2108,24 +2283,6 @@ impl SparkSession {
             .configured_catalog_limit("sparkless.server.max_catalog_bytes")
             .unwrap_or(usize::MAX);
         let target = self.temp_view_accounting_key(name);
-        let current_view_bytes = self
-            .shared_catalog
-            .as_ref()
-            .expect("checked above")
-            .view_accounting
-            .lock()
-            .map_err(|_| PolarsError::InvalidOperation("view accounting lock poisoned".into()))?
-            .get(&self.temp_view_scope_id)
-            .and_then(|views| views.get(&target))
-            .copied()
-            .unwrap_or(0);
-        let tables = self
-            .tables
-            .lock()
-            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
         let replacement_remains_pinned = self
             .shared_catalog
             .as_ref()
@@ -2133,25 +2290,40 @@ impl SparkSession {
             .active_readers
             .load(Ordering::Acquire)
             > 0;
-        let reclaimable_view_bytes = if replacement_remains_pinned {
-            0
-        } else {
-            current_view_bytes
-        };
-        let mut staged_total = candidate_bytes
-            .saturating_add(self.catalog_auxiliary_bytes()?)
-            .saturating_sub(reclaimable_view_bytes);
-        for frame in tables {
-            staged_total = staged_total.saturating_add(frame.estimated_size()?);
-            if staged_total > max_catalog_bytes {
-                return Err(PolarsError::ComputeError(
-                    format!(
-                        "CatalogCapacityExceeded: staged catalog would exceed {max_catalog_bytes} bytes"
-                    )
-                    .into(),
-                ));
+        let mut frames = self
+            .tables
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let shared = self.shared_catalog.as_ref().expect("checked above");
+        let views = shared
+            .view_accounting
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("view accounting lock poisoned".into()))?;
+        for (scope_id, scoped_views) in views.iter() {
+            for (view_name, frame) in scoped_views {
+                if !replacement_remains_pinned
+                    && *scope_id == self.temp_view_scope_id
+                    && view_name == &target
+                {
+                    continue;
+                }
+                frames.push(frame.clone());
             }
         }
+        drop(views);
+        frames.extend(
+            shared
+                .pinned_versions
+                .lock()
+                .map_err(|_| PolarsError::InvalidOperation("pinned-version lock poisoned".into()))?
+                .iter()
+                .cloned(),
+        );
+        frames.push(candidate.clone());
+        let staged_total = deduplicated_catalog_bytes(&frames)?;
         if staged_total > max_catalog_bytes {
             return Err(PolarsError::ComputeError(
                 format!(
@@ -2163,37 +2335,42 @@ impl SparkSession {
         Ok(())
     }
 
-    fn catalog_auxiliary_bytes(&self) -> Result<usize, PolarsError> {
+    fn catalog_auxiliary_frames(&self) -> Result<Vec<DataFrame>, PolarsError> {
         let Some(catalog) = &self.shared_catalog else {
-            return Ok(0);
+            return Ok(Vec::new());
         };
-        let views = catalog
+        let mut frames = catalog
             .view_accounting
             .lock()
             .map_err(|_| PolarsError::InvalidOperation("view accounting lock poisoned".into()))?
             .values()
-            .flat_map(|views| views.values().copied())
-            .fold(0usize, usize::saturating_add);
-        let pinned = catalog
-            .pinned_versions
-            .lock()
-            .map_err(|_| PolarsError::InvalidOperation("pinned-version lock poisoned".into()))?
-            .iter()
-            .map(|(_, bytes)| *bytes)
-            .fold(0usize, usize::saturating_add);
-        Ok(views.saturating_add(pinned))
+            .flat_map(|views| views.values().cloned())
+            .collect::<Vec<_>>();
+        frames.extend(
+            catalog
+                .pinned_versions
+                .lock()
+                .map_err(|_| PolarsError::InvalidOperation("pinned-version lock poisoned".into()))?
+                .iter()
+                .cloned(),
+        );
+        Ok(frames)
     }
 
-    fn retain_catalog_version_if_readers(&self, frame: DataFrame, accounted_bytes: Option<usize>) {
+    #[cfg(test)]
+    fn catalog_auxiliary_bytes(&self) -> Result<usize, PolarsError> {
+        deduplicated_catalog_bytes(&self.catalog_auxiliary_frames()?)
+    }
+
+    fn retain_catalog_version_if_readers(&self, frame: DataFrame, _accounted_bytes: Option<usize>) {
         let Some(catalog) = &self.shared_catalog else {
             return;
         };
         if catalog.active_readers.load(Ordering::Acquire) == 0 {
             return;
         }
-        let bytes = accounted_bytes.unwrap_or_else(|| frame.estimated_size().unwrap_or(usize::MAX));
         if let Ok(mut pinned) = catalog.pinned_versions.lock() {
-            pinned.push((frame, bytes));
+            pinned.push(frame);
         }
     }
 
@@ -2268,14 +2445,7 @@ impl SparkSession {
                     return;
                 }
             };
-            let bytes = match df.estimated_size() {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    eprintln!("robin-sparkless-polars: temporary view sizing failed: {error}");
-                    return;
-                }
-            };
-            if let Err(error) = self.register_temp_view_during_sql(name, df, bytes) {
+            if let Err(error) = self.register_temp_view_during_sql(name, df) {
                 eprintln!("robin-sparkless-polars: {error}");
             }
             return;
@@ -2303,15 +2473,13 @@ impl SparkSession {
     }
 
     /// Register a session-local view while the caller holds the shared catalog writer guard.
-    /// The provided byte count is the materialized native size reserved for this view snapshot.
     #[cfg(feature = "sql")]
     pub(crate) fn register_temp_view_during_sql(
         &self,
         name: &str,
         df: DataFrame,
-        accounted_bytes: usize,
     ) -> Result<(), PolarsError> {
-        self.check_catalog_temp_view_growth(name, accounted_bytes)?;
+        self.check_catalog_temp_view_growth(name, &df)?;
         let Some(shared) = &self.shared_catalog else {
             self.create_or_replace_temp_view(name, df);
             return Ok(());
@@ -2334,15 +2502,16 @@ impl SparkSession {
                 .cloned()
                 .unwrap_or_else(|| name.to_string())
         };
-        let previous = views.insert(key, df);
+        let previous = views.insert(key, df.clone());
         let session_sizes = accounting.entry(self.temp_view_scope_id).or_default();
-        let previous_size = session_sizes.remove(&normalized);
-        session_sizes.insert(normalized, accounted_bytes);
+        let previous_snapshot = session_sizes.remove(&normalized);
+        session_sizes.insert(normalized, df);
         drop(views);
         drop(accounting);
         if let Some(previous) = previous {
-            self.retain_catalog_version_if_readers(previous, previous_size);
+            self.retain_catalog_version_if_readers(previous, None);
         }
+        drop(previous_snapshot);
         Ok(())
     }
 
@@ -2476,9 +2645,9 @@ impl SparkSession {
             let Some(frame) = views.remove(&key) else {
                 return false;
             };
-            let size = accounting
+            let previous_snapshot = accounting
                 .get_mut(&self.temp_view_scope_id)
-                .and_then(|sizes| sizes.remove(&normalized));
+                .and_then(|views| views.remove(&normalized));
             if accounting
                 .get(&self.temp_view_scope_id)
                 .is_some_and(HashMap::is_empty)
@@ -2487,7 +2656,8 @@ impl SparkSession {
             }
             drop(views);
             drop(accounting);
-            self.retain_catalog_version_if_readers(frame, size);
+            self.retain_catalog_version_if_readers(frame, None);
+            drop(previous_snapshot);
             true
         } else {
             match self.catalog.lock() {
@@ -4620,17 +4790,13 @@ impl SparkSession {
     pub fn stop(&self) {
         let views = if let Some(shared) = &self.shared_catalog {
             let mut accounting = shared.view_accounting.lock().ok();
-            let sizes = accounting
+            let snapshots = accounting
                 .as_mut()
                 .and_then(|accounting| accounting.remove(&self.temp_view_scope_id))
                 .unwrap_or_default();
-            match self.catalog.lock() {
+            let frames = match self.catalog.lock() {
                 Ok(mut views) => std::mem::take(&mut *views)
-                    .into_iter()
-                    .map(|(name, frame)| {
-                        let bytes = sizes.get(&self.temp_view_accounting_key(&name)).copied();
-                        (frame, bytes)
-                    })
+                    .into_values()
                     .collect::<Vec<_>>(),
                 Err(_) => {
                     eprintln!(
@@ -4638,7 +4804,10 @@ impl SparkSession {
                     );
                     Vec::new()
                 }
-            }
+            };
+            drop(snapshots);
+            drop(accounting);
+            frames
         } else {
             match self.catalog.lock() {
                 Ok(mut m) => {
@@ -4653,8 +4822,8 @@ impl SparkSession {
                 }
             }
         };
-        for (frame, bytes) in views {
-            self.retain_catalog_version_if_readers(frame, bytes);
+        for frame in views {
+            self.retain_catalog_version_if_readers(frame, None);
         }
         if self.shared_catalog.is_none() {
             match self.tables.lock() {
@@ -4816,7 +4985,7 @@ mod tests {
             vec![Series::new("payload".into(), values).into()],
         )
         .unwrap();
-        DataFrame::from_polars_with_options(physical, false)
+        DataFrame::from_eager_with_options(physical, false)
     }
 
     fn catalog_test_session(max_catalog_bytes: usize) -> SparkSession {
@@ -4877,18 +5046,18 @@ mod tests {
         let _mutation = session.shared_catalog_mutation_guard().unwrap();
         let _writer = session.shared_catalog_guard().unwrap();
         session
-            .register_temp_view_during_sql("first", table.clone(), bytes)
+            .register_temp_view_during_sql("first", catalog_test_frame())
             .unwrap();
         assert!(
             session
-                .register_temp_view_during_sql("second", table.clone(), bytes)
+                .register_temp_view_during_sql("second", catalog_test_frame())
                 .unwrap_err()
                 .to_string()
                 .contains("CatalogCapacityExceeded")
         );
         assert!(session.drop_temp_view_during_sql("first"));
         session
-            .register_temp_view_during_sql("second", table, bytes)
+            .register_temp_view_during_sql("second", catalog_test_frame())
             .unwrap();
         assert_eq!(session.catalog_auxiliary_bytes().unwrap(), bytes);
         session.stop();
@@ -4905,7 +5074,7 @@ mod tests {
         let _mutation = session.shared_catalog_mutation_guard().unwrap();
         let _writer = session.shared_catalog_guard().unwrap();
         session
-            .register_temp_view_during_sql("snapshot", table.clone(), bytes)
+            .register_temp_view_during_sql("snapshot", catalog_test_frame())
             .unwrap();
         drop(_writer);
 
@@ -4913,7 +5082,7 @@ mod tests {
         let _writer = session.shared_catalog_guard().unwrap();
         let replacement = catalog_test_frame();
         let error = session
-            .register_temp_view_during_sql("snapshot", replacement.clone(), bytes)
+            .register_temp_view_during_sql("snapshot", replacement.clone())
             .unwrap_err();
         assert!(error.to_string().contains("CatalogCapacityExceeded"));
         assert_eq!(session.catalog_auxiliary_bytes().unwrap(), bytes);
@@ -4923,9 +5092,69 @@ mod tests {
         drop(read_lease);
         let _writer = session.shared_catalog_guard().unwrap();
         session
-            .register_temp_view_during_sql("snapshot", replacement, bytes)
+            .register_temp_view_during_sql("snapshot", replacement)
             .unwrap();
         assert_eq!(session.catalog_auxiliary_bytes().unwrap(), bytes);
+    }
+
+    #[test]
+    fn shared_catalog_deduplicates_shared_arrow_chunks_across_views() {
+        let table = catalog_test_frame();
+        let bytes = table.estimated_size().unwrap();
+        let session = catalog_test_session(bytes);
+        session.register_table("t", table.clone());
+
+        let _mutation = session.shared_catalog_mutation_guard().unwrap();
+        let _writer = session.shared_catalog_guard().unwrap();
+        session
+            .register_temp_view_during_sql("alias", table.clone())
+            .unwrap();
+        session
+            .register_temp_view_during_sql("second_alias", table)
+            .unwrap();
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), bytes);
+        assert!(
+            session
+                .register_temp_view_during_sql("independent", catalog_test_frame())
+                .unwrap_err()
+                .to_string()
+                .contains("CatalogCapacityExceeded")
+        );
+    }
+
+    #[test]
+    fn shared_catalog_serializes_concurrent_growth_at_the_byte_limit() {
+        let frame = catalog_test_frame();
+        let bytes = frame.estimated_size().unwrap();
+        let session = catalog_test_session(bytes);
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let mut joins = Vec::new();
+        for name in ["first", "second"] {
+            let session = session.clone();
+            let barrier = barrier.clone();
+            joins.push(std::thread::spawn(move || {
+                let candidate = catalog_test_frame();
+                barrier.wait();
+                let _mutation = session.shared_catalog_mutation_guard().unwrap();
+                let _writer = session.shared_catalog_guard().unwrap();
+                if session
+                    .check_catalog_table_growth(name, &candidate)
+                    .is_err()
+                {
+                    return false;
+                }
+                session.register_table_during_sql(name, candidate);
+                true
+            }));
+        }
+        barrier.wait();
+        let accepted = joins
+            .into_iter()
+            .map(|join| join.join().unwrap())
+            .filter(|accepted| *accepted)
+            .count();
+        assert_eq!(accepted, 1);
+        assert_eq!(session.tables.lock().unwrap().len(), 1);
     }
 
     #[test]
