@@ -151,7 +151,8 @@ enum StatementClass {
 
 #[derive(Debug, Clone)]
 struct OperationRecord {
-    fingerprint: [u8; 32],
+    request_fingerprint: [u8; 32],
+    semantic_fingerprint: Option<[u8; 32]>,
     session: String,
     session_generation: u64,
     execution_state: &'static str,
@@ -570,7 +571,7 @@ impl ServerInner {
     fn reserve_operation(
         &self,
         id: &str,
-        fingerprint: [u8; 32],
+        request_fingerprint: [u8; 32],
         session: &str,
         generation: u64,
     ) -> ReserveOperation {
@@ -586,7 +587,7 @@ impl ServerInner {
                 .lock()
                 .ok()
                 .and_then(|sessions| sessions.get(session).map(|entry| entry.generation));
-            if record.fingerprint != fingerprint
+            if record.request_fingerprint != request_fingerprint
                 || record.session != session
                 || current_generation.is_some_and(|value| value != record.session_generation)
             {
@@ -605,7 +606,8 @@ impl ServerInner {
             return ReserveOperation::Full;
         }
         let operation = Arc::new(Mutex::new(OperationRecord {
-            fingerprint,
+            request_fingerprint,
+            semantic_fingerprint: None,
             session: session.to_string(),
             session_generation: generation,
             execution_state: "running",
@@ -627,7 +629,7 @@ impl ServerInner {
     fn lookup_operation(
         &self,
         id: &str,
-        fingerprint: [u8; 32],
+        request_fingerprint: [u8; 32],
         session: &str,
     ) -> Result<Option<Arc<Mutex<OperationRecord>>>, ()> {
         let registry = self.operation_records.lock().map_err(|_| ())?;
@@ -641,7 +643,7 @@ impl ServerInner {
             .map_err(|_| ())?
             .get(session)
             .map(|entry| entry.generation);
-        if record.fingerprint != fingerprint
+        if record.request_fingerprint != request_fingerprint
             || record.session != session
             || current_generation.is_some_and(|value| value != record.session_generation)
         {
@@ -649,6 +651,22 @@ impl ServerInner {
         }
         drop(record);
         Ok(Some(Arc::clone(existing)))
+    }
+
+    fn bind_operation_semantics(
+        &self,
+        operation: &Arc<Mutex<OperationRecord>>,
+        current_database: String,
+    ) -> Result<(), ()> {
+        let mut record = operation.lock().map_err(|_| ())?;
+        if record.semantic_fingerprint.is_none() {
+            record.semantic_fingerprint = Some(semantic_operation_fingerprint(
+                record.request_fingerprint,
+                record.session_generation,
+                &current_database,
+            ));
+        }
+        Ok(())
     }
 
     fn operation_json(&self, id: &str, record: &OperationRecord) -> JsonValue {
@@ -843,15 +861,15 @@ impl Server {
         } else {
             None
         };
-        let mutation_fingerprint = operation_id
+        let mutation_request_fingerprint = operation_id
             .as_deref()
             .map(|_| request_fingerprint(&parsed));
-        if let (Some(operation_id), Some(fingerprint)) =
-            (operation_id.as_deref(), mutation_fingerprint)
+        if let (Some(operation_id), Some(request_fingerprint)) =
+            (operation_id.as_deref(), mutation_request_fingerprint)
         {
             match self
                 .inner
-                .lookup_operation(operation_id, fingerprint, &parsed.session)
+                .lookup_operation(operation_id, request_fingerprint, &parsed.session)
             {
                 Ok(Some(existing)) => {
                     return existing_operation_response(&self.inner, operation_id, &existing);
@@ -871,10 +889,11 @@ impl Server {
             Err(error) => return request_failure_response(error),
         };
         let operation = if let Some(operation_id) = operation_id.as_deref() {
-            let fingerprint = mutation_fingerprint.unwrap_or_else(|| request_fingerprint(&parsed));
+            let request_fingerprint =
+                mutation_request_fingerprint.unwrap_or_else(|| request_fingerprint(&parsed));
             match self.inner.reserve_operation(
                 operation_id,
-                fingerprint,
+                request_fingerprint,
                 &parsed.session,
                 lease.0.generation,
             ) {
@@ -942,6 +961,28 @@ impl Server {
                 );
             }
         };
+        if let Some(operation) = &operation
+            && self
+                .inner
+                .bind_operation_semantics(operation, lease.0.session.current_database())
+                .is_err()
+        {
+            drop(session_guard);
+            drop(ticket);
+            set_operation_failure(
+                operation,
+                "OperationStateUnavailable",
+                "could not bind the mutation to its session context",
+                "failed",
+            );
+            return agent_error(
+                "OperationStateUnavailable",
+                "could not bind the mutation to its session context",
+                operation_id
+                    .as_deref()
+                    .map(|id| self.operation_json_by_record(id, operation)),
+            );
+        }
         // Queue writers asynchronously before compute admission. A mutation waiting behind the
         // catalog lane must not occupy a spawn_blocking worker or an active compute permit.
         let mutation_guard = if operation.is_some() {
@@ -2409,6 +2450,23 @@ fn request_fingerprint(request: &StatementRequest) -> [u8; 32] {
         hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part.as_bytes());
     }
+    hasher.finalize().into()
+}
+
+fn semantic_operation_fingerprint(
+    request_fingerprint: [u8; 32],
+    session_generation: u64,
+    current_database: &str,
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    for part in [AGENT_PROTOCOL_VERSION, MUTATION_PROTOCOL_VERSION] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    hasher.update(request_fingerprint);
+    hasher.update(session_generation.to_be_bytes());
+    hasher.update((current_database.len() as u64).to_be_bytes());
+    hasher.update(current_database.as_bytes());
     hasher.finalize().into()
 }
 
@@ -4137,6 +4195,69 @@ mod tests {
             append_utc_suffix_to_timestamp_cells(&mut too_large, &fields, max_cell_bytes - 1)
                 .unwrap_err();
         assert_eq!(error.name, "ResultLimitExceeded");
+    }
+
+    #[tokio::test]
+    async fn mutation_semantic_fingerprint_captures_session_generation_and_database() {
+        let server = Server::new(ServerConfig::default()).unwrap();
+        server.inner.root_session.register_database("phase_context");
+        let lease = server.inner.session_lease("semantic-session").unwrap();
+        lease
+            .0
+            .session
+            .set_current_database("phase_context")
+            .unwrap();
+        let request = StatementRequest {
+            session: "semantic-session".into(),
+            kind: "sql".into(),
+            code: "CREATE TABLE items (id BIGINT)".into(),
+            server_instance_id: Some(server.instance_id().into()),
+            operation_id: Some("semantic-operation".into()),
+        };
+        let request_fingerprint = request_fingerprint(&request);
+        let operation = match server.inner.reserve_operation(
+            "semantic-operation",
+            request_fingerprint,
+            &request.session,
+            lease.0.generation,
+        ) {
+            ReserveOperation::New(record) => record,
+            _ => panic!("expected a new mutation record"),
+        };
+
+        let _session_guard = lease.0.serial.clone().lock_owned().await;
+        server
+            .inner
+            .bind_operation_semantics(&operation, lease.0.session.current_database())
+            .unwrap();
+        let first = operation.lock().unwrap();
+        let bound_fingerprint = semantic_operation_fingerprint(
+            request_fingerprint,
+            lease.0.generation,
+            "phase_context",
+        );
+        assert_eq!(first.semantic_fingerprint, Some(bound_fingerprint));
+        assert_ne!(
+            bound_fingerprint,
+            semantic_operation_fingerprint(request_fingerprint, lease.0.generation, "default",)
+        );
+        assert_ne!(
+            bound_fingerprint,
+            semantic_operation_fingerprint(
+                request_fingerprint,
+                lease.0.generation + 1,
+                "phase_context",
+            )
+        );
+        drop(first);
+
+        lease.0.session.set_current_database("default").unwrap();
+        server
+            .inner
+            .bind_operation_semantics(&operation, lease.0.session.current_database())
+            .unwrap();
+        let retained = operation.lock().unwrap();
+        assert_eq!(retained.semantic_fingerprint, Some(bound_fingerprint));
     }
 
     #[tokio::test]
