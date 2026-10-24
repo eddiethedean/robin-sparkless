@@ -624,6 +624,11 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{conflict}");
     assert_eq!(conflict["ename"], "OperationIdentityConflict");
 
+    let (status, cross_session_retry) =
+        statement(&server, "reader", insert_sql, Some("append-once"));
+    assert_eq!(status, 200, "{cross_session_retry}");
+    assert_eq!(cross_session_retry["ename"], "OperationIdentityConflict");
+
     let (status, reopened_session) = statement(&server, "owner", "SELECT 1 AS value", None);
     assert_eq!(status, 200, "{reopened_session}");
     assert_eq!(reopened_session["status"], "ok");
