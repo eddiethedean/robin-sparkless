@@ -2631,6 +2631,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mutation_retention_byte_capacity_rejects_before_catalog_effects() {
+        let config = ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_mutation_records: 2,
+            max_mutation_bytes: 4100,
+            ..ServerConfig::default()
+        };
+        let server = Server::new(config).unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let first = statement_request(
+            address,
+            &instance,
+            "byte_owner",
+            "byte-cap-first",
+            "CREATE DATABASE byte_first",
+        )
+        .await;
+        assert_eq!(first["status"], "ok", "{first}");
+        assert_eq!(first["operation"]["effect_outcome"], "committed");
+
+        let (status, rejected) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"byte_owner",
+                "kind":"sql",
+                "code":"CREATE DATABASE byte_second",
+                "server_instance_id":instance,
+                "operation_id":"byte-cap-second"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{rejected}");
+        assert_eq!(rejected["ename"], "MutationRetentionCapacityExceeded");
+        assert!(server.inner.root_session.database_exists("byte_first"));
+        assert!(!server.inner.root_session.database_exists("byte_second"));
+        assert!(server.inner.operation("byte-cap-second").is_none());
+
+        let (status, retained_status) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({"server_instance_id":instance,"operation_id":"byte-cap-first"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{retained_status}");
+        assert_eq!(retained_status["effect_outcome"], "committed");
+
+        let replay = statement_request(
+            address,
+            &instance,
+            "byte_owner",
+            "byte-cap-first",
+            "CREATE DATABASE byte_first",
+        )
+        .await;
+        assert_eq!(replay["status"], "ok", "{replay}");
+        assert_eq!(replay["operation"]["effect_outcome"], "committed");
+        assert!(server.inner.root_session.database_exists("byte_first"));
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn separate_server_instances_own_isolated_catalogs() {
         async fn start_test_server(
             server: Server,
