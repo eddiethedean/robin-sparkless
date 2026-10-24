@@ -284,7 +284,8 @@ jobs:
             status=$?
             set -e
             printf '%s\n' "$output"
-            if [ "$status" -eq 0 ] || printf '%s\n' "$output" | grep -Eqi 'already uploaded'; then
+            if [ "$status" -eq 0 ] || printf '%s\n' "$output" | grep -Eqi 'already uploaded|already exists on crates\.io index'; then
+              echo "Treating ${crate}@4.16.0 as already published"
               return 0
             fi
             return "$status"
