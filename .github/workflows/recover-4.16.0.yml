@@ -9,6 +9,11 @@ on:
         required: true
         options:
           - 4.16.0
+      reuse_artifacts_from_run:
+        description: Reuse the validated wheel artifacts from an earlier recovery run
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -96,6 +101,7 @@ jobs:
 
   build-sparkless:
     name: Build sparkless wheel (${{ matrix.key }})
+    if: ${{ inputs.reuse_artifacts_from_run == '' }}
     needs: [verify-source]
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -178,12 +184,50 @@ jobs:
   verify-built-packages:
     name: Verify complete PyPI distributions
     needs: [verify-source, build-sparkless]
+    if: >-
+      ${{
+        always() && needs.verify-source.result == 'success' &&
+        (needs.build-sparkless.result == 'success' ||
+         (inputs.reuse_artifacts_from_run != '' && needs.build-sparkless.result == 'skipped'))
+      }}
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - name: Validate the prior recovery run artifacts
+        if: ${{ inputs.reuse_artifacts_from_run != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ inputs.reuse_artifacts_from_run }}
+        run: |
+          set -euo pipefail
+          run_json="$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID")"
+          printf '%s' "$run_json" | jq -e '
+            .path == ".github/workflows/recover-4.16.0.yml" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main"
+          ' >/dev/null
+          jobs_json="$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100")"
+          printf '%s' "$jobs_json" | jq -e '
+            ([.jobs[] | select(.name | startswith("Build sparkless wheel (")) | select(.conclusion == "success")] | length) == 8 and
+            ([.jobs[] | select(.name == "Verify complete PyPI distributions") | select(.conclusion == "success")] | length) == 1
+          ' >/dev/null
+      - name: Download validated wheel artifacts from the prior run
+        if: ${{ inputs.reuse_artifacts_from_run != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.reuse_artifacts_from_run }}
+          pattern: sparkless-wheel-*
+          path: dist
+          merge-multiple: true
       - uses: actions/download-artifact@v4
+        if: ${{ inputs.reuse_artifacts_from_run == '' }}
         with:
           pattern: sparkless-wheel-*
           path: dist
