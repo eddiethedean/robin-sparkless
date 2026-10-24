@@ -1,6 +1,6 @@
 //! Polars schema conversion for StructType. Kept in main crate (has Polars dependency).
 
-use polars::prelude::{DataType as PlDataType, Field, Schema, TimeUnit};
+use polars::prelude::{DataType as PlDataType, Field, PolarsError, Schema, TimeUnit, TimeZone};
 use robin_sparkless_core::{DataType, StructField, StructType};
 
 /// Extension trait for Polars schema conversion. Implemented for [`StructType`] from core.
@@ -8,6 +8,10 @@ use robin_sparkless_core::{DataType, StructField, StructType};
 pub trait StructTypePolarsExt: Sized {
     fn from_polars_schema(schema: &Schema) -> Self;
     fn to_polars_schema(&self) -> Schema;
+    /// Convert only types whose semantics can be represented without lossy fallback.
+    fn try_from_polars_schema(schema: &Schema) -> Result<Self, PolarsError>;
+    /// Convert only fields whose nullability, metadata, and logical types survive Polars' schema.
+    fn try_to_polars_schema(&self) -> Result<Schema, PolarsError>;
 }
 
 impl StructTypePolarsExt for StructType {
@@ -18,6 +22,7 @@ impl StructTypePolarsExt for StructType {
                 name: name.to_string(),
                 data_type: polars_type_to_data_type(dtype),
                 nullable: true, // Polars doesn't expose nullability in the same way
+                metadata: Default::default(),
             })
             .collect();
         StructType::new(fields)
@@ -36,6 +41,157 @@ impl StructTypePolarsExt for StructType {
             .collect();
         Schema::from_iter(fields)
     }
+
+    fn try_from_polars_schema(schema: &Schema) -> Result<Self, PolarsError> {
+        let fields = schema
+            .iter()
+            .map(|(name, dtype)| {
+                Ok(StructField::new(
+                    name.to_string(),
+                    checked_polars_type_to_data_type(dtype, name)?,
+                    true,
+                ))
+            })
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        Ok(StructType::new(fields))
+    }
+
+    fn try_to_polars_schema(&self) -> Result<Schema, PolarsError> {
+        self.validate_metadata()
+            .map_err(|error| PolarsError::ComputeError(error.into()))?;
+        let fields = self
+            .fields()
+            .iter()
+            .map(|field| {
+                if !field.nullable {
+                    return Err(schema_conversion_error(
+                        &field.name,
+                        "Polars cannot preserve non-nullable field declarations",
+                    ));
+                }
+                if !field.metadata.is_empty() {
+                    return Err(schema_conversion_error(
+                        &field.name,
+                        "Polars Field does not preserve logical field metadata",
+                    ));
+                }
+                Ok(Field::new(
+                    field.name.as_str().into(),
+                    checked_data_type_to_polars_type(&field.data_type, &field.name)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        Ok(Schema::from_iter(fields))
+    }
+}
+
+fn schema_conversion_error(path: &str, message: &str) -> PolarsError {
+    PolarsError::InvalidOperation(format!("logical schema field '{path}': {message}").into())
+}
+
+pub(crate) fn checked_polars_type_to_data_type(
+    dtype: &PlDataType,
+    path: &str,
+) -> Result<DataType, PolarsError> {
+    let unsupported = || {
+        schema_conversion_error(
+            path,
+            &format!("physical type {dtype} has no checked logical mapping"),
+        )
+    };
+    Ok(match dtype {
+        PlDataType::String => DataType::String,
+        PlDataType::Int8 => DataType::Byte,
+        PlDataType::Int16 => DataType::Short,
+        PlDataType::Int32 => DataType::Integer,
+        PlDataType::Int64 => DataType::Long,
+        PlDataType::Float32 => DataType::Float,
+        PlDataType::Float64 => DataType::Double,
+        PlDataType::Decimal(precision, scale) => DataType::Decimal(
+            (*precision)
+                .try_into()
+                .map_err(|_| schema_conversion_error(path, "decimal precision exceeds 255"))?,
+            (*scale)
+                .try_into()
+                .map_err(|_| schema_conversion_error(path, "decimal scale exceeds 255"))?,
+        ),
+        PlDataType::Boolean => DataType::Boolean,
+        PlDataType::Date => DataType::Date,
+        PlDataType::Datetime(TimeUnit::Microseconds, Some(timezone))
+            if timezone.as_str() == "UTC" =>
+        {
+            DataType::Timestamp
+        }
+        PlDataType::Datetime(TimeUnit::Microseconds, None) => DataType::TimestampNtz,
+        PlDataType::Binary => DataType::Binary,
+        // Polars' physical schema omits nested field nullability and metadata. Reject it here;
+        // callers with a logical schema must carry that descriptor alongside the plan.
+        PlDataType::List(_) | PlDataType::Struct(_) => return Err(unsupported()),
+        _ => return Err(unsupported()),
+    })
+}
+
+pub(crate) fn checked_data_type_to_polars_type(
+    dtype: &DataType,
+    path: &str,
+) -> Result<PlDataType, PolarsError> {
+    let unsupported = |reason: &str| schema_conversion_error(path, reason);
+    Ok(match dtype {
+        DataType::String => PlDataType::String,
+        DataType::Byte => PlDataType::Int8,
+        DataType::Short => PlDataType::Int16,
+        DataType::Integer => PlDataType::Int32,
+        DataType::Long => PlDataType::Int64,
+        DataType::Float => PlDataType::Float32,
+        DataType::Double => PlDataType::Float64,
+        DataType::Decimal(precision, scale) => {
+            PlDataType::Decimal(*precision as usize, *scale as usize)
+        }
+        DataType::Boolean => PlDataType::Boolean,
+        DataType::Date => PlDataType::Date,
+        DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
+        DataType::TimestampNtz => PlDataType::Datetime(TimeUnit::Microseconds, None),
+        DataType::Binary => PlDataType::Binary,
+        DataType::Array(element) => {
+            PlDataType::List(Box::new(checked_data_type_to_polars_type(element, path)?))
+        }
+        DataType::ArrayWithNullability {
+            element_type,
+            contains_null: true,
+        } => PlDataType::List(Box::new(checked_data_type_to_polars_type(
+            element_type,
+            path,
+        )?)),
+        DataType::ArrayWithNullability {
+            contains_null: false,
+            ..
+        } => {
+            return Err(unsupported(
+                "Polars List cannot preserve non-null element declarations",
+            ));
+        }
+        DataType::Struct(fields) => {
+            let nested = fields
+                .iter()
+                .map(|field| {
+                    if !field.nullable || !field.metadata.is_empty() {
+                        return Err(unsupported(
+                            "Polars Struct fields cannot preserve nested nullability or metadata",
+                        ));
+                    }
+                    Ok(Field::new(
+                        field.name.as_str().into(),
+                        checked_data_type_to_polars_type(&field.data_type, path)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, PolarsError>>()?;
+            PlDataType::Struct(nested)
+        }
+        DataType::Map(_, _) | DataType::MapWithNullability { .. } => {
+            return Err(unsupported("Polars has no native logical map type"));
+        }
+        _ => return Err(unsupported("logical type has no checked Polars mapping")),
+    })
 }
 
 fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
@@ -162,5 +318,76 @@ mod tests {
             DataType::Integer
         ));
         assert!(matches!(struct_type.fields()[1].data_type, DataType::Long));
+    }
+
+    #[test]
+    fn checked_conversion_preserves_native_scalar_distinctions() {
+        let schema = Schema::from_iter(vec![
+            Field::new("tiny".into(), PlDataType::Int8),
+            Field::new("single".into(), PlDataType::Float32),
+            Field::new(
+                "instant".into(),
+                PlDataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
+            ),
+            Field::new(
+                "wall_clock".into(),
+                PlDataType::Datetime(TimeUnit::Microseconds, None),
+            ),
+            Field::new("payload".into(), PlDataType::Binary),
+        ]);
+        let logical = StructType::try_from_polars_schema(&schema).unwrap();
+        assert!(matches!(logical.fields()[0].data_type, DataType::Byte));
+        assert!(matches!(logical.fields()[1].data_type, DataType::Float));
+        assert!(matches!(logical.fields()[2].data_type, DataType::Timestamp));
+        assert!(matches!(
+            logical.fields()[3].data_type,
+            DataType::TimestampNtz
+        ));
+        assert!(matches!(logical.fields()[4].data_type, DataType::Binary));
+
+        let physical = logical.try_to_polars_schema().unwrap();
+        let logical_again = StructType::try_from_polars_schema(&physical).unwrap();
+        assert!(matches!(
+            logical_again.fields()[0].data_type,
+            DataType::Byte
+        ));
+        assert!(matches!(
+            logical_again.fields()[1].data_type,
+            DataType::Float
+        ));
+        assert!(matches!(
+            logical_again.fields()[2].data_type,
+            DataType::Timestamp
+        ));
+        assert!(matches!(
+            logical_again.fields()[3].data_type,
+            DataType::TimestampNtz
+        ));
+    }
+
+    #[test]
+    fn checked_conversion_rejects_types_and_metadata_that_polars_would_erase() {
+        let unsigned = Schema::from_iter(vec![Field::new("u".into(), PlDataType::UInt64)]);
+        assert!(StructType::try_from_polars_schema(&unsigned).is_err());
+
+        let with_metadata = StructType::new(vec![
+            StructField::new("id".into(), DataType::Long, true)
+                .with_metadata([("source".to_string(), serde_json::json!("catalog"))].into()),
+        ]);
+        assert!(with_metadata.try_to_polars_schema().is_err());
+
+        let non_nullable =
+            StructType::new(vec![StructField::new("id".into(), DataType::Long, false)]);
+        assert!(non_nullable.try_to_polars_schema().is_err());
+
+        let nested = StructType::new(vec![StructField::new(
+            "items".into(),
+            DataType::ArrayWithNullability {
+                element_type: Box::new(DataType::Integer),
+                contains_null: false,
+            },
+            true,
+        )]);
+        assert!(nested.try_to_polars_schema().is_err());
     }
 }

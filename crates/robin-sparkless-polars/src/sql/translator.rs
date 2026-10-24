@@ -353,6 +353,9 @@ pub fn translate_with_cancellation(
                     if *if_exists {
                         continue;
                     }
+                    if !session.uses_shared_catalog() && session.drop_temp_view(&name) {
+                        continue;
+                    }
                     return Err(PolarsError::InvalidOperation(
                         format!("SQL: saved table does not exist: {name}").into(),
                     ));
@@ -686,6 +689,7 @@ fn translate_insert(
 
     // Append rows to existing table in the same namespace that provided the target table.
     let appended = target_df.union(&new_rows_df)?;
+    let logical_schema = appended.logical_schema.clone();
     drop(snapshot_guard);
     check_cancellation(token)?;
     // Materialize the complete candidate before catalog publication. A lazy append plan could
@@ -695,8 +699,12 @@ fn translate_insert(
         .collect_with_cancellation(token)
         .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
     check_cancellation(token)?;
-    let appended =
+    let mut appended_df =
         DataFrame::from_polars_with_options(staged.as_ref().clone(), session.is_case_sensitive());
+    if let Some(schema) = logical_schema {
+        appended_df = appended_df.with_logical_schema(schema)?;
+    }
+    let appended = appended_df;
     if session.has_exact_temp_view(&table_name)
         || (!has_provider && session.has_temp_view(&table_name))
     {

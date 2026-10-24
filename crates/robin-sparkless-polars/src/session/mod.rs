@@ -13,12 +13,13 @@ use polars::chunked_array::builder::get_list_builder;
 use polars::prelude::{
     AnonymousScan, AnonymousScanArgs, DataFrame as PlDataFrame, DataType, Field, IntoSeries,
     LazyFrame, NamedFrom, PlSmallStr, PolarsError, ScanArgsAnonymous, Schema, Series, TimeUnit,
+    TimeZone,
 };
 use polars_arrow::bitmap::Bitmap;
 use robin_sparkless_core::engine::{
     ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
 };
-use robin_sparkless_core::schema::{DataType as CoreDataType, StructType};
+use robin_sparkless_core::schema::{DataType as CoreDataType, StructField, StructType};
 use robin_sparkless_core::{
     PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils,
     decimal_allow_precision_loss_from_session_map,
@@ -372,9 +373,11 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         "string" | "str" | "varchar" => Some(DataType::String),
         "boolean" | "bool" => Some(DataType::Boolean),
         "date" => Some(DataType::Date),
-        "timestamp" | "datetime" | "timestamp_ntz" => {
-            Some(DataType::Datetime(TimeUnit::Microseconds, None))
-        }
+        "timestamp" | "datetime" => Some(DataType::Datetime(
+            TimeUnit::Microseconds,
+            Some(TimeZone::UTC),
+        )),
+        "timestamp_ntz" => Some(DataType::Datetime(TimeUnit::Microseconds, None)),
         _ => None,
     }
 }
@@ -1726,6 +1729,11 @@ impl SparkSession {
         self
     }
 
+    #[cfg(feature = "sql")]
+    pub(crate) fn uses_shared_catalog(&self) -> bool {
+        self.shared_catalog.is_some()
+    }
+
     /// Serialize SQL catalog resolution/publication for sessions in one shared scope.
     ///
     /// The guard covers SQL translation, where table references are resolved into immutable
@@ -2120,10 +2128,15 @@ impl SparkSession {
 
     /// Returns whether a temp view is registered under exactly this identifier.
     pub(crate) fn has_exact_temp_view(&self, name: &str) -> bool {
-        self.catalog
-            .lock()
-            .ok()
-            .is_some_and(|m| m.contains_key(name))
+        self.catalog.lock().ok().is_some_and(|views| {
+            if self.is_case_sensitive() {
+                views.contains_key(name)
+            } else {
+                views
+                    .keys()
+                    .any(|view_name| view_name.eq_ignore_ascii_case(name))
+            }
+        })
     }
 
     /// Drop a temporary view by name (PySpark: catalog.dropTempView).
@@ -2355,8 +2368,16 @@ impl SparkSession {
                 }
             };
         }
-        if (self.shared_catalog.is_none() || !name.contains('.')) && self.has_temp_view(name) {
-            return true;
+        if self.shared_catalog.is_none() || !name.contains('.') {
+            let exact_only =
+                name.contains('.') && self.external_catalog_provider().ok().flatten().is_some();
+            if if exact_only {
+                self.has_exact_temp_view(name)
+            } else {
+                self.has_temp_view(name)
+            } {
+                return true;
+            }
         }
         if match self.tables.lock() {
             Ok(m) => m.contains_key(&self.saved_table_key(name)),
@@ -3952,10 +3973,13 @@ impl SparkSession {
                 ..Default::default()
             },
         )?;
-        Ok(
-            DataFrame::from_lazy_with_options(lazy, self.is_case_sensitive())
-                .with_range_cardinality(start, step, row_count),
-        )
+        DataFrame::from_lazy_with_options(lazy, self.is_case_sensitive())
+            .with_range_cardinality(start, step, row_count)
+            .with_logical_schema(StructType::new(vec![StructField::new(
+                "id".into(),
+                CoreDataType::Long,
+                false,
+            )]))
     }
 
     /// Read a CSV file.

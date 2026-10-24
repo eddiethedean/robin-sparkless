@@ -1,6 +1,6 @@
 # 4.17.0 implementation and release plan
 
-**Status: planned; no implementation or release gates completed.** This plan refines **Phase 1**, following the [4.16 implementation plan](RELEASE_4_16.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes again at **4.17.0**, including unchanged packages. Owners, implementation issues/PRs, and test evidence remain unassigned.
+**Status: implementation in progress; no release gates completed.** This plan refines **Phase 1**, following the [4.16 implementation plan](RELEASE_4_16.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes again at **4.17.0**, including unchanged packages. Owners, external adapter tracking, and release evidence remain unassigned.
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Release roadmap](ROADMAP.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
@@ -152,4 +152,8 @@ Run controlled races around the actual publication point as well as real concurr
 - [ ] 417-07: regression and V31 candidate gates pass.
 - [ ] 417-08: V32 public inventory verification completes 4.17.0.
 
-This refinement supplies implementation instructions only. It does not add server code, bump versions, change the external emulator, publish packages, or complete any validation gate.
+## Current implementation state
+
+The repository now contains the first native implementation slices: a process-scoped shared catalog and managed SQL mutation path with HTTP operation identities/status, a deferred native range scan with exact cardinality for direct and supported simple-filter counts, and a logical schema sidecar with bounded metadata and checked Polars conversion. The native scalar schema is retained through table creation, filters, projections/casts, unions, temporary views, and staged table appends. Unsupported remote logical types remain disabled.
+
+This code does not complete the release plan. Arbitrary filtered range counts can still materialize the anonymous scan, bounded batch production and scheduler/allocation/RSS evidence remain open, and nested logical schemas are not yet carried through every native/IPC transformation. The 4.16 launcher and coordinated package baseline are absent, the external SDK/emulator adapter is untracked, and V15–V18/V31–V32 have not been run. Keep every slice checkbox open until its full exit evidence passes; do not mark 4.17 ready to tag or publish from the native tests alone.

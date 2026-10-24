@@ -1772,6 +1772,15 @@ fn execute_statement(
             "INSERT INTO must target a saved table, not a temporary view",
         ));
     }
+    if action == "drop_table"
+        && target
+            .is_some_and(|name| !session.saved_table_exists(name) && session.has_temp_view(name))
+    {
+        return Err(execution_failure(
+            "UnsupportedSql",
+            "DROP TABLE must target a saved table; use DROP VIEW for a temporary view",
+        ));
+    }
     let frame = session
         .sql_with_cancellation(sql, token)
         .map_err(map_engine_failure)?;
@@ -1932,7 +1941,7 @@ fn expression_nullable(expr: &ast::Expr) -> bool {
 fn spark_schema(fields: &[StructField]) -> Result<JsonValue, ExecutionFailure> {
     let mut encoded_fields = Vec::with_capacity(fields.len());
     for field in fields {
-        encoded_fields.push(json!({"name":field.name,"type":spark_type(&field.data_type)?,"nullable":field.nullable,"metadata":{}}));
+        encoded_fields.push(json!({"name":field.name,"type":spark_type(&field.data_type)?,"nullable":field.nullable,"metadata":field.metadata}));
     }
     Ok(json!({"type":"struct","fields":encoded_fields}))
 }
@@ -2290,6 +2299,19 @@ mod tests {
         assert!(validate_statement("SELECT TRY_CAST('1' AS BIGINT)").is_err());
         assert!(validate_statement("SELECT CAST('1' AS ARRAY<INT>)").is_err());
         assert!(validate_statement("SELECT CAST(1 AS BIGINT)").is_ok());
+    }
+
+    #[test]
+    fn result_schema_preserves_metadata_and_keeps_native_extensions_disabled() {
+        let metadata = [("owner".to_string(), json!("analytics"))]
+            .into_iter()
+            .collect();
+        let field = StructField::new("id".into(), DataType::Long, false).with_metadata(metadata);
+        let encoded = spark_schema(&[field]).unwrap();
+        assert_eq!(encoded["fields"][0]["metadata"]["owner"], "analytics");
+
+        let byte_field = StructField::new("tiny".into(), DataType::Byte, true);
+        assert!(spark_schema(&[byte_field]).is_err());
     }
 
     #[tokio::test]
@@ -2660,6 +2682,26 @@ mod tests {
         .await;
         assert_eq!(
             replaced_view.1["data"]["application/json"]["data"],
+            json!([[12]])
+        );
+        let drop_view_as_table = statement_request(
+            address,
+            &server_id,
+            "s_write",
+            "drop-view-as-table",
+            "DROP TABLE local_items",
+        )
+        .await;
+        assert_eq!(drop_view_as_table["ename"], "UnsupportedSql");
+        let view_after_wrong_drop = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({"session":"s_write","kind":"sql","code":"SELECT id FROM local_items"}),
+        )
+        .await;
+        assert_eq!(
+            view_after_wrong_drop.1["data"]["application/json"]["data"],
             json!([[12]])
         );
 

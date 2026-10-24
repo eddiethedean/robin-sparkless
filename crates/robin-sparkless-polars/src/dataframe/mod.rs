@@ -21,7 +21,7 @@ pub use transformations::{
 use crate::column::Column;
 use crate::error::{EngineError, polars_to_core_error};
 use crate::functions::SortOrder;
-use crate::schema::{StructType, StructTypePolarsExt};
+use crate::schema::{StructField, StructType, StructTypePolarsExt};
 use crate::session::SparkSession;
 use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
@@ -45,6 +45,14 @@ use std::sync::Arc;
 const DEFAULT_CASE_SENSITIVE: bool = false;
 const DEFAULT_EXTERNAL_ARROW_BATCH_ROWS: usize = 10_000;
 const DEFAULT_EXTERNAL_ARROW_BATCH_BYTES: usize = 64 * 1024 * 1024;
+
+fn projected_source_column(expression: &Expr) -> Option<&str> {
+    match expression {
+        Expr::Column(name) => Some(name.as_str()),
+        Expr::Alias(inner, _) | Expr::Cast { expr: inner, .. } => projected_source_column(inner),
+        _ => None,
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RangeCardinality {
@@ -458,6 +466,9 @@ pub struct DataFrame {
     /// Transformations that can change cardinality must clear this hint.
     pub(crate) row_count_hint: Option<u64>,
     pub(crate) range_cardinality: Option<RangeCardinality>,
+    /// Logical schema retained beside Polars' physical schema when the latter cannot express
+    /// nullability or metadata.
+    pub(crate) logical_schema: Option<StructType>,
 }
 
 /// Spec for groupBy: either a column name (str) or a Column expression (e.g. col("a").alias("x")).
@@ -472,6 +483,7 @@ impl DataFrame {
     /// Create a new DataFrame from a Polars DataFrame (case-insensitive column matching by default).
     /// Stores as Lazy for consistency with the lazy-by-default execution model.
     pub fn from_polars(df: PlDataFrame) -> Self {
+        let logical_schema = StructType::try_from_polars_schema(df.schema().as_ref()).ok();
         let lf = df.lazy();
         DataFrame {
             inner: DataFrameInner::Lazy(lf),
@@ -482,12 +494,14 @@ impl DataFrame {
             post_select_exprs: None,
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema,
         }
     }
 
     /// Create a new DataFrame from a Polars DataFrame with explicit case sensitivity.
     /// When `case_sensitive` is false, column resolution is case-insensitive (PySpark default).
     pub fn from_polars_with_options(df: PlDataFrame, case_sensitive: bool) -> Self {
+        let logical_schema = StructType::try_from_polars_schema(df.schema().as_ref()).ok();
         let lf = df.lazy();
         DataFrame {
             inner: DataFrameInner::Lazy(lf),
@@ -498,6 +512,7 @@ impl DataFrame {
             post_select_exprs: None,
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema,
         }
     }
 
@@ -505,6 +520,7 @@ impl DataFrame {
     /// Used by create_dataframe_from_rows so schema (including struct types) is immediately
     /// available for dotted column resolution (e.g. select("StructValue.e1")) (#1076).
     pub(crate) fn from_eager_with_options(df: PlDataFrame, case_sensitive: bool) -> Self {
+        let logical_schema = StructType::try_from_polars_schema(df.schema().as_ref()).ok();
         DataFrame {
             inner: DataFrameInner::Eager(Arc::new(df)),
             case_sensitive,
@@ -514,6 +530,7 @@ impl DataFrame {
             post_select_exprs: None,
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema,
         }
     }
 
@@ -528,6 +545,7 @@ impl DataFrame {
             post_select_exprs: None,
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema: None,
         }
     }
 
@@ -542,6 +560,7 @@ impl DataFrame {
             post_select_exprs: None,
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema: None,
         }
     }
 
@@ -560,6 +579,7 @@ impl DataFrame {
             post_select_exprs: Some(post_select_exprs),
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema: None,
         }
     }
 
@@ -580,6 +600,7 @@ impl DataFrame {
             post_select_exprs: Some(post_select_exprs),
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema: None,
         }
     }
 
@@ -599,6 +620,7 @@ impl DataFrame {
             post_select_exprs: None,
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema: None,
         }
     }
 
@@ -614,6 +636,7 @@ impl DataFrame {
             post_select_exprs: self.post_select_exprs.clone(),
             row_count_hint: self.row_count_hint,
             range_cardinality: self.range_cardinality,
+            logical_schema: self.logical_schema.clone(),
         }
     }
 
@@ -628,6 +651,7 @@ impl DataFrame {
             post_select_exprs: None,
             row_count_hint: None,
             range_cardinality: None,
+            logical_schema: None,
         }
     }
 
@@ -677,6 +701,7 @@ impl DataFrame {
             post_select_exprs: self.post_select_exprs.clone(),
             row_count_hint: self.row_count_hint,
             range_cardinality: self.range_cardinality,
+            logical_schema: self.logical_schema.clone(),
         }
     }
 
@@ -1697,8 +1722,173 @@ impl DataFrame {
 
     /// Get the schema of the DataFrame
     pub fn schema(&self) -> Result<StructType, PolarsError> {
+        if let Some(schema) = &self.logical_schema {
+            return Ok(schema.clone());
+        }
         let s = self.schema_or_collect()?;
         Ok(StructType::from_polars_schema(&s))
+    }
+
+    /// Attach a checked logical schema to a physical Polars plan. This is how callers preserve
+    /// nullability and metadata that Polars' physical `Field` does not represent.
+    pub fn with_logical_schema(mut self, schema: StructType) -> Result<Self, PolarsError> {
+        schema
+            .validate_metadata()
+            .map_err(|error| PolarsError::InvalidOperation(error.into()))?;
+        let physical = self.schema_or_collect()?;
+        if schema.fields().len() != physical.len() {
+            return Err(PolarsError::SchemaMismatch(
+                format!(
+                    "logical schema has {} fields but the Polars plan has {}",
+                    schema.fields().len(),
+                    physical.len()
+                )
+                .into(),
+            ));
+        }
+        for (logical, (physical_name, physical_dtype)) in
+            schema.fields().iter().zip(physical.iter())
+        {
+            if logical.name != physical_name.as_str() {
+                return Err(PolarsError::SchemaMismatch(
+                    format!(
+                        "logical field '{}' does not match Polars field '{}' at the same position",
+                        logical.name, physical_name
+                    )
+                    .into(),
+                ));
+            }
+            let expected = crate::schema_conv::checked_data_type_to_polars_type(
+                &logical.data_type,
+                &logical.name,
+            )?;
+            if &expected != physical_dtype {
+                return Err(PolarsError::SchemaMismatch(
+                    format!(
+                        "logical field '{}' maps to {expected}, but the Polars plan has {physical_dtype}",
+                        logical.name
+                    )
+                    .into(),
+                ));
+            }
+        }
+        self.logical_schema = Some(schema);
+        Ok(self)
+    }
+
+    fn projected_logical_schema(
+        &self,
+        expressions: &[Expr],
+        output: &DataFrame,
+    ) -> Option<StructType> {
+        let source_schema = self.logical_schema.as_ref()?;
+        let output_schema = output.schema_or_collect().ok()?;
+        if expressions.len() != output_schema.len() {
+            return None;
+        }
+        let fields = output_schema
+            .iter()
+            .zip(expressions)
+            .map(|((output_name, output_dtype), expression)| {
+                let alias_name = match expression {
+                    Expr::Alias(_, alias) => alias.as_str(),
+                    _ => output_name.as_str(),
+                };
+                if let Some(source_name) = projected_source_column(expression)
+                    && let Some(source) = source_schema.fields().iter().find(|field| {
+                        if self.case_sensitive {
+                            field.name == source_name
+                        } else {
+                            field.name.eq_ignore_ascii_case(source_name)
+                        }
+                    })
+                {
+                    let mut projected = source.clone();
+                    let physical_matches = crate::schema_conv::checked_data_type_to_polars_type(
+                        &source.data_type,
+                        &source.name,
+                    )
+                    .is_ok_and(|expected| &expected == output_dtype);
+                    if !physical_matches {
+                        projected.data_type = crate::schema_conv::checked_polars_type_to_data_type(
+                            output_dtype,
+                            output_name,
+                        )
+                        .ok()?;
+                    }
+                    projected.name = alias_name.to_string();
+                    return Some(projected);
+                }
+                let data_type =
+                    crate::schema_conv::checked_polars_type_to_data_type(output_dtype, output_name)
+                        .ok()?;
+                Some(StructField::new(output_name.to_string(), data_type, true))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(StructType::new(fields))
+    }
+
+    fn logical_schema_by_output_names(&self, output: &DataFrame) -> Option<StructType> {
+        let source_schema = self.logical_schema.as_ref()?;
+        let output_schema = output.schema_or_collect().ok()?;
+        let fields = output_schema
+            .iter()
+            .map(|(output_name, output_dtype)| {
+                if let Some(source) = source_schema.fields().iter().find(|field| {
+                    if self.case_sensitive {
+                        field.name == output_name.as_str()
+                    } else {
+                        field.name.eq_ignore_ascii_case(output_name.as_str())
+                    }
+                }) {
+                    let matches_physical = crate::schema_conv::checked_data_type_to_polars_type(
+                        &source.data_type,
+                        &source.name,
+                    )
+                    .is_ok_and(|expected| &expected == output_dtype);
+                    if matches_physical {
+                        let mut projected = source.clone();
+                        projected.name = output_name.to_string();
+                        return Some(projected);
+                    }
+                }
+                Some(StructField::new(
+                    output_name.to_string(),
+                    crate::schema_conv::checked_polars_type_to_data_type(output_dtype, output_name)
+                        .ok()?,
+                    true,
+                ))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(StructType::new(fields))
+    }
+
+    fn merged_logical_schema(&self, other: &DataFrame) -> Option<StructType> {
+        let (left, right) = match (&self.logical_schema, &other.logical_schema) {
+            (Some(left), Some(right)) => (left, Some(right)),
+            (Some(left), None) => (left, None),
+            (None, Some(right)) => (right, None),
+            (None, None) => return None,
+        };
+        if right.is_none() {
+            return Some(left.clone());
+        }
+        let right = right?;
+        if left.fields().len() != right.fields().len() {
+            return None;
+        }
+        let mut merged = left.fields().to_vec();
+        for (left, right) in merged.iter_mut().zip(right.fields()) {
+            if left.name != right.name
+                || serde_json::to_value(&left.data_type).ok()?
+                    != serde_json::to_value(&right.data_type).ok()?
+            {
+                return None;
+            }
+            left.nullable |= right.nullable;
+            // Union follows the left input's field metadata, matching its output field order.
+        }
+        Some(StructType::new(merged))
     }
 
     /// Same as [`schema`](Self::schema) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -2474,7 +2664,19 @@ impl DataFrame {
     /// Accepts either column names (strings) or Column expressions (e.g. from regexp_extract_all(...).alias("m")).
     /// Column names are resolved according to case sensitivity.
     pub fn select_exprs(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
-        transformations::select_with_exprs(self, exprs, self.case_sensitive, false)
+        let logical_schema = if self.logical_schema.is_some() {
+            Some(exprs.clone())
+        } else {
+            None
+        };
+        let mut selected =
+            transformations::select_with_exprs(self, exprs, self.case_sensitive, false)?;
+        if let Some(exprs) = logical_schema
+            && let Some(schema) = self.projected_logical_schema(&exprs, &selected)
+        {
+            selected.logical_schema = Some(schema);
+        }
+        Ok(selected)
     }
 
     /// Select columns by name (returns a new DataFrame).
@@ -2545,7 +2747,13 @@ impl DataFrame {
 
     /// Select using a mix of column names and expressions (PySpark: select("a", col("b").alias("x"))).
     pub fn select_items(&self, items: Vec<SelectItem<'_>>) -> Result<DataFrame, PolarsError> {
-        transformations::select_items(self, items, self.case_sensitive)
+        let mut selected = transformations::select_items(self, items, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_by_output_names(&selected)
+        {
+            selected.logical_schema = Some(schema);
+        }
+        Ok(selected)
     }
 
     /// Filter rows using a Polars expression.
@@ -2555,6 +2763,7 @@ impl DataFrame {
             .and_then(|range| range.count_matching(&condition));
         let mut filtered = transformations::filter(self, condition, self.case_sensitive)?;
         filtered.row_count_hint = row_count_hint;
+        filtered.logical_schema = self.logical_schema.clone();
         Ok(filtered)
     }
 
@@ -2573,7 +2782,13 @@ impl DataFrame {
     /// Add or replace a column. Use a [`Column`] (e.g. from `col("x")`, `rand(42)`, `randn(42)`).
     /// For `rand`/`randn`, generates one distinct value per row (PySpark-like).
     pub fn with_column(&self, column_name: &str, col: &Column) -> Result<DataFrame, PolarsError> {
-        transformations::with_column(self, column_name, col, self.case_sensitive)
+        let mut output = transformations::with_column(self, column_name, col, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_by_output_names(&output)
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// Same as [`with_column`](Self::with_column) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -2826,17 +3041,24 @@ impl DataFrame {
         column_names: Vec<&str>,
         ascending: Vec<bool>,
     ) -> Result<DataFrame, PolarsError> {
-        transformations::order_by(self, column_names, ascending, self.case_sensitive)
+        let mut ordered =
+            transformations::order_by(self, column_names, ascending, self.case_sensitive)?;
+        ordered.logical_schema = self.logical_schema.clone();
+        Ok(ordered)
     }
 
     /// Order by sort expressions (asc/desc with nulls_first/last).
     pub fn order_by_exprs(&self, sort_orders: Vec<SortOrder>) -> Result<DataFrame, PolarsError> {
-        transformations::order_by_exprs(self, sort_orders, self.case_sensitive)
+        let mut ordered = transformations::order_by_exprs(self, sort_orders, self.case_sensitive)?;
+        ordered.logical_schema = self.logical_schema.clone();
+        Ok(ordered)
     }
 
     /// Union (unionAll): stack another DataFrame vertically. Schemas must match (same columns, same order).
     pub fn union(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
-        transformations::union(self, other, self.case_sensitive)
+        let mut combined = transformations::union(self, other, self.case_sensitive)?;
+        combined.logical_schema = self.merged_logical_schema(other);
+        Ok(combined)
     }
 
     /// Alias for union (PySpark unionAll).
@@ -2855,7 +3077,9 @@ impl DataFrame {
 
     /// Distinct: drop duplicate rows (all columns or optional subset).
     pub fn distinct(&self, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
-        transformations::distinct(self, subset, self.case_sensitive)
+        let mut distinct = transformations::distinct(self, subset, self.case_sensitive)?;
+        distinct.logical_schema = self.logical_schema.clone();
+        Ok(distinct)
     }
 
     /// Drop one or more columns.
@@ -2894,6 +3118,7 @@ impl DataFrame {
             row_count: range.row_count.min(n as u64),
             ..range
         });
+        limited.logical_schema = self.logical_schema.clone();
         Ok(limited)
     }
 
@@ -3164,7 +3389,13 @@ impl DataFrame {
 
     /// Add or replace multiple columns. PySpark withColumns. Accepts `Column` so rand/randn get per-row values.
     pub fn with_columns(&self, exprs: &[(String, Column)]) -> Result<DataFrame, PolarsError> {
-        transformations::with_columns(self, exprs, self.case_sensitive)
+        let mut output = transformations::with_columns(self, exprs, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_by_output_names(&output)
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// Rename multiple columns. PySpark withColumnsRenamed.
@@ -4566,6 +4797,7 @@ impl Clone for DataFrame {
             post_select_exprs: self.post_select_exprs.clone(),
             row_count_hint: self.row_count_hint,
             range_cardinality: self.range_cardinality,
+            logical_schema: self.logical_schema.clone(),
         }
     }
 }
@@ -5235,6 +5467,69 @@ mod tests {
             filtered.count_with_cancellation(&cancelled),
             Err(EngineError::Cancelled(_))
         ));
+    }
+
+    #[test]
+    fn logical_schema_metadata_and_nullability_follow_filter_projection_and_union() {
+        let physical = polars::prelude::df!("id" => [1i64, 2, 3]).unwrap();
+        let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
+            .into_iter()
+            .collect();
+        let logical = StructType::new(vec![
+            StructField::new("id".into(), robin_sparkless_core::DataType::Long, false)
+                .with_metadata(metadata),
+        ]);
+        let source = DataFrame::from_lazy_with_options(physical.lazy(), false)
+            .with_logical_schema(logical)
+            .unwrap();
+
+        let filtered = source.filter(col("id").gt(lit(1i64))).unwrap();
+        let filtered_schema = filtered.schema().unwrap();
+        let field = &filtered_schema.fields()[0];
+        assert!(!field.nullable);
+        assert_eq!(field.metadata["owner"], "analytics");
+
+        let casted = source
+            .select_exprs(vec![col("id").cast(DataType::Float64).alias("cast_id")])
+            .unwrap();
+        let casted_schema = casted.schema().unwrap();
+        let field = &casted_schema.fields()[0];
+        assert!(matches!(
+            field.data_type,
+            robin_sparkless_core::DataType::Double
+        ));
+        assert!(!field.nullable);
+        assert_eq!(field.metadata["owner"], "analytics");
+
+        let projected = filtered
+            .select_exprs(vec![col("id").alias("renamed")])
+            .unwrap();
+        let projected_schema = projected.schema().unwrap();
+        let field = &projected_schema.fields()[0];
+        assert_eq!(field.name, "renamed");
+        assert!(!field.nullable);
+        assert_eq!(field.metadata["owner"], "analytics");
+
+        let unioned = projected.union(&projected).unwrap();
+        let unioned_schema = unioned.schema().unwrap();
+        let field = &unioned_schema.fields()[0];
+        assert!(!field.nullable);
+        assert_eq!(field.metadata["owner"], "analytics");
+    }
+
+    #[test]
+    fn logical_schema_attachment_checks_physical_type_compatibility() {
+        let physical = polars::prelude::df!("id" => [1i64]).unwrap();
+        let logical = StructType::new(vec![StructField::new(
+            "id".into(),
+            robin_sparkless_core::DataType::Double,
+            true,
+        )]);
+        assert!(
+            DataFrame::from_polars(physical)
+                .with_logical_schema(logical)
+                .is_err()
+        );
     }
 
     #[test]
