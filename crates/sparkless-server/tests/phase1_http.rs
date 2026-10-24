@@ -624,6 +624,12 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{conflict}");
     assert_eq!(conflict["ename"], "OperationIdentityConflict");
 
+    let whitespace_variant = "INSERT INTO  phase_http.items (id, note) VALUES (7, 'seven')";
+    let (status, exact_bytes_conflict) =
+        statement(&server, "owner", whitespace_variant, Some("append-once"));
+    assert_eq!(status, 200, "{exact_bytes_conflict}");
+    assert_eq!(exact_bytes_conflict["ename"], "OperationIdentityConflict");
+
     let (status, cross_session_retry) =
         statement(&server, "reader", insert_sql, Some("append-once"));
     assert_eq!(status, 200, "{cross_session_retry}");
