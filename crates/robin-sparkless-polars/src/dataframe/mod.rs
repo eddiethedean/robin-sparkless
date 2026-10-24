@@ -58,6 +58,73 @@ fn projected_source_column(expression: &Expr) -> Option<&str> {
     }
 }
 
+fn expression_contains(expression: &Expr, predicate: impl Fn(&Expr) -> bool) -> bool {
+    let mut found = false;
+    let _ = expression.clone().try_map_expr(|node| {
+        if predicate(&node) {
+            found = true;
+        }
+        Ok(node)
+    });
+    found
+}
+
+fn range_projection_preserves_row_count(expressions: &[Expr]) -> bool {
+    // Keep the constant-count shortcut away from expressions whose result height can differ
+    // from the input. Unknown Polars function nodes take the conservative fallback as well.
+    expressions.iter().all(|expression| {
+        !expression_contains(expression, |node| {
+            matches!(node, Expr::Literal(value) if !value.is_scalar())
+                || matches!(
+                    node,
+                    Expr::Agg(_)
+                        | Expr::DataTypeFunction(_)
+                        | Expr::Display { .. }
+                        | Expr::Element
+                        | Expr::Explode { .. }
+                        | Expr::Eval { .. }
+                        | Expr::Filter { .. }
+                        | Expr::Gather { .. }
+                        | Expr::Function { .. }
+                        | Expr::Len
+                        | Expr::Slice { .. }
+                        | Expr::Over { .. }
+                        | Expr::AnonymousFunction { .. }
+                        | Expr::SubPlan(..)
+                )
+        })
+    })
+}
+
+fn range_projection_can_run_per_batch(expressions: &[Expr]) -> bool {
+    // Some row-preserving expressions still depend on the full input (for example sorting or
+    // windows). Only append a projection to the range pipeline when chunks can execute alone.
+    expressions.iter().all(|expression| {
+        !expression_contains(expression, |node| {
+            matches!(node, Expr::Literal(value) if !value.is_scalar())
+                || matches!(
+                    node,
+                    Expr::Agg(_)
+                        | Expr::DataTypeFunction(_)
+                        | Expr::Display { .. }
+                        | Expr::Element
+                        | Expr::Explode { .. }
+                        | Expr::Eval { .. }
+                        | Expr::Filter { .. }
+                        | Expr::Gather { .. }
+                        | Expr::Function { .. }
+                        | Expr::Len
+                        | Expr::Over { .. }
+                        | Expr::AnonymousFunction { .. }
+                        | Expr::Slice { .. }
+                        | Expr::Sort { .. }
+                        | Expr::SortBy { .. }
+                        | Expr::SubPlan(..)
+                )
+        })
+    })
+}
+
 #[derive(Clone)]
 pub(crate) struct RangeCardinality {
     pub start: i64,
@@ -70,11 +137,122 @@ pub(crate) struct RangeCardinality {
 enum RangeOperation {
     Filter(Expr),
     Limit(u64),
+    Project(Vec<Expr>),
 }
 
 enum RangeBatchError {
     Polars(PolarsError),
     Engine(EngineError),
+}
+
+struct RangeBatchProducer {
+    range: RangeCardinality,
+    case_sensitive: bool,
+    token: Option<CancellationToken>,
+    batch_rows: usize,
+    first_index: u64,
+    limit_consumed: Vec<u64>,
+}
+
+impl RangeBatchProducer {
+    fn new(
+        range: RangeCardinality,
+        case_sensitive: bool,
+        token: Option<CancellationToken>,
+        batch_rows: usize,
+    ) -> Self {
+        let limit_consumed = vec![0; range.operations.len()];
+        Self {
+            range,
+            case_sensitive,
+            token,
+            batch_rows: batch_rows.max(1),
+            first_index: 0,
+            limit_consumed,
+        }
+    }
+
+    fn next_batch(&mut self) -> Result<Option<PlDataFrame>, RangeBatchError> {
+        loop {
+            if let Some(token) = &self.token {
+                token.check_cancelled().map_err(RangeBatchError::Engine)?;
+            }
+            let limit_satisfied = self
+                .range
+                .operations
+                .iter()
+                .enumerate()
+                .any(|(index, operation)| {
+                    matches!(operation, RangeOperation::Limit(limit) if self.limit_consumed[index] >= *limit)
+                });
+            if self.first_index >= self.range.row_count || limit_satisfied {
+                return Ok(None);
+            }
+
+            let rows = usize::try_from(
+                (self.range.row_count - self.first_index).min(self.batch_rows as u64),
+            )
+            .expect("range batch size is bounded by usize");
+            let mut batch = self
+                .range
+                .batch(self.first_index, rows)
+                .map_err(RangeBatchError::Polars)?;
+            self.first_index += rows as u64;
+
+            for (operation_index, operation) in self.range.operations.iter().enumerate() {
+                if let Some(token) = &self.token {
+                    token.check_cancelled().map_err(RangeBatchError::Engine)?;
+                }
+                match operation {
+                    RangeOperation::Filter(condition) => {
+                        let frame = DataFrame::from_polars_with_options(batch, self.case_sensitive);
+                        let filtered = frame
+                            .filter(condition.clone())
+                            .map_err(RangeBatchError::Polars)?;
+                        batch = filtered
+                            .collect_inner()
+                            .map_err(RangeBatchError::Polars)?
+                            .as_ref()
+                            .clone();
+                    }
+                    RangeOperation::Limit(limit) => {
+                        let remaining = limit.saturating_sub(self.limit_consumed[operation_index]);
+                        if remaining < batch.height() as u64 {
+                            let frame =
+                                DataFrame::from_polars_with_options(batch, self.case_sensitive);
+                            let limited = frame
+                                .limit(remaining as usize)
+                                .map_err(RangeBatchError::Polars)?;
+                            batch = limited
+                                .collect_inner()
+                                .map_err(RangeBatchError::Polars)?
+                                .as_ref()
+                                .clone();
+                        }
+                        self.limit_consumed[operation_index] = self.limit_consumed[operation_index]
+                            .saturating_add(batch.height() as u64);
+                    }
+                    RangeOperation::Project(expressions) => {
+                        let frame = DataFrame::from_polars_with_options(batch, self.case_sensitive);
+                        let projected = frame
+                            .select_exprs(expressions.clone())
+                            .map_err(RangeBatchError::Polars)?;
+                        batch = projected
+                            .collect_inner()
+                            .map_err(RangeBatchError::Polars)?
+                            .as_ref()
+                            .clone();
+                    }
+                }
+            }
+            if let Some(token) = &self.token {
+                token.check_cancelled().map_err(RangeBatchError::Engine)?;
+            }
+            if batch.height() > 0 {
+                return Ok(Some(batch));
+            }
+        }
+    }
 }
 
 impl RangeCardinality {
@@ -165,6 +343,27 @@ impl RangeCardinality {
         }
         let id = polars::prelude::Series::new("id".into(), values);
         PlDataFrame::new_infer_height(vec![id.into()])
+    }
+}
+
+enum IpcBatchSource {
+    Polars(CollectBatches),
+    Range(RangeBatchProducer),
+}
+
+impl IpcBatchSource {
+    fn next_batch(&mut self) -> Option<Result<PlDataFrame, EngineError>> {
+        match self {
+            Self::Polars(batches) => batches
+                .next()
+                .map(|result| result.map_err(polars_to_core_error)),
+            Self::Range(producer) => match producer.next_batch() {
+                Ok(Some(batch)) => Some(Ok(batch)),
+                Ok(None) => None,
+                Err(RangeBatchError::Polars(error)) => Some(Err(polars_to_core_error(error))),
+                Err(RangeBatchError::Engine(error)) => Some(Err(error)),
+            },
+        }
     }
 }
 
@@ -296,7 +495,7 @@ pub(crate) enum DataFrameInner {
 }
 
 struct PolarsIpcBatchIterator {
-    batches: Option<CollectBatches>,
+    source: Option<IpcBatchSource>,
     current: Option<PlDataFrame>,
     current_offset: usize,
     max_rows: usize,
@@ -309,23 +508,28 @@ struct PolarsIpcBatchIterator {
 
 impl PolarsIpcBatchIterator {
     fn close(&mut self) {
-        self.batches.take();
+        self.source.take();
         self.current.take();
         self.current_offset = 0;
         self.closed = true;
     }
 
-    fn next_source_row(&mut self) -> Option<Result<PlDataFrame, polars::prelude::PolarsError>> {
-        if let Some(current) = self.current.as_ref() {
-            let row = current.slice(self.current_offset as i64, 1);
-            self.current_offset += 1;
-            if self.current_offset >= current.height() {
-                self.current.take();
-                self.current_offset = 0;
+    fn next_source_row(&mut self) -> Option<Result<PlDataFrame, EngineError>> {
+        if self.current.is_none() {
+            match self.source.as_mut().and_then(IpcBatchSource::next_batch) {
+                Some(Ok(batch)) => self.current = Some(batch),
+                Some(Err(error)) => return Some(Err(error)),
+                None => return None,
             }
-            return Some(Ok(row));
         }
-        self.batches.as_mut().and_then(Iterator::next)
+        let current = self.current.as_ref().expect("source batch was set");
+        let row = current.slice(self.current_offset as i64, 1);
+        self.current_offset += 1;
+        if self.current_offset >= current.height() {
+            self.current.take();
+            self.current_offset = 0;
+        }
+        Some(Ok(row))
     }
 
     fn combine_rows(rows: &[PlDataFrame]) -> Result<PlDataFrame, polars::prelude::PolarsError> {
@@ -383,7 +587,6 @@ impl Iterator for PolarsIpcBatchIterator {
                 Some(Ok(row)) if row.height() > 0 => row,
                 Some(Ok(_)) => continue,
                 Some(Err(error)) => {
-                    let error = polars_to_core_error(error);
                     if !rows.is_empty() {
                         self.deferred_error = Some(error);
                         break;
@@ -728,69 +931,13 @@ impl DataFrame {
         token: Option<&CancellationToken>,
         mut visit: impl FnMut(PlDataFrame) -> Result<(), RangeBatchError>,
     ) -> Result<(), RangeBatchError> {
-        let mut limit_consumed = vec![0u64; range.operations.len()];
-        let mut first_index = 0u64;
-        while first_index < range.row_count {
-            if let Some(token) = token {
-                token.check_cancelled().map_err(RangeBatchError::Engine)?;
-            }
-            let limit_satisfied = range
-                .operations
-                .iter()
-                .enumerate()
-                .any(|(index, operation)| {
-                    matches!(operation, RangeOperation::Limit(limit) if limit_consumed[index] >= *limit)
-                });
-            if limit_satisfied {
-                break;
-            }
-
-            let rows = usize::try_from(
-                (range.row_count - first_index).min(RANGE_EXECUTION_BATCH_ROWS as u64),
-            )
-            .expect("range batch size is bounded by usize");
-            let mut batch = range
-                .batch(first_index, rows)
-                .map_err(RangeBatchError::Polars)?;
-            first_index += rows as u64;
-
-            for (operation_index, operation) in range.operations.iter().enumerate() {
-                if let Some(token) = token {
-                    token.check_cancelled().map_err(RangeBatchError::Engine)?;
-                }
-                match operation {
-                    RangeOperation::Filter(condition) => {
-                        let frame = Self::from_polars_with_options(batch, self.case_sensitive);
-                        let filtered = frame
-                            .filter(condition.clone())
-                            .map_err(RangeBatchError::Polars)?;
-                        batch = filtered
-                            .collect_inner()
-                            .map_err(RangeBatchError::Polars)?
-                            .as_ref()
-                            .clone();
-                    }
-                    RangeOperation::Limit(limit) => {
-                        let remaining = limit.saturating_sub(limit_consumed[operation_index]);
-                        if remaining < batch.height() as u64 {
-                            let frame = Self::from_polars_with_options(batch, self.case_sensitive);
-                            let limited = frame
-                                .limit(remaining as usize)
-                                .map_err(RangeBatchError::Polars)?;
-                            batch = limited
-                                .collect_inner()
-                                .map_err(RangeBatchError::Polars)?
-                                .as_ref()
-                                .clone();
-                        }
-                        limit_consumed[operation_index] =
-                            limit_consumed[operation_index].saturating_add(batch.height() as u64);
-                    }
-                }
-            }
-            if let Some(token) = token {
-                token.check_cancelled().map_err(RangeBatchError::Engine)?;
-            }
+        let mut producer = RangeBatchProducer::new(
+            range.clone(),
+            self.case_sensitive,
+            token.cloned(),
+            RANGE_EXECUTION_BATCH_ROWS,
+        );
+        while let Some(batch) = producer.next_batch()? {
             visit(batch)?;
         }
         Ok(())
@@ -818,17 +965,13 @@ impl DataFrame {
         range: &RangeCardinality,
         token: Option<&CancellationToken>,
     ) -> Result<PlDataFrame, RangeBatchError> {
-        let mut output = range.batch(0, 0).map_err(RangeBatchError::Polars)?;
-        let mut has_rows = false;
+        let schema = self
+            .lazy_frame()
+            .collect_schema()
+            .map_err(RangeBatchError::Polars)?;
+        let mut output = PlDataFrame::empty_with_schema(&schema);
         self.for_each_range_batch(range, token, |batch| {
-            if batch.height() > 0 {
-                if has_rows {
-                    output.vstack_mut(&batch).map_err(RangeBatchError::Polars)?;
-                } else {
-                    output = batch;
-                    has_rows = true;
-                }
-            }
+            output.vstack_mut(&batch).map_err(RangeBatchError::Polars)?;
             Ok(())
         })?;
         Ok(output)
@@ -2431,11 +2574,19 @@ impl DataFrame {
                 "max_bytes must be greater than zero".into(),
             ));
         }
-        // Row sized source pulls keep the producer's in-flight memory independent of
-        // max_rows/max_bytes. The iterator can only serialize and validate one row at
-        // a time, so a small byte limit cannot arrive after a large Polars chunk has
-        // already been materialized.
-        let batches = self.collect_batches(1).map_err(polars_to_core_error)?;
+        // Row-sized source pulls keep in-flight memory independent of max_rows/max_bytes.
+        // Range plans use the native operation pipeline with a one-row source chunk so a
+        // small byte limit is checked before a larger chunk is retained.
+        let source = if let Some(range) = &self.range_cardinality {
+            IpcBatchSource::Range(RangeBatchProducer::new(
+                range.clone(),
+                self.case_sensitive,
+                Some(token.clone()),
+                1,
+            ))
+        } else {
+            IpcBatchSource::Polars(self.collect_batches(1).map_err(polars_to_core_error)?)
+        };
         let logical_schema_json = self
             .logical_schema
             .as_ref()
@@ -2445,7 +2596,7 @@ impl DataFrame {
                 EngineError::User(format!("logical schema serialization failed: {error}"))
             })?;
         Ok(ArrowIpcBatchStream::new(PolarsIpcBatchIterator {
-            batches: Some(batches),
+            source: Some(source),
             current: None,
             current_offset: 0,
             max_rows,
@@ -2874,6 +3025,9 @@ impl DataFrame {
     /// Accepts either column names (strings) or Column expressions (e.g. from regexp_extract_all(...).alias("m")).
     /// Column names are resolved according to case sensitivity.
     pub fn select_exprs(&self, exprs: Vec<Expr>) -> Result<DataFrame, PolarsError> {
+        let preserves_row_count = range_projection_preserves_row_count(&exprs);
+        let can_run_per_range_batch = range_projection_can_run_per_batch(&exprs);
+        let batch_expressions = exprs.clone();
         let logical_schema = if self.logical_schema.is_some() {
             Some(exprs.clone())
         } else {
@@ -2885,6 +3039,15 @@ impl DataFrame {
             && let Some(schema) = self.projected_logical_schema(&exprs, &selected)
         {
             selected.logical_schema = Some(schema);
+        }
+        if preserves_row_count {
+            selected.row_count_hint = self.row_count_hint;
+            if can_run_per_range_batch && let Some(mut range) = self.range_cardinality.clone() {
+                range
+                    .operations
+                    .push(RangeOperation::Project(batch_expressions));
+                selected.range_cardinality = Some(range);
+            }
         }
         Ok(selected)
     }
@@ -2958,10 +3121,22 @@ impl DataFrame {
     /// Select using a mix of column names and expressions (PySpark: select("a", col("b").alias("x"))).
     pub fn select_items(&self, items: Vec<SelectItem<'_>>) -> Result<DataFrame, PolarsError> {
         let mut selected = transformations::select_items(self, items, self.case_sensitive)?;
+        let range_expressions = selected.post_select_exprs.clone();
         if self.logical_schema.is_some()
             && let Some(schema) = self.logical_schema_by_output_names(&selected)
         {
             selected.logical_schema = Some(schema);
+        }
+        if let Some(expressions) = range_expressions
+            && range_projection_preserves_row_count(&expressions)
+        {
+            selected.row_count_hint = self.row_count_hint;
+            if range_projection_can_run_per_batch(&expressions)
+                && let Some(mut range) = self.range_cardinality.clone()
+            {
+                range.operations.push(RangeOperation::Project(expressions));
+                selected.range_cardinality = Some(range);
+            }
         }
         Ok(selected)
     }
@@ -5694,6 +5869,166 @@ mod tests {
                 assert_eq!(matched_rows, expected as u64);
             }
         }
+    }
+
+    #[test]
+    fn projected_range_keeps_exact_count_and_supports_filter_after_projection() {
+        let session = SparkSession::builder()
+            .app_name("projected-range-batches")
+            .get_or_create();
+        let projected = session
+            .range(0, 10_000_000, 1)
+            .unwrap()
+            .select_exprs(vec![(col("id") * lit(2i64)).alias("doubled")])
+            .unwrap();
+
+        assert_eq!(projected.row_count_hint, Some(10_000_000));
+        assert_eq!(projected.count().unwrap(), 10_000_000);
+        assert_eq!(projected.columns().unwrap(), vec!["doubled"]);
+        let range = projected
+            .range_cardinality
+            .as_ref()
+            .expect("row-preserving projection keeps range metadata")
+            .clone();
+        let mut projected_rows = 0u64;
+        let mut largest_batch = 0usize;
+        let scan_result = projected.for_each_range_batch(&range, None, |batch| {
+            projected_rows += batch.height() as u64;
+            largest_batch = largest_batch.max(batch.height());
+            Ok(())
+        });
+        assert!(scan_result.is_ok(), "projected range scan must succeed");
+        assert_eq!(projected_rows, 10_000_000);
+        assert!(largest_batch <= RANGE_EXECUTION_BATCH_ROWS);
+
+        let tail = projected
+            .filter(col("doubled").gt(lit(19_999_990i64)))
+            .unwrap();
+        assert_eq!(tail.count().unwrap(), 4);
+        let collected = tail.collect().unwrap();
+        let values = collected.column("doubled").unwrap().i64().unwrap();
+        assert_eq!(
+            values.into_no_null_iter().collect::<Vec<_>>(),
+            vec![19_999_992, 19_999_994, 19_999_996, 19_999_998]
+        );
+    }
+
+    #[test]
+    fn projected_range_limit_preserves_schema_for_empty_and_nonempty_results() {
+        let session = SparkSession::builder()
+            .app_name("projected-range-limit-schema")
+            .get_or_create();
+        let projected = session
+            .range(0, 10, 1)
+            .unwrap()
+            .select_exprs(vec![(col("id") + lit(1i64)).alias("next_id")])
+            .unwrap();
+
+        let empty = projected.limit(0).unwrap();
+        assert_eq!(empty.columns().unwrap(), vec!["next_id"]);
+        assert_eq!(empty.collect().unwrap().height(), 0);
+        assert_eq!(empty.schema().unwrap().fields()[0].name, "next_id");
+
+        let limited = projected.limit(3).unwrap();
+        let collected = limited.collect().unwrap();
+        assert_eq!(
+            collected.column("next_id").unwrap().i64().unwrap().get(0),
+            Some(1)
+        );
+        assert_eq!(
+            collected.column("next_id").unwrap().i64().unwrap().get(2),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn cardinality_changing_projection_drops_range_count_hint() {
+        let session = SparkSession::builder()
+            .app_name("cardinality-changing-range-projection")
+            .get_or_create();
+        let distinct_bools = session
+            .range(0, 100, 1)
+            .unwrap()
+            .select_exprs(vec![col("id").cast(DataType::Boolean).unique()])
+            .unwrap();
+
+        assert_eq!(distinct_bools.row_count_hint, None);
+        assert!(distinct_bools.range_cardinality.is_none());
+        assert_eq!(distinct_bools.count().unwrap(), 2);
+    }
+
+    #[test]
+    fn range_projection_does_not_assume_vector_literals_preserve_cardinality() {
+        let vector_literal = lit(Series::new("values".into(), [1i64, 2]));
+
+        assert!(!range_projection_preserves_row_count(std::slice::from_ref(
+            &vector_literal
+        )));
+        assert!(!range_projection_can_run_per_batch(std::slice::from_ref(
+            &vector_literal
+        )));
+    }
+
+    #[test]
+    fn mixed_select_items_keep_range_projection_on_the_bounded_path() {
+        let session = SparkSession::builder()
+            .app_name("mixed-select-items-range")
+            .get_or_create();
+        let projected = session
+            .range(0, 1_000_000, 1)
+            .unwrap()
+            .select_items(vec![
+                SelectItem::ColumnName("id"),
+                SelectItem::Expr((col("id") + lit(1i64)).alias("next_id")),
+            ])
+            .unwrap();
+
+        assert_eq!(projected.row_count_hint, Some(1_000_000));
+        assert_eq!(projected.count().unwrap(), 1_000_000);
+        let collected = projected.limit(2).unwrap().collect().unwrap();
+        assert_eq!(
+            collected.column("id").unwrap().i64().unwrap().get(1),
+            Some(1)
+        );
+        assert_eq!(
+            collected.column("next_id").unwrap().i64().unwrap().get(1),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn projected_range_arrow_batches_use_the_bounded_native_source() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::SerReader;
+
+        let session = SparkSession::builder()
+            .app_name("projected-range-ipc")
+            .get_or_create();
+        let frame = session
+            .range(0, 10_000_000, 1)
+            .unwrap()
+            .filter(col("id").gt(lit(40i64)))
+            .unwrap()
+            .select_exprs(vec![(col("id") * lit(2i64)).alias("doubled")])
+            .unwrap()
+            .limit(3)
+            .unwrap();
+        let mut batches = frame
+            .to_arrow_ipc_batches_with_cancellation(2, 16 * 1024, &CancellationToken::new())
+            .unwrap();
+
+        let first = batches.next().unwrap().unwrap();
+        let reader = IpcStreamReader::new(std::io::Cursor::new(first.bytes));
+        let first_rows = reader.finish().unwrap();
+        let values = first_rows.column("doubled").unwrap().i64().unwrap();
+        assert_eq!(values.into_no_null_iter().collect::<Vec<_>>(), vec![82, 84]);
+
+        let second = batches.next().unwrap().unwrap();
+        let reader = IpcStreamReader::new(std::io::Cursor::new(second.bytes));
+        let second_rows = reader.finish().unwrap();
+        let values = second_rows.column("doubled").unwrap().i64().unwrap();
+        assert_eq!(values.into_no_null_iter().collect::<Vec<_>>(), vec![86]);
+        assert!(batches.next().is_none());
     }
 
     #[test]
