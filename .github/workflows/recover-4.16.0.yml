@@ -101,7 +101,6 @@ jobs:
 
   build-sparkless:
     name: Build sparkless wheel (${{ matrix.key }})
-    if: ${{ inputs.reuse_artifacts_from_run == '' }}
     needs: [verify-source]
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -152,11 +151,16 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Reuse validated wheel artifacts from the prior recovery run
+        if: ${{ inputs.reuse_artifacts_from_run != '' }}
+        run: echo "Wheel build skipped; verify-built-packages downloads the validated prior-run artifacts."
       - uses: actions/checkout@v4
+        if: ${{ inputs.reuse_artifacts_from_run == '' }}
         with:
           ref: v4.16.0
           path: source
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        if: ${{ inputs.reuse_artifacts_from_run == '' }}
         with:
           target: ${{ matrix.target }}
           command: build
@@ -166,7 +170,7 @@ jobs:
           rust-toolchain: 1.93.1
           working-directory: source
       - name: Build sparkless source distribution
-        if: matrix.key == 'manylinux-x86_64'
+        if: ${{ inputs.reuse_artifacts_from_run == '' && matrix.key == 'manylinux-x86_64' }}
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           command: sdist
@@ -175,6 +179,7 @@ jobs:
           rust-toolchain: 1.93.1
           working-directory: source
       - name: Upload built distributions
+        if: ${{ inputs.reuse_artifacts_from_run == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: sparkless-wheel-${{ matrix.key }}
