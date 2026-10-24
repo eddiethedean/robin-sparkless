@@ -6372,6 +6372,90 @@ mod tests {
         assert!(matches!(payload.get(1).unwrap(), AnyValue::Null));
     }
 
+    #[test]
+    fn nested_struct_schema_survives_union_filter_projection_and_ipc() {
+        use polars::chunked_array::StructChunked;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{NamedFrom, SerReader, Series};
+        use polars_arrow::bitmap::Bitmap;
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        fn source_frame() -> DataFrame {
+            let id = Series::new("id".into(), vec![1_i32, 2, 3]);
+            let label = Series::new("label".into(), ["first", "hidden", "third"]);
+            let payload =
+                StructChunked::from_series("payload".into(), 3, [&id, &label].into_iter())
+                    .unwrap()
+                    .with_outer_validity(Some(Bitmap::from_iter([true, false, true])))
+                    .into_series();
+            let physical = PlDataFrame::new_infer_height(vec![payload.into()]).unwrap();
+            let nested_metadata = [("origin".to_string(), serde_json::json!("shared catalog"))]
+                .into_iter()
+                .collect();
+            let logical = StructType::new(vec![StructField::new(
+                "payload".into(),
+                LogicalDataType::Struct(vec![
+                    StructField::new("id".into(), LogicalDataType::Integer, false)
+                        .with_metadata(nested_metadata),
+                    StructField::new("label".into(), LogicalDataType::String, true),
+                ]),
+                true,
+            )]);
+            DataFrame::from_polars(physical)
+                .with_logical_schema(logical)
+                .unwrap()
+        }
+
+        let source = source_frame();
+        let unioned = source.union(&source).unwrap();
+        let filtered = unioned.filter(col("payload").is_not_null()).unwrap();
+        let projected = filtered
+            .select_exprs(vec![col("payload").alias("renamed")])
+            .unwrap();
+
+        assert_eq!(projected.count().unwrap(), 4);
+        let schema = projected.schema().unwrap();
+        assert_eq!(schema.fields().len(), 1);
+        assert_eq!(schema.fields()[0].name, "renamed");
+        let LogicalDataType::Struct(nested_fields) = &schema.fields()[0].data_type else {
+            panic!("nested logical struct must survive union, filter, and projection");
+        };
+        assert!(!nested_fields[0].nullable);
+        assert_eq!(nested_fields[0].metadata["origin"], "shared catalog");
+
+        let expected_schema = schema.to_json().unwrap();
+        let batch = projected
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        assert_eq!(decoded.height(), 4);
+        let payload = decoded.column("renamed").unwrap();
+        let fields = payload.struct_().unwrap();
+        assert_eq!(
+            fields.field_by_name("id").unwrap().i32().unwrap().get(0),
+            Some(1)
+        );
+        assert_eq!(
+            fields.field_by_name("id").unwrap().i32().unwrap().get(1),
+            Some(3)
+        );
+        assert_eq!(
+            fields.field_by_name("label").unwrap().str().unwrap().get(3),
+            Some("third")
+        );
+    }
+
     /// Issue #235: root-level string–numeric comparison coercion in filter.
     #[test]
     fn coerce_string_numeric_root_in_filter() {
