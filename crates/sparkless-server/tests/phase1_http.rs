@@ -283,6 +283,75 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
         1
     );
 
+    let (status, scalar_table) = statement(
+        &server,
+        "owner",
+        "CREATE TABLE phase_http.scalar_items (exact_id BIGINT, amount DECIMAL(38,4), event_time TIMESTAMP, event_day DATE)",
+        Some("create-scalar-items"),
+    );
+    assert_eq!(status, 200, "{scalar_table}");
+    assert_eq!(scalar_table["status"], "ok");
+    let (status, scalar_insert) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.scalar_items VALUES (9007199254740993, '1234567890123456789012345678901234.5678', '2025-01-02T03:04:05.123456', '2025-01-02')",
+        Some("insert-scalar-items"),
+    );
+    assert_eq!(status, 200, "{scalar_insert}");
+    assert_eq!(scalar_insert["operation"]["effect_outcome"], "committed");
+    let (status, scalar_view) = statement(
+        &server,
+        "owner",
+        "CREATE TEMP VIEW scalar_snapshot AS SELECT exact_id, amount, event_time, event_day FROM phase_http.scalar_items WHERE exact_id > 0",
+        Some("create-scalar-snapshot"),
+    );
+    assert_eq!(status, 200, "{scalar_view}");
+    assert_eq!(scalar_view["status"], "ok");
+    let (status, scalar_projection) = statement(
+        &server,
+        "owner",
+        "SELECT event_day, amount, exact_id, event_time FROM scalar_snapshot",
+        None,
+    );
+    assert_eq!(status, 200, "{scalar_projection}");
+    assert_eq!(
+        scalar_projection["data"]["application/json"]["schema"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|field| field["type"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["date", "decimal(38,4)", "long", "timestamp"]
+    );
+    assert_eq!(
+        scalar_projection["data"]["application/json"]["data"],
+        json!([[
+            "2025-01-02",
+            "1234567890123456789012345678901234.5678",
+            9007199254740993_i64,
+            "2025-01-02T03:04:05.123456"
+        ]])
+    );
+    let (status, scalar_count) = statement(
+        &server,
+        "reader",
+        "SELECT COUNT(*) AS n FROM phase_http.scalar_items",
+        None,
+    );
+    assert_eq!(status, 200, "{scalar_count}");
+    assert_eq!(
+        scalar_count["data"]["application/json"]["data"],
+        json!([[1]])
+    );
+    assert_eq!(
+        scalar_count["data"]["application/json"]["schema"]["fields"][0]["type"],
+        "long"
+    );
+    assert_eq!(
+        scalar_count["data"]["application/json"]["schema"]["fields"][0]["nullable"],
+        false
+    );
+
     let insert_sql = "INSERT INTO phase_http.items (id, note) VALUES (7, 'seven')";
     let submit_barrier = Arc::new(Barrier::new(2));
     let simultaneous = (0..2)
