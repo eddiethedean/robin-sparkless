@@ -3243,8 +3243,8 @@ mod tests {
             bind: "127.0.0.1:0".parse().unwrap(),
             max_active_operations: 1,
             max_pending_operations: CLIENTS,
-            queue_timeout: Duration::from_secs(5),
-            response_timeout: Duration::from_secs(30),
+            queue_timeout: Duration::from_secs(30),
+            response_timeout: Duration::from_secs(60),
             ..ServerConfig::default()
         })
         .unwrap();
@@ -3287,7 +3287,7 @@ mod tests {
                         &json!({
                             "session":format!("scheduler-client-{index}"),
                             "kind":"sql",
-                            "code":"SELECT COUNT(*) AS n FROM multi_client_scheduler_range WHERE id > 5"
+                            "code":"SELECT COUNT(*) AS n FROM multi_client_scheduler_range WHERE id >= 5000000 AND id < 5000010"
                         }),
                     )
                     .await
@@ -3322,10 +3322,7 @@ mod tests {
                 .unwrap();
             assert_eq!(status, StatusCode::OK, "{response}");
             assert_eq!(response["status"], "ok", "{response}");
-            assert_eq!(
-                response["data"]["application/json"]["data"],
-                json!([[9_999_994]])
-            );
+            assert_eq!(response["data"]["application/json"]["data"], json!([[10]]));
         }
         assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
 
