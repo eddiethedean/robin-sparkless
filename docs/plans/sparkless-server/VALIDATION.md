@@ -172,6 +172,8 @@ These are local component checks, not passing release gates. The current work ha
 
 - At source commit [`b1dd8777`](https://github.com/eddiethedean/robin-sparkless/commit/b1dd8777), `cargo test --release --locked -p sparkless-server --test phase1_http -- --nocapture` passed. The HTTP regression replays a committed mutation after close, then reopens the same session ID and confirms an otherwise identical retry conflicts against the new live generation; a subsequent table read confirms the append occurred only once. This is focused V16 identity evidence, not the full gate.
 
+- At source commit [`40bc86e1`](https://github.com/eddiethedean/robin-sparkless/commit/40bc86e1), `cargo test --release --locked -p sparkless-server shared_catalog_and_mutation_replay_are_scoped_to_server_instance -- --nocapture` passed. The live HTTP test holds one session's serial lane, queues `USE phase_db` then a temporary-view mutation, and confirms the latter's retained semantic digest binds to `phase_db`; the view also reads the expected row from that database. Strict all-target server Clippy, formatting, and diff checks passed. This is focused D10/V16 evidence; the full outcomes and SDK matrix remain open.
+
 Every advertised binary-wheel platform still requires independent build/install/runtime witnesses. CI must add targeted format/clippy/tests for supported feature combinations, launcher tests on supported Python/platform versions, and the distinct direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect routes. Keep their evidence separate and do not report planned commands as passed.
 
 ## Evidence record template
