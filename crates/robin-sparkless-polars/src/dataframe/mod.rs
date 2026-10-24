@@ -50,12 +50,80 @@ const RANGE_EXECUTION_BATCH_ROWS: usize = 16_384;
 /// Positional result fields, rows, and their declared logical schema.
 pub type PositionalJsonResult = (Vec<String>, Vec<Vec<JsonValue>>, StructType);
 
-fn projected_source_column(expression: &Expr) -> Option<&str> {
+fn projected_source_column(expression: &Expr) -> Option<String> {
     match expression {
-        Expr::Column(name) => Some(name.as_str()),
+        Expr::Column(name) => Some(name.to_string()),
         Expr::Alias(inner, _) | Expr::Cast { expr: inner, .. } => projected_source_column(inner),
+        Expr::Function {
+            input,
+            function:
+                polars::prelude::FunctionExpr::StructExpr(polars::prelude::StructFunction::FieldByName(
+                    field_name,
+                )),
+        } => Some(format!(
+            "{}.{}",
+            projected_source_column(input.first()?)?,
+            field_name
+        )),
         _ => None,
     }
+}
+
+fn logical_field_for_projected_column(
+    schema: &StructType,
+    source_name: &str,
+    case_sensitive: bool,
+) -> Option<StructField> {
+    let matches_name = |left: &str, right: &str| {
+        if case_sensitive {
+            left == right
+        } else {
+            left.eq_ignore_ascii_case(right)
+        }
+    };
+    let parts = source_name.split('.').collect::<Vec<_>>();
+
+    // Prefer an exact top-level match so columns whose names contain dots remain addressable.
+    if let Some(field) = schema
+        .fields()
+        .iter()
+        .find(|field| matches_name(&field.name, source_name))
+    {
+        return Some(field.clone());
+    }
+
+    // A resolved expression can still carry a table qualifier before the nested field path.
+    // Try each component as the root, then follow only declared struct fields.
+    for (root_index, root_name) in parts.iter().enumerate() {
+        let Some(mut field) = schema
+            .fields()
+            .iter()
+            .find(|field| matches_name(&field.name, root_name))
+            .cloned()
+        else {
+            continue;
+        };
+        let mut found = true;
+        for child_name in &parts[root_index + 1..] {
+            let robin_sparkless_core::DataType::Struct(children) = &field.data_type else {
+                found = false;
+                break;
+            };
+            let Some(child) = children
+                .iter()
+                .find(|child| matches_name(&child.name, child_name))
+                .cloned()
+            else {
+                found = false;
+                break;
+            };
+            field = child;
+        }
+        if found && root_index + 1 < parts.len() {
+            return Some(field);
+        }
+    }
+    None
 }
 
 fn expression_contains(expression: &Expr, predicate: impl Fn(&Expr) -> bool) -> bool {
@@ -2146,23 +2214,17 @@ impl DataFrame {
             .iter()
             .zip(expressions)
             .map(|((output_name, output_dtype), expression)| {
-                let alias_name = match expression {
-                    Expr::Alias(_, alias) => alias.as_str(),
-                    _ => output_name.as_str(),
-                };
                 if let Some(source_name) = projected_source_column(expression)
-                    && let Some(source) = source_schema.fields().iter().find(|field| {
-                        if self.case_sensitive {
-                            field.name == source_name
-                        } else {
-                            field.name.eq_ignore_ascii_case(source_name)
-                        }
-                    })
+                    && let Some(source) = logical_field_for_projected_column(
+                        source_schema,
+                        &source_name,
+                        self.case_sensitive,
+                    )
                 {
-                    let mut projected = source.clone();
+                    let mut projected = source;
                     let physical_matches = crate::schema_conv::checked_data_type_to_polars_type(
-                        &source.data_type,
-                        &source.name,
+                        &projected.data_type,
+                        &projected.name,
                     )
                     .is_ok_and(|expected| &expected == output_dtype);
                     if !physical_matches {
@@ -2172,13 +2234,51 @@ impl DataFrame {
                         )
                         .ok()?;
                     }
-                    projected.name = alias_name.to_string();
+                    projected.name = output_name.to_string();
                     return Some(projected);
                 }
                 let data_type =
                     crate::schema_conv::checked_polars_type_to_data_type(output_dtype, output_name)
                         .ok()?;
                 Some(StructField::new(output_name.to_string(), data_type, true))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(StructType::new(fields))
+    }
+
+    fn projected_logical_schema_for_paths(
+        &self,
+        source_paths: &[String],
+        output: &DataFrame,
+    ) -> Option<StructType> {
+        let source_schema = self.logical_schema.as_ref()?;
+        let output_schema = output.schema_or_collect().ok()?;
+        if source_paths.len() != output_schema.len() {
+            return None;
+        }
+        let fields = source_paths
+            .iter()
+            .zip(output_schema.iter())
+            .map(|(source_path, (output_name, output_dtype))| {
+                let mut projected = logical_field_for_projected_column(
+                    source_schema,
+                    source_path,
+                    self.case_sensitive,
+                )?;
+                let physical_matches = crate::schema_conv::checked_data_type_to_polars_type(
+                    &projected.data_type,
+                    &projected.name,
+                )
+                .is_ok_and(|expected| &expected == output_dtype);
+                if !physical_matches {
+                    projected.data_type = crate::schema_conv::checked_polars_type_to_data_type(
+                        output_dtype,
+                        output_name,
+                    )
+                    .ok()?;
+                }
+                projected.name = output_name.to_string();
+                Some(projected)
             })
             .collect::<Option<Vec<_>>>()?;
         Some(StructType::new(fields))
@@ -2219,7 +2319,12 @@ impl DataFrame {
         Some(StructType::new(fields))
     }
 
-    fn merged_logical_schema(&self, other: &DataFrame, output: &DataFrame) -> Option<StructType> {
+    fn merged_logical_schema(
+        &self,
+        other: &DataFrame,
+        output: &DataFrame,
+        align_by_name: bool,
+    ) -> Option<StructType> {
         let left_schema = self.logical_schema.as_ref();
         let right_schema = other.logical_schema.as_ref();
         if left_schema.is_none() && right_schema.is_none() {
@@ -2240,23 +2345,25 @@ impl DataFrame {
                 })
             });
 
+        let match_by_name = align_by_name || names_match;
         let mut fields = Vec::with_capacity(output_schema.len());
         for (index, (output_name, output_dtype)) in output_schema.iter().enumerate() {
             let left_field = left_schema.and_then(|schema| {
-                schema
-                    .fields()
-                    .iter()
-                    .find(|field| {
-                        if self.case_sensitive {
-                            field.name == output_name.as_str()
-                        } else {
-                            field.name.eq_ignore_ascii_case(output_name.as_str())
-                        }
-                    })
-                    .or_else(|| schema.fields().get(index))
+                let matched = schema.fields().iter().find(|field| {
+                    if self.case_sensitive {
+                        field.name == output_name.as_str()
+                    } else {
+                        field.name.eq_ignore_ascii_case(output_name.as_str())
+                    }
+                });
+                matched.or_else(|| {
+                    (!align_by_name)
+                        .then(|| schema.fields().get(index))
+                        .flatten()
+                })
             });
             let right_field = right_schema.and_then(|schema| {
-                if names_match {
+                if match_by_name {
                     schema.fields().iter().find(|field| {
                         if self.case_sensitive {
                             field.name == output_name.as_str()
@@ -2574,6 +2681,63 @@ impl DataFrame {
                 format!("row count {count} exceeds this platform's usize range").into(),
             )
         })
+    }
+
+    fn logical_schema_after_renames(
+        &self,
+        output: &DataFrame,
+        renames: &[(String, String)],
+    ) -> Option<StructType> {
+        let source_schema = self.logical_schema.as_ref()?;
+        let output_schema = output.schema_or_collect().ok()?;
+        let same_name = |left: &str, right: &str| {
+            if self.case_sensitive {
+                left == right
+            } else {
+                left.eq_ignore_ascii_case(right)
+            }
+        };
+        let fields = output_schema
+            .iter()
+            .map(|(output_name, output_dtype)| {
+                let source_name = renames
+                    .iter()
+                    .find(|(_, renamed)| same_name(renamed, output_name.as_str()))
+                    .map(|(source, _)| source.as_str())
+                    .unwrap_or(output_name.as_str());
+                let Some(source) = source_schema
+                    .fields()
+                    .iter()
+                    .find(|field| same_name(&field.name, source_name))
+                else {
+                    return Some(StructField::new(
+                        output_name.to_string(),
+                        crate::schema_conv::checked_polars_type_to_data_type(
+                            output_dtype,
+                            output_name,
+                        )
+                        .ok()?,
+                        true,
+                    ));
+                };
+                let mut projected = source.clone();
+                let physical_matches = crate::schema_conv::checked_data_type_to_polars_type(
+                    &source.data_type,
+                    &source.name,
+                )
+                .is_ok_and(|expected| &expected == output_dtype);
+                if !physical_matches {
+                    projected.data_type = crate::schema_conv::checked_polars_type_to_data_type(
+                        output_dtype,
+                        output_name,
+                    )
+                    .ok()?;
+                }
+                projected.name = output_name.to_string();
+                Some(projected)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(StructType::new(fields))
     }
 
     /// Count rows while checking cooperative cancellation at the native materialization boundary.
@@ -3221,7 +3385,13 @@ impl DataFrame {
                 })
                 .collect::<Result<Vec<_>, PolarsError>>()?;
             // Exprs already resolved by column_name_to_expr (e.g. "t1.id" -> col("id")); skip re-resolve to avoid ambiguous on col("id") (#1230).
-            return self.select_exprs(exprs);
+            let mut selected = self.select_exprs(exprs)?;
+            if self.logical_schema.is_some()
+                && let Some(schema) = self.projected_logical_schema_for_paths(&expanded, &selected)
+            {
+                selected.logical_schema = Some(schema);
+            }
+            return Ok(selected);
         }
         // Non-dotted names: build explicit expressions so we can implement PySpark-like
         // ambiguous-case handling. When multiple physical columns differ only by case
@@ -3264,10 +3434,12 @@ impl DataFrame {
     pub fn select_items(&self, items: Vec<SelectItem<'_>>) -> Result<DataFrame, PolarsError> {
         let mut selected = transformations::select_items(self, items, self.case_sensitive)?;
         let range_expressions = selected.post_select_exprs.clone();
-        if self.logical_schema.is_some()
-            && let Some(schema) = self.logical_schema_by_output_names(&selected)
-        {
-            selected.logical_schema = Some(schema);
+        if self.logical_schema.is_some() {
+            selected.logical_schema = range_expressions
+                .as_deref()
+                .and_then(|expressions| self.projected_logical_schema(expressions, &selected))
+                .or_else(|| selected.logical_schema.clone())
+                .or_else(|| self.logical_schema_by_output_names(&selected));
         }
         if let Some(expressions) = range_expressions
             && range_projection_preserves_row_count(&expressions)
@@ -3592,7 +3764,7 @@ impl DataFrame {
     /// Union (unionAll): stack another DataFrame vertically. Schemas must match (same columns, same order).
     pub fn union(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
         let mut combined = transformations::union(self, other, self.case_sensitive)?;
-        combined.logical_schema = self.merged_logical_schema(other, &combined);
+        combined.logical_schema = self.merged_logical_schema(other, &combined, false);
         Ok(combined)
     }
 
@@ -3607,7 +3779,14 @@ impl DataFrame {
         other: &DataFrame,
         allow_missing_columns: bool,
     ) -> Result<DataFrame, PolarsError> {
-        transformations::union_by_name(self, other, allow_missing_columns, self.case_sensitive)
+        let mut combined = transformations::union_by_name(
+            self,
+            other,
+            allow_missing_columns,
+            self.case_sensitive,
+        )?;
+        combined.logical_schema = self.merged_logical_schema(other, &combined, true);
+        Ok(combined)
     }
 
     /// Distinct: drop duplicate rows (all columns or optional subset).
@@ -3619,7 +3798,13 @@ impl DataFrame {
 
     /// Drop one or more columns.
     pub fn drop(&self, columns: Vec<&str>) -> Result<DataFrame, PolarsError> {
-        transformations::drop(self, columns, self.case_sensitive)
+        let mut output = transformations::drop(self, columns, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_by_output_names(&output)
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// Drop columns from string names and/or Column references (PySpark `drop(col)` parity).
@@ -3627,7 +3812,13 @@ impl DataFrame {
         &self,
         specs: Vec<transformations::DropColumnSpec>,
     ) -> Result<DataFrame, PolarsError> {
-        transformations::drop_specs(self, specs, self.case_sensitive)
+        let mut output = transformations::drop_specs(self, specs, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_by_output_names(&output)
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// Drop rows with nulls. PySpark na.drop(subset, how, thresh).
@@ -3637,12 +3828,20 @@ impl DataFrame {
         how: &str,
         thresh: Option<usize>,
     ) -> Result<DataFrame, PolarsError> {
-        transformations::dropna(self, subset, how, thresh, self.case_sensitive)
+        let mut output = transformations::dropna(self, subset, how, thresh, self.case_sensitive)?;
+        output.logical_schema = self.logical_schema.clone();
+        Ok(output)
     }
 
     /// Fill nulls with a literal expression. PySpark na.fill(value, subset=...).
     pub fn fillna(&self, value: Expr, subset: Option<Vec<&str>>) -> Result<DataFrame, PolarsError> {
-        transformations::fillna(self, value, subset, self.case_sensitive)
+        let mut output = transformations::fillna(self, value, subset, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_by_output_names(&output)
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// Limit: return first n rows.
@@ -3669,7 +3868,17 @@ impl DataFrame {
         old_name: &str,
         new_name: &str,
     ) -> Result<DataFrame, PolarsError> {
-        transformations::with_column_renamed(self, old_name, new_name, self.case_sensitive)
+        let mut output =
+            transformations::with_column_renamed(self, old_name, new_name, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_after_renames(
+                &output,
+                &[(old_name.to_string(), new_name.to_string())],
+            )
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// Replace values in a column (old_value -> new_value). PySpark replace.
@@ -3679,7 +3888,14 @@ impl DataFrame {
         old_value: Expr,
         new_value: Expr,
     ) -> Result<DataFrame, PolarsError> {
-        transformations::replace(self, column_name, old_value, new_value, self.case_sensitive)
+        let mut output =
+            transformations::replace(self, column_name, old_value, new_value, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_by_output_names(&output)
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// Cross join with another DataFrame (cartesian product). PySpark crossJoin.
@@ -3920,7 +4136,13 @@ impl DataFrame {
 
     /// Select columns whose names match the regex. PySpark colRegex.
     pub fn col_regex(&self, pattern: &str) -> Result<DataFrame, PolarsError> {
-        transformations::col_regex(self, pattern, self.case_sensitive)
+        let mut output = transformations::col_regex(self, pattern, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_by_output_names(&output)
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// Add or replace multiple columns. PySpark withColumns. Accepts `Column` so rand/randn get per-row values.
@@ -3939,7 +4161,13 @@ impl DataFrame {
         &self,
         renames: &[(String, String)],
     ) -> Result<DataFrame, PolarsError> {
-        transformations::with_columns_renamed(self, renames, self.case_sensitive)
+        let mut output = transformations::with_columns_renamed(self, renames, self.case_sensitive)?;
+        if self.logical_schema.is_some()
+            && let Some(schema) = self.logical_schema_after_renames(&output, renames)
+        {
+            output.logical_schema = Some(schema);
+        }
+        Ok(output)
     }
 
     /// NA sub-API. PySpark df.na().
@@ -3949,7 +4177,9 @@ impl DataFrame {
 
     /// Skip first n rows. PySpark offset(n).
     pub fn offset(&self, n: usize) -> Result<DataFrame, PolarsError> {
-        transformations::offset(self, n, self.case_sensitive)
+        let mut output = transformations::offset(self, n, self.case_sensitive)?;
+        output.logical_schema = self.logical_schema.clone();
+        Ok(output)
     }
 
     /// Transform by a function. PySpark transform(func).
@@ -6517,6 +6747,7 @@ mod tests {
         }
 
         let source = source_frame();
+        let source_schema_json = source.schema().unwrap().to_json().unwrap();
         let unioned = source.union(&source).unwrap();
         let filtered = unioned.filter(col("payload").is_not_null()).unwrap();
         let projected = filtered
@@ -6532,6 +6763,73 @@ mod tests {
         };
         assert!(!nested_fields[0].nullable);
         assert_eq!(nested_fields[0].metadata["origin"], "shared catalog");
+
+        let nested_field = source.select(vec!["payload.id"]).unwrap().schema().unwrap();
+        assert_eq!(nested_field.fields()[0].name, "id");
+        assert!(!nested_field.fields()[0].nullable);
+        assert_eq!(
+            nested_field.fields()[0].metadata["origin"],
+            "shared catalog"
+        );
+
+        let selected_items = source
+            .select_items(vec![SelectItem::Expr(col("payload").alias("item_payload"))])
+            .unwrap()
+            .schema()
+            .unwrap();
+        let LogicalDataType::Struct(item_fields) = &selected_items.fields()[0].data_type else {
+            panic!("mixed select must retain the nested logical schema");
+        };
+        assert_eq!(selected_items.fields()[0].name, "item_payload");
+        assert!(!item_fields[0].nullable);
+        assert_eq!(item_fields[0].metadata["origin"], "shared catalog");
+
+        let selected_nested_item = source
+            .select_items(vec![SelectItem::ColumnName("payload.id")])
+            .unwrap()
+            .schema()
+            .unwrap();
+        assert_eq!(selected_nested_item.fields()[0].name, "id");
+        assert!(!selected_nested_item.fields()[0].nullable);
+        assert_eq!(
+            selected_nested_item.fields()[0].metadata["origin"],
+            "shared catalog"
+        );
+
+        let selected_expr = source
+            .select_expr(&["payload as expr_payload".to_string()])
+            .unwrap()
+            .schema()
+            .unwrap();
+        let LogicalDataType::Struct(expr_fields) = &selected_expr.fields()[0].data_type else {
+            panic!("selectExpr must retain the nested logical schema");
+        };
+        assert_eq!(selected_expr.fields()[0].name, "expr_payload");
+        assert!(!expr_fields[0].nullable);
+        assert_eq!(expr_fields[0].metadata["origin"], "shared catalog");
+
+        let renamed = source
+            .with_column_renamed("payload", "renamed_payload")
+            .unwrap();
+        let renamed_schema = renamed.schema().unwrap();
+        let LogicalDataType::Struct(renamed_fields) = &renamed_schema.fields()[0].data_type else {
+            panic!("renaming must retain the nested logical schema");
+        };
+        assert_eq!(renamed_schema.fields()[0].name, "renamed_payload");
+        assert!(!renamed_fields[0].nullable);
+        assert_eq!(renamed_fields[0].metadata["origin"], "shared catalog");
+
+        let by_name = source.union_by_name(&source, false).unwrap();
+        assert_eq!(
+            by_name.schema().unwrap().to_json().unwrap(),
+            source_schema_json
+        );
+
+        let row_filtered = source.dropna(None, "any", None).unwrap();
+        assert_eq!(
+            row_filtered.schema().unwrap().to_json().unwrap(),
+            source_schema_json
+        );
 
         let expected_schema = schema.to_json().unwrap();
         let batch = projected
@@ -6710,6 +7008,42 @@ mod tests {
             rows.iter()
                 .all(|row| row.get("key").is_some_and(serde_json::Value::is_string))
         );
+    }
+
+    #[test]
+    fn union_by_name_merges_logical_fields_by_name_when_right_has_extra_columns() {
+        let left = DataFrame::from_lazy(polars::prelude::df!("payload" => [1i64]).unwrap().lazy());
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("extra" => [9i64], "payload" => [2i64]).unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![
+            StructField::new("extra".into(), robin_sparkless_core::DataType::Long, false)
+                .with_metadata(
+                    [("owner".to_string(), serde_json::json!("extra"))]
+                        .into_iter()
+                        .collect(),
+                ),
+            StructField::new(
+                "payload".into(),
+                robin_sparkless_core::DataType::Long,
+                false,
+            )
+            .with_metadata(
+                [("owner".to_string(), serde_json::json!("payload"))]
+                    .into_iter()
+                    .collect(),
+            ),
+        ]))
+        .unwrap();
+
+        let combined = left.union_by_name(&right, false).unwrap();
+        let schema = combined.schema().unwrap();
+        assert_eq!(schema.fields().len(), 1);
+        assert_eq!(schema.fields()[0].name, "payload");
+        assert_eq!(schema.fields()[0].metadata["owner"], "payload");
+        let rows = combined.collect_as_json_rows().unwrap();
+        assert_eq!(rows[0]["payload"], serde_json::json!(1));
+        assert_eq!(rows[1]["payload"], serde_json::json!(2));
     }
 
     #[test]

@@ -643,9 +643,15 @@ pub fn select_items(
             }
         }
     }
+    let projected_exprs = exprs.clone();
     let mut result = select_with_exprs(df, exprs, case_sensitive, false)?;
     for (from, to) in rename_after {
         result = result.with_column_renamed(&from, &to)?;
+    }
+    if df.logical_schema.is_some()
+        && let Some(schema) = df.projected_logical_schema(&projected_exprs, &result)
+    {
+        result.logical_schema = Some(schema);
     }
     Ok(result)
 }
@@ -2512,7 +2518,13 @@ pub fn select_expr(
             select_exprs.push(col(resolved.as_str()));
         }
     }
-    select_with_exprs(df, select_exprs, case_sensitive, false)
+    let mut output = select_with_exprs(df, select_exprs.clone(), case_sensitive, false)?;
+    if df.logical_schema.is_some()
+        && let Some(schema) = df.projected_logical_schema(&select_exprs, &output)
+    {
+        output.logical_schema = Some(schema);
+    }
+    Ok(output)
 }
 
 /// Select columns whose names match the regex pattern. PySpark colRegex.
