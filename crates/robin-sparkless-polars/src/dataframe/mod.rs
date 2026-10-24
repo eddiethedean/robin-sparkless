@@ -6781,6 +6781,22 @@ mod tests {
                 assert_eq!(labels.get(0), Some("three"));
             }
         }
+
+        let empty = transformed.limit(0).unwrap();
+        let empty_batch = empty
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(empty_batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+        assert_eq!(reader.finish().unwrap().height(), 0);
     }
 
     #[test]
