@@ -4858,8 +4858,40 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(negative_values, vec![7, 4, 1]);
 
+        let near_max = session
+            .range(i64::MAX - 2, i64::MAX, 1)
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            near_max
+                .column("id")
+                .unwrap()
+                .i64()
+                .unwrap()
+                .into_no_null_iter()
+                .collect::<Vec<_>>(),
+            vec![i64::MAX - 2, i64::MAX - 1]
+        );
+        let near_min = session
+            .range(i64::MIN + 2, i64::MIN, -1)
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            near_min
+                .column("id")
+                .unwrap()
+                .i64()
+                .unwrap()
+                .into_no_null_iter()
+                .collect::<Vec<_>>(),
+            vec![i64::MIN + 2, i64::MIN + 1]
+        );
+
         assert_eq!(session.range(4, 4, 1).unwrap().count().unwrap(), 0);
         assert!(session.range(0, 1, 0).is_err());
+        assert_eq!(range_row_count(i64::MIN, i64::MAX, 1).unwrap(), u64::MAX);
         assert_eq!(range_row_count(i64::MIN, i64::MAX, i64::MAX).unwrap(), 3);
         assert_eq!(range_row_count(i64::MAX, i64::MIN, i64::MIN).unwrap(), 2);
     }

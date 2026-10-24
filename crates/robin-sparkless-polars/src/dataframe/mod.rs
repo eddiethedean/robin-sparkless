@@ -5659,31 +5659,41 @@ mod tests {
         let session = SparkSession::builder()
             .app_name("bounded-range-batches")
             .get_or_create();
-        let frame = session
-            .range(0, 10_000_000, 1)
-            .unwrap()
-            .filter(col("id").gt(5i64))
-            .unwrap();
-        let range = frame
-            .range_cardinality
-            .as_ref()
-            .expect("range metadata survives the filter")
-            .clone();
-        let mut batch_count = 0usize;
-        let mut largest_batch = 0usize;
-        let mut matched_rows = 0u64;
-        let result = frame.for_each_range_batch(&range, None, |batch| {
-            batch_count += 1;
-            largest_batch = largest_batch.max(batch.height());
-            matched_rows += batch.height() as u64;
-            Ok(())
-        });
+        for (rows, expected) in [
+            (10_000, 9_994),
+            (1_000_000, 999_994),
+            (10_000_000, 9_999_994),
+        ] {
+            let frame = session
+                .range(0, rows, 1)
+                .unwrap()
+                .filter(col("id").gt(5i64))
+                .unwrap();
+            assert_eq!(frame.schema().unwrap().fields()[0].name, "id");
+            assert_eq!(frame.count().unwrap(), expected as usize);
 
-        assert!(result.is_ok(), "range batch scan returned an error");
-        assert!(batch_count > 1, "large input must be split into batches");
-        assert!(largest_batch <= RANGE_EXECUTION_BATCH_ROWS);
-        assert_eq!(matched_rows, 9_999_994);
-        assert_eq!(frame.count().unwrap(), matched_rows as usize);
+            if rows == 10_000_000 {
+                let range = frame
+                    .range_cardinality
+                    .as_ref()
+                    .expect("range metadata survives the filter")
+                    .clone();
+                let mut batch_count = 0usize;
+                let mut largest_batch = 0usize;
+                let mut matched_rows = 0u64;
+                let result = frame.for_each_range_batch(&range, None, |batch| {
+                    batch_count += 1;
+                    largest_batch = largest_batch.max(batch.height());
+                    matched_rows += batch.height() as u64;
+                    Ok(())
+                });
+
+                assert!(result.is_ok(), "range batch scan must succeed");
+                assert!(batch_count > 1, "large input must be split into batches");
+                assert!(largest_batch <= RANGE_EXECUTION_BATCH_ROWS);
+                assert_eq!(matched_rows, expected as u64);
+            }
+        }
     }
 
     #[test]
