@@ -4494,6 +4494,43 @@ mod tests {
         assert_eq!(filtered.count().unwrap(), 4);
     }
 
+    #[test]
+    fn range_chained_filters_and_interleaved_limits_execute_in_bounded_batches() {
+        let session = SparkSession::builder()
+            .app_name("lazy-range-batched-count")
+            .get_or_create();
+
+        let filtered = session
+            .range(0, 100_000, 1)
+            .unwrap()
+            .filter(polars::prelude::col("id").gt(10i64))
+            .unwrap()
+            .filter(polars::prelude::col("id").lt(90_000i64))
+            .unwrap();
+        assert_eq!(filtered.count().unwrap(), 89_989);
+
+        let limited = session
+            .range(0, 100_000, 1)
+            .unwrap()
+            .filter(polars::prelude::col("id").gt(10i64))
+            .unwrap()
+            .limit(4)
+            .unwrap()
+            .filter(polars::prelude::col("id").gt(12i64))
+            .unwrap();
+        assert_eq!(limited.count().unwrap(), 2);
+        let ids = limited
+            .collect()
+            .unwrap()
+            .column("id")
+            .unwrap()
+            .i64()
+            .unwrap()
+            .into_no_null_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![13, 14]);
+    }
+
     #[derive(Clone)]
     struct TestExternalCatalog {
         identifier: String,

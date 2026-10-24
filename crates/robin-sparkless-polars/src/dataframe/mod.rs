@@ -27,8 +27,8 @@ use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
 use polars::prelude::{
     AnyValue, CollectBatches, DataFrame as PlDataFrame, DataType, Engine, Expr, Field, IntoLazy,
-    LazyFrame, LiteralValue, NULL, Operator, PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes,
-    UnknownKind, col, lit,
+    LazyFrame, LiteralValue, NULL, NamedFrom, Operator, PlSmallStr, PolarsError, Schema,
+    SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
 use robin_sparkless_core::engine::{
     ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, ExternalCatalogProvider,
@@ -45,6 +45,7 @@ use std::sync::Arc;
 const DEFAULT_CASE_SENSITIVE: bool = false;
 const DEFAULT_EXTERNAL_ARROW_BATCH_ROWS: usize = 10_000;
 const DEFAULT_EXTERNAL_ARROW_BATCH_BYTES: usize = 64 * 1024 * 1024;
+const RANGE_EXECUTION_BATCH_ROWS: usize = 16_384;
 
 fn projected_source_column(expression: &Expr) -> Option<&str> {
     match expression {
@@ -54,15 +55,32 @@ fn projected_source_column(expression: &Expr) -> Option<&str> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone)]
 pub(crate) struct RangeCardinality {
     pub start: i64,
     pub step: i64,
     pub row_count: u64,
+    operations: Vec<RangeOperation>,
+}
+
+#[derive(Clone)]
+enum RangeOperation {
+    Filter(Expr),
+    Limit(u64),
+}
+
+enum RangeBatchError {
+    Polars(PolarsError),
+    Engine(EngineError),
 }
 
 impl RangeCardinality {
-    pub(crate) fn count_matching(self, expression: &Expr) -> Option<u64> {
+    pub(crate) fn count_matching(&self, expression: &Expr) -> Option<u64> {
+        // This arithmetic shortcut is exact only before any other filter or limit has
+        // changed the sequence being counted. All compound cases use bounded execution.
+        if !self.operations.is_empty() {
+            return None;
+        }
         let Expr::BinaryExpr { left, op, right } = expression else {
             return None;
         };
@@ -129,6 +147,21 @@ impl RangeCardinality {
             }
         }
         Some(if first { low } else { self.row_count - low })
+    }
+
+    fn batch(&self, first_index: u64, rows: usize) -> Result<PlDataFrame, PolarsError> {
+        let mut values = Vec::with_capacity(rows);
+        for offset in 0..rows {
+            let index = first_index.checked_add(offset as u64).ok_or_else(|| {
+                PolarsError::ComputeError("range scan row index overflowed UInt64".into())
+            })?;
+            let value = self.start as i128 + index as i128 * self.step as i128;
+            values.push(i64::try_from(value).map_err(|_| {
+                PolarsError::ComputeError("range value exceeds Int64 bounds".into())
+            })?);
+        }
+        let id = polars::prelude::Series::new("id".into(), values);
+        PlDataFrame::new_infer_height(vec![id.into()])
     }
 }
 
@@ -635,7 +668,7 @@ impl DataFrame {
             pre_select_lf: self.pre_select_lf.clone(),
             post_select_exprs: self.post_select_exprs.clone(),
             row_count_hint: self.row_count_hint,
-            range_cardinality: self.range_cardinality,
+            range_cardinality: self.range_cardinality.clone(),
             logical_schema: self.logical_schema.clone(),
         }
     }
@@ -674,14 +707,138 @@ impl DataFrame {
             start,
             step,
             row_count,
+            operations: Vec::new(),
         };
         self.row_count_hint = Some(row_count);
         self.range_cardinality = Some(cardinality);
         self
     }
 
+    fn for_each_range_batch(
+        &self,
+        range: &RangeCardinality,
+        token: Option<&CancellationToken>,
+        mut visit: impl FnMut(PlDataFrame) -> Result<(), RangeBatchError>,
+    ) -> Result<(), RangeBatchError> {
+        let mut limit_consumed = vec![0u64; range.operations.len()];
+        let mut first_index = 0u64;
+        while first_index < range.row_count {
+            if let Some(token) = token {
+                token.check_cancelled().map_err(RangeBatchError::Engine)?;
+            }
+            let limit_satisfied = range
+                .operations
+                .iter()
+                .enumerate()
+                .any(|(index, operation)| {
+                    matches!(operation, RangeOperation::Limit(limit) if limit_consumed[index] >= *limit)
+                });
+            if limit_satisfied {
+                break;
+            }
+
+            let rows = usize::try_from(
+                (range.row_count - first_index).min(RANGE_EXECUTION_BATCH_ROWS as u64),
+            )
+            .expect("range batch size is bounded by usize");
+            let mut batch = range
+                .batch(first_index, rows)
+                .map_err(RangeBatchError::Polars)?;
+            first_index += rows as u64;
+
+            for (operation_index, operation) in range.operations.iter().enumerate() {
+                if let Some(token) = token {
+                    token.check_cancelled().map_err(RangeBatchError::Engine)?;
+                }
+                match operation {
+                    RangeOperation::Filter(condition) => {
+                        let frame = Self::from_polars_with_options(batch, self.case_sensitive);
+                        let filtered = frame
+                            .filter(condition.clone())
+                            .map_err(RangeBatchError::Polars)?;
+                        batch = filtered
+                            .collect_inner()
+                            .map_err(RangeBatchError::Polars)?
+                            .as_ref()
+                            .clone();
+                    }
+                    RangeOperation::Limit(limit) => {
+                        let remaining = limit.saturating_sub(limit_consumed[operation_index]);
+                        if remaining < batch.height() as u64 {
+                            let frame = Self::from_polars_with_options(batch, self.case_sensitive);
+                            let limited = frame
+                                .limit(remaining as usize)
+                                .map_err(RangeBatchError::Polars)?;
+                            batch = limited
+                                .collect_inner()
+                                .map_err(RangeBatchError::Polars)?
+                                .as_ref()
+                                .clone();
+                        }
+                        limit_consumed[operation_index] =
+                            limit_consumed[operation_index].saturating_add(batch.height() as u64);
+                    }
+                }
+            }
+            if let Some(token) = token {
+                token.check_cancelled().map_err(RangeBatchError::Engine)?;
+            }
+            visit(batch)?;
+        }
+        Ok(())
+    }
+
+    fn count_range_batches(
+        &self,
+        range: &RangeCardinality,
+        token: Option<&CancellationToken>,
+    ) -> Result<u64, RangeBatchError> {
+        let mut count = 0u64;
+        self.for_each_range_batch(range, token, |batch| {
+            count = count.checked_add(batch.height() as u64).ok_or_else(|| {
+                RangeBatchError::Polars(PolarsError::ComputeError(
+                    "range count exceeds UInt64".into(),
+                ))
+            })?;
+            Ok(())
+        })?;
+        Ok(count)
+    }
+
+    fn collect_range_batches(
+        &self,
+        range: &RangeCardinality,
+        token: Option<&CancellationToken>,
+    ) -> Result<PlDataFrame, RangeBatchError> {
+        let mut output = range.batch(0, 0).map_err(RangeBatchError::Polars)?;
+        let mut has_rows = false;
+        self.for_each_range_batch(range, token, |batch| {
+            if batch.height() > 0 {
+                if has_rows {
+                    output.vstack_mut(&batch).map_err(RangeBatchError::Polars)?;
+                } else {
+                    output = batch;
+                    has_rows = true;
+                }
+            }
+            Ok(())
+        })?;
+        Ok(output)
+    }
+
     /// Materialize the plan. Single point of collect for all actions.
     pub(crate) fn collect_inner(&self) -> Result<Arc<PlDataFrame>, PolarsError> {
+        if let Some(range) = &self.range_cardinality {
+            let collected =
+                self.collect_range_batches(range, None)
+                    .map_err(|error| match error {
+                        RangeBatchError::Polars(error) => error,
+                        RangeBatchError::Engine(error) => {
+                            PolarsError::ComputeError(error.to_string().into())
+                        }
+                    })?;
+            return Ok(Arc::new(collected));
+        }
         match &self.inner {
             DataFrameInner::Eager(df) => Ok(df.clone()),
             DataFrameInner::Lazy(lf) => Ok(Arc::new(lf.clone().collect()?)),
@@ -700,7 +857,7 @@ impl DataFrame {
             pre_select_lf: self.pre_select_lf.clone(),
             post_select_exprs: self.post_select_exprs.clone(),
             row_count_hint: self.row_count_hint,
-            range_cardinality: self.range_cardinality,
+            range_cardinality: self.range_cardinality.clone(),
             logical_schema: self.logical_schema.clone(),
         }
     }
@@ -2127,6 +2284,20 @@ impl DataFrame {
                 )
             });
         }
+        if let Some(range) = &self.range_cardinality {
+            let count = match self.count_range_batches(range, None) {
+                Ok(count) => count,
+                Err(RangeBatchError::Polars(error)) => return Err(error),
+                Err(RangeBatchError::Engine(error)) => {
+                    return Err(PolarsError::ComputeError(error.to_string().into()));
+                }
+            };
+            return usize::try_from(count).map_err(|_| {
+                PolarsError::ComputeError(
+                    format!("row count {count} exceeds this platform's usize range").into(),
+                )
+            });
+        }
         // Keep the aggregation in the lazy plan. Collecting the source and reading its
         // height used memory proportional to every row, even though count returns one
         // scalar. `len()` counts rows (including rows whose columns are all null).
@@ -2154,6 +2325,19 @@ impl DataFrame {
     pub fn count_with_cancellation(&self, token: &CancellationToken) -> Result<usize, EngineError> {
         token.check_cancelled()?;
         if let Some(count) = self.row_count_hint {
+            return usize::try_from(count).map_err(|_| {
+                EngineError::User(format!(
+                    "row count {count} exceeds this platform's usize range"
+                ))
+            });
+        }
+        if let Some(range) = &self.range_cardinality {
+            let count =
+                self.count_range_batches(range, Some(token))
+                    .map_err(|error| match error {
+                        RangeBatchError::Polars(error) => polars_to_core_error(error),
+                        RangeBatchError::Engine(error) => error,
+                    })?;
             return usize::try_from(count).map_err(|_| {
                 EngineError::User(format!(
                     "row count {count} exceeds this platform's usize range"
@@ -2264,7 +2448,16 @@ impl DataFrame {
         token: &CancellationToken,
     ) -> Result<Arc<PlDataFrame>, EngineError> {
         token.check_cancelled()?;
-        let collected = self.collect_inner().map_err(polars_to_core_error)?;
+        let collected = if let Some(range) = &self.range_cardinality {
+            Arc::new(self.collect_range_batches(range, Some(token)).map_err(
+                |error| match error {
+                    RangeBatchError::Polars(error) => polars_to_core_error(error),
+                    RangeBatchError::Engine(error) => error,
+                },
+            )?)
+        } else {
+            self.collect_inner().map_err(polars_to_core_error)?
+        };
         token.check_cancelled()?;
         Ok(collected)
     }
@@ -2760,9 +2953,17 @@ impl DataFrame {
     pub fn filter(&self, condition: Expr) -> Result<DataFrame, PolarsError> {
         let row_count_hint = self
             .range_cardinality
+            .as_ref()
             .and_then(|range| range.count_matching(&condition));
+        let mut range_cardinality = self.range_cardinality.clone();
+        if let Some(range) = &mut range_cardinality {
+            range
+                .operations
+                .push(RangeOperation::Filter(condition.clone()));
+        }
         let mut filtered = transformations::filter(self, condition, self.case_sensitive)?;
         filtered.row_count_hint = row_count_hint;
+        filtered.range_cardinality = range_cardinality;
         filtered.logical_schema = self.logical_schema.clone();
         Ok(filtered)
     }
@@ -3114,10 +3315,11 @@ impl DataFrame {
     pub fn limit(&self, n: usize) -> Result<DataFrame, PolarsError> {
         let mut limited = transformations::limit(self, n, self.case_sensitive)?;
         limited.row_count_hint = self.row_count_hint.map(|count| count.min(n as u64));
-        limited.range_cardinality = self.range_cardinality.map(|range| RangeCardinality {
-            row_count: range.row_count.min(n as u64),
-            ..range
-        });
+        let mut range_cardinality = self.range_cardinality.clone();
+        if let Some(range) = &mut range_cardinality {
+            range.operations.push(RangeOperation::Limit(n as u64));
+        }
+        limited.range_cardinality = range_cardinality;
         limited.logical_schema = self.logical_schema.clone();
         Ok(limited)
     }
@@ -4796,7 +4998,7 @@ impl Clone for DataFrame {
             pre_select_lf: self.pre_select_lf.clone(),
             post_select_exprs: self.post_select_exprs.clone(),
             row_count_hint: self.row_count_hint,
-            range_cardinality: self.range_cardinality,
+            range_cardinality: self.range_cardinality.clone(),
             logical_schema: self.logical_schema.clone(),
         }
     }
