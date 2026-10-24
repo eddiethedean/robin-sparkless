@@ -176,6 +176,8 @@ These are local component checks, not passing release gates. The current work ha
 
 - At source commit [`d1639e23`](https://github.com/eddiethedean/robin-sparkless/commit/d1639e23), `cargo test --release --locked -p robin-sparkless-polars --features sql --lib nested_array_ipc_roundtrip_preserves_values_and_logical_schema -- --nocapture` passed. The nested-array IPC witness now verifies a zero-row stream carries the exact logical schema metadata as well as the populated values/nulls. Strict all-target Polars Clippy, formatting, and diff checks passed. This closes one empty-result V18 fixture only; the broader transformation and interoperability matrix remains open.
 
+- At source commit [`aeeb66db`](https://github.com/eddiethedean/robin-sparkless/commit/aeeb66db), `cargo test --release --locked -p robin-sparkless-polars --features sql --lib nested_array_of_struct_schema_and_ipc_survive_transformations -- --nocapture` passed. The new witness carries nested struct nullability and metadata through an array sidecar, filter, alias projection, union, and decoded IPC values; lossy standalone Polars schema conversion remains rejected. Strict all-target Polars Clippy, formatting, and diff checks passed. This adds native V18 coverage; the full transformation and interoperability matrix remains open.
+
 Every advertised binary-wheel platform still requires independent build/install/runtime witnesses. CI must add targeted format/clippy/tests for supported feature combinations, launcher tests on supported Python/platform versions, and the distinct direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect routes. Keep their evidence separate and do not report planned commands as passed.
 
 ## Evidence record template
