@@ -215,6 +215,51 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{hidden_view}");
     assert_eq!(hidden_view["status"], "error");
 
+    let (status, saved_snapshot) = statement(
+        &server,
+        "owner",
+        "CREATE TEMP VIEW saved_snapshot AS SELECT id FROM phase_http.items",
+        Some("create-saved-snapshot"),
+    );
+    assert_eq!(status, 200, "{saved_snapshot}");
+    assert_eq!(saved_snapshot["status"], "ok");
+
+    let (status, appended_after_snapshot) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.items (id, note) VALUES (8, 'eight')",
+        Some("append-after-snapshot"),
+    );
+    assert_eq!(status, 200, "{appended_after_snapshot}");
+    assert_eq!(
+        appended_after_snapshot["operation"]["effect_outcome"],
+        "committed"
+    );
+
+    let (status, pinned_snapshot_read) = statement(
+        &server,
+        "owner",
+        "SELECT id FROM saved_snapshot ORDER BY id",
+        None,
+    );
+    assert_eq!(status, 200, "{pinned_snapshot_read}");
+    assert_eq!(
+        pinned_snapshot_read["data"]["application/json"]["data"],
+        json!([[7]])
+    );
+
+    let (status, latest_table_read) = statement(
+        &server,
+        "reader",
+        "SELECT id, note FROM phase_http.items ORDER BY id",
+        None,
+    );
+    assert_eq!(status, 200, "{latest_table_read}");
+    assert_eq!(
+        latest_table_read["data"]["application/json"]["data"],
+        json!([[7, "seven"], [8, "eight"]])
+    );
+
     let (status, closed) = post(&server, "/close", &json!({"session":"owner"}));
     assert_eq!(status, 200, "{closed}");
     assert_eq!(closed["status"], "ok");
@@ -245,7 +290,7 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{after_replay}");
     assert_eq!(
         after_replay["data"]["application/json"]["data"],
-        json!([[7, "seven"]])
+        json!([[7, "seven"], [8, "eight"]])
     );
 
     server.stop();
