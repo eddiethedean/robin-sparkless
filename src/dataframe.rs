@@ -245,6 +245,36 @@ impl DataFrame {
         self.0.collect_as_json_rows_engine()
     }
 
+    /// Collect bounded positional JSON rows for wire protocols that preserve duplicate labels.
+    /// The row limit is enforced inside the native lazy plan before the result is materialized.
+    pub fn collect_as_positional_json_with_cancellation(
+        &self,
+        max_rows: usize,
+        array_struct_paths: &std::collections::HashSet<String>,
+        token: &CancellationToken,
+    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>, StructType), EngineError> {
+        self.0
+            .collect_as_positional_json_with_cancellation(max_rows, array_struct_paths, token)
+    }
+
+    /// Collect positional JSON under a byte budget as well as a row budget.
+    pub fn collect_as_positional_json_with_limits(
+        &self,
+        max_rows: usize,
+        max_total_json_bytes: usize,
+        max_cell_json_bytes: usize,
+        array_struct_paths: &std::collections::HashSet<String>,
+        token: &CancellationToken,
+    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>, StructType), EngineError> {
+        self.0.collect_as_positional_json_with_limits(
+            max_rows,
+            max_total_json_bytes,
+            max_cell_json_bytes,
+            array_struct_paths,
+            token,
+        )
+    }
+
     pub fn collect_as_json_rows(&self) -> Result<Vec<HashMap<String, JsonValue>>, PolarsError> {
         self.0.collect_as_json_rows()
     }

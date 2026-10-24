@@ -12,6 +12,7 @@
 
 pub mod embed;
 
+pub use crate::SharedCatalog;
 pub use crate::config::SparklessConfig;
 pub use crate::dataframe::{
     CubeRollupData, DataFrame, GroupedData, JoinType, PivotedGroupedData, SaveMode, WriteFormat,

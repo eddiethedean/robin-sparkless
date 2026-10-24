@@ -108,6 +108,7 @@ pub use dataframe::{
     expr_contains_only_join_key_equalities, try_extract_join_eq_columns,
     try_extract_join_eq_columns_all,
 };
+pub use robin_sparkless_polars::SharedCatalog;
 pub use robin_sparkless_polars::dataframe::DropColumnSpec;
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 

@@ -18,8 +18,8 @@ use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
     BinaryOperator, CastKind, ExactNumberInfo, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
-    ObjectType, OrderByKind, Query, Select, SelectItem, SetExpr, SetOperator, Statement,
-    TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
+    ObjectType, OrderByKind, Query, SchemaName, Select, SelectItem, SetExpr, SetOperator,
+    Statement, TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -204,9 +204,29 @@ pub fn translate_with_cancellation(
         Statement::CreateView(create_view) => {
             // CREATE [OR REPLACE] [TEMP] VIEW name AS SELECT ... (#1011).
             let view_name = table_name_from_object_name(&create_view.name);
-            let df = translate_query(session, create_view.query.as_ref())?;
+            if session.has_temp_view(&view_name) && !create_view.or_replace {
+                return Err(PolarsError::InvalidOperation(
+                    format!("SQL: temporary view already exists: {view_name}").into(),
+                ));
+            }
+            if !session.has_temp_view(&view_name)
+                && session
+                    .get_config()
+                    .get("sparkless.server.max_temp_views")
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .is_some_and(|limit| session.list_temp_view_names().len() >= limit)
+            {
+                return Err(PolarsError::ComputeError(
+                    "CatalogCapacityExceeded: session temporary-view limit reached".into(),
+                ));
+            }
+            let planned = translate_query(session, create_view.query.as_ref())?;
+            // Resolve and retain the creation-time schema while still keeping the view lazy.
+            // Relation plans already contain the immutable table DataFrames resolved under the
+            // shared-catalog guard, so later drop/recreate operations cannot rebind this view.
+            let _schema = planned.schema()?;
             check_cancellation(token)?;
-            session.create_or_replace_temp_view(&view_name, df);
+            session.create_or_replace_temp_view(&view_name, planned);
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
                 session.is_case_sensitive(),
@@ -214,6 +234,7 @@ pub fn translate_with_cancellation(
         }
         Statement::CreateTable(create_table) => {
             let table_name = table_name_from_object_name(&create_table.name);
+            session.check_saved_table_database(&table_name)?;
             let exists = session.local_table_exists(&table_name)
                 || session
                     .resolve_external_table_descriptor(&table_name)?
@@ -256,46 +277,119 @@ pub fn translate_with_cancellation(
                 false,
             )?;
             check_cancellation(token)?;
-            session.register_table(&table_name, df);
+            session.check_catalog_table_growth(&table_name, &df)?;
+            session.register_table_during_sql(&table_name, df);
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
                 session.is_case_sensitive(),
             ))
         }
         Statement::Insert(insert) => translate_insert(session, insert, token),
-        Statement::CreateSchema { schema_name, .. } => {
+        Statement::CreateSchema {
+            schema_name,
+            if_not_exists,
+            ..
+        } => {
             check_cancellation(token)?;
-            let name = schema_name.to_string();
-            session.register_database(&name);
+            let name = match schema_name {
+                SchemaName::Simple(name) => table_name_from_object_name(name),
+                SchemaName::UnnamedAuthorization(ident) => ident.value.clone(),
+                _ => schema_name.to_string(),
+            };
+            if session.database_exists(&name) {
+                if *if_not_exists {
+                    return Ok(DataFrame::from_polars_with_options(
+                        PlDataFrame::empty(),
+                        session.is_case_sensitive(),
+                    ));
+                }
+                return Err(PolarsError::InvalidOperation(
+                    format!("SQL: database already exists: {name}").into(),
+                ));
+            }
+            session.check_database_capacity()?;
+            session.register_database_during_sql(&name);
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
                 session.is_case_sensitive(),
             ))
         }
-        Statement::CreateDatabase { db_name, .. } => {
+        Statement::CreateDatabase {
+            db_name,
+            if_not_exists,
+            ..
+        } => {
             check_cancellation(token)?;
-            let name = db_name.to_string();
-            session.register_database(&name);
+            let name = table_name_from_object_name(db_name);
+            if session.database_exists(&name) {
+                if *if_not_exists {
+                    return Ok(DataFrame::from_polars_with_options(
+                        PlDataFrame::empty(),
+                        session.is_case_sensitive(),
+                    ));
+                }
+                return Err(PolarsError::InvalidOperation(
+                    format!("SQL: database already exists: {name}").into(),
+                ));
+            }
+            session.check_database_capacity()?;
+            session.register_database_during_sql(&name);
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
                 session.is_case_sensitive(),
             ))
         }
         Statement::Drop {
-            object_type: ObjectType::Table | ObjectType::View,
+            object_type: ObjectType::Table,
             names,
+            if_exists,
             ..
         } => {
             check_cancellation(token)?;
             for obj_name in names {
-                let name = obj_name.to_string();
-                if name.starts_with("global_temp.") {
-                    if let Some(suffix) = name.strip_prefix("global_temp.") {
-                        session.drop_global_temp_view(suffix);
+                let name = table_name_from_object_name(obj_name);
+                session.check_saved_table_database(&name)?;
+                if !session.saved_table_exists(&name) {
+                    if *if_exists {
+                        continue;
                     }
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: saved table does not exist: {name}").into(),
+                    ));
                 }
-                let _ = session.drop_temp_view(&name);
-                session.drop_table(&name);
+                session.drop_table_during_sql(&name);
+            }
+            Ok(DataFrame::from_polars_with_options(
+                PlDataFrame::empty(),
+                session.is_case_sensitive(),
+            ))
+        }
+        Statement::Drop {
+            object_type: ObjectType::View,
+            names,
+            if_exists,
+            ..
+        } => {
+            check_cancellation(token)?;
+            for obj_name in names {
+                let name = table_name_from_object_name(obj_name);
+                if let Some(suffix) = name.strip_prefix("global_temp.") {
+                    if !session.drop_global_temp_view_during_sql(suffix) && !*if_exists {
+                        return Err(PolarsError::InvalidOperation(
+                            format!("SQL: global temporary view does not exist: {name}").into(),
+                        ));
+                    }
+                    continue;
+                }
+                if !session.has_temp_view(&name) {
+                    if *if_exists {
+                        continue;
+                    }
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: temporary view does not exist: {name}").into(),
+                    ));
+                }
+                session.drop_temp_view(&name);
             }
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
@@ -305,11 +399,31 @@ pub fn translate_with_cancellation(
         Statement::Drop {
             object_type: ObjectType::Schema,
             names,
+            if_exists,
             ..
         } => {
             check_cancellation(token)?;
             for obj_name in names {
-                session.drop_database(&obj_name.to_string());
+                let name = table_name_from_object_name(obj_name);
+                if name.eq_ignore_ascii_case("default") {
+                    return Err(PolarsError::InvalidOperation(
+                        "SQL: the default database cannot be dropped".into(),
+                    ));
+                }
+                if !session.database_exists(&name) {
+                    if *if_exists {
+                        continue;
+                    }
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: database does not exist: {name}").into(),
+                    ));
+                }
+                if session.database_has_saved_tables(&name) {
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: database is not empty: {name}").into(),
+                    ));
+                }
+                session.drop_database_during_sql(&name);
             }
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
@@ -319,11 +433,31 @@ pub fn translate_with_cancellation(
         Statement::Drop {
             object_type: ObjectType::Database,
             names,
+            if_exists,
             ..
         } => {
             check_cancellation(token)?;
             for obj_name in names {
-                session.drop_database(&obj_name.to_string());
+                let name = table_name_from_object_name(obj_name);
+                if name.eq_ignore_ascii_case("default") {
+                    return Err(PolarsError::InvalidOperation(
+                        "SQL: the default database cannot be dropped".into(),
+                    ));
+                }
+                if !session.database_exists(&name) {
+                    if *if_exists {
+                        continue;
+                    }
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: database does not exist: {name}").into(),
+                    ));
+                }
+                if session.database_has_saved_tables(&name) {
+                    return Err(PolarsError::InvalidOperation(
+                        format!("SQL: database is not empty: {name}").into(),
+                    ));
+                }
+                session.drop_database_during_sql(&name);
             }
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
@@ -337,11 +471,11 @@ pub fn translate_with_cancellation(
                 let name = obj_name.to_string();
                 if name.starts_with("global_temp.") {
                     if let Some(suffix) = name.strip_prefix("global_temp.") {
-                        session.drop_global_temp_view(suffix);
+                        session.drop_global_temp_view_during_sql(suffix);
                     }
                 }
                 let _ = session.drop_temp_view(&name);
-                session.drop_table(&name);
+                session.drop_table_during_sql(&name);
             }
             Ok(DataFrame::from_polars_with_options(
                 PlDataFrame::empty(),
@@ -417,6 +551,12 @@ fn translate_insert(
     token: &CancellationToken,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     check_cancellation(token)?;
+    // Capture the target and SELECT source against one catalog publication point. The shared
+    // mutation lane remains held by SQL execution while this short catalog writer guard is
+    // released for candidate materialization.
+    let snapshot_guard = session
+        .shared_catalog_guard()
+        .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
     // Only support INSERT INTO <table_name> ... (no TABLE FUNCTION targets).
     let table_name = match &insert.table {
         TableObject::TableName(name) => table_name_from_object_name(name),
@@ -426,6 +566,7 @@ fn translate_insert(
             ));
         }
     };
+    session.check_saved_table_database(&table_name)?;
 
     let local_target = table_name
         .get(.."global_temp.".len())
@@ -545,13 +686,27 @@ fn translate_insert(
 
     // Append rows to existing table in the same namespace that provided the target table.
     let appended = target_df.union(&new_rows_df)?;
+    drop(snapshot_guard);
     check_cancellation(token)?;
+    // Materialize the complete candidate before catalog publication. A lazy append plan could
+    // otherwise be registered successfully and then fail only when a later reader collects it,
+    // leaving the catalog with a committed-looking but unusable table version.
+    let staged = appended
+        .collect_with_cancellation(token)
+        .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+    check_cancellation(token)?;
+    let appended =
+        DataFrame::from_polars_with_options(staged.as_ref().clone(), session.is_case_sensitive());
     if session.has_exact_temp_view(&table_name)
         || (!has_provider && session.has_temp_view(&table_name))
     {
         session.create_or_replace_temp_view(&table_name, appended);
     } else {
-        session.register_table(&table_name, appended);
+        let _publication_guard = session
+            .shared_catalog_guard()
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+        session.check_catalog_table_growth(&table_name, &appended)?;
+        session.register_table_during_sql(&table_name, appended);
     }
 
     Ok(DataFrame::from_polars_with_options(

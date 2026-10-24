@@ -4,7 +4,7 @@ use crate::EngineError;
 use robin_sparkless_core::engine::ExternalCatalogProvider;
 use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 use robin_sparkless_polars::{
-    DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError,
+    DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError, SharedCatalog,
     SparkSession as PolarsSparkSession, SparkSessionBuilder as PolarsSparkSessionBuilder,
 };
 use std::collections::HashMap;
@@ -39,6 +39,12 @@ impl SparkSessionBuilder {
 
     pub fn config(self, key: impl Into<String>, value: impl Into<String>) -> Self {
         SparkSessionBuilder(self.0.config(key, value))
+    }
+
+    /// Share saved tables and database names with sessions built from this catalog scope.
+    /// Temporary views and session settings remain isolated between sessions.
+    pub fn shared_catalog(self, catalog: SharedCatalog) -> Self {
+        SparkSessionBuilder(self.0.shared_catalog(catalog))
     }
 
     /// Config key-value pairs set on the builder (for singleton compatibility check).

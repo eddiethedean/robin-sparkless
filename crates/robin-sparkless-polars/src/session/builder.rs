@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 
-use super::{SparkSession, set_thread_udf_session};
+use super::{SharedCatalog, SparkSession, set_thread_udf_session};
 
 /// Builder for creating a SparkSession with configuration options
 #[derive(Clone)]
@@ -12,6 +12,7 @@ pub struct SparkSessionBuilder {
     app_name: Option<String>,
     master: Option<String>,
     config: HashMap<String, String>,
+    shared_catalog: Option<SharedCatalog>,
 }
 
 impl Default for SparkSessionBuilder {
@@ -26,6 +27,7 @@ impl SparkSessionBuilder {
             app_name: None,
             master: None,
             config: HashMap::new(),
+            shared_catalog: None,
         }
     }
 
@@ -41,6 +43,14 @@ impl SparkSessionBuilder {
 
     pub fn config(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.config.insert(key.into(), value.into());
+        self
+    }
+
+    /// Attach new sessions created by this builder to an explicitly shared application catalog.
+    /// The shared catalog contains saved tables/databases; temporary views and session settings
+    /// remain isolated between sessions.
+    pub fn shared_catalog(mut self, catalog: SharedCatalog) -> Self {
+        self.shared_catalog = Some(catalog);
         self
     }
 
@@ -61,6 +71,10 @@ impl SparkSessionBuilder {
             SessionRuntimeConfig::set_compat_profile(&mut config, compat);
         }
         let session = SparkSession::new(self.app_name, self.master, config);
+        let session = match self.shared_catalog {
+            Some(catalog) => session.with_shared_catalog(catalog),
+            None => session,
+        };
         set_thread_udf_session(session.clone());
         session
     }

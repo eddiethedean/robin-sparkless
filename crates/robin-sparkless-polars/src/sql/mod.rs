@@ -61,6 +61,20 @@ pub fn execute_sql_with_cancellation(
     token.check_cancelled()?;
     let statement = parse_spark_statement(query).map_err(polars_to_core_error)?;
     let read_only = is_read_only_statement(&statement);
+    let staged_insert = is_staged_insert(&statement);
+    let _mutation_guard = if read_only {
+        None
+    } else {
+        session.shared_catalog_mutation_guard()?
+    };
+    // Reads resolve every relation against one catalog publication point. INSERT takes its
+    // own short guard around snapshot capture and publication, leaving readers free to use the
+    // committed version while the candidate append is materialized.
+    let _shared_catalog_guard = if staged_insert {
+        None
+    } else {
+        session.shared_catalog_guard()?
+    };
     let result = execute_sql_statement(session, statement, token).map_err(|error| {
         if error.to_string().starts_with("cancelled: ") {
             EngineError::Cancelled("operation cancelled".into())
@@ -79,7 +93,32 @@ fn execute_sql_inner(
     query: &str,
     token: &CancellationToken,
 ) -> Result<DataFrame, PolarsError> {
-    execute_sql_statement(session, parse_spark_statement(query)?, token)
+    let statement = parse_spark_statement(query)?;
+    let read_only = is_read_only_statement(&statement);
+    let staged_insert = is_staged_insert(&statement);
+    let _mutation_guard = if read_only {
+        None
+    } else {
+        session
+            .shared_catalog_mutation_guard()
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
+    };
+    let _shared_catalog_guard = if staged_insert {
+        None
+    } else {
+        session
+            .shared_catalog_guard()
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
+    };
+    execute_sql_statement(session, statement, token)
+}
+
+fn is_staged_insert(statement: &SparkStatement) -> bool {
+    matches!(
+        statement,
+        SparkStatement::Sqlparser(statement)
+            if matches!(statement.as_ref(), Statement::Insert(_))
+    )
 }
 
 fn is_read_only_statement(statement: &SparkStatement) -> bool {
@@ -202,7 +241,7 @@ fn execute_sql_statement(
 
                     // Register the table in the catalog so it can be queried
                     let loaded_df = crate::delta::read_delta(&table_path, session.is_case_sensitive())?;
-                    session.register_table(&table_name, loaded_df);
+                    session.register_table_during_sql(&table_name, loaded_df);
 
                     Ok(DataFrame::from_polars_with_options(
                         polars::prelude::DataFrame::empty(),
@@ -217,9 +256,9 @@ fn execute_sql_statement(
                     // For other formats, register as a temp table (in-memory replacement)
                     // Note: Full file-based persistence for non-Delta formats could be added later
                     check_cancellation(token)?;
-                    session.drop_table(&table_name);
+                    session.drop_table_during_sql(&table_name);
                     session.drop_temp_view(&table_name);
-                    session.register_table(&table_name, result_df);
+                    session.register_table_during_sql(&table_name, result_df);
                     Ok(DataFrame::from_polars_with_options(
                         polars::prelude::DataFrame::empty(),
                         session.is_case_sensitive(),

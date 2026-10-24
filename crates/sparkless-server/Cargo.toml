@@ -1,0 +1,26 @@
+[package]
+name = "sparkless-server"
+version = "4.15.3"
+edition = "2024"
+rust-version = "1.93"
+description = "Native HTTP statement service for Robin Sparkless"
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[[bin]]
+name = "sparkless-server"
+path = "src/main.rs"
+
+[dependencies]
+bytes = "1.11.1"
+http-body-util = "0.1.3"
+hyper = { version = "1.8.1", features = ["http1", "server"] }
+hyper-util = { version = "0.1.20", features = ["http1", "server", "tokio"] }
+robin-sparkless = { version = "4.15.3", path = "../..", features = ["sql"] }
+robin-sparkless-core = { version = "4.15.3", path = "../robin-sparkless-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+spark-sql-parser = { version = "0.5.0", path = "../spark-sql-parser" }
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "net", "sync", "time", "signal", "io-util"] }
+uuid = { version = "1.20.0", features = ["v4", "serde"] }

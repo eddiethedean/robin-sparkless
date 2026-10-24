@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/robin-sparkless-core", "crates/robin-sparkless-polars", "crates/spark-sql-parser", ".", "python"]
+members = ["crates/robin-sparkless-core", "crates/robin-sparkless-polars", "crates/spark-sql-parser", "crates/sparkless-server", ".", "python"]
 
 [package]
 name = "robin-sparkless"

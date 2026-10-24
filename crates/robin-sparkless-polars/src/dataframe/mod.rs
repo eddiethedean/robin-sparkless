@@ -1785,17 +1785,56 @@ impl DataFrame {
 
     /// Count the number of rows (action - triggers execution)
     pub fn count(&self) -> Result<usize, PolarsError> {
-        Ok(self.collect_inner()?.height())
+        // Keep the aggregation in the lazy plan. Collecting the source and reading its
+        // height used memory proportional to every row, even though count returns one
+        // scalar. `len()` counts rows (including rows whose columns are all null).
+        let result = self
+            .lazy_frame()
+            .select([polars::prelude::len()
+                .cast(DataType::UInt64)
+                .alias("__sparkless_count")])
+            .collect()?;
+        let count = result
+            .column("__sparkless_count")?
+            .u64()?
+            .get(0)
+            .ok_or_else(|| {
+                PolarsError::ComputeError("row count aggregate returned no value".into())
+            })?;
+        usize::try_from(count).map_err(|_| {
+            PolarsError::ComputeError(
+                format!("row count {count} exceeds this platform's usize range").into(),
+            )
+        })
+    }
+
+    /// Count rows while checking cooperative cancellation at the native materialization boundary.
+    pub fn count_with_cancellation(&self, token: &CancellationToken) -> Result<usize, EngineError> {
+        token.check_cancelled()?;
+        let result = Self::from_lazy_with_options(
+            self.lazy_frame().select([polars::prelude::len()
+                .cast(DataType::UInt64)
+                .alias("__sparkless_count")]),
+            self.case_sensitive,
+        )
+        .collect_with_cancellation(token)?;
+        let count = result
+            .column("__sparkless_count")
+            .map_err(polars_to_core_error)?
+            .u64()
+            .map_err(polars_to_core_error)?
+            .get(0)
+            .ok_or_else(|| EngineError::Internal("row count aggregate returned no value".into()))?;
+        usize::try_from(count).map_err(|_| {
+            EngineError::User(format!(
+                "row count {count} exceeds this platform's usize range"
+            ))
+        })
     }
 
     /// Same as [`count`](Self::count) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn count_engine(&self) -> Result<usize, EngineError> {
         self.count().map_err(polars_to_core_error)
-    }
-
-    /// Count rows while honoring cooperative cancellation before and after materialization.
-    pub fn count_with_cancellation(&self, token: &CancellationToken) -> Result<usize, EngineError> {
-        Ok(self.collect_with_cancellation(token)?.height())
     }
 
     /// Show the first n rows (collects at most `n` rows, not the full DataFrame).
@@ -1809,6 +1848,11 @@ impl DataFrame {
     /// Collect the DataFrame (action - triggers execution)
     pub fn collect(&self) -> Result<Arc<PlDataFrame>, PolarsError> {
         self.collect_inner()
+    }
+
+    /// Estimate the native buffers retained by this DataFrame after materialization.
+    pub fn estimated_size(&self) -> Result<usize, PolarsError> {
+        Ok(self.collect_inner()?.estimated_size())
     }
 
     /// Execute this plan as a back-pressured stream of bounded Polars DataFrames.
@@ -2119,6 +2163,144 @@ impl DataFrame {
                 );
             }
         }
+        Ok((names, rows, schema))
+    }
+
+    /// Collect positional JSON cells, preserving column order and duplicate labels.
+    ///
+    /// `max_rows` is enforced by limiting the native plan to one row beyond the bound. Use the
+    /// `with_limits` variant when the protocol also requires a serialized-byte budget.
+    pub fn collect_as_positional_json_with_cancellation(
+        &self,
+        max_rows: usize,
+        array_struct_paths: &HashSet<String>,
+        token: &CancellationToken,
+    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>, StructType), EngineError> {
+        self.collect_as_positional_json_with_limits(
+            max_rows,
+            usize::MAX,
+            usize::MAX,
+            array_struct_paths,
+            token,
+        )
+    }
+
+    /// Collect positional JSON cells with row, total encoded-data, and encoded-cell limits.
+    /// The encoded-data budget covers the outer JSON array of rows, before protocol envelope and
+    /// schema bytes are added by the caller.
+    pub fn collect_as_positional_json_with_limits(
+        &self,
+        max_rows: usize,
+        max_total_json_bytes: usize,
+        max_cell_json_bytes: usize,
+        array_struct_paths: &HashSet<String>,
+        token: &CancellationToken,
+    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>, StructType), EngineError> {
+        token.check_cancelled()?;
+        if max_total_json_bytes < 2 {
+            return Err(EngineError::User(
+                "result exceeds the configured serialized byte limit".into(),
+            ));
+        }
+        let probe_limit = max_rows.checked_add(1).ok_or_else(|| {
+            EngineError::User("maximum positional result row count is too large".into())
+        })?;
+        let limited = self
+            .clone()
+            .limit(probe_limit)
+            .map_err(polars_to_core_error)?;
+        let plan_schema = limited
+            .lazy_frame()
+            .collect_schema()
+            .map_err(polars_to_core_error)?;
+        let collected = limited.collect_with_cancellation(token)?;
+        if collected.height() > max_rows {
+            return Err(EngineError::User(format!(
+                "result exceeds the configured row limit of {max_rows}"
+            )));
+        }
+
+        let names_and_dtypes: Vec<(String, DataType)> = plan_schema
+            .iter_names_and_dtypes()
+            .map(|(name, dtype)| (name.to_string(), dtype.clone()))
+            .collect();
+        let names: Vec<String> = names_and_dtypes
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        let schema = StructType::from_polars_schema(&plan_schema);
+        let mut rows = Vec::with_capacity(collected.height());
+        let mut encoded_data_bytes = 2usize; // The empty outer JSON array: [].
+        for row_index in 0..collected.height() {
+            token.check_cancelled()?;
+            let mut row = Vec::with_capacity(names_and_dtypes.len());
+            let mut encoded_row_bytes = 2usize; // Opening and closing brackets.
+            let mut column_occurrences = HashMap::<String, usize>::new();
+            for (column_index, (name, dtype)) in names_and_dtypes.iter().enumerate() {
+                let occurrence = column_occurrences.entry(name.clone()).or_default();
+                let physical_index = collected
+                    .columns()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, column)| column.name().as_str() == name)
+                    .nth(*occurrence)
+                    .map(|(index, _)| index)
+                    .ok_or_else(|| {
+                        EngineError::User(format!(
+                            "result column at position {column_index} ('{name}') is missing"
+                        ))
+                    })?;
+                *occurrence += 1;
+                let column = &collected.columns()[physical_index];
+                let value = column.get(row_index).map_err(polars_to_core_error)?;
+                let json = if matches!(value, AnyValue::Null) {
+                    JsonValue::Null
+                } else {
+                    any_value_to_json_with_array_struct_override(
+                        &value,
+                        dtype,
+                        array_struct_paths,
+                        &serde_json::to_string(name).map_err(|error| {
+                            EngineError::User(format!(
+                                "could not encode result column name: {error}"
+                            ))
+                        })?,
+                    )
+                    .map_err(polars_to_core_error)?
+                };
+                let cell_bytes = serde_json::to_vec(&json)
+                    .map_err(|error| EngineError::User(error.to_string()))?
+                    .len();
+                if cell_bytes > max_cell_json_bytes {
+                    return Err(EngineError::User(
+                        "a result cell exceeds the configured byte limit".into(),
+                    ));
+                }
+                encoded_row_bytes = encoded_row_bytes
+                    .saturating_add(usize::from(!row.is_empty()))
+                    .saturating_add(cell_bytes);
+                let next_total = encoded_data_bytes
+                    .saturating_add(usize::from(!rows.is_empty()))
+                    .saturating_add(encoded_row_bytes);
+                if next_total > max_total_json_bytes {
+                    return Err(EngineError::User(
+                        "serialized result exceeds the configured byte limit".into(),
+                    ));
+                }
+                row.push(json);
+            }
+            let next_total = encoded_data_bytes
+                .saturating_add(usize::from(!rows.is_empty()))
+                .saturating_add(encoded_row_bytes);
+            if next_total > max_total_json_bytes {
+                return Err(EngineError::User(
+                    "serialized result exceeds the configured byte limit".into(),
+                ));
+            }
+            encoded_data_bytes = next_total;
+            rows.push(row);
+        }
+        token.check_cancelled()?;
         Ok((names, rows, schema))
     }
 
@@ -4858,6 +5040,56 @@ mod tests {
         let expr = col("str_col").eq(lit(123i64));
         let out = df.filter(expr).unwrap();
         assert_eq!(out.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn lazy_count_preserves_filter_semantics_and_checks_cancellation() {
+        let frame = polars::prelude::df!("id" => [1i64, 2, 3, 4]).unwrap();
+        let df = DataFrame::from_lazy_with_options(frame.lazy(), false);
+        let filtered = df
+            .filter(crate::functions::col("id").gt(lit(2i64)).into_expr())
+            .unwrap();
+        assert_eq!(filtered.count().unwrap(), 2);
+        assert_eq!(
+            filtered
+                .count_with_cancellation(&CancellationToken::new())
+                .unwrap(),
+            2
+        );
+
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        assert!(matches!(
+            filtered.count_with_cancellation(&cancelled),
+            Err(EngineError::Cancelled(_))
+        ));
+    }
+
+    #[test]
+    fn positional_collection_enforces_encoded_cell_and_result_budgets() {
+        let frame = polars::prelude::df!("value" => ["a string that will not fit"]).unwrap();
+        let df = DataFrame::from_lazy_with_options(frame.lazy(), false);
+        let token = CancellationToken::new();
+        assert!(matches!(
+            df.collect_as_positional_json_with_limits(
+                10,
+                1024,
+                4,
+                &HashSet::new(),
+                &token,
+            ),
+            Err(EngineError::User(message)) if message.contains("cell")
+        ));
+        assert!(matches!(
+            df.collect_as_positional_json_with_limits(
+                10,
+                8,
+                1024,
+                &HashSet::new(),
+                &token,
+            ),
+            Err(EngineError::User(message)) if message.contains("serialized result")
+        ));
     }
 
     /// #988: Numeric column == string literal: coerce string to numeric (PySpark parity).

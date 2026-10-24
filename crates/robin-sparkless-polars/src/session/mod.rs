@@ -1550,6 +1550,38 @@ pub type TableCatalog = Arc<Mutex<HashMap<String, DataFrame>>>;
 /// Names of databases/schemas created via CREATE DATABASE / CREATE SCHEMA (session-scoped). Persisted when SQL DDL runs.
 pub type DatabaseCatalog = Arc<Mutex<HashSet<String>>>;
 
+/// Catalog state deliberately shared by the logical sessions of one application or service.
+/// A fresh value creates an independent catalog; cloning a value shares saved tables,
+/// database names, and catalog-scoped global views. Session temporary views and configuration
+/// remain on `SparkSession` and are never included here.
+#[derive(Clone)]
+pub struct SharedCatalog {
+    tables: TableCatalog,
+    databases: DatabaseCatalog,
+    global_temp_views: TempViewCatalog,
+    writer: Arc<Mutex<()>>,
+    mutation_lane: Arc<Mutex<()>>,
+}
+
+impl Default for SharedCatalog {
+    fn default() -> Self {
+        Self {
+            tables: Arc::new(Mutex::new(HashMap::new())),
+            databases: Arc::new(Mutex::new(HashSet::new())),
+            global_temp_views: Arc::new(Mutex::new(HashMap::new())),
+            writer: Arc::new(Mutex::new(())),
+            mutation_lane: Arc::new(Mutex::new(())),
+        }
+    }
+}
+
+impl SharedCatalog {
+    /// Create a new, empty catalog scope. Sessions must explicitly attach to this value.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// Main entry point for creating DataFrames and executing queries
 /// Similar to PySpark's SparkSession but using Polars as the backend
 #[derive(Clone)]
@@ -1573,6 +1605,8 @@ pub struct SparkSession {
     pub(crate) cached_tables: Arc<Mutex<HashSet<String>>>,
     /// External catalog resolver attached to this logical session.
     external_catalog_provider: Arc<RwLock<Option<Arc<dyn ExternalCatalogProvider>>>>,
+    /// Optional application catalog shared by sessions created from this session.
+    shared_catalog: Option<SharedCatalog>,
 }
 
 impl SparkSession {
@@ -1600,6 +1634,7 @@ impl SparkSession {
             current_database: Arc::new(Mutex::new("default".to_string())),
             cached_tables: Arc::new(Mutex::new(HashSet::new())),
             external_catalog_provider: Arc::new(RwLock::new(None)),
+            shared_catalog: None,
         }
     }
 
@@ -1608,24 +1643,100 @@ impl SparkSession {
         self.app_name.clone()
     }
 
-    /// Create a new logical session with isolated catalogs/state (PySpark: SparkSession.newSession()).
-    /// Global temp views remain process-scoped; everything else is session-scoped.
+    /// Create a logical session with isolated temporary views/configuration (PySpark: `newSession`).
+    /// Saved tables and databases remain isolated for ordinary embedded sessions. When this
+    /// session was explicitly attached to a [`SharedCatalog`], the child shares that catalog
+    /// while retaining its own temporary views and session configuration.
     pub fn new_session(&self) -> Self {
         let current_db = self.current_database();
+        let (tables, databases) = match &self.shared_catalog {
+            Some(catalog) => (catalog.tables.clone(), catalog.databases.clone()),
+            None => (
+                Arc::new(Mutex::new(HashMap::new())),
+                Arc::new(Mutex::new(HashSet::new())),
+            ),
+        };
         SparkSession {
             app_name: self.app_name.clone(),
             master: self.master.clone(),
             config: self.config.clone(),
             runtime_config: self.runtime_config.clone(),
             catalog: Arc::new(Mutex::new(HashMap::new())),
-            tables: Arc::new(Mutex::new(HashMap::new())),
-            databases: Arc::new(Mutex::new(HashSet::new())),
+            tables,
+            databases,
             udf_registry: UdfRegistry::new(),
             current_database: Arc::new(Mutex::new(current_db)),
             cached_tables: Arc::new(Mutex::new(HashSet::new())),
             // A new logical session never inherits external catalog callbacks.
             external_catalog_provider: Arc::new(RwLock::new(None)),
+            shared_catalog: self.shared_catalog.clone(),
         }
+    }
+
+    /// Attach this session to an explicitly owned catalog scope.
+    ///
+    /// Use on a newly created session before registering saved tables. Sessions created later
+    /// with [`Self::new_session`] share the catalog but get fresh temporary views and local
+    /// settings. The catalog value, rather than process-global statics, defines service scope.
+    pub fn with_shared_catalog(mut self, catalog: SharedCatalog) -> Self {
+        self.tables = catalog.tables.clone();
+        self.databases = catalog.databases.clone();
+        self.shared_catalog = Some(catalog);
+        self
+    }
+
+    /// Serialize SQL catalog resolution/publication for sessions in one shared scope.
+    ///
+    /// The guard covers SQL translation, where table references are resolved into immutable
+    /// DataFrame plans. Once returned, those plans keep their resolved table versions without
+    /// holding the catalog lock through collection or result encoding.
+    pub(crate) fn shared_catalog_guard(
+        &self,
+    ) -> Result<Option<std::sync::MutexGuard<'_, ()>>, EngineError> {
+        self.shared_catalog
+            .as_ref()
+            .map(|catalog| {
+                catalog.writer.lock().map_err(|_| {
+                    EngineError::User("shared catalog writer lock is poisoned".to_string())
+                })
+            })
+            .transpose()
+    }
+
+    /// Serialize shared-catalog mutations while allowing readers to resolve snapshots during
+    /// staged data work. The catalog writer mutex remains the short publication/resolution lock.
+    pub(crate) fn shared_catalog_mutation_guard(
+        &self,
+    ) -> Result<Option<std::sync::MutexGuard<'_, ()>>, EngineError> {
+        self.shared_catalog
+            .as_ref()
+            .map(|catalog| {
+                catalog.mutation_lane.lock().map_err(|_| {
+                    EngineError::User("shared catalog mutation lane is poisoned".to_string())
+                })
+            })
+            .transpose()
+    }
+
+    fn shared_catalog_mutation_and_writer_guards(
+        &self,
+    ) -> Result<
+        (
+            Option<std::sync::MutexGuard<'_, ()>>,
+            Option<std::sync::MutexGuard<'_, ()>>,
+        ),
+        EngineError,
+    > {
+        let mutation = self.shared_catalog_mutation_guard()?;
+        let writer = self.shared_catalog_guard()?;
+        Ok((mutation, writer))
+    }
+
+    fn global_temp_views(&self) -> TempViewCatalog {
+        self.shared_catalog
+            .as_ref()
+            .map(|catalog| catalog.global_temp_views.clone())
+            .unwrap_or_else(global_temp_catalog)
     }
 
     /// Attach or remove this logical session's external catalog resolver.
@@ -1679,11 +1790,164 @@ impl SparkSession {
         }
         match self.current_database.lock() {
             Ok(mut guard) => {
-                *guard = name.to_string();
+                *guard = if self.shared_catalog.is_some() {
+                    name.to_ascii_lowercase()
+                } else {
+                    name.to_string()
+                };
                 Ok(())
             }
             Err(_) => Ok(()),
         }
+    }
+
+    /// Resolve an unqualified saved-table name in a shared service catalog.
+    fn saved_table_key(&self, name: &str) -> String {
+        if self.shared_catalog.is_none() {
+            return name.to_string();
+        }
+        let name = name.to_ascii_lowercase();
+        if name.contains('.') {
+            name
+        } else {
+            format!("{}.{}", self.current_database().to_ascii_lowercase(), name)
+        }
+    }
+
+    pub(crate) fn check_saved_table_database(&self, name: &str) -> Result<(), PolarsError> {
+        if self.shared_catalog.is_none() {
+            return Ok(());
+        }
+        let current = self.current_database();
+        if !self.database_exists(&current) {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "Current database '{current}' does not exist; use USE to select an existing database"
+                )
+                .into(),
+            ));
+        }
+        if let Some((database, _)) = name.split_once('.')
+            && !self.database_exists(database)
+        {
+            return Err(PolarsError::InvalidOperation(
+                format!("Database '{database}' does not exist").into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether a database still owns saved tables. A poisoned catalog is treated as non-empty.
+    pub(crate) fn database_has_saved_tables(&self, name: &str) -> bool {
+        let prefix = format!("{}.", name.to_ascii_lowercase());
+        self.tables
+            .lock()
+            .map(|tables| {
+                tables
+                    .keys()
+                    .any(|table| table.to_ascii_lowercase().starts_with(&prefix))
+            })
+            .unwrap_or(true)
+    }
+
+    /// Validate that a staged saved-table version fits configured shared-catalog limits.
+    /// The caller must hold the shared catalog writer guard through validation and publication.
+    #[cfg(feature = "sql")]
+    pub(crate) fn check_catalog_table_growth(
+        &self,
+        name: &str,
+        candidate: &DataFrame,
+    ) -> Result<(), PolarsError> {
+        if self.shared_catalog.is_none() {
+            return Ok(());
+        }
+        let Some(max_table_bytes) =
+            self.configured_catalog_limit("sparkless.server.max_table_bytes")
+        else {
+            return Ok(());
+        };
+        let max_catalog_bytes = self
+            .configured_catalog_limit("sparkless.server.max_catalog_bytes")
+            .unwrap_or(usize::MAX);
+        let max_tables = self
+            .configured_catalog_limit("sparkless.server.max_tables")
+            .unwrap_or(usize::MAX);
+        let candidate_bytes = candidate.estimated_size()?;
+        if candidate_bytes > max_table_bytes {
+            return Err(PolarsError::ComputeError(
+                format!(
+                    "CatalogCapacityExceeded: staged table is {candidate_bytes} bytes; the per-table limit is {max_table_bytes}"
+                )
+                .into(),
+            ));
+        }
+        let target_key = self.saved_table_key(name);
+        let tables = self
+            .tables
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+            .iter()
+            .map(|(key, frame)| (key.clone(), frame.clone()))
+            .collect::<Vec<_>>();
+        if !tables.iter().any(|(key, _)| key == &target_key) && tables.len() >= max_tables {
+            return Err(PolarsError::ComputeError(
+                format!("CatalogCapacityExceeded: saved-table limit is {max_tables}").into(),
+            ));
+        }
+        // Count the staged version alongside committed versions. This reserves space for
+        // publication without treating a replacement as though it freed the old buffers first.
+        let mut staged_total = candidate_bytes;
+        for (_, frame) in tables {
+            staged_total = staged_total.saturating_add(frame.estimated_size()?);
+            if staged_total > max_catalog_bytes {
+                return Err(PolarsError::ComputeError(
+                    format!(
+                        "CatalogCapacityExceeded: staged catalog would exceed {max_catalog_bytes} bytes"
+                    )
+                    .into(),
+                ));
+            }
+        }
+        if staged_total > max_catalog_bytes {
+            return Err(PolarsError::ComputeError(
+                format!(
+                    "CatalogCapacityExceeded: staged catalog would exceed {max_catalog_bytes} bytes"
+                )
+                .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "sql")]
+    pub(crate) fn check_database_capacity(&self) -> Result<(), PolarsError> {
+        let Some(max_databases) = self.configured_catalog_limit("sparkless.server.max_databases")
+        else {
+            return Ok(());
+        };
+        if self.shared_catalog.is_some()
+            && self
+                .databases
+                .lock()
+                .map_err(|_| {
+                    PolarsError::InvalidOperation("database catalog lock poisoned".into())
+                })?
+                .len()
+                .saturating_add(1)
+                >= max_databases
+        {
+            return Err(PolarsError::ComputeError(
+                format!("CatalogCapacityExceeded: database limit is {max_databases}").into(),
+            ));
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "sql")]
+    fn configured_catalog_limit(&self, key: &str) -> Option<usize> {
+        self.config
+            .get(key)
+            .and_then(|value| value.parse::<usize>().ok())
     }
 
     pub fn cache_table(&self, name: &str) {
@@ -1720,7 +1984,17 @@ impl SparkSession {
     pub fn create_or_replace_temp_view(&self, name: &str, df: DataFrame) {
         match self.catalog.lock() {
             Ok(mut m) => {
-                m.insert(name.to_string(), df);
+                if self.is_case_sensitive() {
+                    m.insert(name.to_string(), df);
+                } else if let Some(existing) = m
+                    .keys()
+                    .find(|existing| existing.eq_ignore_ascii_case(name))
+                    .cloned()
+                {
+                    m.insert(existing, df);
+                } else {
+                    m.insert(name.to_string(), df);
+                }
             }
             Err(_) => {
                 eprintln!(
@@ -1731,9 +2005,17 @@ impl SparkSession {
     }
 
     /// Global temp view (PySpark: createGlobalTempView). Persists across sessions within the same process.
+    /// For an explicitly shared catalog, the view is scoped to that catalog instead of the process.
     /// If the global catalog lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn create_global_temp_view(&self, name: &str, df: DataFrame) {
-        match global_temp_catalog().lock() {
+        let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+            Ok(guards) => guards,
+            Err(error) => {
+                eprintln!("robin-sparkless-polars: {error}");
+                return;
+            }
+        };
+        match self.global_temp_views().lock() {
             Ok(mut m) => {
                 m.insert(name.to_string(), df);
             }
@@ -1748,7 +2030,14 @@ impl SparkSession {
     /// Global temp view (PySpark: createOrReplaceGlobalTempView). Persists across sessions within the same process.
     /// If the global catalog lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn create_or_replace_global_temp_view(&self, name: &str, df: DataFrame) {
-        match global_temp_catalog().lock() {
+        let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+            Ok(guards) => guards,
+            Err(error) => {
+                eprintln!("robin-sparkless-polars: {error}");
+                return;
+            }
+        };
+        match self.global_temp_views().lock() {
             Ok(mut m) => {
                 m.insert(name.to_string(), df);
             }
@@ -1762,23 +2051,30 @@ impl SparkSession {
 
     /// Returns true when `name` is registered as a session temp view (same resolution as [`Self::table`]).
     pub fn has_temp_view(&self, name: &str) -> bool {
-        if self
-            .catalog
-            .lock()
-            .ok()
-            .is_some_and(|m| m.contains_key(name))
-        {
+        if self.shared_catalog.is_some() && name.contains('.') {
+            return false;
+        }
+        if self.temp_view(name).is_some() {
             return true;
         }
         if name.contains('.') {
             let unqualified = name.rsplit_once('.').map(|(_, t)| t).unwrap_or(name);
-            return self
-                .catalog
-                .lock()
-                .ok()
-                .is_some_and(|m| m.contains_key(unqualified));
+            return self.temp_view(unqualified).is_some();
         }
         false
+    }
+
+    fn temp_view(&self, name: &str) -> Option<DataFrame> {
+        self.catalog.lock().ok().and_then(|views| {
+            if self.is_case_sensitive() {
+                views.get(name).cloned()
+            } else {
+                views
+                    .iter()
+                    .find(|(view_name, _)| view_name.eq_ignore_ascii_case(name))
+                    .map(|(_, frame)| frame.clone())
+            }
+        })
     }
 
     /// Returns whether a temp view is registered under exactly this identifier.
@@ -1794,7 +2090,19 @@ impl SparkSession {
     /// If the catalog lock is poisoned, returns false and a message is emitted to stderr.
     pub fn drop_temp_view(&self, name: &str) -> bool {
         match self.catalog.lock() {
-            Ok(mut m) => m.remove(name).is_some(),
+            Ok(mut m) => {
+                if self.is_case_sensitive() {
+                    m.remove(name).is_some()
+                } else {
+                    let existing = m
+                        .keys()
+                        .find(|view_name| view_name.eq_ignore_ascii_case(name))
+                        .cloned();
+                    existing
+                        .and_then(|view_name| m.remove(&view_name))
+                        .is_some()
+                }
+            }
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: catalog lock poisoned, drop_temp_view may have failed"
@@ -1807,7 +2115,19 @@ impl SparkSession {
     /// Drop a global temporary view (PySpark: catalog.dropGlobalTempView). Removes from process-wide catalog.
     /// If the global catalog lock is poisoned, returns false and a message is emitted to stderr.
     pub fn drop_global_temp_view(&self, name: &str) -> bool {
-        match global_temp_catalog().lock() {
+        let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+            Ok(guards) => guards,
+            Err(error) => {
+                eprintln!("robin-sparkless-polars: {error}");
+                return false;
+            }
+        };
+        self.drop_global_temp_view_during_sql(name)
+    }
+
+    /// Drop a global temporary view while the caller already holds the catalog writer guard.
+    pub(crate) fn drop_global_temp_view_during_sql(&self, name: &str) -> bool {
+        match self.global_temp_views().lock() {
             Ok(mut m) => m.remove(name).is_some(),
             Err(_) => {
                 eprintln!(
@@ -1821,9 +2141,22 @@ impl SparkSession {
     /// Register a DataFrame as a saved table (PySpark: saveAsTable). Inserts into the tables catalog only.
     /// If the tables lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn register_table(&self, name: &str, df: DataFrame) {
+        let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+            Ok(guards) => guards,
+            Err(error) => {
+                eprintln!("robin-sparkless-polars: {error}");
+                return;
+            }
+        };
+        self.register_table_during_sql(name, df);
+    }
+
+    /// Register a table while the caller already holds the catalog writer guard.
+    pub(crate) fn register_table_during_sql(&self, name: &str, df: DataFrame) {
+        let key = self.saved_table_key(name);
         match self.tables.lock() {
             Ok(mut m) => {
-                m.insert(name.to_string(), df);
+                m.insert(key, df);
             }
             Err(_) => {
                 eprintln!(
@@ -1836,9 +2169,29 @@ impl SparkSession {
     /// Register a database/schema name (from CREATE DATABASE / CREATE SCHEMA). Persisted in session for listDatabases/databaseExists.
     /// If the databases lock is poisoned, the operation is best-effort and a message is emitted to stderr.
     pub fn register_database(&self, name: &str) {
+        let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+            Ok(guards) => guards,
+            Err(error) => {
+                eprintln!("robin-sparkless-polars: {error}");
+                return;
+            }
+        };
+        self.register_database_during_sql(name);
+    }
+
+    /// Register a database while the caller already holds the catalog writer guard.
+    pub(crate) fn register_database_during_sql(&self, name: &str) {
+        if name.eq_ignore_ascii_case("default") || name.eq_ignore_ascii_case("global_temp") {
+            return;
+        }
+        let key = if self.shared_catalog.is_some() {
+            name.to_ascii_lowercase()
+        } else {
+            name.to_string()
+        };
         match self.databases.lock() {
             Ok(mut s) => {
-                s.insert(name.to_string());
+                s.insert(key);
             }
             Err(_) => {
                 eprintln!(
@@ -1854,7 +2207,14 @@ impl SparkSession {
         let mut names: Vec<String> = vec!["default".to_string(), "global_temp".to_string()];
         match self.databases.lock() {
             Ok(guard) => {
-                let mut created: Vec<String> = guard.iter().cloned().collect();
+                let mut created: Vec<String> = guard
+                    .iter()
+                    .filter(|name| {
+                        !name.eq_ignore_ascii_case("default")
+                            && !name.eq_ignore_ascii_case("global_temp")
+                    })
+                    .cloned()
+                    .collect();
                 created.sort();
                 names.extend(created);
             }
@@ -1874,6 +2234,7 @@ impl SparkSession {
             return true;
         }
         match self.databases.lock() {
+            Ok(s) if self.shared_catalog.is_some() => s.contains(&name.to_ascii_lowercase()),
             Ok(s) => s.contains(name),
             Err(_) => {
                 eprintln!(
@@ -1888,7 +2249,7 @@ impl SparkSession {
     /// If the tables lock is poisoned, returns None and a message is emitted to stderr.
     pub fn get_saved_table(&self, name: &str) -> Option<DataFrame> {
         match self.tables.lock() {
-            Ok(m) => m.get(name).cloned(),
+            Ok(m) => m.get(&self.saved_table_key(name)).cloned(),
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: tables lock poisoned, get_saved_table may have failed"
@@ -1928,7 +2289,7 @@ impl SparkSession {
     /// If the tables lock is poisoned, returns false and a message is emitted to stderr.
     pub fn saved_table_exists(&self, name: &str) -> bool {
         match self.tables.lock() {
-            Ok(m) => m.contains_key(name),
+            Ok(m) => m.contains_key(&self.saved_table_key(name)),
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: tables lock poisoned, saved_table_exists may be wrong"
@@ -1943,7 +2304,7 @@ impl SparkSession {
     pub(crate) fn local_table_exists(&self, name: &str) -> bool {
         // global_temp.xyz
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
-            return match global_temp_catalog().lock() {
+            return match self.global_temp_views().lock() {
                 Ok(m) => m.contains_key(tbl),
                 Err(_) => {
                     eprintln!(
@@ -1953,19 +2314,11 @@ impl SparkSession {
                 }
             };
         }
-        if match self.catalog.lock() {
-            Ok(m) => m.contains_key(name),
-            Err(_) => {
-                eprintln!(
-                    "robin-sparkless-polars: catalog lock poisoned, table_exists may be wrong"
-                );
-                false
-            }
-        } {
+        if (self.shared_catalog.is_none() || !name.contains('.')) && self.has_temp_view(name) {
             return true;
         }
         if match self.tables.lock() {
-            Ok(m) => m.contains_key(name),
+            Ok(m) => m.contains_key(&self.saved_table_key(name)),
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: tables lock poisoned, table_exists may be wrong"
@@ -1978,7 +2331,10 @@ impl SparkSession {
         // #984: schema-qualified name — try unqualified table name only for the
         // legacy local catalog. Once an external provider is attached, a miss for
         // the full identifier must not be shadowed by an unrelated local suffix.
-        if name.contains('.') && self.external_catalog_provider().ok().flatten().is_none() {
+        if self.shared_catalog.is_none()
+            && name.contains('.')
+            && self.external_catalog_provider().ok().flatten().is_none()
+        {
             let unqualified = name.rsplit_once('.').map(|(_, tbl)| tbl).unwrap_or(name);
             if match self.catalog.lock() {
                 Ok(m) => m.contains_key(unqualified),
@@ -2029,7 +2385,7 @@ impl SparkSession {
     /// Return global temp view names (process-scoped). PySpark: catalog.listTables(dbName="global_temp").
     /// If the global catalog lock is poisoned, returns empty and a message is emitted to stderr.
     pub fn list_global_temp_view_names(&self) -> Vec<String> {
-        match global_temp_catalog().lock() {
+        match self.global_temp_views().lock() {
             Ok(m) => m.keys().cloned().collect(),
             Err(_) => {
                 eprintln!(
@@ -2071,8 +2427,21 @@ impl SparkSession {
     /// Drop a saved table by name (removes from tables catalog only). No-op if not present.
     /// If the tables lock is poisoned, returns false and a message is emitted to stderr.
     pub fn drop_table(&self, name: &str) -> bool {
+        let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+            Ok(guards) => guards,
+            Err(error) => {
+                eprintln!("robin-sparkless-polars: {error}");
+                return false;
+            }
+        };
+        self.drop_table_during_sql(name)
+    }
+
+    /// Drop a saved table while the caller already holds the catalog writer guard.
+    pub(crate) fn drop_table_during_sql(&self, name: &str) -> bool {
+        let key = self.saved_table_key(name);
         match self.tables.lock() {
-            Ok(mut m) => m.remove(name).is_some(),
+            Ok(mut m) => m.remove(&key).is_some(),
             Err(_) => {
                 eprintln!(
                     "robin-sparkless-polars: tables lock poisoned, drop_table may have failed"
@@ -2086,14 +2455,31 @@ impl SparkSession {
     /// Does not drop "default" or "global_temp". No-op if not present (or if_exists). Returns true if removed.
     /// If the databases lock is poisoned, returns false and a message is emitted to stderr.
     pub fn drop_database(&self, name: &str) -> bool {
+        let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
+            Ok(guards) => guards,
+            Err(error) => {
+                eprintln!("robin-sparkless-polars: {error}");
+                return false;
+            }
+        };
+        self.drop_database_during_sql(name)
+    }
+
+    /// Drop a database while the caller already holds the catalog writer guard.
+    pub(crate) fn drop_database_during_sql(&self, name: &str) -> bool {
         if name.eq_ignore_ascii_case("default") || name.eq_ignore_ascii_case("global_temp") {
             return false;
         }
-        // Best-effort: if dropping current db, reset to default.
-        if self.current_database().eq(name) {
+        if self.shared_catalog.is_some() && self.database_has_saved_tables(name) {
+            return false;
+        }
+        // Preserve the historical embedded behavior. A service session keeps its current
+        // database after a drop so the next statement reports that the database is missing.
+        if self.shared_catalog.is_none() && self.current_database().eq(name) {
             let _ = self.set_current_database("default");
         }
         match self.databases.lock() {
+            Ok(mut s) if self.shared_catalog.is_some() => s.remove(&name.to_ascii_lowercase()),
             Ok(mut s) => s.remove(name),
             Err(_) => {
                 eprintln!(
@@ -2159,7 +2545,8 @@ impl SparkSession {
     ) -> Result<DataFrame, PolarsError> {
         // global_temp.xyz -> global catalog only
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
-            if let Some(df) = global_temp_catalog()
+            if let Some(df) = self
+                .global_temp_views()
                 .lock()
                 .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
                 .get(tbl)
@@ -2175,20 +2562,20 @@ impl SparkSession {
             ));
         }
         // Session: temp view, saved table
-        if let Some(df) = self
-            .catalog
-            .lock()
-            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
-            .get(name)
-            .cloned()
-        {
+        if let Some(df) = if self.shared_catalog.is_some() && name.contains('.') {
+            None
+        } else {
+            self.temp_view(name)
+        } {
             return Ok(df);
         }
+        self.check_saved_table_database(name)?;
+        let saved_table_key = self.saved_table_key(name);
         if let Some(df) = self
             .tables
             .lock()
             .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
-            .get(name)
+            .get(&saved_table_key)
             .cloned()
         {
             return Ok(df);
@@ -2205,7 +2592,7 @@ impl SparkSession {
         // Preserve this historical fallback only when there is no external resolver. If a
         // configured catalog misses a multipart name, returning a local table with the same
         // final component would bind an unrelated relation.
-        if name.contains('.') && !has_external_provider {
+        if self.shared_catalog.is_none() && name.contains('.') && !has_external_provider {
             let unqualified = name.rsplit_once('.').map(|(_, tbl)| tbl).unwrap_or(name);
             if let Some(df) = self
                 .catalog
@@ -3822,17 +4209,19 @@ impl SparkSession {
                 "robin-sparkless-polars: catalog lock poisoned, stop() cleanup may be partial"
             ),
         }
-        match self.tables.lock() {
-            Ok(mut m) => m.clear(),
-            Err(_) => eprintln!(
-                "robin-sparkless-polars: tables lock poisoned, stop() cleanup may be partial"
-            ),
-        }
-        match self.databases.lock() {
-            Ok(mut s) => s.clear(),
-            Err(_) => eprintln!(
-                "robin-sparkless-polars: databases lock poisoned, stop() cleanup may be partial"
-            ),
+        if self.shared_catalog.is_none() {
+            match self.tables.lock() {
+                Ok(mut m) => m.clear(),
+                Err(_) => eprintln!(
+                    "robin-sparkless-polars: tables lock poisoned, stop() cleanup may be partial"
+                ),
+            }
+            match self.databases.lock() {
+                Ok(mut s) => s.clear(),
+                Err(_) => eprintln!(
+                    "robin-sparkless-polars: databases lock poisoned, stop() cleanup may be partial"
+                ),
+            }
         }
         let _ = self.udf_registry.clear();
         clear_thread_udf_session();
@@ -3855,6 +4244,7 @@ impl SparkSession {
             current_database: self.current_database.clone(),
             cached_tables: self.cached_tables.clone(),
             external_catalog_provider: self.external_catalog_provider.clone(),
+            shared_catalog: self.shared_catalog.clone(),
         })
     }
 }

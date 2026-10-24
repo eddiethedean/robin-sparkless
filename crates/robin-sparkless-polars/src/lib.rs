@@ -67,7 +67,7 @@ pub use robin_sparkless_core::engine::{
     ExternalTableWriteRequest, ExternalTableWriteResult,
 };
 pub use schema::{DataType, StructField, StructType, StructTypePolarsExt, schema_from_json};
-pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
+pub use session::{DataFrameReader, SharedCatalog, SparkSession, SparkSessionBuilder};
 pub use traits::{FromRobinDf, IntoRobinDf};
 pub use type_coercion::{
     CompareOp, coerce_for_pyspark_comparison, coerce_for_pyspark_eq_null_safe, find_common_type,
