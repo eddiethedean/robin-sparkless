@@ -130,6 +130,8 @@ These are local component checks, not passing release gates. The current work ha
 | 1,000,000 | 58; 80,694 / 16,194 | 3,509; 19,474,116 / 262,712 | 489; 8,524,502 | 25,788,416 (25,739,264–25,837,568) |
 | 10,000,000 | 59; 79,798 / 15,410 | 29,986; 194,266,482 / 262,712 | 441; 8,524,502 | 25,804,800 (25,804,800–25,853,952) |
 
+- `cargo test --locked -p robin-sparkless-polars --features sql --lib nested_struct_schema_survives_union_filter_projection_and_ipc -- --nocapture` — passed one focused native test at source commit [`cb218b6a8864cb5d0f293166b7402dbe7fa10904`](https://github.com/eddiethedean/robin-sparkless/commit/cb218b6a8864cb5d0f293166b7402dbe7fa10904), on Darwin 25.5.0 arm64 with Rust 1.93.1. It checks nested field metadata/nullability and decoded values after union, filter, projection, and Arrow IPC export. This adds targeted Phase 1 nested-schema evidence; it does not complete the nested type/transform matrix or V18.
+
 Every advertised binary-wheel platform still requires independent build/install/runtime witnesses. CI must add targeted format/clippy/tests for supported feature combinations, launcher tests on supported Python/platform versions, and the distinct direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect routes. Keep their evidence separate and do not report planned commands as passed.
 
 ## Evidence record template
