@@ -6521,13 +6521,22 @@ mod tests {
         let wall_clock = Series::new("wall_clock".into(), [Some(1_234_567_i64), None, Some(-1)])
             .cast(&PlDataType::Datetime(TimeUnit::Microseconds, None))
             .unwrap();
-        let physical =
-            PlDataFrame::new_infer_height(vec![tiny.into(), single.into(), wall_clock.into()])
-                .unwrap();
+        let payload = Series::new(
+            "payload".into(),
+            [Some(&b"\x00\xff"[..]), None, Some(&b"ok"[..])],
+        );
+        let physical = PlDataFrame::new_infer_height(vec![
+            tiny.into(),
+            single.into(),
+            wall_clock.into(),
+            payload.into(),
+        ])
+        .unwrap();
         let logical = StructType::new(vec![
-            StructField::new("tiny".into(), LogicalDataType::Byte, false),
-            StructField::new("single".into(), LogicalDataType::Float, false),
-            StructField::new("wall_clock".into(), LogicalDataType::TimestampNtz, false),
+            StructField::new("tiny".into(), LogicalDataType::Byte, true),
+            StructField::new("single".into(), LogicalDataType::Float, true),
+            StructField::new("wall_clock".into(), LogicalDataType::TimestampNtz, true),
+            StructField::new("payload".into(), LogicalDataType::Binary, true),
         ]);
         let expected_schema = logical.to_json().unwrap();
         let source = DataFrame::from_polars(physical)
@@ -6580,6 +6589,10 @@ mod tests {
         );
         assert_eq!(wall_clock.datetime().unwrap().physical().get(1), None);
         assert_eq!(wall_clock.datetime().unwrap().physical().get(2), Some(-1));
+        let payload = decoded.column("payload").unwrap().binary().unwrap();
+        assert_eq!(payload.get(0), Some(&b"\x00\xff"[..]));
+        assert_eq!(payload.get(1), None);
+        assert_eq!(payload.get(2), Some(&b"ok"[..]));
 
         let empty = source.limit(0).unwrap();
         let empty_batch = empty
