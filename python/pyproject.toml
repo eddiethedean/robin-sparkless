@@ -79,6 +79,11 @@ ignore_missing_imports = true
 module = ["pytest", "pytest.*", "_pytest", "_pytest.*"]
 follow_imports = "skip"
 
+# Arrow timestamp normalization is optional when serving a Python external catalog.
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
 # Optional at runtime (delta-spark); release job runs mypy without installing it.
 [[tool.mypy.overrides]]
 module = ["delta", "delta.*"]
