@@ -10,6 +10,9 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 [features]
 default = []
 sql = ["dep:spark-sql-parser"]
+# Deterministic concurrency hooks for integration tests that exercise the SQL path through
+# another crate. This feature is never enabled by normal package builds.
+test-hooks = []
 # deltalake 0.32.4 / buoyant_kernel 0.22.2 uses the 1.0 derive-macro API.
 # Keep Cargo from resolving the semver-compatible but incompatible 1.2 release.
 delta = [

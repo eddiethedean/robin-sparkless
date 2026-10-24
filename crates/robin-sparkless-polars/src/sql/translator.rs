@@ -1327,6 +1327,8 @@ fn translate_select_from(
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
     #[cfg(test)]
     test_hooks::after_first_relation_resolution();
+    #[cfg(feature = "test-hooks")]
+    super::test_hooks::after_first_relation_resolution();
     let left_alias_opt = table_alias_from_factor(&first_tj.relation);
     if let Some(ref prefix) = left_alias_opt {
         if should_prefix_columns(&first_tj.relation) {

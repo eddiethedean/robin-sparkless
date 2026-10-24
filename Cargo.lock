@@ -5735,6 +5735,7 @@ dependencies = [
  "hyper-util",
  "robin-sparkless",
  "robin-sparkless-core",
+ "robin-sparkless-polars",
  "serde",
  "serde_json",
  "sha2 0.10.9",

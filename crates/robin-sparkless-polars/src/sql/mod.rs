@@ -5,6 +5,55 @@
 mod decimal;
 pub(crate) mod translator;
 
+/// Hidden coordination hooks used to test catalog races through public server entry points.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub mod test_hooks {
+    use std::cell::RefCell;
+    use std::sync::{LazyLock, Mutex};
+
+    type Hook = Box<dyn FnOnce() + Send + 'static>;
+
+    static NEXT_HOOK: LazyLock<Mutex<Option<(String, Hook)>>> = LazyLock::new(|| Mutex::new(None));
+
+    thread_local! {
+        static ARMED_HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+    }
+
+    /// Pause the next SQL statement containing `query_fragment` after it resolves its first
+    /// relation. The callback runs on the SQL execution thread and fires at most once.
+    pub fn after_first_relation_resolution_for_query(
+        query_fragment: impl Into<String>,
+        hook: impl FnOnce() + Send + 'static,
+    ) {
+        let query_fragment = query_fragment.into();
+        assert!(
+            !query_fragment.is_empty(),
+            "query fragment must not be empty"
+        );
+        *NEXT_HOOK.lock().expect("SQL test hook lock") = Some((query_fragment, Box::new(hook)));
+    }
+
+    pub(crate) fn arm_for_query(query: &str) {
+        let mut pending = NEXT_HOOK.lock().expect("SQL test hook lock");
+        if pending
+            .as_ref()
+            .is_some_and(|(fragment, _)| query.contains(fragment))
+        {
+            let (_, hook) = pending.take().expect("matched SQL test hook");
+            ARMED_HOOK.with(|slot| *slot.borrow_mut() = Some(hook));
+        }
+    }
+
+    pub(crate) fn after_first_relation_resolution() {
+        ARMED_HOOK.with(|slot| {
+            if let Some(hook) = slot.borrow_mut().take() {
+                hook();
+            }
+        });
+    }
+}
+
 use crate::dataframe::DataFrame;
 use crate::error::polars_to_core_error;
 use crate::session::SparkSession;
@@ -58,6 +107,8 @@ pub fn execute_sql_with_cancellation(
     query: &str,
     token: &CancellationToken,
 ) -> Result<DataFrame, EngineError> {
+    #[cfg(feature = "test-hooks")]
+    test_hooks::arm_for_query(query);
     token.check_cancelled()?;
     let statement = parse_spark_statement(query).map_err(polars_to_core_error)?;
     let read_only = is_read_only_statement(&statement);

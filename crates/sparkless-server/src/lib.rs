@@ -2607,6 +2607,140 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn http_join_statement_blocks_publication_between_relation_resolutions() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        for (operation, sql) in [
+            ("race-create-db", "CREATE DATABASE phase417_http_race"),
+            (
+                "race-create-left",
+                "CREATE TABLE phase417_http_race.left_items (id BIGINT)",
+            ),
+            (
+                "race-create-right",
+                "CREATE TABLE phase417_http_race.right_items (id BIGINT)",
+            ),
+            (
+                "race-insert-left",
+                "INSERT INTO phase417_http_race.left_items VALUES (1)",
+            ),
+            (
+                "race-insert-right",
+                "INSERT INTO phase417_http_race.right_items VALUES (10)",
+            ),
+        ] {
+            let response =
+                statement_request(address, &instance, "race-owner", operation, sql).await;
+            assert_eq!(response["status"], "ok", "{operation}: {response}");
+        }
+
+        let (paused_tx, paused_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        robin_sparkless_polars::sql::test_hooks::after_first_relation_resolution_for_query(
+            "race_left_id",
+            move || {
+                paused_tx
+                    .send(())
+                    .expect("signal first relation resolution");
+                resume_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("resume HTTP statement after writer attempt");
+            },
+        );
+
+        let read_sql = "SELECT l.id AS race_left_id, r.id AS race_right_id \
+                        FROM phase417_http_race.left_items l \
+                        CROSS JOIN phase417_http_race.right_items r";
+        let reader_instance = instance.clone();
+        let reader = tokio::spawn(async move {
+            statement_request(
+                address,
+                &reader_instance,
+                "race-reader",
+                "race-join-read",
+                read_sql,
+            )
+            .await
+        });
+        tokio::task::spawn_blocking(move || paused_rx.recv_timeout(Duration::from_secs(3)))
+            .await
+            .expect("wait for SQL execution worker")
+            .expect("HTTP query pauses after resolving its first table");
+
+        let writer_instance = instance.clone();
+        let mut writer = tokio::spawn(async move {
+            statement_request(
+                address,
+                &writer_instance,
+                "race-writer",
+                "race-join-append",
+                "INSERT INTO phase417_http_race.left_items VALUES (2)",
+            )
+            .await
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut writer)
+                .await
+                .is_err(),
+            "writer must not publish between relation resolutions"
+        );
+        let (health_status, health) = request_json(address, "GET", "/health", &json!({})).await;
+        assert_eq!(health_status, StatusCode::OK, "{health}");
+        assert_eq!(health["status"], "ready");
+
+        resume_tx
+            .send(())
+            .expect("release the paused SQL statement");
+        let read = reader.await.expect("HTTP reader task");
+        assert_eq!(read["status"], "ok", "{read}");
+        assert_eq!(read["data"]["application/json"]["data"], json!([[1, 10]]));
+        let write = writer.await.expect("HTTP writer task");
+        assert_eq!(write["status"], "ok", "{write}");
+
+        let (status, after_publication) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"race-reader",
+                "kind":"sql",
+                "code":"SELECT l.id, r.id FROM phase417_http_race.left_items l CROSS JOIN phase417_http_race.right_items r"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{after_publication}");
+        let rows = after_publication["data"]["application/json"]["data"]
+            .as_array()
+            .expect("joined rows");
+        assert_eq!(rows.len(), 2, "{after_publication}");
+        assert!(rows.contains(&json!([1, 10])), "{after_publication}");
+        assert!(rows.contains(&json!([2, 10])), "{after_publication}");
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn mutation_writer_queue_timeout_records_failure_without_effects() {
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
