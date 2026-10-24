@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Native server release gates** — package and verify the publishable Rust crate archives, install the exact `sparkless[server]` candidate wheel pair in a fresh offline environment, and test the owned server against a real HTTP SQL request before publication.
+- **Public release verification** — gate release completion on fresh installs of the published Rust server and Python server extra, the pinned public-SDK mutation suite, PyPI artifact metadata, and the pulled GHCR image digest.
+- **Rust license policy** — explicitly account for ISC, CDLA-Permissive-2.0, MPL-2.0, and CC0-1.0 licenses present in the locked dependency graph.
+
+### Fixed
+
+- **Server shutdown** — handle SIGTERM in both native server modes so container stop requests drain the listener and exit cleanly.
+- **Server version command** — expose `sparkless-server --version` without loading runtime configuration, so registry-installed binaries can be checked against their release tag.
+- **Dependency security** — update Tokio and `ctutils` past RUSTSEC-2026-0386 and RUSTSEC-2026-0385, and replace yanked `chacha20` 0.10.0 with 0.10.2.
+
 ### Breaking
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.

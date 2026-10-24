@@ -27,7 +27,7 @@ The release workflow currently stages server binary wheels for `macosx_14_0_arm6
    ```
 
 4. Run the repository checks, including formatting, strict Clippy, Rust tests, Python lint/tests, and the pinned MiniLake public-SDK integration suite. Follow the phase plan for the exact V-gate scenarios; a focused component test does not substitute for the integrated gate.
-5. Create or update `codex/release-X.Y.Z`, include the complete reviewed changes, and push it. The Release workflow performs non-publishing validation on `codex/release-*` branches. Review the full run, including the server binary wheel jobs and container SQL/graceful-shutdown smoke, before tagging. Candidate jobs upload wheel artifacts for inspection but do not publish them.
+5. Create or update `codex/release-X.Y.Z`, include the complete reviewed changes, and push it. The Release workflow performs non-publishing validation on `codex/release-*` branches. Review the full run, including packaged Rust crate archives, the candidate binary wheel builds, a fresh offline `sparkless[server]` install and query, and the native container SQL/graceful-shutdown smoke before tagging. Candidate jobs upload wheel and image artifacts for inspection but do not publish them.
 
 The checker supports Python 3.11+ through `tomllib`; Python 3.8–3.10 developer environments need `tomli` installed.
 
@@ -46,18 +46,20 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The tag workflow reruns the required validation before publication. Its dependency order is:
+The tag workflow reruns every validation before the first publication. Its dependency order is:
 
-1. Build, install, and smoke-test the `sparkless-server-bin` wheels on native macOS arm64 and manylinux x86_64 runners; run `auditwheel show` for the Linux wheel. The wheel publish steps run only for tags.
-2. Build the `linux/amd64` native image. Verify readiness, execute `SELECT 1 AS result` over HTTP, and stop the non-root container gracefully. Publish its `vX.Y.Z` tag to GHCR only after these checks pass.
+1. Package the publishable Rust crates and verify the archives have matching versions, no local dependency paths, and no root patch table. Build and install-test `sparkless-server-bin` wheels on native macOS arm64 and manylinux x86_64 runners; run `auditwheel show` for the Linux wheel. Install the matching candidate `sparkless` and binary wheels from local artifacts, with package-index access disabled, then start the server through the public Python launcher and run an HTTP SQL query.
+2. Build the `linux/amd64` native image. Verify its non-root runtime user, readiness, `SELECT 1 AS result` over HTTP, and graceful stop. Save the verified image as a workflow artifact. No package or image is published while these gates are running.
 3. Publish Rust crates in dependency order: `spark-sql-parser`, `robin-sparkless-core`, `robin-sparkless-polars`, `robin-sparkless`, then `sparkless-server`.
-4. Publish the `sparkless` Python extension wheels and source distribution across its configured Linux, macOS, and Windows matrix. These jobs wait for the server binary wheels and container gate as well as the Rust, Python, and adapter checks.
+4. Publish the tested `sparkless-server-bin` wheels to PyPI and the tested `vX.Y.Z` image to GHCR, refusing to overwrite an existing container tag.
+5. Publish the `sparkless` Python extension wheels and source distribution across its configured Linux, macOS, and Windows matrix. These jobs wait for the Rust crates, server binary wheels, container, and adapter checks.
+6. For 4.17 tags, run the V32 public-release job after every publication job succeeds. It installs the Rust server crate from crates.io and checks its version, verifies PyPI metadata and the required binary wheel tags, installs `sparkless[server]` from PyPI in a clean locked SDK environment, runs the pinned public-SDK mutation suite against that installed binary, and pulls, digest-checks, queries, and gracefully stops the GHCR image.
 
 The workflow skips a crates.io version only when the registry reports it was already uploaded. PyPI wheel publication uses `--skip-existing`; this supports recovery from a partial registry run but does not make a partial release complete. Never edit or overwrite a published package. If published contents need correction, publish a new coordinated patch version.
 
 ## Verify the released artifacts
 
-Use a clean environment outside this checkout to install exact `sparkless==X.Y.Z` and, on each advertised platform, `sparkless[server]==X.Y.Z`. Exercise the public Databricks SDK path and verify typed values, schemas, and the release-specific operation behavior. Install and launch the native binary wheel independently; verify its version, readiness/control protocol, health endpoint, and graceful shutdown. Pull the exact GHCR tag, record its immutable digest, and repeat the HTTP SQL and shutdown smoke against the pulled image. Verify the Rust crates and docs.rs pages at their exact release versions.
+The 4.17 tag workflow runs V32 automatically after all publication jobs succeed. It verifies exact public package versions, installs the published Rust server crate, installs `sparkless[server]` in a fresh environment and runs the pinned MiniLake public-SDK mutation suite against the packaged binary, checks required PyPI server-wheel tags and file hashes, and pulls the GHCR tag to compare its immutable digest with the publish result before repeating HTTP SQL and shutdown checks. Review its evidence and record the final artifact URLs and hashes in the phase validation matrix. Add platform-specific public installs if the advertised server-extra matrix expands.
 
 Record artifact URLs, wheel tags and hashes, image digest, source commit, tool versions, commands, and observed results in the phase validation matrix. A local wheel or image smoke is useful development evidence, but it does not pass the candidate inventory gate or replace a fresh public-artifact check.
 

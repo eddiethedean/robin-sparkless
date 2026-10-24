@@ -39,6 +39,21 @@ jobs:
             python scripts/check_release_versions.py
           fi
 
+  rust-package-archives:
+    name: Package distributable Rust crates
+    needs: [release-metadata]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Package every publishable Rust crate
+        run: cargo package --locked --workspace --exclude sparkless-native --no-verify
+      - name: Verify package manifests have no local dependency paths or patch tables
+        run: python3 scripts/verify_rust_package_archives.py
+
   # --- Rust ---
   format:
     name: Format
@@ -264,7 +279,7 @@ jobs:
         run: |
           set -euo pipefail
           PY=/opt/python/cp311-cp311/bin/python
-          "$PY" -m pip install wheel auditwheel twine
+          "$PY" -m pip install wheel auditwheel
           mkdir -p dist
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
@@ -277,13 +292,6 @@ jobs:
         with:
           name: sparkless-server-bin-manylinux-2-28-x86_64
           path: dist/*.whl
-      - name: Publish server binary wheel to PyPI
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: /opt/python/cp311-cp311/bin/python -m twine upload --non-interactive --skip-existing dist/*.whl
-
   server-bin-macos-arm64:
     name: Server binary wheel (macOS arm64)
     needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests]
@@ -312,7 +320,7 @@ jobs:
       - name: Build and verify macOS wheel
         run: |
           set -euo pipefail
-          python3 -m pip install wheel twine
+          python3 -m pip install wheel
           mkdir -p dist
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
@@ -324,32 +332,45 @@ jobs:
         with:
           name: sparkless-server-bin-macosx-14-0-arm64
           path: dist/*.whl
-      - name: Publish server binary wheel to PyPI
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: python3 -m twine upload --non-interactive --skip-existing dist/*.whl
+  server-extra-consumer:
+    name: Fresh sparkless server-extra consumer install
+    needs: [python-tests, server-bin-manylinux-x86_64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download candidate Sparkless wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: sparkless-wheel-ubuntu-latest
+          path: dist/sparkless
+      - name: Download candidate server binary wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-bin-manylinux-2-28-x86_64
+          path: dist/server-bin
+      - name: Install and exercise the exact server extra offline
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --no-index --find-links dist/sparkless --find-links dist/server-bin "sparkless[server]==${version}"
+          .venv/bin/python -m pip check
+          .venv/bin/python scripts/verify_server_extra_install.py "$version"
 
   server-container:
-    name: Native server container smoke and publication
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64]
+    name: Native server container build and smoke
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-extra-consumer]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Select candidate image tag
+      - name: Select candidate image name
         id: image
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME}"
-          else
-            version="$(python3 -c 'import tomllib; print(tomllib.load(open("crates/sparkless-server/Cargo.toml", "rb"))["package"]["version"])')"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "image=sparkless-server:candidate-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - name: Build native server image
         run: docker build --pull -f crates/sparkless-server/Dockerfile -t "${{ steps.image.outputs.image }}" .
@@ -377,69 +398,31 @@ jobs:
             docker rm -f "$name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          ready=false
-          for _ in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:18099/health >/dev/null; then
-              ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [[ "$ready" != true ]]; then
-            echo "container did not become healthy"
-            exit 1
-          fi
-          python3 - <<'PY'
-          import json
-          import urllib.request
-
-          request = urllib.request.Request(
-              "http://127.0.0.1:18099/statements",
-              data=json.dumps({"session": "release-smoke", "kind": "sql", "code": "SELECT 1 AS result"}).encode(),
-              headers={"Content-Type": "application/json"},
-              method="POST",
-          )
-          with urllib.request.urlopen(request, timeout=10) as response:
-              body = json.load(response)
-          assert body["status"] == "ok", body
-          assert body["data"]["application/json"]["data"] == [[1]], body
-          PY
+          python3 scripts/verify_server_http.py http://127.0.0.1:18099
           docker stop --time 10 "$name"
           exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
           if [[ "$exit_code" != 0 ]]; then
             echo "container exited with status $exit_code after graceful stop"
             exit 1
           fi
-      - name: Log in to GitHub Container Registry
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      - name: Save verified native image
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Refuse to overwrite a published container tag
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        run: |
-          if docker manifest inspect "ghcr.io/eddiethedean/sparkless-server:${{ steps.image.outputs.version }}" >/dev/null 2>&1; then
-            echo "container tag ${{ steps.image.outputs.version }} already exists; refusing to overwrite it"
-            exit 1
-          fi
-      - name: Publish verified container image
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          VERSION: ${{ steps.image.outputs.version }}
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
-          set -euo pipefail
-          target="ghcr.io/eddiethedean/sparkless-server:${VERSION}"
-          docker tag "$IMAGE" "$target"
-          docker push "$target"
-          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
-          echo "Published and smoke-tested `$digest`" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p dist
+          docker save --output dist/sparkless-server.tar "$IMAGE"
+      - name: Upload verified native image
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-server-container-image
+          path: dist/sparkless-server.tar
+          retention-days: 1
 
   publish:
     name: Build docs and publish to crates.io
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_rust && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, rust-package-archives]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -486,7 +469,75 @@ jobs:
           publish_one robin-sparkless-polars
           publish_one robin-sparkless
           publish_one sparkless-server
-       
+
+  publish-server-bin:
+    name: Publish server binary wheels to PyPI
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [publish, server-container, server-extra-consumer, server-bin-manylinux-x86_64, server-bin-macos-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download verified Linux server wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-bin-manylinux-2-28-x86_64
+          path: dist/linux
+      - name: Download verified macOS server wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-bin-macosx-14-0-arm64
+          path: dist/macos
+      - name: Check and publish server binary wheels
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          python -m pip install twine
+          python -m twine check dist/linux/*.whl dist/macos/*.whl
+          python -m twine upload --non-interactive --skip-existing dist/linux/*.whl dist/macos/*.whl
+
+  publish-server-container:
+    name: Publish verified native server container
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    needs: [publish, publish-server-bin, server-container]
+    outputs:
+      image_digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-container-image
+          path: dist
+      - name: Load verified image
+        run: docker load --input dist/sparkless-server.tar
+      - name: Log in to GitHub Container Registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Refuse to overwrite a published container tag
+        run: |
+          if docker manifest inspect "ghcr.io/eddiethedean/sparkless-server:${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "container tag ${GITHUB_REF_NAME} already exists; refusing to overwrite it"
+            exit 1
+          fi
+      - name: Publish verified image and record digest
+        id: publish
+        run: |
+          set -euo pipefail
+          source="sparkless-server:candidate-${GITHUB_SHA}"
+          target="ghcr.io/eddiethedean/sparkless-server:${GITHUB_REF_NAME}"
+          docker tag "$source" "$target"
+          docker push "$target"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
+          echo "digest=${digest##*@}" >> "$GITHUB_OUTPUT"
+          echo "Published and smoke-tested `$digest`" >> "$GITHUB_STEP_SUMMARY"
+
   # --- Python (lint + tests, then PyPI publish for 3.8+) ---
   python-lint:
     name: Python (mypy)
@@ -603,7 +654,7 @@ jobs:
     name: PyPI manylinux x86_64 + sdist
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (maturin)
@@ -621,7 +672,7 @@ jobs:
     name: PyPI manylinux aarch64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04-arm
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (maturin)
@@ -639,7 +690,7 @@ jobs:
     name: PyPI macOS ${{ matrix.target }}
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
     strategy:
       fail-fast: false
       matrix:
@@ -659,7 +710,7 @@ jobs:
     name: PyPI musllinux x86_64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python 3.8
@@ -679,7 +730,7 @@ jobs:
     name: PyPI musllinux aarch64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04-arm
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python 3.8
@@ -687,6 +738,7 @@ jobs:
         with:
           python-version: "3.8"
       - name: Publish to PyPI (maturin)
+        id: publish_first
         continue-on-error: true
         uses: messense/maturin-action@v1
         env:
@@ -696,7 +748,9 @@ jobs:
           command: publish
           args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
       - name: Retry publish to PyPI (maturin)
-        if: failure()
+        id: publish_retry
+        if: steps.publish_first.outcome == 'failure'
+        continue-on-error: true
         uses: messense/maturin-action@v1
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
@@ -704,12 +758,15 @@ jobs:
           target: aarch64-unknown-linux-musl
           command: publish
           args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --skip-existing
+      - name: Fail if both PyPI publication attempts failed
+        if: steps.publish_first.outcome == 'failure' && steps.publish_retry.outcome == 'failure'
+        run: exit 1
 
   publish-pypi-windows-x86_64:
     name: PyPI Windows x86_64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (maturin)
@@ -725,7 +782,7 @@ jobs:
     name: PyPI Windows aarch64
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-11-arm
-    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish]
+    needs: [format, clippy, audit, deny, build, test, phase1-sdk-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, publish, publish-server-bin, publish-server-container]
     steps:
       - uses: actions/checkout@v4
       - name: Publish to PyPI (maturin)
@@ -736,3 +793,159 @@ jobs:
           target: aarch64-pc-windows-msvc
           command: publish
           args: --locked --manifest-path python/Cargo.toml -i 3.8 --skip-existing
+
+  verify-public-release:
+    name: Verify public release inventory and fresh installs (V32)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v4.17.')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+    needs:
+      - publish
+      - publish-server-bin
+      - publish-server-container
+      - publish-pypi-manylinux-x86_64
+      - publish-pypi-manylinux-aarch64
+      - publish-pypi-mac
+      - publish-pypi-musllinux-x86_64
+      - publish-pypi-musllinux-aarch64
+      - publish-pypi-windows-x86_64
+      - publish-pypi-windows-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Install and run the published Rust server crate
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          cargo install --locked --version "$version" --root "$RUNNER_TEMP/public-rust" sparkless-server
+          actual="$("$RUNNER_TEMP/public-rust/bin/sparkless-server" --version)"
+          expected="sparkless-server ${version}"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "installed binary reported '$actual'; expected '$expected'"
+            exit 1
+          fi
+          echo "$actual"
+      - name: Download the tested public server-wheel inputs
+        uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-bin-manylinux-2-28-x86_64
+          path: public-server-wheels/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: sparkless-server-bin-macosx-14-0-arm64
+          path: public-server-wheels/macos
+      - name: Verify public Python release files and hashes
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${VERSION#v}" python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          expected = {
+              "sparkless": ("bdist_wheel", "sdist"),
+              "sparkless-server-bin": ("manylinux_2_28_x86_64", "macosx_14_0_arm64"),
+          }
+          for project, markers in expected.items():
+              url = "https://pypi.org/pypi/{}/{}/json".format(project, version)
+              request = urllib.request.Request(url, headers={"User-Agent": "sparkless-release-verification"})
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  release = json.load(response)
+              if release["info"]["version"] != version:
+                  raise SystemExit("{} published version does not match {}".format(project, version))
+              files = release["urls"]
+              names = [entry["filename"] for entry in files]
+              for marker in markers:
+                  present = (
+                      any(entry["packagetype"] == marker for entry in files)
+                      if marker in {"bdist_wheel", "sdist"}
+                      else any(marker in name for name in names)
+                  )
+                  if not present:
+                      raise SystemExit("{} {} artifact is missing from PyPI".format(project, marker))
+              for entry in files:
+                  if not re.fullmatch(r"[0-9a-f]{64}", entry["digests"]["sha256"]):
+                      raise SystemExit("{} has a malformed SHA-256 digest".format(entry["filename"]))
+              if project == "sparkless-server-bin":
+                  for directory in (Path("public-server-wheels/linux"), Path("public-server-wheels/macos")):
+                      wheels = list(directory.glob("*.whl"))
+                      if len(wheels) != 1:
+                          raise SystemExit("{} did not provide exactly one tested wheel".format(directory))
+                      wheel = wheels[0]
+                      published = next((entry for entry in files if entry["filename"] == wheel.name), None)
+                      if published is None:
+                          raise SystemExit("tested wheel {} is missing from PyPI".format(wheel.name))
+                      local_digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+                      if local_digest != published["digests"]["sha256"]:
+                          raise SystemExit("published wheel {} differs from its tested build".format(wheel.name))
+          print("PyPI versions, required server wheels, sdist, and file hashes are present")
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: eddiethedean/minilake
+          ref: f015df957d1296063f004f7dfdfcc250ba22c596
+          path: minilake
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install uv
+        run: python -m pip install uv
+      - name: Create the locked public-SDK test environment
+        working-directory: minilake
+        run: uv sync --locked --group dev
+      - name: Install the exact published Python server extra
+        working-directory: minilake
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          uv pip install --python .venv/bin/python "sparkless[server]==${version}"
+          uv pip check --python .venv/bin/python
+          .venv/bin/python "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" "$version"
+          binary="$(.venv/bin/python -c 'from sparkless_server_bin import executable_path; print(executable_path())')"
+          echo "SPARKLESS_SERVER_BIN=$binary" >> "$GITHUB_ENV"
+      - name: Verify public SDK catalog mutations and operation outcomes
+        working-directory: minilake
+        run: .venv/bin/python -m pytest tests/test_warehouses.py tests/test_sql_statements.py tests/test_sparkless_adapter.py tests/test_sparkless_adapter_integration.py -q
+      - name: Pull and verify the published container digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_IMAGE_DIGEST: ${{ needs.publish-server-container.outputs.image_digest }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          image="ghcr.io/eddiethedean/sparkless-server:${tag}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "$image"
+          actual="$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")"
+          actual_digest="${actual##*@}"
+          if [[ -z "$EXPECTED_IMAGE_DIGEST" || "$actual_digest" != "$EXPECTED_IMAGE_DIGEST" ]]; then
+            echo "published image digest $actual_digest does not match pushed digest $EXPECTED_IMAGE_DIGEST"
+            exit 1
+          fi
+          name="sparkless-server-public-smoke-${GITHUB_RUN_ID}"
+          docker run -d --name "$name" -p 127.0.0.1:18099:8099 "$image"
+          cleanup() {
+            docker logs "$name" || true
+            docker rm -f "$name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          python3 scripts/verify_server_http.py http://127.0.0.1:18099
+          docker stop --time 10 "$name"
+          exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
+          if [[ "$exit_code" != 0 ]]; then
+            echo "published container exited with status $exit_code after graceful stop"
+            exit 1
+          fi
+      - name: Record V32 public artifact evidence
+        run: |
+          echo "Verified published Rust server, fresh public Python server extra and SDK mutation suite, and GHCR image digest ${{ needs.publish-server-container.outputs.image_digest }} for ${GITHUB_REF_NAME}." >> "$GITHUB_STEP_SUMMARY"

@@ -43,6 +43,10 @@ allow = [
     "Zlib",
     "BSL-1.0",
     "Unicode-3.0",
+    "ISC", # aws-lc-rs, pulled by rustls
+    "CDLA-Permissive-2.0", # webpki root certificates
+    "MPL-2.0", # option-ext, pulled by Delta Lake's dirs dependency
+    "CC0-1.0", # tiny-keccak
 ]
 confidence-threshold = 0.8
 

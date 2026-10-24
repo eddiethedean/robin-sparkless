@@ -126,6 +126,21 @@ fn control_mode_reports_bound_listener_and_stops_on_versioned_command() {
     assert!(stopped_line.len() <= 16 * 1024);
 }
 
+#[test]
+fn version_flag_reports_the_packaged_server_version() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sparkless-server"))
+        .arg("--version")
+        .output()
+        .expect("run server version command");
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("version output is UTF-8")
+            .trim(),
+        format!("sparkless-server {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn serve_mode_drains_on_sigterm() {
@@ -148,7 +163,10 @@ fn serve_mode_drains_on_sigterm() {
         .expect("start server process");
     let mut child = ChildGuard(child);
 
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // This process starts a full native engine, and the control-mode test in this
+    // integration binary also starts an engine concurrently. Give slower CI runners
+    // time to initialize before treating a missing listener as a signal regression.
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(status) = child.0.try_wait().expect("poll server status") {
             panic!("server exited before becoming ready: {status}");

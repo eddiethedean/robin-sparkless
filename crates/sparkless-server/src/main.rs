@@ -14,15 +14,18 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let mut config = ServerConfig::from_env().map_err(std::io::Error::other)?;
     let mut args = std::env::args().skip(1);
     let mode = match args.next().as_deref() {
         Some("serve") => false,
         Some("control") => true,
         Some("--help") | Some("help") | None => {
             println!(
-                "Usage:\n  sparkless-server serve [--host IP] [--port PORT]\n  sparkless-server control [--host IP] [--port PORT]\n\nThe control command writes bounded JSON-lines readiness and stopped records to stdout and accepts a shutdown command on stdin.\n\nEnvironment: SPARKLESS_SERVER_HOST, SPARKLESS_SERVER_PORT, SPARKLESS_SESSION_IDLE_TTL_MS"
+                "Usage:\n  sparkless-server serve [--host IP] [--port PORT]\n  sparkless-server control [--host IP] [--port PORT]\n  sparkless-server --version\n\nThe control command writes bounded JSON-lines readiness and stopped records to stdout and accepts a shutdown command on stdin.\n\nEnvironment: SPARKLESS_SERVER_HOST, SPARKLESS_SERVER_PORT, SPARKLESS_SESSION_IDLE_TTL_MS"
             );
+            return Ok(());
+        }
+        Some("--version") | Some("-V") => {
+            println!("sparkless-server {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         Some(command) => {
@@ -31,6 +34,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     };
+    let mut config = ServerConfig::from_env().map_err(std::io::Error::other)?;
     while let Some(flag) = args.next() {
         let value = args
             .next()
