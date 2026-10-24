@@ -3607,7 +3607,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn sustained_multi_client_lazy_counts_keep_health_progressing() {
         const CLIENTS: usize = 4;
-        const REQUESTS_PER_CLIENT: usize = 8;
+        const REQUESTS_PER_CLIENT: usize = 64;
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
             max_active_operations: CLIENTS,
@@ -3700,8 +3700,8 @@ mod tests {
         let _ = stop_health_tx.send(());
         health_task.await.expect("health polling task");
         assert!(
-            health_checks.load(Ordering::Acquire) > 0,
-            "health should progress during the sustained request workload"
+            health_checks.load(Ordering::Acquire) >= 10,
+            "health should progress repeatedly during the sustained request workload"
         );
         assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
 
