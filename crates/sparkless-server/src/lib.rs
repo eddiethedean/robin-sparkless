@@ -3604,6 +3604,111 @@ mod tests {
         server_task.await.unwrap().unwrap();
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn sustained_multi_client_lazy_counts_keep_health_progressing() {
+        const CLIENTS: usize = 4;
+        const REQUESTS_PER_CLIENT: usize = 8;
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_active_operations: CLIENTS,
+            max_pending_operations: CLIENTS * 2,
+            queue_timeout: Duration::from_secs(10),
+            response_timeout: Duration::from_secs(30),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let range = server.inner.root_session.range(0, 10_000_000, 1).unwrap();
+        server
+            .inner
+            .root_session
+            .register_table("sustained_lazy_count_range", range);
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let health_checks = Arc::new(AtomicUsize::new(0));
+        let workload_active = Arc::new(AtomicBool::new(true));
+        let (stop_health_tx, mut stop_health_rx) = oneshot::channel::<()>();
+        let health_task = {
+            let health_checks = Arc::clone(&health_checks);
+            let workload_active = Arc::clone(&workload_active);
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = &mut stop_health_rx => break,
+                        _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                            let (status, response) =
+                                request_json(address, "GET", "/health", &json!({})).await;
+                            assert_eq!(status, StatusCode::OK, "{response}");
+                            assert_eq!(response["status"], "ready");
+                            if workload_active.load(Ordering::Acquire) {
+                                health_checks.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
+            })
+        };
+
+        let start = Arc::new(tokio::sync::Barrier::new(CLIENTS));
+        let clients = (0..CLIENTS)
+            .map(|index| {
+                let start = Arc::clone(&start);
+                tokio::spawn(async move {
+                    start.wait().await;
+                    let session = format!("sustained-client-{index}");
+                    for _ in 0..REQUESTS_PER_CLIENT {
+                        let (status, response) = timeout(
+                            Duration::from_secs(30),
+                            request_json(
+                                address,
+                                "POST",
+                                "/statements",
+                                &json!({
+                                    "session":session.clone(),
+                                    "kind":"sql",
+                                    "code":"SELECT COUNT(*) AS n FROM sustained_lazy_count_range WHERE id >= 5000000 AND id < 5000010"
+                                }),
+                            ),
+                        )
+                        .await
+                        .expect("sustained count request should complete");
+                        assert_eq!(status, StatusCode::OK, "{response}");
+                        assert_eq!(response["status"], "ok", "{response}");
+                        assert_eq!(response["data"]["application/json"]["data"], json!([[10]]));
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for client in clients {
+            client.await.expect("sustained HTTP client task");
+        }
+        workload_active.store(false, Ordering::Release);
+        let _ = stop_health_tx.send(());
+        health_task.await.expect("health polling task");
+        assert!(
+            health_checks.load(Ordering::Acquire) > 0,
+            "health should progress during the sustained request workload"
+        );
+        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn long_filtered_count_keeps_health_responsive_while_compute_is_occupied() {
         let server = Server::new(ServerConfig {
