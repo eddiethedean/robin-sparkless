@@ -5261,6 +5261,59 @@ mod tests {
     }
 
     #[test]
+    fn shared_catalog_join_keeps_one_snapshot_across_table_resolutions() {
+        let session = catalog_test_session(usize::MAX);
+        let make_frame = |id| {
+            let id = Series::new("id".into(), [id]);
+            let physical = PlDataFrame::new_infer_height(vec![id.into()]).unwrap();
+            DataFrame::from_polars(physical)
+        };
+        session.register_table("left_items", make_frame(1_i64));
+        session.register_table("right_items", make_frame(10_i64));
+
+        let read_lease = session.begin_catalog_read_snapshot().unwrap().unwrap();
+        let resolved_join = session
+            .sql(
+                "SELECT l.id AS left_id, r.id AS right_id \
+                 FROM left_items l CROSS JOIN right_items r",
+            )
+            .unwrap();
+        {
+            let _mutation = session.shared_catalog_mutation_guard().unwrap();
+            let _writer = session.shared_catalog_guard().unwrap();
+            let left_replacement = make_frame(2_i64);
+            session
+                .check_catalog_table_growth("left_items", &left_replacement)
+                .unwrap();
+            session.register_table_during_sql("left_items", left_replacement);
+            let right_replacement = make_frame(20_i64);
+            session
+                .check_catalog_table_growth("right_items", &right_replacement)
+                .unwrap();
+            session.register_table_during_sql("right_items", right_replacement);
+        }
+
+        let old_rows = resolved_join.collect_as_json_rows().unwrap();
+        assert_eq!(old_rows.len(), 1);
+        assert_eq!(old_rows[0].get("left_id"), Some(&serde_json::json!(1)));
+        assert_eq!(old_rows[0].get("right_id"), Some(&serde_json::json!(10)));
+        let new_rows = session
+            .sql(
+                "SELECT l.id AS left_id, r.id AS right_id \
+                 FROM left_items l CROSS JOIN right_items r",
+            )
+            .unwrap()
+            .collect_as_json_rows()
+            .unwrap();
+        assert_eq!(new_rows.len(), 1);
+        assert_eq!(new_rows[0].get("left_id"), Some(&serde_json::json!(2)));
+        assert_eq!(new_rows[0].get("right_id"), Some(&serde_json::json!(20)));
+
+        drop(read_lease);
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), 0);
+    }
+
+    #[test]
     fn shared_catalog_charges_pinned_versions_until_last_read_finishes() {
         let original = catalog_test_frame();
         let bytes = original.estimated_size().unwrap();
