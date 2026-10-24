@@ -3665,7 +3665,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn sustained_multi_client_lazy_counts_keep_health_progressing() {
         const CLIENTS: usize = 4;
-        const REQUESTS_PER_CLIENT: usize = 64;
+        const REQUESTS_PER_CLIENT: usize = 256;
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
             max_active_operations: CLIENTS,
