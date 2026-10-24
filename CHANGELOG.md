@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.16.0] - 2026-10-23
 
+### Release
+
+- Pushed release tag `v4.16.0` at commit `8b20ea8ce3326a38c361ec859278b32ef790f53b`. Tag-triggered GitHub Actions run [40042661738](https://github.com/eddiethedean/robin-sparkless/actions/runs/40042661738) is building the release artifacts; publication is not confirmed yet.
+
 ### Added
 
 - **Native SQL server** — Add the optional `sparkless-server` HTTP SQL service, bounded read-only query execution, session lifecycle, readiness/control protocol, and sync/async `SparklessServer` launcher.
@@ -22,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Align all first-party Rust and Python package versions at 4.16.0, including the SQL parser.
 
-The source implementation is present; native HTTP/launcher, platform lifecycle, candidate-artifact, and publication evidence remains pending. Upstream SDK/emulator and experimental Connect certification is optional and does not block the native HTTP release.
+The pre-publication native HTTP, launcher, platform, and candidate-artifact gates passed before tagging. The tag-triggered publication workflow is still running; verify its result and complete post-publication gate V30 before treating the public release as complete. Upstream SDK/emulator and experimental Connect certification is optional and does not block the native HTTP release.
 
 ## [4.15.3] - 2026-10-22
 

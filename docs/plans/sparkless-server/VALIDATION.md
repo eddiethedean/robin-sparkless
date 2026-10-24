@@ -2,7 +2,7 @@
 
 [Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
 
-**Status: required native V05–V14/V29 pre-publication gates passed for the 4.16.0 candidate.** Evidence combines the passing cross-platform GitHub Actions run, installed-consumer and Linux container checks, and the direct native acceptance tests recorded below. The 4.16 publication scope is the native HTTP service, launcher, and distributions. SDK/emulator and experimental Connect certification (V01–V04) is optional and does not block release.
+**Status: required native V05–V14/V29 pre-publication gates passed, and tag `v4.16.0` has been pushed.** The tag-triggered publication workflow is still running; public artifact publication and post-publication gate V30 are not yet confirmed. The 4.16 publication scope is the native HTTP service, launcher, and distributions. SDK/emulator and experimental Connect certification (V01–V04) is optional and does not block release.
 
 For each gate record the native commit, client/SDK version, emulator/oracle revision and digest where applicable, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep separate results for direct HTTP, SDK/emulator, standalone Connect, emulator-proxied Connect, MiniLake Jobs, and optional MiniLake shared Delta/catalog/DML routes. MiniLake's DuckDB SQL success cannot prove native execution or replace an agent/proxy gate.
 
@@ -92,6 +92,12 @@ Only the native V05–V14 and V29 gates below are required before any 4.16.0 art
 - V29: clean consumer installation outside the checkout combined the candidate root and server wheels on Darwin arm64. Root wheel SHA-256: `bb200ee2ca7967bbc208e1c3a1d0a1c0b774a9adf18c8eb011d4eab95515c9f7`; server wheel SHA-256: `53d482bd59e4d6cb1ad30de00632af35e4056607279ed019b21f8338f29555cc`. `sparkless[server]` installed both exact 4.16.0 packages with no source checkout; the installed launcher resolved and ran the server, `/health` passed, and exact BIGINT/schema passed. The clean environment had neither gRPC nor PySpark importable. The server extra pins `sparkless-server-bin==4.16.0`; gRPC occurs only in the separate optional Connect test lock. Root Cargo patches are not used when consuming the prebuilt wheel.
 
 These statuses certify the native 4.16 HTTP release scope only. They do not certify SDK/emulator, experimental Connect, or any optional MiniLake route. V30 remains a post-publication verification gate.
+
+### Tag and publication status
+
+- Tag: `v4.16.0`, pushed 2026-10-23 at commit `8b20ea8ce3326a38c361ec859278b32ef790f53b`.
+- Tag workflow: [run 40042661738](https://github.com/eddiethedean/robin-sparkless/actions/runs/40042661738), still running its native platform builds as of 2026-10-24 00:35 UTC.
+- GitHub Release entry and public artifact publication are not yet confirmed. Update this record and run V30 after workflow completion.
 
 ## Optional integration status
 
