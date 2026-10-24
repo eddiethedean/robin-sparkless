@@ -2567,6 +2567,86 @@ mod tests {
         server_task.await.unwrap().unwrap();
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn long_filtered_count_keeps_health_responsive_while_compute_is_occupied() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_active_operations: 1,
+            queue_timeout: Duration::from_secs(5),
+            response_timeout: Duration::from_secs(30),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let long_range = server.inner.root_session.range(0, 10_000_000, 1).unwrap();
+        server
+            .inner
+            .root_session
+            .register_table("health_progress_range", long_range);
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let query = tokio::spawn(async move {
+            request_json(
+                address,
+                "POST",
+                "/statements",
+                &json!({
+                    "session":"long-counter",
+                    "kind":"sql",
+                    "code":"SELECT COUNT(*) AS n FROM health_progress_range WHERE id > 5"
+                }),
+            )
+            .await
+        });
+        timeout(Duration::from_secs(2), async {
+            while server.inner.admission.active.available_permits() != 0 {
+                assert!(
+                    !query.is_finished(),
+                    "count ended before holding compute admission"
+                );
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("long count should acquire the only compute permit");
+
+        let (health_status, health_response) = timeout(
+            Duration::from_secs(1),
+            request_json(address, "GET", "/health", &json!({})),
+        )
+        .await
+        .expect("health should progress while native count work occupies compute");
+        assert_eq!(health_status, StatusCode::OK, "{health_response}");
+        assert_eq!(health_response["status"], "ready");
+        assert_eq!(server.inner.admission.active.available_permits(), 0);
+
+        let (query_status, query_response) = timeout(Duration::from_secs(30), query)
+            .await
+            .expect("long count should finish")
+            .unwrap();
+        assert_eq!(query_status, StatusCode::OK, "{query_response}");
+        assert_eq!(
+            query_response["data"]["application/json"]["data"],
+            json!([[9_999_994]])
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
     #[test]
     fn result_schema_preserves_metadata_and_keeps_native_extensions_disabled() {
         let metadata = [("owner".to_string(), json!("analytics"))]

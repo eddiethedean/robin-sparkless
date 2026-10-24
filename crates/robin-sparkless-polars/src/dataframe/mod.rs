@@ -5841,6 +5841,25 @@ mod tests {
             .with_logical_schema(logical.clone())
             .unwrap();
         let expected_schema = logical.to_json().unwrap();
+        let filtered_schema = source
+            .filter(col("payload").is_not_null())
+            .unwrap()
+            .schema()
+            .unwrap();
+        assert_eq!(filtered_schema.to_json().unwrap(), expected_schema);
+        let projected = source
+            .select_exprs(vec![col("payload").alias("copy")])
+            .unwrap();
+        let projected_schema = projected.schema().unwrap();
+        let projected_field = &projected_schema.fields()[0];
+        assert_eq!(projected_field.name, "copy");
+        assert!(projected_field.nullable);
+        let robin_sparkless_core::DataType::Struct(nested_fields) = &projected_field.data_type
+        else {
+            panic!("projected payload must retain its nested logical schema");
+        };
+        assert!(!nested_fields[0].nullable);
+        assert_eq!(nested_fields[0].metadata["origin"], "shared catalog");
         let batch = source
             .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
             .unwrap()
