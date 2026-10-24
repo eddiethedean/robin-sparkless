@@ -6665,6 +6665,22 @@ mod tests {
         assert!(arrays.get_as_series(1).is_none());
         let third = arrays.get_as_series(2).unwrap();
         assert_eq!(third.i32().unwrap().get(0), Some(3));
+
+        let empty = source.limit(0).unwrap();
+        let empty_batch = empty
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(empty_batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+        assert_eq!(reader.finish().unwrap().height(), 0);
     }
 
     #[test]
