@@ -5,11 +5,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
 import time
 from typing import Any
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -39,13 +42,85 @@ CRATES = (
     "robin-sparkless",
     "sparkless-server",
 )
-USER_AGENT = "sparkless-release-verifier (https://github.com/eddiethedean/robin-sparkless)"
+USER_AGENT = (
+    "sparkless-release-verifier (https://github.com/eddiethedean/robin-sparkless)"
+)
 
 
 def _fetch_json(url: str, timeout: float = 15.0) -> dict[str, Any]:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
+
+
+def _fetch_distribution(url: str) -> bytes:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "files.pythonhosted.org":
+        raise ValueError("PyPI returned an unexpected distribution URL")
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=60.0) as response:
+        return response.read()
+
+
+def preserve_existing_pypi_files(
+    local_directory: Path, project: str, version: str = VERSION
+) -> list[str]:
+    """Replace candidate files already on PyPI with the immutable published bytes."""
+    url = "https://pypi.org/pypi/{}/{}/json".format(project, version)
+    try:
+        data = _fetch_json(url)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return []
+        raise
+
+    info = data.get("info", {})
+    if info.get("version") != version:
+        raise ValueError("PyPI returned a different version while preserving files")
+    if info.get("name", "").lower().replace("_", "-") != project:
+        raise ValueError("PyPI returned a different project while preserving files")
+
+    candidates = {
+        path.name: path for path in local_directory.iterdir() if path.is_file()
+    }
+    preserved = []
+    for entry in data.get("urls", []):
+        filename = entry.get("filename", "")
+        if Path(filename).name != filename or filename not in candidates:
+            raise ValueError(
+                "published PyPI file is not present in the verified candidate: {}".format(
+                    filename
+                )
+            )
+        expected_hash = entry.get("digests", {}).get("sha256", "")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            raise ValueError("{} has a malformed SHA-256 digest".format(filename))
+        candidate = candidates[filename]
+        current_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        if current_hash == expected_hash:
+            continue
+
+        published_bytes = _fetch_distribution(entry.get("url", ""))
+        published_hash = hashlib.sha256(published_bytes).hexdigest()
+        if published_hash != expected_hash:
+            raise ValueError(
+                "downloaded PyPI file does not match its published digest: {}".format(
+                    filename
+                )
+            )
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=local_directory, prefix=".pypi-preserved-", delete=False
+            ) as temporary:
+                temporary.write(published_bytes)
+                temporary_path = Path(temporary.name)
+            os.replace(temporary_path, candidate)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+        preserved.append(filename)
+    return preserved
 
 
 def validate_pypi_release(
@@ -57,7 +132,9 @@ def validate_pypi_release(
     if data.get("info", {}).get("version") != version:
         raise ValueError("{} does not report version {}".format(project, version))
     if data.get("info", {}).get("name", "").lower().replace("_", "-") != project:
-        raise ValueError("PyPI returned metadata for the wrong project: {}".format(project))
+        raise ValueError(
+            "PyPI returned metadata for the wrong project: {}".format(project)
+        )
 
     expected_platforms = PYPI_PLATFORMS[project]
     wheel_platforms = set()
@@ -124,10 +201,14 @@ def _retry(check, attempts: int = 20, interval: float = 5.0) -> None:
             last_error = error
             if attempt + 1 < attempts:
                 time.sleep(interval)
-    raise RuntimeError("public release verification did not converge: {}".format(last_error))
+    raise RuntimeError(
+        "public release verification did not converge: {}".format(last_error)
+    )
 
 
-def verify_public_release(server_bin_directory: Path, sparkless_directory: Path) -> None:
+def verify_public_release(
+    server_bin_directory: Path, sparkless_directory: Path
+) -> None:
     for project in ("sparkless-server-bin", "sparkless"):
         url = "https://pypi.org/pypi/{}/{}/json".format(project, VERSION)
         local_directory = {
@@ -149,7 +230,9 @@ def verify_public_release(server_bin_directory: Path, sparkless_directory: Path)
             data = _fetch_json(url)
             record = data.get("version", {})
             if record.get("num") != VERSION or data.get("crate", {}).get("id") != crate:
-                raise ValueError("crates.io returned the wrong release for {}".format(crate))
+                raise ValueError(
+                    "crates.io returned the wrong release for {}".format(crate)
+                )
 
         _retry(check_crate)
 

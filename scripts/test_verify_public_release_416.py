@@ -3,7 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from verify_public_release_416 import PYPI_PLATFORMS, validate_pypi_release
+from unittest.mock import patch
+
+from verify_public_release_416 import (
+    PYPI_PLATFORMS,
+    preserve_existing_pypi_files,
+    validate_pypi_release,
+)
 
 
 def release_metadata(project, version="4.16.0"):
@@ -30,7 +36,9 @@ def release_metadata(project, version="4.16.0"):
 
 class VerifyPublicRelease416Test(unittest.TestCase):
     def test_accepts_complete_server_binary_inventory(self):
-        validate_pypi_release(release_metadata("sparkless-server-bin"), "sparkless-server-bin")
+        validate_pypi_release(
+            release_metadata("sparkless-server-bin"), "sparkless-server-bin"
+        )
 
     def test_accepts_complete_sparkless_inventory(self):
         validate_pypi_release(release_metadata("sparkless"), "sparkless")
@@ -73,6 +81,45 @@ class VerifyPublicRelease416Test(unittest.TestCase):
                 validate_pypi_release(
                     metadata, "sparkless-server-bin", local_directory=directory
                 )
+
+    def test_preserves_existing_pypi_bytes_for_immutable_filenames(self):
+        metadata = release_metadata("sparkless-server-bin")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for entry in metadata["urls"]:
+                contents = ("candidate:" + entry["filename"]).encode("utf-8")
+                (directory / entry["filename"]).write_bytes(contents)
+                entry["digests"]["sha256"] = hashlib.sha256(contents).hexdigest()
+
+            existing = metadata["urls"][0]
+            published_bytes = b"immutable PyPI file"
+            existing["digests"]["sha256"] = hashlib.sha256(published_bytes).hexdigest()
+            existing["url"] = "https://files.pythonhosted.org/packages/file.whl"
+            with (
+                patch("verify_public_release_416._fetch_json", return_value=metadata),
+                patch(
+                    "verify_public_release_416._fetch_distribution",
+                    return_value=published_bytes,
+                ),
+            ):
+                preserved = preserve_existing_pypi_files(
+                    directory, "sparkless-server-bin"
+                )
+
+            self.assertEqual(preserved, [existing["filename"]])
+            self.assertEqual(
+                (directory / existing["filename"]).read_bytes(), published_bytes
+            )
+
+    def test_rejects_unexpected_existing_pypi_filename(self):
+        metadata = release_metadata("sparkless-server-bin")
+        metadata["urls"][0]["filename"] = "unexpected.whl"
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("verify_public_release_416._fetch_json", return_value=metadata):
+                with self.assertRaisesRegex(ValueError, "not present in the verified"):
+                    preserve_existing_pypi_files(
+                        Path(temporary), "sparkless-server-bin"
+                    )
 
 
 if __name__ == "__main__":

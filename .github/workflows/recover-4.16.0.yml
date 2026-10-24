@@ -188,6 +188,11 @@ jobs:
           pattern: sparkless-wheel-*
           path: dist
           merge-multiple: true
+      - name: Preserve immutable files already published to PyPI
+        run: >-
+          python scripts/preserve_existing_pypi_files_416.py
+          --directory dist
+          --project sparkless
       - name: Validate all wheel platforms and source distribution
         run: |
           set -euo pipefail
