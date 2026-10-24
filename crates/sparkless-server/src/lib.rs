@@ -1224,6 +1224,36 @@ struct ExecutionLimits {
     max_cell_bytes: usize,
 }
 
+fn append_utc_suffix_to_timestamp_cells(
+    rows: &mut [Vec<JsonValue>],
+    fields: &[StructField],
+    max_cell_bytes: usize,
+) -> Result<(), ExecutionFailure> {
+    for (column_index, field) in fields.iter().enumerate() {
+        if !matches!(field.data_type, DataType::Timestamp) {
+            continue;
+        }
+        for row in rows.iter_mut() {
+            let Some(JsonValue::String(timestamp)) = row.get_mut(column_index) else {
+                continue;
+            };
+            if !timestamp.ends_with('Z') {
+                timestamp.push('Z');
+            }
+            let encoded_size = serde_json::to_vec(timestamp)
+                .map_err(|error| execution_failure("ResultEncodingError", &error.to_string()))?
+                .len();
+            if encoded_size > max_cell_bytes {
+                return Err(execution_failure(
+                    "ResultLimitExceeded",
+                    "encoded cell exceeds the configured byte limit",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String)> {
     let parsed = spark_sql_parser::parse_spark_sql(sql)
         .map_err(|error| ("UnsupportedSql", error.to_string()))?;
@@ -1981,7 +2011,7 @@ fn execute_statement(
     let max_data_bytes = limits
         .max_result_bytes
         .saturating_sub(empty_response_len.saturating_sub(2));
-    let (_columns, rows, _native_schema) = frame
+    let (_columns, mut rows, _native_schema) = frame
         .collect_as_positional_json_with_limits(
             limits.max_rows,
             max_data_bytes,
@@ -1990,6 +2020,7 @@ fn execute_statement(
             token,
         )
         .map_err(map_engine_failure)?;
+    append_utc_suffix_to_timestamp_cells(&mut rows, &fields, limits.max_cell_bytes)?;
     let response = json!({
         "status":"ok",
         "data":{"application/json":{"schema":schema,"data":rows}}
@@ -3729,6 +3760,35 @@ mod tests {
 
         let byte_field = StructField::new("tiny".into(), DataType::Byte, true);
         assert!(spark_schema(&[byte_field]).is_err());
+    }
+
+    #[test]
+    fn utc_timestamp_cells_add_z_without_exceeding_the_encoded_cell_limit() {
+        let fields = [
+            StructField::new("event_time".into(), DataType::Timestamp, true),
+            StructField::new("label".into(), DataType::String, true),
+        ];
+        let expected_timestamp = json!("2025-01-02T03:04:05.123456Z");
+        let max_cell_bytes = serde_json::to_vec(&expected_timestamp).unwrap().len();
+        let mut rows = vec![
+            vec![
+                json!("2025-01-02T03:04:05.123456"),
+                json!("ordinary string"),
+            ],
+            vec![json!(null), json!("2025-01-02T03:04:05.123456Z")],
+        ];
+
+        append_utc_suffix_to_timestamp_cells(&mut rows, &fields, max_cell_bytes).unwrap();
+        assert_eq!(rows[0][0], expected_timestamp);
+        assert_eq!(rows[0][1], json!("ordinary string"));
+        assert_eq!(rows[1][0], json!(null));
+        assert_eq!(rows[1][1], expected_timestamp);
+
+        let mut too_large = vec![vec![json!("2025-01-02T03:04:05.123456"), json!(null)]];
+        let error =
+            append_utc_suffix_to_timestamp_cells(&mut too_large, &fields, max_cell_bytes - 1)
+                .unwrap_err();
+        assert_eq!(error.name, "ResultLimitExceeded");
     }
 
     #[tokio::test]

@@ -329,7 +329,7 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
             "2025-01-02",
             "1234567890123456789012345678901234.5678",
             9007199254740993_i64,
-            "2025-01-02T03:04:05.123456"
+            "2025-01-02T03:04:05.123456Z"
         ]])
     );
     let (status, scalar_count) = statement(
