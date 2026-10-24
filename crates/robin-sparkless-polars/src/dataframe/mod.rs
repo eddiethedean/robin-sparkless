@@ -5811,6 +5811,64 @@ mod tests {
         assert_eq!(third.i32().unwrap().get(0), Some(3));
     }
 
+    #[test]
+    fn nested_struct_ipc_roundtrip_preserves_values_nulls_and_logical_schema() {
+        use polars::chunked_array::StructChunked;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{NamedFrom, SerReader, Series};
+        use polars_arrow::bitmap::Bitmap;
+
+        let id = Series::new("id".into(), vec![1_i32, 2, 3]);
+        let label = Series::new("label".into(), ["first", "hidden", "third"]);
+        let payload = StructChunked::from_series("payload".into(), 3, [&id, &label].into_iter())
+            .unwrap()
+            .with_outer_validity(Some(Bitmap::from_iter([true, false, true])))
+            .into_series();
+        let physical = PlDataFrame::new_infer_height(vec![payload.into()]).unwrap();
+        let nested_metadata = [("origin".to_string(), serde_json::json!("shared catalog"))]
+            .into_iter()
+            .collect();
+        let logical = StructType::new(vec![StructField::new(
+            "payload".into(),
+            robin_sparkless_core::DataType::Struct(vec![
+                StructField::new("id".into(), robin_sparkless_core::DataType::Integer, false)
+                    .with_metadata(nested_metadata),
+                StructField::new("label".into(), robin_sparkless_core::DataType::String, true),
+            ]),
+            true,
+        )]);
+        let source = DataFrame::from_polars(physical)
+            .with_logical_schema(logical.clone())
+            .unwrap();
+        let expected_schema = logical.to_json().unwrap();
+        let batch = source
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        let payload = decoded.column("payload").unwrap();
+        let fields = payload.struct_().unwrap();
+        assert_eq!(
+            fields.field_by_name("id").unwrap().i32().unwrap().get(0),
+            Some(1)
+        );
+        assert_eq!(
+            fields.field_by_name("id").unwrap().i32().unwrap().get(2),
+            Some(3)
+        );
+        assert!(matches!(payload.get(1).unwrap(), AnyValue::Null));
+    }
+
     /// Issue #235: root-level string–numeric comparison coercion in filter.
     #[test]
     fn coerce_string_numeric_root_in_filter() {

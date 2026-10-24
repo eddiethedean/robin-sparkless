@@ -104,6 +104,8 @@ fn sql_ast_data_type_to_cast_name(dt: &spark_sql_parser::ast::DataType) -> Strin
     let s = dt.to_string().to_lowercase();
     if s.starts_with("int") || s.starts_with("integer") || s == "int4" {
         "int".to_string()
+    } else if s.starts_with("smallint") || s == "int2" {
+        "smallint".to_string()
     } else if s.starts_with("bigint") || s == "int8" || s == "long" {
         "long".to_string()
     } else if s.starts_with("double") {
@@ -121,6 +123,13 @@ fn sql_ast_data_type_to_cast_name(dt: &spark_sql_parser::ast::DataType) -> Strin
     } else {
         // STRING, VARCHAR, CHAR, etc.
         "string".to_string()
+    }
+}
+
+fn sql_ast_data_type_to_table_schema_type(dt: &spark_sql_parser::ast::DataType) -> String {
+    match sql_ast_data_type_to_cast_name(dt).as_str() {
+        "int" => "int32".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -295,7 +304,7 @@ pub fn translate_with_cancellation(
                 .map(|c| {
                     (
                         c.name.value.clone(),
-                        sql_ast_data_type_to_cast_name(&c.data_type),
+                        sql_ast_data_type_to_table_schema_type(&c.data_type),
                     )
                 })
                 .collect();
@@ -540,8 +549,7 @@ fn align_insert_select_to_target(
     index_map: &[usize],
     insert_col_count: usize,
 ) -> Result<DataFrame, PolarsError> {
-    use crate::schema_conv::data_type_to_polars_type;
-    use polars::prelude::DataType as PlDataType;
+    use crate::schema_conv::checked_data_type_to_polars_type;
 
     let select_schema = select_df.schema()?;
     let select_fields = select_schema.fields();
@@ -561,18 +569,26 @@ fn align_insert_select_to_target(
         if let Some(val_pos) = index_map.iter().position(|&tidx| tidx == target_idx) {
             let src = &select_col_names[val_pos];
             let resolved = select_df.resolve_column_name(src)?;
-            exprs.push(col(resolved.as_str()).alias(target_name.as_str()));
+            let target_type = checked_data_type_to_polars_type(
+                &target_schema.fields()[target_idx].data_type,
+                target_name,
+            )?;
+            exprs.push(
+                col(resolved.as_str())
+                    .strict_cast(target_type)
+                    .alias(target_name.as_str()),
+            );
         } else {
-            let pl_ty = data_type_to_polars_type(&target_schema.fields()[target_idx].data_type);
-            let null_expr = match pl_ty {
-                PlDataType::String => lit(polars::prelude::NULL).cast(PlDataType::String),
-                other => lit(polars::prelude::NULL).cast(other),
-            };
+            let pl_ty = checked_data_type_to_polars_type(
+                &target_schema.fields()[target_idx].data_type,
+                target_name,
+            )?;
+            let null_expr = lit(polars::prelude::NULL).strict_cast(pl_ty);
             exprs.push(null_expr.alias(target_name.as_str()));
         }
     }
     let lf = select_df.lazy_frame().select(exprs);
-    Ok(DataFrame::from_lazy_with_options(lf, case_sensitive))
+    DataFrame::from_lazy_with_options(lf, case_sensitive).with_logical_schema(target_schema.clone())
 }
 
 /// Translate INSERT INTO table [(col1, col2, ...)] {VALUES (...), (...)} or
@@ -677,9 +693,9 @@ fn translate_insert(
                 let schema: Vec<(String, String)> = target_schema
                     .fields()
                     .iter()
-                    .map(|f| (f.name.clone(), core_data_type_to_str(&f.data_type)))
+                    .map(|f| (f.name.clone(), core_data_type_to_insert_type(&f.data_type)))
                     .collect();
-                session.create_dataframe_from_rows(rows, schema, false, false)?
+                session.create_dataframe_from_rows(rows, schema, true, false)?
             }
             // INSERT INTO t SELECT ... : map SELECT columns to target insert list and NULL-fill omitted cols.
             _ => {
@@ -795,6 +811,15 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
             format!("struct<{}>", parts.join(","))
         }
         _ => "unknown".to_string(),
+    }
+}
+
+/// Scalar type names used while building INSERT VALUES rows. The public simpleString spelling
+/// for SQL INT is still `int`; row construction needs its checked 32-bit representation.
+fn core_data_type_to_insert_type(dt: &CoreDataType) -> String {
+    match dt {
+        CoreDataType::Integer => "int32".to_string(),
+        _ => core_data_type_to_str(dt),
     }
 }
 

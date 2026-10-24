@@ -155,6 +155,134 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{created_table}");
     assert_eq!(created_table["status"], "ok");
 
+    let (status, created_integer_table) = statement(
+        &server,
+        "owner",
+        "CREATE TABLE phase_http.integer_items (id INT)",
+        Some("create-integer-table"),
+    );
+    assert_eq!(status, 200, "{created_integer_table}");
+    assert_eq!(created_integer_table["status"], "ok");
+    let (status, empty_integer_table) = statement(
+        &server,
+        "reader",
+        "SELECT id FROM phase_http.integer_items",
+        None,
+    );
+    assert_eq!(status, 200, "{empty_integer_table}");
+    assert_eq!(
+        empty_integer_table["data"]["application/json"]["schema"]["fields"][0]["type"],
+        "integer"
+    );
+    let (status, rejected_integer_overflow) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.integer_items VALUES (2147483648)",
+        Some("reject-integer-overflow"),
+    );
+    assert_eq!(status, 200, "{rejected_integer_overflow}");
+    assert_eq!(rejected_integer_overflow["status"], "error");
+    assert_eq!(
+        rejected_integer_overflow["operation"]["effect_outcome"],
+        "failed"
+    );
+    let (status, accepted_integer_boundary) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.integer_items VALUES (2147483647)",
+        Some("accept-integer-boundary"),
+    );
+    assert_eq!(status, 200, "{accepted_integer_boundary}");
+    assert_eq!(
+        accepted_integer_boundary["operation"]["effect_outcome"],
+        "committed"
+    );
+    let (status, integer_boundary_read) = statement(
+        &server,
+        "reader",
+        "SELECT id FROM phase_http.integer_items",
+        None,
+    );
+    assert_eq!(status, 200, "{integer_boundary_read}");
+    assert_eq!(
+        integer_boundary_read["data"]["application/json"]["data"],
+        json!([[2147483647]])
+    );
+
+    let (status, created_temporal_table) = statement(
+        &server,
+        "owner",
+        "CREATE TABLE phase_http.temporal_items (event_ts TIMESTAMP, event_day DATE, small SMALLINT)",
+        Some("create-temporal-table"),
+    );
+    assert_eq!(status, 200, "{created_temporal_table}");
+    assert_eq!(created_temporal_table["status"], "ok");
+    let (status, empty_temporal_table) = statement(
+        &server,
+        "reader",
+        "SELECT * FROM phase_http.temporal_items",
+        None,
+    );
+    assert_eq!(status, 200, "{empty_temporal_table}");
+    assert_eq!(
+        empty_temporal_table["data"]["application/json"]["schema"]["fields"][0]["type"],
+        "timestamp"
+    );
+    assert_eq!(
+        empty_temporal_table["data"]["application/json"]["schema"]["fields"][1]["type"],
+        "date"
+    );
+    assert_eq!(
+        empty_temporal_table["data"]["application/json"]["schema"]["fields"][2]["type"],
+        "short"
+    );
+    let (status, rejected_date) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.temporal_items VALUES ('2025-01-02T03:04:05', 'not-a-date', 32767)",
+        Some("reject-invalid-date"),
+    );
+    assert_eq!(status, 200, "{rejected_date}");
+    assert_eq!(rejected_date["status"], "error");
+    assert_eq!(rejected_date["operation"]["effect_outcome"], "failed");
+    let (status, rejected_smallint_overflow) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.temporal_items VALUES ('2025-01-02T03:04:05', '2025-01-02', 32768)",
+        Some("reject-smallint-overflow"),
+    );
+    assert_eq!(status, 200, "{rejected_smallint_overflow}");
+    assert_eq!(rejected_smallint_overflow["status"], "error");
+    assert_eq!(
+        rejected_smallint_overflow["operation"]["effect_outcome"],
+        "failed"
+    );
+    let (status, accepted_temporal_boundary) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.temporal_items VALUES ('2025-01-02T03:04:05', '2025-01-02', 32767)",
+        Some("accept-temporal-boundary"),
+    );
+    assert_eq!(status, 200, "{accepted_temporal_boundary}");
+    assert_eq!(
+        accepted_temporal_boundary["operation"]["effect_outcome"],
+        "committed"
+    );
+    let (status, temporal_read) = statement(
+        &server,
+        "reader",
+        "SELECT * FROM phase_http.temporal_items",
+        None,
+    );
+    assert_eq!(status, 200, "{temporal_read}");
+    assert_eq!(
+        temporal_read["data"]["application/json"]["data"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
     let insert_sql = "INSERT INTO phase_http.items (id, note) VALUES (7, 'seven')";
     let submit_barrier = Arc::new(Barrier::new(2));
     let simultaneous = (0..2)
@@ -257,6 +385,51 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{latest_table_read}");
     assert_eq!(
         latest_table_read["data"]["application/json"]["data"],
+        json!([[7, "seven"], [8, "eight"]])
+    );
+
+    let (status, rejected_append) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.items (id, note) VALUES ('not-an-integer', 'invalid')",
+        Some("rejected-cast-append"),
+    );
+    assert_eq!(status, 200, "{rejected_append}");
+    assert_eq!(rejected_append["status"], "error");
+    assert_eq!(rejected_append["operation"]["effect_outcome"], "failed");
+
+    let (status, rejected_select_cast) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.items (id, note) SELECT note, note FROM phase_http.items",
+        Some("rejected-select-cast"),
+    );
+    assert_eq!(status, 200, "{rejected_select_cast}");
+    assert_eq!(rejected_select_cast["status"], "error");
+    assert_eq!(
+        rejected_select_cast["operation"]["effect_outcome"],
+        "failed"
+    );
+
+    let (status, rejected_update) = statement(
+        &server,
+        "owner",
+        "UPDATE phase_http.items SET note = 'changed' WHERE id = 7",
+        Some("unsupported-update"),
+    );
+    assert_eq!(status, 200, "{rejected_update}");
+    assert_eq!(rejected_update["status"], "error");
+    assert_eq!(rejected_update["ename"], "UnsupportedSql");
+
+    let (status, after_rejections) = statement(
+        &server,
+        "reader",
+        "SELECT id, note FROM phase_http.items ORDER BY id",
+        None,
+    );
+    assert_eq!(status, 200, "{after_rejections}");
+    assert_eq!(
+        after_rejections["data"]["application/json"]["data"],
         json!([[7, "seven"], [8, "eight"]])
     );
 

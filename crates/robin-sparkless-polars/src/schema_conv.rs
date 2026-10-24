@@ -75,6 +75,7 @@ impl StructTypePolarsExt for StructType {
                         "Polars Field does not preserve logical field metadata",
                     ));
                 }
+                ensure_polars_nested_schema_is_lossless(&field.data_type, &field.name)?;
                 Ok(Field::new(
                     field.name.as_str().into(),
                     checked_data_type_to_polars_type(&field.data_type, &field.name)?,
@@ -87,6 +88,42 @@ impl StructTypePolarsExt for StructType {
 
 fn schema_conversion_error(path: &str, message: &str) -> PolarsError {
     PolarsError::InvalidOperation(format!("logical schema field '{path}': {message}").into())
+}
+
+fn ensure_polars_nested_schema_is_lossless(
+    data_type: &DataType,
+    path: &str,
+) -> Result<(), PolarsError> {
+    match data_type {
+        DataType::Array(element)
+        | DataType::ArrayWithNullability {
+            element_type: element,
+            ..
+        } => {
+            ensure_polars_nested_schema_is_lossless(element, &format!("{path}[]"))?;
+            Ok(())
+        }
+        DataType::Struct(fields) => {
+            for field in fields {
+                let nested_path = format!("{path}.{}", field.name);
+                if !field.nullable {
+                    return Err(schema_conversion_error(
+                        &nested_path,
+                        "Polars Struct fields cannot preserve nested nullability",
+                    ));
+                }
+                if !field.metadata.is_empty() {
+                    return Err(schema_conversion_error(
+                        &nested_path,
+                        "Polars Struct fields cannot preserve nested metadata",
+                    ));
+                }
+                ensure_polars_nested_schema_is_lossless(&field.data_type, &nested_path)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 pub(crate) fn checked_polars_type_to_data_type(
@@ -174,11 +211,6 @@ pub(crate) fn checked_data_type_to_polars_type(
             let nested = fields
                 .iter()
                 .map(|field| {
-                    if !field.nullable || !field.metadata.is_empty() {
-                        return Err(unsupported(
-                            "Polars Struct fields cannot preserve nested nullability or metadata",
-                        ));
-                    }
                     Ok(Field::new(
                         field.name.as_str().into(),
                         checked_data_type_to_polars_type(&field.data_type, path)?,
@@ -389,5 +421,48 @@ mod tests {
             true,
         )]);
         assert!(nested.try_to_polars_schema().is_err());
+
+        let map = StructType::new(vec![StructField::new(
+            "attributes".into(),
+            DataType::Map(Box::new(DataType::String), Box::new(DataType::Integer)),
+            true,
+        )]);
+        assert!(map.try_to_polars_schema().is_err());
+    }
+
+    #[test]
+    fn checked_struct_mapping_keeps_lossy_nested_declarations_in_the_sidecar() {
+        let metadata = [("source".to_string(), serde_json::json!("catalog"))]
+            .into_iter()
+            .collect();
+        let schema = StructType::new(vec![StructField::new(
+            "payload".into(),
+            DataType::Struct(vec![
+                StructField::new("id".into(), DataType::Integer, false).with_metadata(metadata),
+                StructField::new("label".into(), DataType::String, true),
+            ]),
+            true,
+        )]);
+
+        assert!(schema.try_to_polars_schema().is_err());
+        assert!(matches!(
+            checked_data_type_to_polars_type(&schema.fields()[0].data_type, "payload").unwrap(),
+            PlDataType::Struct(_)
+        ));
+
+        let array_schema = StructType::new(vec![StructField::new(
+            "items".into(),
+            DataType::Array(Box::new(DataType::Struct(vec![StructField::new(
+                "id".into(),
+                DataType::Integer,
+                false,
+            )]))),
+            true,
+        )]);
+        assert!(array_schema.try_to_polars_schema().is_err());
+        assert!(matches!(
+            checked_data_type_to_polars_type(&array_schema.fields()[0].data_type, "items").unwrap(),
+            PlDataType::List(_)
+        ));
     }
 }

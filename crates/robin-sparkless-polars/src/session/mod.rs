@@ -383,6 +383,15 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
     }
 }
 
+fn timestamp_data_type(type_str: &str) -> DataType {
+    let timezone = if type_str.trim().eq_ignore_ascii_case("timestamp_ntz") {
+        None
+    } else {
+        Some(TimeZone::UTC)
+    };
+    DataType::Datetime(TimeUnit::Microseconds, timezone)
+}
+
 /// #420: Check that a cell value is compatible with schema type (for verify_schema).
 /// Returns Err with a short message when the value is not valid for the given type.
 fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), String> {
@@ -400,6 +409,13 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
             JsonValue::String(s) if decimal_transport_value(s).parse::<i16>().is_ok() => Ok(()),
             _ => Err(format!("expected smallint, got {}", value_type_name(v))),
         },
+        // Preserve the long-standing row-construction behavior for public `int` aliases.
+        // Managed SQL DDL uses `int32` so its target schema receives strict 32-bit checks.
+        "int" | "integer" => match v {
+            JsonValue::Number(_) => Ok(()),
+            JsonValue::String(s) if decimal_transport_value(s).parse::<i64>().is_ok() => Ok(()),
+            _ => Err(format!("expected integer, got {}", value_type_name(v))),
+        },
         "int32" => match v {
             JsonValue::Number(n)
                 if n.as_i64().is_some_and(|value| i32::try_from(value).is_ok()) =>
@@ -409,17 +425,27 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
             JsonValue::String(s) if decimal_transport_value(s).parse::<i32>().is_ok() => Ok(()),
             _ => Err(format!("expected int32, got {}", value_type_name(v))),
         },
-        "int" | "integer" | "bigint" | "long" | "tinyint" => match v {
-            JsonValue::Number(_) => Ok(()), // #1265: accept any number (e.g. 10^18 from UDF); build uses i64 or f64
+        "tinyint" => match v {
+            JsonValue::Number(n) if n.as_i64().is_some_and(|value| i8::try_from(value).is_ok()) => {
+                Ok(())
+            }
+            JsonValue::String(s) if decimal_transport_value(s).parse::<i8>().is_ok() => Ok(()),
+            _ => Err(format!("expected tinyint, got {}", value_type_name(v))),
+        },
+        "bigint" | "long" => match v {
+            JsonValue::Number(n) if n.as_i64().is_some() => Ok(()),
             JsonValue::String(s) if decimal_transport_value(s).parse::<i64>().is_ok() => Ok(()),
-            _ => Err(format!(
-                "expected bigint/number, got {}",
-                value_type_name(v)
-            )),
+            _ => Err(format!("expected bigint, got {}", value_type_name(v))),
         },
         "double" | "float" | "double_precision" => match v {
-            JsonValue::Number(_) => Ok(()),
-            JsonValue::String(s) if decimal_transport_value(s).parse::<f64>().is_ok() => Ok(()),
+            JsonValue::Number(n) if n.as_f64().is_some_and(f64::is_finite) => Ok(()),
+            JsonValue::String(s)
+                if decimal_transport_value(s)
+                    .parse::<f64>()
+                    .is_ok_and(f64::is_finite) =>
+            {
+                Ok(())
+            }
             _ => Err(format!(
                 "expected double/number, got {}",
                 value_type_name(v)
@@ -428,7 +454,42 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
         "string" | "str" | "varchar" => Ok(()), // any value can be string
         "boolean" | "bool" => match v {
             JsonValue::Bool(_) => Ok(()),
+            JsonValue::String(s)
+                if s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("false") =>
+            {
+                Ok(())
+            }
             _ => Err(format!("expected boolean, got {}", value_type_name(v))),
+        },
+        "date" => match v {
+            JsonValue::String(value)
+                if chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok() =>
+            {
+                Ok(())
+            }
+            JsonValue::Object(value) if parse_date_from_json_object(value).is_some() => Ok(()),
+            _ => Err(format!("expected date, got {}", value_type_name(v))),
+        },
+        "timestamp" | "datetime" | "timestamp_ntz" => match v {
+            JsonValue::String(value) if parse_timestamp_str_to_micros(value).is_ok() => Ok(()),
+            JsonValue::Object(value) if parse_datetime_from_json_object(value).is_some() => Ok(()),
+            JsonValue::Number(value) if value.as_i64().is_some() => Ok(()),
+            _ => Err(format!("expected timestamp, got {}", value_type_name(v))),
+        },
+        "binary" => match v {
+            JsonValue::String(value)
+                if base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    value.as_bytes(),
+                )
+                .is_ok() =>
+            {
+                Ok(())
+            }
+            _ => Err(format!(
+                "expected base64 binary, got {}",
+                value_type_name(v)
+            )),
         },
         _ if is_decimal_type_str(&t) => {
             let (precision, scale) = parse_decimal_precision_scale(&t)
@@ -1035,7 +1096,7 @@ fn json_values_to_series(
                 })
                 .collect();
             let s = Series::new(name.into(), vals);
-            s.cast(&DataType::Datetime(TimeUnit::Microseconds, None))
+            s.cast(&timestamp_data_type(type_str))
                 .map_err(|e| PolarsError::ComputeError(format!("datetime cast: {e}").into()))
         }
         "binary" => {
@@ -1270,13 +1331,12 @@ fn json_value_to_series_single(
         (JsonValue::String(s), "timestamp" | "datetime" | "timestamp_ntz") => {
             let micros = parse_timestamp_str_to_micros(s)?;
             let s = Series::new(name.into(), vec![Some(micros)])
-                .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                .cast(&timestamp_data_type(type_str))?;
             Ok(s)
         }
         (JsonValue::Number(n), "timestamp" | "datetime" | "timestamp_ntz") => {
             let micros = n.as_i64();
-            let s = Series::new(name.into(), vec![micros])
-                .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+            let s = Series::new(name.into(), vec![micros]).cast(&timestamp_data_type(type_str))?;
             Ok(s)
         }
         (JsonValue::Object(obj), "timestamp" | "datetime" | "timestamp_ntz") => {
@@ -1284,7 +1344,7 @@ fn json_value_to_series_single(
                 PolarsError::ComputeError("datetime object: missing year/month/day".into())
             })?;
             let s = Series::new(name.into(), vec![Some(micros)])
-                .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                .cast(&timestamp_data_type(type_str))?;
             Ok(s)
         }
         _ => Err(PolarsError::ComputeError(
@@ -2066,9 +2126,21 @@ impl SparkSession {
             .values()
             .cloned()
             .collect::<Vec<_>>();
+        let replacement_remains_pinned = self
+            .shared_catalog
+            .as_ref()
+            .expect("checked above")
+            .active_readers
+            .load(Ordering::Acquire)
+            > 0;
+        let reclaimable_view_bytes = if replacement_remains_pinned {
+            0
+        } else {
+            current_view_bytes
+        };
         let mut staged_total = candidate_bytes
             .saturating_add(self.catalog_auxiliary_bytes()?)
-            .saturating_sub(current_view_bytes);
+            .saturating_sub(reclaimable_view_bytes);
         for frame in tables {
             staged_total = staged_total.saturating_add(frame.estimated_size()?);
             if staged_total > max_catalog_bytes {
@@ -3915,11 +3987,9 @@ impl SparkSession {
                             })
                             .collect();
                     let series = Series::new(name.as_str().into(), vals);
-                    series
-                        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))
-                        .map_err(|e| {
-                            PolarsError::ComputeError(format!("datetime cast: {e}").into())
-                        })?
+                    series.cast(&timestamp_data_type(type_str)).map_err(|e| {
+                        PolarsError::ComputeError(format!("datetime cast: {e}").into())
+                    })?
                 }
                 "list" | "array" => {
                     // PySpark parity: ("col", "list") or ("col", "array"); infer element type from first non-null array.
@@ -4826,6 +4896,39 @@ mod tests {
     }
 
     #[test]
+    fn shared_catalog_temp_view_replacement_reserves_a_pinned_version() {
+        let table = catalog_test_frame();
+        let bytes = table.estimated_size().unwrap();
+        let session = catalog_test_session(bytes.saturating_mul(2));
+        session.register_table("t", table.clone());
+
+        let _mutation = session.shared_catalog_mutation_guard().unwrap();
+        let _writer = session.shared_catalog_guard().unwrap();
+        session
+            .register_temp_view_during_sql("snapshot", table.clone(), bytes)
+            .unwrap();
+        drop(_writer);
+
+        let read_lease = session.begin_catalog_read_snapshot().unwrap().unwrap();
+        let _writer = session.shared_catalog_guard().unwrap();
+        let replacement = catalog_test_frame();
+        let error = session
+            .register_temp_view_during_sql("snapshot", replacement.clone(), bytes)
+            .unwrap_err();
+        assert!(error.to_string().contains("CatalogCapacityExceeded"));
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), bytes);
+        assert_eq!(session.temp_view("snapshot").unwrap().count().unwrap(), 64);
+
+        drop(_writer);
+        drop(read_lease);
+        let _writer = session.shared_catalog_guard().unwrap();
+        session
+            .register_temp_view_during_sql("snapshot", replacement, bytes)
+            .unwrap();
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), bytes);
+    }
+
+    #[test]
     fn range_uses_lazy_source_with_checked_signed_cardinality() {
         let session = SparkSession::builder()
             .app_name("lazy-range-source")
@@ -5154,6 +5257,14 @@ mod tests {
         assert!(verify_json_value_for_type(&too_large, "decimal(4,2)").is_err());
         assert!(json_values_to_series(&[Some(too_large)], "decimal(4,2)", "amount").is_err());
         assert!(parse_decimal_precision_scale("decimal(2,3)").is_none());
+    }
+
+    #[test]
+    fn managed_int32_validation_is_strict_without_changing_legacy_int_aliases() {
+        let outside_int32 = json!(2147483648_i64);
+        assert!(verify_json_value_for_type(&outside_int32, "int").is_ok());
+        assert!(verify_json_value_for_type(&outside_int32, "int32").is_err());
+        assert!(verify_json_value_for_type(&json!(i32::MAX), "int32").is_ok());
     }
 
     #[test]
