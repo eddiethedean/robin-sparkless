@@ -1,6 +1,11 @@
 import unittest
+from pathlib import Path
 
-from check_release_versions import validate_versions
+from check_release_versions import (
+    check_release,
+    validate_server_inventory,
+    validate_versions,
+)
 
 
 class ReleaseVersionsTest(unittest.TestCase):
@@ -61,6 +66,16 @@ class ReleaseVersionsTest(unittest.TestCase):
     def test_stable_version_required(self):
         self.packages["robin-sparkless"] = "4.13.3-rc.1"
         self.assertTrue(any("semantic version" in error for error in self.validate()))
+
+    def test_current_server_binary_and_extra_are_coupled(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(validate_server_inventory(root), [])
+        self.assertEqual(check_release(root), [])
+
+    def test_phase_416_candidate_requires_coordinated_parser(self):
+        root = Path(__file__).resolve().parents[1]
+        errors = validate_server_inventory(root, "v4.16.0")
+        self.assertTrue(any("spark-sql-parser" in error for error in errors))
 
 
 if __name__ == "__main__":

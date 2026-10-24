@@ -2,7 +2,7 @@
 
 [Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
 
-**Status: planned. No implementation tests or release gates below have been run for this server plan.** Every evidence field is pending. Documentation checks do not establish server conformance.
+**Status: implementation checks in progress; no release gates below are marked passed.** Targeted native, launcher, release-inventory, and packaging checks have run locally; they do not establish release-gate conformance. Every gate evidence field remains pending until its complete scenario and required artifact are recorded. Documentation checks do not establish server conformance.
 
 For each gate record the native commit, client/SDK version, emulator/oracle revision and digest where applicable, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep separate results for direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect.
 
@@ -67,9 +67,19 @@ Inspect actual public client outputs and transport traces. Do not patch SDK mode
 
 For concurrency/cancellation, use controlled blocking/safe-point scenarios to establish ownership semantics and real workloads to establish integration behavior. A response deadline is not proof that compute stopped. Benchmark memory includes intermediates and replay buffers.
 
-## Release commands to add with implementation
+## Partial implementation checks
 
-The server crate does not yet exist as part of this documentation change. Once added, CI should use targeted format/clippy/tests for its supported feature combinations, launcher tests on supported Python/platform versions, and the four distinct end-to-end routes. Record the actual commands and lockfile paths beside their evidence; do not provide fictional runnable commands or report these planned checks as passed.
+These are local component checks, not passing release gates. The current work has run strict server clippy, server control-protocol integration, Polars SQL unit/integration tests, Python launcher tests, release-inventory tests, Ruff, mypy, and a locally built/installed macOS arm64 server wheel. Record exact final command output, source commit, platform, and artifacts when adding evidence; do not infer V12–V18 or V29–V32 from these checks.
+
+- `cargo test --release --locked -p sparkless-server -p robin-sparkless-polars --features sql` — passed, including 314 Polars library tests, the server unit/control-protocol tests, and doctests.
+- `cargo clippy --locked -p sparkless-server --all-features --all-targets -- -D warnings` — passed.
+- `cargo clippy --locked -p robin-sparkless-polars --features sql --all-targets -- -D warnings` — passed.
+- `PYTHONPATH=python/sparkless .venv/bin/python -m pytest tests/server/test_launcher.py -q` — 5 passed.
+- `PYTHONPATH=scripts .venv/bin/python -m unittest test_check_release_versions -v` — 10 passed.
+- `sparkless_server_bin-4.15.3-py3-none-macosx_26_0_arm64.whl` (local SHA-256 `a77950fd7b74fe96f07e5c706c5b2ab65b56dd744f527eced639368004900b98`) was installed into a clean target directory and its packaged executable launched and stopped through the Python owner.
+- The container image built with pinned builder/runtime image digests and returned HTTP 200 from `/health` as its configured non-root user. This is one local Linux witness, not a supported platform matrix.
+
+Every advertised binary-wheel platform still requires independent build/install/runtime witnesses. CI must add targeted format/clippy/tests for supported feature combinations, launcher tests on supported Python/platform versions, and the distinct direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect routes. Keep their evidence separate and do not report planned commands as passed.
 
 ## Evidence record template
 

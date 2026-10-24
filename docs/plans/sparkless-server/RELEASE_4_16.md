@@ -1,6 +1,6 @@
 # 4.16.0 implementation and release plan
 
-**Status: planned; no implementation or release gates completed.** This plan refines Phase 0A + 0B into reviewable delivery slices. Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.16.0**.
+**Status: implementation in progress; no release gates completed.** Native control/readiness protocol work, an owned sync/async Python launcher, a platform-specific binary-wheel build path, and a native container recipe now exist. They have targeted local checks, but the 4.16 integrated contracts, advertised platform matrix, SDK/emulator route, candidate inventory, and release gates remain incomplete. This plan refines Phase 0A + 0B into reviewable delivery slices. Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.16.0**.
 
 [Roadmap](ROADMAP.md#4160-http-service-launcher-and-unified-distribution) · [Epic](EPIC.md) · [Workstreams](README.md#workstreams) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 

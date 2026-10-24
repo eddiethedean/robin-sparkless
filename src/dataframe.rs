@@ -4,6 +4,7 @@ use robin_sparkless_core::EngineError;
 use robin_sparkless_core::engine::{CollectedRows, DataFrameBackend, GroupedDataBackend};
 use robin_sparkless_core::expr::ExprIr;
 use robin_sparkless_core::{CancellationToken, DataType, StructType};
+pub use robin_sparkless_polars::dataframe::PositionalJsonResult;
 use robin_sparkless_polars::dataframe::{
     DataFrameNa as PolarsDataFrameNa, DataFrameStat as PolarsDataFrameStat,
     DataFrameWriter as PolarsDataFrameWriter,
@@ -252,7 +253,7 @@ impl DataFrame {
         max_rows: usize,
         array_struct_paths: &std::collections::HashSet<String>,
         token: &CancellationToken,
-    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>, StructType), EngineError> {
+    ) -> Result<PositionalJsonResult, EngineError> {
         self.0
             .collect_as_positional_json_with_cancellation(max_rows, array_struct_paths, token)
     }
@@ -265,7 +266,7 @@ impl DataFrame {
         max_cell_json_bytes: usize,
         array_struct_paths: &std::collections::HashSet<String>,
         token: &CancellationToken,
-    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>, StructType), EngineError> {
+    ) -> Result<PositionalJsonResult, EngineError> {
         self.0.collect_as_positional_json_with_limits(
             max_rows,
             max_total_json_bytes,

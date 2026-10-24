@@ -47,6 +47,9 @@ const DEFAULT_EXTERNAL_ARROW_BATCH_ROWS: usize = 10_000;
 const DEFAULT_EXTERNAL_ARROW_BATCH_BYTES: usize = 64 * 1024 * 1024;
 const RANGE_EXECUTION_BATCH_ROWS: usize = 16_384;
 
+/// Positional result fields, rows, and their declared logical schema.
+pub type PositionalJsonResult = (Vec<String>, Vec<Vec<JsonValue>>, StructType);
+
 fn projected_source_column(expression: &Expr) -> Option<&str> {
     match expression {
         Expr::Column(name) => Some(name.as_str()),
@@ -127,7 +130,7 @@ impl RangeCardinality {
                 Operator::LtEq => value <= threshold as i128,
                 Operator::Gt => value > threshold as i128,
                 Operator::GtEq => value >= threshold as i128,
-                _ => return false,
+                _ => false,
             }
         };
         let first = matches(0);
@@ -298,6 +301,7 @@ struct PolarsIpcBatchIterator {
     current_offset: usize,
     max_rows: usize,
     max_bytes: usize,
+    logical_schema_json: Option<String>,
     token: CancellationToken,
     deferred_error: Option<EngineError>,
     closed: bool,
@@ -338,9 +342,13 @@ impl PolarsIpcBatchIterator {
         {
             use polars::io::ipc::IpcStreamWriter;
             use polars::prelude::SerWriter;
-            IpcStreamWriter::new(&mut cursor)
-                .finish(batch)
-                .map_err(polars_to_core_error)?;
+            let mut writer = IpcStreamWriter::new(&mut cursor);
+            if let Some(schema) = &self.logical_schema_json {
+                let mut metadata = polars_arrow::datatypes::Metadata::new();
+                metadata.insert("sparkless.logical_schema.v1".into(), schema.clone().into());
+                writer.set_custom_schema_metadata(Arc::new(metadata));
+            }
+            writer.finish(batch).map_err(polars_to_core_error)?;
         }
         Ok(cursor.into_inner())
     }
@@ -2428,12 +2436,21 @@ impl DataFrame {
         // a time, so a small byte limit cannot arrive after a large Polars chunk has
         // already been materialized.
         let batches = self.collect_batches(1).map_err(polars_to_core_error)?;
+        let logical_schema_json = self
+            .logical_schema
+            .as_ref()
+            .map(StructType::to_json)
+            .transpose()
+            .map_err(|error| {
+                EngineError::User(format!("logical schema serialization failed: {error}"))
+            })?;
         Ok(ArrowIpcBatchStream::new(PolarsIpcBatchIterator {
             batches: Some(batches),
             current: None,
             current_offset: 0,
             max_rows,
             max_bytes,
+            logical_schema_json,
             token: token.clone(),
             deferred_error: None,
             closed: false,
@@ -2717,7 +2734,7 @@ impl DataFrame {
         max_rows: usize,
         array_struct_paths: &HashSet<String>,
         token: &CancellationToken,
-    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>, StructType), EngineError> {
+    ) -> Result<PositionalJsonResult, EngineError> {
         self.collect_as_positional_json_with_limits(
             max_rows,
             usize::MAX,
@@ -2737,7 +2754,7 @@ impl DataFrame {
         max_cell_json_bytes: usize,
         array_struct_paths: &HashSet<String>,
         token: &CancellationToken,
-    ) -> Result<(Vec<String>, Vec<Vec<JsonValue>>, StructType), EngineError> {
+    ) -> Result<PositionalJsonResult, EngineError> {
         token.check_cancelled()?;
         if max_total_json_bytes < 2 {
             return Err(EngineError::User(
@@ -5635,6 +5652,39 @@ mod tests {
             result,
             Err(EngineError::User(message)) if message == "max_rows must be greater than zero"
         ));
+    }
+
+    #[test]
+    fn arrow_ipc_batches_carry_the_checked_logical_schema() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::SerReader;
+
+        let physical = polars::prelude::df!("id" => [1i64, 2]).unwrap();
+        let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
+            .into_iter()
+            .collect();
+        let logical = StructType::new(vec![
+            StructField::new("id".into(), robin_sparkless_core::DataType::Long, false)
+                .with_metadata(metadata),
+        ]);
+        let source = DataFrame::from_polars(physical)
+            .with_logical_schema(logical.clone())
+            .unwrap();
+        let expected = logical.to_json().unwrap();
+        let stream = source
+            .to_arrow_ipc_batches_with_cancellation(2, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(stream.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected.as_str()));
+        assert_eq!(reader.finish().unwrap().height(), 2);
     }
 
     /// Issue #235: root-level string–numeric comparison coercion in filter.

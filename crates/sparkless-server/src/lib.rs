@@ -36,8 +36,9 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 use uuid::Uuid;
 
-const AGENT_PROTOCOL_VERSION: &str = "1";
-const MUTATION_PROTOCOL_VERSION: &str = "1";
+pub const CONTROL_PROTOCOL_VERSION: u32 = 1;
+pub const AGENT_PROTOCOL_VERSION: &str = "1";
+pub const MUTATION_PROTOCOL_VERSION: &str = "1";
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_ERROR_BYTES: usize = 1024;
 const MAX_CATALOG_DATABASES: usize = 128;
@@ -270,6 +271,21 @@ impl Server {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        self.serve_until_with_ready(shutdown, |_| Ok(())).await
+    }
+
+    /// Bind, run a native startup witness, then invoke `on_ready` with the actual address before
+    /// serving until `shutdown` resolves. Used by the owned-child control protocol so readiness
+    /// is tied to this listener rather than an unrelated process on the configured port.
+    pub async fn serve_until_with_ready<F, R>(
+        self,
+        shutdown: F,
+        on_ready: R,
+    ) -> Result<(), ServerError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+        R: FnOnce(SocketAddr) -> Result<(), ServerError>,
+    {
         let listener = TcpListener::bind(self.inner.config.bind).await?;
         let bound = listener.local_addr()?;
         self.startup_check().await?;
@@ -278,7 +294,24 @@ impl Server {
             "sparkless-server ready address={bound} instance_id={}",
             self.inner.instance_id
         );
+        if let Err(error) = on_ready(bound) {
+            self.inner.ready.store(false, Ordering::Release);
+            return Err(error);
+        }
         self.run_listener(listener, shutdown).await
+    }
+
+    /// Control-protocol readiness record for an owned launcher process.
+    pub fn readiness_record(&self, bound: SocketAddr) -> JsonValue {
+        json!({
+            "type": "ready",
+            "control_protocol_version": CONTROL_PROTOCOL_VERSION,
+            "server_version": env!("CARGO_PKG_VERSION"),
+            "agent_protocol_version": AGENT_PROTOCOL_VERSION,
+            "server_instance_id": self.inner.instance_id,
+            "http_url": format!("http://{bound}"),
+            "capabilities": self.capabilities_json()
+        })
     }
 
     pub async fn serve(self) -> Result<(), ServerError> {
@@ -572,43 +605,44 @@ impl Server {
     }
 
     fn capabilities(&self) -> HttpResponse {
-        json_response(
-            StatusCode::OK,
-            json!({
-                "agent_protocol_version": AGENT_PROTOCOL_VERSION,
-                "mutation_protocol_version": MUTATION_PROTOCOL_VERSION,
-                "server_instance_id": self.inner.instance_id,
-                "transport": "http",
-                "spark_connect_supported": false,
-                "sql": {
-                    "reads": ["SELECT", "COUNT(*)", "managed_tables"],
-                    "mutations": ["CREATE DATABASE", "CREATE TABLE", "INSERT INTO", "DROP TABLE", "DROP DATABASE", "CREATE TEMP VIEW", "DROP VIEW", "USE"]
-                },
-                "limits": {
-                    "request_bytes": self.inner.config.max_request_bytes,
-                    "sql_bytes": self.inner.config.max_sql_bytes,
-                    "result_rows": self.inner.config.max_result_rows,
-                    "result_bytes": self.inner.config.max_result_bytes,
-                    "cell_bytes": self.inner.config.max_cell_bytes,
-                    "active_operations": self.inner.config.max_active_operations,
-                    "pending_operations": self.inner.config.max_pending_operations,
-                    "sessions": self.inner.config.max_sessions,
-                    "catalog_databases": MAX_CATALOG_DATABASES,
-                    "catalog_tables": MAX_CATALOG_TABLES,
-                    "session_temp_views": MAX_SESSION_TEMP_VIEWS,
-                    "table_accounted_bytes": MAX_TABLE_ACCOUNTED_BYTES,
-                    "catalog_accounted_bytes": MAX_CATALOG_ACCOUNTED_BYTES,
-                    "retained_mutations": self.inner.config.max_mutation_records,
-                    "retained_mutation_bytes": self.inner.config.max_mutation_bytes,
-                    "body_read_timeout_ms": self.inner.config.body_read_timeout.as_millis(),
-                    "queue_timeout_ms": self.inner.config.queue_timeout.as_millis(),
-                    "response_timeout_ms": self.inner.config.response_timeout.as_millis()
-                },
-                "cancellation": "cooperative; native work retains admission until it returns",
-                "catalog_lifetime": "in-memory for this server instance",
-                "catalog_byte_accounting": "Polars estimated_size for committed saved tables plus the staged candidate; lazy temporary views and versions pinned by in-flight snapshots are not charged, and this is not an RSS limit"
-            }),
-        )
+        json_response(StatusCode::OK, self.capabilities_json())
+    }
+
+    fn capabilities_json(&self) -> JsonValue {
+        json!({
+            "agent_protocol_version": AGENT_PROTOCOL_VERSION,
+            "mutation_protocol_version": MUTATION_PROTOCOL_VERSION,
+            "server_instance_id": self.inner.instance_id,
+            "transport": "http",
+            "spark_connect_supported": false,
+            "sql": {
+                "reads": ["SELECT", "COUNT(*)", "managed_tables"],
+                "mutations": ["CREATE DATABASE", "CREATE TABLE", "INSERT INTO", "DROP TABLE", "DROP DATABASE", "CREATE TEMP VIEW", "DROP VIEW", "USE"]
+            },
+            "limits": {
+                "request_bytes": self.inner.config.max_request_bytes,
+                "sql_bytes": self.inner.config.max_sql_bytes,
+                "result_rows": self.inner.config.max_result_rows,
+                "result_bytes": self.inner.config.max_result_bytes,
+                "cell_bytes": self.inner.config.max_cell_bytes,
+                "active_operations": self.inner.config.max_active_operations,
+                "pending_operations": self.inner.config.max_pending_operations,
+                "sessions": self.inner.config.max_sessions,
+                "catalog_databases": MAX_CATALOG_DATABASES,
+                "catalog_tables": MAX_CATALOG_TABLES,
+                "session_temp_views": MAX_SESSION_TEMP_VIEWS,
+                "table_accounted_bytes": MAX_TABLE_ACCOUNTED_BYTES,
+                "catalog_accounted_bytes": MAX_CATALOG_ACCOUNTED_BYTES,
+                "retained_mutations": self.inner.config.max_mutation_records,
+                "retained_mutation_bytes": self.inner.config.max_mutation_bytes,
+                "body_read_timeout_ms": self.inner.config.body_read_timeout.as_millis(),
+                "queue_timeout_ms": self.inner.config.queue_timeout.as_millis(),
+                "response_timeout_ms": self.inner.config.response_timeout.as_millis()
+            },
+            "cancellation": "cooperative; native work retains admission until it returns",
+            "catalog_lifetime": "in-memory for this server instance",
+            "catalog_byte_accounting": "Polars estimated_size for committed saved tables plus the staged candidate; lazy temporary views and versions pinned by in-flight snapshots are not charged, and this is not an RSS limit"
+        })
     }
 
     async fn handle_statements(&self, request: Request<Incoming>) -> HttpResponse {
@@ -823,9 +857,11 @@ impl Server {
         let class_for_job = class.clone();
         let code = parsed.code.clone();
         let instance = self.inner.clone();
-        let max_rows = self.inner.config.max_result_rows;
-        let max_result_bytes = self.inner.config.max_result_bytes;
-        let max_cell_bytes = self.inner.config.max_cell_bytes;
+        let limits = ExecutionLimits {
+            max_rows: self.inner.config.max_result_rows,
+            max_result_bytes: self.inner.config.max_result_bytes,
+            max_cell_bytes: self.inner.config.max_cell_bytes,
+        };
         let operation_record_for_job = operation.clone();
         let operation_key_for_job = operation_id.clone();
         let token_for_work = token.clone();
@@ -843,28 +879,17 @@ impl Server {
                     &code,
                     action,
                     target.as_deref(),
-                    max_rows,
-                    max_result_bytes,
-                    max_cell_bytes,
+                    limits,
                     &token_for_work,
                 )
-                .and_then(|response| {
+                .map(|response| {
                     let receipt =
                         record_catalog_mutation(&instance, target.as_deref(), action, &session);
-                    Ok((response, receipt))
+                    (response, receipt)
                 })
             } else {
-                execute_statement(
-                    &session,
-                    &code,
-                    "read",
-                    None,
-                    max_rows,
-                    max_result_bytes,
-                    max_cell_bytes,
-                    &token_for_work,
-                )
-                .map(|response| (response, None))
+                execute_statement(&session, &code, "read", None, limits, &token_for_work)
+                    .map(|response| (response, None))
             };
             if let Some(record) = &operation_record_for_job {
                 match &result {
@@ -882,18 +907,18 @@ impl Server {
                 }
             }
             result.map(|(mut response, receipt)| {
-                if let Some(record) = &operation_record_for_job {
-                    if let Ok(record) = record.lock() {
-                        let operation = operation_json_from_record(
-                            &instance.instance_id,
-                            operation_key_for_job.as_deref().unwrap_or_default(),
-                            &record,
-                        );
-                        if let Some(object) = response.as_object_mut() {
-                            object.insert("operation".into(), operation);
-                            if let Some(receipt) = receipt {
-                                object.insert("receipt".into(), receipt);
-                            }
+                if let Some(record) = &operation_record_for_job
+                    && let Ok(record) = record.lock()
+                {
+                    let operation = operation_json_from_record(
+                        &instance.instance_id,
+                        operation_key_for_job.as_deref().unwrap_or_default(),
+                        &record,
+                    );
+                    if let Some(object) = response.as_object_mut() {
+                        object.insert("operation".into(), operation);
+                        if let Some(receipt) = receipt {
+                            object.insert("receipt".into(), receipt);
                         }
                     }
                 }
@@ -1051,6 +1076,13 @@ impl Server {
 struct ExecutionFailure {
     name: &'static str,
     message: String,
+}
+
+#[derive(Clone, Copy)]
+struct ExecutionLimits {
+    max_rows: usize,
+    max_result_bytes: usize,
+    max_cell_bytes: usize,
 }
 
 fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String)> {
@@ -1297,13 +1329,13 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
                             );
                         }
                     }
-                    ast::Expr::UnaryOp { op, .. }
-                        if matches!(
-                            op,
+                    ast::Expr::UnaryOp {
+                        op:
                             ast::UnaryOperator::Plus
-                                | ast::UnaryOperator::Minus
-                                | ast::UnaryOperator::Not
-                        ) => {}
+                            | ast::UnaryOperator::Minus
+                            | ast::UnaryOperator::Not,
+                        ..
+                    } => {}
                     ast::Expr::Cast {
                         kind,
                         data_type,
@@ -1745,9 +1777,7 @@ fn execute_statement(
     sql: &str,
     action: &str,
     target: Option<&str>,
-    max_rows: usize,
-    max_result_bytes: usize,
-    max_cell_bytes: usize,
+    limits: ExecutionLimits,
     token: &CancellationToken,
 ) -> Result<JsonValue, ExecutionFailure> {
     if action == "use" {
@@ -1789,10 +1819,10 @@ fn execute_statement(
         .map_err(|error| execution_failure("QueryError", &error.to_string()))?
         .fields()
         .to_vec();
-    if let Ok(SparkStatement::Sqlparser(statement)) = spark_sql_parser::parse_spark_sql(sql) {
-        if let ast::Statement::Query(query) = statement.as_ref() {
-            apply_query_nullability(query, &mut fields);
-        }
+    if let Ok(SparkStatement::Sqlparser(statement)) = spark_sql_parser::parse_spark_sql(sql)
+        && let ast::Statement::Query(query) = statement.as_ref()
+    {
+        apply_query_nullability(query, &mut fields);
     }
     let schema = spark_schema(&fields)?;
     let empty_response = json!({
@@ -1802,12 +1832,14 @@ fn execute_statement(
     let empty_response_len = serde_json::to_vec(&empty_response)
         .map_err(|error| execution_failure("ResultEncodingError", &error.to_string()))?
         .len();
-    let max_data_bytes = max_result_bytes.saturating_sub(empty_response_len.saturating_sub(2));
+    let max_data_bytes = limits
+        .max_result_bytes
+        .saturating_sub(empty_response_len.saturating_sub(2));
     let (_columns, rows, _native_schema) = frame
         .collect_as_positional_json_with_limits(
-            max_rows,
+            limits.max_rows,
             max_data_bytes,
-            max_cell_bytes,
+            limits.max_cell_bytes,
             &Default::default(),
             token,
         )
@@ -1819,7 +1851,7 @@ fn execute_statement(
     let encoded_len = serde_json::to_vec(&response)
         .map_err(|error| execution_failure("ResultEncodingError", &error.to_string()))?
         .len();
-    if encoded_len > max_result_bytes {
+    if encoded_len > limits.max_result_bytes {
         return Err(execution_failure(
             "ResultLimitExceeded",
             "serialized result exceeds the configured byte limit",
@@ -2316,9 +2348,11 @@ mod tests {
 
     #[tokio::test]
     async fn shared_catalog_and_mutation_replay_are_scoped_to_server_instance() {
-        let mut config = ServerConfig::default();
-        config.bind = "127.0.0.1:0".parse().unwrap();
-        let server = Server::new(config).unwrap();
+        let config = ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            ..ServerConfig::default()
+        };
+        let server = Server::new(config.clone()).unwrap();
         server.startup_check().await.unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -2489,6 +2523,14 @@ mod tests {
         )
         .await;
         assert_eq!(create_table["status"], "ok");
+
+        let isolated_server = Server::new(config).unwrap();
+        let isolated_session = isolated_server.inner.root_session.new_session();
+        assert!(
+            isolated_session
+                .sql("SELECT id FROM phase_db.items")
+                .is_err()
+        );
 
         let create_default_table = statement_request(
             address,
@@ -2684,6 +2726,14 @@ mod tests {
             replaced_view.1["data"]["application/json"]["data"],
             json!([[12]])
         );
+        let view_in_other_session = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({"session":"s_other","kind":"sql","code":"SELECT id FROM local_items"}),
+        )
+        .await;
+        assert_ne!(view_in_other_session.1["status"], "ok");
         let drop_view_as_table = statement_request(
             address,
             &server_id,
@@ -2742,6 +2792,14 @@ mod tests {
             after_close.1["data"]["application/json"]["data"],
             json!([[2]])
         );
+        let view_after_close = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({"session":"s_after_close","kind":"sql","code":"SELECT id FROM local_items"}),
+        )
+        .await;
+        assert_ne!(view_after_close.1["status"], "ok");
 
         let unsupported = request_json(
             address,

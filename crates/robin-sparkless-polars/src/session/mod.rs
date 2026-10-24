@@ -1594,6 +1594,11 @@ pub type TableCatalog = Arc<Mutex<HashMap<String, DataFrame>>>;
 /// Names of databases/schemas created via CREATE DATABASE / CREATE SCHEMA (session-scoped). Persisted when SQL DDL runs.
 pub type DatabaseCatalog = Arc<Mutex<HashSet<String>>>;
 
+type SharedCatalogMutationWriterGuards<'a> = (
+    Option<std::sync::MutexGuard<'a, ()>>,
+    Option<std::sync::MutexGuard<'a, ()>>,
+);
+
 /// Catalog state deliberately shared by the logical sessions of one application or service.
 /// A fresh value creates an independent catalog; cloning a value shares saved tables,
 /// database names, and catalog-scoped global views. Session temporary views and configuration
@@ -1769,13 +1774,7 @@ impl SparkSession {
 
     fn shared_catalog_mutation_and_writer_guards(
         &self,
-    ) -> Result<
-        (
-            Option<std::sync::MutexGuard<'_, ()>>,
-            Option<std::sync::MutexGuard<'_, ()>>,
-        ),
-        EngineError,
-    > {
+    ) -> Result<SharedCatalogMutationWriterGuards<'_>, EngineError> {
         let mutation = self.shared_catalog_mutation_guard()?;
         let writer = self.shared_catalog_guard()?;
         Ok((mutation, writer))

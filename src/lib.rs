@@ -104,8 +104,8 @@ pub use robin_sparkless_polars::functions::{SortOrder, *};
 // Root-owned entry-point types (delegate to robin-sparkless-polars).
 pub use dataframe::{
     CubeRollupData, DataFrame, DataFrameNa, DataFrameStat, DataFrameWriter, GroupBySpec,
-    GroupedData, JoinType, PivotedGroupedData, SaveMode, SelectItem, WriteFormat, WriteMode,
-    expr_contains_only_join_key_equalities, try_extract_join_eq_columns,
+    GroupedData, JoinType, PivotedGroupedData, PositionalJsonResult, SaveMode, SelectItem,
+    WriteFormat, WriteMode, expr_contains_only_join_key_equalities, try_extract_join_eq_columns,
     try_extract_join_eq_columns_all,
 };
 pub use robin_sparkless_polars::SharedCatalog;

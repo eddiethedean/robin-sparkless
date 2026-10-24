@@ -66,6 +66,23 @@ Contributors should use the [uv setup and native build workflow](../CONTRIBUTING
 | `pip install "sparkless[dev]"` | pytest, pandas, hypothesis, pytest-xdist |
 | `pip install "sparkless[jdbc]"` | JDBC integration tests (testcontainers, drivers) |
 | `pip install "sparkless[pyspark]"` | Run tests against real PySpark (`SPARKLESS_TEST_MODE=pyspark`) |
+| `pip install "sparkless[server]"` | Own a native HTTP statement server child process |
+
+The optional server extra installs a platform-specific `sparkless-server-bin`
+wheel. `SparklessServer` and `AsyncSparklessServer` own the child, wait for its
+versioned native-readiness record, and stop/reap it when their context exits:
+
+```python
+from sparkless import SparklessServer
+
+with SparklessServer() as server:
+    print(server.http_url)
+```
+
+The async equivalent supports `async with`. Both expose HTTP only;
+`spark_connect_url` raises because Spark Connect is not enabled. An explicit
+`executable_path` can select a matching locally built binary. The launcher does
+not search `PATH`, download a binary, or compile one at runtime.
 
 ### Supported platforms
 

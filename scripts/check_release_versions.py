@@ -98,7 +98,7 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         and isinstance(node.value, ast.Constant)
         and isinstance(node.value.value, str)
     )
-    return validate_versions(
+    errors = validate_versions(
         packages,
         dependencies,
         lock_versions,
@@ -106,6 +106,89 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         (root / "CHANGELOG.md").read_text(),
         tag,
     )
+    errors.extend(validate_server_inventory(root, tag))
+    return errors
+
+
+def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
+    """Check the separately distributed native server and its package coupling."""
+    facade = read_toml(root / "Cargo.toml")
+    core = read_toml(root / "crates/robin-sparkless-core/Cargo.toml")
+    polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
+    parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
+    server = read_toml(root / "crates/sparkless-server/Cargo.toml")
+    lock_versions = {
+        package["name"]: package["version"]
+        for package in read_toml(root / "Cargo.lock")["package"]
+    }
+    python = read_toml(root / "python/pyproject.toml")
+    server_binary = read_toml(root / "python/server-bin/pyproject.toml")["project"]
+
+    expected = facade["package"]["version"]
+    errors = []
+    if server["package"]["version"] != expected:
+        errors.append(
+            "sparkless-server: version {} does not match {}".format(
+                server["package"]["version"], expected
+            )
+        )
+    if lock_versions.get("sparkless-server") != server["package"]["version"]:
+        errors.append("sparkless-server: Cargo.lock does not match its manifest")
+    for dependency, package_version in (
+        ("robin-sparkless", expected),
+        ("robin-sparkless-core", core["package"]["version"]),
+        ("spark-sql-parser", parser["package"]["version"]),
+    ):
+        actual = server["dependencies"][dependency]["version"]
+        if actual != package_version:
+            errors.append(
+                "sparkless-server/{}: dependency version {} does not match {}".format(
+                    dependency, actual, package_version
+                )
+            )
+    if server_binary["version"] != expected:
+        errors.append(
+            "sparkless-server-bin: version {} does not match {}".format(
+                server_binary["version"], expected
+            )
+        )
+    server_extra = python["project"].get("optional-dependencies", {}).get("server", [])
+    required_extra = "sparkless-server-bin=={}".format(expected)
+    if required_extra not in server_extra:
+        errors.append(
+            "sparkless[server]: missing exact binary dependency {}".format(
+                required_extra
+            )
+        )
+
+    # From the 4.16 candidate line onward, the parser joins the coordinated first-party
+    # release inventory. Older published tags intentionally retain the parser's 0.x line.
+    if tag is not None:
+        match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag)
+        if match and (int(match.group(1)), int(match.group(2))) >= (4, 16):
+            if parser["package"]["version"] != expected:
+                errors.append(
+                    "spark-sql-parser: version {} does not match candidate {}".format(
+                        parser["package"]["version"], expected
+                    )
+                )
+            for dependency, actual in (
+                (
+                    "robin-sparkless-polars/spark-sql-parser",
+                    polars["dependencies"]["spark-sql-parser"]["version"],
+                ),
+                (
+                    "sparkless-server/spark-sql-parser",
+                    server["dependencies"]["spark-sql-parser"]["version"],
+                ),
+            ):
+                if actual != expected:
+                    errors.append(
+                        "{}: dependency version {} does not match candidate {}".format(
+                            dependency, actual, expected
+                        )
+                    )
+    return errors
 
 
 def main() -> int:

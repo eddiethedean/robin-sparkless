@@ -393,6 +393,15 @@ setattr(DataFrame, "select", _dataframe_select)
 
 # PySpark-style: from sparkless import F, functions, StringType, ...
 def __getattr__(name: str) -> object:
+    if name in (
+        "SparklessServer",
+        "AsyncSparklessServer",
+        "SparklessServerError",
+        "UnsupportedServerPlatformError",
+    ):
+        from sparkless import server as server_module
+
+        return getattr(server_module, name)
     if name in ("F", "functions"):
         import sparkless.sql.functions as f
 
@@ -487,6 +496,10 @@ __all__: List[str] = [
     "SparklessError",
     "SparklessCancelledError",
     "SparklessExternalCatalogError",
+    "SparklessServer",
+    "AsyncSparklessServer",
+    "SparklessServerError",
+    "UnsupportedServerPlatformError",
     "sql",
     "col",
     "lit",

@@ -384,6 +384,7 @@ def pytest_collection_modifyitems(
             / "test_external_catalog_provider.py"
         ).resolve(),
         (Path(__file__).resolve().parent / "sql" / "conftest.py").resolve(),
+        (Path(__file__).resolve().parent / "server" / "test_launcher.py").resolve(),
         (
             Path(__file__).resolve().parent / "unit" / "test_sparkless_testing.py"
         ).resolve(),
