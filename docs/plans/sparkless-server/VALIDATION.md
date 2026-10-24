@@ -174,6 +174,8 @@ These are local component checks, not passing release gates. The current work ha
 
 - At source commit [`40bc86e1`](https://github.com/eddiethedean/robin-sparkless/commit/40bc86e1), `cargo test --release --locked -p sparkless-server shared_catalog_and_mutation_replay_are_scoped_to_server_instance -- --nocapture` passed. The live HTTP test holds one session's serial lane, queues `USE phase_db` then a temporary-view mutation, and confirms the latter's retained semantic digest binds to `phase_db`; the view also reads the expected row from that database. Strict all-target server Clippy, formatting, and diff checks passed. This is focused D10/V16 evidence; the full outcomes and SDK matrix remain open.
 
+- At source commit [`d1639e23`](https://github.com/eddiethedean/robin-sparkless/commit/d1639e23), `cargo test --release --locked -p robin-sparkless-polars --features sql --lib nested_array_ipc_roundtrip_preserves_values_and_logical_schema -- --nocapture` passed. The nested-array IPC witness now verifies a zero-row stream carries the exact logical schema metadata as well as the populated values/nulls. Strict all-target Polars Clippy, formatting, and diff checks passed. This closes one empty-result V18 fixture only; the broader transformation and interoperability matrix remains open.
+
 Every advertised binary-wheel platform still requires independent build/install/runtime witnesses. CI must add targeted format/clippy/tests for supported feature combinations, launcher tests on supported Python/platform versions, and the distinct direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect routes. Keep their evidence separate and do not report planned commands as passed.
 
 ## Evidence record template
