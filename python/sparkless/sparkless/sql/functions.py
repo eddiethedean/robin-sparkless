@@ -39,6 +39,8 @@ from sparkless import (
     split as _split,
     coalesce as _coalesce,
     to_timestamp as _to_timestamp,
+    to_timestamp_ltz as _to_timestamp_ltz,
+    to_timestamp_ntz as _to_timestamp_ntz,
     to_date as _to_date,
     current_date as _current_date,
     current_timestamp as _current_timestamp,
@@ -1050,6 +1052,8 @@ __all__ = [
     "min",
     "max",
     "to_timestamp",
+    "to_timestamp_ltz",
+    "to_timestamp_ntz",
     "to_date",
     "datediff",
     "current_date",
@@ -1285,6 +1289,20 @@ def to_timestamp(column, fmt=None):
     if getattr(wrapped, "sql", None) is not None:
         return wrapped
     return _to_timestamp(_as_col(column), fmt)
+
+
+def to_timestamp_ltz(column, fmt=None):
+    wrapped = _wrap_expr_str_in_sql_fn(column, "to_timestamp_ltz", fmt)
+    if getattr(wrapped, "sql", None) is not None:
+        return wrapped
+    return _to_timestamp_ltz(_as_col(column), fmt)
+
+
+def to_timestamp_ntz(column, fmt=None):
+    wrapped = _wrap_expr_str_in_sql_fn(column, "to_timestamp_ntz", fmt)
+    if getattr(wrapped, "sql", None) is not None:
+        return wrapped
+    return _to_timestamp_ntz(_as_col(column), fmt)
 
 
 def to_date(column, fmt=None):

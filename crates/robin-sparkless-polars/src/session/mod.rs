@@ -375,7 +375,8 @@ fn json_type_str_to_polars(type_str: &str) -> Option<DataType> {
         "int" | "integer" | "int32" => Some(DataType::Int32),
         "smallint" | "short" => Some(DataType::Int16),
         "bigint" | "long" => Some(DataType::Int64),
-        "double" | "float" | "double_precision" => Some(DataType::Float64),
+        "float" => Some(DataType::Float32),
+        "double" | "double_precision" => Some(DataType::Float64),
         "string" | "str" | "varchar" => Some(DataType::String),
         "boolean" | "bool" => Some(DataType::Boolean),
         "date" => Some(DataType::Date),
@@ -444,13 +445,7 @@ fn verify_json_value_for_type(v: &JsonValue, type_str: &str) -> Result<(), Strin
         },
         "double" | "float" | "double_precision" => match v {
             JsonValue::Number(n) if n.as_f64().is_some_and(f64::is_finite) => Ok(()),
-            JsonValue::String(s)
-                if decimal_transport_value(s)
-                    .parse::<f64>()
-                    .is_ok_and(f64::is_finite) =>
-            {
-                Ok(())
-            }
+            JsonValue::String(s) if decimal_transport_value(s).parse::<f64>().is_ok() => Ok(()),
             _ => Err(format!(
                 "expected double/number, got {}",
                 value_type_name(v)
@@ -669,7 +664,8 @@ fn json_element_type_to_polars(elem_type: &str) -> DataType {
     match elem_type.trim().to_ascii_lowercase().as_str() {
         "boolean" | "bool" => DataType::Boolean,
         "bigint" | "long" | "int" => DataType::Int64,
-        "double" | "float" => DataType::Float64,
+        "float" => DataType::Float32,
+        "double" => DataType::Float64,
         _ => DataType::String,
     }
 }
@@ -721,7 +717,7 @@ fn json_values_to_series(
     type_str: &str,
     name: &str,
 ) -> Result<Series, PolarsError> {
-    use chrono::{NaiveDate, NaiveDateTime};
+    use chrono::NaiveDate;
     let epoch = date_utils::epoch_naive_date();
     let type_lower = type_str.trim().to_lowercase();
 
@@ -988,13 +984,27 @@ fn json_values_to_series(
                 .collect();
             Ok(Series::new(name.into(), vals))
         }
-        "double" | "float" | "double_precision" => {
+        "double" | "double_precision" => {
             let vals: Vec<Option<f64>> = values
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
                         JsonValue::Number(n) => n.as_f64(),
                         JsonValue::String(s) => decimal_transport_value(s).parse::<f64>().ok(),
+                        JsonValue::Null => None,
+                        _ => None,
+                    })
+                })
+                .collect();
+            Ok(Series::new(name.into(), vals))
+        }
+        "float" => {
+            let vals: Vec<Option<f32>> = values
+                .iter()
+                .map(|ov| {
+                    ov.as_ref().and_then(|v| match v {
+                        JsonValue::Number(n) => n.as_f64().map(|value| value as f32),
+                        JsonValue::String(s) => decimal_transport_value(s).parse::<f32>().ok(),
                         JsonValue::Null => None,
                         _ => None,
                     })
@@ -1065,34 +1075,7 @@ fn json_values_to_series(
                 .iter()
                 .map(|ov| {
                     ov.as_ref().and_then(|v| match v {
-                        JsonValue::String(s) => {
-                            let parsed = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
-                                .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
-                                .or_else(|_| {
-                                    NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").map_err(
-                                        |e| PolarsError::ComputeError(e.to_string().into()),
-                                    )
-                                })
-                                .or_else(|_| {
-                                    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").map_err(
-                                        |e| PolarsError::ComputeError(e.to_string().into()),
-                                    )
-                                })
-                                .or_else(|_| {
-                                    NaiveDate::parse_from_str(s, "%Y-%m-%d")
-                                        .map_err(|e| {
-                                            PolarsError::ComputeError(e.to_string().into())
-                                        })
-                                        .and_then(|d| {
-                                            d.and_hms_opt(0, 0, 0).ok_or_else(|| {
-                                                PolarsError::ComputeError(
-                                                    "date to datetime (0:0:0)".into(),
-                                                )
-                                            })
-                                        })
-                                });
-                            parsed.ok().map(|dt| dt.and_utc().timestamp_micros())
-                        }
+                        JsonValue::String(s) => parse_timestamp_str_to_micros(s).ok(),
                         JsonValue::Object(obj) => parse_datetime_from_json_object(obj),
                         JsonValue::Number(n) => n.as_i64(),
                         JsonValue::Null => None,
@@ -1254,15 +1237,28 @@ fn json_value_to_series_single(
                 .map_err(|e| PolarsError::ComputeError(format!("int parse: {e}").into()))?;
             Ok(Series::new(name.into(), vec![Some(i)]))
         }
-        (JsonValue::Number(n), "double" | "float" | "double_precision") => {
+        (JsonValue::Number(n), "double" | "double_precision") => {
             Ok(Series::new(name.into(), vec![n.as_f64()]))
         }
-        (JsonValue::String(s), "double" | "float" | "double_precision") => {
+        (JsonValue::String(s), "double" | "double_precision") => {
             let f = decimal_transport_value(s)
                 .trim()
                 .parse::<f64>()
                 .map_err(|e| PolarsError::ComputeError(format!("float parse: {e}").into()))?;
             Ok(Series::new(name.into(), vec![Some(f)]))
+        }
+        (JsonValue::Number(n), "float") => Ok(Series::new(
+            name.into(),
+            vec![n.as_f64().map(|value| value as f32)],
+        )),
+        (JsonValue::String(s), "float") => {
+            let value = decimal_transport_value(s)
+                .trim()
+                .parse::<f32>()
+                .map_err(|error| {
+                    PolarsError::ComputeError(format!("float parse: {error}").into())
+                })?;
+            Ok(Series::new(name.into(), vec![Some(value)]))
         }
         (JsonValue::Number(n), t) if is_decimal_type_str(t) => {
             let (precision, scale) = parse_decimal_precision_scale(t).ok_or_else(|| {
@@ -1382,12 +1378,19 @@ fn parse_datetime_from_json_object(obj: &serde_json::Map<String, JsonValue>) -> 
 
 /// Parse a single timestamp string to microseconds since epoch (for json_value_to_series_single).
 fn parse_timestamp_str_to_micros(s: &str) -> Result<i64, PolarsError> {
-    use chrono::{NaiveDate, NaiveDateTime};
+    use chrono::{DateTime, NaiveDate, NaiveDateTime};
     let s = s.trim().trim_end_matches('Z');
+    if let Ok(timestamp) = DateTime::parse_from_rfc3339(s) {
+        return Ok(timestamp.timestamp_micros());
+    }
     NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
         .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
         .or_else(|_| {
             NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+                .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
+        })
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
                 .map_err(|e| PolarsError::ComputeError(e.to_string().into()))
         })
         .or_else(|_| {
@@ -4010,7 +4013,7 @@ impl SparkSession {
                         Series::new(name.as_str().into(), i64_vals)
                     }
                 }
-                "double" | "float" | "double_precision" => {
+                "double" | "double_precision" => {
                     let vals: Vec<Option<f64>> = rows
                         .iter()
                         .map(|row| {
@@ -4019,6 +4022,25 @@ impl SparkSession {
                                 JsonValue::Number(n) => n.as_f64(),
                                 JsonValue::String(s) => {
                                     decimal_transport_value(&s).parse::<f64>().ok()
+                                }
+                                JsonValue::Null => None,
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    Series::new(name.as_str().into(), vals)
+                }
+                "float" => {
+                    let vals: Vec<Option<f32>> = rows
+                        .iter()
+                        .map(|row| {
+                            let value = row.get(col_idx).cloned().unwrap_or(JsonValue::Null);
+                            match value {
+                                JsonValue::Number(number) => {
+                                    number.as_f64().map(|value| value as f32)
+                                }
+                                JsonValue::String(value) => {
+                                    decimal_transport_value(&value).parse::<f32>().ok()
                                 }
                                 JsonValue::Null => None,
                                 _ => None,
@@ -4977,6 +4999,45 @@ mod tests {
     #[cfg(feature = "delta")]
     use robin_sparkless_core::engine::ExternalTableSaveMode;
     use serde_json::json;
+
+    #[test]
+    fn explicit_double_schema_accepts_non_finite_float_transport_values() {
+        for value in ["nan", "NaN", "inf", "+Infinity", "-inf"] {
+            assert!(
+                verify_json_value_for_type(&JsonValue::String(value.into()), "double").is_ok(),
+                "expected {value:?} to be accepted as a transported Python float"
+            );
+        }
+        assert!(verify_json_value_for_type(&json!("not a number"), "double").is_err());
+    }
+
+    #[test]
+    fn timestamp_verification_accepts_python_datetime_microseconds() {
+        let value = json!("2026-10-24 07:38:40.237647");
+        assert!(verify_json_value_for_type(&value, "timestamp").is_ok());
+    }
+
+    #[test]
+    fn explicit_float_schema_builds_float32_series() {
+        let session = SparkSession::builder()
+            .app_name("explicit-float32-schema")
+            .get_or_create();
+        let frame = session
+            .create_dataframe_from_rows(
+                vec![vec![json!(1.25)]],
+                vec![("score".into(), "float".into())],
+                false,
+                false,
+            )
+            .unwrap();
+
+        assert_eq!(frame.get_column_dtype("score"), Some(DataType::Float32));
+        let materialized = frame.collect().unwrap();
+        assert_eq!(
+            materialized.column("score").unwrap().dtype(),
+            &DataType::Float32
+        );
+    }
 
     fn catalog_test_frame() -> DataFrame {
         let values = vec!["x".repeat(128); 64];

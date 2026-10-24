@@ -264,16 +264,19 @@ fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
 pub(crate) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
     match data_type {
         DataType::String => PlDataType::String,
+        DataType::Byte => PlDataType::Int8,
         DataType::Short => PlDataType::Int16,
         DataType::Integer => PlDataType::Int32,
         DataType::Long => PlDataType::Int64,
+        DataType::Float => PlDataType::Float32,
         DataType::Double => PlDataType::Float64,
         DataType::Decimal(precision, scale) => {
             PlDataType::Decimal(*precision as usize, *scale as usize)
         }
         DataType::Boolean => PlDataType::Boolean,
         DataType::Date => PlDataType::Date,
-        DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, None),
+        DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
+        DataType::TimestampNtz => PlDataType::Datetime(TimeUnit::Microseconds, None),
         DataType::Binary => PlDataType::Binary,
         DataType::Array(inner) => PlDataType::List(Box::new(data_type_to_polars_type(inner))),
         DataType::Struct(fields) => PlDataType::Struct(

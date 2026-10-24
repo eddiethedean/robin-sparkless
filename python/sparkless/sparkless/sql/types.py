@@ -196,6 +196,17 @@ class TimestampType(DataType):
         return "timestamp"
 
 
+class TimestampNTZType(DataType):
+    """Timestamp without timezone conversion, matching Spark's TIMESTAMP_NTZ."""
+
+    def simpleString(self) -> str:
+        return "timestamp_ntz"
+
+    @classmethod
+    def typeName(cls) -> str:
+        return "timestamp_ntz"
+
+
 class ArrayType(DataType):
     def __init__(
         self,
@@ -647,6 +658,7 @@ __all__ = [
     "BooleanType",
     "DateType",
     "TimestampType",
+    "TimestampNTZType",
     "ArrayType",
     "MapType",
     "DecimalType",

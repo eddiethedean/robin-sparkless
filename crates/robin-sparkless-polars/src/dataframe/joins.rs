@@ -1120,6 +1120,42 @@ mod tests {
     }
 
     #[test]
+    fn join_float32_key_to_string_key_keeps_numeric_key_type() {
+        use polars::prelude::{DataType as PlDataType, df};
+
+        let left = DataFrame::from_polars_with_options(
+            df!("key" => &[1.5_f32, 2.5_f32], "value_left" => &["A", "B"]).unwrap(),
+            false,
+        );
+        let right = DataFrame::from_polars_with_options(
+            df!("key" => &["1.5", "2.5"], "value_right" => &["X", "Y"]).unwrap(),
+            false,
+        );
+        let out = join(
+            &left,
+            &right,
+            vec!["key"],
+            vec!["key"],
+            JoinType::Inner,
+            JoinOptions {
+                case_sensitive: false,
+                coalesce_same_name_keys: true,
+                mark_join_keys_ambiguous: false,
+                origin: JoinOrigin::ColumnOn,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(out.get_column_dtype("key"), Some(PlDataType::Float32));
+        let rows = out.collect_as_json_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].get("key").and_then(|value| value.as_f64()),
+            Some(1.5)
+        );
+    }
+
+    #[test]
     fn left_join() {
         let left = left_df();
         let right = right_df();

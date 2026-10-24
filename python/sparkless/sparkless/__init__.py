@@ -67,6 +67,8 @@ _mod = __import__(
         "array_compact",
         "posexplode",
         "to_timestamp",
+        "to_timestamp_ltz",
+        "to_timestamp_ntz",
         "to_date",
         "current_date",
         "current_timestamp",
@@ -274,6 +276,8 @@ def _ensure_str_dict(properties: Dict[str, object] | None) -> Dict[str, str]:
 
 
 to_timestamp = _mod.to_timestamp
+to_timestamp_ltz = _mod.to_timestamp_ltz
+to_timestamp_ntz = _mod.to_timestamp_ntz
 to_date = _mod.to_date
 current_date = _mod.current_date
 current_timestamp = _mod.current_timestamp
@@ -418,6 +422,7 @@ def __getattr__(name: str) -> object:
         "BooleanType",
         "DateType",
         "TimestampType",
+        "TimestampNTZType",
         "ArrayType",
         "MapType",
         "DecimalType",

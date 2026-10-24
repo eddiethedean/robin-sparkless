@@ -4664,9 +4664,10 @@ pub fn apply_make_timestamp(
                 }
             }),
         );
-    let out_series = out
-        .into_series()
-        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    let out_series = out.into_series().cast(&DataType::Datetime(
+        TimeUnit::Microseconds,
+        Some(polars::prelude::TimeZone::UTC),
+    ))?;
     Ok(Some(Column::new(name, out_series)))
 }
 
@@ -4701,11 +4702,17 @@ pub fn apply_to_timestamp_format(
         let dtype = series.dtype();
         match dtype {
             DataType::Datetime(_, _) => {
-                let out_series = series.cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                let out_series = series.cast(&DataType::Datetime(
+                    TimeUnit::Microseconds,
+                    Some(polars::prelude::TimeZone::UTC),
+                ))?;
                 return Ok(Some(Column::new(name, out_series)));
             }
             DataType::Date => {
-                let out_series = series.cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                let out_series = series.cast(&DataType::Datetime(
+                    TimeUnit::Microseconds,
+                    Some(polars::prelude::TimeZone::UTC),
+                ))?;
                 return Ok(Some(Column::new(name, out_series)));
             }
             DataType::Int32 | DataType::Int64 => {
@@ -4717,7 +4724,10 @@ pub fn apply_to_timestamp_format(
                 );
                 let out_series = out
                     .into_series()
-                    .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                    .cast(&DataType::Datetime(
+                        TimeUnit::Microseconds,
+                        Some(polars::prelude::TimeZone::UTC),
+                    ))?;
                 return Ok(Some(Column::new(name, out_series)));
             }
             DataType::Float64 => {
@@ -4730,7 +4740,10 @@ pub fn apply_to_timestamp_format(
                 );
                 let out_series = out
                     .into_series()
-                    .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                    .cast(&DataType::Datetime(
+                        TimeUnit::Microseconds,
+                        Some(polars::prelude::TimeZone::UTC),
+                    ))?;
                 return Ok(Some(Column::new(name, out_series)));
             }
             // BooleanType: unsupported for conversion; return null timestamp column (PySpark parity #1252).
@@ -4742,7 +4755,10 @@ pub fn apply_to_timestamp_format(
                 );
                 let out_series = out
                     .into_series()
-                    .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+                    .cast(&DataType::Datetime(
+                        TimeUnit::Microseconds,
+                        Some(polars::prelude::TimeZone::UTC),
+                    ))?;
                 return Ok(Some(Column::new(name, out_series)));
             }
             _ => {
@@ -4796,9 +4812,10 @@ pub fn apply_to_timestamp_format(
             })
         }),
     );
-    let out_series = out
-        .into_series()
-        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    let out_series = out.into_series().cast(&DataType::Datetime(
+        TimeUnit::Microseconds,
+        Some(polars::prelude::TimeZone::UTC),
+    ))?;
     if strict {
         // to_timestamp: ensure no nulls introduced by parse (optional: could check and error)
         Ok(Some(Column::new(name, out_series)))
@@ -4848,9 +4865,10 @@ pub fn apply_to_timestamp_strip_fraction_recent_null(
             })
         }),
     );
-    let out_series = out
-        .into_series()
-        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    let out_series = out.into_series().cast(&DataType::Datetime(
+        TimeUnit::Microseconds,
+        Some(polars::prelude::TimeZone::UTC),
+    ))?;
     Ok(Some(Column::new(name, out_series)))
 }
 
@@ -7042,9 +7060,10 @@ pub fn apply_to_timestamp_ltz_format(
             })
         }),
     );
-    let out_series = out
-        .into_series()
-        .cast(&DataType::Datetime(TimeUnit::Microseconds, None))?;
+    let out_series = out.into_series().cast(&DataType::Datetime(
+        TimeUnit::Microseconds,
+        Some(polars::prelude::TimeZone::UTC),
+    ))?;
     let _ = strict;
     Ok(Some(Column::new(name, out_series)))
 }

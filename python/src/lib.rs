@@ -7,7 +7,7 @@
 
 mod external_catalog;
 
-use polars::prelude::{CollectBatches, DataFrame as PlDataFrame};
+use polars::prelude::DataFrame as PlDataFrame;
 use polars_plan::dsl::AggExpr;
 use pyo3::class::basic::CompareOp;
 use pyo3::create_exception;
@@ -633,7 +633,18 @@ fn json_value_to_py_with_schema(
     _output_column_names: Option<&[String]>,
 ) -> PyResult<PyObject> {
     Ok(match (dtype, value) {
-        (Some(DataType::Timestamp), JsonValue::String(s)) => datetime_cls
+        (Some(DataType::Timestamp), JsonValue::String(s)) => {
+            // PySpark exposes TimestampType values as naive Python datetimes even
+            // though the engine stores these values as UTC instants. TimestampNTZ
+            // values remain timezone-free by construction and use the branch below.
+            let value = datetime_cls.call_method1("fromisoformat", (s.as_str(),))?;
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("tzinfo", py.None())?;
+            value
+                .call_method("replace", (), Some(&kwargs))?
+                .into_py_any(py)?
+        }
+        (Some(DataType::TimestampNtz), JsonValue::String(s)) => datetime_cls
             .call_method1("fromisoformat", (s.as_str(),))
             .and_then(|o| o.into_py_any(py))
             .or_else(|_| into_py_object(py, s.clone()))?,
@@ -652,7 +663,7 @@ fn json_value_to_py_with_schema(
                 s.to_string().into_py_any(py)?
             }
         }
-        (Some(DataType::Double), JsonValue::String(s)) => {
+        (Some(DataType::Float | DataType::Double), JsonValue::String(s)) => {
             let s = s.trim();
             if let Ok(f) = s.parse::<f64>() {
                 f.into_py_any(py)?
@@ -2428,6 +2439,7 @@ fn spark_type_to_arrow_type(
         DataType::Short => ("int16", Vec::new()),
         DataType::Integer => ("int32", Vec::new()),
         DataType::Long => ("int64", Vec::new()),
+        DataType::Float => ("float32", Vec::new()),
         DataType::Double => ("float64", Vec::new()),
         DataType::Decimal(precision, scale) => {
             return pa
@@ -2437,7 +2449,7 @@ fn spark_type_to_arrow_type(
         }
         DataType::Boolean => ("bool_", Vec::new()),
         DataType::Date => ("date32", Vec::new()),
-        DataType::Timestamp => {
+        DataType::Timestamp | DataType::TimestampNtz => {
             return pa.getattr("timestamp")?.call1(("us",))?.into_py_any(py);
         }
         DataType::Binary => ("binary", Vec::new()),
@@ -3922,6 +3934,7 @@ fn simple_string_to_type(s: &str) -> String {
         "boolean" | "bool" => "boolean".to_string(),
         "date" => "date".to_string(),
         "timestamp" => "timestamp".to_string(),
+        "timestamp_ntz" => "timestamp_ntz".to_string(),
         "binary" => "binary".to_string(),
         "list" | "array" => lower,
         _ if lower.starts_with("array<") && lower.ends_with('>') => trimmed.to_string(),
@@ -5797,12 +5810,13 @@ fn is_fill_compatible_with_schema_dtype(
 ) -> bool {
     use robin_sparkless::schema::DataType as SchemaDataType;
     match kind {
-        // Integers and floats can fill numeric columns (int/long/double).
+        // Integers and floats can fill numeric columns (int/long/float/double).
         FillValueKind::Int | FillValueKind::Float => matches!(
             dt,
             SchemaDataType::Short
                 | SchemaDataType::Integer
                 | SchemaDataType::Long
+                | SchemaDataType::Float
                 | SchemaDataType::Double
                 | SchemaDataType::Decimal(_, _)
         ),
@@ -6546,7 +6560,7 @@ struct PyDataFrame {
 
 #[pyclass(module = "sparkless.sql.session", unsendable)]
 struct PyArrowBatchIterator {
-    batches: Option<CollectBatches>,
+    batches: Option<robin_sparkless::DataFrameBatches>,
     template: Py<PyDataFrame>,
     max_rows: usize,
     max_bytes: usize,
@@ -6561,7 +6575,7 @@ impl PyArrowBatchIterator {
     fn next_source_batch(
         &mut self,
         py: Python<'_>,
-    ) -> Option<Result<PlDataFrame, polars::prelude::PolarsError>> {
+    ) -> Option<Result<PlDataFrame, robin_sparkless_core::EngineError>> {
         let batches = self.batches.take()?;
         let (batches, next) = py.detach(move || {
             let mut batches = batches;
@@ -6589,7 +6603,7 @@ impl PyArrowBatchIterator {
     fn next_source_row(
         &mut self,
         py: Python<'_>,
-    ) -> Option<Result<PlDataFrame, polars::prelude::PolarsError>> {
+    ) -> Option<Result<PlDataFrame, robin_sparkless_core::EngineError>> {
         if let Some(pending) = self.pending.as_ref() {
             let row = pending.slice(self.pending_offset as i64, 1);
             self.pending_offset += 1;
@@ -7407,8 +7421,11 @@ impl PyDataFrame {
 
         // Fetch one source row at a time so max_bytes is applied before the producer
         // can materialize a large row batch in memory.
-        let batches = self.inner.collect_batches(1).map_err(to_py_err)?;
         let action = self.begin_action();
+        let batches = self
+            .inner
+            .collect_batches_with_cancellation(1, &action.token)
+            .map_err(to_py_err)?;
         let template = Py::new(py, self.wrap_derived(self.inner.clone()))?;
         Py::new(
             py,
@@ -8674,6 +8691,7 @@ impl PyDataFrame {
                 DataType::Short => mk0("ShortType"),
                 DataType::Integer => mk0("IntegerType"),
                 DataType::Long => mk0("LongType"),
+                DataType::Float => mk0("FloatType"),
                 DataType::Double => mk0("DoubleType"),
                 DataType::Decimal(precision, scale) => Ok(types_mod
                     .getattr("DecimalType")?
@@ -8682,6 +8700,7 @@ impl PyDataFrame {
                 DataType::Boolean => mk0("BooleanType"),
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
+                DataType::TimestampNtz => mk0("TimestampNTZType"),
                 DataType::Binary => mk0("BinaryType"),
                 DataType::Array(elem)
                     if map_paths.contains(path)
@@ -8831,6 +8850,7 @@ impl PyDataFrame {
                 DataType::Short => mk0("ShortType"),
                 DataType::Integer => mk0("IntegerType"),
                 DataType::Long => mk0("LongType"),
+                DataType::Float => mk0("FloatType"),
                 DataType::Double => mk0("DoubleType"),
                 DataType::Decimal(precision, scale) => Ok(types_mod
                     .getattr("DecimalType")?
@@ -8839,6 +8859,7 @@ impl PyDataFrame {
                 DataType::Boolean => mk0("BooleanType"),
                 DataType::Date => mk0("DateType"),
                 DataType::Timestamp => mk0("TimestampType"),
+                DataType::TimestampNtz => mk0("TimestampNTZType"),
                 DataType::Binary => mk0("BinaryType"),
                 DataType::Array(elem) => {
                     let elem_py = dtype_to_py(py, types_mod, elem)?;
@@ -10520,6 +10541,7 @@ impl PyDataFrame {
                     DataType::Short => "smallint".to_string(),
                     DataType::Integer => "int".to_string(),
                     DataType::Long => "long".to_string(),
+                    DataType::Float => "float".to_string(),
                     DataType::Double => "double".to_string(),
                     DataType::Decimal(precision, scale) => {
                         format!("decimal({precision},{scale})")
@@ -10527,6 +10549,7 @@ impl PyDataFrame {
                     DataType::Boolean => "boolean".to_string(),
                     DataType::Date => "date".to_string(),
                     DataType::Timestamp => "timestamp".to_string(),
+                    DataType::TimestampNtz => "timestamp_ntz".to_string(),
                     DataType::Binary => "binary".to_string(),
                     DataType::Array(_) => "array".to_string(),
                     DataType::Map(_, _) => "map".to_string(),
@@ -14014,6 +14037,22 @@ fn to_timestamp(column: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
 
 #[pyfunction]
 #[pyo3(signature = (column, format=None))]
+fn to_timestamp_ltz(column: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    functions::to_timestamp_ltz(&column.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, format=None))]
+fn to_timestamp_ntz(column: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
+    functions::to_timestamp_ntz(&column.inner, format)
+        .map(|c| PyColumn { inner: c })
+        .map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(signature = (column, format=None))]
 fn to_date(column: &PyColumn, format: Option<&str>) -> PyResult<PyColumn> {
     functions::to_date(&column.inner, format)
         .map(|c| PyColumn { inner: c })
@@ -14710,7 +14749,7 @@ fn py_type_str_to_core_data_type(s: &str) -> CoreDataType {
         "int" => CoreDataType::Integer,
         "short" | "smallint" => CoreDataType::Short,
         "double" => CoreDataType::Double,
-        "float" => CoreDataType::Double,
+        "float" => CoreDataType::Float,
         _ if type_str.starts_with("decimal(") => {
             let args = type_str
                 .trim_start_matches("decimal(")
@@ -14724,6 +14763,7 @@ fn py_type_str_to_core_data_type(s: &str) -> CoreDataType {
         "boolean" => CoreDataType::Boolean,
         "date" => CoreDataType::Date,
         "timestamp" => CoreDataType::Timestamp,
+        "timestamp_ntz" => CoreDataType::TimestampNtz,
         "binary" => CoreDataType::Binary,
         _ => CoreDataType::String,
     }
@@ -15301,6 +15341,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(posexplode, m)?)?;
     m.add_function(wrap_pyfunction!(posexplode_outer, m)?)?;
     m.add_function(wrap_pyfunction!(to_timestamp, m)?)?;
+    m.add_function(wrap_pyfunction!(to_timestamp_ltz, m)?)?;
+    m.add_function(wrap_pyfunction!(to_timestamp_ntz, m)?)?;
     m.add_function(wrap_pyfunction!(to_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_date, m)?)?;
     m.add_function(wrap_pyfunction!(current_timestamp, m)?)?;

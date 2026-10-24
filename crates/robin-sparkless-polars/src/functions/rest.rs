@@ -3133,7 +3133,7 @@ pub fn try_to_number(column: &Column, _format: Option<&str>) -> Result<Column, S
 /// maps the source column with a UDF that strips fraction, parses, and returns null when parsed is
 /// "recent" (within 31 days of ref_ts). PySpark parity #168/#153; no column-name allowlist.
 pub fn to_timestamp_fused_strip_fraction(column: &Column, format: &str) -> Result<Column, String> {
-    use polars::prelude::{DataType, Field, TimeUnit};
+    use polars::prelude::{DataType, Field, TimeUnit, TimeZone};
     let ref_ts = chrono::Utc::now();
     let out_name = format!("to_timestamp({}, {format})", column.name());
     let out_name2 = out_name.clone();
@@ -3149,7 +3149,7 @@ pub fn to_timestamp_fused_strip_fraction(column: &Column, format: &str) -> Resul
         move |_schema, field| match field.dtype() {
             DataType::String => Ok(Field::new(
                 out_name2.clone().into(),
-                DataType::Datetime(TimeUnit::Microseconds, None),
+                DataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
             )),
             _ => Err(polars::prelude::PolarsError::ComputeError(
                 "to_timestamp fused path requires StringType".into(),
@@ -3165,7 +3165,7 @@ pub fn to_timestamp_fused_strip_fraction(column: &Column, format: &str) -> Resul
 /// Cast to timestamp, or parse with format when provided (PySpark to_timestamp).
 /// When format is None, parses string columns with default format "%Y-%m-%d %H:%M:%S" (PySpark parity #273).
 pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, String> {
-    use polars::prelude::{DataType, Field, TimeUnit};
+    use polars::prelude::{DataType, Field, TimeUnit, TimeZone};
     let fmt_owned = format.map(|s| s.to_string());
     let out_name = match format {
         None => format!("to_timestamp({})", column.name()),
@@ -3197,7 +3197,7 @@ pub fn to_timestamp(column: &Column, format: Option<&str>) -> Result<Column, Str
                 | DataType::Float64
                 | DataType::Boolean => Ok(Field::new(
                     out_name2.clone().into(),
-                    DataType::Datetime(TimeUnit::Microseconds, None),
+                    DataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
                 )),
                 _ => Err(polars::prelude::PolarsError::ComputeError(
                     "to_timestamp requires StringType, TimestampType, IntegerType, LongType, DateType, or DoubleType"
@@ -3229,7 +3229,7 @@ pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Result<Column,
         |_schema, field| {
             Ok(Field::new(
                 field.name().clone(),
-                DataType::Datetime(TimeUnit::Microseconds, None),
+                DataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
             ))
         },
     );
@@ -3238,7 +3238,7 @@ pub fn try_to_timestamp(column: &Column, format: Option<&str>) -> Result<Column,
 
 /// Parse as timestamp in local timezone, return UTC (PySpark to_timestamp_ltz).
 pub fn to_timestamp_ltz(column: &Column, format: Option<&str>) -> Result<Column, String> {
-    use polars::prelude::{DataType, Field, TimeUnit};
+    use polars::prelude::{DataType, Field, TimeUnit, TimeZone};
     match format {
         None => crate::cast(column, "timestamp"),
         Some(fmt) => {
@@ -3254,7 +3254,7 @@ pub fn to_timestamp_ltz(column: &Column, format: Option<&str>) -> Result<Column,
                 |_schema, field| {
                     Ok(Field::new(
                         field.name().clone(),
-                        DataType::Datetime(TimeUnit::Microseconds, None),
+                        DataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
                     ))
                 },
             );
@@ -3267,7 +3267,7 @@ pub fn to_timestamp_ltz(column: &Column, format: Option<&str>) -> Result<Column,
 pub fn to_timestamp_ntz(column: &Column, format: Option<&str>) -> Result<Column, String> {
     use polars::prelude::{DataType, Field, TimeUnit};
     match format {
-        None => crate::cast(column, "timestamp"),
+        None => crate::cast(column, "timestamp_ntz"),
         Some(fmt) => {
             let fmt_owned = fmt.to_string();
             let expr = column.expr().clone().map(
@@ -3869,7 +3869,9 @@ pub fn make_timestamp_ntz(
     minute: &Column,
     sec: &Column,
 ) -> Column {
-    make_timestamp(year, month, day, hour, minute, sec, None)
+    let timestamp = make_timestamp(year, month, day, hour, minute, sec, None);
+    crate::cast(&timestamp, "timestamp_ntz")
+        .expect("make_timestamp_ntz casts its timestamp result to TIMESTAMP_NTZ")
 }
 
 /// Convert seconds since epoch to timestamp (PySpark timestamp_seconds).

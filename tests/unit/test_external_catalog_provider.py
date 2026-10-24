@@ -272,6 +272,8 @@ def test_schema_bridge_preserves_recursive_types_and_integer_widths():
             T.StructField("int", T.IntegerType(), False),
             T.StructField("long", T.LongType()),
             T.StructField("short", T.ShortType()),
+            T.StructField("score", T.FloatType()),
+            T.StructField("local_time", T.TimestampNTZType()),
             T.StructField(
                 "nested",
                 T.ArrayType(
@@ -293,6 +295,8 @@ def test_schema_bridge_preserves_recursive_types_and_integer_widths():
     assert type(table.schema["int"].dataType) is T.IntegerType
     assert type(table.schema["long"].dataType) is T.LongType
     assert type(table.schema["short"].dataType) is T.ShortType
+    assert type(table.schema["score"].dataType) is T.FloatType
+    assert type(table.schema["local_time"].dataType) is T.TimestampNTZType
     assert table.schema["int"].nullable is False
     nested = table.schema["nested"].dataType.elementType.valueType
     assert nested["decimal"].dataType.precision == 18
@@ -798,10 +802,12 @@ def test_public_validators_accept_all_native_schema_types():
             T.StructField("short", T.ShortType()),
             T.StructField("long", T.LongType()),
             T.StructField("double", T.DoubleType()),
+            T.StructField("float", T.FloatType()),
             T.StructField("decimal", T.DecimalType(18, 3)),
             T.StructField("boolean", T.BooleanType()),
             T.StructField("date", T.DateType()),
             T.StructField("timestamp", T.TimestampType()),
+            T.StructField("timestamp_ntz", T.TimestampNTZType()),
             T.StructField("binary", T.BinaryType()),
             T.StructField("array", T.ArrayType(T.LongType())),
             T.StructField("map", T.MapType(T.StringType(), T.LongType())),

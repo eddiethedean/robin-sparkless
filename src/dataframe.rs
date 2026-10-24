@@ -4,6 +4,7 @@ use robin_sparkless_core::EngineError;
 use robin_sparkless_core::engine::{CollectedRows, DataFrameBackend, GroupedDataBackend};
 use robin_sparkless_core::expr::ExprIr;
 use robin_sparkless_core::{CancellationToken, DataType, StructType};
+pub use robin_sparkless_polars::DataFrameBatches;
 pub use robin_sparkless_polars::dataframe::PositionalJsonResult;
 use robin_sparkless_polars::dataframe::{
     DataFrameNa as PolarsDataFrameNa, DataFrameStat as PolarsDataFrameStat,
@@ -238,6 +239,15 @@ impl DataFrame {
         max_rows: usize,
     ) -> Result<robin_sparkless_polars::CollectBatches, PolarsError> {
         self.0.collect_batches(max_rows)
+    }
+
+    /// Execute bounded batches with cooperative cancellation and native range support.
+    pub fn collect_batches_with_cancellation(
+        &self,
+        max_rows: usize,
+        token: &CancellationToken,
+    ) -> Result<DataFrameBatches, EngineError> {
+        self.0.collect_batches_with_cancellation(max_rows, token)
     }
 
     pub fn collect_as_json_rows_engine(

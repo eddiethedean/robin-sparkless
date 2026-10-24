@@ -52,6 +52,7 @@ class SparkImports:
     BooleanType: Any
     DateType: Any
     TimestampType: Any
+    TimestampNTZType: Any
     ArrayType: Any
     MapType: Any
     DecimalType: Any
@@ -85,6 +86,7 @@ class SparkImports:
             from pyspark.sql import functions as F
             from pyspark.sql import Window
             from pyspark.sql import DataFrameReader
+            from pyspark.sql import types as pyspark_types
             from pyspark.sql.types import (
                 ArrayType,
                 BinaryType,
@@ -121,6 +123,7 @@ class SparkImports:
             self.BooleanType = BooleanType
             self.DateType = DateType
             self.TimestampType = TimestampType
+            self.TimestampNTZType = getattr(pyspark_types, "TimestampNTZType", None)
             self.ArrayType = ArrayType
             self.MapType = MapType
             self.DecimalType = DecimalType
@@ -156,6 +159,7 @@ class SparkImports:
             StructField,
             StructType,
             TimestampType,
+            TimestampNTZType,
         )
 
         self.SparkSession = SparkSession
@@ -176,6 +180,7 @@ class SparkImports:
         self.BooleanType = BooleanType
         self.DateType = DateType
         self.TimestampType = TimestampType
+        self.TimestampNTZType = TimestampNTZType
         self.ArrayType = ArrayType
         self.MapType = MapType
         self.DecimalType = DecimalType

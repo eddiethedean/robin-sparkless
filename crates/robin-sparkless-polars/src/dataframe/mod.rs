@@ -367,6 +367,32 @@ impl IpcBatchSource {
     }
 }
 
+/// A bounded, cancellable stream of collected DataFrame batches.
+///
+/// This export iterator uses the native range producer for plans that can be
+/// evaluated per range batch, avoiding Polars' unsupported `AnonymousScan`
+/// lowering for those plans.
+pub struct DataFrameBatches {
+    source: Option<IpcBatchSource>,
+    token: CancellationToken,
+}
+
+impl Iterator for DataFrameBatches {
+    type Item = Result<PlDataFrame, EngineError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Err(error) = self.token.check_cancelled() {
+            self.source.take();
+            return Some(Err(error));
+        }
+        let result = self.source.as_mut()?.next_batch()?;
+        if result.is_err() {
+            self.source.take();
+        }
+        Some(result)
+    }
+}
+
 fn integer_literal(value: &LiteralValue) -> Option<i64> {
     let LiteralValue::Scalar(value) = value else {
         return None;
@@ -2171,32 +2197,88 @@ impl DataFrame {
         Some(StructType::new(fields))
     }
 
-    fn merged_logical_schema(&self, other: &DataFrame) -> Option<StructType> {
-        let (left, right) = match (&self.logical_schema, &other.logical_schema) {
-            (Some(left), Some(right)) => (left, Some(right)),
-            (Some(left), None) => (left, None),
-            (None, Some(right)) => (right, None),
-            (None, None) => return None,
-        };
-        if right.is_none() {
-            return Some(left.clone());
-        }
-        let right = right?;
-        if left.fields().len() != right.fields().len() {
+    fn merged_logical_schema(&self, other: &DataFrame, output: &DataFrame) -> Option<StructType> {
+        let left_schema = self.logical_schema.as_ref();
+        let right_schema = other.logical_schema.as_ref();
+        if left_schema.is_none() && right_schema.is_none() {
             return None;
         }
-        let mut merged = left.fields().to_vec();
-        for (left, right) in merged.iter_mut().zip(right.fields()) {
-            if left.name != right.name
-                || serde_json::to_value(&left.data_type).ok()?
-                    != serde_json::to_value(&right.data_type).ok()?
-            {
-                return None;
-            }
-            left.nullable |= right.nullable;
-            // Union follows the left input's field metadata, matching its output field order.
+
+        let output_schema = output.schema_or_collect().ok()?;
+        let left_names = self.columns().ok()?;
+        let right_names = other.columns().ok()?;
+        let names_match = left_names.len() == right_names.len()
+            && left_names.iter().all(|left_name| {
+                right_names.iter().any(|right_name| {
+                    if self.case_sensitive {
+                        left_name == right_name
+                    } else {
+                        left_name.eq_ignore_ascii_case(right_name)
+                    }
+                })
+            });
+
+        let mut fields = Vec::with_capacity(output_schema.len());
+        for (index, (output_name, output_dtype)) in output_schema.iter().enumerate() {
+            let left_field = left_schema.and_then(|schema| {
+                schema
+                    .fields()
+                    .iter()
+                    .find(|field| {
+                        if self.case_sensitive {
+                            field.name == output_name.as_str()
+                        } else {
+                            field.name.eq_ignore_ascii_case(output_name.as_str())
+                        }
+                    })
+                    .or_else(|| schema.fields().get(index))
+            });
+            let right_field = right_schema.and_then(|schema| {
+                if names_match {
+                    schema.fields().iter().find(|field| {
+                        if self.case_sensitive {
+                            field.name == output_name.as_str()
+                        } else {
+                            field.name.eq_ignore_ascii_case(output_name.as_str())
+                        }
+                    })
+                } else {
+                    schema.fields().get(index)
+                }
+            });
+
+            // Preserve a logical declaration only when it still describes the coerced physical
+            // output. This matters for chained unions: the first union can coerce (for example)
+            // LONG + STRING to STRING, and a later union must not restore the right input's LONG
+            // sidecar over that physical STRING column.
+            let data_type = [left_field, right_field]
+                .into_iter()
+                .flatten()
+                .find(|field| {
+                    crate::schema_conv::checked_data_type_to_polars_type(
+                        &field.data_type,
+                        &field.name,
+                    )
+                    .is_ok_and(|mapped| &mapped == output_dtype)
+                })
+                .map(|field| field.data_type.clone())
+                .or_else(|| {
+                    crate::schema_conv::checked_polars_type_to_data_type(output_dtype, output_name)
+                        .ok()
+                })?;
+
+            // Union retains the left field's metadata and conservatively combines nullability.
+            // A missing sidecar means its nullability is unknown, so use nullable=true.
+            let mut field = left_field.or(right_field).cloned().unwrap_or_else(|| {
+                StructField::new(output_name.to_string(), data_type.clone(), true)
+            });
+            field.name = output_name.to_string();
+            field.data_type = data_type;
+            field.nullable = left_field.map(|field| field.nullable).unwrap_or(true)
+                || right_field.map(|field| field.nullable).unwrap_or(true);
+            fields.push(field);
         }
-        Some(StructType::new(merged))
+        Some(StructType::new(fields))
     }
 
     /// Same as [`schema`](Self::schema) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -2550,6 +2632,41 @@ impl DataFrame {
         })?;
         self.lazy_frame()
             .collect_batches(Engine::Auto, true, Some(chunk_size), true)
+    }
+
+    /// Execute this plan as bounded batches with cooperative cancellation.
+    ///
+    /// Range plans supported by the native per-batch pipeline are evaluated
+    /// directly, so streaming exports do not route those plans through an
+    /// unsupported Polars `AnonymousScan`.
+    pub fn collect_batches_with_cancellation(
+        &self,
+        max_rows: usize,
+        token: &CancellationToken,
+    ) -> Result<DataFrameBatches, EngineError> {
+        token.check_cancelled()?;
+        if max_rows == 0 {
+            return Err(EngineError::User(
+                "max_rows must be greater than zero".into(),
+            ));
+        }
+        let source = if let Some(range) = &self.range_cardinality {
+            IpcBatchSource::Range(RangeBatchProducer::new(
+                range.clone(),
+                self.case_sensitive,
+                Some(token.clone()),
+                max_rows,
+            ))
+        } else {
+            IpcBatchSource::Polars(
+                self.collect_batches(max_rows)
+                    .map_err(polars_to_core_error)?,
+            )
+        };
+        Ok(DataFrameBatches {
+            source: Some(source),
+            token: token.clone(),
+        })
     }
 
     /// Export the plan as lazy, byte- and row-bounded Arrow IPC batches.
@@ -3450,7 +3567,7 @@ impl DataFrame {
     /// Union (unionAll): stack another DataFrame vertically. Schemas must match (same columns, same order).
     pub fn union(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
         let mut combined = transformations::union(self, other, self.case_sensitive)?;
-        combined.logical_schema = self.merged_logical_schema(other);
+        combined.logical_schema = self.merged_logical_schema(other, &combined);
         Ok(combined)
     }
 
@@ -6032,6 +6149,38 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_dataframe_batches_use_the_native_range_source() {
+        let session = SparkSession::builder()
+            .app_name("projected-range-dataframe-batches")
+            .get_or_create();
+        let frame = session
+            .range(0, 10_000_000, 1)
+            .unwrap()
+            .filter(col("id").gt(40i64))
+            .unwrap()
+            .select_exprs(vec![(col("id") * lit(2i64)).alias("doubled")])
+            .unwrap()
+            .limit(3)
+            .unwrap();
+        let token = CancellationToken::new();
+        let mut batches = frame.collect_batches_with_cancellation(2, &token).unwrap();
+
+        let mut values = Vec::new();
+        for batch in &mut batches {
+            let batch = batch.unwrap();
+            values.extend(
+                batch
+                    .column("doubled")
+                    .unwrap()
+                    .i64()
+                    .unwrap()
+                    .into_no_null_iter(),
+            );
+        }
+        assert_eq!(values, vec![82, 84, 86]);
+    }
+
+    #[test]
     fn range_batch_scan_observes_cancellation_between_batches() {
         let session = SparkSession::builder()
             .app_name("cancelled-range-batches")
@@ -6303,6 +6452,42 @@ mod tests {
         let field = &unioned_schema.fields()[0];
         assert!(!field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
+    }
+
+    #[test]
+    fn union_keeps_the_coerced_physical_type_through_chained_logical_schemas() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let metadata = [("owner".to_string(), serde_json::json!("left"))]
+            .into_iter()
+            .collect();
+        let numeric = DataFrame::from_polars(polars::prelude::df!("key" => [1i64]).unwrap())
+            .with_logical_schema(StructType::new(vec![
+                StructField::new("key".into(), LogicalDataType::Long, false)
+                    .with_metadata(metadata),
+            ]))
+            .unwrap();
+        let text = DataFrame::from_polars(polars::prelude::df!("key" => ["2"]).unwrap());
+        let third_number = DataFrame::from_polars(polars::prelude::df!("key" => [3i64]).unwrap());
+
+        let first = numeric.union(&text).unwrap();
+        let first_schema = first.schema().unwrap();
+        let first_field = &first_schema.fields()[0];
+        assert!(matches!(&first_field.data_type, LogicalDataType::String));
+        assert!(first_field.nullable);
+        assert_eq!(first_field.metadata["owner"], "left");
+
+        let chained = first.union(&third_number).unwrap();
+        let chained_schema = chained.schema().unwrap();
+        let chained_field = &chained_schema.fields()[0];
+        assert!(matches!(&chained_field.data_type, LogicalDataType::String));
+        assert_eq!(chained_field.metadata["owner"], "left");
+        let (_, rows, _) = chained.collect_as_json_rows_with_names().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert!(
+            rows.iter()
+                .all(|row| row.get("key").is_some_and(serde_json::Value::is_string))
+        );
     }
 
     #[test]

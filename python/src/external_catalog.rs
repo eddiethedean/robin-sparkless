@@ -503,6 +503,9 @@ impl ExternalCatalogProvider for PythonExternalCatalogProvider {
             let table = module
                 .getattr("_descriptor_from_json")?
                 .call1((descriptor_json,))?;
+            let payload = module
+                .getattr("_normalize_python_provider_timestamp_ipc")?
+                .call1((PyBytes::new(py, &request.data.bytes), &table))?;
             let mode = match request.mode {
                 ExternalTableSaveMode::ErrorIfExists => "errorifexists",
                 ExternalTableSaveMode::Overwrite => "overwrite",
@@ -512,12 +515,7 @@ impl ExternalCatalogProvider for PythonExternalCatalogProvider {
             let kwargs = PyDict::new(py);
             kwargs.set_item("identifier", request.identifier)?;
             kwargs.set_item("table", table)?;
-            kwargs.set_item(
-                "data",
-                module
-                    .getattr("ArrowIpcStream")?
-                    .call1((PyBytes::new(py, &request.data.bytes),))?,
-            )?;
+            kwargs.set_item("data", module.getattr("ArrowIpcStream")?.call1((payload,))?)?;
             kwargs.set_item(
                 "mode",
                 module.getattr("ExternalTableSaveMode")?.call1((mode,))?,
