@@ -30,7 +30,7 @@ D05/D06 also require the complete 4.17.0 candidate inventory, exact launcher/bin
 | --- | --- | --- | --- | --- |
 | D01 | Client/proto/oracle compatibility manifest | 0A | SS-01, SS-03 | Exact pyspark-client release, matching proto tag/commit, Python range, gRPC/protobuf/PyArrow locks, generator version, reference Spark/Sail versions and settings |
 | D02 | SQL/configuration semantics | 0A | SS-01, SS-08 | Explicit engine profile, ANSI/case sensitivity/timezone/decimal behavior; mutable versus read-only configuration; unsupported keys fail |
-| D03 | Emulator prerequisite and trust scope | 0A tracking; 0B integration | SS-01, SS-07 | External owner and issue/PR, typed-result fix, exact revision/image digest and SDK version; shared sql-warehouse identity limitations |
+| D03 | Emulator prerequisite and trust scope | 0A tracking; 0B integration | SS-01, SS-07 | MiniLake adapter source revision `155cb95cd49ae476ea4392dd9b5c2f63e6341fbb`, SDK lock `0.133.0`, typed-result and mutation-route tests are recorded; upstream owner/issue or PR, image digest if used, and shared warehouse/session limitations remain tracked |
 | D04 | Supported SQL/type/JSON contract | 0A specification; 0B verification; mutation extension in 1 | SS-01, SS-05, SS-07, SS-08 | Allowlisted read-only nodes/functions, Phase 1 managed SQL/identity/status extension, logical schema JSON, exact integer/decimal/date/time/null encodings, duplicate labels, non-finite float policy |
 | D05 | Binary/platform/release matrix | 0B | SS-02, SS-06, SS-11 | Supported OS/arch/libc targets, runtime dependencies, artifact verification, package publishing order and binary-extra compatibility |
 | D06 | Launcher control and compatibility | 0B | SS-02, SS-06 | Message framing/size, per-launch identity, endpoint readiness, version negotiation, Windows/POSIX graceful shutdown, cleanup and fork restrictions |
@@ -54,8 +54,8 @@ Populate the following together at the 0A gate; file locations may be chosen dur
 | Spark Connect protocol sources/compiler | Unselected | Pending |
 | gRPC/protobuf/PyArrow dependencies | Unselected | Pending |
 | Polars/Arrow serialization boundary | Unselected | Pending |
-| Databricks SDK | Unselected | Pending |
-| Corrected emulator and image digest | Unselected | Pending external dependency |
+| Databricks SDK | `databricks-sdk==0.133.0` | Locked by MiniLake `uv.lock`; public SDK integration uses the unmodified SDK models |
+| Corrected emulator and image digest | MiniLake optional Sparkless adapter, commit [`155cb95cd49ae476ea4392dd9b5c2f63e6341fbb`](https://github.com/eddiethedean/minilake/commit/155cb95cd49ae476ea4392dd9b5c2f63e6341fbb) | Pushed to the fork branch `sparkless-phase1-adapter`; source-level live integration was used, no image digest; upstream PR/merge and owner tracking remain open |
 | Reference Spark/Sail and settings | Unselected | Pending |
 | Launcher control and HTTP envelope versions | Unselected | Pending |
 
