@@ -3012,6 +3012,116 @@ mod tests {
         server_task.await.unwrap().unwrap();
     }
 
+    #[tokio::test]
+    async fn concurrent_same_identity_appends_once_but_distinct_identities_each_commit() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let created = statement_request(
+            address,
+            &instance,
+            "concurrent-writer",
+            "create-concurrent-table",
+            "CREATE TABLE concurrent_idempotency (id BIGINT)",
+        )
+        .await;
+        assert_eq!(created["status"], "ok", "{created}");
+
+        let (first, duplicate) = tokio::join!(
+            statement_request(
+                address,
+                &instance,
+                "concurrent-writer",
+                "same-append",
+                "INSERT INTO concurrent_idempotency VALUES (1)",
+            ),
+            statement_request(
+                address,
+                &instance,
+                "concurrent-writer",
+                "same-append",
+                "INSERT INTO concurrent_idempotency VALUES (1)",
+            ),
+        );
+        assert_eq!(first["operation"]["operation_id"], "same-append");
+        assert_eq!(duplicate["operation"]["operation_id"], "same-append");
+
+        let operation = timeout(Duration::from_secs(2), async {
+            loop {
+                let (status, result) = request_json(
+                    address,
+                    "POST",
+                    "/operations/status",
+                    &json!({
+                        "server_instance_id":instance,
+                        "operation_id":"same-append"
+                    }),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK, "{result}");
+                if result["execution_state"] != "running" {
+                    break result;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("same-identity mutation should reach a terminal outcome");
+        assert_eq!(operation["effect_outcome"], "committed", "{operation}");
+
+        for operation_id in ["append-once-a", "append-once-b"] {
+            let response = statement_request(
+                address,
+                &instance,
+                "concurrent-writer",
+                operation_id,
+                "INSERT INTO concurrent_idempotency VALUES (2)",
+            )
+            .await;
+            assert_eq!(response["status"], "ok", "{response}");
+            assert_eq!(response["operation"]["effect_outcome"], "committed");
+        }
+
+        let (status, count) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"concurrent-reader",
+                "kind":"sql",
+                "code":"SELECT id FROM concurrent_idempotency ORDER BY id"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{count}");
+        assert_eq!(
+            count["data"]["application/json"]["data"],
+            json!([[1], [2], [2]])
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
     #[test]
     fn result_schema_preserves_metadata_and_keeps_native_extensions_disabled() {
         let metadata = [("owner".to_string(), json!("analytics"))]
