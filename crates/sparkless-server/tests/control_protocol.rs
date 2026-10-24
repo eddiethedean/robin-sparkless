@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -124,4 +124,68 @@ fn control_mode_reports_bound_listener_and_stops_on_versioned_command() {
     assert_eq!(stopped["type"], "stopped");
     assert_eq!(stopped["control_protocol_version"], 1);
     assert!(stopped_line.len() <= 16 * 1024);
+}
+
+#[cfg(unix)]
+#[test]
+fn serve_mode_drains_on_sigterm() {
+    let reservation = TcpListener::bind("127.0.0.1:0").expect("reserve ephemeral port");
+    let address = reservation.local_addr().expect("read reserved address");
+    drop(reservation);
+
+    let child = Command::new(env!("CARGO_BIN_EXE_sparkless-server"))
+        .args([
+            "serve",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &address.port().to_string(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start server process");
+    let mut child = ChildGuard(child);
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(status) = child.0.try_wait().expect("poll server status") {
+            panic!("server exited before becoming ready: {status}");
+        }
+        if let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(100)) {
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .expect("set health response timeout");
+            stream
+                .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .expect("send health request");
+            let mut response = String::new();
+            stream
+                .read_to_string(&mut response)
+                .expect("read health response");
+            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "server did not become ready");
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let signal = Command::new("kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status()
+        .expect("send SIGTERM");
+    assert!(signal.success(), "SIGTERM command failed: {signal}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().expect("poll stopped server") {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "server did not drain after SIGTERM"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert!(status.success(), "server exited unsuccessfully: {status}");
 }

@@ -101,8 +101,21 @@ enum ControlFrame {
 async fn control_shutdown() {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {},
+        _ = terminate_signal() => {},
         _ = read_control_commands() => {},
     }
+}
+
+#[cfg(unix)]
+async fn terminate_signal() {
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("install SIGTERM handler");
+    let _ = terminate.recv().await;
+}
+
+#[cfg(not(unix))]
+async fn terminate_signal() {
+    std::future::pending::<()>().await;
 }
 
 async fn read_control_commands() {

@@ -68,12 +68,17 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
     facade = read_toml(root / "Cargo.toml")
     core = read_toml(root / "crates/robin-sparkless-core/Cargo.toml")
     polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
+    server = read_toml(root / "crates/sparkless-server/Cargo.toml")
     native = read_toml(root / "python/Cargo.toml")
     project = read_toml(root / "python/pyproject.toml")["project"]
     packages = {
         manifest["package"]["name"]: manifest["package"]["version"]
-        for manifest in (facade, core, polars, native)
+        for manifest in (facade, core, polars, server, native)
     }
+    expected = facade["package"]["version"]
+    if _is_coordinated_release(expected):
+        parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
+        packages[parser["package"]["name"]] = parser["package"]["version"]
     packages["sparkless"] = project["version"]
     lock_versions = {
         package["name"]: package["version"]
@@ -85,7 +90,16 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         "facade/core": facade["dependencies"]["robin-sparkless-core"]["version"],
         "facade/polars": facade["dependencies"]["robin-sparkless-polars"]["version"],
         "polars/core": polars["dependencies"]["robin-sparkless-core"]["version"],
+        "server/facade": server["dependencies"]["robin-sparkless"]["version"],
+        "server/core": server["dependencies"]["robin-sparkless-core"]["version"],
     }
+    if _is_coordinated_release(expected):
+        dependencies["polars/parser"] = polars["dependencies"]["spark-sql-parser"][
+            "version"
+        ]
+        dependencies["server/parser"] = server["dependencies"]["spark-sql-parser"][
+            "version"
+        ]
     module = ast.parse((root / "python/sparkless/sparkless/__init__.py").read_text())
     python_version = next(
         node.value.value
@@ -162,33 +176,42 @@ def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
         )
 
     # From the 4.16 candidate line onward, the parser joins the coordinated first-party
-    # release inventory. Older published tags intentionally retain the parser's 0.x line.
-    if tag is not None:
-        match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag)
-        if match and (int(match.group(1)), int(match.group(2))) >= (4, 16):
-            if parser["package"]["version"] != expected:
+    # release inventory. Determine this from either the candidate manifest version or the
+    # requested tag so release-candidate branches receive the same checks as tags.
+    requested_version = (
+        tag[1:] if tag is not None and tag.startswith("v") else tag or expected
+    )
+    if _is_coordinated_release(expected) or _is_coordinated_release(requested_version):
+        if parser["package"]["version"] != expected:
+            errors.append(
+                "spark-sql-parser: version {} does not match candidate {}".format(
+                    parser["package"]["version"], expected
+                )
+            )
+        if lock_versions.get("spark-sql-parser") != parser["package"]["version"]:
+            errors.append("spark-sql-parser: Cargo.lock does not match its manifest")
+        for dependency, actual in (
+            (
+                "robin-sparkless-polars/spark-sql-parser",
+                polars["dependencies"]["spark-sql-parser"]["version"],
+            ),
+            (
+                "sparkless-server/spark-sql-parser",
+                server["dependencies"]["spark-sql-parser"]["version"],
+            ),
+        ):
+            if actual != expected:
                 errors.append(
-                    "spark-sql-parser: version {} does not match candidate {}".format(
-                        parser["package"]["version"], expected
+                    "{}: dependency version {} does not match candidate {}".format(
+                        dependency, actual, expected
                     )
                 )
-            for dependency, actual in (
-                (
-                    "robin-sparkless-polars/spark-sql-parser",
-                    polars["dependencies"]["spark-sql-parser"]["version"],
-                ),
-                (
-                    "sparkless-server/spark-sql-parser",
-                    server["dependencies"]["spark-sql-parser"]["version"],
-                ),
-            ):
-                if actual != expected:
-                    errors.append(
-                        "{}: dependency version {} does not match candidate {}".format(
-                            dependency, actual, expected
-                        )
-                    )
     return errors
+
+
+def _is_coordinated_release(version: str) -> bool:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", version)
+    return bool(match and (int(match.group(1)), int(match.group(2))) >= (4, 16))
 
 
 def main() -> int:

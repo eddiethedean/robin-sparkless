@@ -1,6 +1,6 @@
 # SS-11: Emulator gRPC integration, benchmarks, and release
 
-> **Status: planned; owner unassigned.** Phase: 0B release foundations; Phase 2 proxy and concurrent-client release.
+> **Status: release evidence in progress.** Phase: 0B release foundations; Phase 2 proxy and concurrent-client release.
 > [Index](README.md) · [Epic contract](EPIC.md#acceptance-and-release-gates) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Outcome
@@ -47,3 +47,5 @@ Resolve or explicitly defer D01, D03, D05, D08 in the [decision register](DECISI
 ## Scope notes
 
 DATABRICKS_SPARK_CONNECT_GRPC_URL configures the proxy backend (HTTP/h2c); clients still use the appropriate Spark Connect connection contract.
+
+The release workflow now includes the pinned MiniLake public-SDK suite, candidate server-binary wheel builds and fresh-install lifecycle checks, manylinux audit, and a non-root native container HTTP-SQL/graceful-shutdown gate. Tag publication waits for these jobs. A local macOS arm64 wheel and native container have been built for focused verification; these are not integrated-candidate or public-artifact evidence. Keep V15–V18, V31, V32, and the full adapter matrix open until their required revisions and outcomes are recorded in [VALIDATION.md](VALIDATION.md).

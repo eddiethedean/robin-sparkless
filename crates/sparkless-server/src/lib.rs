@@ -323,10 +323,7 @@ impl Server {
     }
 
     pub async fn serve(self) -> Result<(), ServerError> {
-        self.serve_until(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await
+        self.serve_until(shutdown_signal()).await
     }
 
     async fn startup_check(&self) -> Result<(), ServerError> {
@@ -395,6 +392,23 @@ impl Server {
             connections.abort_all();
         }
         Ok(())
+    }
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
 

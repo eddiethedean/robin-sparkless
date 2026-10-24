@@ -1,6 +1,6 @@
 # 4.16.0 implementation and release plan
 
-**Status: implementation in progress; no release gates completed.** Native control/readiness protocol work, an owned sync/async Python launcher, a platform-specific binary-wheel build path, and a native container recipe now exist. They have targeted local checks, but the 4.16 integrated contracts, advertised platform matrix, SDK/emulator route, candidate inventory, and release gates remain incomplete. This plan refines Phase 0A + 0B into reviewable delivery slices. Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.16.0**.
+**Status: implementation in progress; no release gates completed.** Native control/readiness protocol work, an owned sync/async Python launcher, a platform-specific binary-wheel build path, a native container recipe, and release workflow checks now exist. The workflow defines a candidate server-extra matrix of macOS 14 arm64 and manylinux 2.28 x86_64, plus a linux/amd64 container. Local checks cover a macOS 26 arm64 wheel and a linux/arm64 container under Docker Desktop; the container ran as UID 65532, served health and `SELECT 1`, and exited 0 after SIGTERM. The exact candidate wheel matrix, linux/amd64 image, 4.16 integrated contracts, SDK/emulator route, candidate inventory, and release gates remain incomplete. This plan refines Phase 0A + 0B into reviewable delivery slices. Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.16.0**.
 
 [Roadmap](ROADMAP.md#4160-http-service-launcher-and-unified-distribution) · [Epic](EPIC.md) · [Workstreams](README.md#workstreams) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
@@ -26,6 +26,8 @@ The choices below are the proposed 4.16 baseline for implementation. Verify them
 | Cancellation | Deadline/disconnect requests cooperative cancellation; operation owns its permit until native execution and its producer end |
 | Python discovery | Exact package-resource binary or explicit executable path; no download, build, or arbitrary PATH fallback |
 | Package coupling | `sparkless[server]` pins `sparkless-server-bin==4.16.0`; launcher validates package/binary version and independently versioned control protocol |
+| Candidate server binary targets | `macosx_14_0_arm64` and `manylinux_2_28_x86_64`; only advertise after native wheel install/start/health/shutdown gates pass |
+| Candidate native image | Single `linux/amd64` image tagged `v4.16.0`; only publish after a non-root HTTP SQL and graceful-stop smoke passes |
 
 Do not use `set_var` inside the multithreaded Rust service to reconfigure Polars. Thread-pool settings must be supplied before pool initialization and measured under concurrent load. Configuring a server session must not change the embedded engine's default semantic profile.
 
@@ -148,13 +150,13 @@ Use a versioned, bounded JSON-lines control mode over pipes owned by the launche
 
 Both sync and async implementations share ownership and compatibility rules. Async cancellation during spawn/readiness/shutdown must trigger bounded cleanup that cannot be abandoned by the same cancellation; reap before propagating it. Support Python 3.8 without assuming newer asyncio helpers are available. Document graceful pipe shutdown, forced termination, fork ownership checks, and POSIX/Windows differences.
 
-The baseline binary wheel package is `sparkless-server-bin`, containing package resources and the precompiled executable, with no runtime download/build fallback. Its version matches `sparkless` exactly in the server extra. Use genuine platform wheel tags and explicit unsupported-platform errors; do not publish a generic empty wheel that pretends to supply every platform.
+The baseline binary wheel package is `sparkless-server-bin`, containing package resources and the precompiled executable, with no runtime download/build fallback. Its version matches `sparkless` exactly in the server extra. The release workflow now builds, installs, and starts wheels tagged `macosx_14_0_arm64` and `manylinux_2_28_x86_64` on matching native runners, and checks readiness, HTTP health, and graceful shutdown. These are the only candidate `sparkless[server]` targets; all other targets must fail clearly until a wheel and lifecycle gate are added. The manylinux job also runs `auditwheel show`. Do not publish a generic empty wheel that pretends to supply every platform.
 
-Select the initial server target matrix in 416-01 and require native lifecycle evidence before advertising any target. Existing Python engine wheel support must remain intact; a platform lacking a server binary may still install ordinary `sparkless`. Unsupported `sparkless[server]` installations must fail clearly rather than silently omit the extra. The container is built from the native executable and needs no Python/JVM.
+The initial server target matrix is selected for 416-01, with advertisement still conditional on passing native lifecycle evidence. Existing Python engine wheel support remains intact; a platform lacking a server binary may still install ordinary `sparkless`. Unsupported `sparkless[server]` installations must fail clearly rather than silently omit the extra. The native image is built from the executable without Python/JVM, runs an HTTP SQL plus graceful-stop smoke before publication, and uses the coordinated version tag.
 
 ## 416-08: metadata, candidate packages, and CI
 
-The current release checker covers the facade/core/Polars/native/Python versions but omits the parser and future server distributions. The existing Rust publisher stops after `robin-sparkless`. Extend both before release. Moving `spark-sql-parser` from 0.5.0 to 4.16.0 also requires updating every first-party parser dependency; changing only its manifest leaves an invalid published graph.
+The release checker now includes `sparkless-server` in the Rust package/dependency/lock graph, requires `spark-sql-parser` version and lock alignment for any 4.16+ candidate branch even without a tag, and verifies the `sparkless-server-bin` version/extra coupling. Tests cover a coordinated 4.17 candidate branch without relying on a release tag. The release workflow publishes `sparkless-server` after the facade, publishes the tested `sparkless-server-bin` wheels before the Python extra, runs the pinned MiniLake SDK integration, and builds/smokes the native image before registry publication. Moving `spark-sql-parser` from 0.5.0 to 4.16.0 still requires updating every first-party parser dependency; changing only its manifest leaves an invalid published graph.
 
 Maintain one explicit inventory of package names, manifests, dependency edges, artifact targets, and publication destinations. Check every version and first-party dependency requirement, Cargo.lock entry, Python runtime value, binary report, wheel metadata, container tag, and `v4.16.0` tag. `sparkless-native` ships inside `sparkless` wheels; it does not add a new crates.io publication requirement.
 
@@ -173,7 +175,7 @@ Keep exact client/emulator versions and D01–D09/D11 evidence in the decision/v
 
 ## Release readiness versus completion
 
-**Ready to tag/publish:** 416-01 through 416-08 are complete; V01–V14 and V29 pass against one integrated candidate and the corrected emulator; all platforms/artifacts in the inventory are built and verified. No publication is needed to prove these pre-publication gates.
+**Ready to tag/publish:** 416-01 through 416-08 are complete; V01–V14 and V29 pass against one integrated candidate and the corrected emulator; all platforms/artifacts in the inventory are built and verified. The release workflow changes are implementation only until a non-publishing candidate run passes, including the selected wheel matrix and container smoke. No publication is needed to prove these pre-publication gates.
 
 **Released:** publish in dependency order, verify package registries plus binaries/container, and pass V30 using fresh public installs. Only then mark 4.16.0 complete. A partial registry publication is an incomplete release. Resume only missing verified artifacts; if existing published contents require correction, issue a coordinated new patch version instead of overwriting artifacts.
 

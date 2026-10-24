@@ -1,6 +1,6 @@
 # SS-02: Rust crate, CLI, and native distribution
 
-> **Status: planned; owner unassigned.** Phase: Minimal scaffolding in 0A; supported CLI/image in 0B.
+> **Status: implementation in place; platform and release evidence open.** Phase: server crate and CLI in 0A; launcher, binary wheel, and image foundations in 0B.
 > [Index](README.md) · [Epic contract](EPIC.md#workspace-build-and-distribution) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Outcome
@@ -43,6 +43,8 @@ Resolve or explicitly defer D05, D06 in the [decision register](DECISIONS.md). R
 - [rust-toolchain.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/rust-toolchain.toml)
 - [docs/RELEASING.md](../../RELEASING.md)
 
-## Scope notes
+## Current implementation state
 
-All server paths here are proposed. No server scaffold or release automation is created by this planning change.
+`crates/sparkless-server` contains the native HTTP service and `serve`/`control` commands. The package inventory includes `sparkless-server` and `sparkless-server-bin`; the latter couples its executable version to `sparkless[server]`. The release workflow builds and freshly installs the staged macOS arm64 and manylinux x86_64 wheels, audits the Linux wheel, and gates publication on the pinned SDK integration and native container SQL/shutdown smoke. The container runs the native executable as a non-root user. A local macOS arm64 wheel and local native image have focused lifecycle witnesses.
+
+Those implementations do not complete the acceptance criteria. Candidate CI still needs to pass on one integrated 4.17 revision; fresh external consumer installs, full public SDK scenarios, additional 4.16 prerequisites, and the V31/V32 artifact gates remain open. Keep the checkboxes above open until their exact platform and release evidence is recorded in [VALIDATION.md](VALIDATION.md).
