@@ -158,6 +158,9 @@ These are local component checks, not passing release gates. The current work ha
 
 - At source commit [`38ae3945098b4a349c10d9d8de4ed3bd40760634`](https://github.com/eddiethedean/robin-sparkless/commit/38ae3945098b4a349c10d9d8de4ed3bd40760634), `cargo test --locked -p robin-sparkless-core` passed all 37 tests, including an exact logical-schema metadata budget boundary: combined top-level and nested-field metadata at 32 KiB is accepted and one additional byte is rejected. Strict all-target core Clippy, `cargo fmt --check`, and `git diff --check` passed. This closes a focused D11 metadata-capacity test gap; the complete V18 type and transformation matrix remains open.
 
+
+- At source commit [`dc2bac34f8bd08ad615d2586ac9bba4f23354546`](https://github.com/eddiethedean/robin-sparkless/commit/dc2bac34f8bd08ad615d2586ac9bba4f23354546), `cargo test --release --locked -p robin-sparkless-polars --features sql --lib native_scalar_type_ipc_roundtrip_preserves_values_and_logical_schema -- --nocapture` passed. The native IPC round-trip checks signed BYTE boundary values, exact FLOAT32 values, and microsecond TIMESTAMP_NTZ physical values, alongside the serialized logical schema. Strict all-target Polars Clippy with `sql,test-hooks`, formatting, and diff checks passed on macOS arm64 / Rust 1.93.1. This is focused native V18 value evidence; these logical types remain disabled in HTTP results, and the full V18 matrix remains open.
+
 Every advertised binary-wheel platform still requires independent build/install/runtime witnesses. CI must add targeted format/clippy/tests for supported feature combinations, launcher tests on supported Python/platform versions, and the distinct direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect routes. Keep their evidence separate and do not report planned commands as passed.
 
 ## Evidence record template
