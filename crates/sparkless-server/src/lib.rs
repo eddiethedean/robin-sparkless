@@ -2045,6 +2045,13 @@ fn execute_statement(
     let frame = session
         .sql_with_cancellation(sql, token)
         .map_err(map_engine_failure)?;
+    if action != "read" {
+        // A successful mutation has already crossed its catalog publication point. Its SQL
+        // result is empty, so do not run the result collector with the request cancellation
+        // token: a deadline racing after publication must not turn a committed effect into a
+        // cancelled operation record.
+        return Ok(empty_agent_success());
+    }
     let mut fields = frame
         .schema()
         .map_err(|error| execution_failure("QueryError", &error.to_string()))?
@@ -2574,6 +2581,12 @@ mod tests {
         );
         assert!(
             validate_statement(
+                "SELECT l.id FROM left_items l INNER JOIN right_items r ON l.id = r.id AND l.kind = r.kind"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_statement(
                 "SELECT l.id FROM left_items l LEFT JOIN right_items r ON l.id = r.id"
             )
             .is_err()
@@ -2581,6 +2594,12 @@ mod tests {
         assert!(
             validate_statement(
                 "SELECT l.id FROM left_items l INNER JOIN right_items r ON l.id > r.id"
+            )
+            .is_err()
+        );
+        assert!(
+            validate_statement(
+                "SELECT l.id FROM left_items l INNER JOIN right_items r ON l.id = r.id OR l.kind = r.kind"
             )
             .is_err()
         );
