@@ -3490,10 +3490,26 @@ impl DataFrame {
     /// For `rand`/`randn`, generates one distinct value per row (PySpark-like).
     pub fn with_column(&self, column_name: &str, col: &Column) -> Result<DataFrame, PolarsError> {
         let mut output = transformations::with_column(self, column_name, col, self.case_sensitive)?;
-        if self.logical_schema.is_some()
-            && let Some(schema) = self.logical_schema_by_output_names(&output)
-        {
-            output.logical_schema = Some(schema);
+        if self.logical_schema.is_some() {
+            let expressions = output
+                .columns()?
+                .into_iter()
+                .map(|output_name| {
+                    let is_updated_column = if self.case_sensitive {
+                        output_name == column_name
+                    } else {
+                        output_name.eq_ignore_ascii_case(column_name)
+                    };
+                    if is_updated_column {
+                        col.expr().clone()
+                    } else {
+                        polars::prelude::col(output_name.as_str())
+                    }
+                })
+                .collect::<Vec<_>>();
+            output.logical_schema = self
+                .projected_logical_schema(&expressions, &output)
+                .or_else(|| self.logical_schema_by_output_names(&output));
         }
         Ok(output)
     }
@@ -6873,6 +6889,17 @@ mod tests {
         assert_eq!(selected_expr.fields()[0].name, "expr_payload");
         assert!(!expr_fields[0].nullable);
         assert_eq!(expr_fields[0].metadata["origin"], "shared catalog");
+
+        let copied = source
+            .with_column_expr("payload_copy", col("payload"))
+            .unwrap();
+        let copied_schema = copied.schema().unwrap();
+        assert_eq!(copied_schema.fields().len(), 2);
+        let LogicalDataType::Struct(copied_fields) = &copied_schema.fields()[1].data_type else {
+            panic!("a copied nested column must retain its logical struct type");
+        };
+        assert!(!copied_fields[0].nullable);
+        assert_eq!(copied_fields[0].metadata["origin"], "shared catalog");
 
         let renamed = source
             .with_column_renamed("payload", "renamed_payload")
