@@ -1088,19 +1088,12 @@ impl Server {
             Err(_) => {
                 token.cancel();
                 // spawn_blocking cannot be aborted. The operation task retains its permits and
-                // session reference and will publish the actual outcome when native work ends.
+                // session reference and is the only publisher of the actual outcome. The
+                // deadline changes the caller's response, not the retained operation state.
                 let extra = operation_id
                     .as_deref()
                     .zip(operation.as_ref())
-                    .map(|(id, record)| {
-                        if let Ok(mut record) = record.lock() {
-                            record.execution_state = "running";
-                            record.effect_outcome = "pending";
-                            operation_json_from_record(&self.inner.instance_id, id, &record)
-                        } else {
-                            JsonValue::Null
-                        }
-                    });
+                    .map(|(id, record)| self.operation_json_by_record(id, record));
                 agent_error(
                     "DeadlineExceeded",
                     "response deadline elapsed; query operation status to establish the final outcome",
@@ -3007,6 +3000,100 @@ mod tests {
         assert_eq!(operation_status["effect_outcome"], "committed");
         assert_eq!(operation_status["receipt"]["kind"], "create_database");
         assert_eq!(operation_status["receipt"]["name"], "disconnected_db");
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mutation_deadline_leaves_operation_status_for_worker_to_resolve() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            response_timeout: Duration::from_nanos(1),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let source = server.inner.root_session.range(0, 500_000, 1).unwrap();
+        server
+            .inner
+            .root_session
+            .register_table("deadline_source", source);
+        let limits = ExecutionLimits {
+            max_rows: server.inner.config.max_result_rows,
+            max_result_bytes: server.inner.config.max_result_bytes,
+            max_cell_bytes: server.inner.config.max_cell_bytes,
+        };
+        let prepared_table = execute_statement(
+            &server.inner.root_session,
+            "CREATE TABLE deadline_items (id BIGINT)",
+            "create_table",
+            Some("deadline_items"),
+            limits,
+            &CancellationToken::new(),
+        )
+        .expect("prepare target table for deadline mutation");
+        assert_eq!(prepared_table["status"], "ok");
+        record_catalog_mutation(
+            &server.inner,
+            Some("deadline_items"),
+            "create_table",
+            &server.inner.root_session,
+        );
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let deadline = statement_request(
+            address,
+            &instance,
+            "deadline-writer",
+            "deadline-insert",
+            "INSERT INTO deadline_items SELECT id FROM deadline_source",
+        )
+        .await;
+        assert_eq!(deadline["ename"], "DeadlineExceeded", "{deadline}");
+        assert_eq!(deadline["operation"]["operation_id"], "deadline-insert");
+
+        let settled = timeout(Duration::from_secs(2), async {
+            loop {
+                let (status, operation) = request_json(
+                    address,
+                    "POST",
+                    "/operations/status",
+                    &json!({
+                        "server_instance_id":instance,
+                        "operation_id":"deadline-insert"
+                    }),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK, "{operation}");
+                if operation["execution_state"] != "running" {
+                    break operation;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("timed-out operation should eventually publish its native outcome");
+        assert_ne!(settled["effect_outcome"], "pending", "{settled}");
+        if settled["effect_outcome"] == "committed" {
+            assert_eq!(settled["receipt"]["kind"], "table");
+        } else {
+            assert_ne!(settled["execution_state"], "running", "{settled}");
+        }
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
