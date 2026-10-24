@@ -21,7 +21,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("control") => true,
         Some("--help") | Some("help") | None => {
             println!(
-                "Usage:\n  sparkless-server serve [--host IP] [--port PORT]\n  sparkless-server control [--host IP] [--port PORT]\n\nThe control command writes bounded JSON-lines readiness and stopped records to stdout and accepts a shutdown command on stdin.\n\nEnvironment: SPARKLESS_SERVER_HOST, SPARKLESS_SERVER_PORT"
+                "Usage:\n  sparkless-server serve [--host IP] [--port PORT]\n  sparkless-server control [--host IP] [--port PORT]\n\nThe control command writes bounded JSON-lines readiness and stopped records to stdout and accepts a shutdown command on stdin.\n\nEnvironment: SPARKLESS_SERVER_HOST, SPARKLESS_SERVER_PORT, SPARKLESS_SESSION_IDLE_TTL_MS"
             );
             return Ok(());
         }

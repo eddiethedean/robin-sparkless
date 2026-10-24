@@ -4,8 +4,11 @@ Standalone native HTTP statement service for Robin Sparkless.
 
 Run from the workspace with `cargo run -p sparkless-server -- serve`. It listens on
 `127.0.0.1:8099` by default; use `--host`/`--port` or `SPARKLESS_SERVER_HOST` /
-`SPARKLESS_SERVER_PORT` to configure the listener. The HTTP routes are `/health`,
-`/capabilities`, `/statements`, `/close`, and `/operations/status`.
+`SPARKLESS_SERVER_PORT` to configure the listener. Ordinary sessions expire after
+15 minutes of inactivity by default; set `SPARKLESS_SESSION_IDLE_TTL_MS` to a positive
+millisecond value to change it. The reserved `sql-warehouse` session does not expire.
+The HTTP routes are `/health`, `/capabilities`, `/statements`, `/close`, and
+`/operations/status`.
 
 Owned launchers use `sparkless-server control --host 127.0.0.1 --port 0`. In this
 mode stdout contains only bounded JSON-lines records: a `ready` record after a

@@ -42,6 +42,14 @@ fn control_mode_reports_bound_listener_and_stops_on_versioned_command() {
     assert_eq!(ready["capabilities"]["agent_protocol_version"], "1");
     assert_eq!(ready["capabilities"]["mutation_protocol_version"], "1");
     assert_eq!(
+        ready["capabilities"]["limits"]["session_idle_ttl_ms"],
+        15 * 60 * 1000
+    );
+    assert_eq!(
+        ready["capabilities"]["limits"]["session_ttl_exemptions"][0],
+        "sql-warehouse"
+    );
+    assert_eq!(
         ready["capabilities"]["server_instance_id"],
         ready["server_instance_id"]
     );

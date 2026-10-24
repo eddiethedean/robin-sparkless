@@ -17,6 +17,7 @@ pub struct ServerConfig {
     pub max_active_operations: usize,
     pub max_pending_operations: usize,
     pub max_sessions: usize,
+    pub session_idle_ttl: Duration,
     pub max_mutation_records: usize,
     pub max_mutation_bytes: usize,
     pub body_read_timeout: Duration,
@@ -36,6 +37,7 @@ impl Default for ServerConfig {
             max_active_operations: 2,
             max_pending_operations: 16,
             max_sessions: 64,
+            session_idle_ttl: Duration::from_secs(15 * 60),
             max_mutation_records: 1024,
             max_mutation_bytes: 4 * 1024 * 1024,
             body_read_timeout: Duration::from_secs(10),
@@ -75,6 +77,10 @@ impl ServerConfig {
             &mut config.max_pending_operations,
         )?;
         set_usize("SPARKLESS_MAX_SESSIONS", &mut config.max_sessions)?;
+        set_duration_ms(
+            "SPARKLESS_SESSION_IDLE_TTL_MS",
+            &mut config.session_idle_ttl,
+        )?;
         set_usize(
             "SPARKLESS_MAX_MUTATION_RECORDS",
             &mut config.max_mutation_records,

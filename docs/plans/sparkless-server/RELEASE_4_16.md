@@ -70,7 +70,7 @@ These are proposed defaults for trusted local usage, not performance claims or h
 | Queue wait | 5 seconds | Remove expired work before it starts |
 | Response deadline | 30 seconds from acceptance, including queue wait | Ends waiting and requests cancellation; does not kill running native code |
 | Sessions | 64, including the reserved warehouse session | Bounded creation; no eviction of active references |
-| Idle TTL | 15 minutes for ordinary sessions | Expire only when queued/running work no longer holds a reference |
+| Idle TTL | 15 minutes for ordinary sessions; `SPARKLESS_SESSION_IDLE_TTL_MS` overrides it | Reaper runs at most every 30 seconds; expire only when queued/running work no longer holds a reference; preserve the reserved `sql-warehouse` session |
 | Live statement HTTP requests | 32 | Nonblocking reservation before body reading; keep through response disposal; health/control have separate bounded capacity |
 | Request body / SQL text | 1 MiB / 256 KiB | Bound before parsing; reject compressed request bodies initially |
 | Body read / result send wait | 5 / 5 seconds | Bound slow clients; body timeout is a transport error, not an engine cancellation result |

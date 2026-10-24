@@ -30,7 +30,7 @@ use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, Semaphore};
 use tokio::task::JoinSet;
@@ -47,6 +47,7 @@ const MAX_CATALOG_TABLES: usize = 1024;
 const MAX_SESSION_TEMP_VIEWS: usize = 128;
 const MAX_TABLE_ACCOUNTED_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CATALOG_ACCOUNTED_BYTES: usize = 256 * 1024 * 1024;
+const RESERVED_WAREHOUSE_SESSION: &str = "sql-warehouse";
 
 type HttpResponse = Response<Full<Bytes>>;
 
@@ -104,10 +105,12 @@ struct Admission {
 struct AdmissionTicket(Arc<AtomicUsize>);
 
 struct SessionLifetime {
+    id: String,
     session: SparkSession,
     generation: u64,
     serial: Arc<tokio::sync::Mutex<()>>,
     active: AtomicUsize,
+    last_activity: Mutex<Instant>,
     closing: AtomicBool,
     stopped: AtomicBool,
     server: Arc<ServerInner>,
@@ -201,6 +204,7 @@ impl Server {
                     .saturating_mul(MIN_MUTATION_RECORD_BYTES)
             && !config.body_read_timeout.is_zero()
             && !config.queue_timeout.is_zero()
+            && !config.session_idle_ttl.is_zero()
             && !config.response_timeout.is_zero();
         if !limits_valid {
             return Err(ServerError {
@@ -354,6 +358,11 @@ impl Server {
     {
         tokio::pin!(shutdown);
         let mut connections = JoinSet::new();
+        let sweep_interval = (self.inner.config.session_idle_ttl / 4)
+            .min(Duration::from_secs(30))
+            .max(Duration::from_millis(1));
+        let mut session_reaper = tokio::time::interval(sweep_interval);
+        session_reaper.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 _ = &mut shutdown => {
@@ -373,6 +382,11 @@ impl Server {
                         let _ = serve_connection(stream, server).await;
                     });
                 }
+                _ = session_reaper.tick() => {
+                    if let Err(error) = self.inner.expire_idle_sessions() {
+                        eprintln!("sparkless-server session reaper: {}", error.message);
+                    }
+                }
                 Some(_) = connections.join_next(), if !connections.is_empty() => {}
             }
         }
@@ -388,7 +402,7 @@ impl ServerInner {
     fn session_lease(self: &Arc<Self>, id: &str) -> Result<SessionLease, RequestFailure> {
         validate_identifier("session", id)?;
         let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
-        if let Some(session) = sessions.get(id) {
+        if let Some(session) = sessions.get(id).cloned() {
             if session.closing.load(Ordering::Acquire) {
                 return Err(RequestFailure {
                     status: StatusCode::CONFLICT,
@@ -396,8 +410,27 @@ impl ServerInner {
                     message: "session is closing".into(),
                 });
             }
+            let idle_expired = id != RESERVED_WAREHOUSE_SESSION
+                && session.active.load(Ordering::Acquire) == 0
+                && session
+                    .last_activity
+                    .lock()
+                    .map_err(|_| internal_failure())?
+                    .elapsed()
+                    >= self.config.session_idle_ttl;
+            if idle_expired {
+                session.closing.store(true, Ordering::Release);
+                sessions.remove(id);
+                drop(sessions);
+                session.stop_once();
+                return self.session_lease(id);
+            }
+            *session
+                .last_activity
+                .lock()
+                .map_err(|_| internal_failure())? = Instant::now();
             session.active.fetch_add(1, Ordering::AcqRel);
-            return Ok(SessionLease(Arc::clone(session)));
+            return Ok(SessionLease(session));
         }
         if self.active_sessions.load(Ordering::Acquire) >= self.config.max_sessions {
             return Err(RequestFailure {
@@ -408,10 +441,12 @@ impl ServerInner {
         }
         let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
         let lifetime = Arc::new(SessionLifetime {
+            id: id.to_string(),
             session: self.root_session.new_session(),
             generation,
             serial: Arc::new(tokio::sync::Mutex::new(())),
             active: AtomicUsize::new(1),
+            last_activity: Mutex::new(Instant::now()),
             closing: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
             server: Arc::clone(self),
@@ -423,18 +458,67 @@ impl ServerInner {
 
     fn close_session(&self, id: &str) -> Result<(), RequestFailure> {
         validate_identifier("session", id)?;
-        let session = self
-            .sessions
-            .lock()
-            .map_err(|_| internal_failure())?
-            .remove(id);
-        if let Some(session) = session {
+        let stop_now = {
+            let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            let Some(session) = sessions.get(id).cloned() else {
+                return Ok(());
+            };
             session.closing.store(true, Ordering::Release);
             if session.active.load(Ordering::Acquire) == 0 {
-                session.stop_once();
+                sessions.remove(id);
+                Some(session)
+            } else {
+                None
             }
+        };
+        if let Some(session) = stop_now {
+            session.stop_once();
         }
         Ok(())
+    }
+
+    fn expire_idle_sessions(&self) -> Result<usize, RequestFailure> {
+        let now = Instant::now();
+        let mut expired = Vec::new();
+        {
+            let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            let mut expired_ids = Vec::new();
+            for (id, session) in sessions.iter() {
+                if id == RESERVED_WAREHOUSE_SESSION || session.active.load(Ordering::Acquire) != 0 {
+                    continue;
+                }
+                let last_activity = session
+                    .last_activity
+                    .lock()
+                    .map_err(|_| internal_failure())?;
+                if now.duration_since(*last_activity) >= self.config.session_idle_ttl {
+                    expired_ids.push(id.clone());
+                }
+            }
+            for id in expired_ids {
+                if let Some(session) = sessions.remove(&id) {
+                    session.closing.store(true, Ordering::Release);
+                    expired.push(session);
+                }
+            }
+        }
+        let count = expired.len();
+        for session in expired {
+            session.stop_once();
+        }
+        Ok(count)
+    }
+
+    fn remove_closed_session(&self, id: &str, generation: u64) {
+        if let Ok(mut sessions) = self.sessions.lock()
+            && sessions.get(id).is_some_and(|session| {
+                session.generation == generation
+                    && session.closing.load(Ordering::Acquire)
+                    && session.active.load(Ordering::Acquire) == 0
+            })
+        {
+            sessions.remove(id);
+        }
     }
 
     fn reserve_admission(&self) -> Result<AdmissionTicket, RequestFailure> {
@@ -570,10 +654,16 @@ impl SessionLifetime {
 impl Drop for SessionLease {
     fn drop(&mut self) {
         let session = &self.0;
-        if session.active.fetch_sub(1, Ordering::AcqRel) == 1
-            && session.closing.load(Ordering::Acquire)
-        {
-            session.stop_once();
+        if session.active.fetch_sub(1, Ordering::AcqRel) == 1 {
+            if let Ok(mut last_activity) = session.last_activity.lock() {
+                *last_activity = Instant::now();
+            }
+            if session.closing.load(Ordering::Acquire) {
+                session.stop_once();
+                session
+                    .server
+                    .remove_closed_session(&session.id, session.generation);
+            }
         }
     }
 }
@@ -641,6 +731,8 @@ impl Server {
                 "active_operations": self.inner.config.max_active_operations,
                 "pending_operations": self.inner.config.max_pending_operations,
                 "sessions": self.inner.config.max_sessions,
+                "session_idle_ttl_ms": self.inner.config.session_idle_ttl.as_millis(),
+                "session_ttl_exemptions": [RESERVED_WAREHOUSE_SESSION],
                 "catalog_databases": MAX_CATALOG_DATABASES,
                 "catalog_tables": MAX_CATALOG_TABLES,
                 "session_temp_views": MAX_SESSION_TEMP_VIEWS,
@@ -2454,6 +2546,193 @@ mod tests {
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn idle_session_ttl_stops_only_ordinary_idle_sessions() {
+        let server = Server::new(ServerConfig {
+            session_idle_ttl: Duration::from_secs(60),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+
+        let ordinary = server.inner.session_lease("idle-client").unwrap();
+        let ordinary_generation = ordinary.0.generation;
+        drop(ordinary);
+        {
+            let session = server.inner.sessions.lock().unwrap()["idle-client"].clone();
+            *session.last_activity.lock().unwrap() =
+                Instant::now() - server.inner.config.session_idle_ttl;
+        }
+
+        assert_eq!(server.inner.expire_idle_sessions().unwrap(), 1);
+        assert_eq!(server.inner.active_sessions.load(Ordering::Acquire), 0);
+        assert!(
+            !server
+                .inner
+                .sessions
+                .lock()
+                .unwrap()
+                .contains_key("idle-client")
+        );
+
+        let replacement = server.inner.session_lease("idle-client").unwrap();
+        assert_ne!(replacement.0.generation, ordinary_generation);
+        drop(replacement);
+
+        let reserved = server
+            .inner
+            .session_lease(RESERVED_WAREHOUSE_SESSION)
+            .unwrap();
+        let reserved_generation = reserved.0.generation;
+        drop(reserved);
+        {
+            let session = server.inner.sessions.lock().unwrap()[RESERVED_WAREHOUSE_SESSION].clone();
+            *session.last_activity.lock().unwrap() =
+                Instant::now() - server.inner.config.session_idle_ttl * 10;
+        }
+
+        assert_eq!(server.inner.expire_idle_sessions().unwrap(), 0);
+        let reserved_again = server
+            .inner
+            .session_lease(RESERVED_WAREHOUSE_SESSION)
+            .unwrap();
+        assert_eq!(reserved_again.0.generation, reserved_generation);
+    }
+
+    #[test]
+    fn idle_session_ttl_does_not_expire_active_references() {
+        let server = Server::new(ServerConfig {
+            session_idle_ttl: Duration::from_secs(60),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let lease = server.inner.session_lease("active-client").unwrap();
+        {
+            *lease.0.last_activity.lock().unwrap() =
+                Instant::now() - server.inner.config.session_idle_ttl * 2;
+        }
+
+        assert_eq!(server.inner.expire_idle_sessions().unwrap(), 0);
+        assert!(
+            server
+                .inner
+                .sessions
+                .lock()
+                .unwrap()
+                .contains_key("active-client")
+        );
+        assert!(!lease.0.closing.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn zero_idle_session_ttl_is_rejected() {
+        assert!(
+            Server::new(ServerConfig {
+                session_idle_ttl: Duration::ZERO,
+                ..ServerConfig::default()
+            })
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn listener_reaper_expires_idle_sessions_without_dropping_saved_catalog() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            session_idle_ttl: Duration::from_millis(80),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.inner.root_session.register_database("ttl_survivor");
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let (status, response) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({"session":"ttl-http","kind":"sql","code":"SELECT 1 AS ready"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        let first_generation = server.inner.sessions.lock().unwrap()["ttl-http"].generation;
+
+        timeout(Duration::from_secs(2), async {
+            while server
+                .inner
+                .sessions
+                .lock()
+                .unwrap()
+                .contains_key("ttl-http")
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("listener reaper should retire the ordinary idle session");
+        assert!(server.inner.root_session.database_exists("ttl_survivor"));
+
+        let (status, response) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({"session":"ttl-http","kind":"sql","code":"SELECT 2 AS ready"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        let second_generation = server.inner.sessions.lock().unwrap()["ttl-http"].generation;
+        assert_ne!(first_generation, second_generation);
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn close_waits_for_active_references_before_reusing_session_id() {
+        let server = Server::new(ServerConfig::default()).unwrap();
+        let lease = server.inner.session_lease("closing-client").unwrap();
+        let generation = lease.0.generation;
+
+        server.inner.close_session("closing-client").unwrap();
+        let current = server.inner.sessions.lock().unwrap()["closing-client"].clone();
+        assert!(current.closing.load(Ordering::Acquire));
+        assert_eq!(current.active.load(Ordering::Acquire), 1);
+        assert!(matches!(
+            server.inner.session_lease("closing-client"),
+            Err(RequestFailure {
+                name: "SessionClosing",
+                ..
+            })
+        ));
+
+        server.inner.close_session("closing-client").unwrap();
+        drop(lease);
+        assert!(
+            !server
+                .inner
+                .sessions
+                .lock()
+                .unwrap()
+                .contains_key("closing-client")
+        );
+        assert_eq!(server.inner.active_sessions.load(Ordering::Acquire), 0);
+
+        let replacement = server.inner.session_lease("closing-client").unwrap();
+        assert_ne!(replacement.0.generation, generation);
     }
 
     #[tokio::test]
