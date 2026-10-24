@@ -6495,6 +6495,72 @@ mod tests {
     }
 
     #[test]
+    fn native_scalar_type_ipc_roundtrip_preserves_values_and_logical_schema() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{DataType as PlDataType, NamedFrom, SerReader, Series, TimeUnit};
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let tiny = Series::new("tiny".into(), [i8::MIN, 0, i8::MAX]);
+        let single = Series::new("single".into(), [1.25_f32, -0.5, 3.75]);
+        let wall_clock = Series::new("wall_clock".into(), [1_234_567_i64, -1, 9_876_543])
+            .cast(&PlDataType::Datetime(TimeUnit::Microseconds, None))
+            .unwrap();
+        let physical =
+            PlDataFrame::new_infer_height(vec![tiny.into(), single.into(), wall_clock.into()])
+                .unwrap();
+        let logical = StructType::new(vec![
+            StructField::new("tiny".into(), LogicalDataType::Byte, false),
+            StructField::new("single".into(), LogicalDataType::Float, false),
+            StructField::new("wall_clock".into(), LogicalDataType::TimestampNtz, false),
+        ]);
+        let expected_schema = logical.to_json().unwrap();
+        let source = DataFrame::from_polars(physical)
+            .with_logical_schema(logical)
+            .unwrap();
+        let batch = source
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        assert_eq!(
+            decoded.column("tiny").unwrap().i8().unwrap().get(0),
+            Some(i8::MIN)
+        );
+        assert_eq!(
+            decoded.column("tiny").unwrap().i8().unwrap().get(2),
+            Some(i8::MAX)
+        );
+        assert_eq!(
+            decoded.column("single").unwrap().f32().unwrap().get(0),
+            Some(1.25)
+        );
+        assert_eq!(
+            decoded.column("single").unwrap().f32().unwrap().get(1),
+            Some(-0.5)
+        );
+        let wall_clock = decoded.column("wall_clock").unwrap();
+        assert_eq!(
+            wall_clock.dtype(),
+            &PlDataType::Datetime(TimeUnit::Microseconds, None)
+        );
+        assert_eq!(
+            wall_clock.datetime().unwrap().physical().get(0),
+            Some(1_234_567)
+        );
+        assert_eq!(wall_clock.datetime().unwrap().physical().get(1), Some(-1));
+    }
+
+    #[test]
     fn nested_array_ipc_roundtrip_preserves_values_and_logical_schema() {
         use polars::io::ipc::IpcStreamReader;
         use polars::prelude::{IntoSeries, ListChunked, SerReader};
