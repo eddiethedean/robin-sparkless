@@ -182,6 +182,8 @@ These are local component checks, not passing release gates. The current work ha
 
 - At source commit [`f8fbd12f`](https://github.com/eddiethedean/robin-sparkless/commit/f8fbd12f), the same array-of-struct IPC test also verifies the transformed logical schema in a zero-row stream. The focused release test, strict all-target Polars Clippy, formatting, and diff checks passed. This adds one nested empty-result V18 fixture; full V18 remains open.
 
+- At source commit [`6e1230fd`](https://github.com/eddiethedean/robin-sparkless/commit/6e1230fd), `cargo test --release --locked -p sparkless-server -p robin-sparkless-polars --features sql` passed: 351 Polars library tests, 24 server library tests, 3 control-protocol tests, the live Phase 1 HTTP test, integration targets, and doctests. This includes the current mutation identity/context and nested-array IPC fixtures. It remains component evidence; V15–V18 integrated-candidate and release gates remain open.
+
 Every advertised binary-wheel platform still requires independent build/install/runtime witnesses. CI must add targeted format/clippy/tests for supported feature combinations, launcher tests on supported Python/platform versions, and the distinct direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect routes. Keep their evidence separate and do not report planned commands as passed.
 
 ## Evidence record template
