@@ -5697,6 +5697,32 @@ mod tests {
     }
 
     #[test]
+    fn range_batch_scan_observes_cancellation_between_batches() {
+        let session = SparkSession::builder()
+            .app_name("cancelled-range-batches")
+            .get_or_create();
+        let frame = session
+            .range(0, 1_000_000, 1)
+            .unwrap()
+            .filter(col("id").gt(5i64))
+            .unwrap();
+        let range = frame.range_cardinality.as_ref().unwrap().clone();
+        let token = CancellationToken::new();
+        let mut visited = 0usize;
+        let result = frame.for_each_range_batch(&range, Some(&token), |_| {
+            visited += 1;
+            token.cancel();
+            Ok(())
+        });
+
+        assert!(matches!(
+            result,
+            Err(RangeBatchError::Engine(EngineError::Cancelled(_)))
+        ));
+        assert_eq!(visited, 1);
+    }
+
+    #[test]
     fn arrow_ipc_batches_carry_the_checked_logical_schema() {
         use polars::io::ipc::IpcStreamReader;
         use polars::prelude::SerReader;
