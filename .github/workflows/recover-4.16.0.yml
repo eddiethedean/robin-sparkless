@@ -1,0 +1,425 @@
+name: Recover 4.16.0 release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Release to recover
+        type: choice
+        required: true
+        options:
+          - 4.16.0
+
+permissions:
+  contents: read
+
+jobs:
+  verify-source:
+    name: Verify original 4.16.0 release evidence
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/checkout@v4
+        with:
+          ref: v4.16.0
+          path: source
+      - name: Confirm this is the one-time 4.16.0 recovery
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          test "$RELEASE_VERSION" = "4.16.0"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git -C source rev-parse HEAD)" = "8b20ea8ce3326a38c361ec859278b32ef790f53b"
+      - name: Download original run evidence and validated server wheels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p source-evidence server-wheels
+          gh api "repos/${GH_REPO}/actions/runs/40042661738" > source-evidence/run.json
+          gh api "repos/${GH_REPO}/actions/runs/40042661738/attempts/1/jobs?per_page=100" > source-evidence/jobs.json
+          gh api "repos/${GH_REPO}/actions/runs/40042661738/artifacts?per_page=100" > source-evidence/artifacts.json
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 40042661738
+          github-token: ${{ github.token }}
+          name: sparkless-server-bin-ubuntu-22.04-manylinux_2_35_x86_64
+          path: server-wheels
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 40042661738
+          github-token: ${{ github.token }}
+          name: sparkless-server-bin-windows-latest-native
+          path: server-wheels
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 40042661738
+          github-token: ${{ github.token }}
+          name: sparkless-server-bin-macos-15-intel-macosx_15_0_x86_64
+          path: server-wheels
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 40042661738
+          github-token: ${{ github.token }}
+          name: sparkless-server-bin-macos-15-macosx_15_0_arm64
+          path: server-wheels
+      - name: Validate original checks and server wheel contents
+        run: |
+          set -euo pipefail
+          python scripts/check_4_16_recovery_source.py \
+            --run source-evidence/run.json \
+            --jobs source-evidence/jobs.json \
+            --artifacts source-evidence/artifacts.json
+          python scripts/verify_release_distributions.py \
+            --directory server-wheels \
+            --project sparkless-server-bin \
+            --version 4.16.0 \
+            --wheels 4 \
+            --sdists 0 \
+            --platform manylinux_2_35_x86_64 \
+            --platform macosx_15_0_arm64 \
+            --platform macosx_15_0_x86_64 \
+            --platform win_amd64
+      - name: Preserve verified server wheels for publishing
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-sparkless-server-bin-4.16.0
+          path: server-wheels/*.whl
+          if-no-files-found: error
+
+  build-sparkless:
+    name: Build sparkless wheel (${{ matrix.key }})
+    needs: [verify-source]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: manylinux-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2_17"
+            args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --sdist --out dist
+          - key: manylinux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2_28"
+            args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
+          - key: macos-x86_64
+            runner: macos-15
+            target: x86_64-apple-darwin
+            manylinux: auto
+            args: --locked --manifest-path python/Cargo.toml -i 3.8 --out dist
+          - key: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            manylinux: auto
+            args: --locked --manifest-path python/Cargo.toml -i 3.8 --out dist
+          - key: musllinux-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            manylinux: auto
+            args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
+          - key: musllinux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            manylinux: auto
+            args: --locked --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
+          - key: windows-x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            manylinux: auto
+            args: --locked --manifest-path python/Cargo.toml -i 3.8 --out dist
+          - key: windows-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            manylinux: auto
+            args: --locked --manifest-path python/Cargo.toml -i 3.8 --out dist
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v4.16.0
+          path: source
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          target: ${{ matrix.target }}
+          command: build
+          args: ${{ matrix.args }}
+          manylinux: ${{ matrix.manylinux }}
+          container: off
+          rust-toolchain: 1.93.1
+          working-directory: source
+      - name: Upload built distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparkless-wheel-${{ matrix.key }}
+          path: source/dist/*
+          if-no-files-found: error
+
+  verify-built-packages:
+    name: Verify complete PyPI distributions
+    needs: [verify-source, build-sparkless]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sparkless-wheel-*
+          path: dist
+          merge-multiple: true
+      - name: Validate all wheel platforms and source distribution
+        run: |
+          set -euo pipefail
+          python scripts/verify_release_distributions.py \
+            --directory dist \
+            --project sparkless \
+            --version 4.16.0 \
+            --wheels 8 \
+            --sdists 1 \
+            --platform macosx_10_12_x86_64 \
+            --platform macosx_11_0_arm64 \
+            --platform manylinux_2_17_x86_64.manylinux2014_x86_64 \
+            --platform manylinux_2_28_aarch64 \
+            --platform musllinux_1_2_aarch64 \
+            --platform musllinux_1_2_x86_64 \
+            --platform win_amd64 \
+            --platform win_arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-sparkless-4.16.0
+          path: dist/*
+          if-no-files-found: error
+
+  publish-server-bin:
+    name: Publish sparkless-server-bin to PyPI
+    needs: [verify-built-packages]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/sparkless-server-bin/4.16.0/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-sparkless-server-bin-4.16.0
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+
+  publish-sparkless:
+    name: Publish sparkless to PyPI
+    needs: [verify-built-packages, publish-server-bin]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/sparkless/4.16.0/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-sparkless-4.16.0
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+
+  publish-rust:
+    name: Publish Rust crates to crates.io
+    needs: [verify-built-packages]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v4.16.0
+          path: source
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Build docs and publish crates in dependency order
+        working-directory: source
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          cargo doc --locked --workspace --no-deps
+          publish_one() {
+            local crate="$1"
+            local output
+            local status
+            set +e
+            output=$(cargo publish --locked -p "$crate" --token "$CARGO_REGISTRY_TOKEN" 2>&1)
+            status=$?
+            set -e
+            printf '%s\n' "$output"
+            if [ "$status" -eq 0 ] || printf '%s\n' "$output" | grep -Eqi 'already uploaded'; then
+              return 0
+            fi
+            return "$status"
+          }
+          publish_one spark-sql-parser
+          publish_one robin-sparkless-core
+          publish_one robin-sparkless-polars
+          publish_one robin-sparkless
+          publish_one sparkless-server
+
+  publish-container:
+    name: Build, smoke-test, and publish GHCR image
+    needs: [verify-built-packages, publish-rust, publish-sparkless]
+    runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.push.outputs.image_digest }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v4.16.0
+          path: source
+      - name: Build the release image from the immutable tag
+        working-directory: source
+        run: >-
+          docker build --pull
+          --label org.opencontainers.image.source=https://github.com/eddiethedean/robin-sparkless
+          -f crates/sparkless-server/Dockerfile
+          -t sparkless-server:4.16.0 .
+      - name: Verify the image runs as a non-root user
+        run: |
+          set -euo pipefail
+          user="$(docker image inspect --format '{{.Config.User}}' sparkless-server:4.16.0)"
+          uid="${user%%:*}"
+          test -n "$uid"
+          test "$uid" != 0
+          test "$uid" != root
+      - name: Smoke-test HTTP and graceful shutdown
+        run: |
+          set -euo pipefail
+          name="sparkless-server-release-smoke-${GITHUB_RUN_ID}"
+          docker run -d --name "$name" -p 127.0.0.1:18099:8099 sparkless-server:4.16.0
+          cleanup() {
+            docker logs "$name" || true
+            docker rm -f "$name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          python3 source/scripts/verify_server_http.py http://127.0.0.1:18099
+          docker stop --time 10 "$name"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" = 0
+      - name: Push version and latest tags to GHCR
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag sparkless-server:4.16.0 ghcr.io/eddiethedean/sparkless-server:4.16.0
+          docker tag sparkless-server:4.16.0 ghcr.io/eddiethedean/sparkless-server:latest
+          docker push ghcr.io/eddiethedean/sparkless-server:4.16.0
+          docker push ghcr.io/eddiethedean/sparkless-server:latest
+          digest="$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/eddiethedean/sparkless-server:4.16.0)"
+          echo "image_digest=${digest##*@}" >> "$GITHUB_OUTPUT"
+
+  verify-public-release:
+    name: Verify public 4.16.0 installations
+    needs: [publish-server-bin, publish-sparkless, publish-rust, publish-container]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-sparkless-server-bin-4.16.0
+          path: public-inputs/server-bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-sparkless-4.16.0
+          path: public-inputs/sparkless
+      - name: Verify PyPI and crates.io inventories
+        run: >-
+          python scripts/verify_public_release_416.py
+          --server-bin-directory public-inputs/server-bin
+          --sparkless-directory public-inputs/sparkless
+      - name: Install and verify the published Rust server binary
+        run: |
+          set -euo pipefail
+          cargo install --locked --version 4.16.0 --root "$RUNNER_TEMP/public-rust" sparkless-server
+          test "$("$RUNNER_TEMP/public-rust/bin/sparkless-server" --version)" = "sparkless-server 4.16.0"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install and verify the published Python server extra
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          .venv/bin/python -m pip install 'sparkless[server]==4.16.0'
+          .venv/bin/python -m pip check
+          .venv/bin/python scripts/verify_server_extra_install.py 4.16.0
+          .venv/bin/python -c "from sparkless.sql import SparkSession; s = SparkSession.builder.app_name('release-4.16.0').get_or_create(); assert s.create_dataframe([(1,)], ['value']).count() == 1"
+      - name: Pull and smoke-test GHCR anonymously
+        env:
+          EXPECTED_IMAGE_DIGEST: ${{ needs.publish-container.outputs.image_digest }}
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          image=ghcr.io/eddiethedean/sparkless-server:4.16.0
+          if ! docker pull "$image"; then
+            echo "Make the sparkless-server GHCR package public, then rerun this verification job."
+            echo "Package settings: https://github.com/users/eddiethedean/packages/container/package/sparkless-server"
+            exit 1
+          fi
+          name="sparkless-server-public-smoke-${GITHUB_RUN_ID}"
+          docker run -d --name "$name" -p 127.0.0.1:18099:8099 "$image"
+          cleanup() {
+            docker logs "$name" || true
+            docker rm -f "$name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          python3 scripts/verify_server_http.py http://127.0.0.1:18099
+          actual="$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")"
+          if [[ -z "$EXPECTED_IMAGE_DIGEST" || "${actual##*@}" != "$EXPECTED_IMAGE_DIGEST" ]]; then
+            echo "pulled GHCR digest does not match the image that passed the pre-publish smoke test"
+            exit 1
+          fi
+          docker stop --time 10 "$name"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" = 0
+
+  create-github-release:
+    name: Create GitHub release record
+    needs: [verify-public-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create the 4.16.0 release entry if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view v4.16.0 >/dev/null 2>&1; then
+            echo "GitHub release v4.16.0 already exists"
+          else
+            gh release create v4.16.0 --verify-tag --title "Sparkless 4.16.0" --generate-notes
+          fi
