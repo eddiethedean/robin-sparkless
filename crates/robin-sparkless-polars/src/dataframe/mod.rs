@@ -5655,6 +5655,38 @@ mod tests {
     }
 
     #[test]
+    fn filtered_large_range_count_uses_bounded_batches() {
+        let session = SparkSession::builder()
+            .app_name("bounded-range-batches")
+            .get_or_create();
+        let frame = session
+            .range(0, 1_000_000, 1)
+            .unwrap()
+            .filter(col("id").gt(5i64))
+            .unwrap();
+        let range = frame
+            .range_cardinality
+            .as_ref()
+            .expect("range metadata survives the filter")
+            .clone();
+        let mut batch_count = 0usize;
+        let mut largest_batch = 0usize;
+        let mut matched_rows = 0u64;
+        let result = frame.for_each_range_batch(&range, None, |batch| {
+            batch_count += 1;
+            largest_batch = largest_batch.max(batch.height());
+            matched_rows += batch.height() as u64;
+            Ok(())
+        });
+
+        assert!(result.is_ok(), "range batch scan returned an error");
+        assert!(batch_count > 1, "large input must be split into batches");
+        assert!(largest_batch <= RANGE_EXECUTION_BATCH_ROWS);
+        assert_eq!(matched_rows, 999_994);
+        assert_eq!(frame.count().unwrap(), matched_rows as usize);
+    }
+
+    #[test]
     fn arrow_ipc_batches_carry_the_checked_logical_schema() {
         use polars::io::ipc::IpcStreamReader;
         use polars::prelude::SerReader;
