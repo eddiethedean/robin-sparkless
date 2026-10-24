@@ -27,7 +27,8 @@ use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
 use polars::prelude::{
     AnyValue, CollectBatches, DataFrame as PlDataFrame, DataType, Engine, Expr, Field, IntoLazy,
-    LazyFrame, NULL, PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes, UnknownKind, col, lit,
+    LazyFrame, LiteralValue, NULL, Operator, PlSmallStr, PolarsError, Schema, SchemaNamesAndDtypes,
+    UnknownKind, col, lit,
 };
 use robin_sparkless_core::engine::{
     ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, ExternalCatalogProvider,
@@ -44,6 +45,113 @@ use std::sync::Arc;
 const DEFAULT_CASE_SENSITIVE: bool = false;
 const DEFAULT_EXTERNAL_ARROW_BATCH_ROWS: usize = 10_000;
 const DEFAULT_EXTERNAL_ARROW_BATCH_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RangeCardinality {
+    pub start: i64,
+    pub step: i64,
+    pub row_count: u64,
+}
+
+impl RangeCardinality {
+    pub(crate) fn count_matching(self, expression: &Expr) -> Option<u64> {
+        let Expr::BinaryExpr { left, op, right } = expression else {
+            return None;
+        };
+        let (operator, threshold) = match (left.as_ref(), right.as_ref()) {
+            (Expr::Column(name), Expr::Literal(value))
+                if name.as_str().eq_ignore_ascii_case("id") =>
+            {
+                (*op, integer_literal(value)?)
+            }
+            (Expr::Literal(value), Expr::Column(name))
+                if name.as_str().eq_ignore_ascii_case("id") =>
+            {
+                (reverse_comparison(*op)?, integer_literal(value)?)
+            }
+            _ => return None,
+        };
+
+        if self.row_count == 0 {
+            return Some(0);
+        }
+        if matches!(
+            operator,
+            Operator::Eq | Operator::EqValidity | Operator::NotEq | Operator::NotEqValidity
+        ) {
+            let delta = threshold as i128 - self.start as i128;
+            let step = self.step as i128;
+            let equal = if delta % step == 0 {
+                let index = delta / step;
+                (index >= 0 && (index as u128) < self.row_count as u128) as u64
+            } else {
+                0
+            };
+            return Some(if matches!(operator, Operator::Eq | Operator::EqValidity) {
+                equal
+            } else {
+                self.row_count - equal
+            });
+        }
+
+        let matches = |index: u64| {
+            let value = self.start as i128 + index as i128 * self.step as i128;
+            match operator {
+                Operator::Lt => value < threshold as i128,
+                Operator::LtEq => value <= threshold as i128,
+                Operator::Gt => value > threshold as i128,
+                Operator::GtEq => value >= threshold as i128,
+                _ => return false,
+            }
+        };
+        let first = matches(0);
+        let last = matches(self.row_count - 1);
+        if first == last {
+            return Some(if first { self.row_count } else { 0 });
+        }
+
+        let mut low = 1;
+        let mut high = self.row_count;
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if matches(middle) == first {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        Some(if first { low } else { self.row_count - low })
+    }
+}
+
+fn integer_literal(value: &LiteralValue) -> Option<i64> {
+    let LiteralValue::Scalar(value) = value else {
+        return None;
+    };
+    match value.as_any_value() {
+        AnyValue::Int8(value) => Some(value as i64),
+        AnyValue::Int16(value) => Some(value as i64),
+        AnyValue::Int32(value) => Some(value as i64),
+        AnyValue::Int64(value) => Some(value),
+        AnyValue::UInt8(value) => Some(value as i64),
+        AnyValue::UInt16(value) => Some(value as i64),
+        AnyValue::UInt32(value) => Some(value as i64),
+        AnyValue::UInt64(value) => i64::try_from(value).ok(),
+        _ => None,
+    }
+}
+
+fn reverse_comparison(operator: Operator) -> Option<Operator> {
+    Some(match operator {
+        Operator::Eq | Operator::EqValidity => operator,
+        Operator::NotEq | Operator::NotEqValidity => operator,
+        Operator::Lt => Operator::Gt,
+        Operator::LtEq => Operator::GtEq,
+        Operator::Gt => Operator::Lt,
+        Operator::GtEq => Operator::LtEq,
+        _ => return None,
+    })
+}
 
 fn external_arrow_batch_limit(
     options: Option<&[(String, String)]>,
@@ -346,6 +454,10 @@ pub struct DataFrame {
     pub(crate) pre_select_lf: Option<LazyFrame>,
     /// Projection exprs from the most recent select (re-applied after sort on pre_select_lf).
     pub(crate) post_select_exprs: Option<Vec<Expr>>,
+    /// Exact row count for a source whose cardinality is known without scanning rows.
+    /// Transformations that can change cardinality must clear this hint.
+    pub(crate) row_count_hint: Option<u64>,
+    pub(crate) range_cardinality: Option<RangeCardinality>,
 }
 
 /// Spec for groupBy: either a column name (str) or a Column expression (e.g. col("a").alias("x")).
@@ -368,6 +480,8 @@ impl DataFrame {
             ambiguous_columns: None,
             pre_select_lf: None,
             post_select_exprs: None,
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -382,6 +496,8 @@ impl DataFrame {
             ambiguous_columns: None,
             pre_select_lf: None,
             post_select_exprs: None,
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -396,6 +512,8 @@ impl DataFrame {
             ambiguous_columns: None,
             pre_select_lf: None,
             post_select_exprs: None,
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -408,6 +526,8 @@ impl DataFrame {
             ambiguous_columns: None,
             pre_select_lf: None,
             post_select_exprs: None,
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -420,6 +540,8 @@ impl DataFrame {
             ambiguous_columns: None,
             pre_select_lf: None,
             post_select_exprs: None,
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -436,6 +558,8 @@ impl DataFrame {
             ambiguous_columns: None,
             pre_select_lf: Some(pre_select_lf),
             post_select_exprs: Some(post_select_exprs),
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -454,6 +578,8 @@ impl DataFrame {
             ambiguous_columns: None,
             pre_select_lf: Some(pre_select_lf),
             post_select_exprs: Some(post_select_exprs),
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -471,6 +597,8 @@ impl DataFrame {
             ambiguous_columns,
             pre_select_lf: None,
             post_select_exprs: None,
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -484,6 +612,8 @@ impl DataFrame {
             ambiguous_columns: self.ambiguous_columns,
             pre_select_lf: self.pre_select_lf.clone(),
             post_select_exprs: self.post_select_exprs.clone(),
+            row_count_hint: self.row_count_hint,
+            range_cardinality: self.range_cardinality,
         }
     }
 
@@ -496,6 +626,8 @@ impl DataFrame {
             ambiguous_columns: None,
             pre_select_lf: None,
             post_select_exprs: None,
+            row_count_hint: None,
+            range_cardinality: None,
         }
     }
 
@@ -511,6 +643,17 @@ impl DataFrame {
             DataFrameInner::Eager(df) => df.as_ref().clone().lazy(),
             DataFrameInner::Lazy(lf) => lf.clone(),
         }
+    }
+
+    pub(crate) fn with_range_cardinality(mut self, start: i64, step: i64, row_count: u64) -> Self {
+        let cardinality = RangeCardinality {
+            start,
+            step,
+            row_count,
+        };
+        self.row_count_hint = Some(row_count);
+        self.range_cardinality = Some(cardinality);
+        self
     }
 
     /// Materialize the plan. Single point of collect for all actions.
@@ -532,6 +675,8 @@ impl DataFrame {
             ambiguous_columns: self.ambiguous_columns.clone(),
             pre_select_lf: self.pre_select_lf.clone(),
             post_select_exprs: self.post_select_exprs.clone(),
+            row_count_hint: self.row_count_hint,
+            range_cardinality: self.range_cardinality,
         }
     }
 
@@ -1785,6 +1930,13 @@ impl DataFrame {
 
     /// Count the number of rows (action - triggers execution)
     pub fn count(&self) -> Result<usize, PolarsError> {
+        if let Some(count) = self.row_count_hint {
+            return usize::try_from(count).map_err(|_| {
+                PolarsError::ComputeError(
+                    format!("row count {count} exceeds this platform's usize range").into(),
+                )
+            });
+        }
         // Keep the aggregation in the lazy plan. Collecting the source and reading its
         // height used memory proportional to every row, even though count returns one
         // scalar. `len()` counts rows (including rows whose columns are all null).
@@ -1811,6 +1963,13 @@ impl DataFrame {
     /// Count rows while checking cooperative cancellation at the native materialization boundary.
     pub fn count_with_cancellation(&self, token: &CancellationToken) -> Result<usize, EngineError> {
         token.check_cancelled()?;
+        if let Some(count) = self.row_count_hint {
+            return usize::try_from(count).map_err(|_| {
+                EngineError::User(format!(
+                    "row count {count} exceeds this platform's usize range"
+                ))
+            });
+        }
         let result = Self::from_lazy_with_options(
             self.lazy_frame().select([polars::prelude::len()
                 .cast(DataType::UInt64)
@@ -2391,7 +2550,12 @@ impl DataFrame {
 
     /// Filter rows using a Polars expression.
     pub fn filter(&self, condition: Expr) -> Result<DataFrame, PolarsError> {
-        transformations::filter(self, condition, self.case_sensitive)
+        let row_count_hint = self
+            .range_cardinality
+            .and_then(|range| range.count_matching(&condition));
+        let mut filtered = transformations::filter(self, condition, self.case_sensitive)?;
+        filtered.row_count_hint = row_count_hint;
+        Ok(filtered)
     }
 
     /// Same as [`filter`](Self::filter) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -2724,7 +2888,13 @@ impl DataFrame {
 
     /// Limit: return first n rows.
     pub fn limit(&self, n: usize) -> Result<DataFrame, PolarsError> {
-        transformations::limit(self, n, self.case_sensitive)
+        let mut limited = transformations::limit(self, n, self.case_sensitive)?;
+        limited.row_count_hint = self.row_count_hint.map(|count| count.min(n as u64));
+        limited.range_cardinality = self.range_cardinality.map(|range| RangeCardinality {
+            row_count: range.row_count.min(n as u64),
+            ..range
+        });
+        Ok(limited)
     }
 
     /// Same as [`limit`](Self::limit) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -4394,6 +4564,8 @@ impl Clone for DataFrame {
             ambiguous_columns: self.ambiguous_columns.clone(),
             pre_select_lf: self.pre_select_lf.clone(),
             post_select_exprs: self.post_select_exprs.clone(),
+            row_count_hint: self.row_count_hint,
+            range_cardinality: self.range_cardinality,
         }
     }
 }

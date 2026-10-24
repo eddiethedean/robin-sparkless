@@ -11,8 +11,8 @@ use base64::Engine;
 use polars::chunked_array::StructChunked;
 use polars::chunked_array::builder::get_list_builder;
 use polars::prelude::{
-    DataFrame as PlDataFrame, DataType, Field, IntoSeries, NamedFrom, PlSmallStr, PolarsError,
-    Series, TimeUnit,
+    AnonymousScan, AnonymousScanArgs, DataFrame as PlDataFrame, DataType, Field, IntoSeries,
+    LazyFrame, NamedFrom, PlSmallStr, PolarsError, ScanArgsAnonymous, Schema, Series, TimeUnit,
 };
 use polars_arrow::bitmap::Bitmap;
 use robin_sparkless_core::engine::{
@@ -1478,16 +1478,57 @@ fn range_row_count(start: i64, end: i64, step: i64) -> Result<u64, PolarsError> 
         if end <= start {
             return Ok(0);
         }
-        let span = (end - start) as u128;
+        let span = (end as i128 - start as i128) as u128;
         let s = step as u128;
-        Ok(span.div_ceil(s).min(u64::MAX as u128) as u64)
+        u64::try_from(span.div_ceil(s))
+            .map_err(|_| PolarsError::ComputeError("range cardinality exceeds UInt64".into()))
     } else {
         if end >= start {
             return Ok(0);
         }
-        let span = (start - end) as u128;
-        let s = (-step) as u128;
-        Ok(span.div_ceil(s).min(u64::MAX as u128) as u64)
+        let span = (start as i128 - end as i128) as u128;
+        let s = (-(step as i128)) as u128;
+        u64::try_from(span.div_ceil(s))
+            .map_err(|_| PolarsError::ComputeError("range cardinality exceeds UInt64".into()))
+    }
+}
+
+#[derive(Debug)]
+struct RangeScan {
+    start: i64,
+    step: i64,
+    row_count: u64,
+}
+
+impl AnonymousScan for RangeScan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn scan(&self, scan_opts: AnonymousScanArgs) -> Result<PlDataFrame, PolarsError> {
+        let rows = scan_opts
+            .n_rows
+            .map(|requested| self.row_count.min(requested as u64))
+            .unwrap_or(self.row_count);
+        let capacity = usize::try_from(rows).map_err(|_| {
+            PolarsError::ComputeError("range scan exceeds this platform's addressable rows".into())
+        })?;
+        let mut values = Vec::with_capacity(capacity);
+        for index in 0..rows {
+            let value = self.start as i128 + index as i128 * self.step as i128;
+            values.push(i64::try_from(value).map_err(|_| {
+                PolarsError::ComputeError("range value exceeds Int64 bounds".into())
+            })?);
+        }
+        let id = Series::new("id".into(), values);
+        PlDataFrame::new_infer_height(vec![id.into()])
+    }
+
+    fn schema(&self, _infer_schema_length: Option<usize>) -> Result<Arc<Schema>, PolarsError> {
+        Ok(Arc::new(Schema::from_iter([Field::new(
+            "id".into(),
+            DataType::Int64,
+        )])))
     }
 }
 
@@ -3895,25 +3936,26 @@ impl SparkSession {
                 .into(),
             ));
         }
-        let mut vals: Vec<i64> = Vec::new();
-        let mut v = start;
-        if step > 0 {
-            while v < end {
-                vals.push(v);
-                v = v.saturating_add(step);
-            }
-        } else {
-            while v > end {
-                vals.push(v);
-                v = v.saturating_add(step);
-            }
-        }
-        let col = Series::new("id".into(), vals);
-        let pl_df = PlDataFrame::new_infer_height(vec![col.into()])?;
-        Ok(DataFrame::from_polars_with_options(
-            pl_df,
-            self.is_case_sensitive(),
-        ))
+        let source = Arc::new(RangeScan {
+            start,
+            step,
+            row_count,
+        });
+        let schema = Arc::new(Schema::from_iter([Field::new(
+            "id".into(),
+            DataType::Int64,
+        )]));
+        let lazy = LazyFrame::anonymous_scan(
+            source,
+            ScanArgsAnonymous {
+                schema: Some(schema),
+                ..Default::default()
+            },
+        )?;
+        Ok(
+            DataFrame::from_lazy_with_options(lazy, self.is_case_sensitive())
+                .with_range_cardinality(start, step, row_count),
+        )
     }
 
     /// Read a CSV file.
@@ -4360,6 +4402,73 @@ mod tests {
     #[cfg(feature = "delta")]
     use robin_sparkless_core::engine::ExternalTableSaveMode;
     use serde_json::json;
+
+    #[test]
+    fn range_uses_lazy_source_with_checked_signed_cardinality() {
+        let session = SparkSession::builder()
+            .app_name("lazy-range-source")
+            .get_or_create();
+
+        let positive = session.range(1, 8, 3).unwrap();
+        assert_eq!(positive.count().unwrap(), 3);
+        let positive_values = positive
+            .limit(3)
+            .unwrap()
+            .collect()
+            .unwrap()
+            .column("id")
+            .unwrap()
+            .i64()
+            .unwrap()
+            .into_no_null_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(positive_values, vec![1, 4, 7]);
+
+        let negative = session.range(7, -2, -3).unwrap();
+        let negative_values = negative
+            .collect()
+            .unwrap()
+            .column("id")
+            .unwrap()
+            .i64()
+            .unwrap()
+            .into_no_null_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(negative_values, vec![7, 4, 1]);
+
+        assert_eq!(session.range(4, 4, 1).unwrap().count().unwrap(), 0);
+        assert!(session.range(0, 1, 0).is_err());
+        assert_eq!(range_row_count(i64::MIN, i64::MAX, i64::MAX).unwrap(), 3);
+        assert_eq!(range_row_count(i64::MAX, i64::MIN, i64::MIN).unwrap(), 2);
+    }
+
+    #[test]
+    fn range_limit_and_filtered_count_keep_their_semantics() {
+        let session = SparkSession::builder()
+            .app_name("lazy-range-limit-count")
+            .get_or_create();
+
+        let large = session.range(0, 1_000_000, 1).unwrap();
+        let first_two = large.limit(2).unwrap();
+        assert_eq!(first_two.count().unwrap(), 2);
+        let values = first_two
+            .collect()
+            .unwrap()
+            .column("id")
+            .unwrap()
+            .i64()
+            .unwrap()
+            .into_no_null_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![0, 1]);
+
+        let filtered = session
+            .range(0, 10, 1)
+            .unwrap()
+            .filter(polars::prelude::col("id").gt(5i64))
+            .unwrap();
+        assert_eq!(filtered.count().unwrap(), 4);
+    }
 
     #[derive(Clone)]
     struct TestExternalCatalog {
