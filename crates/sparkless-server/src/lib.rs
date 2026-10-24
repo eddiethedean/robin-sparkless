@@ -2480,6 +2480,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mutation_writer_queue_timeout_records_failure_without_effects() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            queue_timeout: Duration::from_millis(150),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let held_lane = Arc::clone(&server.inner.mutation_lane).lock_owned().await;
+        let instance = server.instance_id().to_string();
+        let (status, response) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"precommit-writer",
+                "kind":"sql",
+                "code":"CREATE DATABASE precommit_timeout_db",
+                "server_instance_id":instance,
+                "operation_id":"precommit-timeout"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(response["ename"], "QueueTimeout");
+        assert_eq!(response["operation"]["effect_outcome"], "failed");
+        assert_eq!(response["operation"]["execution_state"], "failed");
+        assert!(
+            !server
+                .inner
+                .root_session
+                .database_exists("precommit_timeout_db")
+        );
+
+        let (status, operation) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({
+                "server_instance_id":instance,
+                "operation_id":"precommit-timeout"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{operation}");
+        assert_eq!(operation["effect_outcome"], "failed");
+        assert_eq!(operation["error"]["ename"], "QueueTimeout");
+        assert!(
+            !server
+                .inner
+                .root_session
+                .database_exists("precommit_timeout_db")
+        );
+
+        drop(held_lane);
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn mutation_retention_capacity_rejects_before_catalog_effects() {
         let undersized = ServerConfig {
             max_mutation_records: 1,
