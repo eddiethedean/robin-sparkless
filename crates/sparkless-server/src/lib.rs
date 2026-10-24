@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{OwnedMutexGuard, Semaphore};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, Semaphore};
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -88,7 +88,7 @@ struct ServerInner {
     operation_records: Mutex<OperationRegistry>,
     admission: Admission,
     connections: Arc<Semaphore>,
-    mutation_lane: Arc<Mutex<()>>,
+    mutation_lane: Arc<AsyncMutex<()>>,
     catalog_receipts: Mutex<HashMap<String, CatalogReceipt>>,
     catalog_sequence: AtomicU64,
     draining: AtomicBool,
@@ -253,7 +253,7 @@ impl Server {
             sessions: Mutex::new(HashMap::new()),
             active_sessions: AtomicUsize::new(0),
             next_session_generation: AtomicU64::new(1),
-            mutation_lane: Arc::new(Mutex::new(())),
+            mutation_lane: Arc::new(AsyncMutex::new(())),
             catalog_receipts: Mutex::new(HashMap::new()),
             catalog_sequence: AtomicU64::new(1),
             draining: AtomicBool::new(false),
@@ -458,6 +458,15 @@ impl ServerInner {
                 Err(updated) => current = updated,
             }
         }
+    }
+
+    async fn acquire_mutation_lane(&self) -> Result<OwnedMutexGuard<()>, ()> {
+        timeout(
+            self.config.queue_timeout,
+            Arc::clone(&self.mutation_lane).lock_owned(),
+        )
+        .await
+        .map_err(|_| ())
     }
 
     fn reserve_operation(
@@ -827,6 +836,35 @@ impl Server {
                 );
             }
         };
+        // Queue writers asynchronously before compute admission. A mutation waiting behind the
+        // catalog lane must not occupy a spawn_blocking worker or an active compute permit.
+        let mutation_guard = if operation.is_some() {
+            match self.inner.acquire_mutation_lane().await {
+                Ok(guard) => Some(guard),
+                Err(()) => {
+                    drop(session_guard);
+                    drop(ticket);
+                    if let Some(record) = &operation {
+                        set_operation_failure(
+                            record,
+                            "QueueTimeout",
+                            "timed out waiting for catalog mutation slot",
+                            "failed",
+                        );
+                    }
+                    return agent_error(
+                        "QueueTimeout",
+                        "timed out waiting for catalog mutation slot",
+                        operation_id
+                            .as_deref()
+                            .zip(operation.as_ref())
+                            .map(|(id, r)| self.operation_json_by_record(id, r)),
+                    );
+                }
+            }
+        } else {
+            None
+        };
         let permit = match timeout(
             self.inner.config.queue_timeout,
             Arc::clone(&self.inner.admission.active).acquire_owned(),
@@ -873,11 +911,9 @@ impl Server {
             let _permit = permit;
             let _ticket = ticket;
             let _session_guard: OwnedMutexGuard<()> = session_guard;
+            let _mutation_guard = mutation_guard;
             let _session_lease = lease;
             let result = if let StatementClass::Mutation { action, target } = &class_for_job {
-                let _mutation_guard = instance.mutation_lane.lock().map_err(|_| {
-                    execution_failure("InternalError", "catalog mutation lane is poisoned")
-                })?;
                 execute_statement(
                     &session,
                     &code,
@@ -2418,6 +2454,32 @@ mod tests {
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn waiting_writer_does_not_consume_compute_admission() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_active_operations: 1,
+            queue_timeout: Duration::from_secs(2),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let held_lane = Arc::clone(&server.inner.mutation_lane).lock_owned().await;
+        let inner = Arc::clone(&server.inner);
+        let waiting_writer = tokio::spawn(async move { inner.acquire_mutation_lane().await });
+        tokio::task::yield_now().await;
+
+        let permit = Arc::clone(&server.inner.admission.active)
+            .try_acquire_owned()
+            .expect("a writer waiting on the async lane must not occupy compute admission");
+        drop(permit);
+        drop(held_lane);
+        timeout(Duration::from_secs(1), waiting_writer)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 
     #[test]
