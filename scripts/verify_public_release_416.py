@@ -191,6 +191,21 @@ def validate_pypi_release(
             )
 
 
+def validate_crate_release(
+    data: dict[str, Any], crate: str, version: str = VERSION
+) -> None:
+    record = data.get("version", {})
+    crate_name = record.get("crate")
+    if crate_name is None:
+        crate_metadata = data.get("crate")
+        if isinstance(crate_metadata, str):
+            crate_name = crate_metadata
+        elif isinstance(crate_metadata, dict):
+            crate_name = crate_metadata.get("id")
+    if record.get("num") != version or crate_name != crate:
+        raise ValueError("crates.io returned the wrong release for {}".format(crate))
+
+
 def _retry(check, attempts: int = 20, interval: float = 5.0) -> None:
     last_error = None
     for attempt in range(attempts):
@@ -227,12 +242,7 @@ def verify_public_release(
         url = "https://crates.io/api/v1/crates/{}/{}".format(crate, VERSION)
 
         def check_crate(url=url, crate=crate):
-            data = _fetch_json(url)
-            record = data.get("version", {})
-            if record.get("num") != VERSION or data.get("crate", {}).get("id") != crate:
-                raise ValueError(
-                    "crates.io returned the wrong release for {}".format(crate)
-                )
+            validate_crate_release(_fetch_json(url), crate)
 
         _retry(check_crate)
 

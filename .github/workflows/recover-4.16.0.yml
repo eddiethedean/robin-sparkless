@@ -14,6 +14,11 @@ on:
         type: string
         required: false
         default: ""
+      reuse_container_from_run:
+        description: Reuse an image already built, smoke-tested, and pushed by an earlier recovery run
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -350,21 +355,25 @@ jobs:
     needs: [verify-built-packages, publish-rust, publish-sparkless]
     runs-on: ubuntu-latest
     outputs:
-      image_digest: ${{ steps.push.outputs.image_digest }}
+      image_digest: ${{ steps.push.outputs.image_digest || steps.reuse.outputs.image_digest }}
     permissions:
+      actions: read
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+        if: ${{ inputs.reuse_container_from_run == '' }}
         with:
           ref: v4.16.0
           path: source
       - name: Checkout the current HTTP smoke-test helper
         uses: actions/checkout@v4
+        if: ${{ inputs.reuse_container_from_run == '' }}
         with:
           ref: main
           path: validation
       - name: Build the release image from the immutable tag
+        if: ${{ inputs.reuse_container_from_run == '' }}
         working-directory: source
         run: >-
           docker build --pull
@@ -372,6 +381,7 @@ jobs:
           -f crates/sparkless-server/Dockerfile
           -t sparkless-server:4.16.0 .
       - name: Verify the image runs as a non-root user
+        if: ${{ inputs.reuse_container_from_run == '' }}
         run: |
           set -euo pipefail
           user="$(docker image inspect --format '{{.Config.User}}' sparkless-server:4.16.0)"
@@ -380,6 +390,7 @@ jobs:
           test "$uid" != 0
           test "$uid" != root
       - name: Smoke-test HTTP and graceful shutdown
+        if: ${{ inputs.reuse_container_from_run == '' }}
         run: |
           set -euo pipefail
           name="sparkless-server-release-smoke-${GITHUB_RUN_ID}"
@@ -394,6 +405,7 @@ jobs:
           test "$(docker inspect --format '{{.State.ExitCode}}' "$name")" = 0
       - name: Push version and latest tags to GHCR
         id: push
+        if: ${{ inputs.reuse_container_from_run == '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -404,6 +416,36 @@ jobs:
           docker push ghcr.io/eddiethedean/sparkless-server:4.16.0
           docker push ghcr.io/eddiethedean/sparkless-server:latest
           digest="$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/eddiethedean/sparkless-server:4.16.0)"
+          echo "image_digest=${digest##*@}" >> "$GITHUB_OUTPUT"
+      - name: Verify and reuse the previously published image digest
+        id: reuse
+        if: ${{ inputs.reuse_container_from_run != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ inputs.reuse_container_from_run }}
+        run: |
+          set -euo pipefail
+          run_json="$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID")"
+          printf '%s' "$run_json" | jq -e '
+            .path == ".github/workflows/recover-4.16.0.yml" and
+            .event == "workflow_dispatch" and
+            .head_branch == "main"
+          ' >/dev/null
+          jobs_json="$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100")"
+          printf '%s' "$jobs_json" | jq -e '
+            ([.jobs[] | select(.name == "Build, smoke-test, and publish GHCR image") |
+              select(.conclusion == "success") | select(
+                ([.steps[] | select(.name == "Build the release image from the immutable tag") | select(.conclusion == "success")] | length) == 1 and
+                ([.steps[] | select(.name == "Verify the image runs as a non-root user") | select(.conclusion == "success")] | length) == 1 and
+                ([.steps[] | select(.name == "Smoke-test HTTP and graceful shutdown") | select(.conclusion == "success")] | length) == 1 and
+                ([.steps[] | select(.name == "Push version and latest tags to GHCR") | select(.conclusion == "success")] | length) == 1
+              )] | length) == 1
+          ' >/dev/null
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull ghcr.io/eddiethedean/sparkless-server:4.16.0
+          digest="$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/eddiethedean/sparkless-server:4.16.0)"
+          test -n "$digest"
           echo "image_digest=${digest##*@}" >> "$GITHUB_OUTPUT"
 
   verify-public-release:

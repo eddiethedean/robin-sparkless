@@ -8,6 +8,7 @@ from unittest.mock import patch
 from verify_public_release_416 import (
     PYPI_PLATFORMS,
     preserve_existing_pypi_files,
+    validate_crate_release,
     validate_pypi_release,
 )
 
@@ -81,6 +82,33 @@ class VerifyPublicRelease416Test(unittest.TestCase):
                 validate_pypi_release(
                     metadata, "sparkless-server-bin", local_directory=directory
                 )
+
+    def test_accepts_current_crates_io_version_response(self):
+        validate_crate_release(
+            {"version": {"num": "4.16.0", "crate": "spark-sql-parser"}},
+            "spark-sql-parser",
+        )
+
+    def test_accepts_legacy_nested_crates_io_response(self):
+        validate_crate_release(
+            {
+                "version": {"num": "4.16.0"},
+                "crate": {"id": "spark-sql-parser"},
+            },
+            "spark-sql-parser",
+        )
+
+    def test_rejects_crates_io_response_for_another_crate_or_version(self):
+        with self.assertRaisesRegex(ValueError, "wrong release"):
+            validate_crate_release(
+                {"version": {"num": "4.16.0", "crate": "other-crate"}},
+                "spark-sql-parser",
+            )
+        with self.assertRaisesRegex(ValueError, "wrong release"):
+            validate_crate_release(
+                {"version": {"num": "4.15.0", "crate": "spark-sql-parser"}},
+                "spark-sql-parser",
+            )
 
     def test_preserves_existing_pypi_bytes_for_immutable_filenames(self):
         metadata = release_metadata("sparkless-server-bin")
