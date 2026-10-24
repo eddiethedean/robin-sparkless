@@ -3276,10 +3276,28 @@ mod tests {
         .await
         .expect("timed-out operation should eventually publish its native outcome");
         assert_ne!(settled["effect_outcome"], "pending", "{settled}");
-        if settled["effect_outcome"] == "committed" {
-            assert_eq!(settled["receipt"]["kind"], "table");
-        } else {
-            assert_ne!(settled["execution_state"], "running", "{settled}");
+        assert_ne!(settled["execution_state"], "running", "{settled}");
+        let committed_rows = server
+            .inner
+            .root_session
+            .table("deadline_items")
+            .unwrap()
+            .count()
+            .unwrap();
+        match settled["effect_outcome"].as_str() {
+            Some("committed") => {
+                assert_eq!(settled["receipt"]["kind"], "table");
+                assert_eq!(committed_rows, 500_000, "{settled}");
+            }
+            Some("failed" | "cancelled") => {
+                assert_eq!(
+                    committed_rows, 0,
+                    "failed staging must have no partial effects: {settled}"
+                );
+            }
+            outcome => {
+                panic!("deadline settled with an unverified effect outcome {outcome:?}: {settled}")
+            }
         }
 
         let _ = shutdown_tx.send(());
