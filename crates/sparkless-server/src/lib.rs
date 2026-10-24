@@ -1610,13 +1610,23 @@ fn validate_set_expr(expr: &ast::SetExpr) -> Result<(), (&'static str, String)> 
                 ));
             }
             for relation in &select.from {
-                if !relation.joins.is_empty() {
+                if select.from.len() != 1 {
                     return Err((
                         "UnsupportedSql",
-                        "joins are not enabled by the HTTP SQL contract".into(),
+                        "comma joins are not enabled by the HTTP SQL contract".into(),
                     ));
                 }
                 validate_table_factor(&relation.relation)?;
+                if relation.joins.len() > 1 {
+                    return Err((
+                        "UnsupportedSql",
+                        "the HTTP SQL contract supports at most one join per SELECT".into(),
+                    ));
+                }
+                for join in &relation.joins {
+                    validate_table_factor(&join.relation)?;
+                    validate_http_join(join)?;
+                }
             }
             for item in &select.projection {
                 if !matches!(
@@ -1647,6 +1657,51 @@ fn validate_set_expr(expr: &ast::SetExpr) -> Result<(), (&'static str, String)> 
             "UnsupportedSql",
             "only SELECT and bounded UNION ALL queries are supported".into(),
         )),
+    }
+}
+
+fn validate_http_join(join: &ast::Join) -> Result<(), (&'static str, String)> {
+    if join.global {
+        return Err((
+            "UnsupportedSql",
+            "GLOBAL joins are not enabled by the HTTP SQL contract".into(),
+        ));
+    }
+    match &join.join_operator {
+        ast::JoinOperator::CrossJoin(ast::JoinConstraint::None) => Ok(()),
+        ast::JoinOperator::Join(ast::JoinConstraint::On(condition))
+        | ast::JoinOperator::Inner(ast::JoinConstraint::On(condition))
+            if valid_http_join_condition(condition) =>
+        {
+            Ok(())
+        }
+        _ => Err((
+            "UnsupportedSql",
+            "HTTP joins support CROSS JOIN or INNER JOIN with equality conditions joined by AND; OUTER, NATURAL, and USING joins are not supported".into(),
+        )),
+    }
+}
+
+fn valid_http_join_condition(expression: &ast::Expr) -> bool {
+    match expression {
+        ast::Expr::BinaryOp {
+            left,
+            op: ast::BinaryOperator::And,
+            right,
+        } => valid_http_join_condition(left) && valid_http_join_condition(right),
+        ast::Expr::BinaryOp {
+            left,
+            op: ast::BinaryOperator::Eq,
+            right,
+        } => matches!(
+            (left.as_ref(), right.as_ref()),
+            (
+                ast::Expr::Identifier(_) | ast::Expr::CompoundIdentifier(_),
+                ast::Expr::Identifier(_) | ast::Expr::CompoundIdentifier(_)
+            )
+        ),
+        ast::Expr::Nested(inner) => valid_http_join_condition(inner),
+        _ => false,
     }
 }
 
@@ -2508,6 +2563,28 @@ mod tests {
         assert!(validate_statement("SELECT TRY_CAST('1' AS BIGINT)").is_err());
         assert!(validate_statement("SELECT CAST('1' AS ARRAY<INT>)").is_err());
         assert!(validate_statement("SELECT CAST(1 AS BIGINT)").is_ok());
+        assert!(
+            validate_statement("SELECT l.id FROM left_items l CROSS JOIN right_items r").is_ok()
+        );
+        assert!(
+            validate_statement(
+                "SELECT l.id FROM left_items l INNER JOIN right_items r ON l.id = r.id"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_statement(
+                "SELECT l.id FROM left_items l LEFT JOIN right_items r ON l.id = r.id"
+            )
+            .is_err()
+        );
+        assert!(
+            validate_statement(
+                "SELECT l.id FROM left_items l INNER JOIN right_items r ON l.id > r.id"
+            )
+            .is_err()
+        );
+        assert!(validate_statement("SELECT id FROM left_items, right_items").is_err());
     }
 
     #[tokio::test]

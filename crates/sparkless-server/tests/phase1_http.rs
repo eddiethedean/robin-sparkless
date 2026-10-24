@@ -457,6 +457,67 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
         json!([[7, "seven"], [8, "eight"]])
     );
 
+    let (status, created_peer_table) = statement(
+        &server,
+        "owner",
+        "CREATE TABLE phase_http.peer_items (peer_id BIGINT, item_id BIGINT)",
+        Some("create-peer-table"),
+    );
+    assert_eq!(status, 200, "{created_peer_table}");
+    assert_eq!(created_peer_table["status"], "ok");
+    let (status, inserted_peer_row) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.peer_items VALUES (9007199254740993, 7)",
+        Some("insert-peer-row"),
+    );
+    assert_eq!(status, 200, "{inserted_peer_row}");
+    assert_eq!(
+        inserted_peer_row["operation"]["effect_outcome"],
+        "committed"
+    );
+
+    let (status, joined_tables) = statement(
+        &server,
+        "reader",
+        "SELECT i.id AS item_id, p.peer_id AS peer_id FROM phase_http.items i CROSS JOIN phase_http.peer_items p ORDER BY item_id",
+        None,
+    );
+    assert_eq!(status, 200, "{joined_tables}");
+    assert_eq!(joined_tables["status"], "ok", "{joined_tables}");
+    assert_eq!(
+        joined_tables["data"]["application/json"]["schema"]["fields"],
+        json!([
+            {"name":"item_id","type":"long","nullable":true,"metadata":{}},
+            {"name":"peer_id","type":"long","nullable":true,"metadata":{}}
+        ])
+    );
+    assert_eq!(
+        joined_tables["data"]["application/json"]["data"],
+        json!([[7, 9007199254740993_i64], [8, 9007199254740993_i64]])
+    );
+    let (status, inner_joined_tables) = statement(
+        &server,
+        "reader",
+        "SELECT i.id AS item_id, p.peer_id AS peer_id FROM phase_http.items i INNER JOIN phase_http.peer_items p ON i.id = p.item_id ORDER BY item_id",
+        None,
+    );
+    assert_eq!(status, 200, "{inner_joined_tables}");
+    assert_eq!(inner_joined_tables["status"], "ok", "{inner_joined_tables}");
+    assert_eq!(
+        inner_joined_tables["data"]["application/json"]["data"],
+        json!([[7, 9007199254740993_i64]])
+    );
+    let (status, rejected_outer_join) = statement(
+        &server,
+        "reader",
+        "SELECT i.id FROM phase_http.items i LEFT JOIN phase_http.peer_items p ON i.id = p.peer_id",
+        None,
+    );
+    assert_eq!(status, 200, "{rejected_outer_join}");
+    assert_eq!(rejected_outer_join["status"], "error");
+    assert_eq!(rejected_outer_join["ename"], "UnsupportedSql");
+
     let (status, rejected_append) = statement(
         &server,
         "owner",
