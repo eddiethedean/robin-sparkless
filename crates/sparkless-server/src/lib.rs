@@ -3238,7 +3238,53 @@ mod tests {
             ..ServerConfig::default()
         })
         .unwrap();
-        server.inner.root_session.register_database("ttl_survivor");
+        let fixture_server = server.clone();
+        tokio::task::spawn_blocking(move || {
+            let limits = ExecutionLimits {
+                max_rows: fixture_server.inner.config.max_result_rows,
+                max_result_bytes: fixture_server.inner.config.max_result_bytes,
+                max_cell_bytes: fixture_server.inner.config.max_cell_bytes,
+            };
+            let token = CancellationToken::new();
+            for (sql, action, target) in [
+                (
+                    "CREATE DATABASE ttl_survivor",
+                    "create_database",
+                    "ttl_survivor",
+                ),
+                (
+                    "CREATE TABLE ttl_survivor.items (id BIGINT)",
+                    "create_table",
+                    "ttl_survivor.items",
+                ),
+                (
+                    "INSERT INTO ttl_survivor.items VALUES (42)",
+                    "append",
+                    "ttl_survivor.items",
+                ),
+            ] {
+                let response = execute_statement(
+                    &fixture_server.inner.root_session,
+                    sql,
+                    action,
+                    Some(target),
+                    limits,
+                    &token,
+                )
+                .unwrap_or_else(|failure| {
+                    panic!("{sql} should establish TTL fixture: {failure:?}")
+                });
+                assert_eq!(response["status"], "ok", "{response}");
+                record_catalog_mutation(
+                    &fixture_server.inner,
+                    Some(target),
+                    action,
+                    &fixture_server.inner.root_session,
+                );
+            }
+        })
+        .await
+        .expect("blocking TTL fixture setup should finish");
         server.startup_check().await.unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -3284,10 +3330,16 @@ mod tests {
             address,
             "POST",
             "/statements",
-            &json!({"session":"ttl-http","kind":"sql","code":"SELECT 2 AS ready"}),
+            &json!({
+                "session":"ttl-http",
+                "kind":"sql",
+                "code":"SELECT id FROM ttl_survivor.items"
+            }),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(response["status"], "ok", "{response}");
+        assert_eq!(response["data"]["application/json"]["data"], json!([[42]]));
         let second_generation = server.inner.sessions.lock().unwrap()["ttl-http"].generation;
         assert_ne!(first_generation, second_generation);
 

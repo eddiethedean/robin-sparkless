@@ -656,6 +656,69 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
         json!([[7, "seven"], [8, "eight"]])
     );
 
+    let (status, retained_view) = statement(
+        &server,
+        "owner",
+        "CREATE TEMP VIEW before_recreate AS SELECT id, note FROM phase_http.items",
+        Some("create-before-recreate-view"),
+    );
+    assert_eq!(status, 200, "{retained_view}");
+    assert_eq!(retained_view["status"], "ok");
+
+    let (status, dropped_table) = statement(
+        &server,
+        "owner",
+        "DROP TABLE phase_http.items",
+        Some("drop-recreated-table"),
+    );
+    assert_eq!(status, 200, "{dropped_table}");
+    assert_eq!(dropped_table["operation"]["effect_outcome"], "committed");
+
+    let (status, recreated_table) = statement(
+        &server,
+        "owner",
+        "CREATE TABLE phase_http.items (id BIGINT, note STRING)",
+        Some("recreate-table-name"),
+    );
+    assert_eq!(status, 200, "{recreated_table}");
+    assert_eq!(recreated_table["operation"]["effect_outcome"], "committed");
+
+    let (status, inserted_recreated_row) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.items VALUES (70, 'recreated')",
+        Some("insert-recreated-row"),
+    );
+    assert_eq!(status, 200, "{inserted_recreated_row}");
+    assert_eq!(
+        inserted_recreated_row["operation"]["effect_outcome"],
+        "committed"
+    );
+
+    let (status, retained_view_read) = statement(
+        &server,
+        "owner",
+        "SELECT id, note FROM before_recreate ORDER BY id",
+        None,
+    );
+    assert_eq!(status, 200, "{retained_view_read}");
+    assert_eq!(
+        retained_view_read["data"]["application/json"]["data"],
+        json!([[7, "seven"], [8, "eight"]])
+    );
+
+    let (status, recreated_binding_read) = statement(
+        &server,
+        "reader",
+        "SELECT id, note FROM phase_http.items ORDER BY id",
+        None,
+    );
+    assert_eq!(status, 200, "{recreated_binding_read}");
+    assert_eq!(
+        recreated_binding_read["data"]["application/json"]["data"],
+        json!([[70, "recreated"]])
+    );
+
     server.stop();
     let restarted = ServerProcess::start();
     assert_ne!(restarted.instance_id, instance_id);
