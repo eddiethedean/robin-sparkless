@@ -289,6 +289,52 @@ mod tests {
     }
 
     #[test]
+    fn logical_schema_metadata_byte_limit_counts_nested_fields_exactly() {
+        fn metadata_with_payload(bytes: usize) -> BTreeMap<String, serde_json::Value> {
+            [(
+                "payload".to_string(),
+                serde_json::Value::String("x".repeat(bytes)),
+            )]
+            .into()
+        }
+
+        let overhead = serde_json::to_vec(&metadata_with_payload(0)).unwrap().len();
+        let payload_budget = MAX_LOGICAL_SCHEMA_METADATA_BYTES - 2 * overhead;
+        let parent_payload = payload_budget / 2;
+        let child_payload = payload_budget - parent_payload;
+        let schema_for_child_size = |child_size| {
+            StructType::new(vec![
+                StructField::new(
+                    "outer".into(),
+                    DataType::Struct(vec![
+                        StructField::new("child".into(), DataType::String, true)
+                            .with_metadata(metadata_with_payload(child_size)),
+                    ]),
+                    true,
+                )
+                .with_metadata(metadata_with_payload(parent_payload)),
+            ])
+        };
+
+        let at_limit = schema_for_child_size(child_payload);
+        let child_metadata = match &at_limit.fields()[0].data_type {
+            DataType::Struct(fields) => &fields[0].metadata,
+            _ => unreachable!("test fixture must contain a nested struct"),
+        };
+        let total_metadata_bytes = serde_json::to_vec(&at_limit.fields()[0].metadata)
+            .unwrap()
+            .len()
+            + serde_json::to_vec(child_metadata).unwrap().len();
+        assert_eq!(total_metadata_bytes, MAX_LOGICAL_SCHEMA_METADATA_BYTES);
+        assert!(at_limit.validate_metadata().is_ok());
+        assert!(
+            schema_for_child_size(child_payload + 1)
+                .validate_metadata()
+                .is_err()
+        );
+    }
+
+    #[test]
     fn test_empty_struct_type() {
         let empty = StructType::new(vec![]);
         assert!(empty.fields().is_empty());
