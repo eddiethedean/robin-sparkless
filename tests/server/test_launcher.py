@@ -5,6 +5,7 @@ import textwrap
 import pytest
 
 import sparkless
+import sparkless.server as server_module
 from sparkless.server import (
     AsyncSparklessServer,
     SparklessServer,
@@ -64,8 +65,19 @@ def _write_fake_server(path, *, delay=0.0, stderr_bytes=0):
     return str(path)
 
 
-def test_sync_launcher_owns_child_restart_and_bounds_diagnostics(tmp_path):
+def _use_python_fake_server(monkeypatch):
+    # The test child is a Python script, not a native executable. Windows cannot
+    # launch a shebang script directly, so route it through the current interpreter.
+    monkeypatch.setattr(
+        server_module,
+        "_command",
+        lambda executable, _host, _port: (sys.executable, executable),
+    )
+
+
+def test_sync_launcher_owns_child_restart_and_bounds_diagnostics(tmp_path, monkeypatch):
     executable = _write_fake_server(tmp_path / "sparkless-server", stderr_bytes=100_000)
+    _use_python_fake_server(monkeypatch)
     server = SparklessServer(
         executable_path=executable,
         startup_timeout=2,
@@ -89,8 +101,9 @@ def test_sync_launcher_owns_child_restart_and_bounds_diagnostics(tmp_path):
     server.stop()
 
 
-def test_same_sync_context_owner_rejects_nested_entry(tmp_path):
+def test_same_sync_context_owner_rejects_nested_entry(tmp_path, monkeypatch):
     executable = _write_fake_server(tmp_path / "sparkless-server")
+    _use_python_fake_server(monkeypatch)
     server = SparklessServer(executable_path=executable, startup_timeout=2)
     with server:
         with pytest.raises(SparklessServerError, match="nested entry"):
@@ -117,8 +130,9 @@ def test_launcher_rejects_wrong_control_protocol(tmp_path):
         _validate_ready(record)
 
 
-def test_async_launcher_reaps_child_on_startup_cancellation(tmp_path):
+def test_async_launcher_reaps_child_on_startup_cancellation(tmp_path, monkeypatch):
     executable = _write_fake_server(tmp_path / "sparkless-server", delay=10)
+    _use_python_fake_server(monkeypatch)
     server = AsyncSparklessServer(
         executable_path=executable,
         startup_timeout=30,
@@ -142,8 +156,9 @@ def test_async_launcher_reaps_child_on_startup_cancellation(tmp_path):
     asyncio.run(run())
 
 
-def test_async_launcher_context_stops_owned_child(tmp_path):
+def test_async_launcher_context_stops_owned_child(tmp_path, monkeypatch):
     executable = _write_fake_server(tmp_path / "sparkless-server")
+    _use_python_fake_server(monkeypatch)
     server = AsyncSparklessServer(
         executable_path=executable,
         startup_timeout=2,
