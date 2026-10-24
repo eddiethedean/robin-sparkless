@@ -6516,9 +6516,9 @@ mod tests {
         use polars::prelude::{DataType as PlDataType, NamedFrom, SerReader, Series, TimeUnit};
         use robin_sparkless_core::DataType as LogicalDataType;
 
-        let tiny = Series::new("tiny".into(), [i8::MIN, 0, i8::MAX]);
-        let single = Series::new("single".into(), [1.25_f32, -0.5, 3.75]);
-        let wall_clock = Series::new("wall_clock".into(), [1_234_567_i64, -1, 9_876_543])
+        let tiny = Series::new("tiny".into(), [Some(i8::MIN), None, Some(i8::MAX)]);
+        let single = Series::new("single".into(), [Some(1.25_f32), None, Some(-0.5)]);
+        let wall_clock = Series::new("wall_clock".into(), [Some(1_234_567_i64), None, Some(-1)])
             .cast(&PlDataType::Datetime(TimeUnit::Microseconds, None))
             .unwrap();
         let physical =
@@ -6552,6 +6552,7 @@ mod tests {
             decoded.column("tiny").unwrap().i8().unwrap().get(0),
             Some(i8::MIN)
         );
+        assert_eq!(decoded.column("tiny").unwrap().i8().unwrap().get(1), None);
         assert_eq!(
             decoded.column("tiny").unwrap().i8().unwrap().get(2),
             Some(i8::MAX)
@@ -6562,6 +6563,10 @@ mod tests {
         );
         assert_eq!(
             decoded.column("single").unwrap().f32().unwrap().get(1),
+            None
+        );
+        assert_eq!(
+            decoded.column("single").unwrap().f32().unwrap().get(2),
             Some(-0.5)
         );
         let wall_clock = decoded.column("wall_clock").unwrap();
@@ -6573,7 +6578,24 @@ mod tests {
             wall_clock.datetime().unwrap().physical().get(0),
             Some(1_234_567)
         );
-        assert_eq!(wall_clock.datetime().unwrap().physical().get(1), Some(-1));
+        assert_eq!(wall_clock.datetime().unwrap().physical().get(1), None);
+        assert_eq!(wall_clock.datetime().unwrap().physical().get(2), Some(-1));
+
+        let empty = source.limit(0).unwrap();
+        let empty_batch = empty
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(empty_batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+        assert_eq!(reader.finish().unwrap().height(), 0);
     }
 
     #[test]
