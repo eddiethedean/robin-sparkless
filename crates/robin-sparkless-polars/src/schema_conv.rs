@@ -95,10 +95,17 @@ fn ensure_polars_nested_schema_is_lossless(
     path: &str,
 ) -> Result<(), PolarsError> {
     match data_type {
+        DataType::ArrayWithNullability {
+            contains_null: false,
+            ..
+        } => Err(schema_conversion_error(
+            path,
+            "Polars List cannot preserve non-null element declarations",
+        )),
         DataType::Array(element)
         | DataType::ArrayWithNullability {
             element_type: element,
-            ..
+            contains_null: true,
         } => {
             ensure_polars_nested_schema_is_lossless(element, &format!("{path}[]"))?;
             Ok(())
@@ -192,21 +199,9 @@ pub(crate) fn checked_data_type_to_polars_type(
         DataType::Array(element) => {
             PlDataType::List(Box::new(checked_data_type_to_polars_type(element, path)?))
         }
-        DataType::ArrayWithNullability {
-            element_type,
-            contains_null: true,
-        } => PlDataType::List(Box::new(checked_data_type_to_polars_type(
-            element_type,
-            path,
-        )?)),
-        DataType::ArrayWithNullability {
-            contains_null: false,
-            ..
-        } => {
-            return Err(unsupported(
-                "Polars List cannot preserve non-null element declarations",
-            ));
-        }
+        DataType::ArrayWithNullability { element_type, .. } => PlDataType::List(Box::new(
+            checked_data_type_to_polars_type(element_type, path)?,
+        )),
         DataType::Struct(fields) => {
             let nested = fields
                 .iter()

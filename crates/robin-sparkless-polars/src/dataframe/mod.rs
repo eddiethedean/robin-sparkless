@@ -6321,6 +6321,91 @@ mod tests {
     }
 
     #[test]
+    fn nonnullable_array_elements_survive_logical_sidecar_and_ipc() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{IntoSeries, ListChunked, SerReader, Series};
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let items = ListChunked::from_iter([
+            Some(Series::new("".into(), vec![1_i32, 2])),
+            None,
+            Some(Series::new("".into(), vec![3_i32])),
+        ])
+        .with_name("items".into())
+        .into_series();
+        let physical = polars::prelude::DataFrame::new_infer_height(vec![items.into()]).unwrap();
+        let logical = StructType::new(vec![StructField::new(
+            "items".into(),
+            LogicalDataType::ArrayWithNullability {
+                element_type: Box::new(LogicalDataType::Integer),
+                contains_null: false,
+            },
+            true,
+        )]);
+        assert!(logical.try_to_polars_schema().is_err());
+
+        let source = DataFrame::from_polars(physical)
+            .with_logical_schema(logical)
+            .unwrap();
+        let projected = source
+            .filter(col("items").is_not_null())
+            .unwrap()
+            .select_exprs(vec![col("items").alias("payload")])
+            .unwrap();
+        let unioned = projected.union(&projected).unwrap();
+        let unioned_schema = unioned.schema().unwrap();
+        assert_eq!(unioned_schema.fields()[0].name, "payload");
+        assert!(matches!(
+            &unioned_schema.fields()[0].data_type,
+            LogicalDataType::ArrayWithNullability {
+                contains_null: false,
+                ..
+            }
+        ));
+
+        let expected_schema = unioned_schema.to_json().unwrap();
+        let batch = unioned
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        assert_eq!(decoded.height(), 4);
+        let arrays = decoded.column("payload").unwrap().list().unwrap();
+        assert_eq!(
+            arrays
+                .get_as_series(0)
+                .unwrap()
+                .i32()
+                .unwrap()
+                .into_no_null_iter()
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            arrays.get_as_series(1).unwrap().i32().unwrap().get(0),
+            Some(3)
+        );
+        assert_eq!(
+            arrays.get_as_series(2).unwrap().i32().unwrap().get(1),
+            Some(2)
+        );
+        assert_eq!(
+            arrays.get_as_series(3).unwrap().i32().unwrap().get(0),
+            Some(3)
+        );
+    }
+
+    #[test]
     fn nested_struct_ipc_roundtrip_preserves_values_nulls_and_logical_schema() {
         use polars::chunked_array::StructChunked;
         use polars::io::ipc::IpcStreamReader;
