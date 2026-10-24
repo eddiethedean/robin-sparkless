@@ -14,10 +14,14 @@ pub mod test_hooks {
 
     type Hook = Box<dyn FnOnce() + Send + 'static>;
 
-    static NEXT_HOOK: LazyLock<Mutex<Option<(String, Hook)>>> = LazyLock::new(|| Mutex::new(None));
+    static NEXT_AFTER_FIRST_RELATION: LazyLock<Mutex<Option<(String, Hook)>>> =
+        LazyLock::new(|| Mutex::new(None));
+    static NEXT_BEFORE_CATALOG_WRITER_LOCK: LazyLock<Mutex<Option<(String, Hook)>>> =
+        LazyLock::new(|| Mutex::new(None));
 
     thread_local! {
-        static ARMED_HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static ARMED_AFTER_FIRST_RELATION: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static ARMED_BEFORE_CATALOG_WRITER_LOCK: RefCell<Option<Hook>> = const { RefCell::new(None) };
     }
 
     /// Pause the next SQL statement containing `query_fragment` after it resolves its first
@@ -31,22 +35,62 @@ pub mod test_hooks {
             !query_fragment.is_empty(),
             "query fragment must not be empty"
         );
-        *NEXT_HOOK.lock().expect("SQL test hook lock") = Some((query_fragment, Box::new(hook)));
+        *NEXT_AFTER_FIRST_RELATION
+            .lock()
+            .expect("SQL test hook lock") = Some((query_fragment, Box::new(hook)));
+    }
+
+    /// Run `hook` when a matching SQL statement attempts to acquire the shared catalog writer
+    /// lock. The callback runs immediately before the lock attempt on the SQL execution thread.
+    pub fn before_catalog_writer_lock_for_query(
+        query_fragment: impl Into<String>,
+        hook: impl FnOnce() + Send + 'static,
+    ) {
+        let query_fragment = query_fragment.into();
+        assert!(
+            !query_fragment.is_empty(),
+            "query fragment must not be empty"
+        );
+        *NEXT_BEFORE_CATALOG_WRITER_LOCK
+            .lock()
+            .expect("SQL test hook lock") = Some((query_fragment, Box::new(hook)));
     }
 
     pub(crate) fn arm_for_query(query: &str) {
-        let mut pending = NEXT_HOOK.lock().expect("SQL test hook lock");
+        let mut pending = NEXT_AFTER_FIRST_RELATION
+            .lock()
+            .expect("SQL test hook lock");
         if pending
             .as_ref()
             .is_some_and(|(fragment, _)| query.contains(fragment))
         {
             let (_, hook) = pending.take().expect("matched SQL test hook");
-            ARMED_HOOK.with(|slot| *slot.borrow_mut() = Some(hook));
+            ARMED_AFTER_FIRST_RELATION.with(|slot| *slot.borrow_mut() = Some(hook));
+        }
+        drop(pending);
+
+        let mut pending = NEXT_BEFORE_CATALOG_WRITER_LOCK
+            .lock()
+            .expect("SQL test hook lock");
+        if pending
+            .as_ref()
+            .is_some_and(|(fragment, _)| query.contains(fragment))
+        {
+            let (_, hook) = pending.take().expect("matched SQL test hook");
+            ARMED_BEFORE_CATALOG_WRITER_LOCK.with(|slot| *slot.borrow_mut() = Some(hook));
         }
     }
 
     pub(crate) fn after_first_relation_resolution() {
-        ARMED_HOOK.with(|slot| {
+        ARMED_AFTER_FIRST_RELATION.with(|slot| {
+            if let Some(hook) = slot.borrow_mut().take() {
+                hook();
+            }
+        });
+    }
+
+    pub(crate) fn before_catalog_writer_lock() {
+        ARMED_BEFORE_CATALOG_WRITER_LOCK.with(|slot| {
             if let Some(hook) = slot.borrow_mut().take() {
                 hook();
             }

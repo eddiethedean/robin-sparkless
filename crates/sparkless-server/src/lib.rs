@@ -2656,6 +2656,7 @@ mod tests {
 
         let (paused_tx, paused_rx) = std::sync::mpsc::channel();
         let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let (writer_waiting_tx, writer_waiting_rx) = std::sync::mpsc::channel();
         robin_sparkless_polars::sql::test_hooks::after_first_relation_resolution_for_query(
             "race_left_id",
             move || {
@@ -2665,6 +2666,14 @@ mod tests {
                 resume_rx
                     .recv_timeout(Duration::from_secs(5))
                     .expect("resume HTTP statement after writer attempt");
+            },
+        );
+        robin_sparkless_polars::sql::test_hooks::before_catalog_writer_lock_for_query(
+            "race-join-append",
+            move || {
+                writer_waiting_tx
+                    .send(())
+                    .expect("signal writer reached the catalog lock");
             },
         );
 
@@ -2694,10 +2703,14 @@ mod tests {
                 &writer_instance,
                 "race-writer",
                 "race-join-append",
-                "INSERT INTO phase417_http_race.left_items VALUES (2)",
+                "INSERT INTO phase417_http_race.left_items VALUES (2) /* race-join-append */",
             )
             .await
         });
+        tokio::task::spawn_blocking(move || writer_waiting_rx.recv_timeout(Duration::from_secs(3)))
+            .await
+            .expect("wait for writer SQL worker")
+            .expect("writer reaches the catalog lock while the join is paused");
         assert!(
             tokio::time::timeout(Duration::from_millis(100), &mut writer)
                 .await

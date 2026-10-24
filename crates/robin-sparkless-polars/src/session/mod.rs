@@ -2051,6 +2051,8 @@ impl SparkSession {
         self.shared_catalog
             .as_ref()
             .map(|catalog| {
+                #[cfg(feature = "test-hooks")]
+                crate::sql::test_hooks::before_catalog_writer_lock();
                 catalog.writer.lock().map_err(|_| {
                     EngineError::User("shared catalog writer lock is poisoned".to_string())
                 })
