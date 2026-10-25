@@ -94,6 +94,8 @@ struct ServerInner {
     catalog_sequence: AtomicU64,
     draining: AtomicBool,
     ready: AtomicBool,
+    #[cfg(test)]
+    test_mutation_before_outcome_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 struct Admission {
@@ -263,6 +265,8 @@ impl Server {
             catalog_sequence: AtomicU64::new(1),
             draining: AtomicBool::new(false),
             ready: AtomicBool::new(false),
+            #[cfg(test)]
+            test_mutation_before_outcome_hook: Mutex::new(None),
         });
         Ok(Self { inner })
     }
@@ -1078,6 +1082,16 @@ impl Server {
                 execute_statement(&session, &code, "read", None, limits, &token_for_work)
                     .map(|response| (response, None))
             };
+            #[cfg(test)]
+            if matches!(class_for_job, StatementClass::Mutation { .. })
+                && let Some(hook) = instance
+                    .test_mutation_before_outcome_hook
+                    .lock()
+                    .ok()
+                    .and_then(|hook| hook.clone())
+            {
+                hook();
+            }
             if let Some(record) = &operation_record_for_job {
                 match &result {
                     Ok((_, receipt)) => set_operation_committed(record, receipt.clone()),
@@ -2292,6 +2306,9 @@ fn map_engine_failure(error: EngineError) -> ExecutionFailure {
         {
             "ResultLimitExceeded"
         }
+        EngineError::Internal(_) if message.contains("CatalogCapacityExceeded") => {
+            "CatalogCapacityExceeded"
+        }
         EngineError::User(_) if message.contains("CatalogCapacityExceeded") => {
             "CatalogCapacityExceeded"
         }
@@ -3116,6 +3133,117 @@ mod tests {
             server.inner.operation_records.lock().unwrap().bytes,
             2 * MIN_MUTATION_RECORD_BYTES,
             "replay must not reserve another record"
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn catalog_capacity_failure_retains_atomic_mutation_outcome() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        // The staged i64 candidate is one bitmap byte above the 64 MiB per-table limit.
+        let source = server
+            .inner
+            .root_session
+            .range(0, 8_388_609, 1)
+            .expect("capacity source range");
+        server
+            .inner
+            .root_session
+            .register_table("capacity_source", source);
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let created = statement_request(
+            address,
+            &instance,
+            "capacity-writer",
+            "capacity-target-create",
+            "CREATE TABLE default.capacity_target (id BIGINT)",
+        )
+        .await;
+        assert_eq!(created["status"], "ok", "{created}");
+
+        let mutation_sql =
+            "INSERT INTO default.capacity_target SELECT id FROM default.capacity_source";
+        let failed = statement_request(
+            address,
+            &instance,
+            "capacity-writer",
+            "catalog-capacity-failure",
+            mutation_sql,
+        )
+        .await;
+        assert_eq!(failed["status"], "error", "{failed}");
+        assert_eq!(failed["ename"], "CatalogCapacityExceeded", "{failed}");
+        assert_eq!(failed["operation"]["execution_state"], "failed");
+        assert_eq!(failed["operation"]["effect_outcome"], "failed");
+        assert_eq!(
+            server
+                .inner
+                .root_session
+                .table("default.capacity_target")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0,
+            "capacity rejection must leave the prior table version intact"
+        );
+
+        let (status, retained) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({
+                "server_instance_id":instance,
+                "operation_id":"catalog-capacity-failure"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{retained}");
+        assert_eq!(retained["execution_state"], "failed");
+        assert_eq!(retained["effect_outcome"], "failed");
+        assert_eq!(retained["error"]["ename"], "CatalogCapacityExceeded");
+
+        let replay = statement_request(
+            address,
+            server.instance_id(),
+            "capacity-writer",
+            "catalog-capacity-failure",
+            mutation_sql,
+        )
+        .await;
+        assert_eq!(replay["status"], "error", "{replay}");
+        assert_eq!(replay["ename"], "CatalogCapacityExceeded", "{replay}");
+        assert_eq!(
+            server
+                .inner
+                .root_session
+                .table("default.capacity_target")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0,
+            "replaying a retained capacity failure must not run another append"
         );
 
         let _ = shutdown_tx.send(());
@@ -4158,6 +4286,278 @@ mod tests {
         assert_eq!(operation_status["effect_outcome"], "committed");
         assert_eq!(operation_status["receipt"]["kind"], "create_database");
         assert_eq!(operation_status["receipt"]["name"], "disconnected_db");
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn deadline_after_publication_keeps_worker_owned_committed_outcome() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            response_timeout: Duration::from_millis(100),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = std::sync::Mutex::new(release_rx);
+        *server
+            .inner
+            .test_mutation_before_outcome_hook
+            .lock()
+            .unwrap() = Some(Arc::new(move || {
+            reached_tx
+                .send(())
+                .expect("signal after the catalog mutation is published");
+            release_rx
+                .lock()
+                .expect("release channel lock")
+                .recv_timeout(Duration::from_secs(3))
+                .expect("release the worker to retain its committed outcome");
+        }));
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let request_instance = instance.clone();
+        let mutation = tokio::spawn(async move {
+            statement_request(
+                address,
+                &request_instance,
+                "post-publication-deadline",
+                "post-publication-create",
+                "CREATE DATABASE published_before_deadline",
+            )
+            .await
+        });
+        tokio::task::spawn_blocking(move || reached_rx.recv_timeout(Duration::from_secs(2)))
+            .await
+            .expect("wait for mutation worker")
+            .expect("SQL returns after publishing and before recording the outcome");
+
+        assert!(
+            server
+                .inner
+                .root_session
+                .database_exists("published_before_deadline")
+        );
+        let running = server
+            .inner
+            .operation("post-publication-create")
+            .expect("accepted operation record");
+        {
+            let record = running.lock().unwrap();
+            assert_eq!(record.execution_state, "running");
+            assert_eq!(record.effect_outcome, "pending");
+        }
+
+        let deadline = timeout(Duration::from_secs(2), mutation)
+            .await
+            .expect("HTTP response deadline should elapse while the worker is paused")
+            .unwrap();
+        assert_eq!(deadline["ename"], "DeadlineExceeded", "{deadline}");
+        assert_eq!(deadline["operation"]["execution_state"], "running");
+        assert_eq!(deadline["operation"]["effect_outcome"], "pending");
+
+        release_tx
+            .send(())
+            .expect("release the worker after the transport deadline");
+        let (status, settled) = timeout(Duration::from_secs(2), async {
+            loop {
+                let response = request_json(
+                    address,
+                    "POST",
+                    "/operations/status",
+                    &json!({
+                        "server_instance_id":instance,
+                        "operation_id":"post-publication-create"
+                    }),
+                )
+                .await;
+                if response.1["execution_state"] == "succeeded" {
+                    break response;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("worker should settle the retained operation after its deadline");
+        assert_eq!(status, StatusCode::OK, "{settled}");
+        assert_eq!(settled["effect_outcome"], "committed", "{settled}");
+        assert_eq!(
+            settled["receipt"]["name"], "published_before_deadline",
+            "{settled}"
+        );
+        assert!(
+            server
+                .inner
+                .root_session
+                .database_exists("published_before_deadline")
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn deadline_during_insert_staging_retains_cancelled_outcome_without_effects() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            response_timeout: Duration::from_millis(250),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let source = server
+            .inner
+            .root_session
+            .range(0, 10_000, 1)
+            .expect("staging source range");
+        server
+            .inner
+            .root_session
+            .register_table("staging_source", source);
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let created = statement_request(
+            address,
+            &instance,
+            "staging-writer",
+            "staging-target-create",
+            "CREATE TABLE default.staging_target (id BIGINT)",
+        )
+        .await;
+        assert_eq!(created["status"], "ok", "{created}");
+
+        let (staged_tx, staged_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = std::sync::Mutex::new(release_rx);
+        robin_sparkless_polars::sql::test_hooks::after_insert_stage_for_query(
+            "INSERT INTO default.staging_target",
+            move || {
+                staged_tx
+                    .send(())
+                    .expect("signal after the complete append candidate is staged");
+                release_rx
+                    .lock()
+                    .expect("staging release channel lock")
+                    .recv_timeout(Duration::from_secs(3))
+                    .expect("release the cancelled staging worker");
+            },
+        );
+
+        let request_instance = instance.clone();
+        let mutation = tokio::spawn(async move {
+            statement_request(
+                address,
+                &request_instance,
+                "staging-writer",
+                "staging-deadline-insert",
+                "INSERT INTO default.staging_target SELECT id FROM default.staging_source",
+            )
+            .await
+        });
+        tokio::task::spawn_blocking(move || staged_rx.recv_timeout(Duration::from_secs(2)))
+            .await
+            .expect("wait for append staging worker")
+            .expect("the complete append candidate should be staged before the deadline");
+
+        let deadline = timeout(Duration::from_secs(2), mutation)
+            .await
+            .expect("response should time out while the candidate is staged")
+            .unwrap();
+        assert_eq!(deadline["ename"], "DeadlineExceeded", "{deadline}");
+        assert_eq!(deadline["operation"]["execution_state"], "running");
+        assert_eq!(deadline["operation"]["effect_outcome"], "pending");
+
+        release_tx
+            .send(())
+            .expect("release the worker after its response deadline");
+        let (status, settled) = timeout(Duration::from_secs(2), async {
+            loop {
+                let response = request_json(
+                    address,
+                    "POST",
+                    "/operations/status",
+                    &json!({
+                        "server_instance_id":instance,
+                        "operation_id":"staging-deadline-insert"
+                    }),
+                )
+                .await;
+                if response.1["execution_state"] != "running" {
+                    break response;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the worker should retain its cancelled staging outcome");
+        assert_eq!(status, StatusCode::OK, "{settled}");
+        assert_eq!(settled["execution_state"], "failed", "{settled}");
+        assert_eq!(settled["effect_outcome"], "cancelled", "{settled}");
+        assert_eq!(settled["error"]["ename"], "Cancelled", "{settled}");
+        assert_eq!(
+            server
+                .inner
+                .root_session
+                .table("default.staging_target")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0,
+            "cancellation after staging but before publication must leave no rows"
+        );
+
+        let replay = statement_request(
+            address,
+            server.instance_id(),
+            "staging-writer",
+            "staging-deadline-insert",
+            "INSERT INTO default.staging_target SELECT id FROM default.staging_source",
+        )
+        .await;
+        assert_eq!(replay["ename"], "Cancelled", "{replay}");
+        assert_eq!(replay["operation"]["effect_outcome"], "cancelled");
+        assert_eq!(
+            server
+                .inner
+                .root_session
+                .table("default.staging_target")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0,
+            "replaying a cancelled mutation identity must not publish its staged rows"
+        );
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();

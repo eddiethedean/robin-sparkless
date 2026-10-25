@@ -742,6 +742,8 @@ fn translate_insert(
     let staged = appended
         .collect_with_cancellation(token)
         .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+    #[cfg(feature = "test-hooks")]
+    crate::sql::test_hooks::after_insert_stage();
     check_cancellation(token)?;
     let mut appended_df =
         DataFrame::from_polars_with_options(staged.as_ref().clone(), session.is_case_sensitive());
