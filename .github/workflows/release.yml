@@ -352,7 +352,7 @@ jobs:
             SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
             "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
           wheel=(dist/*.whl)
-          "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64
+          "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64 --protocol legacy-4.16
           auditwheel show "${wheel[0]}"
       - name: Upload manylinux server wheel
         uses: actions/upload-artifact@v4
@@ -395,7 +395,7 @@ jobs:
             SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
             "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
           wheel=(dist/*.whl)
-          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64
+          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64 --protocol legacy-4.16
       - name: Upload macOS server wheel
         uses: actions/upload-artifact@v4
         with:
