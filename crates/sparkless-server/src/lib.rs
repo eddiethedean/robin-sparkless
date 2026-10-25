@@ -3044,6 +3044,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mutation_retention_accepts_exact_byte_capacity_boundary() {
+        let config = ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_mutation_records: 2,
+            max_mutation_bytes: 2 * MIN_MUTATION_RECORD_BYTES,
+            ..ServerConfig::default()
+        };
+        let server = Server::new(config).unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        for operation_id in ["a", "b"] {
+            let response =
+                statement_request(address, &instance, "s", operation_id, "USE default").await;
+            assert_eq!(response["status"], "ok", "{operation_id}: {response}");
+            assert_eq!(response["operation"]["effect_outcome"], "committed");
+        }
+        {
+            let registry = server.inner.operation_records.lock().unwrap();
+            assert_eq!(registry.records.len(), 2);
+            assert_eq!(registry.bytes, 2 * MIN_MUTATION_RECORD_BYTES);
+        }
+
+        let (status, rejected) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"s",
+                "kind":"sql",
+                "code":"USE default",
+                "server_instance_id":instance,
+                "operation_id":"c"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{rejected}");
+        assert_eq!(rejected["ename"], "MutationRetentionCapacityExceeded");
+        assert!(server.inner.operation("c").is_none());
+
+        for operation_id in ["a", "b"] {
+            let (status, retained) = request_json(
+                address,
+                "POST",
+                "/operations/status",
+                &json!({"server_instance_id":instance,"operation_id":operation_id}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{operation_id}: {retained}");
+            assert_eq!(retained["effect_outcome"], "committed");
+        }
+        let replay = statement_request(address, &instance, "s", "a", "USE default").await;
+        assert_eq!(replay["status"], "ok", "{replay}");
+        assert_eq!(replay["operation"]["effect_outcome"], "committed");
+        assert_eq!(
+            server.inner.operation_records.lock().unwrap().bytes,
+            2 * MIN_MUTATION_RECORD_BYTES,
+            "replay must not reserve another record"
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn default_mutation_retention_limit_keeps_success_and_failure_records() {
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
