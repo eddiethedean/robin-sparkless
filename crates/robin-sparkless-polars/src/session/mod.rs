@@ -5084,6 +5084,78 @@ mod tests {
             .with_shared_catalog(SharedCatalog::new())
     }
 
+    /// Manual resource witness for staged and snapshot-pinned table versions.
+    /// Run with SPARKLESS_CATALOG_BENCH_ROWS set for separate increasing-cardinality processes.
+    #[test]
+    #[ignore = "manual V17 retained/staged catalog memory measurement"]
+    fn shared_catalog_retention_and_staging_memory_measurement() {
+        let rows = std::env::var("SPARKLESS_CATALOG_BENCH_ROWS")
+            .expect("set SPARKLESS_CATALOG_BENCH_ROWS")
+            .parse::<usize>()
+            .expect("SPARKLESS_CATALOG_BENCH_ROWS must be a positive integer");
+        assert!(rows > 0);
+        let row_count = i64::try_from(rows).expect("row count must fit i64");
+        let make_frame = |start: i64| {
+            let end = start
+                .checked_add(row_count)
+                .expect("benchmark range end must fit i64");
+            let values = (start..end).collect::<Vec<_>>();
+            let physical =
+                PlDataFrame::new_infer_height(vec![Series::new("id".into(), values).into()])
+                    .unwrap();
+            DataFrame::from_polars(physical)
+        };
+
+        let construction_started = std::time::Instant::now();
+        let original = make_frame(0);
+        let candidate = make_frame(row_count);
+        let construction_micros = construction_started.elapsed().as_micros();
+        let original_bytes = deduplicated_catalog_bytes(std::slice::from_ref(&original)).unwrap();
+        let candidate_bytes = deduplicated_catalog_bytes(std::slice::from_ref(&candidate)).unwrap();
+
+        let session = catalog_test_session(usize::MAX);
+        session.register_table("phase1_memory", original.clone());
+        let read_lease = session.begin_catalog_read_snapshot().unwrap().unwrap();
+        let resolved_reader = session.table("phase1_memory").unwrap();
+
+        let staging_started = std::time::Instant::now();
+        let staged_accounted_bytes =
+            deduplicated_catalog_bytes(&[original.clone(), candidate.clone()]).unwrap();
+        {
+            let _mutation = session.shared_catalog_mutation_guard().unwrap();
+            let _writer = session.shared_catalog_guard().unwrap();
+            session
+                .check_catalog_table_growth("phase1_memory", &candidate)
+                .unwrap();
+            session.register_table_during_sql("phase1_memory", candidate.clone());
+        }
+        let staging_micros = staging_started.elapsed().as_micros();
+        let retained_pinned_bytes = session.catalog_auxiliary_bytes().unwrap();
+        assert_eq!(retained_pinned_bytes, original_bytes);
+        let read_started = std::time::Instant::now();
+        let read = resolved_reader.collect().unwrap();
+        let read_micros = read_started.elapsed().as_micros();
+        let old_values = read.column("id").unwrap().i64().unwrap();
+        assert_eq!(old_values.len(), rows);
+        assert_eq!(old_values.get(0), Some(0));
+        assert_eq!(old_values.get(rows - 1), Some(row_count - 1));
+        let current = session.table("phase1_memory").unwrap().collect().unwrap();
+        let current_values = current.column("id").unwrap().i64().unwrap();
+        assert_eq!(current_values.get(0), Some(row_count));
+        assert_eq!(current_values.get(rows - 1), Some(row_count * 2 - 1));
+
+        println!(
+            "catalog_memory rows={rows} strategy=eager_i64_table_replacement \
+             construction_us={construction_micros} original_bytes={original_bytes} \
+             candidate_bytes={candidate_bytes} staged_accounted_bytes={staged_accounted_bytes} \
+             staging_us={staging_micros} retained_pinned_bytes={retained_pinned_bytes} \
+             read_us={read_micros} read_rows={rows} read_bytes={original_bytes}",
+        );
+
+        drop(read_lease);
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), 0);
+    }
+
     #[test]
     fn shared_catalog_cancelled_insert_before_execution_has_no_effect() {
         let session = SparkSession::new(Some("cancelled-insert-test".into()), None, HashMap::new())
