@@ -37,7 +37,14 @@ GitHub Actions needs `CARGO_REGISTRY_TOKEN` for crates.io. PyPI publishing uses 
 
 ## Tag and publication sequence
 
-After the integrated candidate branch passes, merge it to `main`, verify the release commit is on `main`, then create and push the tag:
+After the integrated candidate branch passes, use the release-line policy below before creating and pushing the tag.
+
+- For the next planned release line, merge the candidate to `main`, verify the release commit is on `main`, then tag that commit.
+- For a corrective patch to an already published line (for example, 4.16.1 correcting 4.16.0), keep the candidate based on that release line and tag the verified candidate commit directly. Do not merge newer development into the patch tag; selectively backport maintenance-only workflow or verifier fixes to `main` separately.
+
+This distinction keeps maintenance package contents aligned with the published release while allowing `main` to continue the next release line.
+
+For a next-line release, the sequence is:
 
 ```bash
 git switch main
