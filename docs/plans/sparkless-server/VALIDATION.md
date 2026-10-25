@@ -152,6 +152,8 @@ These are local component checks, not passing release gates. The current work ha
 
   Read medians were 3, 4, and 4 µs respectively. The exact old version remained readable while pinned; the current version held the replacement values; accounted old-version bytes fell to zero when the read lease ended. This workload stays below the provisional 256 MiB max-RSS budget on this host. It measures one eager i64 column replacement path, not a full server or arbitrary staging workload; V17's broader strategy and sustained multi-client gates remain open.
 
+- At candidate source commit [`2d74ce690b0f79bfa146e1a05693e79910bb9568`](https://github.com/eddiethedean/robin-sparkless/commit/2d74ce690b0f79bfa146e1a05693e79910bb9568), `cargo test --release --locked -p robin-sparkless-polars --features sql --lib` passed all 353 non-ignored library tests (one manual resource witness remains ignored by default). The new per-table byte-capacity test accepts a staged table exactly at its accounted-byte limit and rejects one byte below that threshold with `CatalogCapacityExceeded` before publishing a saved-table binding. Strict all-target Polars Clippy, formatting, and diff checks passed. This closes the exact per-table byte boundary; the broader catalog/HTTP capacity and mutation-outcome matrices remain open.
+
 | Range rows | Construction median µs; allocated / peak-live bytes | Filtered count median µs; allocated / peak-live bytes | `LIMIT 10` median µs; peak-live bytes | Max RSS median bytes (range) |
 | ---: | ---: | ---: | ---: | ---: |
 | 10,000 | 61; 79,798 / 15,410 | 423; 215,512 / 160,456 | 459; 8,473,430 | 25,329,664 (25,313,280–25,346,048) |
