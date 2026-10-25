@@ -11,7 +11,7 @@ from pathlib import Path
 from verify_server_http import verify_endpoint
 
 
-def verify(expected_version: str) -> None:
+def verify(expected_version: str, protocol: str = "current") -> None:
     import sparkless
     from sparkless.server import SparklessServer
     from sparkless_server_bin import executable_path
@@ -34,7 +34,7 @@ def verify(expected_version: str) -> None:
     server = SparklessServer(startup_timeout=30, shutdown_timeout=15, kill_timeout=5)
     server.start()
     try:
-        if not server.server_instance_id:
+        if protocol == "current" and not server.server_instance_id:
             raise RuntimeError("owned server did not report an instance identity")
         verify_endpoint(server.http_url)
     except BaseException:
@@ -48,9 +48,15 @@ def verify(expected_version: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version", help="expected coordinated release version")
+    parser.add_argument(
+        "--protocol",
+        choices=("current", "legacy-4.16"),
+        default="current",
+        help="control protocol expected from the packaged server binary",
+    )
     args = parser.parse_args()
     try:
-        verify(args.version)
+        verify(args.version, args.protocol)
     except (OSError, RuntimeError, importlib.metadata.PackageNotFoundError) as error:
         print("ERROR: {}".format(error), file=sys.stderr)
         return 1

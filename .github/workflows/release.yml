@@ -62,7 +62,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/sparkless-4161"
           "$RUNNER_TEMP/sparkless-4161/bin/python" -m pip install 'sparkless[server]==4.16.1'
           "$RUNNER_TEMP/sparkless-4161/bin/python" -m pip check
-          "$RUNNER_TEMP/sparkless-4161/bin/python" scripts/verify_server_extra_install.py 4.16.1
+          "$RUNNER_TEMP/sparkless-4161/bin/python" scripts/verify_server_extra_install.py 4.16.1 --protocol legacy-4.16
       - name: No 4.16.1 prerequisite applies to this release candidate
         if: startsWith(github.ref, 'refs/heads/codex/release-') && !startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v') && !startsWith(github.ref, 'refs/tags/v4.17.')
         run: echo "4.16.1 is a prerequisite only for the 4.17 release line."
@@ -1028,7 +1028,11 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           uv pip install --python .venv/bin/python "sparkless[server]==${version}"
           uv pip check --python .venv/bin/python
-          .venv/bin/python "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" "$version"
+          if [[ "$version" == "4.16.1" ]]; then
+            .venv/bin/python "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" "$version" --protocol legacy-4.16
+          else
+            .venv/bin/python "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" "$version"
+          fi
           binary="$(.venv/bin/python -c 'from sparkless_server_bin import executable_path; print(executable_path())')"
           echo "SPARKLESS_SERVER_BIN=$binary" >> "$GITHUB_ENV"
       - name: Verify public SDK catalog mutations and operation outcomes
