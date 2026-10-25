@@ -5221,7 +5221,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless"
-version = "4.16.0"
+version = "4.16.1"
 dependencies = [
  "chrono",
  "criterion",
@@ -5237,7 +5237,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-core"
-version = "4.16.0"
+version = "4.16.1"
 dependencies = [
  "chrono",
  "serde",
@@ -5248,7 +5248,7 @@ dependencies = [
 
 [[package]]
 name = "robin-sparkless-polars"
-version = "4.16.0"
+version = "4.16.1"
 dependencies = [
  "aes-gcm",
  "arrow-array 57.2.0",
@@ -5781,7 +5781,7 @@ dependencies = [
 
 [[package]]
 name = "spark-sql-parser"
-version = "4.16.0"
+version = "4.16.1"
 dependencies = [
  "sqlparser 0.61.0",
  "thiserror 2.0.18",
@@ -5789,7 +5789,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-native"
-version = "4.16.0"
+version = "4.16.1"
 dependencies = [
  "base64 0.22.1",
  "polars",
@@ -5804,7 +5804,7 @@ dependencies = [
 
 [[package]]
 name = "sparkless-server"
-version = "4.16.0"
+version = "4.16.1"
 dependencies = [
  "bytes",
  "chrono",

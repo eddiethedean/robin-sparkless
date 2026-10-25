@@ -1,6 +1,6 @@
 [package]
 name = "sparkless-server"
-version = "4.16.0"
+version = "4.16.1"
 edition = "2024"
 rust-version = "1.93"
 description = "Native read-only HTTP SQL service for Robin Sparkless."
@@ -38,9 +38,9 @@ http-body = { version = "1", optional = true }
 http-body-util = { version = "0.1", optional = true }
 hyper = { version = "1", features = ["http1", "server"], optional = true }
 hyper-util = { version = "0.1", features = ["http1", "server", "service", "tokio"], optional = true }
-robin-sparkless = { version = "4.16.0", path = "../..", features = ["sql"] }
+robin-sparkless = { version = "4.16.1", path = "../..", features = ["sql"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-spark-sql-parser = { version = "4.16.0", path = "../spark-sql-parser" }
+spark-sql-parser = { version = "4.16.1", path = "../spark-sql-parser" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time", "io-util", "io-std"], optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }

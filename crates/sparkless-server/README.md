@@ -28,14 +28,14 @@ on stdin. Diagnostics go to stderr.
 Build the JVM-free Linux image from the repository root:
 
 ```sh
-docker build -f crates/sparkless-server/Dockerfile -t sparkless-server:4.16.0 .
-docker run --rm -p 127.0.0.1:8099:8099 sparkless-server:4.16.0
+docker build -f crates/sparkless-server/Dockerfile -t sparkless-server:4.16.1 .
+docker run --rm -p 127.0.0.1:8099:8099 sparkless-server:4.16.1
 ```
 
 The image runs as an unprivileged user and listens on `0.0.0.0:8099` inside the
 container. It contains the server executable and its native runtime libraries;
 it does not contain Python or a JVM. The release workflow publishes the Linux
-x86_64 image as `ghcr.io/eddiethedean/sparkless-server:4.16.0` and updates the
+x86_64 image as `ghcr.io/eddiethedean/sparkless-server:4.16.1` and updates the
 `latest` tag after the release checks pass.
 
 ## HTTP contract

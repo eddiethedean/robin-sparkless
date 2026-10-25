@@ -1,6 +1,6 @@
 [package]
 name = "spark-sql-parser"
-version = "4.16.0"
+version = "4.16.1"
 edition = "2024"
 rust-version = "1.93"
 description = "Parse SQL into sqlparser AST (Spark-style: SELECT, CREATE SCHEMA/DATABASE, DROP TABLE/VIEW/SCHEMA)."

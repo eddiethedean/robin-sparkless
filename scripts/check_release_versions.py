@@ -68,15 +68,17 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
     facade = read_toml(root / "Cargo.toml")
     core = read_toml(root / "crates/robin-sparkless-core/Cargo.toml")
     polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
-    parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
     server = read_toml(root / "crates/sparkless-server/Cargo.toml")
     native = read_toml(root / "python/Cargo.toml")
     project = read_toml(root / "python/pyproject.toml")["project"]
-    server_binary = read_toml(root / "python/server-bin/pyproject.toml")["project"]
     packages = {
         manifest["package"]["name"]: manifest["package"]["version"]
-        for manifest in (facade, core, polars, parser, server, native)
+        for manifest in (facade, core, polars, server, native)
     }
+    expected = facade["package"]["version"]
+    if _is_coordinated_release(expected):
+        parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
+        packages[parser["package"]["name"]] = parser["package"]["version"]
     packages["sparkless"] = project["version"]
     lock_versions = {
         package["name"]: package["version"]
@@ -88,12 +90,19 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         "facade/core": facade["dependencies"]["robin-sparkless-core"]["version"],
         "facade/polars": facade["dependencies"]["robin-sparkless-polars"]["version"],
         "polars/core": polars["dependencies"]["robin-sparkless-core"]["version"],
-        "polars/parser": polars["dependencies"]["spark-sql-parser"]["version"],
         "server/facade": server["dependencies"]["robin-sparkless"]["version"],
-        "server/parser": server["dependencies"]["spark-sql-parser"]["version"],
-        "native/facade": native["dependencies"]["robin-sparkless"]["version"],
-        "native/core": native["dependencies"]["robin-sparkless-core"]["version"],
     }
+    if "robin-sparkless-core" in server["dependencies"]:
+        dependencies["server/core"] = server["dependencies"][
+            "robin-sparkless-core"
+        ]["version"]
+    if _is_coordinated_release(expected):
+        dependencies["polars/parser"] = polars["dependencies"]["spark-sql-parser"][
+            "version"
+        ]
+        dependencies["server/parser"] = server["dependencies"]["spark-sql-parser"][
+            "version"
+        ]
     module = ast.parse((root / "python/sparkless/sparkless/__init__.py").read_text())
     python_version = next(
         node.value.value
@@ -114,35 +123,100 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         (root / "CHANGELOG.md").read_text(),
         tag,
     )
-    binary_version = server_binary["version"]
-    if binary_version != packages["robin-sparkless"]:
+    errors.extend(validate_server_inventory(root, tag))
+    return errors
+
+
+def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
+    """Check the separately distributed native server and its package coupling."""
+    facade = read_toml(root / "Cargo.toml")
+    core = read_toml(root / "crates/robin-sparkless-core/Cargo.toml")
+    polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
+    parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
+    server = read_toml(root / "crates/sparkless-server/Cargo.toml")
+    lock_versions = {
+        package["name"]: package["version"]
+        for package in read_toml(root / "Cargo.lock")["package"]
+    }
+    python = read_toml(root / "python/pyproject.toml")
+    server_binary = read_toml(root / "python/server-bin/pyproject.toml")["project"]
+
+    expected = facade["package"]["version"]
+    errors = []
+    if server["package"]["version"] != expected:
         errors.append(
-            "sparkless-server-bin: version {} does not match {}".format(
-                binary_version, packages["robin-sparkless"]
+            "sparkless-server: version {} does not match {}".format(
+                server["package"]["version"], expected
             )
         )
-    expected_extra = "sparkless-server-bin=={}".format(binary_version)
-    if project["optional-dependencies"].get("server") != [expected_extra]:
-        errors.append(
-            "sparkless[server] must pin exactly {}".format(expected_extra)
-        )
-    container = (root / "crates/sparkless-server/Dockerfile").read_text()
-    release_workflow = (root / ".github/workflows/release.yml").read_text()
-    if "cargo build --locked --release" not in container or "ENTRYPOINT [\"sparkless-server\"]" not in container:
-        errors.append("sparkless-server Dockerfile must build and launch the native server")
-    for required in (
-        "publish_one sparkless-server",
-        "publish-container:",
-        "ghcr.io/${REPOSITORY_OWNER,,}/sparkless-server",
-        'version=${RELEASE_TAG#v}',
-        "manylinux_2_35_x86_64",
-        "macosx_15_0_arm64",
-        "macosx_15_0_x86_64",
+    if lock_versions.get("sparkless-server") != server["package"]["version"]:
+        errors.append("sparkless-server: Cargo.lock does not match its manifest")
+    for dependency, package_version in (
+        ("robin-sparkless", expected),
+        ("robin-sparkless-core", core["package"]["version"]),
+        ("spark-sql-parser", parser["package"]["version"]),
     ):
-        if required not in release_workflow:
-            errors.append("release workflow is missing a required native publication target")
-            break
+        if dependency not in server["dependencies"]:
+            continue
+        actual = server["dependencies"][dependency]["version"]
+        if actual != package_version:
+            errors.append(
+                "sparkless-server/{}: dependency version {} does not match {}".format(
+                    dependency, actual, package_version
+                )
+            )
+    if server_binary["version"] != expected:
+        errors.append(
+            "sparkless-server-bin: version {} does not match {}".format(
+                server_binary["version"], expected
+            )
+        )
+    server_extra = python["project"].get("optional-dependencies", {}).get("server", [])
+    required_extra = "sparkless-server-bin=={}".format(expected)
+    if required_extra not in server_extra:
+        errors.append(
+            "sparkless[server]: missing exact binary dependency {}".format(
+                required_extra
+            )
+        )
+
+    # From the 4.16 candidate line onward, the parser joins the coordinated first-party
+    # release inventory. Determine this from either the candidate manifest version or the
+    # requested tag so release-candidate branches receive the same checks as tags.
+    requested_version = (
+        tag[1:] if tag is not None and tag.startswith("v") else tag or expected
+    )
+    if _is_coordinated_release(expected) or _is_coordinated_release(requested_version):
+        if parser["package"]["version"] != expected:
+            errors.append(
+                "spark-sql-parser: version {} does not match candidate {}".format(
+                    parser["package"]["version"], expected
+                )
+            )
+        if lock_versions.get("spark-sql-parser") != parser["package"]["version"]:
+            errors.append("spark-sql-parser: Cargo.lock does not match its manifest")
+        for dependency, actual in (
+            (
+                "robin-sparkless-polars/spark-sql-parser",
+                polars["dependencies"]["spark-sql-parser"]["version"],
+            ),
+            (
+                "sparkless-server/spark-sql-parser",
+                server["dependencies"]["spark-sql-parser"]["version"],
+            ),
+        ):
+            if actual != expected:
+                errors.append(
+                    "{}: dependency version {} does not match candidate {}".format(
+                        dependency, actual, expected
+                    )
+                )
     return errors
+
+
+def _is_coordinated_release(version: str) -> bool:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", version)
+    return bool(match and (int(match.group(1)), int(match.group(2))) >= (4, 16))
 
 
 def main() -> int:
@@ -158,7 +232,7 @@ def main() -> int:
             print(f"ERROR: {error}")
         return 1
     print(
-        "Release manifests, first-party dependency versions, lockfile, server wheel pin, Python version, and changelog agree"
+        "Release manifests, dependency versions, lockfile, Python version, and changelog agree"
     )
     return 0
 

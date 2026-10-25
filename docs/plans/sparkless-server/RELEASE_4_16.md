@@ -1,12 +1,12 @@
 # 4.16.0 implementation and release plan
 
-**Status: native HTTP/launcher source, container build, and release jobs are implemented in this checkout; local preflight checks are recorded and required acceptance gates remain pending.** The direct HTTP route, bounded runtime/session lifecycle, SQL scalar allowlist, Rust CLI, owned-process Python launcher, platform-wheel build path, and JVM-free Linux image have source implementations. A macOS arm64 wheel and a linux/arm64 image passed local smoke checks; other platform artifacts and native publication gates remain unverified. SDK/emulator integration and Connect feasibility are optional certifications. Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) is versioned at **4.16.0**.
+**Status: 4.16.0 was published with an incomplete Python launcher package.** The immutable `sparkless-server-bin==4.16.0` module is missing `executable_path`, so the public `sparkless[server]==4.16.0` consumer check fails. This candidate prepares coordinated **4.16.1** packages with that missing API and verifies the complete artifact set before publication; it does not alter the already-published 4.16.0 files. The HTTP route, runtime/session lifecycle, SQL scalar allowlist, Rust CLI, launcher, platform-wheel build path, and JVM-free Linux image remain the 4.16 surface.
 
 [Roadmap](ROADMAP.md#4160--http-service-launcher-and-unified-distribution) · [Epic](EPIC.md) · [Workstreams](README.md#workstreams) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Release outcome
 
-A fresh `sparkless[server]==4.16.0` installation on an advertised platform can launch an owned native Rust child, execute the declared read-only SQL subset through HTTP, and clean up with synchronous or asynchronous lifecycle methods. Databricks SDK/emulator interoperability is an optional certification and is not part of 4.16 publication readiness. Non-Python consumers can install the Rust CLI or use its native image.
+A fresh `sparkless[server]==4.16.1` installation on an advertised platform can launch an owned native Rust child, execute the declared read-only SQL subset through HTTP, and clean up with synchronous or asynchronous lifecycle methods. Databricks SDK/emulator interoperability is an optional certification and is not part of the corrective patch. Non-Python consumers can install the Rust CLI or use its native image.
 
 The public server has no supported Spark Connect endpoint in 4.16.0. The optional Phase 0A Connect experiment remains test-only and feature-gated; it does not block this release. Catalog mutations, file/network readers, Python execution, nested types, and production gRPC remain assigned to their later gates. Existing embedded Rust/Python APIs retain their supported behavior; the restricted surface applies to remote server execution.
 
