@@ -137,6 +137,36 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     let mut server = ServerProcess::start();
     let instance_id = server.instance_id.clone();
 
+    let (status, unknown_operation) = post(
+        &server,
+        "/operations/status",
+        &json!({
+            "server_instance_id":instance_id,
+            "operation_id":"unknown-before-acceptance"
+        }),
+    );
+    assert_eq!(status, 404, "{unknown_operation}");
+    assert_eq!(unknown_operation["ename"], "UnknownOperation");
+    let (status, accepted_after_unknown_status) = statement(
+        &server,
+        "owner",
+        "CREATE DATABASE status_probe",
+        Some("unknown-before-acceptance"),
+    );
+    assert_eq!(status, 200, "{accepted_after_unknown_status}");
+    assert_eq!(accepted_after_unknown_status["status"], "ok");
+    let (status, accepted_status) = post(
+        &server,
+        "/operations/status",
+        &json!({
+            "server_instance_id":instance_id,
+            "operation_id":"unknown-before-acceptance"
+        }),
+    );
+    assert_eq!(status, 200, "{accepted_status}");
+    assert_eq!(accepted_status["execution_state"], "succeeded");
+    assert_eq!(accepted_status["effect_outcome"], "committed");
+
     let (status, created_db) = statement(
         &server,
         "owner",

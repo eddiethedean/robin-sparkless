@@ -2898,7 +2898,7 @@ mod tests {
         let config = ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
             max_mutation_records: 1,
-            max_mutation_bytes: 4096,
+            max_mutation_bytes: MIN_MUTATION_RECORD_BYTES,
             ..ServerConfig::default()
         };
         let server = Server::new(config).unwrap();
@@ -2919,27 +2919,26 @@ mod tests {
         };
 
         let instance = server.instance_id().to_string();
-        let accepted = statement_request(
-            address,
-            &instance,
-            "writer",
-            "retained-create",
-            "CREATE DATABASE retained_db",
-        )
-        .await;
+        let accepted =
+            statement_request(address, &instance, "w", "a", "CREATE DATABASE retained_db").await;
         assert_eq!(accepted["status"], "ok");
         assert_eq!(accepted["operation"]["effect_outcome"], "committed");
+        assert_eq!(
+            server.inner.operation_records.lock().unwrap().bytes,
+            MIN_MUTATION_RECORD_BYTES,
+            "the smallest valid operation key consumes the exact minimum byte budget"
+        );
 
         let (status, rejected) = request_json(
             address,
             "POST",
             "/statements",
             &json!({
-                "session":"writer",
+                "session":"w",
                 "kind":"sql",
                 "code":"CREATE DATABASE must_not_exist",
                 "server_instance_id":instance,
-                "operation_id":"rejected-create"
+                "operation_id":"b"
             }),
         )
         .await;
@@ -2951,12 +2950,12 @@ mod tests {
             address,
             "POST",
             "/operations/status",
-            &json!({"server_instance_id":instance,"operation_id":"retained-create"}),
+            &json!({"server_instance_id":instance,"operation_id":"a"}),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(retained_status["effect_outcome"], "committed");
-        assert!(server.inner.operation("rejected-create").is_none());
+        assert!(server.inner.operation("b").is_none());
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
