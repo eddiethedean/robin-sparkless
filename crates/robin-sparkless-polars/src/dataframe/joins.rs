@@ -1366,30 +1366,42 @@ mod tests {
     }
 
     #[test]
-    fn full_outer_join_preserves_timestamp_ntz_timezone_and_values() {
+    fn full_outer_join_preserves_timestamp_and_ntz_distinctions_and_values() {
         use polars::io::ipc::IpcStreamReader;
-        use polars::prelude::{DataType as PlDataType, NamedFrom, SerReader, Series, TimeUnit};
+        use polars::prelude::{
+            DataType as PlDataType, NamedFrom, SerReader, Series, TimeUnit, TimeZone,
+        };
         use robin_sparkless_core::DataType as CoreDataType;
 
-        fn source(keys: &[i32], timestamps: &[i64]) -> DataFrame {
+        fn source(keys: &[i32], wall_clock_values: &[i64], instant_values: &[i64]) -> DataFrame {
             let id = Series::new("id".into(), keys.to_vec());
-            let wall_clock = Series::new("wall_clock".into(), timestamps.to_vec())
+            let wall_clock = Series::new("wall_clock".into(), wall_clock_values.to_vec())
                 .cast(&PlDataType::Datetime(TimeUnit::Microseconds, None))
                 .unwrap();
-            let physical =
-                polars::prelude::DataFrame::new_infer_height(vec![id.into(), wall_clock.into()])
-                    .unwrap();
+            let instant = Series::new("instant".into(), instant_values.to_vec())
+                .cast(&PlDataType::Datetime(
+                    TimeUnit::Microseconds,
+                    Some(TimeZone::UTC),
+                ))
+                .unwrap();
+            let physical = polars::prelude::DataFrame::new_infer_height(vec![
+                id.into(),
+                wall_clock.into(),
+                instant.into(),
+            ])
+            .unwrap();
             let logical = StructType::new(vec![
                 StructField::new("id".into(), CoreDataType::Integer, false),
                 StructField::new("wall_clock".into(), CoreDataType::TimestampNtz, false),
+                StructField::new("instant".into(), CoreDataType::Timestamp, false),
             ]);
             DataFrame::from_polars(physical)
                 .with_logical_schema(logical)
                 .unwrap()
         }
 
-        let left = source(&[1, 2], &[1_234_567, -1]);
-        let right = source(&[1, 3], &[9_876_543, 42]);
+        let left = source(&[1, 2], &[1_234_567, -1], &[8_765_432, -2]);
+        let right = source(&[1, 3], &[9_876_543, 42], &[7_654_321, 43]);
         let joined = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
         let schema = joined.schema().unwrap();
         for name in ["wall_clock", "wall_clock_right"] {
@@ -1399,6 +1411,15 @@ mod tests {
                 .find(|field| field.name == name)
                 .unwrap();
             assert!(matches!(&field.data_type, CoreDataType::TimestampNtz));
+            assert!(field.nullable, "outer join must mark {name} nullable");
+        }
+        for name in ["instant", "instant_right"] {
+            let field = schema
+                .fields()
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap();
+            assert!(matches!(&field.data_type, CoreDataType::Timestamp));
             assert!(field.nullable, "outer join must mark {name} nullable");
         }
 
@@ -1429,28 +1450,42 @@ mod tests {
                 "{name} must remain a timezone-free physical timestamp"
             );
         }
-        let left_values = decoded
-            .column("wall_clock")
-            .unwrap()
-            .datetime()
-            .unwrap()
-            .physical();
-        let right_values = decoded
-            .column("wall_clock_right")
-            .unwrap()
-            .datetime()
-            .unwrap()
-            .physical();
-        let mut observed = (0..decoded.height())
-            .map(|row| (left_values.get(row), right_values.get(row)))
+        for name in ["instant", "instant_right"] {
+            assert_eq!(
+                decoded.column(name).unwrap().dtype(),
+                &PlDataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
+                "{name} must remain a UTC instant"
+            );
+        }
+        let physical_values =
+            |name: &str| decoded.column(name).unwrap().datetime().unwrap().physical();
+        let left_wall_clock = physical_values("wall_clock");
+        let right_wall_clock = physical_values("wall_clock_right");
+        let mut wall_clock_values = (0..decoded.height())
+            .map(|row| (left_wall_clock.get(row), right_wall_clock.get(row)))
             .collect::<Vec<_>>();
-        observed.sort();
+        wall_clock_values.sort();
         assert_eq!(
-            observed,
+            wall_clock_values,
             vec![
                 (None, Some(42)),
                 (Some(-1), None),
                 (Some(1_234_567), Some(9_876_543)),
+            ]
+        );
+
+        let left_instant = physical_values("instant");
+        let right_instant = physical_values("instant_right");
+        let mut instant_values = (0..decoded.height())
+            .map(|row| (left_instant.get(row), right_instant.get(row)))
+            .collect::<Vec<_>>();
+        instant_values.sort();
+        assert_eq!(
+            instant_values,
+            vec![
+                (None, Some(43)),
+                (Some(-2), None),
+                (Some(8_765_432), Some(7_654_321)),
             ]
         );
     }
