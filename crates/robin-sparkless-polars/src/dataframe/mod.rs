@@ -5240,7 +5240,44 @@ impl<'a> DataFrameWriter<'a> {
                 self.df.clone()
             }
             SaveMode::Append => {
-                let existing_pl = if let Some(existing) = session.get_saved_table(name) {
+                let saved_existing = session.get_saved_table(name);
+                let existing_logical_schema = saved_existing
+                    .as_ref()
+                    .and_then(|existing| existing.logical_schema.clone());
+                let logical_schema = match (existing_logical_schema, self.df.logical_schema.clone())
+                {
+                    (Some(existing), Some(incoming)) => {
+                        let existing_json = existing.to_json().map_err(|error| {
+                            PolarsError::InvalidOperation(
+                                format!(
+                                    "saveAsTable append: serialize existing logical schema: {error}"
+                                )
+                                .into(),
+                            )
+                        })?;
+                        let incoming_json = incoming.to_json().map_err(|error| {
+                            PolarsError::InvalidOperation(
+                                format!(
+                                    "saveAsTable append: serialize incoming logical schema: {error}"
+                                )
+                                .into(),
+                            )
+                        })?;
+                        if existing_json != incoming_json {
+                            return Err(PolarsError::SchemaMismatch(
+                                format!(
+                                    "saveAsTable append: logical schema does not match existing table '{name}'"
+                                )
+                                .into(),
+                            ));
+                        }
+                        Some(existing)
+                    }
+                    (Some(existing), None) => Some(existing),
+                    (None, Some(incoming)) => Some(incoming),
+                    (None, None) => None,
+                };
+                let existing_pl = if let Some(existing) = saved_existing {
                     existing.collect_inner()?.as_ref().clone()
                 } else if warehouse_exists {
                     // Read from warehouse (data.parquet convention). For schema-qualified names,
@@ -5336,6 +5373,11 @@ impl<'a> DataFrameWriter<'a> {
                         combined,
                         self.df.case_sensitive,
                     )
+                };
+                let merged = if let Some(logical_schema) = logical_schema {
+                    merged.with_logical_schema(logical_schema)?
+                } else {
+                    merged
                 };
                 if let Some(ref p) = warehouse_path {
                     let stage = stage_warehouse_write(&merged, p, token)?;
@@ -7664,6 +7706,129 @@ mod tests {
             undersized_empty_batch.next().unwrap(),
             Err(EngineError::User(message)) if message.contains("empty Arrow IPC schema")
         ));
+    }
+
+    #[test]
+    fn nested_logical_schema_survives_saved_table_append_and_temp_view_roundtrip() {
+        use polars::chunked_array::StructChunked;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{SerReader, Series};
+        use polars_arrow::bitmap::Bitmap;
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        fn source_frame(metadata_value: &str) -> DataFrame {
+            let id = Series::new("id".into(), vec![1_i32, 2, 3]);
+            let label = Series::new("label".into(), ["first", "hidden", "third"]);
+            let payload =
+                StructChunked::from_series("payload".into(), 3, [&id, &label].into_iter())
+                    .unwrap()
+                    .with_outer_validity(Some(Bitmap::from_iter([true, false, true])))
+                    .into_series();
+            let physical = PlDataFrame::new_infer_height(vec![payload.into()]).unwrap();
+            let metadata = [("origin".to_string(), serde_json::json!(metadata_value))]
+                .into_iter()
+                .collect();
+            let logical = StructType::new(vec![StructField::new(
+                "payload".into(),
+                LogicalDataType::Struct(vec![
+                    StructField::new("id".into(), LogicalDataType::Integer, false)
+                        .with_metadata(metadata),
+                    StructField::new("label".into(), LogicalDataType::String, true),
+                ]),
+                true,
+            )]);
+            DataFrame::from_polars(physical)
+                .with_logical_schema(logical)
+                .unwrap()
+        }
+
+        fn assert_nested_ids(frame: &PlDataFrame, expected: &[Option<i32>]) {
+            assert_eq!(frame.height(), expected.len());
+            let payload = frame.column("payload").unwrap();
+            let fields = payload.struct_().unwrap();
+            let ids = fields.field_by_name("id").unwrap();
+            let ids = ids.i32().unwrap();
+            for (index, expected) in expected.iter().enumerate() {
+                match expected {
+                    Some(value) => assert_eq!(ids.get(index), Some(*value)),
+                    None => assert!(matches!(payload.get(index).unwrap(), AnyValue::Null)),
+                }
+            }
+        }
+
+        let suffix = std::process::id();
+        let table_name = format!("nested_append_{suffix}");
+        let view_name = format!("nested_append_view_{suffix}");
+        let session = SparkSession::builder()
+            .app_name(format!("nested-append-{suffix}"))
+            .get_or_create();
+        let source = source_frame("table metadata");
+        let expected_schema = source.schema().unwrap().to_json().unwrap();
+
+        source
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Overwrite)
+            .unwrap();
+        let original = session.table(&table_name).unwrap();
+        assert_eq!(
+            original.schema().unwrap().to_json().unwrap(),
+            expected_schema
+        );
+
+        // A physical-compatible append that changes declared nested metadata must fail before
+        // replacing the saved table or changing its original rows/schema.
+        let incompatible = source_frame("different metadata");
+        let mismatch = incompatible
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Append);
+        assert!(
+            matches!(mismatch, Err(PolarsError::SchemaMismatch(_))),
+            "unexpected logical-schema append result: {mismatch:?}"
+        );
+        let unchanged = session.table(&table_name).unwrap();
+        assert_eq!(
+            unchanged.schema().unwrap().to_json().unwrap(),
+            expected_schema
+        );
+        assert_nested_ids(&unchanged.collect().unwrap(), &[Some(1), None, Some(3)]);
+
+        source
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Append)
+            .unwrap();
+        let appended = session.table(&table_name).unwrap();
+        assert_eq!(
+            appended.schema().unwrap().to_json().unwrap(),
+            expected_schema
+        );
+        assert_nested_ids(
+            &appended.collect().unwrap(),
+            &[Some(1), None, Some(3), Some(1), None, Some(3)],
+        );
+
+        session.create_or_replace_temp_view(&view_name, appended);
+        let view = session.table(&view_name).unwrap();
+        assert_eq!(view.schema().unwrap().to_json().unwrap(), expected_schema);
+        let batch = view
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+        assert_nested_ids(
+            &reader.finish().unwrap(),
+            &[Some(1), None, Some(3), Some(1), None, Some(3)],
+        );
+
+        assert!(session.drop_temp_view(&view_name));
+        assert!(session.drop_table(&table_name));
     }
 
     /// Issue #235: root-level string–numeric comparison coercion in filter.
