@@ -6217,6 +6217,43 @@ mod tests {
         ));
     }
 
+    /// Manual resource witness for lazy range construction and schema inspection.
+    /// Run in separate processes with `SPARKLESS_RANGE_BENCH_ROWS` set to increasing sizes.
+    #[test]
+    #[ignore = "manual V17 lazy range construction RSS measurement"]
+    fn lazy_range_construction_memory_measurement() {
+        let rows = std::env::var("SPARKLESS_RANGE_BENCH_ROWS")
+            .expect("set SPARKLESS_RANGE_BENCH_ROWS")
+            .parse::<usize>()
+            .expect("SPARKLESS_RANGE_BENCH_ROWS must be a positive integer");
+        assert!(rows > 0);
+        let end = i64::try_from(rows).expect("row count must fit i64");
+        let session = SparkSession::builder()
+            .app_name("lazy-range-memory-measurement")
+            .get_or_create();
+
+        let construction_started = std::time::Instant::now();
+        let frame = session.range(0, end, 1).unwrap();
+        let construction_micros = construction_started.elapsed().as_micros();
+        std::hint::black_box(&frame);
+
+        let schema_started = std::time::Instant::now();
+        let schema = frame.schema().unwrap();
+        let schema_micros = schema_started.elapsed().as_micros();
+        assert_eq!(frame.row_count_hint, Some(rows as u64));
+        assert_eq!(schema.fields()[0].name, "id");
+        assert!(matches!(
+            schema.fields()[0].data_type,
+            crate::schema::DataType::Long
+        ));
+        assert!(!schema.fields()[0].nullable);
+
+        println!(
+            "range_memory rows={rows} strategy=lazy_scan construction_us={construction_micros} \
+             schema_us={schema_micros} row_count_hint={rows} columns=1",
+        );
+    }
+
     #[test]
     fn filtered_large_range_count_uses_bounded_batches() {
         let session = SparkSession::builder()

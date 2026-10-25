@@ -949,9 +949,65 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  phase1-v17-resource-witness:
+    name: Phase 1 V17 range and memory witness
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v4.17.'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y unixodbc-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Measure isolated range, catalog, and sustained HTTP workloads
+        run: python3 scripts/verify_v17_memory.py --output "$RUNNER_TEMP/v17-resource-witness.json"
+      - name: Preserve V17 resource evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v17-resource-witness
+          path: ${{ runner.temp }}/v17-resource-witness.json
+          if-no-files-found: error
+          retention-days: 90
+
   verify-candidate-distributions:
     name: Verify complete candidate PyPI inventory (V31)
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'push' &&
+        (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-')) &&
+        !contains(needs.*.result, 'failure') &&
+        !contains(needs.*.result, 'cancelled') &&
+        (
+          (
+            startsWith(github.ref, 'refs/tags/v4.17.') ||
+            startsWith(github.ref, 'refs/heads/codex/release-4.17')
+          ) && needs.phase1-v17-resource-witness.result == 'success' ||
+          (
+            !startsWith(github.ref, 'refs/tags/v4.17.') &&
+            !startsWith(github.ref, 'refs/heads/codex/release-4.17')
+          )
+        )
+      }}
     runs-on: ubuntu-latest
     needs:
       - format
@@ -962,6 +1018,7 @@ jobs:
       - build
       - test
       - phase1-sdk-integration
+      - phase1-v17-resource-witness
       - python-lint
       - python-tests
       - server-bin-manylinux-x86_64
@@ -980,6 +1037,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Download V17 resource evidence for this 4.17 candidate
+        if: startsWith(github.ref, 'refs/tags/v4.17.') || startsWith(github.ref, 'refs/heads/codex/release-4.17')
+        uses: actions/download-artifact@v4
+        with:
+          name: v17-resource-witness
+          path: dist/evidence
+      - name: Verify V17 evidence belongs to this candidate and meets its budgets
+        if: startsWith(github.ref, 'refs/tags/v4.17.') || startsWith(github.ref, 'refs/heads/codex/release-4.17')
+        run: python3 scripts/verify_v17_memory.py --verify-report dist/evidence/v17-resource-witness.json --expected-sha "$GITHUB_SHA"
       - name: Download all candidate sparkless distributions
         uses: actions/download-artifact@v4
         with:
