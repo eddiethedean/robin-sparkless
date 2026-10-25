@@ -430,6 +430,17 @@ mod tests {
             true,
         )]);
         assert!(map.try_to_polars_schema().is_err());
+
+        let map_with_nullability = StructType::new(vec![StructField::new(
+            "required_attributes".into(),
+            DataType::MapWithNullability {
+                key_type: Box::new(DataType::String),
+                value_type: Box::new(DataType::Integer),
+                value_contains_null: false,
+            },
+            true,
+        )]);
+        assert!(map_with_nullability.try_to_polars_schema().is_err());
     }
 
     #[test]

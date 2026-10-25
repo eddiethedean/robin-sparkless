@@ -251,6 +251,15 @@ mod tests {
                 },
                 true,
             ),
+            StructField::new(
+                "required_attributes".into(),
+                DataType::MapWithNullability {
+                    key_type: Box::new(DataType::String),
+                    value_type: Box::new(DataType::Integer),
+                    value_contains_null: false,
+                },
+                true,
+            ),
             StructField::new("event_time".into(), DataType::TimestampNtz, true),
         ]);
         schema.validate_metadata().unwrap();
@@ -267,6 +276,13 @@ mod tests {
             roundtrip.fields()[1].data_type,
             DataType::MapWithNullability {
                 value_contains_null: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            roundtrip.fields()[2].data_type,
+            DataType::MapWithNullability {
+                value_contains_null: false,
                 ..
             }
         ));
