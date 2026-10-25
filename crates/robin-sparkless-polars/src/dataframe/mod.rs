@@ -6791,6 +6791,92 @@ mod tests {
         assert_eq!(encoded_schema, Some(expected_schema.as_str()));
         assert_eq!(reader.finish().unwrap().height(), 0);
 
+        let scalar_transformed = source
+            .filter(col("tiny").is_not_null())
+            .unwrap()
+            .select_exprs(vec![
+                col("tiny").cast(PlDataType::Int8).alias("tiny_copy"),
+                col("single").cast(PlDataType::Float32).alias("single_copy"),
+                col("payload").alias("payload_copy"),
+            ])
+            .unwrap();
+        let scalar_union = scalar_transformed.union(&scalar_transformed).unwrap();
+        assert_eq!(scalar_union.count().unwrap(), 4);
+        let scalar_schema = scalar_union.schema().unwrap();
+        assert!(matches!(
+            &scalar_schema.fields()[0].data_type,
+            LogicalDataType::Byte
+        ));
+        assert!(matches!(
+            &scalar_schema.fields()[1].data_type,
+            LogicalDataType::Float
+        ));
+        assert!(matches!(
+            &scalar_schema.fields()[2].data_type,
+            LogicalDataType::Binary
+        ));
+        let scalar_expected_schema = scalar_schema.to_json().unwrap();
+        let scalar_batch = scalar_union
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut scalar_reader = IpcStreamReader::new(std::io::Cursor::new(scalar_batch.bytes));
+        let scalar_metadata = scalar_reader.custom_metadata().unwrap().unwrap();
+        let scalar_encoded_schema = scalar_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(scalar_encoded_schema, Some(scalar_expected_schema.as_str()));
+        let scalar_values = scalar_reader.finish().unwrap();
+        assert_eq!(
+            scalar_values
+                .column("tiny_copy")
+                .unwrap()
+                .i8()
+                .unwrap()
+                .into_no_null_iter()
+                .collect::<Vec<_>>(),
+            vec![i8::MIN, i8::MAX, i8::MIN, i8::MAX]
+        );
+        assert_eq!(
+            scalar_values
+                .column("single_copy")
+                .unwrap()
+                .f32()
+                .unwrap()
+                .into_no_null_iter()
+                .collect::<Vec<_>>(),
+            vec![1.25, -0.5, 1.25, -0.5]
+        );
+        let binary_values = scalar_values
+            .column("payload_copy")
+            .unwrap()
+            .binary()
+            .unwrap();
+        assert_eq!(binary_values.get(0), Some(&b"\x00\xff"[..]));
+        assert_eq!(binary_values.get(1), Some(&b"ok"[..]));
+        assert_eq!(binary_values.get(2), Some(&b"\x00\xff"[..]));
+        assert_eq!(binary_values.get(3), Some(&b"ok"[..]));
+
+        let empty_scalar_union = scalar_union.limit(0).unwrap();
+        let empty_scalar_batch = empty_scalar_union
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut empty_scalar_reader =
+            IpcStreamReader::new(std::io::Cursor::new(empty_scalar_batch.bytes));
+        let empty_scalar_metadata = empty_scalar_reader.custom_metadata().unwrap().unwrap();
+        let empty_scalar_schema = empty_scalar_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(empty_scalar_schema, Some(scalar_expected_schema.as_str()));
+        assert_eq!(empty_scalar_reader.finish().unwrap().height(), 0);
+
         let transformed = source
             .filter(col("wall_clock").is_not_null())
             .unwrap()

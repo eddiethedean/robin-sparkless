@@ -3044,6 +3044,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn default_mutation_retention_limit_keeps_success_and_failure_records() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let capacity = server.inner.config.max_mutation_records;
+        for index in 0..capacity - 1 {
+            let operation_id = format!("keep-{index}");
+            let response =
+                statement_request(address, &instance, "w", &operation_id, "USE default").await;
+            assert_eq!(response["status"], "ok", "{operation_id}: {response}");
+        }
+
+        let failure_session = "s".repeat(MAX_IDENTIFIER_BYTES);
+        let failure_operation = "f".repeat(MAX_IDENTIFIER_BYTES);
+        let max_record_bytes =
+            MUTATION_RECORD_BASE_BYTES + failure_session.len() + failure_operation.len();
+        assert_eq!(max_record_bytes, 2304);
+        assert!(max_record_bytes <= 4 * 1024);
+        let retained_failure = statement_request(
+            address,
+            &instance,
+            &failure_session,
+            &failure_operation,
+            "DROP DATABASE default",
+        )
+        .await;
+        assert_eq!(retained_failure["status"], "error", "{retained_failure}");
+        assert_eq!(
+            retained_failure["operation"]["effect_outcome"], "failed",
+            "failed outcomes consume retention capacity"
+        );
+
+        let (status, oldest) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({"server_instance_id":instance,"operation_id":"keep-0"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{oldest}");
+        assert_eq!(oldest["effect_outcome"], "committed");
+        let (status, failure_status) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({"server_instance_id":instance,"operation_id":failure_operation}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{failure_status}");
+        assert_eq!(failure_status["effect_outcome"], "failed");
+
+        let (status, rejected) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"w",
+                "kind":"sql",
+                "code":"CREATE DATABASE over_limit",
+                "server_instance_id":instance,
+                "operation_id":"over-limit"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{rejected}");
+        assert_eq!(rejected["ename"], "MutationRetentionCapacityExceeded");
+        assert!(!server.inner.root_session.database_exists("over_limit"));
+        assert!(server.inner.operation("over-limit").is_none());
+        {
+            let registry = server.inner.operation_records.lock().unwrap();
+            assert_eq!(registry.records.len(), capacity);
+            assert!(registry.bytes < server.inner.config.max_mutation_bytes);
+        }
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn separate_server_instances_own_isolated_catalogs() {
         async fn start_test_server(
             server: Server,
