@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Rust schema API** — `robin_sparkless_core::DataType` now includes `Short` and `Decimal` and is marked non-exhaustive. Downstream exhaustive matches must add a fallback arm. Ship this API change in a major release.
 
+## [4.17.0] - 2026-10-24
+
+### Added
+
+- **Shared native SQL catalog** — support isolated service catalogs with session-local views and state, cross-session table access, statement snapshots, and atomic managed-table mutations.
+- **Mutation outcome tracking** — expose stable operation identities, retained commit outcomes, bounded mutation retention, and status recovery across request deadlines and disconnects.
+- **Bounded native execution** — defer range construction and use bounded batches for supported filtered counts, with scheduler health and large-workload measurements.
+- **Logical schema fidelity** — preserve supported scalar distinctions and nested schema metadata through checked native transformations and Arrow IPC.
+- **Coordinated server distribution** — publish the HTTP server binary as platform-specific wheels and verify the Python extra, native image, and public SDK integration in release gates.
+
 ## [4.15.3] - 2026-10-22
 
 ### Fixed
