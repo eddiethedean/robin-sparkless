@@ -1258,6 +1258,113 @@ mod tests {
         );
     }
 
+    #[test]
+    fn full_outer_join_preserves_nested_struct_schema_and_ipc_values() {
+        use polars::chunked_array::StructChunked;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{AnyValue, IntoSeries, NamedFrom, SerReader, Series};
+        use robin_sparkless_core::DataType as CoreDataType;
+        use std::collections::BTreeMap;
+
+        fn metadata(origin: &str) -> BTreeMap<String, serde_json::Value> {
+            [("origin".to_string(), serde_json::json!(origin))]
+                .into_iter()
+                .collect()
+        }
+
+        fn source(keys: &[i32], scores: &[i32], labels: &[&str], side: &str) -> DataFrame {
+            let key = Series::new("id".into(), keys.to_vec());
+            let score = Series::new("score".into(), scores.to_vec());
+            let label = Series::new("label".into(), labels.to_vec());
+            let payload = StructChunked::from_series(
+                "payload".into(),
+                keys.len(),
+                [&score, &label].into_iter(),
+            )
+            .unwrap()
+            .into_series();
+            let physical =
+                polars::prelude::DataFrame::new_infer_height(vec![key.into(), payload.into()])
+                    .unwrap();
+            let nested = CoreDataType::Struct(vec![
+                StructField::new("score".into(), CoreDataType::Integer, false)
+                    .with_metadata(metadata(&format!("{side}-score"))),
+                StructField::new("label".into(), CoreDataType::String, false),
+            ]);
+            let logical = StructType::new(vec![
+                StructField::new("id".into(), CoreDataType::Integer, false),
+                StructField::new("payload".into(), nested, false)
+                    .with_metadata(metadata(&format!("{side}-payload"))),
+            ]);
+            DataFrame::from_polars(physical)
+                .with_logical_schema(logical)
+                .unwrap()
+        }
+
+        let left = source(&[1, 2], &[11, 22], &["left-one", "left-two"], "left");
+        let right = source(&[1, 3], &[100, 300], &["right-one", "right-three"], "right");
+        let joined = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
+        assert_eq!(joined.count().unwrap(), 3);
+
+        let schema = joined.schema().unwrap();
+        for (name, side) in [("payload", "left"), ("payload_right", "right")] {
+            let field = schema
+                .fields()
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap();
+            assert!(field.nullable, "full outer join must make {name} nullable");
+            assert_eq!(field.metadata["origin"], format!("{side}-payload"));
+            let CoreDataType::Struct(fields) = &field.data_type else {
+                panic!("{name} must retain its nested struct type");
+            };
+            assert!(!fields[0].nullable, "the nested score remains non-nullable");
+            assert_eq!(fields[0].metadata["origin"], format!("{side}-score"));
+        }
+
+        let expected_schema = schema.to_json().unwrap();
+        let batch = joined
+            .to_arrow_ipc_batches_with_cancellation(
+                8,
+                16 * 1024,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+            )
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        let score_for = |column: &str, row: usize| -> Option<i32> {
+            let column = decoded.column(column).unwrap();
+            if matches!(column.get(row).unwrap(), AnyValue::Null) {
+                return None;
+            }
+            column
+                .struct_()
+                .unwrap()
+                .field_by_name("score")
+                .unwrap()
+                .i32()
+                .unwrap()
+                .get(row)
+        };
+        let mut observed = (0..decoded.height())
+            .map(|row| (score_for("payload", row), score_for("payload_right", row)))
+            .collect::<Vec<_>>();
+        observed.sort();
+        let mut expected = vec![(Some(11), Some(100)), (Some(22), None), (None, Some(300))];
+        expected.sort();
+        assert_eq!(observed, expected);
+    }
+
     /// #1165: Join with same-named keys and coalesce: non-key columns keep correct dtypes in schema and collect.
     #[test]
     fn join_coalesce_preserves_non_key_column_types() {
