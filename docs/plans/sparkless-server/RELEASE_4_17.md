@@ -1,6 +1,6 @@
 # 4.17.0 implementation and release plan
 
-**Status: implementation in progress; no release gates completed.** This plan refines **Phase 1**, following the [4.16 implementation plan](RELEASE_4_16.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes again at **4.17.0**, including unchanged packages. Owners, external adapter tracking, and release evidence remain unassigned.
+**Status: implementation in progress; no full 4.17 release-readiness gate is complete.** This plan refines **Phase 1**, following the [4.16 implementation plan](RELEASE_4_16.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes again at **4.17.0**, including unchanged packages. Partial native and adapter evidence is recorded in [417-04](#417-04-mutation-identity-outcomes-and-adapter-integration) and [VALIDATION](VALIDATION.md); implementation owners, upstream adapter acceptance, and integrated V15–V18/V31/V32 evidence remain open.
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Release roadmap](ROADMAP.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
