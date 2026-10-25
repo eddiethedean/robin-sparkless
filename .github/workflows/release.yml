@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: false
+      pypi_recovery_run_id:
+        description: Completed tagged release run ID whose verified PyPI uploads need recovery
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -530,6 +535,106 @@ jobs:
         with:
           packages-dir: dist/
           skip-existing: true
+
+  recover-pypi-publication:
+    name: Recover PyPI publication from a verified release run
+    if: github.event_name == 'workflow_dispatch' && inputs.pypi_recovery_run_id != '' && !inputs.publish_rust && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: pypi
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate the completed tagged source run and V31 artifacts
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.pypi_recovery_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "pypi_recovery_run_id must be a numeric GitHub Actions run ID"
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/recovery-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/recovery-jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/recovery-artifacts.json"
+          workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml" --jq .id)"
+          python3 scripts/verify_pypi_recovery_source.py \
+            --run-json "$RUNNER_TEMP/recovery-run.json" \
+            --jobs-json "$RUNNER_TEMP/recovery-jobs.json" \
+            --artifacts-json "$RUNNER_TEMP/recovery-artifacts.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --workflow-id "$workflow_id" >> "$GITHUB_OUTPUT"
+      - name: Download the exact V31-verified distributions
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.pypi_recovery_run_id }}
+          github-token: ${{ github.token }}
+          name: verified-server-bin-candidate
+          path: dist/server-bin
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.pypi_recovery_run_id }}
+          github-token: ${{ github.token }}
+          name: verified-sparkless-candidate
+          path: dist/sparkless
+      - name: Recheck the exact source-run distributions
+        env:
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          version="$RELEASE_VERSION"
+          python3 scripts/verify_recovery_distributions.py \
+            --version "$version" \
+            --server-bin-directory dist/server-bin \
+            --sparkless-directory dist/sparkless
+          python3 -m pip install twine
+          python3 -m twine check dist/server-bin/* dist/sparkless/*
+      - name: Recover server binary wheels on PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/server-bin/
+          skip-existing: true
+      - name: Recover sparkless distributions on PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/sparkless/
+          skip-existing: true
+      - name: Verify public PyPI and crates.io artifacts against the verified inputs
+        env:
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_public_release_416.py \
+            --version "$RELEASE_VERSION" \
+            --server-bin-directory dist/server-bin \
+            --sparkless-directory dist/sparkless
+      - name: Verify a fresh exact-version server-extra install
+        env:
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/sparkless-recovery"
+          "$RUNNER_TEMP/sparkless-recovery/bin/python" -m pip install "sparkless[server]==$RELEASE_VERSION"
+          "$RUNNER_TEMP/sparkless-recovery/bin/python" -m pip check
+          if [[ "$RELEASE_VERSION" == "4.16.1" ]]; then
+            "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION" --protocol legacy-4.16
+          else
+            "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION"
+          fi
+      - name: Record the recovery scope
+        env:
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+          SOURCE_RUN_ID: ${{ inputs.pypi_recovery_run_id }}
+        run: echo "Recovered and verified PyPI distributions for $RELEASE_VERSION from tag workflow run $SOURCE_RUN_ID. The source V31 inventory, PyPI hashes, crates.io versions, and fresh server-extra install passed." >> "$GITHUB_STEP_SUMMARY"
 
   publish-server-container:
     name: Publish verified native server container

@@ -1,0 +1,106 @@
+"""Validate a completed release run before reusing its PyPI artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import re
+import sys
+from typing import Any
+
+
+RELEASE_WORKFLOW = ".github/workflows/release.yml"
+VERIFIED_CANDIDATE_JOB = "Verify complete candidate PyPI inventory (V31)"
+PUBLISHED_CRATES_JOB = "Build docs and publish to crates.io"
+REQUIRED_ARTIFACTS = {
+    "verified-server-bin-candidate",
+    "verified-sparkless-candidate",
+}
+
+
+def validate_recovery_source(
+    run: dict[str, Any],
+    jobs: dict[str, Any],
+    artifacts: dict[str, Any],
+    repository: str,
+    workflow_id: int,
+) -> str:
+    """Return the stable version only for an eligible completed tag run."""
+    if run.get("event") != "push":
+        raise ValueError("source run must be triggered by a tag push")
+    if run.get("status") != "completed":
+        raise ValueError("source release run must be completed")
+    if run.get("workflow_id") != workflow_id:
+        raise ValueError("source run must use the release workflow")
+    if run.get("path") != RELEASE_WORKFLOW:
+        raise ValueError("source run came from a different workflow file")
+    head_repository = run.get("head_repository") or {}
+    if str(head_repository.get("full_name", "")).lower() != repository.lower():
+        raise ValueError("source run must belong to this repository")
+
+    tag = run.get("head_branch", "")
+    match = re.fullmatch(r"v([0-9]+\.[0-9]+\.[0-9]+)", tag)
+    if match is None:
+        raise ValueError("source run must target a stable version tag")
+
+    if not any(
+        job.get("name") == VERIFIED_CANDIDATE_JOB
+        and job.get("conclusion") == "success"
+        for job in jobs.get("jobs", [])
+    ):
+        raise ValueError("source run did not pass the complete V31 inventory gate")
+    if not any(
+        job.get("name") == PUBLISHED_CRATES_JOB
+        and job.get("conclusion") == "success"
+        for job in jobs.get("jobs", [])
+    ):
+        raise ValueError("source run did not successfully publish the Rust crates")
+
+    available_artifacts = {
+        artifact.get("name")
+        for artifact in artifacts.get("artifacts", [])
+        if artifact.get("expired") is False
+    }
+    missing_artifacts = REQUIRED_ARTIFACTS - available_artifacts
+    if missing_artifacts:
+        raise ValueError(
+            "source run is missing unexpired verified artifact(s): {}".format(
+                ", ".join(sorted(missing_artifacts))
+            )
+        )
+    return match.group(1)
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("{} must contain a JSON object".format(path))
+    return value
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-json", type=Path, required=True)
+    parser.add_argument("--jobs-json", type=Path, required=True)
+    parser.add_argument("--artifacts-json", type=Path, required=True)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--workflow-id", type=int, required=True)
+    args = parser.parse_args(argv)
+    try:
+        version = validate_recovery_source(
+            _read_json(args.run_json),
+            _read_json(args.jobs_json),
+            _read_json(args.artifacts_json),
+            args.repository,
+            args.workflow_id,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        print("PyPI recovery source rejected: {}".format(error), file=sys.stderr)
+        return 1
+    print("version={}".format(version))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

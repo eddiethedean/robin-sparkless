@@ -59,6 +59,10 @@ Use the [4.17 validation corpus](RELEASE_4_17.md#validation-corpus-and-release-g
 
 V31 checks the complete 4.17.0 candidate before tagging/publication; V32 establishes completion after fresh public installs. A passing direct mutation test cannot substitute for the external adapter/public SDK gate. All evidence remains pending until implementation runs these checks.
 
+### Recovering a partial PyPI upload
+
+Dispatch the `Release` workflow from `main` and set `pypi_recovery_run_id` to the completed tag-run ID. Recovery accepts only a same-repository `Release` run from a stable version tag whose V31 inventory and crates.io publication succeeded and whose two verified distribution artifacts are still available. It rechecks both inventories, uploads with PyPI `skip-existing`, then verifies public file hashes, crates.io versions, and a fresh exact-version `sparkless[server]` install. This recovers PyPI publication only; GHCR remains governed by the release run.
+
 ## Test implementation guidance
 
 Use native unit/integration tests for schema mappings, admission ownership, state transitions, and error propagation. Add property/fuzz tests where malformed nested protocols or state-machine races justify them. Integration tests must use real engine computation, not programmed success responses.

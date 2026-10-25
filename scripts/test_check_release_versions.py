@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+import shutil
 from tempfile import TemporaryDirectory
 
 from check_release_versions import (
@@ -73,10 +74,37 @@ class ReleaseVersionsTest(unittest.TestCase):
         self.assertEqual(validate_server_inventory(root), [])
         self.assertEqual(check_release(root), [])
 
-    def test_phase_416_candidate_requires_coordinated_parser(self):
-        root = Path(__file__).resolve().parents[1]
-        errors = validate_server_inventory(root, "v4.16.0")
-        self.assertTrue(any("spark-sql-parser" in error for error in errors))
+    def test_coordinated_candidate_requires_parser_dependency_alignment(self):
+        source = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifests = (
+                "Cargo.toml",
+                "Cargo.lock",
+                "crates/robin-sparkless-core/Cargo.toml",
+                "crates/robin-sparkless-polars/Cargo.toml",
+                "crates/spark-sql-parser/Cargo.toml",
+                "crates/sparkless-server/Cargo.toml",
+                "python/pyproject.toml",
+                "python/server-bin/pyproject.toml",
+            )
+            for relative in manifests:
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source / relative, destination)
+
+            server_manifest = root / "crates/sparkless-server/Cargo.toml"
+            server_manifest.write_text(
+                server_manifest.read_text().replace(
+                    'spark-sql-parser = { version = "4.17.0"',
+                    'spark-sql-parser = { version = "4.16.0"',
+                    1,
+                )
+            )
+            errors = validate_server_inventory(root, "v4.17.0")
+            self.assertTrue(
+                any("sparkless-server/spark-sql-parser" in error for error in errors)
+            )
 
     def test_candidate_branch_requires_parser_manifest_and_lock_alignment(self):
         with TemporaryDirectory() as temporary:
