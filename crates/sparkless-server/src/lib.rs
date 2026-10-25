@@ -4216,8 +4216,33 @@ mod tests {
         let encoded = spark_schema(&[field]).unwrap();
         assert_eq!(encoded["fields"][0]["metadata"]["owner"], "analytics");
 
-        let byte_field = StructField::new("tiny".into(), DataType::Byte, true);
-        assert!(spark_schema(&[byte_field]).is_err());
+        let unsupported_types = vec![
+            DataType::Byte,
+            DataType::Float,
+            DataType::TimestampNtz,
+            DataType::Binary,
+            DataType::Array(Box::new(DataType::Long)),
+            DataType::ArrayWithNullability {
+                element_type: Box::new(DataType::Long),
+                contains_null: false,
+            },
+            DataType::Map(Box::new(DataType::Long), Box::new(DataType::String)),
+            DataType::MapWithNullability {
+                key_type: Box::new(DataType::Long),
+                value_type: Box::new(DataType::String),
+                value_contains_null: false,
+            },
+            DataType::Struct(vec![StructField::new(
+                "nested".into(),
+                DataType::Long,
+                true,
+            )]),
+        ];
+        for data_type in unsupported_types {
+            let field = StructField::new("unsupported".into(), data_type, true);
+            let error = spark_schema(&[field]).unwrap_err();
+            assert_eq!(error.name, "UnsupportedResultType");
+        }
     }
 
     #[test]
