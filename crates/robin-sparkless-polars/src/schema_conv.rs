@@ -273,7 +273,11 @@ pub(crate) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
         DataType::Timestamp => PlDataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
         DataType::TimestampNtz => PlDataType::Datetime(TimeUnit::Microseconds, None),
         DataType::Binary => PlDataType::Binary,
-        DataType::Array(inner) => PlDataType::List(Box::new(data_type_to_polars_type(inner))),
+        DataType::Array(inner)
+        | DataType::ArrayWithNullability {
+            element_type: inner,
+            ..
+        } => PlDataType::List(Box::new(data_type_to_polars_type(inner))),
         DataType::Struct(fields) => PlDataType::Struct(
             fields
                 .iter()

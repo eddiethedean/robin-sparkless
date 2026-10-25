@@ -2410,6 +2410,144 @@ impl DataFrame {
         Some(StructType::new(fields))
     }
 
+    /// Preserve field declarations across joins by following the result names back to their
+    /// input columns. Polars does not carry Spark field metadata or nested nullability in its
+    /// physical schema, so the join result must retain the logical descriptor explicitly.
+    pub(crate) fn joined_logical_schema(
+        &self,
+        other: &DataFrame,
+        output: &DataFrame,
+        how: JoinType,
+    ) -> Option<StructType> {
+        if self.logical_schema.is_none() && other.logical_schema.is_none() {
+            return None;
+        }
+
+        let output_schema = output.schema_or_collect().ok()?;
+        let left_schema = self.schema_or_collect().ok()?;
+        let right_schema = other.schema_or_collect().ok()?;
+        let left_names = self.columns().ok()?;
+        let right_names = other.columns().ok()?;
+        let matches_name = |left: &str, right: &str| {
+            if self.case_sensitive {
+                left == right
+            } else {
+                left.eq_ignore_ascii_case(right)
+            }
+        };
+
+        let logical_or_physical_field = |frame: &DataFrame,
+                                         physical_schema: &Schema,
+                                         source_name: &str|
+         -> Option<StructField> {
+            if let Some(field) = frame.logical_schema.as_ref().and_then(|schema| {
+                schema
+                    .fields()
+                    .iter()
+                    .find(|field| matches_name(&field.name, source_name))
+            }) {
+                return Some(field.clone());
+            }
+            let dtype = physical_schema
+                .iter()
+                .find(|(name, _)| matches_name(name.as_str(), source_name))
+                .map(|(_, dtype)| dtype)?;
+            Some(StructField::new(
+                source_name.to_string(),
+                crate::schema_conv::checked_polars_type_to_data_type(dtype, source_name).ok()?,
+                true,
+            ))
+        };
+
+        let aliased_right_source = |output_name: &str| -> Option<&str> {
+            let mut used = left_names.iter().cloned().collect::<HashSet<_>>();
+            for right_name in &right_names {
+                let collides = left_names
+                    .iter()
+                    .any(|left_name| matches_name(left_name, right_name));
+                let alias = if collides || !used.insert(right_name.clone()) {
+                    let mut candidate = format!("{right_name}_right");
+                    if !used.insert(candidate.clone()) {
+                        let mut suffix = 1usize;
+                        loop {
+                            candidate = format!("{right_name}_right_{suffix}");
+                            if used.insert(candidate.clone()) {
+                                break;
+                            }
+                            suffix += 1;
+                        }
+                    }
+                    candidate
+                } else {
+                    right_name.clone()
+                };
+                if matches_name(&alias, output_name) && (collides || alias != *right_name) {
+                    return Some(right_name.as_str());
+                }
+            }
+            None
+        };
+
+        let fields = output_schema
+            .iter()
+            .map(|(output_name, output_dtype)| {
+                let left_source = left_names
+                    .iter()
+                    .find(|name| matches_name(name, output_name.as_str()))
+                    .map(String::as_str);
+                let right_exact_source = right_names
+                    .iter()
+                    .find(|name| matches_name(name, output_name.as_str()))
+                    .map(String::as_str);
+                let right_source =
+                    right_exact_source.or_else(|| aliased_right_source(output_name.as_str()));
+
+                // An unsuffixed collision is the left field (including a coalesced join key).
+                // Right fields renamed by the join implementation are recovered from `_right`.
+                let (source_frame, source_schema, source_name, is_right) =
+                    if let Some(source_name) = left_source {
+                        (self, left_schema.as_ref(), source_name, false)
+                    } else if let Some(source_name) = right_source {
+                        (other, right_schema.as_ref(), source_name, true)
+                    } else {
+                        return Some(StructField::new(
+                            output_name.to_string(),
+                            crate::schema_conv::checked_polars_type_to_data_type(
+                                output_dtype,
+                                output_name,
+                            )
+                            .ok()?,
+                            true,
+                        ));
+                    };
+
+                let mut field =
+                    logical_or_physical_field(source_frame, source_schema, source_name)?;
+                if !crate::schema_conv::checked_data_type_to_polars_type(
+                    &field.data_type,
+                    source_name,
+                )
+                .is_ok_and(|expected| &expected == output_dtype)
+                {
+                    field.data_type = crate::schema_conv::checked_polars_type_to_data_type(
+                        output_dtype,
+                        output_name,
+                    )
+                    .ok()?;
+                }
+                field.name = output_name.to_string();
+                if matches!(how, JoinType::Outer)
+                    || (matches!(how, JoinType::Left) && is_right)
+                    || (matches!(how, JoinType::Right) && !is_right)
+                {
+                    field.nullable = true;
+                }
+                Some(field)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(StructType::new(fields))
+    }
+
     /// Same as [`schema`](Self::schema) but returns [`EngineError`]. Use in bindings to avoid Polars.
     pub fn schema_engine(&self) -> Result<StructType, EngineError> {
         self.schema().map_err(polars_to_core_error)
@@ -3916,7 +4054,9 @@ impl DataFrame {
 
     /// Cross join with another DataFrame (cartesian product). PySpark crossJoin.
     pub fn cross_join(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
-        transformations::cross_join(self, other, self.case_sensitive)
+        let mut output = transformations::cross_join(self, other, self.case_sensitive)?;
+        output.logical_schema = self.joined_logical_schema(other, &output, JoinType::Inner);
+        Ok(output)
     }
 
     /// Summary statistics. PySpark describe.
