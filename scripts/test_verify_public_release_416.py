@@ -10,6 +10,7 @@ from verify_public_release_416 import (
     preserve_existing_pypi_files,
     validate_crate_release,
     validate_pypi_release,
+    verify_public_release,
 )
 
 
@@ -52,6 +53,41 @@ class VerifyPublicRelease416Test(unittest.TestCase):
     def test_accepts_the_corrective_4161_server_binary_platforms(self):
         metadata = release_metadata("sparkless-server-bin", "4.16.1")
         validate_pypi_release(metadata, "sparkless-server-bin", version="4.16.1")
+
+    def test_accepts_the_corrective_4161_sparkless_platforms(self):
+        metadata = release_metadata("sparkless", "4.16.1")
+        validate_pypi_release(metadata, "sparkless", version="4.16.1")
+
+    def test_verifies_public_prerequisite_without_local_build_directories(self):
+        responses = {
+            "https://pypi.org/pypi/sparkless-server-bin/4.16.1/json": release_metadata(
+                "sparkless-server-bin", "4.16.1"
+            ),
+            "https://pypi.org/pypi/sparkless/4.16.1/json": release_metadata(
+                "sparkless", "4.16.1"
+            ),
+        }
+        for crate in (
+            "spark-sql-parser",
+            "robin-sparkless-core",
+            "robin-sparkless-polars",
+            "robin-sparkless",
+            "sparkless-server",
+        ):
+            responses["https://crates.io/api/v1/crates/{}/4.16.1".format(crate)] = {
+                "version": {"num": "4.16.1", "crate": crate}
+            }
+
+        def fetch(url):
+            return responses[url]
+
+        with (
+            patch("verify_public_release_416._fetch_json", side_effect=fetch),
+            patch(
+                "verify_public_release_416._retry", side_effect=lambda check: check()
+            ),
+        ):
+            verify_public_release(None, None, version="4.16.1")
 
     def test_417_inventory_requires_exact_published_build_hashes(self):
         metadata = release_metadata("sparkless-server-bin", "4.17.0")

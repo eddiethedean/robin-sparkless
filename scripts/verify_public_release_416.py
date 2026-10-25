@@ -250,7 +250,9 @@ def _retry(check, attempts: int = 20, interval: float = 5.0) -> None:
 
 
 def verify_public_release(
-    server_bin_directory: Path, sparkless_directory: Path, version: str = VERSION
+    server_bin_directory: Path | None,
+    sparkless_directory: Path | None,
+    version: str = VERSION,
 ) -> None:
     for project in ("sparkless-server-bin", "sparkless"):
         url = "https://pypi.org/pypi/{}/{}/json".format(project, version)
@@ -281,9 +283,11 @@ def verify_public_release(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", default=VERSION)
-    parser.add_argument("--server-bin-directory", type=Path, required=True)
-    parser.add_argument("--sparkless-directory", type=Path, required=True)
+    parser.add_argument("--server-bin-directory", type=Path)
+    parser.add_argument("--sparkless-directory", type=Path)
     args = parser.parse_args(argv)
+    if (args.server_bin_directory is None) != (args.sparkless_directory is None):
+        parser.error("both local distribution directories must be provided together")
     try:
         verify_public_release(
             args.server_bin_directory, args.sparkless_directory, args.version
@@ -291,11 +295,18 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError, urllib.error.URLError) as error:
         print("public release verification failed: {}".format(error))
         return 1
-    print(
-        "verified {} PyPI file hashes and crates.io release artifacts".format(
-            args.version
+    if args.server_bin_directory is None:
+        print(
+            "verified {} public PyPI inventories and crates.io releases".format(
+                args.version
+            )
         )
-    )
+    else:
+        print(
+            "verified {} PyPI file hashes and crates.io release artifacts".format(
+                args.version
+            )
+        )
     return 0
 
 
