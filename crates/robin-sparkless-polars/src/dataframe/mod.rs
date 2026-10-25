@@ -7404,6 +7404,32 @@ mod tests {
                 .unwrap()
         }
 
+        fn assert_nested_ids(frame: &DataFrame, column_name: &str, expected: &[Option<i32>]) {
+            let collected = frame.collect().unwrap();
+            assert_eq!(collected.height(), expected.len());
+            let payload = collected.column(column_name).unwrap();
+            let fields = payload.struct_().unwrap();
+            let ids = fields.field_by_name("id").unwrap();
+            let ids = ids.i32().unwrap();
+            let labels = fields.field_by_name("label").unwrap();
+            let labels = labels.str().unwrap();
+            for (index, expected) in expected.iter().enumerate() {
+                match expected {
+                    Some(value) => {
+                        assert_eq!(ids.get(index), Some(*value));
+                        let expected_label = match value {
+                            1 => "first",
+                            2 => "hidden",
+                            3 => "third",
+                            _ => panic!("unexpected nested id {value}"),
+                        };
+                        assert_eq!(labels.get(index), Some(expected_label));
+                    }
+                    None => assert!(matches!(payload.get(index).unwrap(), AnyValue::Null)),
+                }
+            }
+        }
+
         let source = source_frame();
         let source_schema_json = source.schema().unwrap().to_json().unwrap();
         let unioned = source.union(&source).unwrap();
@@ -7465,8 +7491,11 @@ mod tests {
                 .unwrap()
                 .as_materialized_series()
         );
+        assert_nested_ids(&duplicated, "payload", &[Some(1), None, Some(3)]);
+        assert_nested_ids(&duplicated, "payload_1", &[Some(1), None, Some(3)]);
 
         assert_eq!(projected.count().unwrap(), 4);
+        assert_nested_ids(&projected, "renamed", &[Some(1), Some(3), Some(1), Some(3)]);
         let schema = projected.schema().unwrap();
         assert_eq!(schema.fields().len(), 1);
         assert_eq!(schema.fields()[0].name, "renamed");
@@ -7476,25 +7505,35 @@ mod tests {
         assert!(!nested_fields[0].nullable);
         assert_eq!(nested_fields[0].metadata["origin"], "shared catalog");
 
-        let nested_field = source.select(vec!["payload.id"]).unwrap().schema().unwrap();
+        let dotted = source.select(vec!["payload.id"]).unwrap();
+        let nested_field = dotted.schema().unwrap();
         assert_eq!(nested_field.fields()[0].name, "id");
         assert!(!nested_field.fields()[0].nullable);
         assert_eq!(
             nested_field.fields()[0].metadata["origin"],
             "shared catalog"
         );
+        let dotted_values = dotted.collect().unwrap();
+        let dotted_ids = dotted_values.column("id").unwrap().i32().unwrap();
+        assert_eq!(dotted_ids.get(0), Some(1));
+        assert_eq!(dotted_ids.get(1), None);
+        assert_eq!(dotted_ids.get(2), Some(3));
 
-        let selected_items = source
+        let selected_items_frame = source
             .select_items(vec![SelectItem::Expr(col("payload").alias("item_payload"))])
-            .unwrap()
-            .schema()
             .unwrap();
+        let selected_items = selected_items_frame.schema().unwrap();
         let LogicalDataType::Struct(item_fields) = &selected_items.fields()[0].data_type else {
             panic!("mixed select must retain the nested logical schema");
         };
         assert_eq!(selected_items.fields()[0].name, "item_payload");
         assert!(!item_fields[0].nullable);
         assert_eq!(item_fields[0].metadata["origin"], "shared catalog");
+        assert_nested_ids(
+            &selected_items_frame,
+            "item_payload",
+            &[Some(1), None, Some(3)],
+        );
 
         let selected_nested_item = source
             .select_items(vec![SelectItem::ColumnName("payload.id")])
@@ -7508,17 +7547,21 @@ mod tests {
             "shared catalog"
         );
 
-        let selected_expr = source
+        let selected_expr_frame = source
             .select_expr(&["payload as expr_payload".to_string()])
-            .unwrap()
-            .schema()
             .unwrap();
+        let selected_expr = selected_expr_frame.schema().unwrap();
         let LogicalDataType::Struct(expr_fields) = &selected_expr.fields()[0].data_type else {
             panic!("selectExpr must retain the nested logical schema");
         };
         assert_eq!(selected_expr.fields()[0].name, "expr_payload");
         assert!(!expr_fields[0].nullable);
         assert_eq!(expr_fields[0].metadata["origin"], "shared catalog");
+        assert_nested_ids(
+            &selected_expr_frame,
+            "expr_payload",
+            &[Some(1), None, Some(3)],
+        );
 
         let copied = source
             .with_column_expr("payload_copy", col("payload"))
@@ -7530,6 +7573,7 @@ mod tests {
         };
         assert!(!copied_fields[0].nullable);
         assert_eq!(copied_fields[0].metadata["origin"], "shared catalog");
+        assert_nested_ids(&copied, "payload_copy", &[Some(1), None, Some(3)]);
 
         let renamed = source
             .with_column_renamed("payload", "renamed_payload")
@@ -7541,11 +7585,17 @@ mod tests {
         assert_eq!(renamed_schema.fields()[0].name, "renamed_payload");
         assert!(!renamed_fields[0].nullable);
         assert_eq!(renamed_fields[0].metadata["origin"], "shared catalog");
+        assert_nested_ids(&renamed, "renamed_payload", &[Some(1), None, Some(3)]);
 
         let by_name = source.union_by_name(&source, false).unwrap();
         assert_eq!(
             by_name.schema().unwrap().to_json().unwrap(),
             source_schema_json
+        );
+        assert_nested_ids(
+            &by_name,
+            "payload",
+            &[Some(1), None, Some(3), Some(1), None, Some(3)],
         );
 
         let row_filtered = source.dropna(None, "any", None).unwrap();
@@ -7553,6 +7603,7 @@ mod tests {
             row_filtered.schema().unwrap().to_json().unwrap(),
             source_schema_json
         );
+        assert_nested_ids(&row_filtered, "payload", &[Some(1), Some(3)]);
 
         let expected_schema = schema.to_json().unwrap();
         let batch = projected
