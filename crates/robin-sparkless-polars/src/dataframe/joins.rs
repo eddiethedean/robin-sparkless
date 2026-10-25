@@ -1365,6 +1365,96 @@ mod tests {
         assert_eq!(observed, expected);
     }
 
+    #[test]
+    fn full_outer_join_preserves_timestamp_ntz_timezone_and_values() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{DataType as PlDataType, NamedFrom, SerReader, Series, TimeUnit};
+        use robin_sparkless_core::DataType as CoreDataType;
+
+        fn source(keys: &[i32], timestamps: &[i64]) -> DataFrame {
+            let id = Series::new("id".into(), keys.to_vec());
+            let wall_clock = Series::new("wall_clock".into(), timestamps.to_vec())
+                .cast(&PlDataType::Datetime(TimeUnit::Microseconds, None))
+                .unwrap();
+            let physical =
+                polars::prelude::DataFrame::new_infer_height(vec![id.into(), wall_clock.into()])
+                    .unwrap();
+            let logical = StructType::new(vec![
+                StructField::new("id".into(), CoreDataType::Integer, false),
+                StructField::new("wall_clock".into(), CoreDataType::TimestampNtz, false),
+            ]);
+            DataFrame::from_polars(physical)
+                .with_logical_schema(logical)
+                .unwrap()
+        }
+
+        let left = source(&[1, 2], &[1_234_567, -1]);
+        let right = source(&[1, 3], &[9_876_543, 42]);
+        let joined = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
+        let schema = joined.schema().unwrap();
+        for name in ["wall_clock", "wall_clock_right"] {
+            let field = schema
+                .fields()
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap();
+            assert!(matches!(&field.data_type, CoreDataType::TimestampNtz));
+            assert!(field.nullable, "outer join must mark {name} nullable");
+        }
+
+        let expected_schema = schema.to_json().unwrap();
+        let batch = joined
+            .to_arrow_ipc_batches_with_cancellation(
+                8,
+                16 * 1024,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+            )
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        for name in ["wall_clock", "wall_clock_right"] {
+            assert_eq!(
+                decoded.column(name).unwrap().dtype(),
+                &PlDataType::Datetime(TimeUnit::Microseconds, None),
+                "{name} must remain a timezone-free physical timestamp"
+            );
+        }
+        let left_values = decoded
+            .column("wall_clock")
+            .unwrap()
+            .datetime()
+            .unwrap()
+            .physical();
+        let right_values = decoded
+            .column("wall_clock_right")
+            .unwrap()
+            .datetime()
+            .unwrap()
+            .physical();
+        let mut observed = (0..decoded.height())
+            .map(|row| (left_values.get(row), right_values.get(row)))
+            .collect::<Vec<_>>();
+        observed.sort();
+        assert_eq!(
+            observed,
+            vec![
+                (None, Some(42)),
+                (Some(-1), None),
+                (Some(1_234_567), Some(9_876_543)),
+            ]
+        );
+    }
+
     /// #1165: Join with same-named keys and coalesce: non-key columns keep correct dtypes in schema and collect.
     #[test]
     fn join_coalesce_preserves_non_key_column_types() {
