@@ -5085,6 +5085,35 @@ mod tests {
     }
 
     #[test]
+    fn shared_catalog_cancelled_insert_before_execution_has_no_effect() {
+        let session = SparkSession::new(Some("cancelled-insert-test".into()), None, HashMap::new())
+            .with_shared_catalog(SharedCatalog::new());
+        session.register_database("default");
+        session
+            .sql("CREATE TABLE default.cancel_before_publish (id BIGINT)")
+            .unwrap();
+
+        let token = robin_sparkless_core::CancellationToken::new();
+        token.cancel();
+        let error = match session.sql_with_cancellation(
+            "INSERT INTO default.cancel_before_publish VALUES (1)",
+            &token,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("pre-cancelled insert unexpectedly returned a result"),
+        };
+        assert!(matches!(error, EngineError::Cancelled(_)), "{error}");
+        assert_eq!(
+            session
+                .table("default.cancel_before_publish")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn shared_catalog_database_limit_includes_default_without_losing_last_slot() {
         let mut config = HashMap::new();
         config.insert(
