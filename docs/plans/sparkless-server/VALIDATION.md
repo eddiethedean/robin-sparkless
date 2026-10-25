@@ -154,6 +154,8 @@ These are local component checks, not passing release gates. The current work ha
 
 - At candidate source commit [`2d74ce690b0f79bfa146e1a05693e79910bb9568`](https://github.com/eddiethedean/robin-sparkless/commit/2d74ce690b0f79bfa146e1a05693e79910bb9568), `cargo test --release --locked -p robin-sparkless-polars --features sql --lib` passed all 353 non-ignored library tests (one manual resource witness remains ignored by default). The new per-table byte-capacity test accepts a staged table exactly at its accounted-byte limit and rejects one byte below that threshold with `CatalogCapacityExceeded` before publishing a saved-table binding. Strict all-target Polars Clippy, formatting, and diff checks passed. This closes the exact per-table byte boundary; the broader catalog/HTTP capacity and mutation-outcome matrices remain open.
 
+- At the same candidate source commit, `cargo test --release --locked -p sparkless-server -p robin-sparkless-polars --features sql` passed the integrated regression suite: 353 Polars library tests plus all integration targets, 25 server unit tests, 3 control-protocol tests, the live `phase1_http` test, and doctests. This confirms the table-capacity case alongside the full local server/Polars integration; it does not complete V15–V18 or V31/V32.
+
 | Range rows | Construction median µs; allocated / peak-live bytes | Filtered count median µs; allocated / peak-live bytes | `LIMIT 10` median µs; peak-live bytes | Max RSS median bytes (range) |
 | ---: | ---: | ---: | ---: | ---: |
 | 10,000 | 61; 79,798 / 15,410 | 423; 215,512 / 160,456 | 459; 8,473,430 | 25,329,664 (25,313,280–25,346,048) |
