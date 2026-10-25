@@ -6782,7 +6782,75 @@ mod tests {
             }
         }
 
-        let empty = transformed.limit(0).unwrap();
+        let copied = transformed
+            .with_column("replica", &transformed.column("payload").unwrap())
+            .unwrap();
+        let renamed = copied
+            .with_column_renamed("replica", "payload_copy")
+            .unwrap();
+        let renamed_schema = renamed.schema().unwrap();
+        let payload_schema = transformed_schema
+            .fields()
+            .iter()
+            .find(|field| field.name == "payload")
+            .unwrap();
+        let copy_schema = renamed_schema
+            .fields()
+            .iter()
+            .find(|field| field.name == "payload_copy")
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&copy_schema.data_type).unwrap(),
+            serde_json::to_value(&payload_schema.data_type).unwrap()
+        );
+        let LogicalDataType::ArrayWithNullability { element_type, .. } = &copy_schema.data_type
+        else {
+            panic!("copied array must preserve its logical declaration");
+        };
+        let LogicalDataType::Struct(copy_fields) = element_type.as_ref() else {
+            panic!("copied array elements must preserve their logical struct");
+        };
+        assert!(!copy_fields[0].nullable);
+        assert_eq!(copy_fields[0].metadata["origin"], "nested IPC");
+
+        let renamed_expected_schema = renamed_schema.to_json().unwrap();
+        let renamed_batch = renamed
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(renamed_batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(renamed_expected_schema.as_str()));
+        let decoded = reader.finish().unwrap();
+        let original = decoded.column("payload").unwrap().list().unwrap();
+        let copy = decoded.column("payload_copy").unwrap().list().unwrap();
+        for row in 0..4 {
+            let original_series = original.get_as_series(row).unwrap();
+            let original = original_series.struct_().unwrap();
+            let copied_series = copy.get_as_series(row).unwrap();
+            let copied = copied_series.struct_().unwrap();
+            assert_eq!(
+                original.field_by_name("id").unwrap().i32().unwrap().get(0),
+                copied.field_by_name("id").unwrap().i32().unwrap().get(0)
+            );
+            assert_eq!(
+                original
+                    .field_by_name("label")
+                    .unwrap()
+                    .str()
+                    .unwrap()
+                    .get(0),
+                copied.field_by_name("label").unwrap().str().unwrap().get(0)
+            );
+        }
+
+        let empty = renamed.limit(0).unwrap();
         let empty_batch = empty
             .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
             .unwrap()
@@ -6795,7 +6863,7 @@ mod tests {
             .iter()
             .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
             .map(|(_, value)| value.as_str());
-        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+        assert_eq!(encoded_schema, Some(renamed_expected_schema.as_str()));
         assert_eq!(reader.finish().unwrap().height(), 0);
     }
 
