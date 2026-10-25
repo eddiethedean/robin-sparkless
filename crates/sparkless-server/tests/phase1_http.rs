@@ -568,6 +568,30 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(rejected_append["status"], "error");
     assert_eq!(rejected_append["operation"]["effect_outcome"], "failed");
 
+    let (status, failed_operation) = post(
+        &server,
+        "/operations/status",
+        &json!({"server_instance_id":instance_id,"operation_id":"rejected-cast-append"}),
+    );
+    assert_eq!(status, 200, "{failed_operation}");
+    assert_eq!(failed_operation["execution_state"], "failed");
+    assert_eq!(failed_operation["effect_outcome"], "failed");
+    assert_eq!(failed_operation["error"]["ename"], rejected_append["ename"]);
+
+    let (status, replayed_failure) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.items (id, note) VALUES ('not-an-integer', 'invalid')",
+        Some("rejected-cast-append"),
+    );
+    assert_eq!(status, 200, "{replayed_failure}");
+    assert_eq!(replayed_failure["ename"], rejected_append["ename"]);
+    assert_eq!(replayed_failure["operation"]["effect_outcome"], "failed");
+    assert_eq!(
+        replayed_failure["operation"]["error"],
+        failed_operation["error"]
+    );
+
     let (status, rejected_select_cast) = statement(
         &server,
         "owner",
