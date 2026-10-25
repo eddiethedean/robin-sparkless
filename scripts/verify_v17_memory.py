@@ -94,6 +94,15 @@ def validate_range_benchmark_measurement(
         "limit_rows": 10,
         "output_bytes": 80,
         "strategy": "lazy_range_bounded_batches",
+        "projected_strategy": "bounded_batches",
+        "projected_columns": 1,
+        "projected_schema_type": "Long",
+        "projected_nullable": "true",
+        "projected_rows": rows,
+        "projected_batch_count": (rows + 16_383) // 16_384,
+        "projected_largest_batch_rows": min(rows, 16_384),
+        "projected_first_value": 0,
+        "projected_last_value": (rows - 1) * 2,
     }
     for key, value in expected.items():
         if fields.get(key) != value:
@@ -113,6 +122,14 @@ def validate_range_benchmark_measurement(
         "limit_allocated_bytes",
         "limit_live_bytes",
         "limit_peak_live_bytes",
+        "projected_plan_us",
+        "projected_plan_allocated_bytes",
+        "projected_plan_live_bytes",
+        "projected_plan_peak_live_bytes",
+        "projected_scan_us",
+        "projected_scan_allocated_bytes",
+        "projected_scan_live_bytes",
+        "projected_scan_peak_live_bytes",
     ):
         if not isinstance(fields.get(key), int) or fields[key] < 0:
             raise ValueError(f"range benchmark is missing a valid {key} measurement")

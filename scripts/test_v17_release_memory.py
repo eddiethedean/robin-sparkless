@@ -63,12 +63,25 @@ class V17MemoryVerifierTests(unittest.TestCase):
             "construction_peak_live_bytes=15970 count_us=242 "
             "count_allocated_bytes=215960 count_live_bytes=0 "
             "count_peak_live_bytes=160904 limit_us=50 limit_allocated_bytes=100 "
-            "limit_live_bytes=0 limit_peak_live_bytes=8473"
+            "limit_live_bytes=0 limit_peak_live_bytes=8473 "
+            "projected_strategy=bounded_batches projected_columns=1 "
+            "projected_schema_type=Long projected_nullable=true "
+            "projected_rows=10000 projected_batch_count=1 "
+            "projected_largest_batch_rows=10000 projected_first_value=0 "
+            "projected_last_value=19998 projected_plan_us=5 "
+            "projected_plan_allocated_bytes=100 projected_plan_live_bytes=10 "
+            "projected_plan_peak_live_bytes=20 projected_scan_us=100 "
+            "projected_scan_allocated_bytes=1000 projected_scan_live_bytes=10 "
+            "projected_scan_peak_live_bytes=100"
         )
         fields = parse_measurement(output, "rows=10000", rows)
         validate_range_benchmark_measurement(fields, rows)
         fields["count"] = 9_993
         with self.assertRaisesRegex(ValueError, "count="):
+            validate_range_benchmark_measurement(fields, rows)
+        fields["count"] = rows - 6
+        fields["projected_batch_count"] = 0
+        with self.assertRaisesRegex(ValueError, "projected_batch_count"):
             validate_range_benchmark_measurement(fields, rows)
 
     def test_candidate_report_requires_complete_repeated_workloads(self) -> None:
@@ -100,6 +113,15 @@ class V17MemoryVerifierTests(unittest.TestCase):
             "limit_rows": 10,
             "output_bytes": 80,
             "strategy": "lazy_range_bounded_batches",
+            "projected_strategy": "bounded_batches",
+            "projected_columns": 1,
+            "projected_schema_type": "Long",
+            "projected_nullable": "true",
+            "projected_rows": rows,
+            "projected_batch_count": 1,
+            "projected_largest_batch_rows": rows,
+            "projected_first_value": 0,
+            "projected_last_value": (rows - 1) * 2,
             "construction_us": 10,
             "construction_allocated_bytes": 100,
             "construction_live_bytes": 10,
@@ -112,6 +134,14 @@ class V17MemoryVerifierTests(unittest.TestCase):
             "limit_allocated_bytes": 100,
             "limit_live_bytes": 10,
             "limit_peak_live_bytes": 20,
+            "projected_plan_us": 10,
+            "projected_plan_allocated_bytes": 100,
+            "projected_plan_live_bytes": 10,
+            "projected_plan_peak_live_bytes": 20,
+            "projected_scan_us": 10,
+            "projected_scan_allocated_bytes": 1_000,
+            "projected_scan_live_bytes": 10,
+            "projected_scan_peak_live_bytes": 20,
         }
         measured = {
             "rows": rows,
