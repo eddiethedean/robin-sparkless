@@ -253,6 +253,12 @@ These are local component checks, not passing release gates. The current work ha
 
 Every advertised binary-wheel platform still requires independent build/install/runtime witnesses. CI must add targeted format/clippy/tests for supported feature combinations, launcher tests on supported Python/platform versions, and the distinct direct HTTP, SDK/emulator, standalone Connect, and emulator-proxied Connect routes. Keep their evidence separate and do not report planned commands as passed.
 
+## Latest candidate follow-up evidence
+
+- At the current candidate source head, `cargo test --release --locked -p robin-sparkless-polars --features sql --lib nested_struct_schema_survives_union_filter_projection_and_ipc -- --nocapture` passed on macOS arm64 / Rust 1.93.1. The nested struct fixture now copies one logical field into two projections; Polars names them `payload` and `payload_1`, and both retain nested nullability/metadata and matching values in Arrow IPC. Strict all-target Polars Clippy, `cargo fmt --all -- --check`, and `git diff --check` passed. This adds one duplicate-projection V18 case; the broader transformation and interoperability matrix remains open.
+- MiniLake fork head [`da5d0edf46c3175083ba8d258df9cdb9450dfdc3`](https://github.com/eddiethedean/minilake/commit/da5d0edf46c3175083ba8d258df9cdb9450dfdc3), using the Sparkless 4.17 candidate server binary and `databricks-sdk==0.133.0`, passed `SPARKLESS_SERVER_BIN=... uv run pytest tests/test_warehouses.py tests/test_sql_statements.py tests/test_sparkless_adapter.py tests/test_sparkless_adapter_integration.py -q`: 65 passed on macOS arm64 / Python 3.14.3 (two existing Pydantic deprecation warnings). The accepted-before-completion SDK test now deletes its warehouse after observing `running/pending`, then confirms the retained terminal outcome and matching row count through a new warehouse. This adds focused V16 session-close recovery evidence; the full mutation outcome/capacity matrix and upstream acceptance remain open.
+- The corrected 4.16.1 prerequisite and current candidate release run have since passed; see PR #1727 for their run and artifact links. These newer results do not close the V16 outcome/capacity matrix, the full V18 nested transformation matrix, or external MiniLake acceptance.
+
 ## Evidence record template
 
 - Gate ID / result (pending, passed, failed, or blocked):

@@ -7248,6 +7248,60 @@ mod tests {
             .select_exprs(vec![col("payload").alias("renamed")])
             .unwrap();
 
+        let duplicated = source
+            .select_exprs(vec![
+                col("payload").alias("payload"),
+                col("payload").alias("payload"),
+            ])
+            .unwrap();
+        let duplicated_schema = duplicated.schema().unwrap();
+        assert_eq!(duplicated_schema.fields().len(), 2);
+        assert_eq!(
+            duplicated_schema
+                .fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["payload", "payload_1"]
+        );
+        for field in duplicated_schema.fields() {
+            let LogicalDataType::Struct(fields) = &field.data_type else {
+                panic!("duplicate nested labels must retain their struct schema");
+            };
+            assert!(!fields[0].nullable);
+            assert_eq!(fields[0].metadata["origin"], "shared catalog");
+        }
+        let duplicated_expected_schema = duplicated_schema.to_json().unwrap();
+        let duplicated_batch = duplicated
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut duplicated_reader =
+            IpcStreamReader::new(std::io::Cursor::new(duplicated_batch.bytes));
+        let duplicated_metadata = duplicated_reader.custom_metadata().unwrap().unwrap();
+        let duplicated_encoded_schema = duplicated_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(
+            duplicated_encoded_schema,
+            Some(duplicated_expected_schema.as_str())
+        );
+        let duplicated_values = duplicated_reader.finish().unwrap();
+        assert_eq!(duplicated_values.width(), 2);
+        assert_eq!(
+            duplicated_values
+                .select_at_idx(0)
+                .unwrap()
+                .as_materialized_series(),
+            duplicated_values
+                .select_at_idx(1)
+                .unwrap()
+                .as_materialized_series()
+        );
+
         assert_eq!(projected.count().unwrap(), 4);
         let schema = projected.schema().unwrap();
         assert_eq!(schema.fields().len(), 1);
