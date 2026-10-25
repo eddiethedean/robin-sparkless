@@ -155,6 +155,35 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{created_table}");
     assert_eq!(created_table["status"], "ok");
 
+    let (status, existing_table_noop) = statement(
+        &server,
+        "owner",
+        "CREATE TABLE IF NOT EXISTS phase_http.items (id BIGINT, note STRING)",
+        Some("create-existing-table-noop"),
+    );
+    assert_eq!(status, 200, "{existing_table_noop}");
+    assert_eq!(existing_table_noop["status"], "ok");
+    assert_eq!(
+        existing_table_noop["operation"]["effect_outcome"],
+        "committed"
+    );
+    assert_eq!(
+        existing_table_noop["receipt"], created_table["receipt"],
+        "a successful idempotent create returns the existing table receipt"
+    );
+    let (status, no_op_status) = post(
+        &server,
+        "/operations/status",
+        &json!({
+            "server_instance_id":instance_id,
+            "operation_id":"create-existing-table-noop"
+        }),
+    );
+    assert_eq!(status, 200, "{no_op_status}");
+    assert_eq!(no_op_status["execution_state"], "succeeded");
+    assert_eq!(no_op_status["effect_outcome"], "committed");
+    assert_eq!(no_op_status["receipt"], created_table["receipt"]);
+
     let (status, created_default_items) = statement(
         &server,
         "owner",
