@@ -6709,10 +6709,14 @@ mod tests {
             payload.into(),
         ])
         .unwrap();
+        let timestamp_metadata = [("semantics".to_string(), serde_json::json!("wall-clock"))]
+            .into_iter()
+            .collect();
         let logical = StructType::new(vec![
             StructField::new("tiny".into(), LogicalDataType::Byte, true),
             StructField::new("single".into(), LogicalDataType::Float, true),
-            StructField::new("wall_clock".into(), LogicalDataType::TimestampNtz, true),
+            StructField::new("wall_clock".into(), LogicalDataType::TimestampNtz, true)
+                .with_metadata(timestamp_metadata),
             StructField::new("payload".into(), LogicalDataType::Binary, true),
         ]);
         let expected_schema = logical.to_json().unwrap();
@@ -6786,6 +6790,80 @@ mod tests {
             .map(|(_, value)| value.as_str());
         assert_eq!(encoded_schema, Some(expected_schema.as_str()));
         assert_eq!(reader.finish().unwrap().height(), 0);
+
+        let transformed = source
+            .filter(col("wall_clock").is_not_null())
+            .unwrap()
+            .select_exprs(vec![
+                col("wall_clock")
+                    .cast(PlDataType::Datetime(TimeUnit::Microseconds, None))
+                    .alias("local_time"),
+            ])
+            .unwrap();
+        let unioned = transformed.union(&transformed).unwrap();
+        assert_eq!(unioned.count().unwrap(), 4);
+        let unioned_schema = unioned.schema().unwrap();
+        let timestamp_field = &unioned_schema.fields()[0];
+        assert!(matches!(
+            &timestamp_field.data_type,
+            LogicalDataType::TimestampNtz
+        ));
+        assert!(timestamp_field.nullable);
+        assert_eq!(timestamp_field.metadata["semantics"], "wall-clock");
+        let unioned_expected_schema = unioned_schema.to_json().unwrap();
+        let unioned_batch = unioned
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut unioned_reader = IpcStreamReader::new(std::io::Cursor::new(unioned_batch.bytes));
+        let unioned_metadata = unioned_reader.custom_metadata().unwrap().unwrap();
+        let unioned_encoded_schema = unioned_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(
+            unioned_encoded_schema,
+            Some(unioned_expected_schema.as_str())
+        );
+        let unioned_values = unioned_reader.finish().unwrap();
+        let local_time = unioned_values.column("local_time").unwrap();
+        assert_eq!(
+            local_time.dtype(),
+            &PlDataType::Datetime(TimeUnit::Microseconds, None)
+        );
+        let mut timestamps = local_time
+            .datetime()
+            .unwrap()
+            .physical()
+            .into_iter()
+            .collect::<Vec<_>>();
+        timestamps.sort();
+        assert_eq!(
+            timestamps,
+            vec![Some(-1), Some(-1), Some(1_234_567), Some(1_234_567)]
+        );
+
+        let empty_union = unioned.limit(0).unwrap();
+        let empty_union_batch = empty_union
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut empty_union_reader =
+            IpcStreamReader::new(std::io::Cursor::new(empty_union_batch.bytes));
+        let empty_union_metadata = empty_union_reader.custom_metadata().unwrap().unwrap();
+        let empty_union_encoded_schema = empty_union_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(
+            empty_union_encoded_schema,
+            Some(unioned_expected_schema.as_str())
+        );
+        assert_eq!(empty_union_reader.finish().unwrap().height(), 0);
     }
 
     #[test]
