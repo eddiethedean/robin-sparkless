@@ -5070,7 +5070,10 @@ mod tests {
         DataFrame::from_eager_with_options(physical, false)
     }
 
-    fn catalog_test_session(max_catalog_bytes: usize) -> SparkSession {
+    fn catalog_test_session_with_limits(
+        max_catalog_bytes: usize,
+        max_table_bytes: usize,
+    ) -> SparkSession {
         let mut config = HashMap::new();
         config.insert(
             "sparkless.server.max_catalog_bytes".to_string(),
@@ -5078,10 +5081,14 @@ mod tests {
         );
         config.insert(
             "sparkless.server.max_table_bytes".to_string(),
-            usize::MAX.to_string(),
+            max_table_bytes.to_string(),
         );
         SparkSession::new(Some("catalog-accounting-test".into()), None, config)
             .with_shared_catalog(SharedCatalog::new())
+    }
+
+    fn catalog_test_session(max_catalog_bytes: usize) -> SparkSession {
+        catalog_test_session_with_limits(max_catalog_bytes, usize::MAX)
     }
 
     /// Manual resource witness for staged and snapshot-pinned table versions.
@@ -5239,6 +5246,34 @@ mod tests {
                 .unwrap();
             session.register_table_during_sql("first", replacement);
             assert_eq!(session.list_table_names(), vec!["default.first"]);
+        }
+    }
+
+    #[test]
+    fn shared_catalog_per_table_byte_limit_accepts_exact_boundary_and_rejects_before_publish() {
+        let candidate = catalog_test_frame();
+        let candidate_bytes = candidate.estimated_size().unwrap();
+        let over_limit = catalog_test_session_with_limits(usize::MAX, candidate_bytes - 1);
+        {
+            let _mutation = over_limit.shared_catalog_mutation_guard().unwrap();
+            let _writer = over_limit.shared_catalog_guard().unwrap();
+            let error = over_limit
+                .check_catalog_table_growth("oversized", &candidate)
+                .unwrap_err();
+            assert!(error.to_string().contains("CatalogCapacityExceeded"));
+            assert!(error.to_string().contains("staged table"));
+            assert!(!over_limit.saved_table_exists("oversized"));
+        }
+
+        let exact_limit = catalog_test_session_with_limits(usize::MAX, candidate_bytes);
+        {
+            let _mutation = exact_limit.shared_catalog_mutation_guard().unwrap();
+            let _writer = exact_limit.shared_catalog_guard().unwrap();
+            exact_limit
+                .check_catalog_table_growth("exact", &candidate)
+                .unwrap();
+            exact_limit.register_table_during_sql("exact", candidate);
+            assert!(exact_limit.saved_table_exists("exact"));
         }
     }
 
