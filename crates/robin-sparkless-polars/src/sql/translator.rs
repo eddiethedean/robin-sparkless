@@ -800,7 +800,11 @@ fn translate_insert(
     check_cancellation(token)?;
     let mut appended_df =
         DataFrame::from_polars_with_options(staged.as_ref().clone(), session.is_case_sensitive());
-    appended_df.validate_json_values()?;
+    // Shared catalog snapshots are serialized through the server's strict JSON boundary.
+    // Embedded sessions retain Polars' supported NaN and infinity values.
+    if session.uses_shared_catalog() {
+        appended_df.validate_json_values()?;
+    }
     if let Some(schema) = logical_schema {
         appended_df = appended_df.with_logical_schema(schema)?;
     }
@@ -2222,7 +2226,11 @@ fn sql_expr_to_polars_with_qualifiers(
                             },
                         ));
                     }
-                    return Ok(left / right);
+                    // Spark returns NULL for a zero denominator when ANSI mode is disabled.
+                    // Keep the Float64 promotion used above for integral division.
+                    return Ok(when(right.clone().eq(lit(0.0)))
+                        .then(lit(polars::prelude::NULL).cast(polars::prelude::DataType::Float64))
+                        .otherwise(left / right));
                 } else if session.runtime_config().ansi_enabled
                     && matches!(op, BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Multiply)
                     && let (Ok(left_field), Ok(right_field)) =
@@ -4241,19 +4249,68 @@ mod insert_literal_tests {
             AnyValue::Float64(0.5)
         );
         session.sql("CREATE TABLE float_sink (n DOUBLE)").unwrap();
-        assert!(
-            session
-                .sql("INSERT INTO float_sink SELECT CAST('NaN' AS DOUBLE) AS n")
-                .is_err()
-        );
-        let count = session
-            .sql("SELECT COUNT(*) AS n FROM float_sink")
+        session
+            .sql("INSERT INTO float_sink SELECT CAST('NaN' AS DOUBLE) AS n")
+            .unwrap();
+        let stored_nan = session
+            .sql("SELECT n FROM float_sink")
             .unwrap()
             .collect()
             .unwrap();
+        assert!(
+            stored_nan
+                .column("n")
+                .unwrap()
+                .f64()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .is_nan()
+        );
+    }
+
+    #[test]
+    fn non_ansi_division_by_zero_returns_null() {
+        let session = SparkSession::new(
+            Some("non-ansi-division-zero-test".into()),
+            None,
+            HashMap::from([("spark.sql.ansi.enabled".into(), "false".into())]),
+        );
+        let result = session.sql("SELECT 1 / 0 AS n").unwrap().collect().unwrap();
+        assert_eq!(result.column("n").unwrap().get(0).unwrap(), AnyValue::Null);
+
+        let fractional = session.sql("SELECT 1 / 2 AS n").unwrap().collect().unwrap();
         assert_eq!(
-            count.column("n").unwrap().get(0).unwrap(),
-            AnyValue::UInt32(0)
+            fractional.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.5)
+        );
+    }
+
+    #[test]
+    fn embedded_insert_preserves_non_finite_double_values() {
+        let session = SparkSession::new(
+            Some("embedded-non-finite-insert-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session.sql("CREATE TABLE nan_values (n DOUBLE)").unwrap();
+        session
+            .sql("INSERT INTO nan_values SELECT CAST('NaN' AS DOUBLE) AS n")
+            .unwrap();
+        let stored = session
+            .sql("SELECT n FROM nan_values")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert!(
+            stored
+                .column("n")
+                .unwrap()
+                .f64()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .is_nan()
         );
     }
 
@@ -4501,5 +4558,27 @@ mod snapshot_tests {
             session.sql("CREATE TEMP VIEW invalid_json_view AS SELECT CAST('NaN' AS DOUBLE) AS n");
         assert!(result.is_err());
         assert!(!session.has_temp_view("invalid_json_view"));
+    }
+
+    #[test]
+    fn shared_catalog_insert_rejects_non_finite_json_values_before_publish() {
+        let session = SparkSession::new(
+            Some("shared-insert-non-finite-test".into()),
+            None,
+            HashMap::new(),
+        )
+        .with_shared_catalog(SharedCatalog::new());
+        session
+            .sql("CREATE TABLE invalid_json_rows (n DOUBLE)")
+            .unwrap();
+
+        let result = session.sql("INSERT INTO invalid_json_rows SELECT CAST('NaN' AS DOUBLE) AS n");
+        assert!(result.is_err());
+        let stored = session
+            .sql("SELECT n FROM invalid_json_rows")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(stored.height(), 0);
     }
 }

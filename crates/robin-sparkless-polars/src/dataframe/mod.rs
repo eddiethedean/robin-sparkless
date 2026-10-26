@@ -2694,6 +2694,7 @@ impl DataFrame {
         other: &DataFrame,
         output: &DataFrame,
         how: JoinType,
+        global_suffix: Option<&str>,
     ) -> Option<StructType> {
         if self.logical_schema.is_none() && other.logical_schema.is_none() {
             return None;
@@ -2746,23 +2747,9 @@ impl DataFrame {
             {
                 continue;
             }
-            if matches!(how, JoinType::Outer) {
-                // The collision budget is determined by existing left-side names. A wide
-                // left frame can force the right alias far beyond the number of right fields.
-                let alias = (0..=left_names.len() + right_names.len()).find_map(|index| {
-                    let suffix = if index == 0 {
-                        "_right".to_string()
-                    } else {
-                        format!("_right_{index}")
-                    };
-                    let candidate = format!("{right_name}{suffix}");
-                    (!left_names
-                        .iter()
-                        .any(|left_name| matches_name(left_name, &candidate))
-                        && output_schema.get(&candidate).is_some())
-                    .then_some(candidate)
-                });
-                if let Some(alias) = alias {
+            if let Some(suffix) = global_suffix {
+                let alias = format!("{right_name}{suffix}");
+                if output_schema.get(&alias).is_some() {
                     aliased_right_sources.insert(alias, right_name.clone());
                 }
                 continue;
@@ -4392,7 +4379,7 @@ impl DataFrame {
     /// Cross join with another DataFrame (cartesian product). PySpark crossJoin.
     pub fn cross_join(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
         let mut output = transformations::cross_join(self, other, self.case_sensitive)?;
-        output.logical_schema = self.joined_logical_schema(other, &output, JoinType::Inner);
+        output.logical_schema = self.joined_logical_schema(other, &output, JoinType::Inner, None);
         Ok(output)
     }
 
@@ -6842,6 +6829,10 @@ pub fn broadcast(df: &DataFrame) -> DataFrame {
 mod tests {
     use super::*;
     use polars::prelude::{IntoSeries, NamedFrom, Series};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     #[test]
     fn with_columns_updates_replaced_column_nullability() {
@@ -6899,6 +6890,69 @@ mod tests {
             .unwrap();
         assert_eq!(swapped.column("a").unwrap().i64().unwrap().get(0), Some(2));
         assert_eq!(swapped.column("b").unwrap().i64().unwrap().get(0), Some(1));
+    }
+
+    #[test]
+    fn with_columns_evaluates_its_input_once() {
+        use polars::prelude::{IntoLazy, col, df};
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let source_calls = calls.clone();
+        let source = df!("x" => [0_i64, 0])
+            .unwrap()
+            .lazy()
+            .with_column(col("x").map(
+                move |column| {
+                    let value = source_calls.fetch_add(1, Ordering::SeqCst) as i64;
+                    Ok(Series::new(column.name().clone(), vec![value; column.len()]).into())
+                },
+                |_, field| Ok(field.clone()),
+            ));
+        let source = DataFrame::from_lazy(source);
+        let output = source
+            .with_columns(&[("y".into(), crate::functions::col("x"))])
+            .unwrap()
+            .collect()
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(output.column("x").unwrap().i64().unwrap().get(0), Some(0));
+        assert_eq!(output.column("y").unwrap().i64().unwrap().get(0), Some(0));
+    }
+
+    #[test]
+    fn different_join_keys_preserve_global_suffix_metadata() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [10_i64], "a_right" => [99_i64], "b" => [20_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("key" => [1_i64], "a" => [100_i64], "b" => [200_i64]).unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![
+            StructField::new("key".into(), LogicalDataType::Long, false),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+            StructField::new("b".into(), LogicalDataType::Long, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-b"))].into()),
+        ]))
+        .unwrap();
+
+        let schema = left
+            .join_with_keys(&right, vec!["id"], vec!["key"], JoinType::Inner, false)
+            .unwrap()
+            .schema()
+            .unwrap();
+        let field = schema
+            .fields()
+            .iter()
+            .find(|field| field.name == "b_right_1")
+            .unwrap();
+        assert_eq!(
+            field.metadata.get("origin"),
+            Some(&serde_json::json!("right-b"))
+        );
+        assert!(!field.nullable);
     }
 
     #[test]
