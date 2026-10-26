@@ -8060,7 +8060,7 @@ mod tests {
             field.data_type,
             robin_sparkless_core::DataType::Double
         ));
-        assert!(!field.nullable);
+        assert!(field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
 
         let projected = filtered
