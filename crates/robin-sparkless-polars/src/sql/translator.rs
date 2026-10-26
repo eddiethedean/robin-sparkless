@@ -134,9 +134,11 @@ fn sql_ast_data_type_to_table_schema_type(dt: &spark_sql_parser::ast::DataType) 
 }
 
 /// Convert a simple SQL literal expression into a JSON value for create_dataframe_from_rows.
-/// Supports the literal forms used in INSERT ... VALUES in the parity tests:
-/// string, numeric, and NULL.
-fn sql_literal_expr_to_json(expr: &SqlExpr) -> Result<JsonValue, PolarsError> {
+/// Supports the SQL literal forms used by INSERT ... VALUES: string, numeric, boolean, and NULL.
+fn sql_literal_expr_to_json(
+    expr: &SqlExpr,
+    target_type: &CoreDataType,
+) -> Result<JsonValue, PolarsError> {
     match expr {
         SqlExpr::Value(ValueWithSpan {
             value: Value::SingleQuotedString(s),
@@ -149,16 +151,54 @@ fn sql_literal_expr_to_json(expr: &SqlExpr) -> Result<JsonValue, PolarsError> {
         SqlExpr::Value(ValueWithSpan {
             value: Value::Number(s, _),
             ..
-        }) => match parse_sql_number_val(s, "literal")? {
-            SqlNumberVal::Int(i) => Ok(JsonValue::from(i)),
-            SqlNumberVal::Float(f) => Ok(JsonValue::from(f)),
-        },
+        }) => sql_number_to_insert_json(s, target_type),
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::Boolean(value),
+            ..
+        }) => Ok(JsonValue::Bool(*value)),
+        SqlExpr::UnaryOp {
+            op:
+                op @ (spark_sql_parser::ast::UnaryOperator::Plus
+                | spark_sql_parser::ast::UnaryOperator::Minus),
+            expr,
+        } => {
+            let SqlExpr::Value(ValueWithSpan {
+                value: Value::Number(number, _),
+                ..
+            }) = expr.as_ref()
+            else {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: INSERT VALUES unary signs apply only to numeric literals".into(),
+                ));
+            };
+            let sign = match op {
+                spark_sql_parser::ast::UnaryOperator::Minus => "-",
+                spark_sql_parser::ast::UnaryOperator::Plus => "+",
+                _ => unreachable!("the match arm accepts only plus or minus"),
+            };
+            sql_number_to_insert_json(&format!("{sign}{number}"), target_type)
+        }
         SqlExpr::Value(ValueWithSpan {
             value: Value::Null, ..
         }) => Ok(JsonValue::Null),
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: INSERT VALUES only supports literal expressions, got '{expr:?}'").into(),
         )),
+    }
+}
+
+fn sql_number_to_insert_json(
+    number: &str,
+    target_type: &CoreDataType,
+) -> Result<JsonValue, PolarsError> {
+    if matches!(target_type, CoreDataType::Decimal(_, _)) {
+        // Keep the SQL token exact: JSON numbers become f64 when they exceed the integer
+        // range, which silently rounds values before decimal column conversion.
+        return Ok(JsonValue::String(format!("__sparkless_decimal__:{number}")));
+    }
+    match parse_sql_number_val(number, "literal")? {
+        SqlNumberVal::Int(value) => Ok(JsonValue::from(value)),
+        SqlNumberVal::Float(value) => Ok(JsonValue::from(value)),
     }
 }
 
@@ -682,8 +722,11 @@ fn translate_insert(
                     // Start with all-null row in target schema order.
                     let mut row: Vec<JsonValue> = vec![JsonValue::Null; target_cols.len()];
                     for (val_pos, expr) in row_exprs.iter().enumerate() {
-                        let v = sql_literal_expr_to_json(expr)?;
                         let target_idx = index_map[val_pos];
+                        let v = sql_literal_expr_to_json(
+                            expr,
+                            &target_schema.fields()[target_idx].data_type,
+                        )?;
                         row[target_idx] = v;
                     }
                     rows.push(row);
@@ -694,7 +737,7 @@ fn translate_insert(
                     .iter()
                     .map(|f| (f.name.clone(), core_data_type_to_insert_type(&f.data_type)))
                     .collect();
-                session.create_dataframe_from_rows(rows, schema, true, false)?
+                session.create_dataframe_from_rows_explicit_schema(rows, schema, true)?
             }
             // INSERT INTO t SELECT ... : map SELECT columns to target insert list and NULL-fill omitted cols.
             _ => {
@@ -997,7 +1040,29 @@ fn translate_set_expr(
             }
             let left_df = translate_set_expr(session, left.as_ref())?;
             let right_df = translate_set_expr(session, right.as_ref())?;
-            let mut df = left_df.union(&right_df)?;
+            let left_columns = left_df.columns()?;
+            let right_columns = right_df.columns()?;
+            if left_columns.len() != right_columns.len() {
+                return Err(PolarsError::InvalidOperation(
+                    format!(
+                        "SQL: UNION requires the same number of columns; left has {}, right has {}",
+                        left_columns.len(),
+                        right_columns.len()
+                    )
+                    .into(),
+                ));
+            }
+            // SQL set operations align result columns by position. DataFrame::union also
+            // supports matching columns by name, so rename the right side into left-side
+            // positional order before calling it.
+            let right_by_position = right_df.select_exprs(
+                right_columns
+                    .iter()
+                    .zip(&left_columns)
+                    .map(|(right, left)| col(right.as_str()).alias(left.as_str()))
+                    .collect(),
+            )?;
+            let mut df = left_df.union(&right_by_position)?;
             // DISTINCT (default for UNION) => drop duplicates; ALL => keep all rows.
             // sqlparser uses SetQuantifier::None when neither ALL nor DISTINCT is written;
             // Spark/SQL default for UNION is DISTINCT.
@@ -3615,6 +3680,80 @@ fn sql_limit_to_usize(expr: &SqlExpr) -> Result<usize, PolarsError> {
         _ => Err(PolarsError::InvalidOperation(
             "SQL: LIMIT must be a literal integer.".into(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod insert_literal_tests {
+    use super::*;
+
+    #[test]
+    fn insert_preserves_exact_signed_decimal_literals() {
+        let session = SparkSession::new(
+            Some("exact-signed-decimal-insert-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .sql("CREATE TABLE exact_signed_decimal_test (amount DECIMAL(20,2))")
+            .unwrap();
+        session
+            .sql("INSERT INTO exact_signed_decimal_test VALUES (-9007199254740993.12)")
+            .unwrap();
+
+        let result = session
+            .sql("SELECT amount FROM exact_signed_decimal_test")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            result.column("amount").unwrap().get(0).unwrap(),
+            AnyValue::Decimal(-900719925474099312, 20, 2)
+        );
+    }
+
+    #[test]
+    fn insert_accepts_boolean_and_all_null_explicit_string_values() {
+        let session = SparkSession::new(
+            Some("insert-boolean-explicit-string-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .sql("CREATE TABLE insert_boolean_test (enabled BOOLEAN)")
+            .unwrap();
+        session
+            .sql("INSERT INTO insert_boolean_test VALUES (TRUE), (FALSE)")
+            .unwrap();
+        let booleans = session
+            .sql("SELECT enabled FROM insert_boolean_test ORDER BY enabled DESC")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            booleans.column("enabled").unwrap().get(0).unwrap(),
+            AnyValue::Boolean(true)
+        );
+        assert_eq!(
+            booleans.column("enabled").unwrap().get(1).unwrap(),
+            AnyValue::Boolean(false)
+        );
+
+        session
+            .sql("CREATE TABLE insert_explicit_string_test (value STRING)")
+            .unwrap();
+        session
+            .sql("INSERT INTO insert_explicit_string_test VALUES (NULL)")
+            .unwrap();
+        let strings = session
+            .sql("SELECT value FROM insert_explicit_string_test")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            strings.column("value").unwrap().get(0).unwrap(),
+            AnyValue::Null
+        );
     }
 }
 

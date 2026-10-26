@@ -39,9 +39,7 @@ class VerifyReleaseDistributionsTest(unittest.TestCase):
         return path
 
     def test_accepts_exact_wheel_and_sdist_inventory(self):
-        self.make_wheel(
-            "sparkless-4.16.0-cp38-abi3-manylinux_2_17_x86_64.whl"
-        )
+        self.make_wheel("sparkless-4.16.0-cp38-abi3-manylinux_2_17_x86_64.whl")
         self.make_sdist()
         files = verify_distributions(
             self.directory,
@@ -54,9 +52,7 @@ class VerifyReleaseDistributionsTest(unittest.TestCase):
         self.assertEqual(len(files), 2)
 
     def test_rejects_wheel_with_mismatched_metadata(self):
-        self.make_wheel(
-            "sparkless-4.16.0-cp38-abi3-win_amd64.whl", version="4.15.3"
-        )
+        self.make_wheel("sparkless-4.16.0-cp38-abi3-win_amd64.whl", version="4.15.3")
         with self.assertRaisesRegex(ValueError, "has version 4.15.3"):
             verify_distributions(
                 self.directory,

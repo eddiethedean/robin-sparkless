@@ -44,7 +44,9 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def validate_source_run(
-    run: dict[str, Any], jobs_response: dict[str, Any], artifacts_response: dict[str, Any]
+    run: dict[str, Any],
+    jobs_response: dict[str, Any],
+    artifacts_response: dict[str, Any],
 ) -> None:
     if run.get("id") != SOURCE_RUN_ID:
         raise ValueError("recovery is pinned to source run {}".format(SOURCE_RUN_ID))
@@ -60,7 +62,9 @@ def validate_source_run(
     for name in REQUIRED_JOBS + SERVER_BUILD_JOBS:
         records = by_name.get(name, [])
         if len(records) != 1 or records[0].get("conclusion") != "success":
-            raise ValueError("required source job did not pass exactly once: {}".format(name))
+            raise ValueError(
+                "required source job did not pass exactly once: {}".format(name)
+            )
 
     python_jobs = [
         job for job in jobs if job.get("name", "").startswith("Python tests - ")
@@ -75,7 +79,9 @@ def validate_source_run(
     for name in SERVER_ARTIFACTS:
         artifact = by_artifact.get(name)
         if artifact is None or artifact.get("expired") is not False:
-            raise ValueError("validated server wheel artifact is unavailable: {}".format(name))
+            raise ValueError(
+                "validated server wheel artifact is unavailable: {}".format(name)
+            )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -108,7 +108,9 @@ def verify_distributions(
 
     for path in sdists:
         if path.name != "{}-{}.tar.gz".format(project, version):
-            raise ValueError("unexpected source distribution filename: {}".format(path.name))
+            raise ValueError(
+                "unexpected source distribution filename: {}".format(path.name)
+            )
         metadata_name, metadata_version = _read_metadata(path)
         if _normalize_project(metadata_name) != expected_name:
             raise ValueError("{} metadata names a different project".format(path.name))

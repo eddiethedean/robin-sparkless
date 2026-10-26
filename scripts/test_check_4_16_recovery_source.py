@@ -21,9 +21,7 @@ def fixture():
     names.extend("Python tests - platform {}".format(index) for index in range(15))
     jobs = {"jobs": [{"name": name, "conclusion": "success"} for name in names]}
     artifacts = {
-        "artifacts": [
-            {"name": name, "expired": False} for name in SERVER_ARTIFACTS
-        ]
+        "artifacts": [{"name": name, "expired": False} for name in SERVER_ARTIFACTS]
     }
     return run, jobs, artifacts
 
