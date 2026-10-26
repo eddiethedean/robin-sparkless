@@ -1038,7 +1038,29 @@ fn translate_set_expr(
             }
             let left_df = translate_set_expr(session, left.as_ref())?;
             let right_df = translate_set_expr(session, right.as_ref())?;
-            let mut df = left_df.union(&right_df)?;
+            let left_columns = left_df.columns()?;
+            let right_columns = right_df.columns()?;
+            if left_columns.len() != right_columns.len() {
+                return Err(PolarsError::InvalidOperation(
+                    format!(
+                        "SQL: UNION requires the same number of columns; left has {}, right has {}",
+                        left_columns.len(),
+                        right_columns.len()
+                    )
+                    .into(),
+                ));
+            }
+            // SQL set operations align result columns by position. DataFrame::union also
+            // supports matching columns by name, so rename the right side into left-side
+            // positional order before calling it.
+            let right_by_position = right_df.select_exprs(
+                right_columns
+                    .iter()
+                    .zip(&left_columns)
+                    .map(|(right, left)| col(right.as_str()).alias(left.as_str()))
+                    .collect(),
+            )?;
+            let mut df = left_df.union(&right_by_position)?;
             // DISTINCT (default for UNION) => drop duplicates; ALL => keep all rows.
             // sqlparser uses SetQuantifier::None when neither ALL nor DISTINCT is written;
             // Spark/SQL default for UNION is DISTINCT.

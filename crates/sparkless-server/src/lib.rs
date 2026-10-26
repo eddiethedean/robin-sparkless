@@ -1828,8 +1828,20 @@ fn validate_table_factor(factor: &ast::TableFactor) -> Result<(), (&'static str,
             lateral,
             subquery,
             sample,
+            alias,
             ..
-        } if !lateral && sample.is_none() => validate_query(subquery),
+        } if !lateral && sample.is_none() => {
+            if alias
+                .as_ref()
+                .is_some_and(|alias| !alias.columns.is_empty())
+            {
+                return Err((
+                    "UnsupportedSql",
+                    "table alias column lists are not supported".into(),
+                ));
+            }
+            validate_query(subquery)
+        }
         _ => Err((
             "UnsupportedSql",
             "only named managed tables and derived SELECT relations are supported".into(),
@@ -2022,6 +2034,21 @@ fn validate_insert(insert: &ast::Insert) -> Result<(), (&'static str, String)> {
     };
     match source.body.as_ref() {
         ast::SetExpr::Values(values) => {
+            if source.with.is_some()
+                || source.fetch.is_some()
+                || !source.locks.is_empty()
+                || source.for_clause.is_some()
+                || source.settings.is_some()
+                || source.format_clause.is_some()
+                || !source.pipe_operators.is_empty()
+                || source.limit_clause.is_some()
+                || source.order_by.is_some()
+            {
+                return Err((
+                    "UnsupportedSql",
+                    "query modifiers are not supported for INSERT VALUES".into(),
+                ));
+            }
             if values.rows.len() > 10_000
                 || values
                     .rows

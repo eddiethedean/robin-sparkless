@@ -69,6 +69,14 @@ fn projected_source_column(expression: &Expr) -> Option<String> {
     }
 }
 
+fn projected_expression_contains_cast(expression: &Expr) -> bool {
+    match expression {
+        Expr::Alias(inner, _) => projected_expression_contains_cast(inner),
+        Expr::Cast { .. } => true,
+        _ => false,
+    }
+}
+
 fn logical_field_for_projected_column(
     schema: &StructType,
     source_name: &str,
@@ -2339,6 +2347,12 @@ impl DataFrame {
                             output_name,
                         )
                         .ok()?;
+                    }
+                    // Permissive casts can turn invalid input values into NULL. Polars' physical
+                    // schema does not expose that possibility, so preserve a conservative
+                    // nullable declaration whenever a projected expression contains a cast.
+                    if projected_expression_contains_cast(expression) {
+                        projected.nullable = true;
                     }
                     projected.name = output_name.to_string();
                     return Some(projected);
