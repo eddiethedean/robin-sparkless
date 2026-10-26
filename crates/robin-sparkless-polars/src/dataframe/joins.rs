@@ -1259,6 +1259,64 @@ mod tests {
     }
 
     #[test]
+    fn full_outer_join_preserves_metadata_for_every_globally_suffixed_field() {
+        use polars::prelude::{NamedFrom, Series};
+        use robin_sparkless_core::DataType as CoreDataType;
+        use std::collections::BTreeMap;
+
+        fn metadata(origin: &str) -> BTreeMap<String, serde_json::Value> {
+            [("origin".to_string(), serde_json::json!(origin))]
+                .into_iter()
+                .collect()
+        }
+
+        let left_physical = polars::prelude::DataFrame::new_infer_height(vec![
+            Series::new("id".into(), [1_i64]).into(),
+            Series::new("a".into(), [10_i64]).into(),
+            Series::new("a_right".into(), [90_i64]).into(),
+            Series::new("b".into(), [20_i64]).into(),
+        ])
+        .unwrap();
+        let right_physical = polars::prelude::DataFrame::new_infer_height(vec![
+            Series::new("id".into(), [1_i64]).into(),
+            Series::new("a".into(), [100_i64]).into(),
+            Series::new("b".into(), [200_i64]).into(),
+        ])
+        .unwrap();
+        let left = DataFrame::from_polars(left_physical)
+            .with_logical_schema(StructType::new(vec![
+                StructField::new("id".into(), CoreDataType::Long, false),
+                StructField::new("a".into(), CoreDataType::Long, false),
+                StructField::new("a_right".into(), CoreDataType::Long, false),
+                StructField::new("b".into(), CoreDataType::Long, false),
+            ]))
+            .unwrap();
+        let right = DataFrame::from_polars(right_physical)
+            .with_logical_schema(StructType::new(vec![
+                StructField::new("id".into(), CoreDataType::Long, false),
+                StructField::new("a".into(), CoreDataType::Long, false)
+                    .with_metadata(metadata("right-a")),
+                StructField::new("b".into(), CoreDataType::Long, false)
+                    .with_metadata(metadata("right-b")),
+            ]))
+            .unwrap();
+
+        let joined = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
+        let schema = joined.schema().unwrap();
+        for (name, origin) in [("a_right_1", "right-a"), ("b_right_1", "right-b")] {
+            assert_eq!(
+                schema
+                    .fields()
+                    .iter()
+                    .find(|field| field.name == name)
+                    .unwrap()
+                    .metadata["origin"],
+                origin
+            );
+        }
+    }
+
+    #[test]
     fn full_outer_join_preserves_nested_struct_schema_and_ipc_values() {
         use polars::chunked_array::StructChunked;
         use polars::io::ipc::IpcStreamReader;

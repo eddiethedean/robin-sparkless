@@ -708,8 +708,10 @@ fn translate_insert(
         index_map.push(idx);
     }
 
-    // Resolve the source plan while the guard still pins one catalog publication point. The
-    // translation builds a lazy plan; the expensive evaluation happens after the guard drops.
+    // UNION currently materializes branches during translation, so let readers acquire the
+    // catalog while translating and staging the source. The target frame above is already a
+    // captured snapshot, and the SQL mutation lane prevents competing SQL writers.
+    drop(snapshot_guard);
     // Build DataFrame of rows to append.
     let new_rows_df: DataFrame = match &insert.source {
         Some(query) => match query.body.as_ref() {
@@ -768,10 +770,6 @@ fn translate_insert(
         }
     };
 
-    // The target and source plans now hold their resolved snapshots. Release the catalog writer
-    // before union/materialization so readers can continue while candidate rows are evaluated.
-    drop(snapshot_guard);
-
     if let Some((provider, descriptor)) = external_target {
         new_rows_df.write().save_as_external_table_descriptor(
             &table_name,
@@ -803,6 +801,7 @@ fn translate_insert(
     check_cancellation(token)?;
     let mut appended_df =
         DataFrame::from_polars_with_options(staged.as_ref().clone(), session.is_case_sensitive());
+    appended_df.validate_json_values()?;
     if let Some(schema) = logical_schema {
         appended_df = appended_df.with_logical_schema(schema)?;
     }
@@ -1137,7 +1136,7 @@ fn translate_select_body(
     body: &Select,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let mut df = translate_select_from(session, body)?;
-    let relation_qualifiers = sql_relation_qualifiers(body);
+    let relation_qualifiers = sql_relation_qualifiers(session, body)?;
     if let Some(selection) = &body.selection {
         let expr = sql_expr_to_polars_with_qualifiers(
             selection,
@@ -1722,17 +1721,36 @@ struct SqlRelationQualifier {
     parts: Vec<String>,
     column_prefix: Option<String>,
     is_right_relation: bool,
+    source_columns: Vec<String>,
+    left_columns: Vec<String>,
 }
 
-fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
+fn sql_relation_qualifiers(
+    session: &SparkSession,
+    select: &Select,
+) -> Result<Vec<SqlRelationQualifier>, PolarsError> {
     let mut qualifiers = Vec::new();
     let mut relation_index = 0usize;
+    let mut first_relation_columns = Vec::new();
     for table_with_joins in &select.from {
         let mut relations = vec![&table_with_joins.relation];
         relations.extend(table_with_joins.joins.iter().map(|join| &join.relation));
         for relation in relations {
             let is_right_relation = relation_index > 0;
             relation_index += 1;
+            let source_columns = match relation {
+                TableFactor::Table { name, .. } => {
+                    let table_name = table_name_from_object_name(name);
+                    session.table(&table_name)?.columns()?
+                }
+                TableFactor::Derived { subquery, .. } => {
+                    translate_query(session, subquery.as_ref())?.columns()?
+                }
+                _ => Vec::new(),
+            };
+            if !is_right_relation {
+                first_relation_columns = source_columns.clone();
+            }
             match relation {
                 TableFactor::Table { name, alias, .. } => {
                     if let Some(alias) = alias {
@@ -1742,6 +1760,8 @@ fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
                             parts: vec![alias.name.value.clone()],
                             column_prefix,
                             is_right_relation,
+                            source_columns: source_columns.clone(),
+                            left_columns: first_relation_columns.clone(),
                         });
                     } else {
                         let parts = name
@@ -1754,12 +1774,16 @@ fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
                                 parts: parts.clone(),
                                 column_prefix: None,
                                 is_right_relation,
+                                source_columns: source_columns.clone(),
+                                left_columns: first_relation_columns.clone(),
                             });
                             if parts.len() > 1 {
                                 qualifiers.push(SqlRelationQualifier {
                                     parts: vec![parts.last().unwrap().clone()],
                                     column_prefix: None,
                                     is_right_relation,
+                                    source_columns: source_columns.clone(),
+                                    left_columns: first_relation_columns.clone(),
                                 });
                             }
                         }
@@ -1772,13 +1796,15 @@ fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
                         parts: vec![alias.name.value.clone()],
                         column_prefix: None,
                         is_right_relation,
+                        source_columns: source_columns.clone(),
+                        left_columns: first_relation_columns.clone(),
                     });
                 }
                 _ => {}
             }
         }
     }
-    qualifiers
+    Ok(qualifiers)
 }
 
 /// Resolve a SQL multipart identifier as a nested struct path, unless its root
@@ -1811,18 +1837,52 @@ fn sql_struct_field_expr(
             .map(|qualifier| (qualifier, qualifier.parts.len()))
     }) {
         let column = names[qualifier_len];
-        let root = qualifier
+        let source_has_column = qualifier.source_columns.iter().any(|source| {
+            if df.case_sensitive {
+                source == column
+            } else {
+                source.eq_ignore_ascii_case(column)
+            }
+        });
+        if !source_has_column {
+            return Err(PolarsError::ColumnNotFound(
+                format!("column '{column}' not found in qualified relation").into(),
+            ));
+        }
+        let prefixed = qualifier
             .column_prefix
             .as_ref()
             .map(|prefix| format!("{prefix}_{column}"))
-            .filter(|candidate| df.get_column_dtype(candidate).is_some())
-            .or_else(|| {
-                qualifier
-                    .is_right_relation
-                    .then(|| format!("{column}_right"))
-                    .filter(|candidate| df.get_column_dtype(candidate).is_some())
-            })
-            .unwrap_or_else(|| column.to_string());
+            .filter(|candidate| df.get_column_dtype(candidate).is_some());
+        let suffixed = if qualifier.is_right_relation
+            && qualifier.left_columns.iter().any(|left| {
+                if df.case_sensitive {
+                    left == column
+                } else {
+                    left.eq_ignore_ascii_case(column)
+                }
+            }) {
+            (0..=qualifier.left_columns.len())
+                .map(|index| {
+                    if index == 0 {
+                        format!("{column}_right")
+                    } else {
+                        format!("{column}_right_{index}")
+                    }
+                })
+                .find(|candidate| {
+                    !qualifier.left_columns.iter().any(|left| {
+                        if df.case_sensitive {
+                            left == candidate
+                        } else {
+                            left.eq_ignore_ascii_case(candidate)
+                        }
+                    }) && df.get_column_dtype(candidate).is_some()
+                })
+        } else {
+            None
+        };
+        let root = prefixed.or(suffixed).unwrap_or_else(|| column.to_string());
         let field_path = &names[qualifier_len + 1..];
         if field_path.is_empty() {
             return Ok(df
@@ -1910,15 +1970,41 @@ fn sql_expr_to_polars(
     sql_expr_to_polars_with_qualifiers(expr, session, df, having_agg_map, having_agg_list, None)
 }
 
-fn sql_numeric_literal_is_zero(expr: &SqlExpr) -> bool {
-    match expr {
-        SqlExpr::Nested(inner) => sql_numeric_literal_is_zero(inner),
-        SqlExpr::Value(ValueWithSpan {
-            value: Value::Number(value, _),
-            ..
-        }) => value.parse::<f64>().is_ok_and(|value| value == 0.0),
-        _ => false,
-    }
+fn common_signed_integer_type(
+    left: &polars::prelude::DataType,
+    right: &polars::prelude::DataType,
+) -> Option<polars::prelude::DataType> {
+    use polars::prelude::DataType;
+    let rank = |dtype: &DataType| match dtype {
+        DataType::Int8 => Some(0),
+        DataType::Int16 => Some(1),
+        DataType::Int32 => Some(2),
+        DataType::Int64 => Some(3),
+        DataType::Int128 => Some(4),
+        _ => None,
+    };
+    let left_rank = rank(left);
+    let right_rank = rank(right);
+    let integer_literal = |dtype: &DataType| {
+        matches!(
+            dtype,
+            DataType::Unknown(polars::prelude::UnknownKind::Int(_))
+        )
+    };
+    let (left_rank, right_rank) = match (left_rank, right_rank) {
+        (Some(left), Some(right)) => (left, right),
+        (Some(left), None) if integer_literal(right) => (left, left),
+        (None, Some(right)) if integer_literal(left) => (right, right),
+        (None, None) if integer_literal(left) && integer_literal(right) => (2, 2),
+        _ => return None,
+    };
+    Some(match left_rank.max(right_rank) {
+        0 => DataType::Int8,
+        1 => DataType::Int16,
+        2 => DataType::Int32,
+        3 => DataType::Int64,
+        _ => DataType::Int128,
+    })
 }
 
 fn sql_expr_to_polars_with_qualifiers(
@@ -2030,14 +2116,6 @@ fn sql_expr_to_polars_with_qualifiers(
         SqlExpr::BinaryOp { left, op, right } => {
             let mut l = sql_expr_to_polars_with_qualifiers(left, session, df, having_agg_map, having_agg_list, relation_qualifiers)?;
             let mut r = sql_expr_to_polars_with_qualifiers(right, session, df, having_agg_map, having_agg_list, relation_qualifiers)?;
-            if matches!(op, BinaryOperator::Divide)
-                && session.runtime_config().ansi_enabled
-                && sql_numeric_literal_is_zero(right)
-            {
-                return Err(PolarsError::ComputeError(
-                    "division by zero (ANSI mode)".into(),
-                ));
-            }
             if matches!(
                 op,
                 BinaryOperator::Plus | BinaryOperator::Minus
@@ -2072,10 +2150,20 @@ fn sql_expr_to_polars_with_qualifiers(
                             |columns| {
                                 let left = columns[0].as_materialized_series().f64()?;
                                 let right = columns[1].as_materialized_series().f64()?;
-                                let mut values = Vec::with_capacity(left.len());
-                                for index in 0..left.len() {
-                                    let left_value = left.get(index);
-                                    let right_value = right.get(index);
+                                let len = if left.is_empty() || right.is_empty() {
+                                    0
+                                } else {
+                                    left.len().max(right.len())
+                                };
+                                if left.len() != 1 && right.len() != 1 && left.len() != right.len() {
+                                    return Err(PolarsError::ShapeMismatch(
+                                        "division operands have incompatible lengths".into(),
+                                    ));
+                                }
+                                let mut values = Vec::with_capacity(len);
+                                for index in 0..len {
+                                    let left_value = left.get(if left.len() == 1 { 0 } else { index });
+                                    let right_value = right.get(if right.len() == 1 { 0 } else { index });
                                     if left_value.is_some()
                                         && right_value.is_some_and(|value| value == 0.0)
                                     {
@@ -2107,13 +2195,14 @@ fn sql_expr_to_polars_with_qualifiers(
                     && matches!(op, BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Multiply)
                     && let (Ok(left_field), Ok(right_field)) =
                         (l.to_field(&schema), r.to_field(&schema))
-                    && left_field.dtype() == right_field.dtype()
+                    && let Some(result_type) = common_signed_integer_type(
+                        left_field.dtype(), right_field.dtype()
+                    )
                 {
                     // Widen signed arithmetic, then strictly cast back to the SQL operand
                     // type. The strict cast turns overflow into an execution error instead
                     // of Polars' default wrapping behavior.
                     use polars::prelude::DataType;
-                    let result_type = left_field.dtype().clone();
                     let widened = match result_type {
                         DataType::Int8 | DataType::Int16 | DataType::Int32 => Some(DataType::Int64),
                         DataType::Int64 => Some(DataType::Int128),
@@ -2121,9 +2210,9 @@ fn sql_expr_to_polars_with_qualifiers(
                     };
                     if let Some(widened) = widened {
                         let value = match op {
-                            BinaryOperator::Plus => l.cast(widened.clone()) + r.cast(widened),
-                            BinaryOperator::Minus => l.cast(widened.clone()) - r.cast(widened),
-                            BinaryOperator::Multiply => l.cast(widened.clone()) * r.cast(widened),
+                            BinaryOperator::Plus => l.cast(result_type.clone()).cast(widened.clone()) + r.cast(result_type.clone()).cast(widened),
+                            BinaryOperator::Minus => l.cast(result_type.clone()).cast(widened.clone()) - r.cast(result_type.clone()).cast(widened),
+                            BinaryOperator::Multiply => l.cast(result_type.clone()).cast(widened.clone()) * r.cast(result_type.clone()).cast(widened),
                             _ => unreachable!(),
                         };
                         return Ok(value.strict_cast(result_type));
@@ -3883,6 +3972,35 @@ mod insert_literal_tests {
             .collect()
             .unwrap();
         assert_eq!(derived_star.get_column_names(), ["id", "id_right"]);
+
+        session
+            .sql("CREATE TABLE suffix_left (id BIGINT, value_right BIGINT, only_left BIGINT)")
+            .unwrap();
+        session
+            .sql("CREATE TABLE suffix_right (id BIGINT, value BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO suffix_left VALUES (1, 900, 777)")
+            .unwrap();
+        session
+            .sql("INSERT INTO suffix_right VALUES (1, 100)")
+            .unwrap();
+        let suffix_join = session
+            .sql("SELECT suffix_left.value_right AS a, suffix_right.value AS b FROM suffix_left INNER JOIN suffix_right ON suffix_left.id = suffix_right.id")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            suffix_join.column("a").unwrap().get(0).unwrap(),
+            AnyValue::Int64(900)
+        );
+        assert_eq!(
+            suffix_join.column("b").unwrap().get(0).unwrap(),
+            AnyValue::Int64(100)
+        );
+        assert!(session
+            .sql("SELECT suffix_right.only_left FROM suffix_left INNER JOIN suffix_right ON suffix_left.id = suffix_right.id")
+            .is_err());
     }
 
     #[test]
@@ -3920,10 +4038,30 @@ mod insert_literal_tests {
             divided.column("n").unwrap().get(0).unwrap(),
             AnyValue::Float64(0.5)
         );
-        assert!(session.sql("SELECT 1 / 0 AS n").is_err());
+        assert!(
+            session
+                .sql("SELECT 1 / 0 AS n")
+                .and_then(|result| result.collect())
+                .is_err()
+        );
         assert!(
             session
                 .sql("SELECT CAST(2147483647 AS INT) + CAST(1 AS INT) AS n")
+                .and_then(|result| result.collect())
+                .is_err()
+        );
+        let exact = session
+            .sql("SELECT CAST('9007199254740993' AS BIGINT) + 0 AS n")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            exact.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Int64(9_007_199_254_740_993)
+        );
+        assert!(
+            session
+                .sql("SELECT CAST('9223372036854775807' AS BIGINT) + CAST(1 AS INT) AS n")
                 .and_then(|result| result.collect())
                 .is_err()
         );
@@ -3958,12 +4096,69 @@ mod insert_literal_tests {
             .sql("CREATE TABLE divisor_source (denominator BIGINT)")
             .unwrap();
         session
-            .sql("INSERT INTO divisor_source VALUES (0)")
+            .sql("INSERT INTO divisor_source VALUES (0), (2), (4), (8)")
             .unwrap();
         assert!(
             session
                 .sql("INSERT INTO division_sink SELECT 1 / denominator AS n FROM divisor_source")
                 .is_err()
+        );
+        let divided = session
+            .sql("SELECT 1 / denominator AS n FROM divisor_source WHERE denominator > 0")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(divided.height(), 3);
+        assert_eq!(
+            divided.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.5)
+        );
+        assert_eq!(
+            divided.column("n").unwrap().get(1).unwrap(),
+            AnyValue::Float64(0.25)
+        );
+        assert_eq!(
+            divided.column("n").unwrap().get(2).unwrap(),
+            AnyValue::Float64(0.125)
+        );
+        let divided_by_scalar = session
+            .sql("SELECT denominator / 2 AS n FROM divisor_source WHERE denominator > 0")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(divided_by_scalar.height(), 3);
+        assert_eq!(
+            session
+                .sql("SELECT 1 / denominator AS n FROM divisor_source WHERE denominator = 999")
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            0
+        );
+        assert_eq!(
+            session
+                .sql("SELECT denominator / 2 AS n FROM divisor_source WHERE denominator = 999")
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            0
+        );
+        session
+            .sql("CREATE TABLE multi_division_sink (n DOUBLE)")
+            .unwrap();
+        session
+            .sql("INSERT INTO multi_division_sink SELECT 1 / denominator AS n FROM divisor_source WHERE denominator > 0")
+            .unwrap();
+        assert_eq!(
+            session
+                .sql("SELECT n FROM multi_division_sink")
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            3
         );
         let committed = session
             .sql("SELECT n FROM division_sink")
@@ -3974,6 +4169,21 @@ mod insert_literal_tests {
         assert_eq!(
             committed.column("n").unwrap().get(0).unwrap(),
             AnyValue::Float64(0.5)
+        );
+        session.sql("CREATE TABLE float_sink (n DOUBLE)").unwrap();
+        assert!(
+            session
+                .sql("INSERT INTO float_sink SELECT CAST('NaN' AS DOUBLE) AS n")
+                .is_err()
+        );
+        let count = session
+            .sql("SELECT COUNT(*) AS n FROM float_sink")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            count.column("n").unwrap().get(0).unwrap(),
+            AnyValue::UInt32(0)
         );
     }
 

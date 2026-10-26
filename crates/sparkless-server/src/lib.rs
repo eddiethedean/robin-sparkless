@@ -4670,7 +4670,7 @@ mod tests {
                 &request_instance,
                 "staging-writer",
                 "staging-deadline-insert",
-                "INSERT INTO default.staging_target SELECT id FROM default.staging_source",
+                "INSERT INTO default.staging_target SELECT id FROM default.staging_source UNION ALL SELECT id FROM default.staging_source",
             )
             .await
         });
@@ -4747,7 +4747,7 @@ mod tests {
             server.instance_id(),
             "staging-writer",
             "staging-deadline-insert",
-            "INSERT INTO default.staging_target SELECT id FROM default.staging_source",
+            "INSERT INTO default.staging_target SELECT id FROM default.staging_source UNION ALL SELECT id FROM default.staging_source",
         )
         .await;
         assert_eq!(replay["ename"], "Cancelled", "{replay}");

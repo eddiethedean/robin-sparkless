@@ -2601,33 +2601,44 @@ impl DataFrame {
             ))
         };
 
+        // Joins use one physical suffix for every colliding right field. Recover that suffix
+        // from the actual output names instead of independently guessing `_right` per column;
+        // an unrelated left field may already have a name such as `value_right`.
+        let join_suffix = (0..=right_names.len())
+            .map(|index| {
+                if index == 0 {
+                    "_right".to_string()
+                } else {
+                    format!("_right_{index}")
+                }
+            })
+            .find(|suffix| {
+                right_names.iter().any(|right_name| {
+                    left_names
+                        .iter()
+                        .any(|left_name| matches_name(left_name, right_name))
+                        && {
+                            let candidate = format!("{right_name}{suffix}");
+                            !left_names
+                                .iter()
+                                .any(|left_name| matches_name(left_name, &candidate))
+                                && output_schema.get(&candidate).is_some()
+                        }
+                })
+            });
         let aliased_right_source = |output_name: &str| -> Option<&str> {
-            let mut used = left_names.iter().cloned().collect::<HashSet<_>>();
-            for right_name in &right_names {
+            right_names.iter().find_map(|right_name| {
                 let collides = left_names
                     .iter()
                     .any(|left_name| matches_name(left_name, right_name));
-                let alias = if collides || !used.insert(right_name.clone()) {
-                    let mut candidate = format!("{right_name}_right");
-                    if !used.insert(candidate.clone()) {
-                        let mut suffix = 1usize;
-                        loop {
-                            candidate = format!("{right_name}_right_{suffix}");
-                            if used.insert(candidate.clone()) {
-                                break;
-                            }
-                            suffix += 1;
-                        }
-                    }
-                    candidate
-                } else {
-                    right_name.clone()
-                };
-                if matches_name(&alias, output_name) && (collides || alias != *right_name) {
-                    return Some(right_name.as_str());
-                }
-            }
-            None
+                let aliased = join_suffix
+                    .as_ref()
+                    .filter(|_| collides)
+                    .is_some_and(|suffix| {
+                        matches_name(&format!("{right_name}{suffix}"), output_name)
+                    });
+                aliased.then_some(right_name.as_str())
+            })
         };
 
         let fields = output_schema
@@ -3232,6 +3243,32 @@ impl DataFrame {
         let rows = self.collect_as_json_rows().map_err(polars_to_core_error)?;
         token.check_cancelled()?;
         Ok(rows)
+    }
+
+    /// Reject values that cannot be returned through the server's strict JSON result contract.
+    /// SQL mutations call this on their fully staged candidate before publishing it.
+    pub(crate) fn validate_json_values(&self) -> Result<(), PolarsError> {
+        let collected = self.collect_inner()?;
+        for column in collected.columns() {
+            let name = column.name().as_str();
+            let dtype = column.dtype();
+            let path = serde_json::to_string(name)
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            for row in 0..collected.height() {
+                let value = column.get(row)?;
+                if matches!(value, AnyValue::Null) {
+                    continue;
+                }
+                let _ = any_value_to_json_with_array_struct_override_policy(
+                    &value,
+                    dtype,
+                    &HashSet::new(),
+                    &path,
+                    true,
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// Collect named JSON rows and schema while honoring cancellation at materialization
@@ -5430,7 +5467,7 @@ impl<'a> DataFrameWriter<'a> {
                     (None, Some(incoming)) => Some(incoming),
                     (None, None) => None,
                 };
-                let existing_pl = if let Some(existing) = saved_existing {
+                let existing_pl = if let Some(existing) = saved_existing.as_ref() {
                     existing.collect_inner()?.as_ref().clone()
                 } else if warehouse_exists {
                     // Read from warehouse (data.parquet convention). For schema-qualified names,
@@ -5489,6 +5526,26 @@ impl<'a> DataFrameWriter<'a> {
                     .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
                     .as_ref()
                     .clone();
+                if let Some(schema) = saved_existing
+                    .as_ref()
+                    .and_then(|existing| existing.logical_schema.as_ref())
+                {
+                    for field in schema.fields().iter().filter(|field| !field.nullable) {
+                        let violates_nullability = match new_pl.column(&field.name) {
+                            Ok(column) => column.null_count() > 0,
+                            Err(_) => merge_schema,
+                        };
+                        if violates_nullability {
+                            return Err(PolarsError::InvalidOperation(
+                                format!(
+                                    "saveAsTable append: non-nullable field '{}' contains null values",
+                                    field.name
+                                )
+                                .into(),
+                            ));
+                        }
+                    }
+                }
                 check_cancelled(token)?;
                 let merged = if merge_schema {
                     let (aligned_existing, aligned_new) =
@@ -8291,6 +8348,51 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn append_without_incoming_logical_sidecar_checks_nonnullable_values() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let session = SparkSession::new(
+            Some("append-nullability-sidecar-test".into()),
+            None,
+            HashMap::new(),
+        );
+        let table_name = format!("append_nullability_{}", std::process::id());
+        let existing = DataFrame::from_polars(polars::prelude::df!("value" => [1_i64]).unwrap())
+            .with_logical_schema(StructType::new(vec![StructField::new(
+                "value".into(),
+                LogicalDataType::Long,
+                false,
+            )]))
+            .unwrap();
+        existing
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Overwrite)
+            .unwrap();
+
+        let incoming = DataFrame::from_lazy_with_options(
+            polars::prelude::df!("value" => [None::<i64>])
+                .unwrap()
+                .lazy(),
+            false,
+        );
+        assert!(
+            incoming
+                .write()
+                .save_as_table(&session, &table_name, SaveMode::Append)
+                .is_err()
+        );
+        assert_eq!(
+            session
+                .table(&table_name)
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            1
+        );
     }
 
     #[test]
