@@ -1,6 +1,6 @@
 # Releasing robin-sparkless
 
-Use this guide with the [server release roadmap](plans/sparkless-server/ROADMAP.md), [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md), and [4.17 implementation plan](plans/sparkless-server/RELEASE_4_17.md). A green source build is only one part of a release: the candidate workflow must verify the coordinated package inventory, public SDK integration, binary wheels, and native container before a release tag is ready.
+Use this guide with the [server release roadmap](plans/sparkless-server/ROADMAP.md), [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md), and [4.17 implementation plan](plans/sparkless-server/RELEASE_4_17.md). A green source build is only one part of a release: the candidate workflow must verify the coordinated package inventory, binary wheels, and native container before a release tag is ready.
 
 ## Release inventory and version policy
 
@@ -26,7 +26,7 @@ The release workflow currently stages server binary wheels for `macosx_14_0_arm6
    python3 scripts/check_release_versions.py --tag vX.Y.Z
    ```
 
-4. Run the repository checks, including formatting, strict Clippy, Rust tests, Python lint/tests, and the pinned MiniLake public-SDK integration suite. Follow the phase plan for the exact V-gate scenarios; a focused component test does not substitute for the integrated gate.
+4. Run the repository checks, including formatting, strict Clippy, Rust tests, and Python lint/tests. External MiniLake tests are not part of CI or the release checks. Follow the phase plan for the exact native V-gate scenarios; a focused component test does not substitute for those gates.
 5. Create or update `codex/release-X.Y.Z`, include the complete reviewed changes, and push it. The Release workflow performs non-publishing validation on `codex/release-*` branches. Review the full run, including packaged Rust crate archives, all eight `sparkless` platform wheels plus its sdist, both supported server-binary wheels, the exact offline `sparkless[server]` install and query, and the native container SQL/graceful-shutdown smoke. V31 checks package names, versions, metadata, and platform tags, then preserves those exact verified distributions as workflow artifacts. Candidate jobs do not publish them.
 
 The checker supports Python 3.11+ through `tomllib`; Python 3.8–3.10 developer environments need `tomli` installed.
@@ -60,13 +60,13 @@ The tag workflow reruns every validation before the first publication. Its depen
 3. Publish Rust crates in dependency order: `spark-sql-parser`, `robin-sparkless-core`, `robin-sparkless-polars`, `robin-sparkless`, then `sparkless-server`. This job waits for V31.
 4. Publish the tested `sparkless-server-bin` wheels to PyPI with OIDC and the tested `vX.Y.Z` image to GHCR, refusing to overwrite an existing container tag.
 5. Publish the exact verified `sparkless` Python extension wheels and source distribution to PyPI with OIDC, after the Rust crates, server binary wheels, and image are published.
-6. For 4.17 tags, run V32 after every publication job succeeds. It installs the Rust server crate from crates.io, verifies every PyPI filename and SHA-256 against the V31 distributions, installs `sparkless[server]` in a clean locked SDK environment and reruns the pinned public-SDK mutation suite, then pulls, digest-checks, queries, and gracefully stops the GHCR image.
+6. For 4.17 tags, run V32 after every publication job succeeds. It installs the Rust server crate from crates.io, verifies every PyPI filename and SHA-256 against the V31 distributions, installs and exercises `sparkless[server]`, then pulls, digest-checks, queries, and gracefully stops the GHCR image.
 
 The workflow skips a crates.io version only when the registry reports it was already uploaded. The PyPI publishing action skips existing files to allow a run to resume after a partial upload; V32 still requires the public set and digests to match the verified candidate exactly. Never edit or overwrite a published package. If published contents need correction, publish a new coordinated patch version.
 
 ## Verify the released artifacts
 
-The 4.17 tag workflow runs V32 automatically after all publication jobs succeed. It verifies exact public package versions and file hashes against V31, installs the published Rust server crate, installs `sparkless[server]` in a fresh environment and runs the pinned MiniLake public-SDK mutation suite against the packaged binary, and pulls the GHCR tag to compare its immutable digest with the publish result before repeating HTTP SQL and shutdown checks. Review its evidence and record the final artifact URLs and hashes in the phase validation matrix. Add platform-specific public installs if the advertised server-extra matrix expands.
+The 4.17 tag workflow runs V32 automatically after all publication jobs succeed. It verifies exact public package versions and file hashes against V31, installs the published Rust server crate, installs and exercises `sparkless[server]`, and pulls the GHCR tag to compare its immutable digest with the publish result before repeating HTTP SQL and shutdown checks. It does not run external MiniLake tests. Review its evidence and record the final artifact URLs and hashes in the phase validation matrix. Add platform-specific public installs if the advertised server-extra matrix expands.
 
 Record artifact URLs, wheel tags and hashes, image digest, source commit, tool versions, commands, and observed results in the phase validation matrix. A local wheel or image smoke is useful development evidence, but it does not pass the candidate inventory gate or replace a fresh public-artifact check.
 
