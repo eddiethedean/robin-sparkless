@@ -1274,6 +1274,10 @@ mod tests {
             Series::new("id".into(), [1_i64]).into(),
             Series::new("a".into(), [10_i64]).into(),
             Series::new("a_right".into(), [90_i64]).into(),
+            Series::new("a_right_1".into(), [91_i64]).into(),
+            Series::new("a_right_2".into(), [92_i64]).into(),
+            Series::new("a_right_3".into(), [93_i64]).into(),
+            Series::new("a_right_4".into(), [94_i64]).into(),
             Series::new("b".into(), [20_i64]).into(),
         ])
         .unwrap();
@@ -1288,6 +1292,10 @@ mod tests {
                 StructField::new("id".into(), CoreDataType::Long, false),
                 StructField::new("a".into(), CoreDataType::Long, false),
                 StructField::new("a_right".into(), CoreDataType::Long, false),
+                StructField::new("a_right_1".into(), CoreDataType::Long, false),
+                StructField::new("a_right_2".into(), CoreDataType::Long, false),
+                StructField::new("a_right_3".into(), CoreDataType::Long, false),
+                StructField::new("a_right_4".into(), CoreDataType::Long, false),
                 StructField::new("b".into(), CoreDataType::Long, false),
             ]))
             .unwrap();
@@ -1303,7 +1311,7 @@ mod tests {
 
         let joined = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
         let schema = joined.schema().unwrap();
-        for (name, origin) in [("a_right_1", "right-a"), ("b_right_1", "right-b")] {
+        for (name, origin) in [("a_right_5", "right-a"), ("b_right_5", "right-b")] {
             assert_eq!(
                 schema
                     .fields()
@@ -1321,7 +1329,7 @@ mod tests {
             let right_a = schema
                 .fields()
                 .iter()
-                .find(|field| field.name == "a_right_1")
+                .find(|field| field.name == "a_right_5")
                 .unwrap();
             assert_eq!(right_a.metadata["origin"], "right-a");
             assert_eq!(right_a.nullable, matches!(how, JoinType::Left));
@@ -1329,7 +1337,7 @@ mod tests {
                 joined
                     .collect()
                     .unwrap()
-                    .column("a_right_1")
+                    .column("a_right_5")
                     .unwrap()
                     .i64()
                     .unwrap()

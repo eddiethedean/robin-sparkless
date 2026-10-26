@@ -797,8 +797,6 @@ fn translate_insert(
     let staged = appended
         .collect_with_cancellation(token)
         .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-    #[cfg(feature = "test-hooks")]
-    crate::sql::test_hooks::after_insert_stage();
     check_cancellation(token)?;
     let mut appended_df =
         DataFrame::from_polars_with_options(staged.as_ref().clone(), session.is_case_sensitive());
@@ -806,6 +804,11 @@ fn translate_insert(
     if let Some(schema) = logical_schema {
         appended_df = appended_df.with_logical_schema(schema)?;
     }
+    #[cfg(feature = "test-hooks")]
+    crate::sql::test_hooks::after_insert_stage();
+    // Validation and logical-schema attachment can be expensive. Do not publish a candidate
+    // when cancellation arrived while either operation was running.
+    check_cancellation(token)?;
     let appended = appended_df;
     if session.has_exact_temp_view(&table_name)
         || (!has_provider && session.has_temp_view(&table_name))
@@ -814,6 +817,7 @@ fn translate_insert(
             let _publication_guard = session
                 .shared_catalog_guard()
                 .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            check_cancellation(token)?;
             session.register_temp_view_during_sql(&table_name, appended)?;
         } else {
             session.create_or_replace_temp_view(&table_name, appended);
@@ -823,6 +827,7 @@ fn translate_insert(
             .shared_catalog_guard()
             .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
         session.check_catalog_table_growth(&table_name, &appended)?;
+        check_cancellation(token)?;
         session.register_table_during_sql(&table_name, appended);
     }
 
@@ -1136,8 +1141,9 @@ fn translate_select_body(
     session: &SparkSession,
     body: &Select,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    let (mut df, relation_columns) = translate_select_from(session, body)?;
-    let relation_qualifiers = sql_relation_qualifiers(body, &relation_columns);
+    let (mut df, relation_columns, relation_left_columns) = translate_select_from(session, body)?;
+    let relation_qualifiers =
+        sql_relation_qualifiers(body, &relation_columns, &relation_left_columns);
     if let Some(selection) = &body.selection {
         let expr = sql_expr_to_polars_with_qualifiers(
             selection,
@@ -1369,10 +1375,16 @@ fn limit_clause_to_expr(lc: &LimitClause) -> Option<&SqlExpr> {
     }
 }
 
+type SelectFromTranslation = (
+    crate::dataframe::DataFrame,
+    Vec<Vec<String>>,
+    Vec<Vec<String>>,
+);
+
 fn translate_select_from(
     session: &SparkSession,
     select: &Select,
-) -> Result<(crate::dataframe::DataFrame, Vec<Vec<String>>), PolarsError> {
+) -> Result<SelectFromTranslation, PolarsError> {
     if select.from.is_empty() {
         // Spark allows "SELECT 1 AS x WHERE 1 = 1" (no FROM). We model this as a single-row
         // relation with a dummy column that is not projected unless explicitly selected.
@@ -1401,11 +1413,13 @@ fn translate_select_from(
         return Ok((
             DataFrame::from_polars_with_options(pl_df, session.is_case_sensitive()),
             Vec::new(),
+            Vec::new(),
         ));
     }
     let first_tj = &select.from[0];
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
     let mut relation_columns = vec![df.columns()?];
+    let mut relation_left_columns = vec![Vec::new()];
     #[cfg(test)]
     test_hooks::after_first_relation_resolution();
     #[cfg(feature = "test-hooks")]
@@ -1420,6 +1434,7 @@ fn translate_select_from(
         .as_deref()
         .filter(|_| should_prefix_columns(&first_tj.relation));
     for join_spec in &first_tj.joins {
+        relation_left_columns.push(df.columns()?);
         let mut right_df = resolve_table_factor(session, &join_spec.relation)?;
         relation_columns.push(right_df.columns()?);
         let right_alias_opt = table_alias_from_factor(&join_spec.relation);
@@ -1484,7 +1499,7 @@ fn translate_select_from(
         // continue to resolve to prefixed column names (e_project_id) across multiple JOINs
         // (issue #376 / robust 3-join SQL tests).
     }
-    Ok((df, relation_columns))
+    Ok((df, relation_columns, relation_left_columns))
 }
 
 fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
@@ -1731,10 +1746,10 @@ struct SqlRelationQualifier {
 fn sql_relation_qualifiers(
     select: &Select,
     relation_columns: &[Vec<String>],
+    relation_left_columns: &[Vec<String>],
 ) -> Vec<SqlRelationQualifier> {
     let mut qualifiers = Vec::new();
     let mut relation_index = 0usize;
-    let mut first_relation_columns = Vec::new();
     for table_with_joins in &select.from {
         let mut relations = vec![&table_with_joins.relation];
         relations.extend(table_with_joins.joins.iter().map(|join| &join.relation));
@@ -1745,9 +1760,10 @@ fn sql_relation_qualifiers(
                 .get(relation_index - 1)
                 .cloned()
                 .unwrap_or_default();
-            if !is_right_relation {
-                first_relation_columns = source_columns.clone();
-            }
+            let left_columns = relation_left_columns
+                .get(relation_index - 1)
+                .cloned()
+                .unwrap_or_default();
             match relation {
                 TableFactor::Table { name, alias, .. } => {
                     if let Some(alias) = alias {
@@ -1758,7 +1774,7 @@ fn sql_relation_qualifiers(
                             column_prefix,
                             is_right_relation,
                             source_columns: source_columns.clone(),
-                            left_columns: first_relation_columns.clone(),
+                            left_columns: left_columns.clone(),
                         });
                     } else {
                         let parts = name
@@ -1772,7 +1788,7 @@ fn sql_relation_qualifiers(
                                 column_prefix: None,
                                 is_right_relation,
                                 source_columns: source_columns.clone(),
-                                left_columns: first_relation_columns.clone(),
+                                left_columns: left_columns.clone(),
                             });
                             if parts.len() > 1 {
                                 qualifiers.push(SqlRelationQualifier {
@@ -1780,7 +1796,7 @@ fn sql_relation_qualifiers(
                                     column_prefix: None,
                                     is_right_relation,
                                     source_columns: source_columns.clone(),
-                                    left_columns: first_relation_columns.clone(),
+                                    left_columns: left_columns.clone(),
                                 });
                             }
                         }
@@ -1794,7 +1810,7 @@ fn sql_relation_qualifiers(
                         column_prefix: None,
                         is_right_relation,
                         source_columns: source_columns.clone(),
-                        left_columns: first_relation_columns.clone(),
+                        left_columns: left_columns.clone(),
                     });
                 }
                 _ => {}
@@ -4017,6 +4033,30 @@ mod insert_literal_tests {
         assert!(session
             .sql("SELECT suffix_right.only_left FROM suffix_left INNER JOIN suffix_right ON suffix_left.id = suffix_right.id")
             .is_err());
+
+        session
+            .sql("CREATE TABLE third_items (id BIGINT, value BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO third_items VALUES (1, 1001)")
+            .unwrap();
+        let three_way = session
+            .sql("SELECT a.value AS a_value, b.value AS b_value, c.value AS c_value FROM left_items a INNER JOIN right_items b ON a.id = b.id INNER JOIN third_items c ON a.id = c.id")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            three_way.column("a_value").unwrap().get(0).unwrap(),
+            AnyValue::Int64(11)
+        );
+        assert_eq!(
+            three_way.column("b_value").unwrap().get(0).unwrap(),
+            AnyValue::Int64(101)
+        );
+        assert_eq!(
+            three_way.column("c_value").unwrap().get(0).unwrap(),
+            AnyValue::Int64(1001)
+        );
     }
 
     #[test]

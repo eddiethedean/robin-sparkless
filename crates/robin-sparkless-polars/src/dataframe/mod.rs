@@ -2747,7 +2747,9 @@ impl DataFrame {
                 continue;
             }
             if matches!(how, JoinType::Outer) {
-                let alias = (0..=right_names.len()).find_map(|index| {
+                // The collision budget is determined by existing left-side names. A wide
+                // left frame can force the right alias far beyond the number of right fields.
+                let alias = (0..=left_names.len() + right_names.len()).find_map(|index| {
                     let suffix = if index == 0 {
                         "_right".to_string()
                     } else {
@@ -5595,42 +5597,65 @@ impl<'a> DataFrameWriter<'a> {
             }
             SaveMode::Append => {
                 let saved_existing = session.get_saved_table(name);
-                let existing_logical_schema = saved_existing
-                    .as_ref()
-                    .and_then(|existing| existing.logical_schema.clone());
-                let logical_schema = match (existing_logical_schema, self.df.logical_schema.clone())
-                {
-                    (Some(existing), Some(incoming)) => {
-                        let existing_json = existing.to_json().map_err(|error| {
-                            PolarsError::InvalidOperation(
-                                format!(
-                                    "saveAsTable append: serialize existing logical schema: {error}"
-                                )
-                                .into(),
-                            )
-                        })?;
-                        let incoming_json = incoming.to_json().map_err(|error| {
-                            PolarsError::InvalidOperation(
-                                format!(
-                                    "saveAsTable append: serialize incoming logical schema: {error}"
-                                )
-                                .into(),
-                            )
-                        })?;
-                        if existing_json != incoming_json {
+                if let (Some(existing), Some(incoming)) = (
+                    saved_existing
+                        .as_ref()
+                        .and_then(|frame| frame.logical_schema.as_ref()),
+                    self.df.logical_schema.as_ref(),
+                ) {
+                    let same_name = |left: &str, right: &str| {
+                        if self.df.case_sensitive {
+                            left == right
+                        } else {
+                            left.eq_ignore_ascii_case(right)
+                        }
+                    };
+                    for existing_field in existing.fields() {
+                        let incoming_field = incoming
+                            .fields()
+                            .iter()
+                            .find(|field| same_name(&field.name, &existing_field.name));
+                        if incoming_field.is_none() && !merge_schema {
                             return Err(PolarsError::SchemaMismatch(
                                 format!(
-                                    "saveAsTable append: logical schema does not match existing table '{name}'"
+                                    "saveAsTable append: logical field '{}' is missing from incoming schema for table '{name}'",
+                                    existing_field.name
                                 )
                                 .into(),
                             ));
                         }
-                        Some(existing)
+                        if let Some(incoming_field) = incoming_field {
+                            if serde_json::to_value(&existing_field.data_type).ok()
+                                != serde_json::to_value(&incoming_field.data_type).ok()
+                                || existing_field.nullable != incoming_field.nullable
+                                || existing_field.metadata != incoming_field.metadata
+                            {
+                                return Err(PolarsError::SchemaMismatch(
+                                    format!(
+                                        "saveAsTable append: logical field '{}' does not match existing table '{name}'",
+                                        existing_field.name
+                                    )
+                                    .into(),
+                                ));
+                            }
+                        }
                     }
-                    (Some(existing), None) => Some(existing),
-                    (None, Some(incoming)) => Some(incoming),
-                    (None, None) => None,
-                };
+                    if !merge_schema
+                        && incoming.fields().iter().any(|incoming_field| {
+                            !existing
+                                .fields()
+                                .iter()
+                                .any(|field| same_name(&field.name, &incoming_field.name))
+                        })
+                    {
+                        return Err(PolarsError::SchemaMismatch(
+                            format!(
+                                "saveAsTable append: incoming logical schema has extra fields for table '{name}'"
+                            )
+                            .into(),
+                        ));
+                    }
+                }
                 let existing_pl = if let Some(existing) = saved_existing.as_ref() {
                     existing.collect_inner()?.as_ref().clone()
                 } else if warehouse_exists {
@@ -5719,6 +5744,12 @@ impl<'a> DataFrameWriter<'a> {
                     }
                 }
                 check_cancelled(token)?;
+                let existing_for_schema = saved_existing.clone().unwrap_or_else(|| {
+                    crate::dataframe::DataFrame::from_polars_with_options(
+                        existing_pl.clone(),
+                        self.df.case_sensitive,
+                    )
+                });
                 let merged = if merge_schema {
                     let (aligned_existing, aligned_new) =
                         align_to_merged_schema_inline(&existing_pl, &new_pl)?;
@@ -5756,7 +5787,9 @@ impl<'a> DataFrameWriter<'a> {
                         self.df.case_sensitive,
                     )
                 };
-                let merged = if let Some(logical_schema) = logical_schema {
+                let merged = if let Some(logical_schema) =
+                    existing_for_schema.merged_logical_schema(self.df, &merged, merge_schema)
+                {
                     merged.with_logical_schema(logical_schema)?
                 } else {
                     merged
@@ -8382,6 +8415,81 @@ mod tests {
         );
 
         assert!(session.drop_temp_view(&view_name));
+        assert!(session.drop_table(&table_name));
+    }
+
+    #[test]
+    fn saved_table_append_aligns_reordered_and_merged_logical_schemas() {
+        use crate::schema::DataType as LogicalDataType;
+
+        fn frame(order: &[&str]) -> DataFrame {
+            let mut columns = Vec::new();
+            let mut fields = Vec::new();
+            for name in order {
+                match *name {
+                    "a" => {
+                        columns.push(Series::new("a".into(), [1_i32]).into());
+                        fields.push(StructField::new(
+                            "a".to_string(),
+                            LogicalDataType::Integer,
+                            false,
+                        ));
+                    }
+                    "b" => {
+                        columns.push(Series::new("b".into(), ["b"]).into());
+                        fields.push(StructField::new(
+                            "b".to_string(),
+                            LogicalDataType::String,
+                            false,
+                        ));
+                    }
+                    "c" => {
+                        columns.push(Series::new("c".into(), [true]).into());
+                        fields.push(StructField::new(
+                            "c".to_string(),
+                            LogicalDataType::Boolean,
+                            true,
+                        ));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            DataFrame::from_polars(PlDataFrame::new_infer_height(columns).unwrap())
+                .with_logical_schema(StructType::new(fields))
+                .unwrap()
+        }
+
+        let suffix = std::process::id();
+        let table_name = format!("logical_append_alignment_{suffix}");
+        let session = SparkSession::builder()
+            .app_name(format!("logical-append-alignment-{suffix}"))
+            .get_or_create();
+        frame(&["a", "b"])
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Overwrite)
+            .unwrap();
+        frame(&["b", "a"])
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Append)
+            .unwrap();
+        frame(&["a", "c", "b"])
+            .write()
+            .option("mergeSchema", "true")
+            .save_as_table(&session, &table_name, SaveMode::Append)
+            .unwrap();
+
+        let appended = session.table(&table_name).unwrap();
+        assert_eq!(appended.columns().unwrap(), ["a", "b", "c"]);
+        assert_eq!(appended.count().unwrap(), 3);
+        let schema = appended.schema().unwrap();
+        assert_eq!(
+            schema
+                .fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
         assert!(session.drop_table(&table_name));
     }
 
