@@ -2745,6 +2745,9 @@ impl DataFrame {
                 .iter()
                 .any(|left_name| matches_name(left_name, right_name))
             {
+                if output_schema.get(right_name).is_some() {
+                    used_names.insert(right_name.clone());
+                }
                 continue;
             }
             if let Some(suffix) = global_suffix {
@@ -6940,6 +6943,79 @@ mod tests {
 
         let schema = left
             .join_with_keys(&right, vec!["id"], vec!["key"], JoinType::Inner, false)
+            .unwrap()
+            .schema()
+            .unwrap();
+        let field = schema
+            .fields()
+            .iter()
+            .find(|field| field.name == "b_right_1")
+            .unwrap();
+        assert_eq!(
+            field.metadata.get("origin"),
+            Some(&serde_json::json!("right-b"))
+        );
+        assert!(!field.nullable);
+    }
+
+    #[test]
+    fn case_sensitive_same_key_join_preserves_global_suffix_metadata() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left = DataFrame::from_polars_with_options(
+            polars::prelude::df!("id" => [1_i64], "a" => [10_i64], "a_right" => [99_i64], "b" => [20_i64]).unwrap(),
+            true,
+        );
+        let right = DataFrame::from_polars_with_options(
+            polars::prelude::df!("id" => [1_i64], "a" => [100_i64], "b" => [200_i64]).unwrap(),
+            true,
+        )
+        .with_logical_schema(StructType::new(vec![
+            StructField::new("id".into(), LogicalDataType::Long, false),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+            StructField::new("b".into(), LogicalDataType::Long, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-b"))].into()),
+        ]))
+        .unwrap();
+
+        let schema = left
+            .join_with_keys(&right, vec!["id"], vec!["id"], JoinType::Inner, false)
+            .unwrap()
+            .schema()
+            .unwrap();
+        let field = schema
+            .fields()
+            .iter()
+            .find(|field| field.name == "b_right_1")
+            .unwrap();
+        assert_eq!(
+            field.metadata.get("origin"),
+            Some(&serde_json::json!("right-b"))
+        );
+        assert!(!field.nullable);
+    }
+
+    #[test]
+    fn earlier_nonoverlap_right_column_reserves_its_name_for_join_aliases() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [10_i64], "a_right" => [99_i64], "b" => [20_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [100_i64], "b_right" => [999_i64], "b" => [200_i64]).unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![
+            StructField::new("id".into(), LogicalDataType::Long, false),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+            StructField::new("b_right".into(), LogicalDataType::Long, false),
+            StructField::new("b".into(), LogicalDataType::Long, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-b"))].into()),
+        ]))
+        .unwrap();
+
+        let schema = left
+            .join_with_keys(&right, vec!["id"], vec!["id"], JoinType::Inner, false)
             .unwrap()
             .schema()
             .unwrap();

@@ -1871,35 +1871,48 @@ fn sql_struct_field_expr(
             .as_ref()
             .map(|prefix| format!("{prefix}_{column}"))
             .filter(|candidate| df.get_column_dtype(candidate).is_some());
-        let suffixed = if qualifier.is_right_relation
-            && qualifier.left_columns.iter().any(|left| {
+        let mut right_output = None;
+        if qualifier.is_right_relation && prefixed.is_none() {
+            let same_name = |left: &str, right: &str| {
                 if df.case_sensitive {
-                    left == column
+                    left == right
                 } else {
-                    left.eq_ignore_ascii_case(column)
+                    left.eq_ignore_ascii_case(right)
                 }
-            }) {
-            (0..=qualifier.left_columns.len())
-                .map(|index| {
-                    if index == 0 {
-                        format!("{column}_right")
-                    } else {
-                        format!("{column}_right_{index}")
+            };
+            let mut used_names = qualifier.left_columns.clone();
+            for source_name in &qualifier.source_columns {
+                let overlaps_left = qualifier
+                    .left_columns
+                    .iter()
+                    .any(|left| same_name(left, source_name));
+                let output_name = if overlaps_left {
+                    (0..=qualifier.left_columns.len() + qualifier.source_columns.len())
+                        .find_map(|index| {
+                            let candidate = if index == 0 {
+                                format!("{source_name}_right")
+                            } else {
+                                format!("{source_name}_right_{index}")
+                            };
+                            (!used_names.iter().any(|used| same_name(used, &candidate))
+                                && df.get_column_dtype(&candidate).is_some())
+                            .then_some(candidate)
+                        })
+                        .or_else(|| df.resolve_column_name(source_name).ok())
+                } else {
+                    df.resolve_column_name(source_name).ok()
+                };
+                if let Some(output_name) = output_name {
+                    if same_name(source_name, column) {
+                        right_output = Some(output_name.clone());
                     }
-                })
-                .find(|candidate| {
-                    !qualifier.left_columns.iter().any(|left| {
-                        if df.case_sensitive {
-                            left == candidate
-                        } else {
-                            left.eq_ignore_ascii_case(candidate)
-                        }
-                    }) && df.get_column_dtype(candidate).is_some()
-                })
-        } else {
-            None
-        };
-        let root = prefixed.or(suffixed).unwrap_or_else(|| column.to_string());
+                    used_names.push(output_name);
+                }
+            }
+        }
+        let root = prefixed
+            .or(right_output)
+            .unwrap_or_else(|| column.to_string());
         let field_path = &names[qualifier_len + 1..];
         if field_path.is_empty() {
             return Ok(df
@@ -4064,6 +4077,40 @@ mod insert_literal_tests {
         assert_eq!(
             three_way.column("c_value").unwrap().get(0).unwrap(),
             AnyValue::Int64(1001)
+        );
+    }
+
+    #[test]
+    fn qualified_join_column_skips_an_earlier_right_field_with_the_suffix_name() {
+        let session = SparkSession::new(
+            Some("qualified-join-suffix-lineage-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .sql("CREATE TABLE left_items (id BIGINT, a BIGINT, a_right BIGINT, b BIGINT)")
+            .unwrap();
+        session
+            .sql("CREATE TABLE right_items (id BIGINT, a BIGINT, b_right BIGINT, b BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO left_items VALUES (1, 10, 99, 20)")
+            .unwrap();
+        session
+            .sql("INSERT INTO right_items VALUES (1, 100, 999, 200)")
+            .unwrap();
+
+        let selected = session
+            .sql(
+                "SELECT right_items.b AS selected_b \
+                 FROM left_items INNER JOIN right_items ON left_items.id = right_items.id",
+            )
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            selected.column("selected_b").unwrap().i64().unwrap().get(0),
+            Some(200)
         );
     }
 

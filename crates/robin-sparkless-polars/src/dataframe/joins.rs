@@ -933,8 +933,8 @@ pub fn join(
         case_sensitive,
         ambiguous_columns,
     );
-    let global_suffix =
-        (keys_differ || matches!(how, JoinType::Outer)).then_some(join_suffix.as_str());
+    let global_suffix = (case_sensitive || keys_differ || matches!(how, JoinType::Outer))
+        .then_some(join_suffix.as_str());
     output.logical_schema = left.joined_logical_schema(right, &output, how, global_suffix);
     Ok(output)
 }
