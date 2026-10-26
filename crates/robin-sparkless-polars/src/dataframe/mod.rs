@@ -37,6 +37,140 @@ use robin_sparkless_core::engine::{
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
+
+fn validate_logical_nullability(
+    value: &polars::prelude::AnyValue<'_>,
+    data_type: &LogicalDataType,
+    nullable: bool,
+    path: &str,
+) -> Result<(), PolarsError> {
+    use polars::prelude::AnyValue;
+    if matches!(value, AnyValue::Null) {
+        return if nullable {
+            Ok(())
+        } else {
+            Err(PolarsError::InvalidOperation(
+                format!("saveAsTable append: non-nullable field '{path}' contains null values")
+                    .into(),
+            ))
+        };
+    }
+    match (value, data_type) {
+        (AnyValue::Struct(_, _, physical_fields), LogicalDataType::Struct(fields)) => {
+            for (child, physical_field) in value._iter_struct_av().zip(physical_fields.iter()) {
+                if let Some(logical_field) = fields
+                    .iter()
+                    .find(|field| field.name == physical_field.name.as_str())
+                {
+                    let child_path = format!("{path}.{}", logical_field.name);
+                    validate_logical_nullability(
+                        &child,
+                        &logical_field.data_type,
+                        logical_field.nullable,
+                        &child_path,
+                    )?;
+                }
+            }
+        }
+        (AnyValue::StructOwned(payload), LogicalDataType::Struct(fields)) => {
+            let (values, physical_fields) = &**payload;
+            for (child, physical_field) in values.iter().zip(physical_fields.iter()) {
+                if let Some(logical_field) = fields
+                    .iter()
+                    .find(|field| field.name == physical_field.name.as_str())
+                {
+                    let child_path = format!("{path}.{}", logical_field.name);
+                    validate_logical_nullability(
+                        child,
+                        &logical_field.data_type,
+                        logical_field.nullable,
+                        &child_path,
+                    )?;
+                }
+            }
+        }
+        (
+            AnyValue::List(values),
+            LogicalDataType::Array(inner)
+            | LogicalDataType::ArrayWithNullability {
+                element_type: inner,
+                ..
+            },
+        ) => {
+            let contains_null = match data_type {
+                LogicalDataType::ArrayWithNullability { contains_null, .. } => *contains_null,
+                _ => true,
+            };
+            for index in 0..values.len() {
+                let child = values.get(index)?;
+                validate_logical_nullability(&child, inner, contains_null, &format!("{path}[]"))?;
+            }
+        }
+        (
+            AnyValue::List(entries),
+            LogicalDataType::Map(key_type, value_type)
+            | LogicalDataType::MapWithNullability {
+                key_type,
+                value_type,
+                ..
+            },
+        ) => {
+            let value_nullable = match data_type {
+                LogicalDataType::MapWithNullability {
+                    value_contains_null,
+                    ..
+                } => *value_contains_null,
+                _ => true,
+            };
+            for index in 0..entries.len() {
+                let entry = entries.get(index)?;
+                let fields = match &entry {
+                    AnyValue::Struct(_, _, fields) => fields.to_vec(),
+                    AnyValue::StructOwned(payload) => payload.1.clone(),
+                    _ => continue,
+                };
+                let mut key = None;
+                let mut value = None;
+                match &entry {
+                    AnyValue::Struct(_, _, _) => {
+                        for (child, field) in entry._iter_struct_av().zip(fields.iter()) {
+                            if field.name == "key" {
+                                key = Some(child.clone());
+                            }
+                            if field.name == "value" {
+                                value = Some(child);
+                            }
+                        }
+                    }
+                    AnyValue::StructOwned(payload) => {
+                        for (child, field) in payload.0.iter().zip(fields.iter()) {
+                            if field.name == "key" {
+                                key = Some(child.clone());
+                            }
+                            if field.name == "value" {
+                                value = Some(child.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                if let Some(key) = key {
+                    validate_logical_nullability(&key, key_type, false, &format!("{path}{{key}}"))?;
+                }
+                if let Some(value) = value {
+                    validate_logical_nullability(
+                        &value,
+                        value_type,
+                        value_nullable,
+                        &format!("{path}{{value}}"),
+                    )?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
@@ -2601,44 +2735,58 @@ impl DataFrame {
             ))
         };
 
-        // Joins use one physical suffix for every colliding right field. Recover that suffix
-        // from the actual output names instead of independently guessing `_right` per column;
-        // an unrelated left field may already have a name such as `value_right`.
-        let join_suffix = (0..=right_names.len())
-            .map(|index| {
-                if index == 0 {
-                    "_right".to_string()
-                } else {
-                    format!("_right_{index}")
-                }
-            })
-            .find(|suffix| {
-                right_names.iter().any(|right_name| {
-                    left_names
+        // Inner/left/right joins allocate suffixes independently for each right field. Rebuild
+        // that allocation in source-column order, accounting for left names and earlier aliases.
+        let mut used_names: HashSet<String> = left_names.iter().cloned().collect();
+        let mut aliased_right_sources = HashMap::<String, String>::new();
+        for right_name in &right_names {
+            if !left_names
+                .iter()
+                .any(|left_name| matches_name(left_name, right_name))
+            {
+                continue;
+            }
+            if matches!(how, JoinType::Outer) {
+                let alias = (0..=right_names.len()).find_map(|index| {
+                    let suffix = if index == 0 {
+                        "_right".to_string()
+                    } else {
+                        format!("_right_{index}")
+                    };
+                    let candidate = format!("{right_name}{suffix}");
+                    (!left_names
                         .iter()
-                        .any(|left_name| matches_name(left_name, right_name))
-                        && {
-                            let candidate = format!("{right_name}{suffix}");
-                            !left_names
-                                .iter()
-                                .any(|left_name| matches_name(left_name, &candidate))
-                                && output_schema.get(&candidate).is_some()
-                        }
-                })
-            });
+                        .any(|left_name| matches_name(left_name, &candidate))
+                        && output_schema.get(&candidate).is_some())
+                    .then_some(candidate)
+                });
+                if let Some(alias) = alias {
+                    aliased_right_sources.insert(alias, right_name.clone());
+                }
+                continue;
+            }
+            let mut index = 0usize;
+            let alias = loop {
+                let candidate = if index == 0 {
+                    format!("{right_name}_right")
+                } else {
+                    format!("{right_name}_right_{index}")
+                };
+                if !used_names.iter().any(|used| matches_name(used, &candidate)) {
+                    break candidate;
+                }
+                index += 1;
+            };
+            if output_schema.get(&alias).is_some() {
+                used_names.insert(alias.clone());
+                aliased_right_sources.insert(alias, right_name.clone());
+            }
+        }
         let aliased_right_source = |output_name: &str| -> Option<&str> {
-            right_names.iter().find_map(|right_name| {
-                let collides = left_names
-                    .iter()
-                    .any(|left_name| matches_name(left_name, right_name));
-                let aliased = join_suffix
-                    .as_ref()
-                    .filter(|_| collides)
-                    .is_some_and(|suffix| {
-                        matches_name(&format!("{right_name}{suffix}"), output_name)
-                    });
-                aliased.then_some(right_name.as_str())
-            })
+            aliased_right_sources
+                .iter()
+                .find(|(alias, _)| matches_name(alias, output_name))
+                .map(|(_, source)| source.as_str())
         };
 
         let fields = output_schema
@@ -4490,14 +4638,30 @@ impl DataFrame {
 
     /// Add or replace multiple columns. PySpark withColumns. Accepts `Column` so rand/randn get per-row values.
     pub fn with_columns(&self, exprs: &[(String, Column)]) -> Result<DataFrame, PolarsError> {
-        if self.logical_schema.is_none() {
-            return transformations::with_columns(self, exprs, self.case_sensitive);
-        }
-        // Preserve expression-derived nullability for each replacement. Rebuilding a schema
-        // from output names alone incorrectly kept nullable=false from the replaced source.
-        let mut output = self.clone();
-        for (name, column) in exprs {
-            output = output.with_column(name, column)?;
+        let mut output = transformations::with_columns(self, exprs, self.case_sensitive)?;
+        if self.logical_schema.is_some() {
+            // Infer every replacement against the original input schema, while retaining the
+            // source metadata and nullability of untouched columns.
+            let expressions = output
+                .columns()?
+                .into_iter()
+                .map(|output_name| {
+                    exprs
+                        .iter()
+                        .find(|(name, _)| {
+                            if self.case_sensitive {
+                                name == &output_name
+                            } else {
+                                name.eq_ignore_ascii_case(&output_name)
+                            }
+                        })
+                        .map(|(_, column)| column.expr().clone())
+                        .unwrap_or_else(|| polars::prelude::col(output_name.as_str()))
+                })
+                .collect::<Vec<_>>();
+            output.logical_schema = self
+                .projected_logical_schema(&expressions, &output)
+                .or_else(|| self.logical_schema_by_output_names(&output));
         }
         Ok(output)
     }
@@ -5530,19 +5694,27 @@ impl<'a> DataFrameWriter<'a> {
                     .as_ref()
                     .and_then(|existing| existing.logical_schema.as_ref())
                 {
-                    for field in schema.fields().iter().filter(|field| !field.nullable) {
-                        let violates_nullability = match new_pl.column(&field.name) {
-                            Ok(column) => column.null_count() > 0,
-                            Err(_) => merge_schema,
+                    for field in schema.fields() {
+                        let column = match new_pl.column(&field.name) {
+                            Ok(column) => column,
+                            Err(_) if merge_schema => {
+                                if !field.nullable {
+                                    return Err(PolarsError::InvalidOperation(
+                                        format!("saveAsTable append: non-nullable field '{}' contains null values", field.name).into(),
+                                    ));
+                                }
+                                continue;
+                            }
+                            Err(_) => continue,
                         };
-                        if violates_nullability {
-                            return Err(PolarsError::InvalidOperation(
-                                format!(
-                                    "saveAsTable append: non-nullable field '{}' contains null values",
-                                    field.name
-                                )
-                                .into(),
-                            ));
+                        for row in 0..new_pl.height() {
+                            let value = column.get(row)?;
+                            validate_logical_nullability(
+                                &value,
+                                &field.data_type,
+                                field.nullable,
+                                &field.name,
+                            )?;
                         }
                     }
                 }
@@ -6671,6 +6843,29 @@ mod tests {
                 .unwrap(),
             AnyValue::Null
         );
+    }
+
+    #[test]
+    fn with_columns_replacements_are_simultaneous() {
+        use polars::prelude::{NamedFrom, Series, col};
+
+        let source = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                Series::new("a".into(), [1_i64]).into(),
+                Series::new("b".into(), [2_i64]).into(),
+            ])
+            .unwrap(),
+        );
+        let swapped = source
+            .with_columns(&[
+                ("a".into(), Column::from_expr(col("b"), None)),
+                ("b".into(), Column::from_expr(col("a"), None)),
+            ])
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(swapped.column("a").unwrap().i64().unwrap().get(0), Some(2));
+        assert_eq!(swapped.column("b").unwrap().i64().unwrap().get(0), Some(1));
     }
 
     #[test]
@@ -8393,6 +8588,60 @@ mod tests {
                 .height(),
             1
         );
+    }
+
+    #[test]
+    fn append_without_sidecar_checks_nested_nonnullable_values() {
+        use polars::chunked_array::StructChunked;
+        use polars::prelude::{IntoLazy, NamedFrom, Series};
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let session = SparkSession::new(
+            Some("append-nested-nullability-test".into()),
+            None,
+            HashMap::new(),
+        );
+        let table_name = format!("append_nested_nullability_{}", std::process::id());
+        let child = Series::new("child".into(), [Some(1_i64)]);
+        let saved_payload = StructChunked::from_series("payload".into(), 1, [&child].into_iter())
+            .unwrap()
+            .into_series();
+        let saved = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![saved_payload.into()]).unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![StructField::new(
+            "payload".into(),
+            LogicalDataType::Struct(vec![StructField::new(
+                "child".into(),
+                LogicalDataType::Long,
+                false,
+            )]),
+            true,
+        )]))
+        .unwrap();
+        saved
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Overwrite)
+            .unwrap();
+
+        let null_child = Series::new("child".into(), [None::<i64>]);
+        let incoming_payload =
+            StructChunked::from_series("payload".into(), 1, [&null_child].into_iter())
+                .unwrap()
+                .into_series();
+        let incoming = DataFrame::from_lazy_with_options(
+            polars::prelude::DataFrame::new_infer_height(vec![incoming_payload.into()])
+                .unwrap()
+                .lazy(),
+            false,
+        );
+        assert!(
+            incoming
+                .write()
+                .save_as_table(&session, &table_name, SaveMode::Append)
+                .is_err()
+        );
+        assert_eq!(session.table(&table_name).unwrap().count().unwrap(), 1);
     }
 
     #[test]

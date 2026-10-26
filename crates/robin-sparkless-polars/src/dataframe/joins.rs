@@ -1314,6 +1314,38 @@ mod tests {
                 origin
             );
         }
+
+        for how in [JoinType::Inner, JoinType::Left] {
+            let joined = left.join(&right, vec!["id"], how).unwrap();
+            let schema = joined.schema().unwrap();
+            let right_a = schema
+                .fields()
+                .iter()
+                .find(|field| field.name == "a_right_1")
+                .unwrap();
+            assert_eq!(right_a.metadata["origin"], "right-a");
+            assert_eq!(right_a.nullable, matches!(how, JoinType::Left));
+            assert_eq!(
+                joined
+                    .collect()
+                    .unwrap()
+                    .column("a_right_1")
+                    .unwrap()
+                    .i64()
+                    .unwrap()
+                    .get(0),
+                Some(100)
+            );
+            assert_eq!(
+                schema
+                    .fields()
+                    .iter()
+                    .find(|field| field.name == "b_right")
+                    .unwrap()
+                    .metadata["origin"],
+                "right-b"
+            );
+        }
     }
 
     #[test]

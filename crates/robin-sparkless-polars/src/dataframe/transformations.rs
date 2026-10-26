@@ -2556,12 +2556,29 @@ pub fn with_columns(
     exprs: &[(String, crate::column::Column)],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let pl = df.collect_inner()?.as_ref().clone();
-    let mut current = super::DataFrame::from_polars_with_options(pl, case_sensitive);
+    let mut physical = df.collect_inner()?.as_ref().clone();
     for (name, col) in exprs {
-        current = with_column(&current, name, col, case_sensitive)?;
+        // PySpark withColumns evaluates every replacement against the input frame. Evaluate
+        // each expression independently against `df`, then apply the resulting series together.
+        // Chaining `with_column` here makes later expressions observe earlier replacements.
+        let evaluated = with_column(df, name, col, case_sensitive)?;
+        let resolved_name = evaluated
+            .columns()?
+            .into_iter()
+            .find(|candidate| {
+                if case_sensitive {
+                    candidate == name
+                } else {
+                    candidate.eq_ignore_ascii_case(name)
+                }
+            })
+            .ok_or_else(|| PolarsError::ColumnNotFound(name.clone().into()))?;
+        physical.with_column(evaluated.collect_inner()?.column(&resolved_name)?.clone())?;
     }
-    Ok(current)
+    Ok(super::DataFrame::from_polars_with_options(
+        physical,
+        case_sensitive,
+    ))
 }
 
 /// Rename multiple columns. PySpark withColumnsRenamed.

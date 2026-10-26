@@ -299,6 +299,7 @@ pub fn translate_with_cancellation(
                 session.is_case_sensitive(),
             );
             snapshot = snapshot.with_logical_schema(schema)?;
+            snapshot.validate_json_values()?;
             check_cancellation(token)?;
             let _publish_guard = session
                 .shared_catalog_guard()
@@ -1135,8 +1136,8 @@ fn translate_select_body(
     session: &SparkSession,
     body: &Select,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    let mut df = translate_select_from(session, body)?;
-    let relation_qualifiers = sql_relation_qualifiers(session, body)?;
+    let (mut df, relation_columns) = translate_select_from(session, body)?;
+    let relation_qualifiers = sql_relation_qualifiers(body, &relation_columns);
     if let Some(selection) = &body.selection {
         let expr = sql_expr_to_polars_with_qualifiers(
             selection,
@@ -1371,7 +1372,7 @@ fn limit_clause_to_expr(lc: &LimitClause) -> Option<&SqlExpr> {
 fn translate_select_from(
     session: &SparkSession,
     select: &Select,
-) -> Result<crate::dataframe::DataFrame, PolarsError> {
+) -> Result<(crate::dataframe::DataFrame, Vec<Vec<String>>), PolarsError> {
     if select.from.is_empty() {
         // Spark allows "SELECT 1 AS x WHERE 1 = 1" (no FROM). We model this as a single-row
         // relation with a dummy column that is not projected unless explicitly selected.
@@ -1397,13 +1398,14 @@ fn translate_select_from(
             PolarsError::InvalidOperation(format!("SQL: failed to create dummy frame: {e}").into())
         })?;
 
-        return Ok(DataFrame::from_polars_with_options(
-            pl_df,
-            session.is_case_sensitive(),
+        return Ok((
+            DataFrame::from_polars_with_options(pl_df, session.is_case_sensitive()),
+            Vec::new(),
         ));
     }
     let first_tj = &select.from[0];
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
+    let mut relation_columns = vec![df.columns()?];
     #[cfg(test)]
     test_hooks::after_first_relation_resolution();
     #[cfg(feature = "test-hooks")]
@@ -1419,6 +1421,7 @@ fn translate_select_from(
         .filter(|_| should_prefix_columns(&first_tj.relation));
     for join_spec in &first_tj.joins {
         let mut right_df = resolve_table_factor(session, &join_spec.relation)?;
+        relation_columns.push(right_df.columns()?);
         let right_alias_opt = table_alias_from_factor(&join_spec.relation);
         if let Some(ref prefix) = right_alias_opt {
             if should_prefix_columns(&join_spec.relation) {
@@ -1481,7 +1484,7 @@ fn translate_select_from(
         // continue to resolve to prefixed column names (e_project_id) across multiple JOINs
         // (issue #376 / robust 3-join SQL tests).
     }
-    Ok(df)
+    Ok((df, relation_columns))
 }
 
 fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
@@ -1726,9 +1729,9 @@ struct SqlRelationQualifier {
 }
 
 fn sql_relation_qualifiers(
-    session: &SparkSession,
     select: &Select,
-) -> Result<Vec<SqlRelationQualifier>, PolarsError> {
+    relation_columns: &[Vec<String>],
+) -> Vec<SqlRelationQualifier> {
     let mut qualifiers = Vec::new();
     let mut relation_index = 0usize;
     let mut first_relation_columns = Vec::new();
@@ -1738,16 +1741,10 @@ fn sql_relation_qualifiers(
         for relation in relations {
             let is_right_relation = relation_index > 0;
             relation_index += 1;
-            let source_columns = match relation {
-                TableFactor::Table { name, .. } => {
-                    let table_name = table_name_from_object_name(name);
-                    session.table(&table_name)?.columns()?
-                }
-                TableFactor::Derived { subquery, .. } => {
-                    translate_query(session, subquery.as_ref())?.columns()?
-                }
-                _ => Vec::new(),
-            };
+            let source_columns = relation_columns
+                .get(relation_index - 1)
+                .cloned()
+                .unwrap_or_default();
             if !is_right_relation {
                 first_relation_columns = source_columns.clone();
             }
@@ -1804,7 +1801,7 @@ fn sql_relation_qualifiers(
             }
         }
     }
-    Ok(qualifiers)
+    qualifiers
 }
 
 /// Resolve a SQL multipart identifier as a nested struct path, unless its root
@@ -1985,17 +1982,36 @@ fn common_signed_integer_type(
     };
     let left_rank = rank(left);
     let right_rank = rank(right);
-    let integer_literal = |dtype: &DataType| {
-        matches!(
-            dtype,
-            DataType::Unknown(polars::prelude::UnknownKind::Int(_))
-        )
+    let integer_literal_rank = |dtype: &DataType| match dtype {
+        DataType::Unknown(polars::prelude::UnknownKind::Int(value)) => {
+            Some(if i32::try_from(*value).is_ok() {
+                2
+            } else if i64::try_from(*value).is_ok() {
+                3
+            } else {
+                4
+            })
+        }
+        _ => None,
     };
     let (left_rank, right_rank) = match (left_rank, right_rank) {
         (Some(left), Some(right)) => (left, right),
-        (Some(left), None) if integer_literal(right) => (left, left),
-        (None, Some(right)) if integer_literal(left) => (right, right),
-        (None, None) if integer_literal(left) && integer_literal(right) => (2, 2),
+        (Some(left), None) if integer_literal_rank(right).is_some() => (
+            left.max(integer_literal_rank(right)?.max(2)),
+            left.max(integer_literal_rank(right)?.max(2)),
+        ),
+        (None, Some(right)) if integer_literal_rank(left).is_some() => (
+            right.max(integer_literal_rank(left)?.max(2)),
+            right.max(integer_literal_rank(left)?.max(2)),
+        ),
+        (None, None)
+            if integer_literal_rank(left).is_some() && integer_literal_rank(right).is_some() =>
+        {
+            let rank = integer_literal_rank(left)?
+                .max(integer_literal_rank(right)?)
+                .max(2);
+            (rank, rank)
+        }
         _ => return None,
     };
     Some(match left_rank.max(right_rank) {
@@ -4059,6 +4075,20 @@ mod insert_literal_tests {
             exact.column("n").unwrap().get(0).unwrap(),
             AnyValue::Int64(9_007_199_254_740_993)
         );
+        for (query, expected) in [
+            ("SELECT 2147483648 + 1 AS n", AnyValue::Int64(2_147_483_649)),
+            (
+                "SELECT 9007199254740993 + 0 AS n",
+                AnyValue::Int64(9_007_199_254_740_993),
+            ),
+            (
+                "SELECT CAST(100 AS SMALLINT) + 30000 AS n",
+                AnyValue::Int32(30_100),
+            ),
+        ] {
+            let actual = session.sql(query).unwrap().collect().unwrap();
+            assert_eq!(actual.column("n").unwrap().get(0).unwrap(), expected);
+        }
         assert!(
             session
                 .sql("SELECT CAST('9223372036854775807' AS BIGINT) + CAST(1 AS INT) AS n")
@@ -4416,5 +4446,20 @@ mod snapshot_tests {
         assert_eq!(new_rows.len(), 1);
         assert_eq!(new_rows[0].get("left_id"), Some(&json!(2)));
         assert_eq!(new_rows[0].get("right_id"), Some(&json!(20)));
+    }
+
+    #[test]
+    fn shared_catalog_temp_view_rejects_non_finite_json_snapshot() {
+        let session = SparkSession::new(
+            Some("shared-view-non-finite-test".into()),
+            None,
+            HashMap::new(),
+        )
+        .with_shared_catalog(SharedCatalog::new());
+
+        let result =
+            session.sql("CREATE TEMP VIEW invalid_json_view AS SELECT CAST('NaN' AS DOUBLE) AS n");
+        assert!(result.is_err());
+        assert!(!session.has_temp_view("invalid_json_view"));
     }
 }
