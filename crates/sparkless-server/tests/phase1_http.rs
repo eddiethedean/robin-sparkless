@@ -842,3 +842,28 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(status, 200, "{new_instance_create}");
     assert_eq!(new_instance_create["status"], "ok");
 }
+
+#[test]
+fn ansi_division_cast_failure_is_atomic_and_retained() {
+    let mut server = ServerProcess::start();
+    let (_, created) = statement(
+        &server,
+        "review",
+        "CREATE TABLE division_sink (n DOUBLE)",
+        Some("create-division-sink"),
+    );
+    assert_eq!(created["status"], "ok", "{created}");
+    let sql = "INSERT INTO division_sink SELECT 'invalid' / 2 AS n";
+    let (_, failed) = statement(&server, "review", sql, Some("invalid-division"));
+    assert_eq!(failed["status"], "error", "{failed}");
+    assert_eq!(failed["operation"]["effect_outcome"], "failed", "{failed}");
+    let (_, replay) = statement(&server, "review", sql, Some("invalid-division"));
+    assert_eq!(replay["operation"]["effect_outcome"], "failed", "{replay}");
+    let (_, rows) = statement(&server, "review", "SELECT n FROM division_sink", None);
+    assert_eq!(
+        rows["data"]["application/json"]["data"],
+        json!([]),
+        "{rows}"
+    );
+    server.stop();
+}

@@ -2557,27 +2557,108 @@ pub fn with_columns(
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
     let physical = df.collect_inner()?.as_ref().clone();
+    let original_names = df.columns()?;
     let mut snapshot = super::DataFrame::from_polars_with_options(physical.clone(), case_sensitive);
     snapshot.logical_schema = df.logical_schema.clone();
+    let same_name = |left: &str, right: &str| {
+        if case_sensitive {
+            left == right
+        } else {
+            left.eq_ignore_ascii_case(right)
+        }
+    };
+
+    // Evaluate every ordinary expression against the same input. Temporary columns carry
+    // those values through a generator so its expanded rows retain the corresponding values.
     let mut physical = physical;
-    for (name, col) in exprs {
-        // PySpark withColumns evaluates every replacement against the input frame. Evaluate
-        // each expression independently against `df`, then apply the resulting series together.
-        // Chaining `with_column` here makes later expressions observe earlier replacements.
-        let evaluated = with_column(&snapshot, name, col, case_sensitive)?;
-        let resolved_name = evaluated
-            .columns()?
-            .into_iter()
-            .find(|candidate| {
-                if case_sensitive {
-                    candidate == name
-                } else {
-                    candidate.eq_ignore_ascii_case(name)
-                }
-            })
+    let mut temporary_columns = Vec::new();
+    let mut generator = None;
+    for (index, (name, column)) in exprs.iter().enumerate() {
+        if explode_expr_parts(column.expr()).is_some() {
+            if generator.replace((name, column)).is_some() {
+                return Err(PolarsError::InvalidOperation(
+                    "withColumns supports at most one generator expression".into(),
+                ));
+            }
+            continue;
+        }
+        let evaluated = with_column(&snapshot, name, column, case_sensitive)?;
+        let names = evaluated.columns()?;
+        let resolved_name = names
+            .iter()
+            .find(|candidate| *candidate == name)
+            .or_else(|| names.iter().find(|candidate| same_name(candidate, name)))
             .ok_or_else(|| PolarsError::ColumnNotFound(name.clone().into()))?;
-        physical.with_column(evaluated.collect_inner()?.column(&resolved_name)?.clone())?;
+        let mut temporary = format!("__sparkless_with_columns_{index}");
+        while physical
+            .get_column_names()
+            .iter()
+            .any(|existing| same_name(existing.as_str(), &temporary))
+            || exprs
+                .iter()
+                .any(|(requested, _)| same_name(requested, &temporary))
+        {
+            temporary.push('_');
+        }
+        let mut value = evaluated.collect_inner()?.column(resolved_name)?.clone();
+        value.rename(temporary.clone().into());
+        physical.with_column(value)?;
+        temporary_columns.push((name, temporary));
     }
+
+    if let Some((name, column)) = generator {
+        let input = super::DataFrame::from_polars_with_options(physical, case_sensitive);
+        physical = with_column(&input, name, column, case_sensitive)?
+            .collect_inner()?
+            .as_ref()
+            .clone();
+        if let Some(existing) = physical
+            .get_column_names()
+            .iter()
+            .find(|existing| {
+                same_name(existing.as_str(), name) && existing.as_str() != name.as_str()
+            })
+            .map(|existing| existing.to_string())
+        {
+            physical.rename(&existing, name.clone().into())?;
+        }
+    }
+    for (name, temporary) in &temporary_columns {
+        let mut value = physical.column(temporary)?.clone();
+        value.rename((*name).clone().into());
+        if let Some(existing) = physical
+            .get_column_names()
+            .iter()
+            .find(|existing| {
+                same_name(existing.as_str(), name) && existing.as_str() != name.as_str()
+            })
+            .map(|existing| existing.to_string())
+        {
+            physical.rename(&existing, (*name).clone().into())?;
+        }
+        physical.with_column(value)?;
+    }
+    for (_, temporary) in &temporary_columns {
+        physical.drop_in_place(temporary)?;
+    }
+
+    // Preserve input positions for replacements and append new names in request order.
+    let mut order = original_names
+        .into_iter()
+        .map(|original| {
+            exprs
+                .iter()
+                .find(|(name, _)| same_name(&original, name))
+                .map(|(name, _)| name.clone())
+                .unwrap_or(original)
+        })
+        .collect::<Vec<_>>();
+    for (name, _) in exprs {
+        if !order.iter().any(|existing| same_name(existing, name)) {
+            order.push(name.clone());
+        }
+    }
+    let physical = physical.select(order.iter().map(String::as_str))?;
     Ok(super::DataFrame::from_polars_with_options(
         physical,
         case_sensitive,

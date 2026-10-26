@@ -2192,9 +2192,9 @@ fn sql_expr_to_polars_with_qualifiers(
                 if matches!(op, BinaryOperator::Divide) {
                     // Spark SQL promotes integral division to DOUBLE. Polars' native integer
                     // division truncates (1 / 2 => 0), so keep non-decimal division fractional.
-                    let left = l.cast(polars::prelude::DataType::Float64);
-                    let right = r.cast(polars::prelude::DataType::Float64);
                     if session.runtime_config().ansi_enabled {
+                        let left = l.strict_cast(polars::prelude::DataType::Float64);
+                        let right = r.strict_cast(polars::prelude::DataType::Float64);
                         return Ok(left.map_many(
                             |columns| {
                                 let left = columns[0].as_materialized_series().f64()?;
@@ -2239,8 +2239,9 @@ fn sql_expr_to_polars_with_qualifiers(
                             },
                         ));
                     }
-                    // Spark returns NULL for a zero denominator when ANSI mode is disabled.
-                    // Keep the Float64 promotion used above for integral division.
+                    // Spark returns NULL for invalid casts or a zero denominator when ANSI mode is disabled.
+                    let left = l.cast(polars::prelude::DataType::Float64);
+                    let right = r.cast(polars::prelude::DataType::Float64);
                     return Ok(when(right.clone().eq(lit(0.0)))
                         .then(lit(polars::prelude::NULL).cast(polars::prelude::DataType::Float64))
                         .otherwise(left / right));
@@ -4206,9 +4207,38 @@ mod insert_literal_tests {
             0
         );
 
+        for query in ["SELECT 'invalid' / 2 AS n", "SELECT 2 / 'invalid' AS n"] {
+            assert!(
+                session
+                    .sql(query)
+                    .and_then(|result| result.collect())
+                    .is_err(),
+                "{query}"
+            );
+        }
+        let valid_string = session
+            .sql("SELECT '1.5' / 2 AS n")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            valid_string.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.75)
+        );
+
         session
             .sql("CREATE TABLE division_sink (n DOUBLE)")
             .unwrap();
+        assert!(
+            session
+                .sql("INSERT INTO division_sink SELECT 'invalid' / 2 AS n")
+                .is_err()
+        );
+        assert!(
+            session
+                .sql("INSERT INTO division_sink SELECT 2 / 'invalid' AS n")
+                .is_err()
+        );
         session
             .sql("INSERT INTO division_sink SELECT 1 / 2 AS n")
             .unwrap();
@@ -4325,6 +4355,14 @@ mod insert_literal_tests {
         );
         let result = session.sql("SELECT 1 / 0 AS n").unwrap().collect().unwrap();
         assert_eq!(result.column("n").unwrap().get(0).unwrap(), AnyValue::Null);
+        for query in ["SELECT 'invalid' / 2 AS n", "SELECT 2 / 'invalid' AS n"] {
+            let result = session.sql(query).unwrap().collect().unwrap();
+            assert_eq!(
+                result.column("n").unwrap().get(0).unwrap(),
+                AnyValue::Null,
+                "{query}"
+            );
+        }
 
         let fractional = session.sql("SELECT 1 / 2 AS n").unwrap().collect().unwrap();
         assert_eq!(
