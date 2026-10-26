@@ -3552,7 +3552,7 @@ impl DataFrame {
                 let json = if matches!(value, AnyValue::Null) {
                     JsonValue::Null
                 } else {
-                    any_value_to_json_with_array_struct_override(
+                    any_value_to_json_with_array_struct_override_policy(
                         &value,
                         dtype,
                         array_struct_paths,
@@ -3561,6 +3561,7 @@ impl DataFrame {
                                 "could not encode result column name: {error}"
                             ))
                         })?,
+                        true,
                     )
                     .map_err(polars_to_core_error)?
                 };
@@ -4452,11 +4453,14 @@ impl DataFrame {
 
     /// Add or replace multiple columns. PySpark withColumns. Accepts `Column` so rand/randn get per-row values.
     pub fn with_columns(&self, exprs: &[(String, Column)]) -> Result<DataFrame, PolarsError> {
-        let mut output = transformations::with_columns(self, exprs, self.case_sensitive)?;
-        if self.logical_schema.is_some()
-            && let Some(schema) = self.logical_schema_by_output_names(&output)
-        {
-            output.logical_schema = Some(schema);
+        if self.logical_schema.is_none() {
+            return transformations::with_columns(self, exprs, self.case_sensitive);
+        }
+        // Preserve expression-derived nullability for each replacement. Rebuilding a schema
+        // from output names alone incorrectly kept nullable=false from the replaced source.
+        let mut output = self.clone();
+        for (name, column) in exprs {
+            output = output.with_column(name, column)?;
         }
         Ok(output)
     }
@@ -6054,11 +6058,11 @@ fn map_value_string_to_json(s: &str) -> JsonValue {
 fn float_to_json_number(f: f64) -> JsonValue {
     const EPSILON: f64 = 1e-6;
     if f.is_finite() {
-        let r = f.round();
-        if (f - r).abs() < EPSILON {
-            if let Some(n) = serde_json::Number::from_f64(r) {
-                return JsonValue::Number(n);
-            }
+        let rounded = f.round();
+        if (f - rounded).abs() < EPSILON
+            && let Some(number) = serde_json::Number::from_f64(rounded)
+        {
+            return JsonValue::Number(number);
         }
     }
     serde_json::Number::from_f64(f)
@@ -6195,6 +6199,16 @@ fn any_value_to_json_with_array_struct_override(
     array_struct_paths: &HashSet<String>,
     path: &str,
 ) -> Result<JsonValue, PolarsError> {
+    any_value_to_json_with_array_struct_override_policy(av, dtype, array_struct_paths, path, false)
+}
+
+fn any_value_to_json_with_array_struct_override_policy(
+    av: &AnyValue<'_>,
+    dtype: &DataType,
+    array_struct_paths: &HashSet<String>,
+    path: &str,
+    preserve_float_precision: bool,
+) -> Result<JsonValue, PolarsError> {
     use serde_json::Map;
     // Plan says String but execution may yield numeric (e.g. get_json_object; #1146): emit string.
     if matches!(dtype, DataType::String) {
@@ -6262,6 +6276,32 @@ fn any_value_to_json_with_array_struct_override(
         AnyValue::UInt16(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::UInt32(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::UInt64(u) => JsonValue::Number(serde_json::Number::from(*u)),
+        AnyValue::Float32(f) if preserve_float_precision && !f.is_finite() => {
+            return Err(PolarsError::ComputeError(
+                "non-finite floating-point values cannot be encoded as JSON".into(),
+            ));
+        }
+        AnyValue::Float64(f) if preserve_float_precision && !f.is_finite() => {
+            return Err(PolarsError::ComputeError(
+                "non-finite floating-point values cannot be encoded as JSON".into(),
+            ));
+        }
+        AnyValue::Float32(f) if preserve_float_precision => {
+            serde_json::Number::from_f64(f64::from(*f))
+                .map(JsonValue::Number)
+                .ok_or_else(|| {
+                    PolarsError::ComputeError(
+                        "non-finite floating-point values cannot be encoded as JSON".into(),
+                    )
+                })?
+        }
+        AnyValue::Float64(f) if preserve_float_precision => serde_json::Number::from_f64(*f)
+            .map(JsonValue::Number)
+            .ok_or_else(|| {
+                PolarsError::ComputeError(
+                    "non-finite floating-point values cannot be encoded as JSON".into(),
+                )
+            })?,
         AnyValue::Float32(f) => float_to_json_number(f64::from(*f)),
         AnyValue::Float64(f) => float_to_json_number(*f),
         AnyValue::String(s) => {
@@ -6354,19 +6394,21 @@ fn any_value_to_json_with_array_struct_override(
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json_with_array_struct_override(
+                                                any_value_to_json_with_array_struct_override_policy(
                                                     &fld_av,
                                                     &fld.dtype,
                                                     array_struct_paths,
                                                     &format!("{path}{{value}}"),
+                                                    preserve_float_precision,
                                                 )?
                                             }
                                         } else {
-                                            any_value_to_json_with_array_struct_override(
+                                            any_value_to_json_with_array_struct_override_policy(
                                                 &fld_av,
                                                 &fld.dtype,
                                                 array_struct_paths,
                                                 &format!("{path}{{value}}"),
+                                                preserve_float_precision,
                                             )?
                                         });
                                     }
@@ -6393,19 +6435,21 @@ fn any_value_to_json_with_array_struct_override(
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json_with_array_struct_override(
+                                                any_value_to_json_with_array_struct_override_policy(
                                                     fld_av,
                                                     &fld.dtype,
                                                     array_struct_paths,
                                                     &format!("{path}{{value}}"),
+                                                    preserve_float_precision,
                                                 )?
                                             }
                                         } else {
-                                            any_value_to_json_with_array_struct_override(
+                                            any_value_to_json_with_array_struct_override_policy(
                                                 fld_av,
                                                 &fld.dtype,
                                                 array_struct_paths,
                                                 &format!("{path}{{value}}"),
+                                                preserve_float_precision,
                                             )?
                                         });
                                     }
@@ -6450,11 +6494,12 @@ fn any_value_to_json_with_array_struct_override(
                 let arr: Vec<JsonValue> = (0..s.len())
                     .filter_map(|i| s.get(i).ok())
                     .map(|a| {
-                        any_value_to_json_with_array_struct_override(
+                        any_value_to_json_with_array_struct_override_policy(
                             &a,
                             inner_dtype,
                             array_struct_paths,
                             &format!("{path}[]"),
+                            preserve_float_precision,
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -6464,7 +6509,7 @@ fn any_value_to_json_with_array_struct_override(
         AnyValue::Struct(_, _, fields) => {
             let mut vals: Vec<JsonValue> = Vec::with_capacity(fields.len());
             for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
-                vals.push(any_value_to_json_with_array_struct_override(
+                vals.push(any_value_to_json_with_array_struct_override_policy(
                     &fld_av,
                     &fld.dtype,
                     array_struct_paths,
@@ -6473,6 +6518,7 @@ fn any_value_to_json_with_array_struct_override(
                         serde_json::to_string(fld.name.as_str())
                             .expect("field names serialize as JSON strings")
                     ),
+                    preserve_float_precision,
                 )?);
             }
             let mut obj = Map::new();
@@ -6487,7 +6533,7 @@ fn any_value_to_json_with_array_struct_override(
                 .iter()
                 .zip(fields.iter())
                 .map(|(fld_av, fld)| {
-                    any_value_to_json_with_array_struct_override(
+                    any_value_to_json_with_array_struct_override_policy(
                         fld_av,
                         &fld.dtype,
                         array_struct_paths,
@@ -6496,6 +6542,7 @@ fn any_value_to_json_with_array_struct_override(
                             serde_json::to_string(fld.name.as_str())
                                 .expect("field names serialize as JSON strings")
                         ),
+                        preserve_float_precision,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -6533,6 +6580,95 @@ pub fn broadcast(df: &DataFrame) -> DataFrame {
 mod tests {
     use super::*;
     use polars::prelude::{IntoSeries, NamedFrom, Series};
+
+    #[test]
+    fn with_columns_updates_replaced_column_nullability() {
+        use polars::prelude::{DataType as PolarsDataType, NULL, lit};
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let source = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                Series::new("value".into(), ["keep"]).into(),
+            ])
+            .unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![StructField::new(
+            "value".into(),
+            LogicalDataType::String,
+            false,
+        )]))
+        .unwrap();
+        let replacement = Column::from_expr(lit(NULL).cast(PolarsDataType::String), None);
+        let replaced = source
+            .with_columns(&[("value".into(), replacement)])
+            .unwrap();
+
+        assert!(replaced.schema().unwrap().fields()[0].nullable);
+        assert_eq!(
+            replaced
+                .collect()
+                .unwrap()
+                .column("value")
+                .unwrap()
+                .get(0)
+                .unwrap(),
+            AnyValue::Null
+        );
+    }
+
+    #[test]
+    fn json_float_encoding_preserves_finite_values_and_rejects_non_finite() {
+        assert_eq!(float_to_json_number(1.0000001), serde_json::json!(1.0));
+        assert_eq!(
+            any_value_to_json_with_array_struct_override_policy(
+                &AnyValue::Float64(0.0000001),
+                &DataType::Float64,
+                &HashSet::new(),
+                "\"n\"",
+                true,
+            )
+            .unwrap(),
+            serde_json::json!(0.0000001)
+        );
+        assert_eq!(
+            any_value_to_json_with_array_struct_override_policy(
+                &AnyValue::Float64(1.0000001),
+                &DataType::Float64,
+                &HashSet::new(),
+                "\"n\"",
+                true,
+            )
+            .unwrap(),
+            serde_json::json!(1.0000001)
+        );
+
+        let error = any_value_to_json_with_array_struct_override_policy(
+            &AnyValue::Float64(f64::NAN),
+            &DataType::Float64,
+            &HashSet::new(),
+            "\"n\"",
+            true,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("non-finite floating-point"));
+
+        let frame = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                Series::new("n".into(), [f64::NAN]).into(),
+            ])
+            .unwrap(),
+        );
+        let error = frame
+            .collect_as_positional_json_with_limits(
+                10,
+                1024,
+                1024,
+                &HashSet::new(),
+                &CancellationToken::new(),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("non-finite floating-point"));
+    }
 
     #[test]
     fn arrow_ipc_batches_reject_zero_max_rows() {

@@ -2015,6 +2015,7 @@ fn supported_scalar_sql_type(dtype: &str) -> bool {
 
 fn validate_insert(insert: &ast::Insert) -> Result<(), (&'static str, String)> {
     if !insert.into
+        || insert.or.is_some()
         || insert.overwrite
         || insert.table_alias.is_some()
         || !insert.assignments.is_empty()
@@ -2741,6 +2742,8 @@ mod tests {
         assert!(validate_statement("SELECT TRY_CAST('1' AS BIGINT)").is_err());
         assert!(validate_statement("SELECT CAST('1' AS ARRAY<INT>)").is_err());
         assert!(validate_statement("SELECT CAST(1 AS BIGINT)").is_ok());
+        assert!(validate_statement("INSERT OR REPLACE INTO t VALUES (1)").is_err());
+        assert!(validate_statement("INSERT OR IGNORE INTO t VALUES (1)").is_err());
         assert!(
             validate_statement("SELECT l.id FROM left_items l CROSS JOIN right_items r").is_ok()
         );
@@ -4683,6 +4686,22 @@ mod tests {
         assert_eq!(deadline["ename"], "DeadlineExceeded", "{deadline}");
         assert_eq!(deadline["operation"]["execution_state"], "running");
         assert_eq!(deadline["operation"]["effect_outcome"], "pending");
+
+        let reader_instance = instance.clone();
+        let read = timeout(
+            Duration::from_millis(150),
+            statement_request(
+                address,
+                &reader_instance,
+                "staging-reader",
+                "staging-target-read-during-stage",
+                "SELECT COUNT(*) AS count FROM default.staging_target",
+            ),
+        )
+        .await
+        .expect("catalog reads must proceed while INSERT staging is paused");
+        assert_eq!(read["status"], "ok", "{read}");
+        assert_eq!(read["data"]["application/json"]["data"], json!([[0]]));
 
         release_tx
             .send(())
