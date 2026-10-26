@@ -171,21 +171,32 @@ fn serve_mode_drains_on_sigterm() {
         if let Some(status) = child.0.try_wait().expect("poll server status") {
             panic!("server exited before becoming ready: {status}");
         }
-        if let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(100)) {
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .expect("set health response timeout");
-            stream
-                .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                .expect("send health request");
-            let mut response = String::new();
-            stream
-                .read_to_string(&mut response)
-                .expect("read health response");
-            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-            break;
-        }
-        assert!(Instant::now() < deadline, "server did not become ready");
+        let last_health_error =
+            match TcpStream::connect_timeout(&address, Duration::from_millis(100)) {
+                Ok(mut stream) => {
+                    let health_response = (|| {
+                        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+                        stream.write_all(
+                            b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                        )?;
+                        let mut response = String::new();
+                        stream.read_to_string(&mut response)?;
+                        Ok::<_, std::io::Error>(response)
+                    })();
+                    match health_response {
+                        Ok(response) => {
+                            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+                            break;
+                        }
+                        Err(error) => error.to_string(),
+                    }
+                }
+                Err(error) => error.to_string(),
+            };
+        assert!(
+            Instant::now() < deadline,
+            "server did not become ready; last health check error: {last_health_error}"
+        );
         thread::sleep(Duration::from_millis(20));
     }
 
