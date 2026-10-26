@@ -29,7 +29,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, Semaphore};
@@ -113,7 +113,36 @@ struct SessionLifetime {
     last_activity: Mutex<Instant>,
     closing: AtomicBool,
     stopped: AtomicBool,
-    server: Arc<ServerInner>,
+    server: Weak<ServerInner>,
+}
+
+/// Settles a reserved operation if its request future is cancelled before handing execution to
+/// the independent blocking worker.
+struct PendingOperationGuard(Option<Arc<Mutex<OperationRecord>>>);
+
+impl PendingOperationGuard {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for PendingOperationGuard {
+    fn drop(&mut self) {
+        let Some(operation) = self.0.take() else {
+            return;
+        };
+        if let Ok(mut record) = operation.lock()
+            && record.execution_state == "running"
+            && record.effect_outcome == "pending"
+        {
+            record.execution_state = "failed";
+            record.effect_outcome = "cancelled";
+            record.error = Some((
+                "Cancelled".to_string(),
+                "mutation request was cancelled before execution".to_string(),
+            ));
+        }
+    }
 }
 
 struct SessionLease(Arc<SessionLifetime>);
@@ -464,7 +493,7 @@ impl ServerInner {
             last_activity: Mutex::new(Instant::now()),
             closing: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
-            server: Arc::clone(self),
+            server: Arc::downgrade(self),
         });
         self.active_sessions.fetch_add(1, Ordering::AcqRel);
         sessions.insert(id.to_string(), Arc::clone(&lifetime));
@@ -678,7 +707,9 @@ impl SessionLifetime {
     fn stop_once(&self) {
         if !self.stopped.swap(true, Ordering::AcqRel) {
             self.session.stop();
-            self.server.active_sessions.fetch_sub(1, Ordering::AcqRel);
+            if let Some(server) = self.server.upgrade() {
+                server.active_sessions.fetch_sub(1, Ordering::AcqRel);
+            }
         }
     }
 }
@@ -692,9 +723,9 @@ impl Drop for SessionLease {
             }
             if session.closing.load(Ordering::Acquire) {
                 session.stop_once();
-                session
-                    .server
-                    .remove_closed_session(&session.id, session.generation);
+                if let Some(server) = session.server.upgrade() {
+                    server.remove_closed_session(&session.id, session.generation);
+                }
             }
         }
     }
@@ -920,6 +951,7 @@ impl Server {
         } else {
             None
         };
+        let mut pending_operation = PendingOperationGuard(operation.clone());
         let ticket = match self.inner.reserve_admission() {
             Ok(ticket) => ticket,
             Err(error) => {
@@ -1112,6 +1144,9 @@ impl Server {
                 response
             })
         });
+        // From this point, the blocking worker owns the reserved operation and will publish its
+        // actual outcome even if the HTTP request future is cancelled or times out.
+        pending_operation.disarm();
         match timeout(timeout_duration, work).await {
             Ok(Ok(Ok(response))) => json_response(StatusCode::OK, response),
             Ok(Ok(Err(error))) => agent_error(
@@ -3264,6 +3299,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn idle_session_does_not_keep_its_server_alive() {
+        let server = Server::new(ServerConfig::default()).unwrap();
+        let weak_server = Arc::downgrade(&server.inner);
+        let lease = server.inner.session_lease("weak-server-owner").unwrap();
+
+        drop(lease);
+        drop(server);
+
+        assert!(weak_server.upgrade().is_none());
+    }
+
     #[tokio::test]
     async fn listener_reaper_expires_idle_sessions_without_dropping_saved_catalog() {
         let server = Server::new(ServerConfig {
@@ -3522,6 +3569,84 @@ mod tests {
         assert_eq!(accepted["status"], "ok");
         assert_eq!(accepted["operation"]["effect_outcome"], "committed");
 
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnect_cancels_a_mutation_waiting_for_the_catalog_lane() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            queue_timeout: Duration::from_secs(3),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let held_lane = Arc::clone(&server.inner.mutation_lane).lock_owned().await;
+        let instance = server.instance_id().to_string();
+        let body = serde_json::to_string(&json!({
+            "session":"disconnect-writer",
+            "kind":"sql",
+            "code":"CREATE DATABASE disconnected_db",
+            "server_instance_id":instance,
+            "operation_id":"disconnect-create"
+        }))
+        .unwrap();
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        let request = format!(
+            "POST /statements HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if server.inner.operation("disconnect-create").is_some()
+                    && server.inner.admission.accepted.load(Ordering::Acquire) > 0
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the accepted mutation must be waiting behind the held lane");
+        drop(stream);
+
+        let operation = server.inner.operation("disconnect-create").unwrap();
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if operation.lock().unwrap().execution_state != "running" {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("disconnect must settle the retained operation");
+        {
+            let operation = operation.lock().unwrap();
+            assert_eq!(operation.execution_state, "failed");
+            assert_eq!(operation.effect_outcome, "cancelled");
+            assert_eq!(operation.error.as_ref().unwrap().0, "Cancelled");
+        }
+
+        drop(held_lane);
+        assert!(!server.inner.root_session.database_exists("disconnected_db"));
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
     }

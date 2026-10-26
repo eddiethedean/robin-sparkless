@@ -3727,6 +3727,28 @@ impl SparkSession {
         verify_schema: bool,
         schema_was_inferred: bool,
     ) -> Result<DataFrame, PolarsError> {
+        self.create_dataframe_from_rows_impl(rows, schema, verify_schema, schema_was_inferred, true)
+    }
+
+    /// Build rows against a caller-supplied schema without the all-string schema inference used
+    /// by the Python-compatible `create_dataframe_from_rows` entry point.
+    pub(crate) fn create_dataframe_from_rows_explicit_schema(
+        &self,
+        rows: Vec<Vec<JsonValue>>,
+        schema: Vec<(String, String)>,
+        verify_schema: bool,
+    ) -> Result<DataFrame, PolarsError> {
+        self.create_dataframe_from_rows_impl(rows, schema, verify_schema, false, false)
+    }
+
+    fn create_dataframe_from_rows_impl(
+        &self,
+        rows: Vec<Vec<JsonValue>>,
+        schema: Vec<(String, String)>,
+        verify_schema: bool,
+        schema_was_inferred: bool,
+        allow_schema_inference: bool,
+    ) -> Result<DataFrame, PolarsError> {
         // #1345: Empty schema + rows with 0 fields each is valid (PySpark: createDataFrame([{}], StructType([])) -> 1 row, 0 cols).
         // Only fail when a row has more than 0 fields (LENGTH_SHOULD_BE_THE_SAME).
         if schema.is_empty() && !rows.is_empty() {
@@ -3744,7 +3766,8 @@ impl SparkSession {
         }
         // #624: When schema is only column names (all "string"), infer from data (PySpark parity).
         // #731, #769, #772: createDataFrame(rows, ["name", "age"]) yields int/double/bool columns.
-        let schema_inferred_in_rust = !schema.is_empty()
+        let schema_inferred_in_rust = allow_schema_inference
+            && !schema.is_empty()
             && !rows.is_empty()
             && schema
                 .iter()
@@ -3761,7 +3784,7 @@ impl SparkSession {
         // so Python's first-col Long and later String stay (PySpark parity). But when Python inferred
         // "string" for a dict column (infer_type_from_py_value has no dict case), upgrade to struct
         // so getField("E1") works (#1216).
-        if !rows.is_empty() {
+        if allow_schema_inference && !rows.is_empty() {
             let names: Vec<String> = schema.iter().map(|(n, _)| n.clone()).collect();
             let inferred = Self::infer_schema_from_json_rows(&rows, &names);
             for (col_idx, (_, dtype_str)) in schema.iter_mut().enumerate() {

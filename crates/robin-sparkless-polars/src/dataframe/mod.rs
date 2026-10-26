@@ -103,6 +103,7 @@ fn logical_field_for_projected_column(
         else {
             continue;
         };
+        let mut nullable = field.nullable;
         let mut found = true;
         for child_name in &parts[root_index + 1..] {
             let robin_sparkless_core::DataType::Struct(children) = &field.data_type else {
@@ -117,9 +118,13 @@ fn logical_field_for_projected_column(
                 found = false;
                 break;
             };
+            nullable |= child.nullable;
             field = child;
         }
         if found && root_index + 1 < parts.len() {
+            // A nested value is also null when any containing struct is null, even if the
+            // declared leaf itself is non-nullable.
+            field.nullable = nullable;
             return Some(field);
         }
     }
@@ -7145,11 +7150,28 @@ mod tests {
 
         let nested_field = source.select(vec!["payload.id"]).unwrap().schema().unwrap();
         assert_eq!(nested_field.fields()[0].name, "id");
-        assert!(!nested_field.fields()[0].nullable);
+        assert!(nested_field.fields()[0].nullable);
         assert_eq!(
             nested_field.fields()[0].metadata["origin"],
             "shared catalog"
         );
+
+        let nested_projection = source.select(vec!["payload.id"]).unwrap();
+        let nested_schema_json = nested_projection.schema().unwrap().to_json().unwrap();
+        let nested_batch = nested_projection
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut nested_reader = IpcStreamReader::new(std::io::Cursor::new(nested_batch.bytes));
+        let nested_metadata = nested_reader.custom_metadata().unwrap().unwrap();
+        let encoded_nested_schema = nested_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_nested_schema, Some(nested_schema_json.as_str()));
+        nested_reader.finish().unwrap();
 
         let selected_items = source
             .select_items(vec![SelectItem::Expr(col("payload").alias("item_payload"))])
@@ -7169,7 +7191,7 @@ mod tests {
             .schema()
             .unwrap();
         assert_eq!(selected_nested_item.fields()[0].name, "id");
-        assert!(!selected_nested_item.fields()[0].nullable);
+        assert!(selected_nested_item.fields()[0].nullable);
         assert_eq!(
             selected_nested_item.fields()[0].metadata["origin"],
             "shared catalog"

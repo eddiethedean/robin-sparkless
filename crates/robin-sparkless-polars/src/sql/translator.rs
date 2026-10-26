@@ -134,8 +134,7 @@ fn sql_ast_data_type_to_table_schema_type(dt: &spark_sql_parser::ast::DataType) 
 }
 
 /// Convert a simple SQL literal expression into a JSON value for create_dataframe_from_rows.
-/// Supports the literal forms used in INSERT ... VALUES in the parity tests:
-/// string, numeric, and NULL.
+/// Supports the SQL literal forms used by INSERT ... VALUES: string, numeric, boolean, and NULL.
 fn sql_literal_expr_to_json(
     expr: &SqlExpr,
     target_type: &CoreDataType,
@@ -153,6 +152,10 @@ fn sql_literal_expr_to_json(
             value: Value::Number(s, _),
             ..
         }) => sql_number_to_insert_json(s, target_type),
+        SqlExpr::Value(ValueWithSpan {
+            value: Value::Boolean(value),
+            ..
+        }) => Ok(JsonValue::Bool(*value)),
         SqlExpr::UnaryOp {
             op:
                 op @ (spark_sql_parser::ast::UnaryOperator::Plus
@@ -734,7 +737,7 @@ fn translate_insert(
                     .iter()
                     .map(|f| (f.name.clone(), core_data_type_to_insert_type(&f.data_type)))
                     .collect();
-                session.create_dataframe_from_rows(rows, schema, true, false)?
+                session.create_dataframe_from_rows_explicit_schema(rows, schema, true)?
             }
             // INSERT INTO t SELECT ... : map SELECT columns to target insert list and NULL-fill omitted cols.
             _ => {
@@ -3682,6 +3685,50 @@ mod insert_literal_tests {
         assert_eq!(
             result.column("amount").unwrap().get(0).unwrap(),
             AnyValue::Decimal(-900719925474099312, 20, 2)
+        );
+    }
+
+    #[test]
+    fn insert_accepts_boolean_and_all_null_explicit_string_values() {
+        let session = SparkSession::new(
+            Some("insert-boolean-explicit-string-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .sql("CREATE TABLE insert_boolean_test (enabled BOOLEAN)")
+            .unwrap();
+        session
+            .sql("INSERT INTO insert_boolean_test VALUES (TRUE), (FALSE)")
+            .unwrap();
+        let booleans = session
+            .sql("SELECT enabled FROM insert_boolean_test ORDER BY enabled DESC")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            booleans.column("enabled").unwrap().get(0).unwrap(),
+            AnyValue::Boolean(true)
+        );
+        assert_eq!(
+            booleans.column("enabled").unwrap().get(1).unwrap(),
+            AnyValue::Boolean(false)
+        );
+
+        session
+            .sql("CREATE TABLE insert_explicit_string_test (value STRING)")
+            .unwrap();
+        session
+            .sql("INSERT INTO insert_explicit_string_test VALUES (NULL)")
+            .unwrap();
+        let strings = session
+            .sql("SELECT value FROM insert_explicit_string_test")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            strings.column("value").unwrap().get(0).unwrap(),
+            AnyValue::Null
         );
     }
 }
