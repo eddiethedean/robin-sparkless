@@ -21,7 +21,7 @@ pub use transformations::{
 use crate::column::Column;
 use crate::error::{EngineError, polars_to_core_error};
 use crate::functions::SortOrder;
-use crate::schema::{StructField, StructType, StructTypePolarsExt};
+use crate::schema::{DataType as LogicalDataType, StructField, StructType, StructTypePolarsExt};
 use crate::session::SparkSession;
 use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
@@ -333,6 +333,19 @@ impl RangeCardinality {
         let Expr::BinaryExpr { left, op, right } = expression else {
             return None;
         };
+        if !matches!(
+            op,
+            Operator::Eq
+                | Operator::EqValidity
+                | Operator::NotEq
+                | Operator::NotEqValidity
+                | Operator::Lt
+                | Operator::LtEq
+                | Operator::Gt
+                | Operator::GtEq
+        ) {
+            return None;
+        }
         let (operator, threshold) = match (left.as_ref(), right.as_ref()) {
             (Expr::Column(name), Expr::Literal(value))
                 if name.as_str().eq_ignore_ascii_case("id") =>
@@ -458,6 +471,94 @@ impl Iterator for DataFrameBatches {
             self.source.take();
         }
         Some(result)
+    }
+}
+
+fn merge_union_logical_type(
+    left: &LogicalDataType,
+    right: &LogicalDataType,
+    output_physical: &DataType,
+) -> Option<LogicalDataType> {
+    use LogicalDataType as D;
+
+    match (left, right, output_physical) {
+        (
+            D::Array(_) | D::ArrayWithNullability { .. },
+            D::Array(_) | D::ArrayWithNullability { .. },
+            DataType::List(output_element),
+        ) => {
+            let (left_element, left_nullable) = match left {
+                D::Array(element) => (element.as_ref(), true),
+                D::ArrayWithNullability {
+                    element_type,
+                    contains_null,
+                } => (element_type.as_ref(), *contains_null),
+                _ => return None,
+            };
+            let (right_element, right_nullable) = match right {
+                D::Array(element) => (element.as_ref(), true),
+                D::ArrayWithNullability {
+                    element_type,
+                    contains_null,
+                } => (element_type.as_ref(), *contains_null),
+                _ => return None,
+            };
+            Some(D::ArrayWithNullability {
+                element_type: Box::new(merge_union_logical_type(
+                    left_element,
+                    right_element,
+                    output_element,
+                )?),
+                contains_null: left_nullable || right_nullable,
+            })
+        }
+        (D::Struct(left_fields), D::Struct(right_fields), DataType::Struct(output_fields))
+            if left_fields.len() == right_fields.len()
+                && left_fields.len() == output_fields.len() =>
+        {
+            let fields = left_fields
+                .iter()
+                .zip(right_fields)
+                .zip(output_fields)
+                .map(|((left, right), output)| {
+                    if left.name != right.name || left.name != output.name().as_str() {
+                        return None;
+                    }
+                    let mut field = left.clone();
+                    field.data_type = merge_union_logical_type(
+                        &left.data_type,
+                        &right.data_type,
+                        output.dtype(),
+                    )?;
+                    field.nullable = left.nullable || right.nullable;
+                    Some(field)
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(D::Struct(fields))
+        }
+        _ => crate::schema_conv::checked_polars_type_to_data_type(output_physical, "union").ok(),
+    }
+}
+
+fn conservative_union_logical_type(output_physical: &DataType) -> Option<LogicalDataType> {
+    match output_physical {
+        DataType::List(element) => Some(LogicalDataType::ArrayWithNullability {
+            element_type: Box::new(conservative_union_logical_type(element)?),
+            contains_null: true,
+        }),
+        DataType::Struct(fields) => Some(LogicalDataType::Struct(
+            fields
+                .iter()
+                .map(|field| {
+                    Some(StructField::new(
+                        field.name().to_string(),
+                        conservative_union_logical_type(field.dtype())?,
+                        true,
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        _ => crate::schema_conv::checked_polars_type_to_data_type(output_physical, "union").ok(),
     }
 }
 
@@ -2380,21 +2481,43 @@ impl DataFrame {
             // output. This matters for chained unions: the first union can coerce (for example)
             // LONG + STRING to STRING, and a later union must not restore the right input's LONG
             // sidecar over that physical STRING column.
-            let data_type = [left_field, right_field]
-                .into_iter()
-                .flatten()
-                .find(|field| {
-                    crate::schema_conv::checked_data_type_to_polars_type(
-                        &field.data_type,
-                        &field.name,
-                    )
+            let unknown_nested_type = conservative_union_logical_type(output_dtype);
+            let merged_type = match (left_field, right_field) {
+                (Some(left), Some(right)) => {
+                    merge_union_logical_type(&left.data_type, &right.data_type, output_dtype)
+                }
+                (Some(left), None) => unknown_nested_type.as_ref().and_then(|unknown| {
+                    merge_union_logical_type(&left.data_type, unknown, output_dtype)
+                }),
+                (None, Some(right)) => unknown_nested_type.as_ref().and_then(|unknown| {
+                    merge_union_logical_type(&right.data_type, unknown, output_dtype)
+                }),
+                (None, None) => None,
+            }
+            .filter(|data_type| {
+                crate::schema_conv::checked_data_type_to_polars_type(data_type, output_name)
                     .is_ok_and(|mapped| &mapped == output_dtype)
-                })
-                .map(|field| field.data_type.clone())
-                .or_else(|| {
-                    crate::schema_conv::checked_polars_type_to_data_type(output_dtype, output_name)
+            });
+            let data_type = merged_type.or_else(|| {
+                [left_field, right_field]
+                    .into_iter()
+                    .flatten()
+                    .find(|field| {
+                        crate::schema_conv::checked_data_type_to_polars_type(
+                            &field.data_type,
+                            &field.name,
+                        )
+                        .is_ok_and(|mapped| &mapped == output_dtype)
+                    })
+                    .map(|field| field.data_type.clone())
+                    .or_else(|| {
+                        crate::schema_conv::checked_polars_type_to_data_type(
+                            output_dtype,
+                            output_name,
+                        )
                         .ok()
-                })?;
+                    })
+            })?;
 
             // Union retains the left field's metadata and conservatively combines nullability.
             // A missing sidecar means its nullability is unknown, so use nullable=true.
@@ -3457,11 +3580,18 @@ impl DataFrame {
 
     /// Filter rows using a Polars expression.
     pub fn filter(&self, condition: Expr) -> Result<DataFrame, PolarsError> {
-        let row_count_hint = self
-            .range_cardinality
-            .as_ref()
-            .and_then(|range| range.count_matching(&condition));
-        let mut range_cardinality = self.range_cardinality.clone();
+        // Batch filtering preserves semantics only for expressions that can be evaluated
+        // independently on each chunk. Aggregates and other nonlocal nodes must fall back to
+        // the complete Polars plan instead of changing their scope to a batch.
+        let batch_safe = range_projection_can_run_per_batch(std::slice::from_ref(&condition));
+        let row_count_hint = batch_safe
+            .then(|| {
+                self.range_cardinality
+                    .as_ref()
+                    .and_then(|range| range.count_matching(&condition))
+            })
+            .flatten();
+        let mut range_cardinality = batch_safe.then(|| self.range_cardinality.clone()).flatten();
         if let Some(range) = &mut range_cardinality {
             range
                 .operations
@@ -7232,6 +7362,84 @@ mod tests {
         let field = &unioned_schema.fields()[0];
         assert!(!field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
+    }
+
+    #[test]
+    fn union_preserves_nested_nullability_after_type_widening() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left_values = Series::new("".into(), vec![Some(1_i32), None]);
+        let left_array = Series::new("items".into(), [left_values]);
+        let left =
+            DataFrame::from_polars(PlDataFrame::new_infer_height(vec![left_array.into()]).unwrap())
+                .with_logical_schema(StructType::new(vec![StructField::new(
+                    "items".into(),
+                    LogicalDataType::ArrayWithNullability {
+                        element_type: Box::new(LogicalDataType::Integer),
+                        contains_null: true,
+                    },
+                    true,
+                )]))
+                .unwrap();
+
+        let right_values = Series::new("".into(), vec![Some(2_i64)]);
+        let right_array = Series::new("items".into(), [right_values]);
+        let right = DataFrame::from_polars(
+            PlDataFrame::new_infer_height(vec![right_array.into()]).unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![StructField::new(
+            "items".into(),
+            LogicalDataType::ArrayWithNullability {
+                element_type: Box::new(LogicalDataType::Long),
+                contains_null: false,
+            },
+            true,
+        )]))
+        .unwrap();
+
+        let unioned = left.union(&right).unwrap();
+        assert!(matches!(
+            &unioned.schema().unwrap().fields()[0].data_type,
+            LogicalDataType::ArrayWithNullability {
+                element_type,
+                contains_null: true,
+            } if matches!(element_type.as_ref(), LogicalDataType::Long)
+        ));
+    }
+
+    #[test]
+    fn union_treats_missing_nested_schema_as_nullable() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let declared_values = Series::new("".into(), vec![Some(1_i64)]);
+        let declared_array = Series::new("items".into(), [declared_values]);
+        let declared = DataFrame::from_polars(
+            PlDataFrame::new_infer_height(vec![declared_array.into()]).unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![StructField::new(
+            "items".into(),
+            LogicalDataType::ArrayWithNullability {
+                element_type: Box::new(LogicalDataType::Long),
+                contains_null: false,
+            },
+            true,
+        )]))
+        .unwrap();
+
+        let undeclared_values = Series::new("".into(), vec![Some(2_i64), None]);
+        let undeclared_array = Series::new("items".into(), [undeclared_values]);
+        let undeclared = DataFrame::from_polars(
+            PlDataFrame::new_infer_height(vec![undeclared_array.into()]).unwrap(),
+        );
+
+        let unioned = declared.union(&undeclared).unwrap();
+        assert!(matches!(
+            &unioned.schema().unwrap().fields()[0].data_type,
+            LogicalDataType::ArrayWithNullability {
+                contains_null: true,
+                ..
+            }
+        ));
     }
 
     #[test]

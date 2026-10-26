@@ -136,7 +136,10 @@ fn sql_ast_data_type_to_table_schema_type(dt: &spark_sql_parser::ast::DataType) 
 /// Convert a simple SQL literal expression into a JSON value for create_dataframe_from_rows.
 /// Supports the literal forms used in INSERT ... VALUES in the parity tests:
 /// string, numeric, and NULL.
-fn sql_literal_expr_to_json(expr: &SqlExpr) -> Result<JsonValue, PolarsError> {
+fn sql_literal_expr_to_json(
+    expr: &SqlExpr,
+    target_type: &CoreDataType,
+) -> Result<JsonValue, PolarsError> {
     match expr {
         SqlExpr::Value(ValueWithSpan {
             value: Value::SingleQuotedString(s),
@@ -149,16 +152,50 @@ fn sql_literal_expr_to_json(expr: &SqlExpr) -> Result<JsonValue, PolarsError> {
         SqlExpr::Value(ValueWithSpan {
             value: Value::Number(s, _),
             ..
-        }) => match parse_sql_number_val(s, "literal")? {
-            SqlNumberVal::Int(i) => Ok(JsonValue::from(i)),
-            SqlNumberVal::Float(f) => Ok(JsonValue::from(f)),
-        },
+        }) => sql_number_to_insert_json(s, target_type),
+        SqlExpr::UnaryOp {
+            op:
+                op @ (spark_sql_parser::ast::UnaryOperator::Plus
+                | spark_sql_parser::ast::UnaryOperator::Minus),
+            expr,
+        } => {
+            let SqlExpr::Value(ValueWithSpan {
+                value: Value::Number(number, _),
+                ..
+            }) = expr.as_ref()
+            else {
+                return Err(PolarsError::InvalidOperation(
+                    "SQL: INSERT VALUES unary signs apply only to numeric literals".into(),
+                ));
+            };
+            let sign = match op {
+                spark_sql_parser::ast::UnaryOperator::Minus => "-",
+                spark_sql_parser::ast::UnaryOperator::Plus => "+",
+                _ => unreachable!("the match arm accepts only plus or minus"),
+            };
+            sql_number_to_insert_json(&format!("{sign}{number}"), target_type)
+        }
         SqlExpr::Value(ValueWithSpan {
             value: Value::Null, ..
         }) => Ok(JsonValue::Null),
         _ => Err(PolarsError::InvalidOperation(
             format!("SQL: INSERT VALUES only supports literal expressions, got '{expr:?}'").into(),
         )),
+    }
+}
+
+fn sql_number_to_insert_json(
+    number: &str,
+    target_type: &CoreDataType,
+) -> Result<JsonValue, PolarsError> {
+    if matches!(target_type, CoreDataType::Decimal(_, _)) {
+        // Keep the SQL token exact: JSON numbers become f64 when they exceed the integer
+        // range, which silently rounds values before decimal column conversion.
+        return Ok(JsonValue::String(format!("__sparkless_decimal__:{number}")));
+    }
+    match parse_sql_number_val(number, "literal")? {
+        SqlNumberVal::Int(value) => Ok(JsonValue::from(value)),
+        SqlNumberVal::Float(value) => Ok(JsonValue::from(value)),
     }
 }
 
@@ -682,8 +719,11 @@ fn translate_insert(
                     // Start with all-null row in target schema order.
                     let mut row: Vec<JsonValue> = vec![JsonValue::Null; target_cols.len()];
                     for (val_pos, expr) in row_exprs.iter().enumerate() {
-                        let v = sql_literal_expr_to_json(expr)?;
                         let target_idx = index_map[val_pos];
+                        let v = sql_literal_expr_to_json(
+                            expr,
+                            &target_schema.fields()[target_idx].data_type,
+                        )?;
                         row[target_idx] = v;
                     }
                     rows.push(row);
@@ -3613,6 +3653,36 @@ fn sql_limit_to_usize(expr: &SqlExpr) -> Result<usize, PolarsError> {
         _ => Err(PolarsError::InvalidOperation(
             "SQL: LIMIT must be a literal integer.".into(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod insert_literal_tests {
+    use super::*;
+
+    #[test]
+    fn insert_preserves_exact_signed_decimal_literals() {
+        let session = SparkSession::new(
+            Some("exact-signed-decimal-insert-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .sql("CREATE TABLE exact_signed_decimal_test (amount DECIMAL(20,2))")
+            .unwrap();
+        session
+            .sql("INSERT INTO exact_signed_decimal_test VALUES (-9007199254740993.12)")
+            .unwrap();
+
+        let result = session
+            .sql("SELECT amount FROM exact_signed_decimal_test")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            result.column("amount").unwrap().get(0).unwrap(),
+            AnyValue::Decimal(-900719925474099312, 20, 2)
+        );
     }
 }
 

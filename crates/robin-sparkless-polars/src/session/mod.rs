@@ -2452,6 +2452,7 @@ impl SparkSession {
     /// The view is session-scoped and is dropped when the session is dropped.
     /// If the catalog lock is poisoned (e.g. a thread panicked while holding it), the operation is best-effort and a message is emitted to stderr.
     pub fn create_or_replace_temp_view(&self, name: &str, df: DataFrame) {
+        #[cfg(feature = "sql")]
         if self.shared_catalog.is_some() {
             let (_mutation, _writer) = match self.shared_catalog_mutation_and_writer_guards() {
                 Ok(guards) => guards,

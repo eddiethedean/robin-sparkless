@@ -1670,12 +1670,18 @@ fn validate_set_expr(expr: &ast::SetExpr) -> Result<(), (&'static str, String)> 
                 }
             }
             for item in &select.projection {
-                if !matches!(
-                    item,
-                    ast::SelectItem::Wildcard(_)
-                        | ast::SelectItem::UnnamedExpr(_)
-                        | ast::SelectItem::ExprWithAlias { .. }
-                ) {
+                let supported = match item {
+                    ast::SelectItem::Wildcard(options) => {
+                        options.opt_ilike.is_none()
+                            && options.opt_exclude.is_none()
+                            && options.opt_except.is_none()
+                            && options.opt_replace.is_none()
+                            && options.opt_rename.is_none()
+                    }
+                    ast::SelectItem::UnnamedExpr(_) | ast::SelectItem::ExprWithAlias { .. } => true,
+                    _ => false,
+                };
+                if !supported {
                     return Err((
                         "UnsupportedSql",
                         "qualified wildcards and extended projections are not supported".into(),
@@ -1965,6 +1971,17 @@ fn validate_insert(insert: &ast::Insert) -> Result<(), (&'static str, String)> {
             "only INSERT INTO managed_table [(columns)] VALUES or SELECT is supported".into(),
         ));
     }
+    let mut insert_columns = std::collections::HashSet::new();
+    if insert
+        .columns
+        .iter()
+        .any(|column| !insert_columns.insert(column.value.to_ascii_lowercase()))
+    {
+        return Err((
+            "UnsupportedSql",
+            "INSERT target columns must be unique".into(),
+        ));
+    }
     let Some(source) = insert.source.as_ref() else {
         return Err(("UnsupportedSql", "INSERT requires VALUES or SELECT".into()));
     };
@@ -1975,7 +1992,7 @@ fn validate_insert(insert: &ast::Insert) -> Result<(), (&'static str, String)> {
                     .rows
                     .iter()
                     .flatten()
-                    .any(|expr| !matches!(expr, ast::Expr::Value(_)))
+                    .any(|expr| !is_supported_insert_literal(expr))
             {
                 return Err((
                     "UnsupportedSql",
@@ -1986,6 +2003,23 @@ fn validate_insert(insert: &ast::Insert) -> Result<(), (&'static str, String)> {
         _ => validate_query(source)?,
     }
     Ok(())
+}
+
+fn is_supported_insert_literal(expression: &ast::Expr) -> bool {
+    match expression {
+        ast::Expr::Value(_) => true,
+        ast::Expr::UnaryOp {
+            op: ast::UnaryOperator::Plus | ast::UnaryOperator::Minus,
+            expr,
+        } => matches!(
+            expr.as_ref(),
+            ast::Expr::Value(ast::ValueWithSpan {
+                value: ast::Value::Number(_, _),
+                ..
+            })
+        ),
+        _ => false,
+    }
 }
 
 fn validate_object_name(name: &ast::ObjectName) -> Result<String, (&'static str, String)> {
