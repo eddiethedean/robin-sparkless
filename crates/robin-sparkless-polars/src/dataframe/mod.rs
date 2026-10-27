@@ -353,6 +353,7 @@ enum RangeOperation {
     Filter(Expr),
     Limit(u64),
     Project(Vec<Expr>),
+    Rename(Vec<(String, String)>),
 }
 
 enum RangeBatchError {
@@ -446,6 +447,13 @@ impl RangeBatchProducer {
                         }
                         self.limit_consumed[operation_index] = self.limit_consumed[operation_index]
                             .saturating_add(batch.height() as u64);
+                    }
+                    RangeOperation::Rename(renames) => {
+                        for (old_name, new_name) in renames {
+                            batch
+                                .rename(old_name, new_name.as_str().into())
+                                .map_err(RangeBatchError::Polars)?;
+                        }
                     }
                     RangeOperation::Project(expressions) => {
                         let frame = DataFrame::from_polars_with_options(batch, self.case_sensitive);
@@ -4682,6 +4690,23 @@ impl DataFrame {
         renames: &[(String, String)],
     ) -> Result<DataFrame, PolarsError> {
         let mut output = transformations::with_columns_renamed(self, renames, self.case_sensitive)?;
+        if let Some(mut range) = self.range_cardinality.clone() {
+            let applied_renames: Vec<(String, String)> = renames
+                .iter()
+                .filter_map(|(old_name, new_name)| {
+                    self.resolve_column_name(old_name)
+                        .ok()
+                        .map(|resolved| (resolved, new_name.clone()))
+                })
+                .collect();
+            if !applied_renames.is_empty() {
+                range
+                    .operations
+                    .push(RangeOperation::Rename(applied_renames));
+                output.range_cardinality = Some(range);
+            }
+        }
+        output.row_count_hint = self.row_count_hint;
         if self.logical_schema.is_some()
             && let Some(schema) = self.logical_schema_after_renames(&output, renames)
         {

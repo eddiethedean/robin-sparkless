@@ -1507,6 +1507,7 @@ fn translate_select_from(
                     right_alias_ref,
                     &first_tj.relation,
                     &join_spec.relation,
+                    session.is_case_sensitive(),
                 )?;
                 let left_refs: Vec<&str> = left_on.iter().map(|s| s.as_str()).collect();
                 let right_refs: Vec<&str> = right_on.iter().map(|s| s.as_str()).collect();
@@ -1659,7 +1660,12 @@ fn join_on_equality_pairs(
     }
 }
 
-fn join_operand_side(expr: &SqlExpr, left: &TableFactor, right: &TableFactor) -> Option<bool> {
+fn join_operand_side(
+    expr: &SqlExpr,
+    left: &TableFactor,
+    right: &TableFactor,
+    case_sensitive: bool,
+) -> Option<bool> {
     let SqlExpr::CompoundIdentifier(parts) = expr else {
         return None;
     };
@@ -1670,6 +1676,13 @@ fn join_operand_side(expr: &SqlExpr, left: &TableFactor, right: &TableFactor) ->
         .iter()
         .map(|part| part.value.as_str())
         .collect();
+    let names_match = |left: &str, right: &str| {
+        if case_sensitive {
+            left == right
+        } else {
+            left.eq_ignore_ascii_case(right)
+        }
+    };
     let matches = |factor: &TableFactor| {
         let alias = match factor {
             TableFactor::Table { alias, .. } | TableFactor::Derived { alias, .. } => {
@@ -1678,7 +1691,7 @@ fn join_operand_side(expr: &SqlExpr, left: &TableFactor, right: &TableFactor) ->
             _ => None,
         };
         if let Some(alias) = alias {
-            if qualifier.len() == 1 && qualifier[0].eq_ignore_ascii_case(alias) {
+            if qualifier.len() == 1 && names_match(qualifier[0], alias) {
                 return true;
             }
         }
@@ -1689,8 +1702,15 @@ fn join_operand_side(expr: &SqlExpr, left: &TableFactor, right: &TableFactor) ->
                     .iter()
                     .filter_map(|part| part.as_ident().map(|ident| ident.value.as_str()))
                     .collect();
-                qualifier == idents.as_slice()
-                    || (qualifier.len() == 1 && idents.last() == qualifier.first())
+                (qualifier.len() == idents.len()
+                    && qualifier
+                        .iter()
+                        .zip(&idents)
+                        .all(|(left, right)| names_match(left, right)))
+                    || (qualifier.len() == 1
+                        && idents
+                            .last()
+                            .is_some_and(|last| names_match(qualifier[0], last)))
             }
             _ => false,
         }
@@ -1708,6 +1728,7 @@ fn join_equality_pairs_for_factors(
     right_alias: Option<&str>,
     left_factor: &TableFactor,
     right_factor: &TableFactor,
+    case_sensitive: bool,
 ) -> Result<Vec<(String, String)>, PolarsError> {
     match expr {
         SqlExpr::BinaryOp {
@@ -1715,8 +1736,8 @@ fn join_equality_pairs_for_factors(
             op: BinaryOperator::Eq,
             right,
         } => {
-            let left_side = join_operand_side(left, left_factor, right_factor);
-            let right_side = join_operand_side(right, left_factor, right_factor);
+            let left_side = join_operand_side(left, left_factor, right_factor, case_sensitive);
+            let right_side = join_operand_side(right, left_factor, right_factor, case_sensitive);
             let (left_expr, right_expr) = match (left_side, right_side) {
                 (Some(true), Some(false)) | (None, None) => (left.as_ref(), right.as_ref()),
                 (Some(false), Some(true)) => (right.as_ref(), left.as_ref()),
@@ -1747,6 +1768,7 @@ fn join_equality_pairs_for_factors(
                 right_alias,
                 left_factor,
                 right_factor,
+                case_sensitive,
             )?;
             pairs.extend(join_equality_pairs_for_factors(
                 right,
@@ -1754,6 +1776,7 @@ fn join_equality_pairs_for_factors(
                 right_alias,
                 left_factor,
                 right_factor,
+                case_sensitive,
             )?);
             Ok(pairs)
         }
@@ -1763,6 +1786,7 @@ fn join_equality_pairs_for_factors(
             right_alias,
             left_factor,
             right_factor,
+            case_sensitive,
         ),
         _ => Err(PolarsError::InvalidOperation(
             "SQL: JOIN ON must be equality conditions combined with AND.".into(),
@@ -1776,6 +1800,7 @@ fn join_condition_to_on_columns_for_factors(
     right_alias: Option<&str>,
     left_factor: &TableFactor,
     right_factor: &TableFactor,
+    case_sensitive: bool,
 ) -> Result<(Vec<String>, Vec<String>), PolarsError> {
     let constraint = match join_op {
         JoinOperator::Join(c)
@@ -1801,8 +1826,14 @@ fn join_condition_to_on_columns_for_factors(
             "SQL: JOIN must use ON (equality); NATURAL/USING not supported.".into(),
         ));
     };
-    let pairs =
-        join_equality_pairs_for_factors(expr, left_alias, right_alias, left_factor, right_factor)?;
+    let pairs = join_equality_pairs_for_factors(
+        expr,
+        left_alias,
+        right_alias,
+        left_factor,
+        right_factor,
+        case_sensitive,
+    )?;
     if pairs.is_empty() {
         return Err(PolarsError::InvalidOperation(
             "SQL: JOIN ON requires at least one equality condition.".into(),
@@ -3389,31 +3420,36 @@ fn apply_projection(
     relation_qualifiers: &[SqlRelationQualifier],
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     // Wildcard: expand to all columns (disambiguate if JOIN produced duplicate names)
-    if projection
-        .iter()
-        .all(|item| matches!(item, SelectItem::Wildcard(_)))
-    {
-        if !projection.is_empty() {
-            let column_names: Vec<String> = df.columns()?.into_iter().collect();
-            let unique_aliases = disambiguate_aliases(&column_names);
-            if unique_aliases == column_names {
-                let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
-                return df.select(refs);
-            }
-            // Duplicate names: select by index then alias (col("x") would be ambiguous).
-            let exprs: Vec<Expr> = (0..column_names.len())
-                .map(|i| nth(i as i64).as_expr().alias(unique_aliases[i].as_str()))
-                .collect();
-            return df.select_exprs(exprs);
+    if projection.len() == 1 && matches!(projection[0], SelectItem::Wildcard(_)) {
+        let column_names: Vec<String> = df.columns()?.into_iter().collect();
+        let unique_aliases = disambiguate_aliases(&column_names);
+        if unique_aliases == column_names {
+            let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
+            return df.select(refs);
         }
+        // Duplicate names: select by index then alias (col("x") would be ambiguous).
+        let exprs: Vec<Expr> = (0..column_names.len())
+            .map(|i| nth(i as i64).as_expr().alias(unique_aliases[i].as_str()))
+            .collect();
+        return df.select_exprs(exprs);
     }
 
     let mut items = Vec::new();
     for item in projection {
         if matches!(item, SelectItem::Wildcard(_)) {
             let column_names = df.columns()?;
-            for (i, name) in column_names.into_iter().enumerate() {
-                items.push(ProjItem::Expr(nth(i as i64).as_expr(), name));
+            for (i, name) in column_names.iter().enumerate() {
+                let is_unique = column_names
+                    .iter()
+                    .filter(|candidate| *candidate == name)
+                    .count()
+                    == 1;
+                let expr = if is_unique {
+                    col(name.as_str()).alias(name.as_str())
+                } else {
+                    nth(i as i64).as_expr()
+                };
+                items.push(ProjItem::Expr(expr, name.clone()));
             }
             continue;
         }
