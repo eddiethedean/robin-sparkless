@@ -1311,8 +1311,28 @@ fn translate_select_body(
             Some(relation_qualifiers.as_slice()),
         )?;
         let agg_exprs = disambiguate_agg_output_names(agg_exprs);
-        let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
-        df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
+        if df.range_cardinality.is_some() {
+            if let Some(count_names) = count_star_projection_names(&body.projection) {
+                let count = df.count()?;
+                let rows = vec![
+                    count_names
+                        .iter()
+                        .map(|_| JsonValue::from(count as u64))
+                        .collect(),
+                ];
+                let schema = count_names
+                    .into_iter()
+                    .map(|name| (name, "long".to_string()))
+                    .collect();
+                df = session.create_dataframe_from_rows(rows, schema, false, false)?;
+            } else {
+                let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
+                df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
+            }
+        } else {
+            let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
+            df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
+        }
     } else {
         df = apply_projection(&df, &body.projection, session, &relation_qualifiers)?;
     }
@@ -1340,18 +1360,23 @@ pub(crate) fn translate_query(
     if let Some(order_by) = &query.order_by {
         if let OrderByKind::Expressions(exprs) = &order_by.kind {
             if !exprs.is_empty() {
-                let pairs: Vec<(String, bool)> = exprs
+                let orders: Vec<crate::functions::SortOrder> = exprs
                     .iter()
                     .map(|o| {
                         let col_name = sql_expr_to_col_name(&o.expr)?;
                         let resolved = df.resolve_column_name(&col_name)?;
                         let ascending = o.options.asc.unwrap_or(true);
-                        Ok((resolved, ascending))
+                        let column = Column::new(resolved);
+                        let nulls_first = o.options.nulls_first.unwrap_or(ascending);
+                        Ok(match (ascending, nulls_first) {
+                            (true, true) => functions::asc_nulls_first(&column),
+                            (true, false) => functions::asc_nulls_last(&column),
+                            (false, true) => functions::desc_nulls_first(&column),
+                            (false, false) => functions::desc_nulls_last(&column),
+                        })
                     })
                     .collect::<Result<Vec<_>, PolarsError>>()?;
-                let (cols, asc): (Vec<String>, Vec<bool>) = pairs.into_iter().unzip();
-                let col_refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-                df = df.order_by(col_refs, asc)?;
+                df = df.order_by_exprs(orders)?;
             }
         }
     }
@@ -1476,10 +1501,12 @@ fn translate_select_from(
                         ));
                     }
                 };
-                let (left_on, right_on) = join_condition_to_on_columns(
+                let (left_on, right_on) = join_condition_to_on_columns_for_factors(
                     &join_spec.join_operator,
                     current_left_alias,
                     right_alias_ref,
+                    &first_tj.relation,
+                    &join_spec.relation,
                 )?;
                 let left_refs: Vec<&str> = left_on.iter().map(|s| s.as_str()).collect();
                 let right_refs: Vec<&str> = right_on.iter().map(|s| s.as_str()).collect();
@@ -1630,6 +1657,159 @@ fn join_on_equality_pairs(
             "SQL: JOIN ON must be equality conditions combined with AND.".into(),
         )),
     }
+}
+
+fn join_operand_side(expr: &SqlExpr, left: &TableFactor, right: &TableFactor) -> Option<bool> {
+    let SqlExpr::CompoundIdentifier(parts) = expr else {
+        return None;
+    };
+    if parts.len() < 2 {
+        return None;
+    }
+    let qualifier: Vec<&str> = parts[..parts.len() - 1]
+        .iter()
+        .map(|part| part.value.as_str())
+        .collect();
+    let matches = |factor: &TableFactor| {
+        let alias = match factor {
+            TableFactor::Table { alias, .. } | TableFactor::Derived { alias, .. } => {
+                alias.as_ref().map(|a| a.name.value.as_str())
+            }
+            _ => None,
+        };
+        if let Some(alias) = alias {
+            if qualifier.len() == 1 && qualifier[0].eq_ignore_ascii_case(alias) {
+                return true;
+            }
+        }
+        match factor {
+            TableFactor::Table { name, .. } => {
+                let idents: Vec<&str> = name
+                    .0
+                    .iter()
+                    .filter_map(|part| part.as_ident().map(|ident| ident.value.as_str()))
+                    .collect();
+                qualifier == idents.as_slice()
+                    || (qualifier.len() == 1 && idents.last() == qualifier.first())
+            }
+            _ => false,
+        }
+    };
+    match (matches(left), matches(right)) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        _ => None,
+    }
+}
+
+fn join_equality_pairs_for_factors(
+    expr: &SqlExpr,
+    left_alias: Option<&str>,
+    right_alias: Option<&str>,
+    left_factor: &TableFactor,
+    right_factor: &TableFactor,
+) -> Result<Vec<(String, String)>, PolarsError> {
+    match expr {
+        SqlExpr::BinaryOp {
+            left,
+            op: BinaryOperator::Eq,
+            right,
+        } => {
+            let left_side = join_operand_side(left, left_factor, right_factor);
+            let right_side = join_operand_side(right, left_factor, right_factor);
+            let (left_expr, right_expr) = match (left_side, right_side) {
+                (Some(true), Some(false)) | (None, None) => (left.as_ref(), right.as_ref()),
+                (Some(false), Some(true)) => (right.as_ref(), left.as_ref()),
+                (Some(true), None) => (left.as_ref(), right.as_ref()),
+                (None, Some(false)) => (left.as_ref(), right.as_ref()),
+                (Some(false), None) => (right.as_ref(), left.as_ref()),
+                (None, Some(true)) => (right.as_ref(), left.as_ref()),
+                _ => {
+                    return Err(PolarsError::InvalidOperation(
+                        "SQL: JOIN ON equality must compare columns from opposite relations."
+                            .into(),
+                    ));
+                }
+            };
+            Ok(vec![(
+                sql_expr_to_qualified_col_name(left_expr, left_alias)?,
+                sql_expr_to_qualified_col_name(right_expr, right_alias)?,
+            )])
+        }
+        SqlExpr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            let mut pairs = join_equality_pairs_for_factors(
+                left,
+                left_alias,
+                right_alias,
+                left_factor,
+                right_factor,
+            )?;
+            pairs.extend(join_equality_pairs_for_factors(
+                right,
+                left_alias,
+                right_alias,
+                left_factor,
+                right_factor,
+            )?);
+            Ok(pairs)
+        }
+        SqlExpr::Nested(inner) => join_equality_pairs_for_factors(
+            inner,
+            left_alias,
+            right_alias,
+            left_factor,
+            right_factor,
+        ),
+        _ => Err(PolarsError::InvalidOperation(
+            "SQL: JOIN ON must be equality conditions combined with AND.".into(),
+        )),
+    }
+}
+
+fn join_condition_to_on_columns_for_factors(
+    join_op: &JoinOperator,
+    left_alias: Option<&str>,
+    right_alias: Option<&str>,
+    left_factor: &TableFactor,
+    right_factor: &TableFactor,
+) -> Result<(Vec<String>, Vec<String>), PolarsError> {
+    let constraint = match join_op {
+        JoinOperator::Join(c)
+        | JoinOperator::Inner(c)
+        | JoinOperator::Left(c)
+        | JoinOperator::LeftOuter(c)
+        | JoinOperator::Right(c)
+        | JoinOperator::RightOuter(c)
+        | JoinOperator::FullOuter(c)
+        | JoinOperator::LeftSemi(c)
+        | JoinOperator::LeftAnti(c)
+        | JoinOperator::Semi(c)
+        | JoinOperator::Anti(c) => c,
+        JoinOperator::CrossJoin(_) => return Ok((vec![], vec![])),
+        other => {
+            return Err(PolarsError::InvalidOperation(
+                format!("SQL: unsupported join type {:?}.", other).into(),
+            ));
+        }
+    };
+    let JoinConstraint::On(expr) = constraint else {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: JOIN must use ON (equality); NATURAL/USING not supported.".into(),
+        ));
+    };
+    let pairs =
+        join_equality_pairs_for_factors(expr, left_alias, right_alias, left_factor, right_factor)?;
+    if pairs.is_empty() {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: JOIN ON requires at least one equality condition.".into(),
+        ));
+    }
+    let (left_on, right_on) = pairs.into_iter().unzip();
+    Ok((left_on, right_on))
 }
 
 /// Returns (left_column_names, right_column_names) for JOIN ON. When table aliases are used, names are prefixed (e.g. e_dept_id, d_id) (#152).
@@ -3209,8 +3389,11 @@ fn apply_projection(
     relation_qualifiers: &[SqlRelationQualifier],
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     // Wildcard: expand to all columns (disambiguate if JOIN produced duplicate names)
-    for item in projection {
-        if matches!(item, SelectItem::Wildcard(_)) {
+    if projection
+        .iter()
+        .all(|item| matches!(item, SelectItem::Wildcard(_)))
+    {
+        if !projection.is_empty() {
             let column_names: Vec<String> = df.columns()?.into_iter().collect();
             let unique_aliases = disambiguate_aliases(&column_names);
             if unique_aliases == column_names {
@@ -3227,6 +3410,13 @@ fn apply_projection(
 
     let mut items = Vec::new();
     for item in projection {
+        if matches!(item, SelectItem::Wildcard(_)) {
+            let column_names = df.columns()?;
+            for (i, name) in column_names.into_iter().enumerate() {
+                items.push(ProjItem::Expr(nth(i as i64).as_expr(), name));
+            }
+            continue;
+        }
         let proj = match item {
             SelectItem::UnnamedExpr(SqlExpr::Identifier(ident)) => {
                 let name = ident.value.as_str();
@@ -3743,6 +3933,40 @@ fn projection_is_scalar_aggregate(projection: &[SelectItem]) -> bool {
         }
     }
     true
+}
+
+/// Return output names when every scalar aggregate is a plain COUNT(*).
+/// Range-backed frames can answer that aggregate from their cardinality metadata
+/// without materializing the generated rows.
+fn count_star_projection_names(projection: &[SelectItem]) -> Option<Vec<String>> {
+    let mut names = Vec::with_capacity(projection.len());
+    for item in projection {
+        let (func, alias) = match item {
+            SelectItem::UnnamedExpr(SqlExpr::Function(func)) => (func, None),
+            SelectItem::ExprWithAlias {
+                expr: SqlExpr::Function(func),
+                alias,
+            } => (func, Some(alias.value.clone())),
+            _ => return None,
+        };
+        let func_name = func
+            .name
+            .0
+            .last()
+            .and_then(|part| part.as_ident())
+            .map(|ident| ident.value.as_str())?;
+        let args = function_args_slice(&func.args);
+        if !func_name.eq_ignore_ascii_case("COUNT")
+            || func.filter.is_some()
+            || func.over.is_some()
+            || args.len() != 1
+            || !matches!(args[0], FunctionArg::Unnamed(FunctionArgExpr::Wildcard))
+        {
+            return None;
+        }
+        names.push(alias.unwrap_or_else(|| "count".to_string()));
+    }
+    Some(disambiguate_aliases(&names))
 }
 
 fn is_agg_function_name(func: &Function) -> bool {
