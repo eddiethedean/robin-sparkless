@@ -97,7 +97,7 @@ Optional features: `sql`, `delta`, `jdbc`, `sqlite`, `jdbc_mysql`. See [docs/QUI
 
 ## Development
 
-**Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)), Python 3.8+, uv. The contributor setup installs Maturin. Java only for `SPARKLESS_TEST_MODE=pyspark`.
+**Prerequisites:** Rust (see [rust-toolchain.toml](rust-toolchain.toml)), Python 3.11+, uv. The contributor setup installs Maturin. Java only for `SPARKLESS_TEST_MODE=pyspark`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, `make check-full`, pytest, and maturin workflow.
 

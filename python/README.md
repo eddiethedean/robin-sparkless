@@ -5,7 +5,7 @@ Drop-in replacement for local development and testing. Same API, 10–100× fast
 
 > **Before you adopt:** [Read caveats](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/BEFORE_YOU_ADOPT.md) — UDF limits, parity gaps, not a Spark cluster replacement.
 
-- **Python 3.8+** · **PySpark 3.2–3.5 compatible** · MIT
+- **Python 3.11+** · **PySpark 3.2–3.5 compatible** · MIT
 
 ---
 
@@ -94,7 +94,7 @@ Prebuilt wheels are published for CI targets on each release (see [PyPI files](h
 | **macOS** | arm64, x86_64 | Universal coverage via separate wheels |
 | **Windows** | x86_64, arm64 | Prebuilt extension modules |
 
-**Python:** 3.8, 3.9, 3.10, 3.11, 3.12 (cp38–cp312 ABI tags on wheels).
+**Python:** 3.11, 3.12, 3.13, 3.14 (cp311 ABI3 wheels).
 
 If no wheel matches your platform, follow the [source build instructions](../CONTRIBUTING.md#setup).
 
@@ -239,7 +239,7 @@ Full details: [TESTING_GUIDE.md](https://github.com/eddiethedean/robin-sparkless
 
 ## Requirements
 
-- **Python 3.8+**
+- **Python 3.11+**
 - **Sparkless mode:** No Java or Spark required.
 - **PySpark mode** (optional): Java and `pip install pyspark` for `SPARKLESS_TEST_MODE=pyspark`.
 

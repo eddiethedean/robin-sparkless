@@ -18,7 +18,7 @@ So the failing tests in PySpark mode are exercising **Sparkless-only APIs or sem
 
 - **pyspark**: `>=3.5,<3.6` (3.5.x)
 - **delta-spark**: `>=3.0,<4` (compatible with Spark 3.5)
-- **Python**: 3.8+ (venv may be 3.9). PySpark 4.x requires Python ≥3.10 for 4.1.x.
+- **Python**: 3.11+. PySpark 4.x requires Python ≥3.10 for 4.1.x.
 
 ## Failures that are *not* fixed by upgrading PySpark
 
@@ -41,7 +41,7 @@ These are **API/behavior differences**; PySpark (including 4.1.1) does not add t
 - **Latest on PyPI**: 4.1.1 (requires Python ≥3.10).
 - **delta-spark**: For Spark 4 use delta-spark 4.x; for Spark 3.5 keep delta-spark 3.x.
 - Upgrading to 4.x may fix or change a small number of behaviors (e.g. error messages, edge cases) but will **not** add the GroupedData pivot helpers or mixed-type `array()` above.  
-- To try PySpark 4.x: use a Python 3.10+ env and `pyspark>=4.0,<4.2` and `delta-spark>=4.0` (if you need Delta with Spark 4).
+- To try PySpark 4.x: use a Python 3.11+ env and `pyspark>=4.0,<4.2` and `delta-spark>=4.0` (if you need Delta with Spark 4).
 
 ## Summary
 
@@ -55,6 +55,6 @@ Sparkless **4.9.0** implements the opt-in PySpark 4 profile (`compat=4.0`). See 
 
 - **Sparkless backend (default CI):** `SPARKLESS_TEST_MODE=sparkless` (or unset), `SPARKLESS_PYSPARK_COMPAT=3.5` (default).
 - **PySpark 3.5 oracle:** `tests/requirements-pyspark.txt`, `SPARKLESS_TEST_MODE=pyspark`.
-- **PySpark 4.1 oracle (nightly):** `tests/requirements-pyspark4.txt`, Java 17, Python 3.10+, `SPARKLESS_TEST_MODE=pyspark`, `SPARKLESS_PYSPARK_COMPAT=4.0`.
+- **PySpark 4.1 oracle (nightly):** `tests/requirements-pyspark4.txt`, Java 17, Python 3.11+, `SPARKLESS_TEST_MODE=pyspark`, `SPARKLESS_PYSPARK_COMPAT=4.0`.
 
 Run profile-specific tests with `@pytest.mark.pyspark4_only` or `@pytest.mark.pyspark3_only`.

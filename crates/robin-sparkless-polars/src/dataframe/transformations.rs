@@ -2438,7 +2438,7 @@ pub fn explain(_df: &DataFrame) -> String {
 pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
     let schema = df.schema()?;
     let mut s = "root\n".to_string();
-    for f in schema.fields() {
+    for f in schema.logical_fields() {
         let dt = match &f.data_type {
             crate::schema::DataType::String => "string".to_string(),
             crate::schema::DataType::Short => "smallint".to_string(),
@@ -3573,7 +3573,11 @@ mod tests {
         assert!(cols.contains(&"name".to_string()));
         // #1262: collected rows must have id as string (PySpark union coerces numeric+string to string).
         let (_names, rows, schema) = out.collect_as_json_rows_with_names().unwrap();
-        let id_field = schema.fields().iter().find(|f| f.name == "id").unwrap();
+        let id_field = schema
+            .logical_fields()
+            .iter()
+            .find(|f| f.name == "id")
+            .unwrap();
         assert!(matches!(
             id_field.data_type,
             robin_sparkless_core::DataType::String

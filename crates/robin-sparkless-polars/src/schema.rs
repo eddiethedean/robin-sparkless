@@ -1,6 +1,6 @@
 //! Schema types (from core) and Polars conversion. Conversion lives in schema_conv.
 
-pub use robin_sparkless_core::{DataType, StructField, StructType};
+pub use robin_sparkless_core::{DataType, LogicalField, StructField, StructType};
 
 pub use crate::schema_conv::StructTypePolarsExt;
 

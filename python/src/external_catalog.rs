@@ -30,7 +30,7 @@ pub(crate) fn logical_map_paths(schema: &robin_sparkless_core::StructType) -> Ha
                 visit(value, &format!("{path}{{value}}"), paths);
             }
             DataType::Array(element) => visit(element, &format!("{path}[]"), paths),
-            DataType::Struct(fields) => {
+            DataType::LogicalStruct(fields) => {
                 for field in fields {
                     visit(
                         &field.data_type,
@@ -43,7 +43,7 @@ pub(crate) fn logical_map_paths(schema: &robin_sparkless_core::StructType) -> Ha
         }
     }
     let mut paths = HashSet::new();
-    for field in schema.fields() {
+    for field in schema.logical_fields() {
         visit(
             &field.data_type,
             &super::arrow_field_path("", &field.name),

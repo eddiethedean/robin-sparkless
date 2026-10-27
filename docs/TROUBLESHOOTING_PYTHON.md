@@ -9,7 +9,7 @@ Common issues when installing or running **Sparkless** (`pip install sparkless`)
 The native extension failed to load. Try:
 
 1. Reinstall: `pip install --force-reinstall "sparkless>=4,<5"`
-2. Ensure Python version is **3.8+** and matches the wheel ABI (e.g. cp311 on Python 3.11).
+2. Ensure Python version is **3.11+** and matches the wheel ABI (e.g. cp311 on Python 3.11).
 3. On Linux **musl** (Alpine): use the musl wheel or build from source with `maturin develop`.
 
 ### No wheel for my platform

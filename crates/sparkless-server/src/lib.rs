@@ -17,7 +17,9 @@ use hyper::http::{HeaderValue, Method, Request, Response, StatusCode};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use robin_sparkless::{DataType, EngineError, SharedCatalog, SparkSession, StructField};
+use robin_sparkless::{
+    DataType, EngineError, LogicalField as StructField, SharedCatalog, SparkSession,
+};
 use robin_sparkless_core::CancellationToken;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
@@ -858,9 +860,53 @@ impl Server {
         if parsed.kind != "sql" {
             return agent_error("UnsupportedKind", "only kind=sql is supported", None);
         }
-        let class = match validate_statement(&parsed.code) {
-            Ok(class) => class,
-            Err((name, message)) => return agent_error(name, &message, None),
+        // A retained mutation can be replayed even when admission is saturated or its
+        // originating session is closed. Conflicting or new requests still need SQL
+        // classification before applying mutation-specific identity rules.
+        if parsed.server_instance_id.as_deref() == Some(self.inner.instance_id.as_str())
+            && let Some(operation_id) = parsed.operation_id.as_deref()
+            && validate_identifier("operation_id", operation_id).is_ok()
+            && let Ok(Some(existing)) = self.inner.lookup_operation(
+                operation_id,
+                request_fingerprint(&parsed),
+                &parsed.session,
+            )
+        {
+            return existing_operation_response(&self.inner, operation_id, &existing);
+        }
+        let ticket = match self.inner.reserve_admission() {
+            Ok(ticket) => ticket,
+            Err(error) => return request_failure_response(error),
+        };
+        let planning_permit = match timeout(
+            self.inner.config.queue_timeout,
+            Arc::clone(&self.inner.admission.active).acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            _ => return agent_error("QueueTimeout", "timed out waiting for SQL validation", None),
+        };
+        let planning_code = parsed.code.clone();
+        let planning = tokio::task::spawn_blocking(move || {
+            let _permit = planning_permit;
+            (validate_statement(&planning_code), ticket)
+        });
+        // The blocking task owns both reservations until parsing actually finishes,
+        // including when this response times out. No catalog effects occur here.
+        let (class, ticket) = match timeout(self.inner.config.response_timeout, planning).await {
+            Ok(Ok((Ok(class), ticket))) => (class, ticket),
+            Ok(Ok((Err((name, message)), _))) => return agent_error(name, &message, None),
+            Ok(Err(_)) => {
+                return agent_error("InternalError", "SQL validation worker failed", None);
+            }
+            Err(_) => {
+                return agent_error(
+                    "ResponseTimeout",
+                    "SQL validation timed out before execution",
+                    None,
+                );
+            }
         };
         let is_mutation = matches!(class, StatementClass::Mutation { .. });
         let operation_id = if is_mutation {
@@ -956,20 +1002,6 @@ impl Server {
             None
         };
         let mut pending_operation = PendingOperationGuard(operation.clone());
-        let ticket = match self.inner.reserve_admission() {
-            Ok(ticket) => ticket,
-            Err(error) => {
-                if let Some(record) = &operation {
-                    set_operation_failure(
-                        record,
-                        "OperationCapacityExceeded",
-                        "operation capacity is full",
-                        "failed",
-                    );
-                }
-                return request_failure_response(error);
-            }
-        };
         let session_guard = match timeout(
             self.inner.config.queue_timeout,
             lease.0.serial.clone().lock_owned(),
@@ -2207,7 +2239,7 @@ fn execute_statement(
     let mut fields = frame
         .schema()
         .map_err(|error| execution_failure("QueryError", &error.to_string()))?
-        .fields()
+        .logical_fields()
         .to_vec();
     if let Ok(SparkStatement::Sqlparser(statement)) = spark_sql_parser::parse_spark_sql(sql)
         && let ast::Statement::Query(query) = statement.as_ref()
@@ -3797,6 +3829,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejected_sql_planning_obeys_admission_and_keeps_health_responsive() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_active_operations: 1,
+            max_pending_operations: 1,
+            queue_timeout: Duration::from_secs(5),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+        let retained = statement_request(
+            address,
+            server.instance_id(),
+            "planning-writer",
+            "planning-replay",
+            "CREATE TABLE planning_replay (id BIGINT)",
+        )
+        .await;
+        assert_eq!(retained["status"], "ok");
+        let held_ticket = server.inner.reserve_admission().unwrap();
+        let held_permit = Arc::clone(&server.inner.admission.active)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let sql = format!(
+            "SELECT {}, random()",
+            (0..12_000)
+                .map(|i| format!("1 AS c{i}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert!(sql.len() < server.inner.config.max_sql_bytes);
+        let body = json!({"session":"planning-reader","kind":"sql","code":sql});
+        let queued = {
+            let body = body.clone();
+            tokio::spawn(async move { request_json(address, "POST", "/statements", &body).await })
+        };
+        timeout(Duration::from_secs(2), async {
+            while server.inner.admission.accepted.load(Ordering::Acquire) != 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("SQL parsing must wait for the occupied compute permit");
+        assert!(!queued.is_finished());
+        for _ in 0..5 {
+            let (status, _) = timeout(
+                Duration::from_millis(250),
+                request_json(address, "GET", "/health", &JsonValue::Null),
+            )
+            .await
+            .expect("health must progress while planning waits");
+            assert_eq!(status, StatusCode::OK);
+        }
+        let replay = timeout(
+            Duration::from_millis(250),
+            statement_request(
+                address,
+                server.instance_id(),
+                "planning-writer",
+                "planning-replay",
+                "CREATE TABLE planning_replay (id BIGINT)",
+            ),
+        )
+        .await
+        .expect("retained replay must not need compute admission");
+        assert_eq!(replay["operation"], retained["operation"]);
+        let (status, response) = request_json(address, "POST", "/statements", &body).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response["ename"], "OperationCapacityExceeded");
+        drop(held_permit);
+        drop(held_ticket);
+        let (_, response) = timeout(Duration::from_secs(5), queued)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response["ename"], "UnsupportedSql");
+        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+        shutdown_tx.send(()).unwrap();
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn waiting_writer_does_not_consume_compute_admission() {
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
@@ -5015,7 +5144,7 @@ mod tests {
                 value_type: Box::new(DataType::String),
                 value_contains_null: false,
             },
-            DataType::Struct(vec![StructField::new(
+            DataType::LogicalStruct(vec![StructField::new(
                 "nested".into(),
                 DataType::Long,
                 true,

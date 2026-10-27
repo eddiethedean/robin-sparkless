@@ -36,4 +36,4 @@ pub use path_security::{
 pub use runtime_config::{
     PysparkCompat, SessionRuntimeConfig, decimal_allow_precision_loss_from_session_map,
 };
-pub use schema::{DataType, StructField, StructType};
+pub use schema::{DataType, LogicalField, StructField, StructType};

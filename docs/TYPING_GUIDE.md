@@ -1,6 +1,6 @@
 ## Typing Guide for `sparkless`
 
-This project targets **Python 3.8+** and maintains type hints for both:
+This project targets **Python 3.11+** and maintains type hints for both:
 
 - The public Python package `sparkless` (PySpark-like API), and
 - The Rust-backed native module exposed via `sparkless._native`.
@@ -30,7 +30,7 @@ Type checking is performed with **mypy** and **pyright**.
 
 ### Python version and syntax
 
-- Code is written to be compatible with **Python 3.8+**.
+- Code is written to be compatible with **Python 3.11+**.
 - In modules that use modern type syntax such as `list[str]` or
   `dict[str, Any]`, ensure `from __future__ import annotations` is present.
 - In older or simple modules, `List[...]` and `Dict[...]` from `typing`

@@ -1,6 +1,6 @@
 # 4.17.0 release readiness review
 
-**Verdict: HOLD. Do not tag or publish 4.17.0.**
+**Historical review at `a017821c`.** See the [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) for repaired findings and the current release hold. The observations below describe the original reviewed source.
 
 Reviewed `codex/release-4.17` at `a017821c2c64c513640d5428f94bd813cccaf24f` on 2026-10-26 (2026-10-27 UTC). This review covers the complete Phase 1 delivery slices, applicable 4.16 regressions, public Rust dependency behavior, Python/source/server packaging, resource ownership, and V31/V32 publication checks. External application acceptance and Phase 2 Connect certification are outside the 4.17 gate.
 

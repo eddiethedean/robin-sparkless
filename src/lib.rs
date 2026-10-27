@@ -67,7 +67,7 @@ pub mod engine {
         lit_i64, lit_null, lit_str, lt, max, mean, median, min, mode, ne, not_, or_, skewness, std,
         stddev, stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance, when,
     };
-    pub use robin_sparkless_core::{DataType, EngineError, StructField, StructType};
+    pub use robin_sparkless_core::{DataType, EngineError, LogicalField, StructField, StructType};
 }
 
 /// Polars-backed types and helper functions re-exported from `robin-sparkless-polars`.
@@ -86,8 +86,8 @@ pub mod polars {
 // for existing users.
 pub use engine::CollectedRows;
 pub use engine::{
-    DataType, EngineError, ExprIr, LiteralValue, StructField, StructType, WhenBuilder,
-    WhenThenBuilder, alias, and_, approx_count_distinct, between, bool_and, call, col,
+    DataType, EngineError, ExprIr, LiteralValue, LogicalField, StructField, StructType,
+    WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct, between, bool_and, call, col,
     collect_list, collect_set, count, count_distinct, count_if, eq, every, first, ge, gt, is_in,
     is_null, kurtosis, le, lit_bool, lit_f64, lit_i32, lit_i64, lit_null, lit_str, lt, max, mean,
     median, min, mode, ne, not_, or_, skewness, std, stddev, stddev_pop, stddev_samp, sum, try_avg,

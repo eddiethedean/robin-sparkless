@@ -34,7 +34,7 @@ See [Python getting started](python_getting_started.md) and [Troubleshooting (Py
 
 ### What Python versions are supported?
 
-Python **3.8+**. Prebuilt wheels are published for common Linux, macOS, and Windows platforms.
+Python **3.11+**. Prebuilt wheels are published for common Linux, macOS, and Windows platforms.
 
 ### Sparkless 3 vs 4?
 

@@ -595,7 +595,7 @@ fn align_insert_select_to_target(
     use crate::schema_conv::checked_data_type_to_polars_type;
 
     let select_schema = select_df.schema()?;
-    let select_fields = select_schema.fields();
+    let select_fields = select_schema.logical_fields();
     if select_fields.len() != insert_col_count {
         return Err(PolarsError::InvalidOperation(
             format!(
@@ -613,7 +613,7 @@ fn align_insert_select_to_target(
             let src = &select_col_names[val_pos];
             let resolved = select_df.resolve_column_name(src)?;
             let target_type = checked_data_type_to_polars_type(
-                &target_schema.fields()[target_idx].data_type,
+                &target_schema.logical_fields()[target_idx].data_type,
                 target_name,
             )?;
             exprs.push(
@@ -623,7 +623,7 @@ fn align_insert_select_to_target(
             );
         } else {
             let pl_ty = checked_data_type_to_polars_type(
-                &target_schema.fields()[target_idx].data_type,
+                &target_schema.logical_fields()[target_idx].data_type,
                 target_name,
             )?;
             let null_expr = lit(polars::prelude::NULL).strict_cast(pl_ty);
@@ -681,7 +681,7 @@ fn translate_insert(
     };
     let target_schema: StructType = target_df.schema()?;
     let target_cols: Vec<String> = target_schema
-        .fields()
+        .logical_fields()
         .iter()
         .map(|f| f.name.clone())
         .collect();
@@ -738,7 +738,7 @@ fn translate_insert(
                         let target_idx = index_map[val_pos];
                         let v = sql_literal_expr_to_json(
                             expr,
-                            &target_schema.fields()[target_idx].data_type,
+                            &target_schema.logical_fields()[target_idx].data_type,
                         )?;
                         row[target_idx] = v;
                     }
@@ -746,7 +746,7 @@ fn translate_insert(
                 }
 
                 let schema: Vec<(String, String)> = target_schema
-                    .fields()
+                    .logical_fields()
                     .iter()
                     .map(|f| (f.name.clone(), core_data_type_to_insert_type(&f.data_type)))
                     .collect();
@@ -868,7 +868,7 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
                 core_data_type_to_str(v)
             )
         }
-        CoreDataType::Struct(fields) => {
+        CoreDataType::LogicalStruct(fields) => {
             let parts: Vec<String> = fields
                 .iter()
                 .map(|f| format!("{}:{}", f.name, core_data_type_to_str(&f.data_type)))
@@ -898,7 +898,7 @@ pub(crate) fn translate_describe_table_optional_col(
     let schema: StructType = df.schema()?;
     let case_sensitive = session.is_case_sensitive();
     let fields: Vec<_> = schema
-        .fields()
+        .logical_fields()
         .iter()
         .filter(|f| {
             col_name.is_none_or(|c| {
@@ -940,7 +940,7 @@ pub(crate) fn translate_describe_table_extended(
     // metadata row so that DESCRIBE EXTENDED returns more rows than basic DESCRIBE.
     let df = session.table(table_name)?;
     let schema: StructType = df.schema()?;
-    let fields = schema.fields();
+    let fields = schema.logical_fields();
     let mut rows: Vec<Vec<JsonValue>> = fields
         .iter()
         .map(|f| {
@@ -3578,6 +3578,13 @@ fn apply_projection(
     }
 
     if items.is_empty() {
+        if !projection.is_empty()
+            && projection
+                .iter()
+                .all(|item| matches!(item, SelectItem::Wildcard(_)))
+        {
+            return Ok(df.clone());
+        }
         return Err(PolarsError::InvalidOperation(
             "SQL: SELECT must list at least one column or *.".into(),
         ));
@@ -3589,7 +3596,7 @@ fn apply_projection(
     // Check if any Python UDF (requires with_column path)
     let has_python_udf = items.iter().any(|i| matches!(i, ProjItem::PythonUdf(_, _)));
 
-    let source_fields = df.schema()?.fields().to_vec();
+    let source_fields = df.schema()?.logical_fields().to_vec();
     let mut df = df.clone();
 
     let projected = if has_python_udf {
@@ -3631,7 +3638,7 @@ fn apply_projection(
     if !wildcard_source_indices.iter().any(Option::is_some) {
         return Ok(projected);
     }
-    let mut output_fields = projected.schema()?.fields().to_vec();
+    let mut output_fields = projected.schema()?.logical_fields().to_vec();
     for (output_index, source_index) in wildcard_source_indices.into_iter().enumerate() {
         if let Some(source_index) = source_index {
             let mut field = source_fields[source_index].clone();
@@ -3641,7 +3648,7 @@ fn apply_projection(
     }
     Ok(projected
         .clone()
-        .with_logical_schema(StructType::new(output_fields))
+        .with_logical_schema(StructType::from_logical_fields(output_fields))
         .unwrap_or(projected))
 }
 
@@ -4374,6 +4381,93 @@ fn sql_limit_to_usize(expr: &SqlExpr) -> Result<usize, PolarsError> {
 #[cfg(test)]
 mod insert_literal_tests {
     use super::*;
+
+    #[test]
+    fn wildcard_projection_preserves_rows_names_and_logical_schema() {
+        let session = SparkSession::new(Some("wildcard-regression".into()), None, HashMap::new());
+        let frame = polars::df!("a.b" => &[1i64, 3], "A" => &[2i64, 4], "a" => &[5i64, 6], "*" => &[7i64, 8]).unwrap();
+        let fields = ["a.b", "A", "a", "*"]
+            .into_iter()
+            .map(|name| {
+                crate::schema::LogicalField::new(name.into(), CoreDataType::Long, false)
+                    .with_metadata(std::collections::BTreeMap::from([(
+                        "tag".into(),
+                        JsonValue::from("kept"),
+                    )]))
+            })
+            .collect();
+        let source = DataFrame::from_polars_with_options(frame, false)
+            .with_logical_schema(StructType::from_logical_fields(fields))
+            .unwrap();
+        session.create_or_replace_temp_view("wildcard_source", source);
+        for sql in [
+            "SELECT * FROM wildcard_source",
+            "SELECT *, 0 AS extra FROM wildcard_source",
+            "SELECT *, * FROM wildcard_source",
+        ] {
+            let output = session.sql(sql).unwrap();
+            let values = output.collect().unwrap();
+            assert_eq!(values.height(), 2, "{sql}");
+            for (name, expected) in [
+                ("a.b", [1, 3]),
+                ("A", [2, 4]),
+                ("a_1", [5, 6]),
+                ("*", [7, 8]),
+            ] {
+                let column = values.column(name).unwrap().i64().unwrap();
+                assert_eq!(
+                    column.into_no_null_iter().collect::<Vec<_>>(),
+                    expected,
+                    "{sql}: {name}"
+                );
+            }
+            for field in output.schema().unwrap().logical_fields().iter().take(4) {
+                assert!(!field.nullable, "{sql}");
+                assert_eq!(field.metadata["tag"], "kept", "{sql}");
+            }
+        }
+    }
+
+    #[test]
+    fn untyped_null_projections_remain_valid_with_and_without_wildcards() {
+        let session = SparkSession::new(
+            Some("null-projection-regression".into()),
+            None,
+            HashMap::new(),
+        );
+        session.create_or_replace_temp_view("null_source", session.range(0, 2, 1).unwrap());
+        for (sql, rows) in [
+            ("SELECT NULL AS n", 1),
+            ("SELECT NULL AS n FROM null_source", 2),
+            ("SELECT *, NULL AS n FROM null_source", 2),
+            ("SELECT COALESCE(NULL, NULL) AS n FROM null_source", 2),
+            (
+                "SELECT CASE WHEN id = 0 THEN NULL ELSE NULL END AS n FROM null_source",
+                2,
+            ),
+        ] {
+            let output = session.sql(sql).unwrap().collect().unwrap();
+            assert_eq!(output.height(), rows, "{sql}");
+            assert_eq!(output.column("n").unwrap().null_count(), rows, "{sql}");
+        }
+    }
+
+    #[test]
+    fn wildcard_projection_accepts_an_empty_schema() {
+        let session = SparkSession::new(Some("empty-schema-wildcard".into()), None, HashMap::new());
+        let empty = session
+            .create_dataframe_from_rows(Vec::new(), Vec::new(), false, false)
+            .unwrap();
+        session.create_or_replace_temp_view("empty_schema", empty);
+        for sql in [
+            "SELECT * FROM empty_schema",
+            "SELECT *, * FROM empty_schema",
+        ] {
+            let result = session.sql(sql).unwrap();
+            assert!(result.columns().unwrap().is_empty());
+            assert_eq!(result.collect().unwrap().height(), 0);
+        }
+    }
 
     #[test]
     fn qualified_join_columns_keep_their_relation_values() {

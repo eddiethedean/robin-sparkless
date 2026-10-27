@@ -21,7 +21,9 @@ pub use transformations::{
 use crate::column::Column;
 use crate::error::{EngineError, polars_to_core_error};
 use crate::functions::SortOrder;
-use crate::schema::{DataType as LogicalDataType, StructField, StructType, StructTypePolarsExt};
+use crate::schema::{
+    DataType as LogicalDataType, LogicalField as StructField, StructType, StructTypePolarsExt,
+};
 use crate::session::SparkSession;
 use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
@@ -56,7 +58,7 @@ fn validate_logical_nullability(
         };
     }
     match (value, data_type) {
-        (AnyValue::Struct(_, _, physical_fields), LogicalDataType::Struct(fields)) => {
+        (AnyValue::Struct(_, _, physical_fields), LogicalDataType::LogicalStruct(fields)) => {
             for (child, physical_field) in value._iter_struct_av().zip(physical_fields.iter()) {
                 if let Some(logical_field) = fields
                     .iter()
@@ -72,7 +74,7 @@ fn validate_logical_nullability(
                 }
             }
         }
-        (AnyValue::StructOwned(payload), LogicalDataType::Struct(fields)) => {
+        (AnyValue::StructOwned(payload), LogicalDataType::LogicalStruct(fields)) => {
             let (values, physical_fields) = &**payload;
             for (child, physical_field) in values.iter().zip(physical_fields.iter()) {
                 if let Some(logical_field) = fields
@@ -227,7 +229,7 @@ fn logical_field_for_projected_column(
 
     // Prefer an exact top-level match so columns whose names contain dots remain addressable.
     if let Some(field) = schema
-        .fields()
+        .logical_fields()
         .iter()
         .find(|field| matches_name(&field.name, source_name))
     {
@@ -238,7 +240,7 @@ fn logical_field_for_projected_column(
     // Try each component as the root, then follow only declared struct fields.
     for (root_index, root_name) in parts.iter().enumerate() {
         let Some(mut field) = schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| matches_name(&field.name, root_name))
             .cloned()
@@ -248,7 +250,7 @@ fn logical_field_for_projected_column(
         let mut nullable = field.nullable;
         let mut found = true;
         for child_name in &parts[root_index + 1..] {
-            let robin_sparkless_core::DataType::Struct(children) = &field.data_type else {
+            let robin_sparkless_core::DataType::LogicalStruct(children) = &field.data_type else {
                 found = false;
                 break;
             };
@@ -667,9 +669,12 @@ fn merge_union_logical_type(
                 contains_null: left_nullable || right_nullable,
             })
         }
-        (D::Struct(left_fields), D::Struct(right_fields), DataType::Struct(output_fields))
-            if left_fields.len() == right_fields.len()
-                && left_fields.len() == output_fields.len() =>
+        (
+            D::LogicalStruct(left_fields),
+            D::LogicalStruct(right_fields),
+            DataType::Struct(output_fields),
+        ) if left_fields.len() == right_fields.len()
+            && left_fields.len() == output_fields.len() =>
         {
             let fields = left_fields
                 .iter()
@@ -689,7 +694,7 @@ fn merge_union_logical_type(
                     Some(field)
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(D::Struct(fields))
+            Some(D::LogicalStruct(fields))
         }
         _ => crate::schema_conv::checked_polars_type_to_data_type(output_physical, "union").ok(),
     }
@@ -701,7 +706,7 @@ fn conservative_union_logical_type(output_physical: &DataType) -> Option<Logical
             element_type: Box::new(conservative_union_logical_type(element)?),
             contains_null: true,
         }),
-        DataType::Struct(fields) => Some(LogicalDataType::Struct(
+        DataType::Struct(fields) => Some(LogicalDataType::LogicalStruct(
             fields
                 .iter()
                 .map(|field| {
@@ -2416,18 +2421,18 @@ impl DataFrame {
             .validate_metadata()
             .map_err(|error| PolarsError::InvalidOperation(error.into()))?;
         let physical = self.schema_or_collect()?;
-        if schema.fields().len() != physical.len() {
+        if schema.logical_fields().len() != physical.len() {
             return Err(PolarsError::SchemaMismatch(
                 format!(
                     "logical schema has {} fields but the Polars plan has {}",
-                    schema.fields().len(),
+                    schema.logical_fields().len(),
                     physical.len()
                 )
                 .into(),
             ));
         }
         for (logical, (physical_name, physical_dtype)) in
-            schema.fields().iter().zip(physical.iter())
+            schema.logical_fields().iter().zip(physical.iter())
         {
             if logical.name != physical_name.as_str() {
                 return Err(PolarsError::SchemaMismatch(
@@ -2505,7 +2510,7 @@ impl DataFrame {
                 Some(StructField::new(output_name.to_string(), data_type, true))
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     fn projected_logical_schema_for_paths(
@@ -2543,7 +2548,7 @@ impl DataFrame {
                 Some(projected)
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     fn logical_schema_by_output_names(&self, output: &DataFrame) -> Option<StructType> {
@@ -2552,7 +2557,7 @@ impl DataFrame {
         let fields = output_schema
             .iter()
             .map(|(output_name, output_dtype)| {
-                if let Some(source) = source_schema.fields().iter().find(|field| {
+                if let Some(source) = source_schema.logical_fields().iter().find(|field| {
                     if self.case_sensitive {
                         field.name == output_name.as_str()
                     } else {
@@ -2578,7 +2583,7 @@ impl DataFrame {
                 ))
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     fn merged_logical_schema(
@@ -2611,7 +2616,7 @@ impl DataFrame {
         let mut fields = Vec::with_capacity(output_schema.len());
         for (index, (output_name, output_dtype)) in output_schema.iter().enumerate() {
             let left_field = left_schema.and_then(|schema| {
-                let matched = schema.fields().iter().find(|field| {
+                let matched = schema.logical_fields().iter().find(|field| {
                     if self.case_sensitive {
                         field.name == output_name.as_str()
                     } else {
@@ -2620,13 +2625,13 @@ impl DataFrame {
                 });
                 matched.or_else(|| {
                     (!align_by_name)
-                        .then(|| schema.fields().get(index))
+                        .then(|| schema.logical_fields().get(index))
                         .flatten()
                 })
             });
             let right_field = right_schema.and_then(|schema| {
                 if match_by_name {
-                    schema.fields().iter().find(|field| {
+                    schema.logical_fields().iter().find(|field| {
                         if self.case_sensitive {
                             field.name == output_name.as_str()
                         } else {
@@ -2634,7 +2639,7 @@ impl DataFrame {
                         }
                     })
                 } else {
-                    schema.fields().get(index)
+                    schema.logical_fields().get(index)
                 }
             });
 
@@ -2691,7 +2696,7 @@ impl DataFrame {
                 || right_field.map(|field| field.nullable).unwrap_or(true);
             fields.push(field);
         }
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     /// Preserve field declarations across joins by following the result names back to their
@@ -2727,7 +2732,7 @@ impl DataFrame {
          -> Option<StructField> {
             if let Some(field) = frame.logical_schema.as_ref().and_then(|schema| {
                 schema
-                    .fields()
+                    .logical_fields()
                     .iter()
                     .find(|field| matches_name(&field.name, source_name))
             }) {
@@ -2864,7 +2869,7 @@ impl DataFrame {
                 Some(field)
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     /// Same as [`schema`](Self::schema) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -2890,7 +2895,7 @@ impl DataFrame {
         }
         self.schema()
             .ok()?
-            .fields()
+            .logical_fields()
             .iter()
             .find(|f| f.name.eq_ignore_ascii_case(resolved.as_str()))
             .map(|f| crate::schema_conv::data_type_to_polars_type(&f.data_type))
@@ -3163,7 +3168,7 @@ impl DataFrame {
                     .map(|(source, _)| source.as_str())
                     .unwrap_or(output_name.as_str());
                 let Some(source) = source_schema
-                    .fields()
+                    .logical_fields()
                     .iter()
                     .find(|field| same_name(&field.name, source_name))
                 else {
@@ -3194,7 +3199,7 @@ impl DataFrame {
                 Some(projected)
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     /// Count rows while checking cooperative cancellation at the native materialization boundary.
@@ -5158,9 +5163,16 @@ impl<'a> DataFrameWriter<'a> {
         fn contains_map(dtype: &crate::schema::DataType) -> bool {
             use crate::schema::DataType;
             match dtype {
-                DataType::Map(_, _) => true,
-                DataType::Array(element) => contains_map(element),
+                DataType::Map(_, _) | DataType::MapWithNullability { .. } => true,
+                DataType::Array(element)
+                | DataType::ArrayWithNullability {
+                    element_type: element,
+                    ..
+                } => contains_map(element),
                 DataType::Struct(fields) => {
+                    fields.iter().any(|field| contains_map(&field.data_type))
+                }
+                DataType::LogicalStruct(fields) => {
                     fields.iter().any(|field| contains_map(&field.data_type))
                 }
                 _ => false,
@@ -5169,7 +5181,7 @@ impl<'a> DataFrameWriter<'a> {
         if !logical_map_paths.is_empty()
             || descriptor
                 .schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .any(|field| contains_map(&field.data_type))
         {
@@ -5643,9 +5655,9 @@ impl<'a> DataFrameWriter<'a> {
                             left.eq_ignore_ascii_case(right)
                         }
                     };
-                    for existing_field in existing.fields() {
+                    for existing_field in existing.logical_fields() {
                         let incoming_field = incoming
-                            .fields()
+                            .logical_fields()
                             .iter()
                             .find(|field| same_name(&field.name, &existing_field.name));
                         if incoming_field.is_none() && !merge_schema {
@@ -5673,9 +5685,9 @@ impl<'a> DataFrameWriter<'a> {
                         }
                     }
                     if !merge_schema
-                        && incoming.fields().iter().any(|incoming_field| {
+                        && incoming.logical_fields().iter().any(|incoming_field| {
                             !existing
-                                .fields()
+                                .logical_fields()
                                 .iter()
                                 .any(|field| same_name(&field.name, &incoming_field.name))
                         })
@@ -5751,7 +5763,7 @@ impl<'a> DataFrameWriter<'a> {
                     .as_ref()
                     .and_then(|existing| existing.logical_schema.as_ref())
                 {
-                    for field in schema.fields() {
+                    for field in schema.logical_fields() {
                         let column = match new_pl.column(&field.name) {
                             Ok(column) => column,
                             Err(_) if merge_schema => {
@@ -6890,7 +6902,7 @@ mod tests {
             ])
             .unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![StructField::new(
+        .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
             "value".into(),
             LogicalDataType::String,
             false,
@@ -6901,7 +6913,7 @@ mod tests {
             .with_columns(&[("value".into(), replacement)])
             .unwrap();
 
-        assert!(replaced.schema().unwrap().fields()[0].nullable);
+        assert!(replaced.schema().unwrap().logical_fields()[0].nullable);
         assert_eq!(
             replaced
                 .collect()
@@ -6975,7 +6987,7 @@ mod tests {
         let right = DataFrame::from_polars(
             polars::prelude::df!("key" => [1_i64], "a" => [100_i64], "b" => [200_i64]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![
+        .with_logical_schema(StructType::from_logical_fields(vec![
             StructField::new("key".into(), LogicalDataType::Long, false),
             StructField::new("a".into(), LogicalDataType::Long, false),
             StructField::new("b".into(), LogicalDataType::Long, false)
@@ -6989,7 +7001,7 @@ mod tests {
             .schema()
             .unwrap();
         let field = schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| field.name == "b_right_1")
             .unwrap();
@@ -7012,7 +7024,7 @@ mod tests {
             polars::prelude::df!("id" => [1_i64], "a" => [100_i64], "b" => [200_i64]).unwrap(),
             true,
         )
-        .with_logical_schema(StructType::new(vec![
+        .with_logical_schema(StructType::from_logical_fields(vec![
             StructField::new("id".into(), LogicalDataType::Long, false),
             StructField::new("a".into(), LogicalDataType::Long, false),
             StructField::new("b".into(), LogicalDataType::Long, false)
@@ -7026,7 +7038,7 @@ mod tests {
             .schema()
             .unwrap();
         let field = schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| field.name == "b_right_1")
             .unwrap();
@@ -7047,7 +7059,7 @@ mod tests {
         let right = DataFrame::from_polars(
             polars::prelude::df!("id" => [1_i64], "a" => [100_i64], "b_right" => [999_i64], "b" => [200_i64]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![
+        .with_logical_schema(StructType::from_logical_fields(vec![
             StructField::new("id".into(), LogicalDataType::Long, false),
             StructField::new("a".into(), LogicalDataType::Long, false),
             StructField::new("b_right".into(), LogicalDataType::Long, false),
@@ -7062,7 +7074,7 @@ mod tests {
             .schema()
             .unwrap();
         let field = schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| field.name == "b_right_1")
             .unwrap();
@@ -7165,12 +7177,12 @@ mod tests {
         let schema = frame.schema().unwrap();
         let schema_micros = schema_started.elapsed().as_micros();
         assert_eq!(frame.row_count_hint, Some(rows as u64));
-        assert_eq!(schema.fields()[0].name, "id");
+        assert_eq!(schema.logical_fields()[0].name, "id");
         assert!(matches!(
-            schema.fields()[0].data_type,
+            schema.logical_fields()[0].data_type,
             crate::schema::DataType::Long
         ));
-        assert!(!schema.fields()[0].nullable);
+        assert!(!schema.logical_fields()[0].nullable);
 
         println!(
             "range_memory rows={rows} strategy=lazy_scan construction_us={construction_micros} \
@@ -7193,7 +7205,7 @@ mod tests {
                 .unwrap()
                 .filter(col("id").gt(5i64))
                 .unwrap();
-            assert_eq!(frame.schema().unwrap().fields()[0].name, "id");
+            assert_eq!(frame.schema().unwrap().logical_fields()[0].name, "id");
             assert_eq!(frame.count().unwrap(), expected as usize);
 
             if rows == 10_000_000 {
@@ -7276,7 +7288,7 @@ mod tests {
         let empty = projected.limit(0).unwrap();
         assert_eq!(empty.columns().unwrap(), vec!["next_id"]);
         assert_eq!(empty.collect().unwrap().height(), 0);
-        assert_eq!(empty.schema().unwrap().fields()[0].name, "next_id");
+        assert_eq!(empty.schema().unwrap().logical_fields()[0].name, "next_id");
 
         let limited = projected.limit(3).unwrap();
         let collected = limited.collect().unwrap();
@@ -7447,7 +7459,7 @@ mod tests {
         let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![
+        let logical = StructType::from_logical_fields(vec![
             StructField::new("id".into(), robin_sparkless_core::DataType::Long, false)
                 .with_metadata(metadata),
         ]);
@@ -7496,7 +7508,7 @@ mod tests {
         let timestamp_metadata = [("semantics".to_string(), serde_json::json!("wall-clock"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![
+        let logical = StructType::from_logical_fields(vec![
             StructField::new("tiny".into(), LogicalDataType::Byte, true),
             StructField::new("single".into(), LogicalDataType::Float, true),
             StructField::new("wall_clock".into(), LogicalDataType::TimestampNtz, true)
@@ -7588,15 +7600,15 @@ mod tests {
         assert_eq!(scalar_union.count().unwrap(), 4);
         let scalar_schema = scalar_union.schema().unwrap();
         assert!(matches!(
-            &scalar_schema.fields()[0].data_type,
+            &scalar_schema.logical_fields()[0].data_type,
             LogicalDataType::Byte
         ));
         assert!(matches!(
-            &scalar_schema.fields()[1].data_type,
+            &scalar_schema.logical_fields()[1].data_type,
             LogicalDataType::Float
         ));
         assert!(matches!(
-            &scalar_schema.fields()[2].data_type,
+            &scalar_schema.logical_fields()[2].data_type,
             LogicalDataType::Binary
         ));
         let scalar_expected_schema = scalar_schema.to_json().unwrap();
@@ -7673,7 +7685,7 @@ mod tests {
         let unioned = transformed.union(&transformed).unwrap();
         assert_eq!(unioned.count().unwrap(), 4);
         let unioned_schema = unioned.schema().unwrap();
-        let timestamp_field = &unioned_schema.fields()[0];
+        let timestamp_field = &unioned_schema.logical_fields()[0];
         assert!(matches!(
             &timestamp_field.data_type,
             LogicalDataType::TimestampNtz
@@ -7752,7 +7764,7 @@ mod tests {
         let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![
+        let logical = StructType::from_logical_fields(vec![
             StructField::new(
                 "items".into(),
                 robin_sparkless_core::DataType::ArrayWithNullability {
@@ -7834,10 +7846,10 @@ mod tests {
         let nested_metadata = [("origin".to_string(), serde_json::json!("nested IPC"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![StructField::new(
+        let logical = StructType::from_logical_fields(vec![StructField::new(
             "elements".into(),
             LogicalDataType::ArrayWithNullability {
-                element_type: Box::new(LogicalDataType::Struct(vec![
+                element_type: Box::new(LogicalDataType::LogicalStruct(vec![
                     StructField::new("id".into(), LogicalDataType::Integer, false)
                         .with_metadata(nested_metadata),
                     StructField::new("label".into(), LogicalDataType::String, true),
@@ -7861,13 +7873,13 @@ mod tests {
         let LogicalDataType::ArrayWithNullability {
             element_type,
             contains_null,
-        } = &transformed_schema.fields()[0].data_type
+        } = &transformed_schema.logical_fields()[0].data_type
         else {
             panic!("array-of-struct logical type must survive transformations");
         };
-        assert_eq!(transformed_schema.fields()[0].name, "payload");
+        assert_eq!(transformed_schema.logical_fields()[0].name, "payload");
         assert!(!contains_null);
-        let LogicalDataType::Struct(nested_fields) = element_type.as_ref() else {
+        let LogicalDataType::LogicalStruct(nested_fields) = element_type.as_ref() else {
             panic!("array element must retain its logical struct schema");
         };
         assert!(!nested_fields[0].nullable);
@@ -7915,12 +7927,12 @@ mod tests {
             .unwrap();
         let renamed_schema = renamed.schema().unwrap();
         let payload_schema = transformed_schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| field.name == "payload")
             .unwrap();
         let copy_schema = renamed_schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| field.name == "payload_copy")
             .unwrap();
@@ -7932,7 +7944,7 @@ mod tests {
         else {
             panic!("copied array must preserve its logical declaration");
         };
-        let LogicalDataType::Struct(copy_fields) = element_type.as_ref() else {
+        let LogicalDataType::LogicalStruct(copy_fields) = element_type.as_ref() else {
             panic!("copied array elements must preserve their logical struct");
         };
         assert!(!copy_fields[0].nullable);
@@ -8006,7 +8018,7 @@ mod tests {
         .with_name("items".into())
         .into_series();
         let physical = polars::prelude::DataFrame::new_infer_height(vec![items.into()]).unwrap();
-        let logical = StructType::new(vec![StructField::new(
+        let logical = StructType::from_logical_fields(vec![StructField::new(
             "items".into(),
             LogicalDataType::ArrayWithNullability {
                 element_type: Box::new(LogicalDataType::Integer),
@@ -8026,9 +8038,9 @@ mod tests {
             .unwrap();
         let unioned = projected.union(&projected).unwrap();
         let unioned_schema = unioned.schema().unwrap();
-        assert_eq!(unioned_schema.fields()[0].name, "payload");
+        assert_eq!(unioned_schema.logical_fields()[0].name, "payload");
         assert!(matches!(
-            &unioned_schema.fields()[0].data_type,
+            &unioned_schema.logical_fields()[0].data_type,
             LogicalDataType::ArrayWithNullability {
                 contains_null: false,
                 ..
@@ -8094,9 +8106,9 @@ mod tests {
         let nested_metadata = [("origin".to_string(), serde_json::json!("shared catalog"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![StructField::new(
+        let logical = StructType::from_logical_fields(vec![StructField::new(
             "payload".into(),
-            robin_sparkless_core::DataType::Struct(vec![
+            robin_sparkless_core::DataType::LogicalStruct(vec![
                 StructField::new("id".into(), robin_sparkless_core::DataType::Integer, false)
                     .with_metadata(nested_metadata),
                 StructField::new("label".into(), robin_sparkless_core::DataType::String, true),
@@ -8117,10 +8129,11 @@ mod tests {
             .select_exprs(vec![col("payload").alias("copy")])
             .unwrap();
         let projected_schema = projected.schema().unwrap();
-        let projected_field = &projected_schema.fields()[0];
+        let projected_field = &projected_schema.logical_fields()[0];
         assert_eq!(projected_field.name, "copy");
         assert!(projected_field.nullable);
-        let robin_sparkless_core::DataType::Struct(nested_fields) = &projected_field.data_type
+        let robin_sparkless_core::DataType::LogicalStruct(nested_fields) =
+            &projected_field.data_type
         else {
             panic!("projected payload must retain its nested logical schema");
         };
@@ -8174,9 +8187,9 @@ mod tests {
             let nested_metadata = [("origin".to_string(), serde_json::json!("shared catalog"))]
                 .into_iter()
                 .collect();
-            let logical = StructType::new(vec![StructField::new(
+            let logical = StructType::from_logical_fields(vec![StructField::new(
                 "payload".into(),
-                LogicalDataType::Struct(vec![
+                LogicalDataType::LogicalStruct(vec![
                     StructField::new("id".into(), LogicalDataType::Integer, false)
                         .with_metadata(nested_metadata),
                     StructField::new("label".into(), LogicalDataType::String, true),
@@ -8229,17 +8242,17 @@ mod tests {
             ])
             .unwrap();
         let duplicated_schema = duplicated.schema().unwrap();
-        assert_eq!(duplicated_schema.fields().len(), 2);
+        assert_eq!(duplicated_schema.logical_fields().len(), 2);
         assert_eq!(
             duplicated_schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .map(|field| field.name.as_str())
                 .collect::<Vec<_>>(),
             ["payload", "payload_1"]
         );
-        for field in duplicated_schema.fields() {
-            let LogicalDataType::Struct(fields) = &field.data_type else {
+        for field in duplicated_schema.logical_fields() {
+            let LogicalDataType::LogicalStruct(fields) = &field.data_type else {
                 panic!("duplicate nested labels must retain their struct schema");
             };
             assert!(!fields[0].nullable);
@@ -8281,9 +8294,10 @@ mod tests {
         assert_eq!(projected.count().unwrap(), 4);
         assert_nested_ids(&projected, "renamed", &[Some(1), Some(3), Some(1), Some(3)]);
         let schema = projected.schema().unwrap();
-        assert_eq!(schema.fields().len(), 1);
-        assert_eq!(schema.fields()[0].name, "renamed");
-        let LogicalDataType::Struct(nested_fields) = &schema.fields()[0].data_type else {
+        assert_eq!(schema.logical_fields().len(), 1);
+        assert_eq!(schema.logical_fields()[0].name, "renamed");
+        let LogicalDataType::LogicalStruct(nested_fields) = &schema.logical_fields()[0].data_type
+        else {
             panic!("nested logical struct must survive union, filter, and projection");
         };
         assert!(!nested_fields[0].nullable);
@@ -8291,10 +8305,10 @@ mod tests {
 
         let dotted = source.select(vec!["payload.id"]).unwrap();
         let nested_field = dotted.schema().unwrap();
-        assert_eq!(nested_field.fields()[0].name, "id");
-        assert!(nested_field.fields()[0].nullable);
+        assert_eq!(nested_field.logical_fields()[0].name, "id");
+        assert!(nested_field.logical_fields()[0].nullable);
         assert_eq!(
-            nested_field.fields()[0].metadata["origin"],
+            nested_field.logical_fields()[0].metadata["origin"],
             "shared catalog"
         );
         let dotted_values = dotted.collect().unwrap();
@@ -8324,10 +8338,12 @@ mod tests {
             .select_items(vec![SelectItem::Expr(col("payload").alias("item_payload"))])
             .unwrap();
         let selected_items = selected_items_frame.schema().unwrap();
-        let LogicalDataType::Struct(item_fields) = &selected_items.fields()[0].data_type else {
+        let LogicalDataType::LogicalStruct(item_fields) =
+            &selected_items.logical_fields()[0].data_type
+        else {
             panic!("mixed select must retain the nested logical schema");
         };
-        assert_eq!(selected_items.fields()[0].name, "item_payload");
+        assert_eq!(selected_items.logical_fields()[0].name, "item_payload");
         assert!(!item_fields[0].nullable);
         assert_eq!(item_fields[0].metadata["origin"], "shared catalog");
         assert_nested_ids(
@@ -8341,10 +8357,10 @@ mod tests {
             .unwrap()
             .schema()
             .unwrap();
-        assert_eq!(selected_nested_item.fields()[0].name, "id");
-        assert!(selected_nested_item.fields()[0].nullable);
+        assert_eq!(selected_nested_item.logical_fields()[0].name, "id");
+        assert!(selected_nested_item.logical_fields()[0].nullable);
         assert_eq!(
-            selected_nested_item.fields()[0].metadata["origin"],
+            selected_nested_item.logical_fields()[0].metadata["origin"],
             "shared catalog"
         );
 
@@ -8352,10 +8368,12 @@ mod tests {
             .select_expr(&["payload as expr_payload".to_string()])
             .unwrap();
         let selected_expr = selected_expr_frame.schema().unwrap();
-        let LogicalDataType::Struct(expr_fields) = &selected_expr.fields()[0].data_type else {
+        let LogicalDataType::LogicalStruct(expr_fields) =
+            &selected_expr.logical_fields()[0].data_type
+        else {
             panic!("selectExpr must retain the nested logical schema");
         };
-        assert_eq!(selected_expr.fields()[0].name, "expr_payload");
+        assert_eq!(selected_expr.logical_fields()[0].name, "expr_payload");
         assert!(!expr_fields[0].nullable);
         assert_eq!(expr_fields[0].metadata["origin"], "shared catalog");
         assert_nested_ids(
@@ -8368,8 +8386,10 @@ mod tests {
             .with_column_expr("payload_copy", col("payload"))
             .unwrap();
         let copied_schema = copied.schema().unwrap();
-        assert_eq!(copied_schema.fields().len(), 2);
-        let LogicalDataType::Struct(copied_fields) = &copied_schema.fields()[1].data_type else {
+        assert_eq!(copied_schema.logical_fields().len(), 2);
+        let LogicalDataType::LogicalStruct(copied_fields) =
+            &copied_schema.logical_fields()[1].data_type
+        else {
             panic!("a copied nested column must retain its logical struct type");
         };
         assert!(!copied_fields[0].nullable);
@@ -8380,10 +8400,12 @@ mod tests {
             .with_column_renamed("payload", "renamed_payload")
             .unwrap();
         let renamed_schema = renamed.schema().unwrap();
-        let LogicalDataType::Struct(renamed_fields) = &renamed_schema.fields()[0].data_type else {
+        let LogicalDataType::LogicalStruct(renamed_fields) =
+            &renamed_schema.logical_fields()[0].data_type
+        else {
             panic!("renaming must retain the nested logical schema");
         };
-        assert_eq!(renamed_schema.fields()[0].name, "renamed_payload");
+        assert_eq!(renamed_schema.logical_fields()[0].name, "renamed_payload");
         assert!(!renamed_fields[0].nullable);
         assert_eq!(renamed_fields[0].metadata["origin"], "shared catalog");
         assert_nested_ids(&renamed, "renamed_payload", &[Some(1), None, Some(3)]);
@@ -8487,9 +8509,9 @@ mod tests {
             let metadata = [("origin".to_string(), serde_json::json!(metadata_value))]
                 .into_iter()
                 .collect();
-            let logical = StructType::new(vec![StructField::new(
+            let logical = StructType::from_logical_fields(vec![StructField::new(
                 "payload".into(),
-                LogicalDataType::Struct(vec![
+                LogicalDataType::LogicalStruct(vec![
                     StructField::new("id".into(), LogicalDataType::Integer, false)
                         .with_metadata(metadata),
                     StructField::new("label".into(), LogicalDataType::String, true),
@@ -8627,7 +8649,7 @@ mod tests {
                 }
             }
             DataFrame::from_polars(PlDataFrame::new_infer_height(columns).unwrap())
-                .with_logical_schema(StructType::new(fields))
+                .with_logical_schema(StructType::from_logical_fields(fields))
                 .unwrap()
         }
 
@@ -8656,7 +8678,7 @@ mod tests {
         let schema = appended.schema().unwrap();
         assert_eq!(
             schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .map(|field| field.name.as_str())
                 .collect::<Vec<_>>(),
@@ -8685,7 +8707,7 @@ mod tests {
 
         let appended = session.table(&table_name).unwrap();
         assert_eq!(appended.count().unwrap(), 2);
-        assert!(appended.schema().unwrap().fields()[0].nullable);
+        assert!(appended.schema().unwrap().logical_fields()[0].nullable);
         assert!(session.drop_table(&table_name));
     }
 
@@ -8729,7 +8751,7 @@ mod tests {
         let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![
+        let logical = StructType::from_logical_fields(vec![
             StructField::new("id".into(), robin_sparkless_core::DataType::Long, false)
                 .with_metadata(metadata),
         ]);
@@ -8739,7 +8761,7 @@ mod tests {
 
         let filtered = source.filter(col("id").gt(lit(1i64))).unwrap();
         let filtered_schema = filtered.schema().unwrap();
-        let field = &filtered_schema.fields()[0];
+        let field = &filtered_schema.logical_fields()[0];
         assert!(!field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
 
@@ -8747,7 +8769,7 @@ mod tests {
             .select_exprs(vec![col("id").cast(DataType::Float64).alias("cast_id")])
             .unwrap();
         let casted_schema = casted.schema().unwrap();
-        let field = &casted_schema.fields()[0];
+        let field = &casted_schema.logical_fields()[0];
         assert!(matches!(
             field.data_type,
             robin_sparkless_core::DataType::Double
@@ -8759,14 +8781,14 @@ mod tests {
             .select_exprs(vec![col("id").alias("renamed")])
             .unwrap();
         let projected_schema = projected.schema().unwrap();
-        let field = &projected_schema.fields()[0];
+        let field = &projected_schema.logical_fields()[0];
         assert_eq!(field.name, "renamed");
         assert!(!field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
 
         let unioned = projected.union(&projected).unwrap();
         let unioned_schema = unioned.schema().unwrap();
-        let field = &unioned_schema.fields()[0];
+        let field = &unioned_schema.logical_fields()[0];
         assert!(!field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
     }
@@ -8779,7 +8801,7 @@ mod tests {
         let left_array = Series::new("items".into(), [left_values]);
         let left =
             DataFrame::from_polars(PlDataFrame::new_infer_height(vec![left_array.into()]).unwrap())
-                .with_logical_schema(StructType::new(vec![StructField::new(
+                .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
                     "items".into(),
                     LogicalDataType::ArrayWithNullability {
                         element_type: Box::new(LogicalDataType::Integer),
@@ -8794,7 +8816,7 @@ mod tests {
         let right = DataFrame::from_polars(
             PlDataFrame::new_infer_height(vec![right_array.into()]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![StructField::new(
+        .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
             "items".into(),
             LogicalDataType::ArrayWithNullability {
                 element_type: Box::new(LogicalDataType::Long),
@@ -8806,7 +8828,7 @@ mod tests {
 
         let unioned = left.union(&right).unwrap();
         assert!(matches!(
-            &unioned.schema().unwrap().fields()[0].data_type,
+            &unioned.schema().unwrap().logical_fields()[0].data_type,
             LogicalDataType::ArrayWithNullability {
                 element_type,
                 contains_null: true,
@@ -8823,7 +8845,7 @@ mod tests {
         let declared = DataFrame::from_polars(
             PlDataFrame::new_infer_height(vec![declared_array.into()]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![StructField::new(
+        .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
             "items".into(),
             LogicalDataType::ArrayWithNullability {
                 element_type: Box::new(LogicalDataType::Long),
@@ -8841,7 +8863,7 @@ mod tests {
 
         let unioned = declared.union(&undeclared).unwrap();
         assert!(matches!(
-            &unioned.schema().unwrap().fields()[0].data_type,
+            &unioned.schema().unwrap().logical_fields()[0].data_type,
             LogicalDataType::ArrayWithNullability {
                 contains_null: true,
                 ..
@@ -8860,7 +8882,7 @@ mod tests {
         );
         let table_name = format!("append_nullability_{}", std::process::id());
         let existing = DataFrame::from_polars(polars::prelude::df!("value" => [1_i64]).unwrap())
-            .with_logical_schema(StructType::new(vec![StructField::new(
+            .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
                 "value".into(),
                 LogicalDataType::Long,
                 false,
@@ -8913,9 +8935,9 @@ mod tests {
         let saved = DataFrame::from_polars(
             polars::prelude::DataFrame::new_infer_height(vec![saved_payload.into()]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![StructField::new(
+        .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
             "payload".into(),
-            LogicalDataType::Struct(vec![StructField::new(
+            LogicalDataType::LogicalStruct(vec![StructField::new(
                 "child".into(),
                 LogicalDataType::Long,
                 false,
@@ -8956,7 +8978,7 @@ mod tests {
             .into_iter()
             .collect();
         let numeric = DataFrame::from_polars(polars::prelude::df!("key" => [1i64]).unwrap())
-            .with_logical_schema(StructType::new(vec![
+            .with_logical_schema(StructType::from_logical_fields(vec![
                 StructField::new("key".into(), LogicalDataType::Long, false)
                     .with_metadata(metadata),
             ]))
@@ -8966,14 +8988,14 @@ mod tests {
 
         let first = numeric.union(&text).unwrap();
         let first_schema = first.schema().unwrap();
-        let first_field = &first_schema.fields()[0];
+        let first_field = &first_schema.logical_fields()[0];
         assert!(matches!(&first_field.data_type, LogicalDataType::String));
         assert!(first_field.nullable);
         assert_eq!(first_field.metadata["owner"], "left");
 
         let chained = first.union(&third_number).unwrap();
         let chained_schema = chained.schema().unwrap();
-        let chained_field = &chained_schema.fields()[0];
+        let chained_field = &chained_schema.logical_fields()[0];
         assert!(matches!(&chained_field.data_type, LogicalDataType::String));
         assert_eq!(chained_field.metadata["owner"], "left");
         let (_, rows, _) = chained.collect_as_json_rows_with_names().unwrap();
@@ -8990,7 +9012,7 @@ mod tests {
         let right = DataFrame::from_polars(
             polars::prelude::df!("extra" => [9i64], "payload" => [2i64]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![
+        .with_logical_schema(StructType::from_logical_fields(vec![
             StructField::new("extra".into(), robin_sparkless_core::DataType::Long, false)
                 .with_metadata(
                     [("owner".to_string(), serde_json::json!("extra"))]
@@ -9012,9 +9034,9 @@ mod tests {
 
         let combined = left.union_by_name(&right, false).unwrap();
         let schema = combined.schema().unwrap();
-        assert_eq!(schema.fields().len(), 1);
-        assert_eq!(schema.fields()[0].name, "payload");
-        assert_eq!(schema.fields()[0].metadata["owner"], "payload");
+        assert_eq!(schema.logical_fields().len(), 1);
+        assert_eq!(schema.logical_fields()[0].name, "payload");
+        assert_eq!(schema.logical_fields()[0].metadata["owner"], "payload");
         let rows = combined.collect_as_json_rows().unwrap();
         assert_eq!(rows[0]["payload"], serde_json::json!(1));
         assert_eq!(rows[1]["payload"], serde_json::json!(2));
@@ -9023,7 +9045,7 @@ mod tests {
     #[test]
     fn logical_schema_attachment_checks_physical_type_compatibility() {
         let physical = polars::prelude::df!("id" => [1i64]).unwrap();
-        let logical = StructType::new(vec![StructField::new(
+        let logical = StructType::from_logical_fields(vec![StructField::new(
             "id".into(),
             robin_sparkless_core::DataType::Double,
             true,

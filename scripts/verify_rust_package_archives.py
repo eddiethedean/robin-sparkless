@@ -7,10 +7,7 @@ import sys
 import tarfile
 from pathlib import Path
 
-try:
-    import tomllib
-except ImportError:  # Python 3.8–3.10 developer environments.
-    import tomli as tomllib
+import tomllib
 
 
 PUBLISHABLE_MANIFESTS = (

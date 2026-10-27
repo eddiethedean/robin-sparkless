@@ -135,7 +135,7 @@ class ReleaseVersionsTest(unittest.TestCase):
                     'server=["sparkless-server-bin==4.17.0"]\n'
                 ),
                 "python/server-bin/pyproject.toml": (
-                    '[project]\nname="sparkless-server-bin"\nversion="4.17.0"\n'
+                    '[project]\nname="sparkless-server-bin"\nversion="4.17.0"\nrequires-python=">=3.11"\n'
                 ),
             }
             for relative, contents in files.items():

@@ -15,10 +15,7 @@ import tempfile
 
 import maturin
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+import tomllib
 
 
 def __getattr__(name):

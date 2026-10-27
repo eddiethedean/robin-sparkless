@@ -2,7 +2,7 @@
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Validation](VALIDATION.md)
 
-**Status:** D05's coordinated package-version policy is resolved by the [4.16+ release roadmap](ROADMAP.md); a staged native D10 fingerprint record appears below. The remaining decisions, complete 4.17 native/HTTP outcome validation, package platform matrix, and release evidence remain open. All first-party packages publish together at 4.16.0, then 4.17.0, and so forth, including `spark-sql-parser`. Owners and implementation issue/PR links are unassigned. The Spark 4.0 family is an evaluation target, not a declared tested patch version.
+**Status:** The standalone D02–D04/D07–D11 contract and Python 3.11 minimum are frozen for 4.17 below; final candidate and distribution evidence remain open. D05's coordinated package versions remain resolved. Future Connect/client/protocol and later-phase choices remain outside the 4.17 gate.
 
 Do not replace an unresolved value with a guessed version or silently treat a recommendation as implemented. Record resolution date, owner, exact immutable revisions, rationale, impacted plans, and validation evidence here.
 
@@ -18,9 +18,24 @@ D14 must select a native source/driver and prove database ownership, stable snap
 
 The [4.16 implementation plan](RELEASE_4_16.md) proposes concrete choices for D02/D04 (restricted SQL, explicit server semantics, exact scalar results), D06 (owned JSON-lines control), D07/D08 (operation accounting and bounded defaults), D09 (read-only ephemeral sessions), and the HTTP scalar slice of D11. These are design baselines to verify in slices 416-01 through 416-08, not completed compatibility decisions or test evidence. Record deviations and their impact before freezing the contracts. All unrelated platform/version choices remain open; the shared 4.16.0 package-version policy is already fixed.
 
+## 4.17 frozen standalone implementation contract (2026-10-27)
+
+Release owner: project maintainer, implementation and evidence in [PR #1727](https://github.com/eddiethedean/robin-sparkless/pull/1727). The maintainer chose to preserve the existing Rust source API and set Python 3.11 as the minimum for this release. The staged entries below are historical; these are the implemented choices for D02–D04 and D07–D11. Gate acceptance still requires the final candidate run and the dependency-security hold to clear.
+
+| Decision | Frozen 4.17 contract | Implementation / validation |
+| --- | --- | --- |
+| D02–D04 | HTTP only; agent/mutation protocol `1`, control protocol `1`; native server uses ANSI casts, UTC and case-insensitive identifiers. Supported managed DDL, atomic INSERT and local views are the explicit allowlist in `RELEASE_4_17.md`; unsupported descendants fail before effects. Scalar HTTP results remain positional and exact, with nested/BINARY/BYTE/FLOAT32/NTZ remote expansion disabled. | `validate_statement`, `execute_statement`, HTTP golden/type/rejection tests in `crates/sparkless-server/src/lib.rs` |
+| D07/D10 | Request identities are scoped to the running instance and exact request/session generation/context. Same-identity replay has one effect and retains the original outcome after close or disconnect; reusing an identity with changed request bytes or another live session generation conflicts. Status lookup creates no record, restart creates an empty catalog/new identity, no eviction or durable recovery is promised. Exact retained replay bypasses saturated compute admission. | Native/direct-HTTP duplicate, conflict, deadline, close, disconnect, capacity, and restart fixtures; packaged verifier repeats effects/replay/status |
+| D08 | Defaults: 2 active/16 pending operations, 64 sessions, 15-minute idle TTL, 1 MiB request/256 KiB SQL, 10k result rows/8 MiB result/1 MiB cell; 1,024 records/4 MiB retained outcomes; 128 databases/1,024 tables/128 views per session; 64 MiB table/256 MiB accounted catalog. Parsing and validation use bounded blocking compute before execution; timeouts retain ownership until their producer exits. Catalog accounting measures shared visible buffers, not RSS. | `ServerConfig`, catalog/reservation tests, admitted large rejected-SQL health witness, SHA-bound V17 resource report in candidate workflow |
+| D09 | Catalog ownership is per service instance; saved tables outlive session close/TTL; temporary views/current database remain local. Reads pin one statement snapshot; writer publication is serialized and atomic; old versions stay charged while pinned. | Shared-catalog/session lifecycle, snapshot interleaving and retention-pressure tests |
+| D11 | Legacy `StructField` literals, `StructType::new` and `fields()` remain source-compatible. Additive `LogicalField`, `from_logical_fields()` and `logical_fields()` retain metadata; nested descriptors use `LogicalStruct` while preserving the existing JSON `Struct` tag. Metadata is capped at 32 KiB per schema/depth 16. Checked unsupported mappings fail; native schema/IPC tests do not enable new HTTP result types. | External-style source fixture, legacy/nested JSON round trips, conversion, transformation, append, union, outer-join and Arrow IPC fixtures |
+| Python distribution | Python >=3.11 for `sparkless` and `sparkless-server-bin`; CPython 3.11 ABI3 extension wheels; supported test interpreters 3.11–3.14. No 3.8–3.10 distributions/support. | Manifest/ABI policy and candidate wheel/sdist metadata checks |
+
+External SDK/emulator acceptance and future Connect, DuckDB, durable catalog, and Python-worker work remain outside this release. V32 is a post-publication verification step; it cannot substitute for the pre-publication candidate checks.
+
 ## 4.17 implementation baseline
 
-The [4.17 implementation plan](RELEASE_4_17.md) proposes staged extensions to the 4.16 contracts. The native D10 fingerprint construction is recorded below at an implementation stage; the other 417-01 choices and the complete native/direct-HTTP outcome matrix remain unresolved. Component evidence does not pass the release gates.
+Historical staged record, superseded for the standalone release by the frozen 2026-10-27 contract above. The [4.17 implementation plan](RELEASE_4_17.md) originally proposed these extensions to 4.16. The native D10 fingerprint construction is recorded below at an implementation stage; the other 417-01 choices and the complete native/direct-HTTP outcome matrix remain unresolved. Component evidence does not pass the release gates.
 
 | Decisions | Phase 1 choices to verify | Required evidence |
 | --- | --- | --- |

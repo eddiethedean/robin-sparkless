@@ -30,7 +30,8 @@ use robin_sparkless::dataframe::{
 use robin_sparkless::functions::{self, asc_from_name, SortOrder, ThenBuilder, WhenBuilder};
 use robin_sparkless::{
     schema_from_json, Column, CubeRollupData, DataFrame, DataType, GroupBySpec, GroupedData,
-    SelectItem, SparkSession, SparkSessionBuilder, StructField, StructType, StructTypePolarsExt,
+    LogicalField as StructField, SelectItem, SparkSession, SparkSessionBuilder, StructType,
+    StructTypePolarsExt,
 };
 use robin_sparkless_core::{
     normalize_unresolved_column_message, CancellationToken, DataType as CoreDataType,
@@ -713,9 +714,9 @@ fn json_value_to_py_with_schema(
             }
             dict.into_py_any(py)?
         }
-        (Some(DataType::Array(elem_type)), JsonValue::Object(obj)) if matches!(elem_type.as_ref(), DataType::Struct(fields) if fields.iter().any(|f| f.name == "key") && fields.iter().any(|f| f.name == "value")) =>
+        (Some(DataType::Array(elem_type)), JsonValue::Object(obj)) if matches!(elem_type.as_ref(), DataType::LogicalStruct(fields) if fields.iter().any(|f| f.name == "key") && fields.iter().any(|f| f.name == "value")) =>
         {
-            let DataType::Struct(fields) = elem_type.as_ref() else {
+            let DataType::LogicalStruct(fields) = elem_type.as_ref() else {
                 unreachable!()
             };
             let key_type = &fields.iter().find(|f| f.name == "key").unwrap().data_type;
@@ -820,7 +821,7 @@ fn json_value_to_py_with_schema(
             }
             s.clone().into_py_any(py)?
         }
-        (Some(DataType::Struct(fields)), JsonValue::Object(obj)) => {
+        (Some(DataType::LogicalStruct(fields)), JsonValue::Object(obj)) => {
             let dict = PyDict::new(py);
             for f in fields {
                 let v = obj.get(&f.name).unwrap_or(&JsonValue::Null);
@@ -838,7 +839,7 @@ fn json_value_to_py_with_schema(
             dict.into_py_any(py)?
         }
         // #1066: Struct (top-level or nested) may be stringified; parse so row["my_struct"]["nested"] is dict.
-        (Some(DataType::Struct(fields)), JsonValue::String(s)) => {
+        (Some(DataType::LogicalStruct(fields)), JsonValue::String(s)) => {
             if let Ok(JsonValue::Object(obj)) = serde_json::from_str::<JsonValue>(s) {
                 let dict = PyDict::new(py);
                 for f in fields {
@@ -1158,7 +1159,7 @@ fn delta_map_paths_for_sql_query(
                 .map(|table| {
                     table
                         .schema
-                        .fields()
+                        .logical_fields()
                         .iter()
                         .map(|field| field.name.clone())
                         .collect()
@@ -2465,7 +2466,7 @@ fn spark_type_to_arrow_type(
                 .call1((key_type, value_type))?
                 .into_py_any(py);
         }
-        DataType::Struct(fields) => {
+        DataType::LogicalStruct(fields) => {
             let py_fields = PyList::empty(py);
             for field in fields {
                 let field_type = spark_type_to_arrow_type(py, pa, &field.data_type)?;
@@ -2494,7 +2495,7 @@ fn spark_type_to_arrow_type_with_maps(
         let (key_type, value_type) = match data_type {
             DataType::Map(key_type, value_type) => (key_type.as_ref(), value_type.as_ref()),
             DataType::Array(element_type) => {
-                let DataType::Struct(fields) = element_type.as_ref() else {
+                let DataType::LogicalStruct(fields) = element_type.as_ref() else {
                     return spark_type_to_arrow_type(py, pa, data_type);
                 };
                 let (Some(key_type), Some(value_type)) = (
@@ -2538,7 +2539,7 @@ fn spark_type_to_arrow_type_with_maps(
             )?;
             pa.getattr("list_")?.call1((element_type,))?.into_py_any(py)
         }
-        DataType::Struct(fields) => {
+        DataType::LogicalStruct(fields) => {
             let py_fields = PyList::empty(py);
             for field in fields {
                 let field_type = spark_type_to_arrow_type_with_maps(
@@ -2590,7 +2591,7 @@ fn normalize_arrow_value_with_maps(
         let (key_type, value_type) = match data_type {
             DataType::Map(key_type, value_type) => (key_type.as_ref(), value_type.as_ref()),
             DataType::Array(element_type) => {
-                let DataType::Struct(fields) = element_type.as_ref() else {
+                let DataType::LogicalStruct(fields) = element_type.as_ref() else {
                     return value.clone().unbind().into_py_any(py);
                 };
                 let (Some(key), Some(item)) = (
@@ -2658,7 +2659,7 @@ fn normalize_arrow_value_with_maps(
     }
 
     match data_type {
-        DataType::Struct(fields) => {
+        DataType::LogicalStruct(fields) => {
             let source = if value.is_instance_of::<PyDict>() {
                 value.clone()
             } else if value.hasattr("asDict")? {
@@ -6311,7 +6312,7 @@ impl PyRDD {
                     inner
                         .schema()
                         .ok()
-                        .map(|s| s.fields().iter().map(|f| f.name.clone()).collect())
+                        .map(|s| s.logical_fields().iter().map(|f| f.name.clone()).collect())
                         .unwrap_or_else(|| col_names.clone()),
                     false,
                 )
@@ -6321,7 +6322,7 @@ impl PyRDD {
                 inner
                     .schema()
                     .ok()
-                    .map(|s| s.fields().iter().map(|f| f.name.clone()).collect())
+                    .map(|s| s.logical_fields().iter().map(|f| f.name.clone()).collect())
                     .unwrap_or_else(|| col_names.clone()),
                 false,
             )
@@ -7185,7 +7186,7 @@ impl PyDataFrame {
                 DataType::Array(element_type) => {
                     let is_key_value_struct = matches!(
                         element_type.as_ref(),
-                        DataType::Struct(fields)
+                        DataType::LogicalStruct(fields)
                             if fields.iter().any(|field| field.name == "key")
                                 && fields.iter().any(|field| field.name == "value")
                     );
@@ -7194,7 +7195,7 @@ impl PyDataFrame {
                     }
                     visit(element_type, &format!("{path}[]"), paths);
                 }
-                DataType::Struct(fields) => {
+                DataType::LogicalStruct(fields) => {
                     for field in fields {
                         visit(
                             &field.data_type,
@@ -7213,7 +7214,7 @@ impl PyDataFrame {
 
         let output_type = target.inner.schema_engine().ok().and_then(|schema| {
             schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .find(|field| field.name == output)
                 .map(|field| field.data_type.clone())
@@ -8704,11 +8705,11 @@ impl PyDataFrame {
                 DataType::Binary => mk0("BinaryType"),
                 DataType::Array(elem)
                     if map_paths.contains(path)
-                        && matches!(elem.as_ref(), DataType::Struct(fields)
+                        && matches!(elem.as_ref(), DataType::LogicalStruct(fields)
                             if fields.iter().any(|field| field.name == "key")
                                 && fields.iter().any(|field| field.name == "value")) =>
                 {
-                    let DataType::Struct(fields) = elem.as_ref() else {
+                    let DataType::LogicalStruct(fields) = elem.as_ref() else {
                         unreachable!()
                     };
                     let key = fields.iter().find(|field| field.name == "key").unwrap();
@@ -8737,8 +8738,7 @@ impl PyDataFrame {
                         dtype_to_py(py, types_mod, elem, &format!("{path}[]"), map_paths)?;
                     Ok(types_mod
                         .getattr("ArrayType")?
-                        // PySpark: many array-returning functions (including split) use
-                        // containsNull=False for elementType=string. We default to False
+                        // PySpark: many array-returning functions (including split) use // containsNull=False for elementType=string. We default to False
                         // here so schema.jsonValue() matches PySpark parity for cases
                         // like string.split_limit (issue #1390).
                         .call1((elem_py, false))?
@@ -8753,7 +8753,7 @@ impl PyDataFrame {
                         .call1((k_py, v_py, true))?
                         .into_py_any(py)?)
                 }
-                DataType::Struct(fields) => {
+                DataType::LogicalStruct(fields) => {
                     let mut py_fields: Vec<PyObject> = Vec::with_capacity(fields.len());
                     for f in fields {
                         let dt_obj = dtype_to_py(
@@ -8782,8 +8782,8 @@ impl PyDataFrame {
             }
         }
 
-        let mut py_fields: Vec<PyObject> = Vec::with_capacity(schema.fields().len());
-        for f in schema.fields() {
+        let mut py_fields: Vec<PyObject> = Vec::with_capacity(schema.logical_fields().len());
+        for f in schema.logical_fields() {
             let dt_obj = dtype_to_py(
                 py,
                 &types_mod,
@@ -8827,8 +8827,8 @@ impl PyDataFrame {
             })
             .map_err(to_py_err)?;
         let mut dtype_by_name: std::collections::HashMap<String, DataType> =
-            std::collections::HashMap::with_capacity(schema.fields().len());
-        for f in schema.fields() {
+            std::collections::HashMap::with_capacity(schema.logical_fields().len());
+        for f in schema.logical_fields() {
             dtype_by_name.insert(f.name.clone(), f.data_type.clone());
         }
 
@@ -8876,7 +8876,7 @@ impl PyDataFrame {
                         .call1((k_py, v_py, true))?
                         .into_py_any(py)?)
                 }
-                DataType::Struct(fields) => {
+                DataType::LogicalStruct(fields) => {
                     let mut py_fields: Vec<PyObject> = Vec::with_capacity(fields.len());
                     for f in fields {
                         let dt_obj = dtype_to_py(py, types_mod, &f.data_type)?;
@@ -8900,8 +8900,8 @@ impl PyDataFrame {
         }
 
         // Build StructType schema object once.
-        let mut py_fields: Vec<PyObject> = Vec::with_capacity(schema.fields().len());
-        for f in schema.fields() {
+        let mut py_fields: Vec<PyObject> = Vec::with_capacity(schema.logical_fields().len());
+        for f in schema.logical_fields() {
             let dt_obj = dtype_to_py(py, &types_mod, &f.data_type)?;
             let sf = struct_field_cls.call1((f.name.clone(), dt_obj, f.nullable, py.None()))?;
             py_fields.push(sf.into_py_any(py)?);
@@ -10278,12 +10278,12 @@ impl PyDataFrame {
             })
             .map_err(to_py_err)?;
         let cols = schema
-            .fields()
+            .logical_fields()
             .iter()
             .map(|field| field.name.clone())
             .collect::<Vec<_>>();
         let dtype_by_name: std::collections::HashMap<String, DataType> = schema
-            .fields()
+            .logical_fields()
             .iter()
             .map(|field| (field.name.clone(), field.data_type.clone()))
             .collect();
@@ -10339,8 +10339,8 @@ impl PyDataFrame {
         }
         let arrays = PyList::empty(py);
         let arrow_fields = PyList::empty(py);
-        let mut output_names = Vec::with_capacity(schema.fields().len());
-        for field in schema.fields() {
+        let mut output_names = Vec::with_capacity(schema.logical_fields().len());
+        for field in schema.logical_fields() {
             token.check_cancelled().map_err(to_py_err)?;
             output_names.push(field.name.clone());
             let values = PyList::empty(py);
@@ -10348,7 +10348,7 @@ impl PyDataFrame {
             let map_shaped_dtype = matches!(
                 &field.data_type,
                 DataType::Array(element_type)
-                    if matches!(element_type.as_ref(), DataType::Struct(fields)
+                    if matches!(element_type.as_ref(), DataType::LogicalStruct(fields)
                         if fields.iter().any(|field| field.name == "key")
                             && fields.iter().any(|field| field.name == "value"))
             );
@@ -10533,7 +10533,7 @@ impl PyDataFrame {
     fn dtypes(&self) -> PyResult<Vec<(String, String)>> {
         let schema = self.inner.schema_engine().map_err(to_py_err)?;
         Ok(schema
-            .fields()
+            .logical_fields()
             .iter()
             .map(|f| {
                 let ty = match &f.data_type {
@@ -10553,7 +10553,7 @@ impl PyDataFrame {
                     DataType::Binary => "binary".to_string(),
                     DataType::Array(_) => "array".to_string(),
                     DataType::Map(_, _) => "map".to_string(),
-                    DataType::Struct(_) => "struct".to_string(),
+                    DataType::LogicalStruct(_) => "struct".to_string(),
                     _ => "unknown".to_string(),
                 };
                 (f.name.clone(), ty)
@@ -14793,7 +14793,7 @@ fn ddl_schema_str_to_polars_dtype(ddl: &str) -> PyResult<polars::prelude::DataTy
         .into_iter()
         .map(|(name, typ)| StructField::new(name, py_type_str_to_core_data_type(&typ), true))
         .collect();
-    let st = StructType::new(fields);
+    let st = StructType::from_logical_fields(fields);
     let schema = st.to_polars_schema();
     let pl_fields: Vec<Field> = schema
         .iter()

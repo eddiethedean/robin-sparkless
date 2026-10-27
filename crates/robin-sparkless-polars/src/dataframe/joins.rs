@@ -646,7 +646,7 @@ pub fn join(
                         left_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == left_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -684,7 +684,7 @@ pub fn join(
                         let dtype = right_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == right_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -707,7 +707,7 @@ pub fn join(
                 let dtype = right_struct
                     .as_ref()
                     .and_then(|s| {
-                        s.fields()
+                        s.logical_fields()
                             .iter()
                             .find(|f| f.name.as_str() == right_name.as_str())
                             .map(|f| data_type_to_polars_type(&f.data_type))
@@ -757,7 +757,7 @@ pub fn join(
                         left_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == result_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -767,7 +767,7 @@ pub fn join(
                         right_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == base)
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -777,7 +777,7 @@ pub fn join(
                         right_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == result_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -971,7 +971,7 @@ mod tests {
         try_extract_join_eq_columns, try_extract_join_eq_columns_all,
     };
     use crate::functions::col;
-    use crate::schema::{DataType as LogicalDataType, StructField, StructType};
+    use crate::schema::{DataType as LogicalDataType, LogicalField as StructField, StructType};
     use crate::{DataFrame, SparkSession};
     use std::collections::HashMap;
 
@@ -1115,7 +1115,7 @@ mod tests {
             contains_null: false,
         };
         let left = DataFrame::from_polars(left_physical)
-            .with_logical_schema(StructType::new(vec![
+            .with_logical_schema(StructType::from_logical_fields(vec![
                 StructField::new("id".into(), LogicalDataType::Integer, false)
                     .with_metadata(metadata("left-key")),
                 StructField::new("payload".into(), list_type(), false)
@@ -1123,7 +1123,7 @@ mod tests {
             ]))
             .unwrap();
         let right = DataFrame::from_polars(right_physical)
-            .with_logical_schema(StructType::new(vec![
+            .with_logical_schema(StructType::from_logical_fields(vec![
                 StructField::new("id".into(), LogicalDataType::Integer, false)
                     .with_metadata(metadata("right-key")),
                 StructField::new("payload".into(), list_type(), false)
@@ -1136,7 +1136,7 @@ mod tests {
         let schema = joined.schema().unwrap();
         let field = |name: &str| {
             schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .find(|field| field.name == name)
                 .unwrap()
@@ -1189,14 +1189,14 @@ mod tests {
         let crossed = left.cross_join(&right).unwrap();
         let crossed_schema = crossed.schema().unwrap();
         let right_key = crossed_schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| field.name == "id_right")
             .unwrap();
         assert_eq!(right_key.metadata["origin"], "right-key");
         assert!(!right_key.nullable);
         let right_payload = crossed_schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| field.name == "payload_right")
             .unwrap();
@@ -1208,7 +1208,7 @@ mod tests {
         for name in ["payload", "payload_right"] {
             assert!(
                 full_schema
-                    .fields()
+                    .logical_fields()
                     .iter()
                     .find(|field| field.name == name)
                     .unwrap()
@@ -1224,7 +1224,7 @@ mod tests {
         ])
         .unwrap();
         let alias_left = DataFrame::from_polars(alias_left_physical)
-            .with_logical_schema(StructType::new(vec![
+            .with_logical_schema(StructType::from_logical_fields(vec![
                 StructField::new("id".into(), LogicalDataType::Integer, false),
                 StructField::new("payload".into(), list_type(), false)
                     .with_metadata(metadata("left-payload")),
@@ -1235,14 +1235,14 @@ mod tests {
         let alias_collision = alias_left.join(&right, vec!["id"], JoinType::Left).unwrap();
         let alias_schema = alias_collision.schema().unwrap();
         let alias_names = alias_schema
-            .fields()
+            .logical_fields()
             .iter()
             .map(|field| field.name.as_str())
             .collect::<Vec<_>>();
         assert!(alias_names.contains(&"payload_right_1"), "{alias_names:?}");
         assert_eq!(
             alias_schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .find(|field| field.name == "payload_right")
                 .unwrap()
@@ -1251,7 +1251,7 @@ mod tests {
         );
         assert_eq!(
             alias_schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .find(|field| field.name == "payload_right_1")
                 .unwrap()
@@ -1276,7 +1276,9 @@ mod tests {
             ])
             .unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![field("ID", false, "left")]))
+        .with_logical_schema(StructType::from_logical_fields(vec![field(
+            "ID", false, "left",
+        )]))
         .unwrap();
         let right = DataFrame::from_polars(
             polars::prelude::DataFrame::new_infer_height(vec![
@@ -1284,7 +1286,9 @@ mod tests {
             ])
             .unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![field("id", true, "right")]))
+        .with_logical_schema(StructType::from_logical_fields(vec![field(
+            "id", true, "right",
+        )]))
         .unwrap();
 
         let joined = left.cross_join(&right).unwrap();
@@ -1292,7 +1296,7 @@ mod tests {
         assert_eq!(rows.column("id").unwrap().null_count(), 1);
         let schema = joined.schema().unwrap();
         let right_id = schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| field.name == "id")
             .unwrap();
@@ -1330,7 +1334,7 @@ mod tests {
         ])
         .unwrap();
         let left = DataFrame::from_polars(left_physical)
-            .with_logical_schema(StructType::new(vec![
+            .with_logical_schema(StructType::from_logical_fields(vec![
                 StructField::new("id".into(), CoreDataType::Long, false),
                 StructField::new("a".into(), CoreDataType::Long, false),
                 StructField::new("a_right".into(), CoreDataType::Long, false),
@@ -1342,7 +1346,7 @@ mod tests {
             ]))
             .unwrap();
         let right = DataFrame::from_polars(right_physical)
-            .with_logical_schema(StructType::new(vec![
+            .with_logical_schema(StructType::from_logical_fields(vec![
                 StructField::new("id".into(), CoreDataType::Long, false),
                 StructField::new("a".into(), CoreDataType::Long, false)
                     .with_metadata(metadata("right-a")),
@@ -1356,7 +1360,7 @@ mod tests {
         for (name, origin) in [("a_right_5", "right-a"), ("b_right_5", "right-b")] {
             assert_eq!(
                 schema
-                    .fields()
+                    .logical_fields()
                     .iter()
                     .find(|field| field.name == name)
                     .unwrap()
@@ -1369,7 +1373,7 @@ mod tests {
             let joined = left.join(&right, vec!["id"], how).unwrap();
             let schema = joined.schema().unwrap();
             let right_a = schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .find(|field| field.name == "a_right_5")
                 .unwrap();
@@ -1388,7 +1392,7 @@ mod tests {
             );
             assert_eq!(
                 schema
-                    .fields()
+                    .logical_fields()
                     .iter()
                     .find(|field| field.name == "b_right")
                     .unwrap()
@@ -1426,12 +1430,12 @@ mod tests {
             let physical =
                 polars::prelude::DataFrame::new_infer_height(vec![key.into(), payload.into()])
                     .unwrap();
-            let nested = CoreDataType::Struct(vec![
+            let nested = CoreDataType::LogicalStruct(vec![
                 StructField::new("score".into(), CoreDataType::Integer, false)
                     .with_metadata(metadata(&format!("{side}-score"))),
                 StructField::new("label".into(), CoreDataType::String, false),
             ]);
-            let logical = StructType::new(vec![
+            let logical = StructType::from_logical_fields(vec![
                 StructField::new("id".into(), CoreDataType::Integer, false),
                 StructField::new("payload".into(), nested, false)
                     .with_metadata(metadata(&format!("{side}-payload"))),
@@ -1449,13 +1453,13 @@ mod tests {
         let schema = joined.schema().unwrap();
         for (name, side) in [("payload", "left"), ("payload_right", "right")] {
             let field = schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .find(|field| field.name == name)
                 .unwrap();
             assert!(field.nullable, "full outer join must make {name} nullable");
             assert_eq!(field.metadata["origin"], format!("{side}-payload"));
-            let CoreDataType::Struct(fields) = &field.data_type else {
+            let CoreDataType::LogicalStruct(fields) = &field.data_type else {
                 panic!("{name} must retain its nested struct type");
             };
             assert!(!fields[0].nullable, "the nested score remains non-nullable");
@@ -1530,7 +1534,7 @@ mod tests {
                 instant.into(),
             ])
             .unwrap();
-            let logical = StructType::new(vec![
+            let logical = StructType::from_logical_fields(vec![
                 StructField::new("id".into(), CoreDataType::Integer, false),
                 StructField::new("wall_clock".into(), CoreDataType::TimestampNtz, false),
                 StructField::new("instant".into(), CoreDataType::Timestamp, false),
@@ -1546,7 +1550,7 @@ mod tests {
         let schema = joined.schema().unwrap();
         for name in ["wall_clock", "wall_clock_right"] {
             let field = schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .find(|field| field.name == name)
                 .unwrap();
@@ -1555,7 +1559,7 @@ mod tests {
         }
         for name in ["instant", "instant_right"] {
             let field = schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .find(|field| field.name == name)
                 .unwrap();
@@ -1652,8 +1656,8 @@ mod tests {
         .unwrap();
         assert_eq!(out.count().unwrap(), 1);
         let schema = out.schema().unwrap();
-        let v_field = schema.fields().iter().find(|f| f.name == "v");
-        let w_field = schema.fields().iter().find(|f| f.name == "w");
+        let v_field = schema.logical_fields().iter().find(|f| f.name == "v");
+        let w_field = schema.logical_fields().iter().find(|f| f.name == "w");
         assert!(
             matches!(v_field.map(|f| &f.data_type), Some(CoreDataType::Long)),
             "v should be Long"

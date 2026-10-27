@@ -1,7 +1,7 @@
 //! Polars schema conversion for StructType. Kept in main crate (has Polars dependency).
 
 use polars::prelude::{DataType as PlDataType, Field, PolarsError, Schema, TimeUnit, TimeZone};
-use robin_sparkless_core::{DataType, StructField, StructType};
+use robin_sparkless_core::{DataType, LogicalField as StructField, StructType};
 
 /// Extension trait for Polars schema conversion. Implemented for [`StructType`] from core.
 /// Bring this trait into scope to use `StructType::from_polars_schema` and `to_polars_schema`.
@@ -25,12 +25,12 @@ impl StructTypePolarsExt for StructType {
                 metadata: Default::default(),
             })
             .collect();
-        StructType::new(fields)
+        StructType::from_logical_fields(fields)
     }
 
     fn to_polars_schema(&self) -> Schema {
         let fields: Vec<Field> = self
-            .fields()
+            .logical_fields()
             .iter()
             .map(|f| {
                 Field::new(
@@ -53,14 +53,14 @@ impl StructTypePolarsExt for StructType {
                 ))
             })
             .collect::<Result<Vec<_>, PolarsError>>()?;
-        Ok(StructType::new(fields))
+        Ok(StructType::from_logical_fields(fields))
     }
 
     fn try_to_polars_schema(&self) -> Result<Schema, PolarsError> {
         self.validate_metadata()
             .map_err(|error| PolarsError::ComputeError(error.into()))?;
         let fields = self
-            .fields()
+            .logical_fields()
             .iter()
             .map(|field| {
                 if !field.nullable {
@@ -95,6 +95,10 @@ fn ensure_polars_nested_schema_is_lossless(
     path: &str,
 ) -> Result<(), PolarsError> {
     match data_type {
+        DataType::Struct(fields) => ensure_polars_nested_schema_is_lossless(
+            &DataType::LogicalStruct(fields.iter().cloned().map(StructField::from).collect()),
+            path,
+        ),
         DataType::ArrayWithNullability {
             contains_null: false,
             ..
@@ -110,7 +114,7 @@ fn ensure_polars_nested_schema_is_lossless(
             ensure_polars_nested_schema_is_lossless(element, &format!("{path}[]"))?;
             Ok(())
         }
-        DataType::Struct(fields) => {
+        DataType::LogicalStruct(fields) => {
             for field in fields {
                 let nested_path = format!("{path}.{}", field.name);
                 if !field.nullable {
@@ -202,7 +206,11 @@ pub(crate) fn checked_data_type_to_polars_type(
         DataType::ArrayWithNullability { element_type, .. } => PlDataType::List(Box::new(
             checked_data_type_to_polars_type(element_type, path)?,
         )),
-        DataType::Struct(fields) => {
+        DataType::Struct(fields) => checked_data_type_to_polars_type(
+            &DataType::LogicalStruct(fields.iter().cloned().map(StructField::from).collect()),
+            path,
+        )?,
+        DataType::LogicalStruct(fields) => {
             let nested = fields
                 .iter()
                 .map(|field| {
@@ -240,7 +248,7 @@ fn polars_type_to_data_type(polars_type: &PlDataType) -> DataType {
         PlDataType::Datetime(_, _) => DataType::Timestamp,
         PlDataType::Binary => DataType::Binary,
         PlDataType::List(inner) => DataType::Array(Box::new(polars_type_to_data_type(inner))),
-        PlDataType::Struct(fields) => DataType::Struct(
+        PlDataType::Struct(fields) => DataType::LogicalStruct(
             fields
                 .iter()
                 .map(|f| {
@@ -278,7 +286,10 @@ pub(crate) fn data_type_to_polars_type(data_type: &DataType) -> PlDataType {
             element_type: inner,
             ..
         } => PlDataType::List(Box::new(data_type_to_polars_type(inner))),
-        DataType::Struct(fields) => PlDataType::Struct(
+        DataType::Struct(fields) => data_type_to_polars_type(&DataType::LogicalStruct(
+            fields.iter().cloned().map(StructField::from).collect(),
+        )),
+        DataType::LogicalStruct(fields) => PlDataType::Struct(
             fields
                 .iter()
                 .map(|f| {
@@ -307,9 +318,12 @@ mod tests {
             Field::new("active".into(), PlDataType::Boolean),
         ]);
         let struct_type = StructType::from_polars_schema(&polars_schema);
-        assert_eq!(struct_type.fields().len(), 4);
-        assert_eq!(struct_type.fields()[0].name, "id");
-        assert!(matches!(struct_type.fields()[0].data_type, DataType::Long));
+        assert_eq!(struct_type.logical_fields().len(), 4);
+        assert_eq!(struct_type.logical_fields()[0].name, "id");
+        assert!(matches!(
+            struct_type.logical_fields()[0].data_type,
+            DataType::Long
+        ));
     }
 
     #[test]
@@ -319,7 +333,7 @@ mod tests {
             StructField::new("name".to_string(), DataType::String, true),
             StructField::new("score".to_string(), DataType::Double, true),
         ];
-        let struct_type = StructType::new(fields);
+        let struct_type = StructType::from_logical_fields(fields);
         let polars_schema = struct_type.to_polars_schema();
         assert_eq!(polars_schema.len(), 3);
         assert_eq!(polars_schema.get("id"), Some(&PlDataType::Int64));
@@ -328,14 +342,17 @@ mod tests {
 
     #[test]
     fn test_roundtrip_schema_conversion() {
-        let original = StructType::new(vec![
+        let original = StructType::from_logical_fields(vec![
             StructField::new("a".to_string(), DataType::Integer, true),
             StructField::new("b".to_string(), DataType::Long, true),
             StructField::new("c".to_string(), DataType::Double, true),
         ]);
         let polars_schema = original.to_polars_schema();
         let roundtrip = StructType::from_polars_schema(&polars_schema);
-        assert_eq!(roundtrip.fields().len(), original.fields().len());
+        assert_eq!(
+            roundtrip.logical_fields().len(),
+            original.logical_fields().len()
+        );
     }
 
     /// Window rank/row_number return UInt32 in Polars; we map to Integer for PySpark parity (int in Row, not str).
@@ -346,12 +363,15 @@ mod tests {
             Field::new("rank".into(), PlDataType::UInt64),
         ]);
         let struct_type = StructType::from_polars_schema(&polars_schema);
-        assert_eq!(struct_type.fields().len(), 2);
+        assert_eq!(struct_type.logical_fields().len(), 2);
         assert!(matches!(
-            struct_type.fields()[0].data_type,
+            struct_type.logical_fields()[0].data_type,
             DataType::Integer
         ));
-        assert!(matches!(struct_type.fields()[1].data_type, DataType::Long));
+        assert!(matches!(
+            struct_type.logical_fields()[1].data_type,
+            DataType::Long
+        ));
     }
 
     #[test]
@@ -370,31 +390,43 @@ mod tests {
             Field::new("payload".into(), PlDataType::Binary),
         ]);
         let logical = StructType::try_from_polars_schema(&schema).unwrap();
-        assert!(matches!(logical.fields()[0].data_type, DataType::Byte));
-        assert!(matches!(logical.fields()[1].data_type, DataType::Float));
-        assert!(matches!(logical.fields()[2].data_type, DataType::Timestamp));
         assert!(matches!(
-            logical.fields()[3].data_type,
+            logical.logical_fields()[0].data_type,
+            DataType::Byte
+        ));
+        assert!(matches!(
+            logical.logical_fields()[1].data_type,
+            DataType::Float
+        ));
+        assert!(matches!(
+            logical.logical_fields()[2].data_type,
+            DataType::Timestamp
+        ));
+        assert!(matches!(
+            logical.logical_fields()[3].data_type,
             DataType::TimestampNtz
         ));
-        assert!(matches!(logical.fields()[4].data_type, DataType::Binary));
+        assert!(matches!(
+            logical.logical_fields()[4].data_type,
+            DataType::Binary
+        ));
 
         let physical = logical.try_to_polars_schema().unwrap();
         let logical_again = StructType::try_from_polars_schema(&physical).unwrap();
         assert!(matches!(
-            logical_again.fields()[0].data_type,
+            logical_again.logical_fields()[0].data_type,
             DataType::Byte
         ));
         assert!(matches!(
-            logical_again.fields()[1].data_type,
+            logical_again.logical_fields()[1].data_type,
             DataType::Float
         ));
         assert!(matches!(
-            logical_again.fields()[2].data_type,
+            logical_again.logical_fields()[2].data_type,
             DataType::Timestamp
         ));
         assert!(matches!(
-            logical_again.fields()[3].data_type,
+            logical_again.logical_fields()[3].data_type,
             DataType::TimestampNtz
         ));
     }
@@ -404,17 +436,20 @@ mod tests {
         let unsigned = Schema::from_iter(vec![Field::new("u".into(), PlDataType::UInt64)]);
         assert!(StructType::try_from_polars_schema(&unsigned).is_err());
 
-        let with_metadata = StructType::new(vec![
+        let with_metadata = StructType::from_logical_fields(vec![
             StructField::new("id".into(), DataType::Long, true)
                 .with_metadata([("source".to_string(), serde_json::json!("catalog"))].into()),
         ]);
         assert!(with_metadata.try_to_polars_schema().is_err());
 
-        let non_nullable =
-            StructType::new(vec![StructField::new("id".into(), DataType::Long, false)]);
+        let non_nullable = StructType::from_logical_fields(vec![StructField::new(
+            "id".into(),
+            DataType::Long,
+            false,
+        )]);
         assert!(non_nullable.try_to_polars_schema().is_err());
 
-        let nested = StructType::new(vec![StructField::new(
+        let nested = StructType::from_logical_fields(vec![StructField::new(
             "items".into(),
             DataType::ArrayWithNullability {
                 element_type: Box::new(DataType::Integer),
@@ -424,14 +459,14 @@ mod tests {
         )]);
         assert!(nested.try_to_polars_schema().is_err());
 
-        let map = StructType::new(vec![StructField::new(
+        let map = StructType::from_logical_fields(vec![StructField::new(
             "attributes".into(),
             DataType::Map(Box::new(DataType::String), Box::new(DataType::Integer)),
             true,
         )]);
         assert!(map.try_to_polars_schema().is_err());
 
-        let map_with_nullability = StructType::new(vec![StructField::new(
+        let map_with_nullability = StructType::from_logical_fields(vec![StructField::new(
             "required_attributes".into(),
             DataType::MapWithNullability {
                 key_type: Box::new(DataType::String),
@@ -448,9 +483,9 @@ mod tests {
         let metadata = [("source".to_string(), serde_json::json!("catalog"))]
             .into_iter()
             .collect();
-        let schema = StructType::new(vec![StructField::new(
+        let schema = StructType::from_logical_fields(vec![StructField::new(
             "payload".into(),
-            DataType::Struct(vec![
+            DataType::LogicalStruct(vec![
                 StructField::new("id".into(), DataType::Integer, false).with_metadata(metadata),
                 StructField::new("label".into(), DataType::String, true),
             ]),
@@ -459,13 +494,14 @@ mod tests {
 
         assert!(schema.try_to_polars_schema().is_err());
         assert!(matches!(
-            checked_data_type_to_polars_type(&schema.fields()[0].data_type, "payload").unwrap(),
+            checked_data_type_to_polars_type(&schema.logical_fields()[0].data_type, "payload")
+                .unwrap(),
             PlDataType::Struct(_)
         ));
 
-        let array_schema = StructType::new(vec![StructField::new(
+        let array_schema = StructType::from_logical_fields(vec![StructField::new(
             "items".into(),
-            DataType::Array(Box::new(DataType::Struct(vec![StructField::new(
+            DataType::Array(Box::new(DataType::LogicalStruct(vec![StructField::new(
                 "id".into(),
                 DataType::Integer,
                 false,
@@ -474,7 +510,8 @@ mod tests {
         )]);
         assert!(array_schema.try_to_polars_schema().is_err());
         assert!(matches!(
-            checked_data_type_to_polars_type(&array_schema.fields()[0].data_type, "items").unwrap(),
+            checked_data_type_to_polars_type(&array_schema.logical_fields()[0].data_type, "items")
+                .unwrap(),
             PlDataType::List(_)
         ));
     }

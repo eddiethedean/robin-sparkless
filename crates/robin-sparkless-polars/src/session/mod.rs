@@ -24,7 +24,9 @@ use polars_arrow::with_match_primitive_type_full;
 use robin_sparkless_core::engine::{
     ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
 };
-use robin_sparkless_core::schema::{DataType as CoreDataType, StructField, StructType};
+use robin_sparkless_core::schema::{
+    DataType as CoreDataType, LogicalField as StructField, StructType,
+};
 use robin_sparkless_core::{
     PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils,
     decimal_allow_precision_loss_from_session_map,
@@ -4561,7 +4563,7 @@ impl SparkSession {
         )?;
         DataFrame::from_lazy_with_options(lazy, self.is_case_sensitive())
             .with_range_cardinality(start, step, row_count)
-            .with_logical_schema(StructType::new(vec![StructField::new(
+            .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
                 "id".into(),
                 CoreDataType::Long,
                 false,
@@ -4940,8 +4942,8 @@ fn external_schemas_match(
     actual: &StructType,
     logical_map_paths: &[String],
 ) -> bool {
-    let expected_fields = expected.fields();
-    let actual_fields = actual.fields();
+    let expected_fields = expected.logical_fields();
+    let actual_fields = actual.logical_fields();
     expected_fields.len() == actual_fields.len()
         && expected_fields
             .iter()
@@ -4991,7 +4993,7 @@ fn external_data_types_match(
         (Map(expected_key, expected_value), Array(actual_entries))
             if logical_map_paths.iter().any(|p| p == path) =>
         {
-            let Struct(actual_fields) = actual_entries.as_ref() else {
+            let LogicalStruct(actual_fields) = actual_entries.as_ref() else {
                 return false;
             };
             actual_fields.len() == 2
@@ -5010,7 +5012,7 @@ fn external_data_types_match(
                     logical_map_paths,
                 )
         }
-        (Struct(expected_fields), Struct(actual_fields)) => {
+        (LogicalStruct(expected_fields), LogicalStruct(actual_fields)) => {
             expected_fields.len() == actual_fields.len()
                 && expected_fields
                     .iter()
@@ -7859,11 +7861,12 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("orders");
         let _actual_schema = write_test_delta_table(&path);
-        let wrong_schema = StructType::new(vec![robin_sparkless_core::StructField::new(
-            "id".into(),
-            CoreDataType::String,
-            true,
-        )]);
+        let wrong_schema =
+            StructType::from_logical_fields(vec![robin_sparkless_core::LogicalField::new(
+                "id".into(),
+                CoreDataType::String,
+                true,
+            )]);
         let descriptor = external_descriptor(&path, wrong_schema);
         let (provider, _) = test_external_catalog("main.analytics.orders", Some(descriptor), None);
         let session = SparkSession::builder()
@@ -7884,11 +7887,12 @@ mod tests {
     #[cfg(not(feature = "delta"))]
     fn external_catalog_requires_delta_feature_for_delta_descriptors() {
         let path = std::path::Path::new("/tmp/external-catalog-delta-feature-required");
-        let schema = StructType::new(vec![robin_sparkless_core::StructField::new(
-            "id".into(),
-            CoreDataType::Long,
-            true,
-        )]);
+        let schema =
+            StructType::from_logical_fields(vec![robin_sparkless_core::LogicalField::new(
+                "id".into(),
+                CoreDataType::Long,
+                true,
+            )]);
         let descriptor = external_descriptor(path, schema);
         let (provider, _) = test_external_catalog("main.analytics.orders", Some(descriptor), None);
         let session = SparkSession::builder()

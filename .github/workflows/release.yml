@@ -87,6 +87,30 @@ jobs:
       - name: Verify package manifests have no local dependency paths or patch tables
         run: python3 scripts/verify_rust_package_archives.py
 
+  rust-consumer-security:
+    name: Audit downstream Rust consumers without workspace patches
+    needs: [release-metadata]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Cargo audit
+        run: cargo install cargo-audit --locked
+      - name: Resolve and audit the graph consumers receive
+        run: python3 scripts/verify_rust_consumer_graph.py --output "$RUNNER_TEMP/rust-consumer-audit.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-consumer-audit
+          path: ${{ runner.temp }}/rust-consumer-audit.json
+          if-no-files-found: error
+
   # --- Rust ---
   format:
     name: Format
@@ -317,6 +341,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -379,7 +406,7 @@ jobs:
           python3 -m venv .venv
           .venv/bin/python -m pip install --no-index --find-links dist/sparkless --find-links dist/server-bin "sparkless[server]==${version}"
           .venv/bin/python -m pip check
-          .venv/bin/python scripts/verify_server_extra_install.py "$version"
+          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations
 
   server-container:
     name: Native server container build and smoke
@@ -418,7 +445,7 @@ jobs:
             docker rm -f "$name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          python3 scripts/verify_server_http.py http://127.0.0.1:18099
+          python3 scripts/verify_server_http.py http://127.0.0.1:18099 --mutations
           docker stop --time 10 "$name"
           exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
           if [[ "$exit_code" != 0 ]]; then
@@ -451,7 +478,7 @@ jobs:
         )
       }}
     runs-on: ubuntu-latest
-    needs: [format, clippy, audit, deny, build, test, phase1-server-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, rust-package-archives, verify-candidate-distributions]
+    needs: [format, clippy, audit, deny, build, test, phase1-server-integration, python-lint, python-tests, server-bin-manylinux-x86_64, server-bin-macos-arm64, server-container, rust-package-archives, rust-consumer-security, verify-candidate-distributions]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -660,7 +687,7 @@ jobs:
           echo "digest=${digest##*@}" >> "$GITHUB_OUTPUT"
           echo "Published and smoke-tested `$digest`" >> "$GITHUB_STEP_SUMMARY"
 
-  # --- Python (lint + tests, then PyPI publish for 3.8+) ---
+  # --- Python (lint + tests, then PyPI publish for 3.11+) ---
   python-lint:
     name: Python (mypy)
     needs: [release-metadata]
@@ -670,7 +697,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
       - name: Install mypy
         run: pip install mypy
       - name: Mypy
@@ -692,7 +719,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: "3.11"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -717,8 +744,8 @@ jobs:
           rustup component add rustfmt clippy --toolchain 1.93.1
       - name: Clear cached wheels
         run: python -c "from pathlib import Path; [wheel.unlink() for wheel in Path('target/wheels').glob('sparkless-*.whl')]"
-      - name: Build wheel (abi3, Python 3.8+)
-        run: cd python && maturin build --locked --release -i 3.8
+      - name: Build wheel (abi3, Python 3.11+)
+        run: cd python && maturin build --locked --release -i 3.11
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
@@ -733,7 +760,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     defaults:
       run:
         shell: bash
@@ -785,14 +812,14 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
           command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --zig --out dist
           manylinux: "2_17"
           container: off
           rust-toolchain: 1.93.1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Build complete source distribution
+      - name: Build complete source distribution on the minimum supported Python
         run: |
           python -m pip install build "maturin>=1.4,<2"
           python -m build --sdist --outdir dist python
@@ -818,7 +845,7 @@ jobs:
         with:
           target: aarch64-unknown-linux-gnu
           command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --out dist
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --zig --out dist
           manylinux: "2_28"
           container: off
           rust-toolchain: 1.93.1
@@ -844,7 +871,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --out dist
           rust-toolchain: 1.93.1
       - uses: actions/upload-artifact@v4
         with:
@@ -861,13 +888,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: "3.11"
       - name: Build wheel (maturin)
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64-unknown-linux-musl
           command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --zig --compatibility musllinux_1_2 --out dist
           rust-toolchain: 1.93.1
       - uses: actions/upload-artifact@v4
         with:
@@ -884,13 +911,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: "3.11"
       - name: Build wheel (maturin)
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: aarch64-unknown-linux-musl
           command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --zig --compatibility musllinux_1_2 --out dist
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --zig --compatibility musllinux_1_2 --out dist
           rust-toolchain: 1.93.1
       - uses: actions/upload-artifact@v4
         with:
@@ -910,7 +937,7 @@ jobs:
         with:
           target: x86_64-pc-windows-msvc
           command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --out dist
           rust-toolchain: 1.93.1
       - uses: actions/upload-artifact@v4
         with:
@@ -930,7 +957,7 @@ jobs:
         with:
           target: aarch64-pc-windows-msvc
           command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.8 --out dist
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --out dist
           rust-toolchain: 1.93.1
       - uses: actions/upload-artifact@v4
         with:
@@ -1000,6 +1027,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - format
+      - rust-consumer-security
       - verify-416-prerequisite
       - clippy
       - audit
@@ -1148,6 +1176,7 @@ jobs:
             exit 1
           fi
           echo "$actual"
+          python3 scripts/verify_server_bin_wheel.py --binary "$RUNNER_TEMP/public-rust/bin/sparkless-server" --version "$version"
       - name: Download the exact verified server binary distributions
         uses: actions/download-artifact@v4
         with:
@@ -1209,7 +1238,7 @@ jobs:
             docker rm -f "$name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          python3 scripts/verify_server_http.py http://127.0.0.1:18099
+          python3 scripts/verify_server_http.py http://127.0.0.1:18099 --mutations
           docker stop --time 10 "$name"
           exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
           if [[ "$exit_code" != 0 ]]; then

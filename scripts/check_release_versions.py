@@ -8,10 +8,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-try:
-    import tomllib
-except ImportError:  # Python 3.8–3.10 developer environments.
-    import tomli as tomllib
+import tomllib
 
 
 def validate_versions(
@@ -121,6 +118,11 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         tag,
     )
     errors.extend(validate_server_inventory(root, tag))
+    if tuple(map(int, expected.split(".")[:2])) >= (4, 17):
+        if project.get("requires-python") != ">=3.11":
+            errors.append("sparkless must require Python >=3.11")
+        if "abi3-py311" not in native["dependencies"]["pyo3"]["features"]:
+            errors.append("sparkless native wheels must use abi3-py311")
     return errors
 
 
@@ -168,6 +170,11 @@ def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
         )
     server_extra = python["project"].get("optional-dependencies", {}).get("server", [])
     required_extra = "sparkless-server-bin=={}".format(expected)
+    if (
+        tuple(map(int, expected.split(".")[:2])) >= (4, 17)
+        and server_binary.get("requires-python") != ">=3.11"
+    ):
+        errors.append("sparkless-server-bin must require Python >=3.11")
     if required_extra not in server_extra:
         errors.append(
             "sparkless[server]: missing exact binary dependency {}".format(

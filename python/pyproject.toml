@@ -4,18 +4,17 @@ version = "4.17.0"
 description = "PySpark-like DataFrame API in Python—no JVM. Uses robin-sparkless (Rust/Polars) as the execution engine."
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 keywords = ["pyspark", "polars", "dataframe", "spark", "etl"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering",
 ]
@@ -40,7 +39,7 @@ jdbc = [
 ]
 # Run Python tests with real PySpark (SPARKLESS_TEST_BACKEND=pyspark or MOCK_SPARK_TEST_BACKEND=pyspark); requires Java.
 pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
-# PySpark 4.x oracle (Java 17, Python 3.10+)
+# PySpark 4.x oracle (Java 17, Python 3.11+)
 pyspark4 = ["pyspark>=4.0,<4.2", "delta-spark>=4.0,<5"]
 # Install the separately built, platform-specific native HTTP server executable.
 server = ["sparkless-server-bin==4.17.0"]
@@ -57,7 +56,7 @@ markers = [
 ]
 
 [build-system]
-requires = ["maturin>=1.4,<2", "tomli>=1.1; python_version < '3.11'"]
+requires = ["maturin>=1.4,<2"]
 build-backend = "_sparkless_build"
 backend-path = ["."]
 
@@ -67,7 +66,7 @@ python-source = "sparkless"
 manifest-path = "Cargo.toml"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_ignores = true
 exclude = ["tests/", ".*/tests/", "upstream_sparkless/"]
@@ -92,6 +91,6 @@ ignore_missing_imports = true
 
 
 [tool.pyright]
-pythonVersion = "3.8"
+pythonVersion = "3.11"
 typeCheckingMode = "basic"
 exclude = ["tests", "**/tests", "**/upstream_sparkless"]

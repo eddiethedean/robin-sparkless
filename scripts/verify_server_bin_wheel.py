@@ -14,10 +14,9 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-try:
-    import tomllib
-except ImportError:  # Python 3.8–3.10 developer environments.
-    import tomli as tomllib
+from verify_server_http import verify_endpoint, verify_mutations
+
+import tomllib
 
 
 PACKAGE_NAME = "sparkless-server-bin"
@@ -66,6 +65,10 @@ def _smoke_installed_binary(expected_version: str) -> None:
         )
     package = importlib.import_module("sparkless_server_bin")
     executable = Path(package.executable_path())
+    verify_binary(executable, expected_version)
+
+
+def verify_binary(executable: Path, expected_version: str) -> None:
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise RuntimeError("installed wheel does not contain an executable server")
 
@@ -106,6 +109,8 @@ def _smoke_installed_binary(expected_version: str) -> None:
         with urllib.request.urlopen(endpoint + "/health", timeout=5) as response:
             if response.status != 200:
                 raise RuntimeError("installed server health check failed")
+        verify_endpoint(endpoint)
+        verify_mutations(endpoint)
 
         assert process.stdin is not None
         process.stdin.write(
@@ -184,9 +189,19 @@ def main() -> int:
         / "python/server-bin/pyproject.toml",
     )
     parser.add_argument("--smoke-installed", metavar="VERSION")
+    parser.add_argument(
+        "--binary", type=Path, help="verify this exact native executable"
+    )
+    parser.add_argument("--version", help="expected native binary version")
     args = parser.parse_args()
     try:
-        if args.smoke_installed is not None:
+        if args.binary is not None:
+            if not args.version or args.wheel or args.smoke_installed:
+                parser.error(
+                    "--binary requires --version and cannot be combined with wheel modes"
+                )
+            verify_binary(args.binary.resolve(), args.version)
+        elif args.smoke_installed is not None:
             _smoke_installed_binary(args.smoke_installed)
         else:
             if args.wheel is None or args.platform is None:
@@ -195,7 +210,9 @@ def main() -> int:
     except (OSError, ValueError, subprocess.SubprocessError, RuntimeError) as error:
         print("ERROR: {}".format(error), file=sys.stderr)
         return 1
-    print("server binary wheel platform, version, startup, health, and shutdown passed")
+    print(
+        "server binary version, HTTP SQL, mutations, replay, status, and shutdown passed"
+    )
     return 0
 
 

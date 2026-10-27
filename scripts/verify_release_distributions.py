@@ -15,7 +15,7 @@ def _normalize_project(name: str) -> str:
     return re.sub(r"[-_.]+", "_", name).lower()
 
 
-def _read_metadata(path: Path) -> tuple[str, str]:
+def _read_metadata(path: Path, minimum_python: str | None = None) -> tuple[str, str]:
     if path.name.endswith(".whl"):
         with zipfile.ZipFile(path) as archive:
             metadata_paths = [
@@ -45,6 +45,10 @@ def _read_metadata(path: Path) -> tuple[str, str]:
         raise ValueError("unsupported distribution file: {}".format(path.name))
 
     metadata = BytesParser().parsebytes(metadata_bytes)
+    if minimum_python is not None and metadata.get("Requires-Python") != minimum_python:
+        raise ValueError(
+            "{} must declare Requires-Python: {}".format(path.name, minimum_python)
+        )
     name = metadata.get("Name")
     version = metadata.get("Version")
     if not name or not version:
@@ -79,12 +83,23 @@ def verify_distributions(
         )
 
     expected_name = _normalize_project(project)
+    minimum_python = (
+        ">=3.11" if tuple(map(int, version.split(".")[:2])) >= (4, 17) else None
+    )
     wheel_platforms = set()
     for path in wheels:
         fields = path.name[:-4].split("-")
         if len(fields) != 5:
             raise ValueError("{} is not a valid wheel filename".format(path.name))
         filename_name, filename_version, _python, _abi, platform = fields
+        if (
+            minimum_python
+            and expected_name == "sparkless"
+            and (_python, _abi) != ("cp311", "abi3")
+        ):
+            raise ValueError(
+                "{} must use the Python 3.11 cp311-abi3 wheel tag".format(path.name)
+            )
         if _normalize_project(filename_name) != expected_name:
             raise ValueError("{} belongs to a different project".format(path.name))
         if filename_version != version:
@@ -96,7 +111,7 @@ def verify_distributions(
         if platform in wheel_platforms:
             raise ValueError("duplicate wheel platform: {}".format(platform))
         wheel_platforms.add(platform)
-        metadata_name, metadata_version = _read_metadata(path)
+        metadata_name, metadata_version = _read_metadata(path, minimum_python)
         if _normalize_project(metadata_name) != expected_name:
             raise ValueError("{} metadata names a different project".format(path.name))
         if metadata_version != version:
@@ -111,7 +126,7 @@ def verify_distributions(
             raise ValueError(
                 "unexpected source distribution filename: {}".format(path.name)
             )
-        metadata_name, metadata_version = _read_metadata(path)
+        metadata_name, metadata_version = _read_metadata(path, minimum_python)
         if _normalize_project(metadata_name) != expected_name:
             raise ValueError("{} metadata names a different project".format(path.name))
         if metadata_version != version:

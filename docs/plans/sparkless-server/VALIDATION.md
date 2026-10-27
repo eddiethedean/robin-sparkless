@@ -12,7 +12,7 @@ For each gate record the native commit, client/reference versions and digests, c
 
 ## Latest full readiness review
 
-The [2026-10-26 review of `a017821c`](READINESS_4_17.md) records 625 passing native tests, seven doctests, current source/package checks, and six actionable findings. The verdict remains **HOLD** for downstream Rust dependency security, Rust `StructField` source compatibility, planning admission, incomplete candidate/public artifact witnesses, and a Python 3.8 build-backend SyntaxError, plus contract acceptance and a final exact-head candidate run. Earlier component evidence below is retained; it does not override these current findings.
+The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Rust metadata API, admitted SQL parsing, functional candidate/public verification changes, and the maintainer-approved Python 3.11 minimum. The release remains **HOLD** until the published Rust consumer graph is fixed and the final candidate's complete V15–V18/V31 evidence passes. The [original review](READINESS_4_17.md) and older component results below remain historical evidence.
 
 ## Gate matrix
 
