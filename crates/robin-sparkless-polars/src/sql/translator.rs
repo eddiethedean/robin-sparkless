@@ -1312,7 +1312,9 @@ fn translate_select_body(
         )?;
         let agg_exprs = disambiguate_agg_output_names(agg_exprs);
         if df.range_cardinality.is_some() {
-            if let Some(count_names) = count_star_projection_names(&body.projection) {
+            if let Some(count_names) =
+                count_star_projection_names(&body.projection, df.case_sensitive)
+            {
                 let count = df.count()?;
                 let rows = vec![
                     count_names
@@ -1691,9 +1693,10 @@ fn join_operand_side(
             _ => None,
         };
         if let Some(alias) = alias {
-            if qualifier.len() == 1 && names_match(qualifier[0], alias) {
-                return true;
-            }
+            // An explicit alias replaces the source table name as the relation's
+            // qualifier. Falling back to the table name can make a qualifier match
+            // both sides of a self-join with crossed aliases.
+            return qualifier.len() == 1 && names_match(qualifier[0], alias);
         }
         match factor {
             TableFactor::Table { name, .. } => {
@@ -3397,17 +3400,23 @@ impl ProjItem {
 }
 
 /// Disambiguate duplicate output aliases (e.g. multiple aggs named "count" -> count, count_1, count_2).
-fn disambiguate_aliases(aliases: &[String]) -> Vec<String> {
-    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+fn disambiguate_aliases(aliases: &[String], case_sensitive: bool) -> Vec<String> {
+    let key = |name: &str| {
+        if case_sensitive {
+            name.to_string()
+        } else {
+            name.to_lowercase()
+        }
+    };
+    let mut seen = std::collections::HashSet::new();
     let mut out = Vec::with_capacity(aliases.len());
     for alias in aliases {
-        let count = seen.entry(alias.clone()).or_insert(0);
-        let name = if *count == 0 {
-            alias.clone()
-        } else {
-            format!("{}_{}", alias, count)
-        };
-        *count += 1;
+        let mut name = alias.clone();
+        let mut suffix = 1;
+        while !seen.insert(key(&name)) {
+            name = format!("{}_{}", alias, suffix);
+            suffix += 1;
+        }
         out.push(name);
     }
     out
@@ -3422,7 +3431,7 @@ fn apply_projection(
     // Wildcard: expand to all columns (disambiguate if JOIN produced duplicate names)
     if projection.len() == 1 && matches!(projection[0], SelectItem::Wildcard(_)) {
         let column_names: Vec<String> = df.columns()?.into_iter().collect();
-        let unique_aliases = disambiguate_aliases(&column_names);
+        let unique_aliases = disambiguate_aliases(&column_names, df.case_sensitive);
         if unique_aliases == column_names {
             let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
             return df.select(refs);
@@ -3435,21 +3444,16 @@ fn apply_projection(
     }
 
     let mut items = Vec::new();
+    // Keep positional lineage for wildcard-expanded columns. Rebuilding a wildcard
+    // as col(name) reparses dots and other special characters as expressions.
+    let mut wildcard_source_indices = Vec::new();
     for item in projection {
         if matches!(item, SelectItem::Wildcard(_)) {
             let column_names = df.columns()?;
             for (i, name) in column_names.iter().enumerate() {
-                let is_unique = column_names
-                    .iter()
-                    .filter(|candidate| *candidate == name)
-                    .count()
-                    == 1;
-                let expr = if is_unique {
-                    col(name.as_str()).alias(name.as_str())
-                } else {
-                    nth(i as i64).as_expr()
-                };
+                let expr = nth(i as i64).as_expr();
                 items.push(ProjItem::Expr(expr, name.clone()));
+                wildcard_source_indices.push(Some(i));
             }
             continue;
         }
@@ -3585,6 +3589,7 @@ fn apply_projection(
             }
         };
         items.push(proj);
+        wildcard_source_indices.push(None);
     }
 
     if items.is_empty() {
@@ -3594,14 +3599,15 @@ fn apply_projection(
     }
 
     let aliases: Vec<String> = items.iter().map(|i| i.alias().to_string()).collect();
-    let final_aliases = disambiguate_aliases(&aliases);
+    let final_aliases = disambiguate_aliases(&aliases, df.case_sensitive);
 
     // Check if any Python UDF (requires with_column path)
     let has_python_udf = items.iter().any(|i| matches!(i, ProjItem::PythonUdf(_, _)));
 
+    let source_fields = df.schema()?.fields().to_vec();
     let mut df = df.clone();
 
-    if has_python_udf {
+    let projected = if has_python_udf {
         // Add Python UDF columns first (with disambiguated names), then select all in order
         for (i, item) in items.iter().enumerate() {
             if let ProjItem::PythonUdf(col, _) = item {
@@ -3618,7 +3624,7 @@ fn apply_projection(
                 }
             })
             .collect();
-        df.select_exprs(exprs)
+        df.select_exprs(exprs)?
     } else {
         // All exprs: use select_with_exprs (disambiguated aliases avoid duplicate column names)
         let exprs: Vec<Expr> = items
@@ -3629,8 +3635,20 @@ fn apply_projection(
                 ProjItem::PythonUdf(_, _) => unreachable!(),
             })
             .collect();
-        df.select_exprs(exprs)
+        df.select_exprs(exprs)?
+    };
+
+    // Polars expressions do not carry Spark's nullability and metadata. Restore
+    // those fields for wildcard projections using their original positional source.
+    let mut output_fields = projected.schema()?.fields().to_vec();
+    for (output_index, source_index) in wildcard_source_indices.into_iter().enumerate() {
+        if let Some(source_index) = source_index {
+            let mut field = source_fields[source_index].clone();
+            field.name = final_aliases[output_index].clone();
+            output_fields[output_index] = field;
+        }
     }
+    projected.with_logical_schema(StructType::new(output_fields))
 }
 
 fn sql_function_alias(func: &Function) -> String {
@@ -3974,7 +3992,10 @@ fn projection_is_scalar_aggregate(projection: &[SelectItem]) -> bool {
 /// Return output names when every scalar aggregate is a plain COUNT(*).
 /// Range-backed frames can answer that aggregate from their cardinality metadata
 /// without materializing the generated rows.
-fn count_star_projection_names(projection: &[SelectItem]) -> Option<Vec<String>> {
+fn count_star_projection_names(
+    projection: &[SelectItem],
+    case_sensitive: bool,
+) -> Option<Vec<String>> {
     let mut names = Vec::with_capacity(projection.len());
     for item in projection {
         let (func, alias) = match item {
@@ -4002,7 +4023,7 @@ fn count_star_projection_names(projection: &[SelectItem]) -> Option<Vec<String>>
         }
         names.push(alias.unwrap_or_else(|| "count".to_string()));
     }
-    Some(disambiguate_aliases(&names))
+    Some(disambiguate_aliases(&names, case_sensitive))
 }
 
 fn is_agg_function_name(func: &Function) -> bool {
