@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Server distribution checks** — exercise shared catalog effects, exact values/schema, mutation replay, and retained status on packaged binaries before publication and on the crates.io-installed executable afterward.
 - **Server shutdown and version** — drain on SIGTERM and expose `sparkless-server --version` without runtime configuration.
 - **Dependency security** — update Tokio and `ctutils` past RUSTSEC-2026-0386 and RUSTSEC-2026-0385, and replace yanked `chacha20` 0.10.0 with 0.10.2. Official artifacts use fixed zstd implementations. The pinned [Rust consumer Cargo patch](security/zstd-4.17-patches.toml) also fixes the registry consumer graph when applied at the application root. Ordinary unpatched Rust builds retain the disclosed, temporary exception above.
+- **Python source builds** — lock `ethnum` to 1.5.3, fixing its invalid error-value transmute in isolated native-extension builds.
 
 ## [4.15.3] - 2026-10-22
 
