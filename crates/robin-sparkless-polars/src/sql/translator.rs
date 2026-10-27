@@ -3428,21 +3428,6 @@ fn apply_projection(
     session: &SparkSession,
     relation_qualifiers: &[SqlRelationQualifier],
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    // Wildcard: expand to all columns (disambiguate if JOIN produced duplicate names)
-    if projection.len() == 1 && matches!(projection[0], SelectItem::Wildcard(_)) {
-        let column_names: Vec<String> = df.columns()?.into_iter().collect();
-        let unique_aliases = disambiguate_aliases(&column_names, df.case_sensitive);
-        if unique_aliases == column_names {
-            let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
-            return df.select(refs);
-        }
-        // Duplicate names: select by index then alias (col("x") would be ambiguous).
-        let exprs: Vec<Expr> = (0..column_names.len())
-            .map(|i| nth(i as i64).as_expr().alias(unique_aliases[i].as_str()))
-            .collect();
-        return df.select_exprs(exprs);
-    }
-
     let mut items = Vec::new();
     // Keep positional lineage for wildcard-expanded columns. Rebuilding a wildcard
     // as col(name) reparses dots and other special characters as expressions.
@@ -3640,6 +3625,12 @@ fn apply_projection(
 
     // Polars expressions do not carry Spark's nullability and metadata. Restore
     // those fields for wildcard projections using their original positional source.
+    // Some SQL expressions (notably an untyped NULL) have no faithful logical-schema
+    // representation in StructType. Keep the valid Polars result if schema attachment
+    // cannot represent such an output field.
+    if !wildcard_source_indices.iter().any(Option::is_some) {
+        return Ok(projected);
+    }
     let mut output_fields = projected.schema()?.fields().to_vec();
     for (output_index, source_index) in wildcard_source_indices.into_iter().enumerate() {
         if let Some(source_index) = source_index {
@@ -3648,7 +3639,10 @@ fn apply_projection(
             output_fields[output_index] = field;
         }
     }
-    projected.with_logical_schema(StructType::new(output_fields))
+    Ok(projected
+        .clone()
+        .with_logical_schema(StructType::new(output_fields))
+        .unwrap_or(projected))
 }
 
 fn sql_function_alias(func: &Function) -> String {

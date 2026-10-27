@@ -46,6 +46,20 @@ fn expr_referenced_columns(expr: &Expr) -> HashSet<String> {
     refs.into_inner()
 }
 
+/// Selectors such as `nth(0)` refer to frame columns without naming them in the
+/// expression tree. Treat them as input references so literal expansion does not
+/// cross-join a positional projection with the source frame.
+fn expr_contains_selector(expr: &Expr) -> bool {
+    let found = RefCell::new(false);
+    let _ = expr.clone().try_map_expr(|e| {
+        if matches!(&e, Expr::Selector(_)) {
+            *found.borrow_mut() = true;
+        }
+        Ok(e)
+    });
+    found.into_inner()
+}
+
 /// Returns true if the expression tree contains a reference to the given column name (so we must not drop it before adding).
 fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
     expr_referenced_columns(expr).contains(column_name)
@@ -517,10 +531,11 @@ pub fn select_with_exprs(
     let no_col_refs = !had_explode
         && first_col.is_some()
         && exprs.iter().all(|e| {
-            expr_referenced_columns(e)
-                .intersection(&df_columns)
-                .next()
-                .is_none()
+            !expr_contains_selector(e)
+                && expr_referenced_columns(e)
+                    .intersection(&df_columns)
+                    .next()
+                    .is_none()
         });
     let lf = if no_col_refs {
         let first = first_col.unwrap();
