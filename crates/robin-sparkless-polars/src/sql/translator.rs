@@ -2056,7 +2056,69 @@ fn common_signed_integer_type(
     })
 }
 
+thread_local! {
+    static SQL_EXPR_TRANSLATION_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SQL_EXPR_ANSI_FAILURES: std::cell::RefCell<Vec<(Expr, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn record_ansi_failure(condition: Expr, message: &'static str) {
+    SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow_mut().push((condition, message)));
+}
+
+fn mask_ansi_failures_since(start: usize, condition: Expr) {
+    SQL_EXPR_ANSI_FAILURES.with(|failures| {
+        for (failure, _) in failures.borrow_mut().iter_mut().skip(start) {
+            *failure = condition.clone().and(failure.clone());
+        }
+    });
+}
+
 fn sql_expr_to_polars_with_qualifiers(
+    expr: &SqlExpr,
+    session: &SparkSession,
+    df: Option<&crate::dataframe::DataFrame>,
+    having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
+) -> Result<Expr, PolarsError> {
+    let outermost = SQL_EXPR_TRANSLATION_DEPTH.with(|depth| depth.get() == 0);
+    if outermost {
+        SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow_mut().clear());
+    }
+    SQL_EXPR_TRANSLATION_DEPTH.with(|depth| depth.set(depth.get() + 1));
+    let result = sql_expr_to_polars_with_qualifiers_inner(
+        expr,
+        session,
+        df,
+        having_agg_map,
+        having_agg_list,
+        relation_qualifiers,
+    );
+    SQL_EXPR_TRANSLATION_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    if !outermost {
+        return result;
+    }
+
+    let mut result = result?;
+    let failures =
+        SQL_EXPR_ANSI_FAILURES.with(|failures| std::mem::take(&mut *failures.borrow_mut()));
+    for (condition, message) in failures {
+        result = result.map_many(
+            move |columns| {
+                let invalid = columns[1].as_materialized_series().bool()?;
+                if invalid.into_iter().any(|value| value.unwrap_or(false)) {
+                    return Err(PolarsError::ComputeError(message.into()));
+                }
+                Ok(columns[0].clone())
+            },
+            &[condition],
+            |_, fields| Ok(fields[0].clone()),
+        );
+    }
+    Ok(result)
+}
+
+fn sql_expr_to_polars_with_qualifiers_inner(
     expr: &SqlExpr,
     session: &SparkSession,
     df: Option<&DataFrame>,
@@ -2193,8 +2255,20 @@ fn sql_expr_to_polars_with_qualifiers(
                     // Spark SQL promotes integral division to DOUBLE. Polars' native integer
                     // division truncates (1 / 2 => 0), so keep non-decimal division fractional.
                     if session.runtime_config().ansi_enabled {
-                        let left = l.strict_cast(polars::prelude::DataType::Float64);
-                        let right = r.strict_cast(polars::prelude::DataType::Float64);
+                        let left = l.clone().cast(polars::prelude::DataType::Float64);
+                        let right = r.clone().cast(polars::prelude::DataType::Float64);
+                        record_ansi_failure(
+                            l.clone().is_not_null().and(left.clone().is_null()),
+                            "invalid cast in ANSI division",
+                        );
+                        record_ansi_failure(
+                            r.clone().is_not_null().and(right.clone().is_null()),
+                            "invalid cast in ANSI division",
+                        );
+                        record_ansi_failure(
+                            left.clone().is_not_null().and(right.clone().eq(lit(0.0))),
+                            "division by zero (ANSI mode)",
+                        );
                         return Ok(left.map_many(
                             |columns| {
                                 let left = columns[0].as_materialized_series().f64()?;
@@ -2213,15 +2287,10 @@ fn sql_expr_to_polars_with_qualifiers(
                                 for index in 0..len {
                                     let left_value = left.get(if left.len() == 1 { 0 } else { index });
                                     let right_value = right.get(if right.len() == 1 { 0 } else { index });
-                                    if left_value.is_some()
-                                        && right_value.is_some_and(|value| value == 0.0)
-                                    {
-                                        return Err(PolarsError::ComputeError(
-                                            "division by zero (ANSI mode)".into(),
-                                        ));
-                                    }
                                     values.push(
-                                        left_value.zip(right_value).map(|(left, right)| left / right),
+                                        left_value
+                                            .zip(right_value)
+                                            .and_then(|(left, right)| (right != 0.0).then_some(left / right)),
                                     );
                                 }
                                 let values = polars::prelude::Float64Chunked::from_iter_options(
@@ -2269,7 +2338,12 @@ fn sql_expr_to_polars_with_qualifiers(
                             BinaryOperator::Multiply => l.cast(result_type.clone()).cast(widened.clone()) * r.cast(result_type.clone()).cast(widened),
                             _ => unreachable!(),
                         };
-                        return Ok(value.strict_cast(result_type));
+                        let narrowed = value.clone().cast(result_type.clone());
+                        record_ansi_failure(
+                            value.is_not_null().and(narrowed.clone().is_null()),
+                            "arithmetic overflow (ANSI mode)",
+                        );
+                        return Ok(narrowed);
                     }
                 }
             }
@@ -2409,22 +2483,74 @@ fn sql_expr_to_polars_with_qualifiers(
             else_result,
             ..
         } => {
-            // Simple CASE: CASE x WHEN a THEN b -> when(x.eq(a)).then(b). Searched CASE: CASE WHEN p THEN b -> when(p).then(b).
-            // Build from the end so we stay in Expr type: else_e = else; for (cond, res) in reverse, else_e = when(cond).then(res).otherwise(else_e).
-            let else_e = match else_result {
-                Some(e) => sql_expr_to_polars_with_qualifiers(e.as_ref(), session, df, having_agg_map, having_agg_list, relation_qualifiers)?,
+            // ANSI arithmetic failures are collected beside their value expression. Mask each
+            // result by its searched/simple CASE selection so a failure in an unselected arm
+            // does not escape Polars' eager evaluation of `when` branches.
+            let operand_expr = operand
+                .as_ref()
+                .map(|operand| {
+                    sql_expr_to_polars_with_qualifiers(
+                        operand,
+                        session,
+                        df,
+                        having_agg_map,
+                        having_agg_list,
+                        relation_qualifiers,
+                    )
+                })
+                .transpose()?;
+            let mut prior_match = lit(false);
+            let mut branches = Vec::with_capacity(conditions.len());
+            for condition_when in conditions {
+                let condition_start = SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow().len());
+                let condition_value = sql_expr_to_polars_with_qualifiers(
+                    &condition_when.condition,
+                    session,
+                    df,
+                    having_agg_map,
+                    having_agg_list,
+                    relation_qualifiers,
+                )?;
+                mask_ansi_failures_since(condition_start, prior_match.clone().not());
+                let condition_value = if let Some(operand) = &operand_expr {
+                    operand.clone().eq(condition_value)
+                } else {
+                    condition_value
+                };
+                let condition_truth = when(condition_value)
+                    .then(lit(true))
+                    .otherwise(lit(false));
+                let selected = prior_match.clone().not().and(condition_truth.clone());
+
+                let result_start = SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow().len());
+                let result = sql_expr_to_polars_with_qualifiers(
+                    &condition_when.result,
+                    session,
+                    df,
+                    having_agg_map,
+                    having_agg_list,
+                    relation_qualifiers,
+                )?;
+                mask_ansi_failures_since(result_start, selected.clone());
+                branches.push((selected, result));
+                prior_match = prior_match.or(condition_truth);
+            }
+
+            let else_start = SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow().len());
+            let mut expr = match else_result {
+                Some(e) => sql_expr_to_polars_with_qualifiers(
+                    e.as_ref(),
+                    session,
+                    df,
+                    having_agg_map,
+                    having_agg_list,
+                    relation_qualifiers,
+                )?,
                 None => lit(polars::prelude::NULL),
             };
-            let mut expr = else_e;
-            for cw in conditions.iter().rev() {
-                let cond = if let Some(op) = &operand {
-                    sql_expr_to_polars_with_qualifiers(op.as_ref(), session, df, having_agg_map, having_agg_list, relation_qualifiers)?
-                        .eq(sql_expr_to_polars_with_qualifiers(&cw.condition, session, df, having_agg_map, having_agg_list, relation_qualifiers)?)
-                } else {
-                    sql_expr_to_polars_with_qualifiers(&cw.condition, session, df, having_agg_map, having_agg_list, relation_qualifiers)?
-                };
-                let res = sql_expr_to_polars_with_qualifiers(&cw.result, session, df, having_agg_map, having_agg_list, relation_qualifiers)?;
-                expr = when(cond).then(res).otherwise(expr);
+            mask_ansi_failures_since(else_start, prior_match.not());
+            for (selected, result) in branches.into_iter().rev() {
+                expr = when(selected).then(result).otherwise(expr);
             }
             Ok(expr)
         }
@@ -4253,6 +4379,46 @@ mod insert_literal_tests {
         session
             .sql("INSERT INTO divisor_source VALUES (0), (2), (4), (8)")
             .unwrap();
+        let guarded = session
+            .sql("SELECT CASE WHEN denominator = 0 THEN 0 ELSE 1 / denominator END AS n FROM divisor_source")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(guarded.height(), 4);
+        assert_eq!(
+            guarded.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.0)
+        );
+        assert_eq!(
+            guarded.column("n").unwrap().get(1).unwrap(),
+            AnyValue::Float64(0.5)
+        );
+
+        session
+            .sql("CREATE TABLE guarded_invalid_source (value BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO guarded_invalid_source VALUES (0)")
+            .unwrap();
+        let guarded_invalid = session
+            .sql("SELECT CASE WHEN value = 0 THEN 7 ELSE 'invalid' / 2 END AS n FROM guarded_invalid_source")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            guarded_invalid.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(7.0)
+        );
+
+        let guarded_overflow = session
+            .sql("SELECT CASE WHEN denominator = 0 THEN 0 ELSE CAST(2147483647 AS INT) + CAST(1 AS INT) END AS n FROM divisor_source WHERE denominator = 0")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            guarded_overflow.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Int32(0)
+        );
         assert!(
             session
                 .sql("INSERT INTO division_sink SELECT 1 / denominator AS n FROM divisor_source")

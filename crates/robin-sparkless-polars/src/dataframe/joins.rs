@@ -1261,6 +1261,46 @@ mod tests {
     }
 
     #[test]
+    fn case_insensitive_cross_join_preserves_exact_source_field_schema() {
+        use polars::prelude::NamedFrom;
+        use std::collections::BTreeMap;
+
+        let field = |name: &str, nullable: bool, origin: &str| {
+            StructField::new(name.into(), LogicalDataType::Long, nullable).with_metadata(
+                BTreeMap::from([("origin".to_string(), serde_json::json!(origin))]),
+            )
+        };
+        let left = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                polars::prelude::Series::new("ID".into(), [1_i64]).into(),
+            ])
+            .unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![field("ID", false, "left")]))
+        .unwrap();
+        let right = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                polars::prelude::Series::new("id".into(), [None::<i64>]).into(),
+            ])
+            .unwrap(),
+        )
+        .with_logical_schema(StructType::new(vec![field("id", true, "right")]))
+        .unwrap();
+
+        let joined = left.cross_join(&right).unwrap();
+        let rows = joined.collect().unwrap();
+        assert_eq!(rows.column("id").unwrap().null_count(), 1);
+        let schema = joined.schema().unwrap();
+        let right_id = schema
+            .fields()
+            .iter()
+            .find(|field| field.name == "id")
+            .unwrap();
+        assert!(right_id.nullable);
+        assert_eq!(right_id.metadata["origin"], "right");
+    }
+
+    #[test]
     fn full_outer_join_preserves_metadata_for_every_globally_suffixed_field() {
         use polars::prelude::{NamedFrom, Series};
         use robin_sparkless_core::DataType as CoreDataType;

@@ -2784,13 +2784,31 @@ impl DataFrame {
         let fields = output_schema
             .iter()
             .map(|(output_name, output_dtype)| {
-                let left_source = left_names
-                    .iter()
-                    .find(|name| matches_name(name, output_name.as_str()))
-                    .map(String::as_str);
                 let right_exact_source = right_names
                     .iter()
-                    .find(|name| matches_name(name, output_name.as_str()))
+                    .find(|name| name.as_str() == output_name.as_str())
+                    .or_else(|| {
+                        right_names
+                            .iter()
+                            .find(|name| matches_name(name, output_name.as_str()))
+                    })
+                    .map(String::as_str);
+                // Exact physical names take precedence over case-insensitive matches. A
+                // cross join can retain `ID` and `id` as distinct output columns; mapping
+                // both to the first left-side match copies the wrong metadata and nullability.
+                let left_source = left_names
+                    .iter()
+                    .find(|name| name.as_str() == output_name.as_str())
+                    .or_else(|| {
+                        right_exact_source
+                            .is_none()
+                            .then(|| {
+                                left_names
+                                    .iter()
+                                    .find(|name| matches_name(name, output_name.as_str()))
+                            })
+                            .flatten()
+                    })
                     .map(String::as_str);
                 let right_source =
                     right_exact_source.or_else(|| aliased_right_source(output_name.as_str()));
@@ -5617,7 +5635,6 @@ impl<'a> DataFrameWriter<'a> {
                         if let Some(incoming_field) = incoming_field {
                             if serde_json::to_value(&existing_field.data_type).ok()
                                 != serde_json::to_value(&incoming_field.data_type).ok()
-                                || existing_field.nullable != incoming_field.nullable
                                 || existing_field.metadata != incoming_field.metadata
                             {
                                 return Err(PolarsError::SchemaMismatch(
@@ -8620,6 +8637,30 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["a", "b", "c"]
         );
+        assert!(session.drop_table(&table_name));
+    }
+
+    #[test]
+    fn saved_table_append_accepts_nonnullable_input_for_nullable_target() {
+        let suffix = std::process::id();
+        let table_name = format!("nullable_append_target_{suffix}");
+        let session = SparkSession::builder()
+            .app_name(format!("nullable-append-target-{suffix}"))
+            .get_or_create();
+        session
+            .sql(&format!("CREATE TABLE {table_name} (id BIGINT)"))
+            .unwrap();
+
+        session
+            .range(0, 2, 1)
+            .unwrap()
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Append)
+            .unwrap();
+
+        let appended = session.table(&table_name).unwrap();
+        assert_eq!(appended.count().unwrap(), 2);
+        assert!(appended.schema().unwrap().fields()[0].nullable);
         assert!(session.drop_table(&table_name));
     }
 
