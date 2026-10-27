@@ -8,12 +8,12 @@
 
 Add **`sparkless-server`**, an independently distributable native Rust library/executable in this Cargo workspace, exposing the existing Robin Sparkless Rust/Polars engine through:
 
-1. **HTTP statement-agent compatibility** for `databricks-emulator`.
+1. **HTTP SQL statements** with exact typed results for standalone clients.
 2. **Real Spark Connect gRPC** for an unmodified JVM-free `pyspark-client`.
 
-Both transports use the same native execution, session, catalog, and result services. The initial service is single-node and intended for trusted local development and tests. Sail and real Spark remain independent compatibility/reference backends.
+Both transports use the same native execution, session, catalog, and result services. After supported Connect, Phase 3 adds DuckDB table sources feeding Polars, and Phase 4 adds an optional DuckDB execution backend behind Connect. The default backend remains Robin Sparkless/Polars. The initial service is single-node and intended for trusted local development and tests. Sail and real Spark remain independent compatibility/reference backends.
 
-**Non-negotiable:** call the Rust engine directly. The service execution path must not import Python, wrap the PyO3 extension, require Java/Py4J, or run an Apache Spark server. Arbitrary `kind=python` statements and notebooks return explicit unsupported errors until separately packaged, isolated Python workers exist. Those workers remain optional and out of process.
+**Non-negotiable:** execute through native server/backend code: Robin's Rust/Polars engine by default, with the later optional DuckDB backend using native database libraries. The service execution path must not import Python, wrap the PyO3 extension, require Java/Py4J, or run an Apache Spark server. Arbitrary `kind=python` statements and notebooks return explicit unsupported errors until separately packaged, isolated Python workers exist. Those workers remain optional and out of process.
 
 This epic covers the complete direction. Each phase has its own supported surface and release gate; a passing smoke query does not establish general Spark or Databricks compatibility.
 
@@ -21,12 +21,14 @@ This epic covers the complete direction. Each phase has its own supported surfac
 
 | Stage | Deliverable | Required dependency / gate |
 | --- | --- | --- |
-| **Phase 0A** | Versioned contracts, engine gap inventory, emulator result fix, and a narrow native Spark Connect feasibility test | Verify SDK result decoding and the real client's execution lifecycle before expanding transport implementation |
-| **Phase 0B** | Read-only HTTP SQL service, minimum bounded runtime/session management, sync/async Python launcher, native image | Exact values and schemas through both direct HTTP and the unmodified SDK using the corrected, pinned emulator |
+| **Phase 0A** | Versioned contracts, engine gap inventory, typed HTTP contracts, and a narrow native Spark Connect feasibility test | Verify typed HTTP result decoding and the real client's execution lifecycle before expanding transport implementation |
+| **Phase 0B** | Read-only HTTP SQL service, minimum bounded runtime/session management, sync/async Python launcher, native image | Exact values and schemas through direct HTTP and fresh packaged consumer environments |
 | **Phase 1** | Shared catalog ownership, controlled mutations, richer logical types, lazy execution improvements | Visibility, concurrency, mutation outcomes, type fidelity, and resource-accounting tests |
-| **Phase 2** | Supported Spark Connect release with Arrow streaming and resumable executions | Pinned unmodified client, lifecycle/conformance suite, then a separate emulator gRPC proxy gate |
-| **Phase 3** | Optional isolated Python workers | Separate trust, packaging, resource, and lifecycle contract |
-| **Phase 4** | Optional Delta Lake / Unity Catalog | Verified native transactions and interoperability |
+| **Phase 2** | Supported Spark Connect release with Arrow streaming and resumable executions | Pinned unmodified client, lifecycle/conformance suite, with optional external route certification outside the standalone release gate |
+| **Phase 3** | Optional DuckDB data source feeding Polars execution | Supported Connect first; V33/V34 typed scans, source snapshots, database ownership, and bounded resources |
+| **Phase 4** | Optional DuckDB execution backend through Connect | Phase 3 first; V35/V36 Spark semantics, backend lifecycle, persistent transaction outcomes, and shared-table interoperability |
+| **Phase 5** | Optional isolated Python workers | Separate trust, packaging, resource, and lifecycle contract |
+| **Phase 6** | Optional Delta Lake / Unity Catalog | Verified native transactions and interoperability |
 
 Phase 0 means **0A and 0B are complete**. Admission control, bounded queues/results, session ownership, cancellation accounting, and shutdown are Phase 0 prerequisites, not later hardening.
 
@@ -76,20 +78,16 @@ crates/sparkless-server/
 - [ ] Choose **one exact PySpark Connect client release** and matching Spark protocol tag/commit. Start evaluation with the Spark 4.0 protocol family reviewed for this epic; record the exact patch, Python requirement, protobuf/gRPC/PyArrow dependencies, and lockfile at the 0A gate.
 - [ ] Record the engine compatibility profile separately from wire compatibility. A 4.0 client target must not silently inherit the engine's default 3.5/ANSI-disabled profile.
 - [ ] Specify ANSI behavior, case sensitivity, session timezone, timestamp interpretation, decimal rules, and supported configuration keys. Reject unsupported configuration changes rather than acknowledging ineffective settings.
-- [ ] Pin the emulator revision/image digest and Databricks SDK version used in CI. Lock any reference Spark/Sail environment independently.
+- [ ] Pin the standalone client, protocol, and reference Spark/Sail environments used in CI.
 - [ ] Record separate versions for the launcher control protocol, HTTP agent envelope, binary package, Spark Connect protocol, and engine semantics. Do not equate these version numbers or advertise a Spark version as the native engine's product version.
 - [ ] Proto generation must be reproducible, with imports, compiler versions, source provenance, and required license notices included.
 
-### Resolve the emulator dependency
+### Standalone typed-result contract
 
-The current emulator adapter reads the agent's typed JSON into generic Go values, and its statement endpoint returns it as `result.text`. The SDK expects `result.data_array` and `manifest.schema`; its normal result decoder does not expose that `text` field. Generic Go JSON decoding also converts numbers to `float64`, risking BIGINT precision loss.
-
-- [ ] Track an explicit **cross-repository prerequisite** in `calvinchengx/databricks-emulator`: preserve the typed agent result, map it to the Statement Execution API's schema/data fields, and retain exact numeric values.
-- [ ] Use typed decoding, `json.Number`, or preserved raw JSON so numeric cells never pass through `float64` merely for transport. Translate to the SDK's documented string-valued non-null JSON_ARRAY cells at the API boundary.
-- [ ] Preserve column order, duplicate labels by position, nulls, empty-result schemas, decimal precision/scale, row counts, and structured failure information.
-- [ ] Include fixtures that exercise the real SDK's `StatementResponse` decoding. Tests must inspect `result.data_array` and `manifest.schema`, not custom parsing of `result.text` or private/raw SDK response access.
-- [ ] The integrated Phase 0 gate requires a pinned emulator build containing these changes. A direct agent test may pass earlier, but does not satisfy that gate. If the upstream change cannot ship, record the blocker explicitly.
-- [ ] Document the emulator's SQL rewriting and shared warehouse session behavior. Test the SQL it actually forwards, not only the original SDK request.
+- [ ] Freeze the native HTTP schema and positional result envelope.
+- [ ] Use in-repository decoder fixtures for exact BIGINT/DECIMAL, ordered duplicate labels, typed nulls, and schema-bearing empty results.
+- [ ] Verify real HTTP output and packaged consumers without external application changes.
+- [ ] Optional external adapters need independent value/schema/lifecycle evidence before being advertised; their development and acceptance cannot block Sparkless.
 
 ### Narrow Spark Connect feasibility test
 
@@ -108,7 +106,7 @@ The internal request is:
 {"session":"sql-warehouse","kind":"sql","code":"SELECT 1 AS result"}
 ```
 
-Configure the emulator with **`DATABRICKS_SPARK_CONNECT_URL=http://sparkless-server:8099`**. Despite its name, this variable identifies the HTTP agent, not Spark Connect gRPC.
+The standalone HTTP endpoint is `http://sparkless-server:8099`; its contract is independent of Spark Connect gRPC and external adapter configuration.
 
 ### Endpoints and envelopes
 
@@ -178,13 +176,13 @@ The current engine has session-local saved tables/database registrations and pro
 - Saved objects survive session close/TTL within the service lifetime. Restart durability is a separate capability requiring a selected storage/metadata model and restart tests.
 - Process-global temporary views are unsupported until their namespace and cleanup can be scoped to the owning service/catalog. Do not expose the current global static accidentally.
 - Define visibility across HTTP and gRPC logical sessions through the catalog service. Add native catalog hooks where needed; an external read resolver alone does not implement mutation coordination.
-- Close/TTL stops new work and coordinates active operations; it must not destroy resources still in use or delete shared catalog objects. The reserved warehouse session's lifetime is explicit; do not silently evict state expected by the emulator.
+- Close/TTL stops new work and coordinates active operations; it must not destroy resources still in use or delete shared catalog objects. The lifetime of a shared service session is explicit; do not silently evict state expected by a client.
 
 ### Trust and identity
 
 The existing HTTP adapter supplies only session/kind/code and uses **one `sql-warehouse` session for all warehouses**. It does not convey per-user or per-connection identity. Preserve that documented compatibility behavior; do not promise isolation the wire contract cannot represent.
 
-Within an authenticated future deployment, session keys must incorporate the trusted principal/service scope, protocol, and logical session ID. Client-supplied session IDs or Spark `UserContext` are not authentication. Any richer HTTP isolation requires an explicit emulator contract extension.
+Within an authenticated future deployment, session keys must incorporate the trusted principal/service scope, protocol, and logical session ID. Client-supplied session IDs or Spark `UserContext` are not authentication. Any richer HTTP isolation requires an explicit authentication and trust contract.
 
 ### Mutations, enabled in Phase 1
 
@@ -221,7 +219,13 @@ The reviewed Spark 4.0 client enables reattachable execution by default. Impleme
 - Define expiration, released-session behavior, and server-restart behavior. A lost session/operation must not be silently recreated and reexecuted.
 - Test reconnect after at least one batch, duplicate execute, repeated release, interrupt during detached execution, retention expiry/capacity exhaustion, and stop/release races.
 
-Only after standalone conformance passes, test the emulator proxy using **`DATABRICKS_SPARK_CONNECT_GRPC_URL=http://sparkless-server:15002`**. Its h2c transport, authentication boundary, cluster/session handle, and streaming behavior are a separate integration gate.
+Optional third-party proxy certification follows standalone conformance. Transport, authentication, session handling, and streaming require their own evidence before advertising that route; external changes or acceptance cannot block standalone Sparkless releases.
+
+## DuckDB phases after supported Connect
+
+Follow the [SS-14 source plan](14-duckdb-data-source.md) in Phase 3 / 4.19, then the [SS-15 execution backend plan](15-duckdb-connect-backend.md) in Phase 4 / 4.20. The first phase reads DuckDB tables through bounded native Arrow batches while Polars computes; the second executes supported SQL/DataFrame plans and enumerated writes inside DuckDB. Each has its own decisions, implementation slices, and release gates. Neither expands the Phase 2 release prerequisite.
+
+Live access to independently written DuckDB tables requires a proven shared database owner and matching catalog/snapshot semantics. Independent writable processes cannot be assumed to share embedded database files. Keep sources read-only until the execution phase proves its write/outcome contract. Use self-contained DuckDB writer/reader fixtures; external application changes are not prerequisites. See D14/D15 and V33–V36 for the required ownership, semantic, memory, lifecycle, and interoperability evidence.
 
 ## Python lifecycle API
 
@@ -290,18 +294,18 @@ Before Phase 2 is enabled, `spark_connect_url` raises a descriptive unsupported 
 ### Phase 0A
 
 - [ ] Version/semantics/transport/type contracts are written and pinned for testing.
-- [ ] Emulator SDK mapping and exact-number handling have a concrete tracked implementation and verified fixtures.
+- [ ] Native typed HTTP mapping and exact-number handling have verified in-repository fixtures.
 - [ ] Native Connect feasibility exercises the unmodified client's initialization, computation, empty result, reconnect, and release paths.
 - [ ] Engine gaps are recorded as prerequisites, with unsupported surfaces explicit.
 
 ### Phase 0B
 
 - [ ] Workspace crate, native CLI/image, HTTP transport, minimum bounded runtime/session manager, and complete sync/async launcher.
-- [ ] Direct HTTP and **unmodified SDK through the corrected pinned emulator** assert both values and schemas for: `SELECT 1 AS result`, BIGINT `9007199254740993`, a high-precision DECIMAL, typed null, and an empty result with schema.
+- [ ] Direct HTTP and fresh packaged consumers assert both values and schemas for: `SELECT 1 AS result`, BIGINT `9007199254740993`, a high-precision DECIMAL, typed null, and an empty result with schema.
 - [ ] Verify column order/duplicate labels, date/timestamp encoding, invalid SQL/kinds, rejected mutations/Python/types, and row/byte/input/admission limits.
 - [ ] Saturate compute while health requests continue making progress. Demonstrate that timed-out native work still occupies its permit until completion.
 - [ ] Verify session TTL/close, isolation of declared session state, startup failure, graceful/forced shutdown, async cancellation, and no child-process leaks.
-- [ ] SQL execution in the server image requires neither Python nor Java. The SDK/launcher run in a separate client environment.
+- [ ] SQL execution in the server image requires neither Python nor Java. The client/launcher run in a separate client environment.
 
 ### Phase 1
 
@@ -319,12 +323,14 @@ The [4.17 implementation plan](RELEASE_4_17.md) refines this phase into delivery
 - [ ] Execute/reattach/release/interrupt/session-release lifecycle passes under disconnects, retries, capacity pressure, and restart.
 - [ ] Multiple clients get independent correct results while health I/O progresses; unsupported features fail truthfully.
 - [ ] The public launcher enables `spark_connect_url` only for a ready supported endpoint.
-- [ ] Emulator gRPC proxy is separately verified before advertising that route.
+- [ ] Optional third-party gRPC routes need separate certification before advertising and do not gate standalone releases.
 
-### Optional phases
+### Optional phases after Connect
 
-- **Phase 3:** isolated Python worker packaging, code trust, quotas, environment/secrets handling, output/errors, Jobs/notebook behavior, and worker cleanup. Core SQL/Connect images remain free of Python.
-- **Phase 4:** native Delta/UC integration with independent-reader verification of schema and transactions, decimal preservation, and explicit rejection of unsupported writes/DDL.
+- **Phase 3:** DuckDB source integration, with read-only typed Arrow scans into Polars, stable multi-table snapshots, native database ownership, independent DuckDB writer visibility, and measured memory/cancellation behavior. Complete V33/V34 before the 4.19 release.
+- **Phase 4:** DuckDB execution behind the Connect endpoint, with explicit backend selection, reference-semantic and schema agreement, persistent transactional write outcomes, Connect lifecycle, and independent client read/write visibility. Complete V35/V36 before the 4.20 release; a source scan alone does not complete this phase.
+- **Phase 5:** isolated Python worker packaging, code trust, quotas, environment/secrets handling, output/errors, Jobs/notebook behavior, and worker cleanup. Core SQL/Connect images remain free of Python.
+- **Phase 6:** native Delta/UC integration with independent-reader verification of schema and transactions, decimal preservation, and explicit rejection of unsupported writes/DDL.
 
 ### Common release checks
 
@@ -339,7 +345,7 @@ The [4.17 implementation plan](RELEASE_4_17.md) refines this phase into delivery
 
 Split this epic into focused issues for:
 
-1. Compatibility/version contracts and emulator typed-result/SDK prerequisite.
+1. Compatibility/version contracts and standalone typed-result fixtures.
 2. Workspace crate, CLI, native packaging, and feature isolation.
 3. Early Spark Connect client lifecycle feasibility.
 4. Admission, operation state, cooperative cancellation accounting, and shutdown.
@@ -349,8 +355,10 @@ Split this epic into focused issues for:
 8. Native logical schema fidelity and lazy range/count gaps.
 9. Connect plan translation, analysis/configuration, and supported type/RPC matrix.
 10. Arrow streaming, bounded replay, reattachment/release, and client conformance.
-11. Emulator gRPC integration and reproducible benchmarks.
-12. Optional isolated Python workers; optional Delta/UC interoperability.
+11. Standalone Connect release checks and reproducible benchmarks.
+12. DuckDB data-source scans, source snapshots, database ownership, and bounded Arrow transfer into Polars.
+13. DuckDB execution backend for Connect, semantic translation, persistent mutation outcomes, and shared DuckDB tables.
+14. Optional isolated Python workers; optional Delta/UC interoperability.
 
 Record cross-repository owners and immutable test revisions in those issues. Do not close this epic based only on crate scaffolding or the two smoke-query witnesses.
 

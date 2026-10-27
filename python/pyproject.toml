@@ -57,8 +57,9 @@ markers = [
 ]
 
 [build-system]
-requires = ["maturin>=1.4,<2"]
-build-backend = "maturin"
+requires = ["maturin>=1.4,<2", "tomli>=1.1; python_version < '3.11'"]
+build-backend = "_sparkless_build"
+backend-path = ["."]
 
 [tool.maturin]
 module-name = "sparkless._native"

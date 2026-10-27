@@ -13,7 +13,7 @@ The [4.17 extension](RELEASE_4_17.md) adds only its enumerated managed-table rea
 
 ## Dependencies and delivery slices
 
-SS-01 contracts/emulator mapping; SS-02 transport; SS-04 runtime; SS-07 minimum sessions; SS-08 minimum scalar/schema repairs.
+SS-01 standalone typed-result contracts; SS-02 transport; SS-04 runtime; SS-07 minimum sessions; SS-08 minimum scalar/schema repairs.
 
 Plan numbers are workstream identifiers, not a strict execution order. Only the applicable phase slice blocks a milestone; later extensions must not delay an earlier gate.
 
@@ -31,14 +31,14 @@ Plan numbers are workstream identifiers, not a strict execution order. Only the 
 
 6. Use status:error envelopes with HTTP 200 for valid requests that fail execution/unsupported-kind checks. Document transport/oversize/admission HTTP failures separately.
 
-7. Run direct HTTP tests and the unmodified SDK route through the pinned corrected emulator; validate values and schemas in both.
+7. Run native/direct HTTP tests and fresh packaged consumers; validate exact values and schemas. Optional external route certification is supplemental.
 
 ## Acceptance criteria
 
 - [ ] SELECT 1, large BIGINT, decimal, typed null, date/time, and empty result fixtures return exact schemas and values.
 - [ ] Invalid input, unsupported operations, output-limit and queue-limit errors are explicit; successful truncation is impossible.
 - [ ] Remote SQL remains read-only in Phase 0B; capabilities match enabled paths.
-- [ ] The SDK integration gate passes via public result fields, not text-only fallback.
+- [ ] Direct HTTP and packaged consumers verify exact positional values and logical schemas.
 
 ## Decisions and implementation touchpoints
 

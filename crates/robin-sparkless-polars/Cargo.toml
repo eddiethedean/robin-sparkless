@@ -84,3 +84,5 @@ odbc-api = { version = "21.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+polars-parquet = { version = "0.53", default-features = false, features = ["zstd"] }
+zstd = { version = "=0.14.3", default-features = false }

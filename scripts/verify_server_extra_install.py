@@ -8,10 +8,14 @@ import os
 import sys
 from pathlib import Path
 
-from verify_server_http import verify_endpoint
+from verify_server_http import verify_endpoint, verify_mutations
 
 
-def verify(expected_version: str, protocol: str = "current") -> None:
+def verify(
+    expected_version: str, protocol: str = "current", mutations: bool = False
+) -> None:
+    if mutations and protocol == "legacy-4.16":
+        raise RuntimeError("mutation checks require the current server protocol")
     import sparkless
     from sparkless.server import SparklessServer
     from sparkless_server_bin import executable_path
@@ -37,6 +41,8 @@ def verify(expected_version: str, protocol: str = "current") -> None:
         if protocol == "current" and not server.server_instance_id:
             raise RuntimeError("owned server did not report an instance identity")
         verify_endpoint(server.http_url)
+        if mutations:
+            verify_mutations(server.http_url)
     except BaseException:
         if server.diagnostics:
             print(server.diagnostics[-4096:], file=sys.stderr)
@@ -49,6 +55,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version", help="expected coordinated release version")
     parser.add_argument(
+        "--mutations", action="store_true", help="verify Phase 1 HTTP mutation outcomes"
+    )
+    parser.add_argument(
         "--protocol",
         choices=("current", "legacy-4.16"),
         default="current",
@@ -56,7 +65,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        verify(args.version, args.protocol)
+        verify(args.version, args.protocol, args.mutations)
     except (OSError, RuntimeError, importlib.metadata.PackageNotFoundError) as error:
         print("ERROR: {}".format(error), file=sys.stderr)
         return 1

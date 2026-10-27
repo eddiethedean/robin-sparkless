@@ -8,7 +8,7 @@ The public PyPI inventory currently contains nine `sparkless==4.16.0` files and 
 
 ## Release outcome
 
-A fresh `sparkless[server]==4.16.0` installation on an advertised platform can launch an owned native Rust child, execute the declared read-only SQL subset through HTTP, and clean up with synchronous or asynchronous lifecycle methods. An unmodified Databricks SDK receives exact values and schema through the corrected pinned emulator. Non-Python consumers can install the Rust CLI or use its native image.
+A fresh `sparkless[server]==4.16.0` installation on an advertised platform can launch an owned native Rust child, execute the declared read-only SQL subset through HTTP, and clean up with synchronous or asynchronous lifecycle methods. Standalone HTTP consumers receive exact values and schema. Non-Python consumers can install the Rust CLI or use its native image.
 
 The public server has no supported Spark Connect endpoint in 4.16.0. The required Phase 0A Connect experiment remains test-only and feature-gated. Catalog mutations, file/network readers, Python execution, nested types, and production gRPC remain assigned to their later gates. Existing embedded Rust/Python APIs retain their supported behavior; the restricted surface applies to remote server execution.
 
@@ -39,25 +39,25 @@ Slice IDs are implementation planning IDs, not GitHub issues or claims of merged
 
 | Slice | Deliverable | Dependencies | Exit evidence |
 | --- | --- | --- | --- |
-| **416-01** | Freeze compatibility, SQL/result contract, package inventory, and external emulator work | None | D01–D04 baseline; SDK decoding fixtures; upstream owner/issue/PR recorded |
+| **416-01** | Freeze compatibility, SQL/result contract, package inventory, and typed HTTP fixtures | None | D01–D04 baseline; typed-result decoder fixtures |
 | **416-02** | Minimal server crate, CLI/config types, protocol-generation test boundary | 416-01 | Direct Rust linkage, feature separation, clean-package build investigation |
 | **416-03** | Native Connect feasibility with the unmodified client defaults | 416-01, 416-02 | V03/V04: computed witness, typed empty result, reconnect, release trace |
 | **416-04** | Bounded executor, operation ownership, read-only sessions, drain/control state | 416-02; incorporate 416-03 findings before freezing interfaces | V09–V11 core tests; a timed-out native task retains its permit |
 | **416-05** | Scalar logical schema/positional export and SQL allowlist | 416-01, 416-02 | Engine fixture corpus passes, including duplicate labels and exact decimals/BIGINT |
 | **416-06** | HTTP agent wired to the real engine/runtime | 416-04, 416-05; 416-03 feasibility complete | V05–V11 direct-agent tests; readiness follows a real native witness |
 | **416-07** | Sync/async launcher and binary distribution | 416-02 control contract, 416-04 shutdown, 416-06 readiness | V12–V14 across advertised launcher/binary platforms |
-| **416-08** | Integrated SDK/emulator, locked release inventory, candidate artifacts/CI | Corrected emulator; 416-01 through 416-07 | V01–V14 plus V29; all 4.16.0 candidate artifacts install and run |
+| **416-08** | Integrated HTTP/launcher, locked release inventory, candidate artifacts/CI | 416-01 through 416-07 | V01–V14 plus V29; all 4.16.0 candidate artifacts install and run |
 | **416-09** | Coordinated publication and public artifact verification | 416-08 and every pre-publication gate | V30: all inventoried artifacts published and verified at 4.16.0 |
 
-After 416-02, runtime work, native schema work, and the external emulator fix can proceed independently. The launcher can develop against the agreed control contract before HTTP completion; its end-to-end gate waits for 416-06. The Connect feasibility test must not expand into the full Phase 2 translator or replay implementation.
+After 416-02, runtime, native schema, and packaging work can proceed independently. The launcher can develop against the agreed control contract before HTTP completion; its end-to-end gate waits for 416-06. The Connect feasibility test must not expand into the full Phase 2 translator or replay implementation.
 
 ## 416-01: compatibility and external dependency
 
-Record one exact client/proto tag for the feasibility test, one exact SDK version, the emulator source revision/image digest, and reference-engine settings in [D01–D04](DECISIONS.md). Distinguish the server version from its semantic and transport compatibility identifiers.
+Record one exact client/proto tag for the feasibility test, reference-engine settings and HTTP decoder fixtures in [D01–D04](DECISIONS.md). Distinguish the server version from its semantic and transport compatibility identifiers.
 
-The external emulator change must preserve the agent's schema and exact cells, then construct public `manifest.schema` and `result.data_array`. Use real SDK model decoding in fixtures, including BIGINT `9007199254740993`, a 38-digit decimal, null, zero rows, and duplicate column names. Neither `result.text` decoding nor a fixture that bypasses the emulator adapter satisfies the gate.
+Native/direct HTTP tests must preserve schema and exact positional cells, including BIGINT `9007199254740993`, a 38-digit decimal, null, zero rows, and duplicate column names. Use self-contained fixtures and fresh packaged consumers. Optional external adapters need separate certification before advertising, but their changes or acceptance do not block Sparkless releases.
 
-Track the external implementation and its immutable test revision as a release dependency. Direct-agent work can continue while it is pending, but **4.16.0 is not ready to publish until the integrated SDK gate passes**.
+Release readiness requires the complete standalone native/HTTP/launcher matrix and candidate artifacts. Optional third-party interoperability is supplemental and never substitutes for or blocks those gates.
 
 ## 416-04: runtime, sessions, and bounded defaults
 
@@ -112,14 +112,14 @@ Construct the logical Spark schema with ordered fields, declared type/precision/
 
 Export values by column index using bounded native batches. Do not call the name-keyed JSON-row APIs for positional results or eager whole-query JSON collection for bounded output. Preserve duplicate public labels using unique internal names and a positional logical-schema mapping; verify ordering and references through aliases before enabling that path. Internal aliases must not escape into public schemas.
 
-The agent JSON contains exact integer numbers, booleans, strings, null, decimal strings, ISO dates, and UTC timestamps with a documented six-digit fractional precision and `Z` suffix. The emulator translates non-null cells into its SDK JSON_ARRAY string encoding without routing numbers through floating point. Preserve decimal scale, including trailing zeros.
+The agent JSON contains exact integer numbers, booleans, strings, null, decimal strings, ISO dates, and UTC timestamps with a documented six-digit fractional precision and `Z` suffix. Preserve decimal scale, including trailing zeros.
 
 ### Minimum golden corpus
 
 | Query / scenario | Required assertion |
 | --- | --- |
 | `SELECT 1 AS result` | One INT cell and matching non-null logical field |
-| `SELECT CAST(9007199254740993 AS BIGINT) AS n` | Exact BIGINT through both HTTP and SDK |
+| `SELECT CAST(9007199254740993 AS BIGINT) AS n` | Exact BIGINT through direct HTTP and packaged consumers |
 | `SELECT CAST('1234567890123456789012345678901234.5678' AS DECIMAL(38,4)) AS d` | Exact decimal text, precision 38 and scale 4 |
 | `SELECT CAST(NULL AS BIGINT) AS n` | Null cell and nullable BIGINT schema |
 | `SELECT CAST(NULL AS BIGINT) AS n WHERE 1 = 0` | Empty row array with the same logical schema |
@@ -129,7 +129,7 @@ The agent JSON contains exact integer numbers, booleans, strings, null, decimal 
 | Cast failure / division by zero / overflow | Declared ANSI behavior; no fabricated null/success |
 | Read query containing a rejected descendant or unsupported clause | Named error before engine execution |
 
-Run each applicable golden case through direct HTTP and the real SDK/emulator route. Compare logical schemas against the pinned reference settings; normalize only documented transport representation differences. Record discovered native fixes rather than weakening the expected schema.
+Run each applicable golden case through direct HTTP and fresh packaged consumers. Compare logical schemas against the pinned reference settings; normalize only documented transport representation differences. Record discovered native fixes rather than weakening the expected schema.
 
 ## 416-06: HTTP behavior
 
@@ -158,7 +158,7 @@ The initial server target matrix is selected for 416-01, with advertisement stil
 
 ## 416-08: metadata, candidate packages, and CI
 
-The release checker now includes `sparkless-server` in the Rust package/dependency/lock graph, requires `spark-sql-parser` version and lock alignment for any 4.16+ candidate branch even without a tag, and verifies the `sparkless-server-bin` version/extra coupling. Tests cover a coordinated 4.17 candidate branch without relying on a release tag. The release workflow packages every publishable Rust crate archive, builds and freshly installs the server wheels, installs the candidate `sparkless[server]` wheel pair offline, runs the pinned MiniLake SDK integration, and builds/smokes the native image before publication. Publication now waits for all checks, then releases Rust crates, server binary wheels/container, and the `sparkless` extension in sequence. Moving `spark-sql-parser` from 0.5.0 to 4.16.0 still requires updating every first-party parser dependency; changing only its manifest leaves an invalid published graph.
+The release checker now includes `sparkless-server` in the Rust package/dependency/lock graph, requires `spark-sql-parser` version and lock alignment for any 4.16+ candidate branch even without a tag, and verifies the `sparkless-server-bin` version/extra coupling. Tests cover a coordinated 4.17 candidate branch without relying on a release tag. The release workflow packages every publishable Rust crate archive, builds and freshly installs the server wheels, installs the candidate `sparkless[server]` wheel pair offline, runs the standalone native server integration suite, and builds/smokes the native image before publication. Publication now waits for all checks, then releases Rust crates, server binary wheels/container, and the `sparkless` extension in sequence. Moving `spark-sql-parser` from 0.5.0 to 4.16.0 still requires updating every first-party parser dependency; changing only its manifest leaves an invalid published graph.
 
 Maintain one explicit inventory of package names, manifests, dependency edges, artifact targets, and publication destinations. Check every version and first-party dependency requirement, Cargo.lock entry, Python runtime value, binary report, wheel metadata, container tag, and `v4.16.0` tag. `sparkless-native` ships inside `sparkless` wheels; it does not add a new crates.io publication requirement.
 
@@ -169,21 +169,21 @@ Run the following independent CI lanes on the integrated candidate:
 1. Native crate/feature/dependency isolation and existing embedded-engine regression checks.
 2. Direct HTTP, logical schema, admission/session/deadline/shutdown checks.
 3. Experimental Connect feasibility with pinned unmodified client defaults; no experimental gRPC in normal artifacts.
-4. Unmodified SDK through the corrected immutable emulator build, with actual value/schema assertions.
+4. Standalone native/direct HTTP and packaged consumers, with actual value/schema assertions.
 5. Sync/async launcher and package-resource installation on each advertised binary platform, plus existing Python wheel regression coverage.
 6. Native image and fresh candidate-package consumer tests, complete metadata inventory, checksums, and platform wheel tags.
 
-Keep exact client/emulator versions and D01–D09/D11 evidence in the decision/validation records. HTTP/binary/launcher failures cannot be masked by a passing embedded-engine suite. Third-party pins remain open until tested; all first-party candidate package versions are 4.16.0.
+Keep exact client/reference versions and D01–D09/D11 evidence in the decision/validation records. HTTP/binary/launcher failures cannot be masked by a passing embedded-engine suite. Optional third-party route pins remain open until tested and do not gate standalone release; all first-party candidate package versions are 4.16.0.
 
 ## Release readiness versus completion
 
-**Ready to tag/publish:** 416-01 through 416-08 are complete; V01–V14 and V29 pass against one integrated candidate and the corrected emulator; all platforms/artifacts in the inventory are built and verified. The release workflow changes are implementation only until a non-publishing candidate run passes, including the selected wheel matrix and container smoke. No publication is needed to prove these pre-publication gates.
+**Ready to tag/publish:** 416-01 through 416-08 are complete; V01–V14 and V29 pass against one integrated standalone candidate; all platforms/artifacts in the inventory are built and verified. The release workflow changes are implementation only until a non-publishing candidate run passes, including the selected wheel matrix and container smoke. No publication is needed to prove these pre-publication gates.
 
 **Released:** publish in dependency order, verify package registries plus binaries/container, and pass V30 using fresh public installs. Only then mark 4.16.0 complete. A partial registry publication is an incomplete release. Resume only missing verified artifacts; if existing published contents require correction, issue a coordinated new patch version instead of overwriting artifacts.
 
 - [ ] 416-01–416-03: contracts and feasibility complete (Phase 0A).
 - [ ] 416-04–416-07: native HTTP, bounded runtime, schema, and owned launcher complete.
-- [ ] 416-08: integrated SDK and all candidate distribution gates pass (Phase 0B ready).
+- [ ] 416-08: integrated HTTP/launcher and all candidate distribution gates pass (Phase 0B ready).
 - [ ] 416-09: complete 4.16.0 inventory published and verified.
 
 This refinement creates implementation instructions only. Native changes, version bumps, external repository changes, and publication happen in the corresponding delivery slices, with evidence recorded before advancing their gates.

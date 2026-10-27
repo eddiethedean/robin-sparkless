@@ -1,6 +1,6 @@
 # SS-12: Optional isolated Python Jobs and notebooks
 
-> **Status: planned; owner unassigned.** Phase: 3; optional and separately packaged.
+> **Status: planned; owner unassigned.** Phase: 5; target 4.21.0; optional and separately packaged.
 > [Index](README.md) · [Epic contract](EPIC.md#acceptance-and-release-gates) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Outcome
@@ -41,4 +41,4 @@ Resolve or explicitly defer D10, D12 in the [decision register](DECISIONS.md). R
 
 ## Scope notes
 
-No Python-worker implementation is required for Phase 0/1/2 SQL or DataFrame gates. Separate interpreters alone do not constitute a security sandbox.
+No Python-worker implementation is required for Phase 0–4 SQL/DataFrame, DuckDB source, or DuckDB Connect gates. This phase is scheduled after the DuckDB phases without an inherent engine dependency. Separate interpreters alone do not constitute a security sandbox.

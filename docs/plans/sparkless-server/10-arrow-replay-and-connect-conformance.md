@@ -45,4 +45,6 @@ Resolve or explicitly defer D07, D08, D11 in the [decision register](DECISIONS.m
 
 ## Scope notes
 
+Keep result/operation ownership explicit so the later DuckDB source and execution phases can reuse this protocol without silently inheriting Polars' ephemeral-catalog semantics. [SS-14](14-duckdb-data-source.md) must preserve source snapshots during scans/replay; [SS-15](15-duckdb-connect-backend.md) must prove database transaction outcomes and persistent-data restart behavior separately. Phase 2 conformance remains scoped to its implemented backend.
+
 Transport end-of-stream is not necessarily query completion. Client defaults must remain enabled throughout conformance tests.

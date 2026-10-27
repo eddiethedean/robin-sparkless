@@ -10,3 +10,12 @@ The source and license files in each directory are from the corresponding crates
 release: `polars-arrow` 0.53.0, `polars-parquet` 0.53.0, `parquet` 57.2.0, and
 `parquet` 58.3.0. Keep source changes limited to dependency compatibility and
 document the upstream versions when refreshing these copies.
+
+Python source releases must use the PEP 517 backend in `python/_sparkless_build.py`;
+it includes these patch sources and prepares the extracted workspace lockfile.
+Direct `maturin sdist` omits the patch directories. Release CI checks a fresh
+extraction with `scripts/verify_release_source.py`.
+
+These root patches do not propagate to downstream crates.io consumers. Fixed
+published dependencies or distributable forks remain a separate Rust release
+requirement; see the 4.17 blocker table in the server release plan.
