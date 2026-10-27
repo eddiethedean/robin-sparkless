@@ -23,6 +23,8 @@ include = [
   "/README.md",
   "/LICENSE",
   "/CHANGELOG.md",
+  "/security/zstd-4.17-patches.toml",
+  "/docs/security/zstd-4.17-exception.md",
 ]
 
 # docs.rs builds with rustc nightly; if the build fails with an ICE (e.g. in polars-core),

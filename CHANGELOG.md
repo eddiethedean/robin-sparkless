@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bounded native execution** — deferred ranges and bounded batches for supported filtered counts, with scheduler-health and resource witnesses.
 - **Logical schema fidelity** — preserve supported scalar distinctions and nested metadata/nullability through native transformations and Arrow IPC. The additive `LogicalField`, `StructType::from_logical_fields`, and `logical_fields()` APIs retain metadata while existing three-field `StructField` literals and `StructType::fields()` remain source-compatible.
 - **Coordinated server distribution** — platform-specific server wheels, fresh offline server-extra installs, a native container, and functional mutation/replay/status checks on candidate and public artifacts. External SDK/emulator certification remains optional.
-- **Rust consumer audit** — publication checks the downstream dependency graph without inheriting workspace Cargo patches.
+- **Rust consumer audit** — publication checks the downstream dependency graph without inheriting workspace Cargo patches. A 4.17.0-only zstd risk exception expires after 2026-11-26; raw findings remain visible and unrelated advisories still block release. [Security scope and residual exposure](docs/security/zstd-4.17-exception.md).
 
 ### Changed
 
@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bounded SQL validation** — run SQL parsing and AST validation on blocking workers under compute and queue admission, while retained mutation replay remains available during saturation.
 - **Server distribution checks** — exercise shared catalog effects, exact values/schema, mutation replay, and retained status on packaged binaries before publication and on the crates.io-installed executable afterward.
 - **Server shutdown and version** — drain on SIGTERM and expose `sparkless-server --version` without runtime configuration.
-- **Dependency security** — update Tokio and `ctutils` past RUSTSEC-2026-0386 and RUSTSEC-2026-0385, and replace yanked `chacha20` 0.10.0 with 0.10.2. Registry-consumer compression dependencies remain a publication hold until fixed upstream versions are consumed and audited.
+- **Dependency security** — update Tokio and `ctutils` past RUSTSEC-2026-0386 and RUSTSEC-2026-0385, and replace yanked `chacha20` 0.10.0 with 0.10.2. Official artifacts use fixed zstd implementations. The pinned [Rust consumer Cargo patch](security/zstd-4.17-patches.toml) also fixes the registry consumer graph when applied at the application root. Ordinary unpatched Rust builds retain the disclosed, temporary exception above.
 
 ## [4.15.3] - 2026-10-22
 

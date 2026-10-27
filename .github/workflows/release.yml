@@ -103,12 +103,16 @@ jobs:
       - name: Install Cargo audit
         run: cargo install cargo-audit --locked
       - name: Resolve and audit the graph consumers receive
-        run: python3 scripts/verify_rust_consumer_graph.py --output "$RUNNER_TEMP/rust-consumer-audit.json"
+        run: |
+          python3 scripts/verify_rust_consumer_graph.py --output "$RUNNER_TEMP/rust-consumer-audit.json"
+          cat "$RUNNER_TEMP/rust-consumer-audit.exceptions.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify the published consumer patch configuration without exceptions
+        run: python3 scripts/verify_rust_consumer_graph.py --patch-config security/zstd-4.17-patches.toml --strict --output "$RUNNER_TEMP/rust-consumer-patched-audit.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: rust-consumer-audit
-          path: ${{ runner.temp }}/rust-consumer-audit.json
+          path: ${{ runner.temp }}/rust-consumer-*.json
           if-no-files-found: error
 
   # --- Rust ---

@@ -2,6 +2,10 @@
 
 Polars-backed implementation of [robin-sparkless](https://github.com/eddiethedean/robin-sparkless): `SparkSession`, `DataFrame`, `DataFrameReader`, `Column`, expression functions, UDFs, and plan execution. This is the **only crate in the workspace that depends on Polars**; the root crate is a thin facade that re-exports the public API.
 
+**4.17.0 security notice:** crates.io builds retain a temporary zstd risk
+exception. Apply the pinned consumer Cargo patches before reading untrusted
+compressed input. See the [exposure, expiry, and patch instructions](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/security/zstd-4.17-exception.md).
+
 [![crates.io](https://img.shields.io/crates/v/robin-sparkless-polars.svg)](https://crates.io/crates/robin-sparkless-polars)
 [![docs.rs](https://docs.rs/robin-sparkless-polars/badge.svg)](https://docs.rs/robin-sparkless-polars)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/eddiethedean/robin-sparkless/blob/main/LICENSE)
