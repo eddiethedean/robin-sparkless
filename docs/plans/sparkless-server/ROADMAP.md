@@ -92,7 +92,7 @@ Remote mutations, arbitrary Python, and production Spark Connect remain unsuppor
 
 Build on the 4.16.0 service with **Phase 1** capabilities, then publish all packages again at **4.17.0**.
 
-The [detailed 4.17 implementation plan](RELEASE_4_17.md) specifies the proposed ephemeral catalog, statement snapshots, initial mutation allowlist, HTTP identity/status extension, bounded outcome retention, native type matrix, and lazy execution evidence. These are implementation baselines to verify, not completed capabilities.
+The [detailed 4.17 implementation plan](RELEASE_4_17.md) specifies the ephemeral catalog, statement snapshots, mutation allowlist, HTTP identity/status extension, bounded outcome retention, native type matrix, and lazy execution evidence. The completed release state and public verification evidence are recorded in that plan and the [validation log](VALIDATION.md#4170-final-public-release-verification-2026-10-28).
 
 ### Delivery sequence
 
@@ -116,13 +116,13 @@ Primary plans: [SS-07](07-sessions-catalogs-and-mutations.md), [SS-08](08-native
 
 ### Release gate
 
-- [ ] 4.16 is complete, its applicable regression gates still pass, and **V15–V18** pass for the enabled Phase 1 surface; production Connect checks remain in 4.18.
-- [ ] Concurrent mutation, duplicate operation, disconnect near commit, and restart tests match the documented guarantees.
-- [ ] Versioned HTTP identity/status preserves outcomes through the complete native/direct-HTTP matrix; legacy requests remain read-only.
-- [ ] Catalog objects survive session close according to policy; temporary state remains isolated.
-- [ ] Schema fidelity and lazy execution are demonstrated, with intermediate-memory measurements.
-- [ ] **V31** verifies every 4.17.0 candidate artifact and isolated consumer installation before tagging/publication.
-- [ ] All packages/artifacts are published and verified at **4.17.0** through **V32** fresh public installs.
+- [x] 4.16 is complete, its applicable regression gates still pass, and **V15–V18** pass for the enabled Phase 1 surface; production Connect checks remain in 4.18.
+- [x] Concurrent mutation, duplicate operation, disconnect near commit, and restart tests match the documented guarantees.
+- [x] Versioned HTTP identity/status preserves outcomes through the complete native/direct-HTTP matrix; legacy requests remain read-only.
+- [x] Catalog objects survive session close according to policy; temporary state remains isolated.
+- [x] Schema fidelity and lazy execution are demonstrated, with intermediate-memory measurements.
+- [x] **V31** verified every 4.17.0 candidate artifact and isolated consumer installation before tagging/publication.
+- [x] All packages/artifacts are published and verified at **4.17.0**; post-publication checks passed through guarded recovery, with the original tag-run V32 job skipped (see [validation evidence](VALIDATION.md#4170-final-public-release-verification-2026-10-28)).
 
 ## 4.18.0 — Supported Spark Connect and Arrow execution
 
