@@ -1145,9 +1145,14 @@ fn translate_select_body(
     session: &SparkSession,
     body: &Select,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    let (mut df, relation_columns, relation_left_columns) = translate_select_from(session, body)?;
-    let relation_qualifiers =
-        sql_relation_qualifiers(body, &relation_columns, &relation_left_columns);
+    let (mut df, relation_columns, relation_left_columns, relation_coalesced_keys) =
+        translate_select_from(session, body)?;
+    let relation_qualifiers = sql_relation_qualifiers(
+        body,
+        &relation_columns,
+        &relation_left_columns,
+        &relation_coalesced_keys,
+    );
     if let Some(selection) = &body.selection {
         let expr = sql_expr_to_polars_with_qualifiers(
             selection,
@@ -1410,6 +1415,7 @@ type SelectFromTranslation = (
     crate::dataframe::DataFrame,
     Vec<Vec<String>>,
     Vec<Vec<String>>,
+    Vec<Vec<(String, String)>>,
 );
 
 fn translate_select_from(
@@ -1445,12 +1451,14 @@ fn translate_select_from(
             DataFrame::from_polars_with_options(pl_df, session.is_case_sensitive()),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         ));
     }
     let first_tj = &select.from[0];
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
     let mut relation_columns = vec![df.columns()?];
     let mut relation_left_columns = vec![Vec::new()];
+    let mut relation_coalesced_keys = vec![Vec::new()];
     #[cfg(test)]
     test_hooks::after_first_relation_resolution();
     #[cfg(feature = "test-hooks")]
@@ -1468,6 +1476,7 @@ fn translate_select_from(
         relation_left_columns.push(df.columns()?);
         let mut right_df = resolve_table_factor(session, &join_spec.relation)?;
         relation_columns.push(right_df.columns()?);
+        relation_coalesced_keys.push(Vec::new());
         let right_alias_opt = table_alias_from_factor(&join_spec.relation);
         if let Some(ref prefix) = right_alias_opt {
             if should_prefix_columns(&join_spec.relation) {
@@ -1511,6 +1520,21 @@ fn translate_select_from(
                     &join_spec.relation,
                     session.is_case_sensitive(),
                 )?;
+                if matches!(
+                    join_type,
+                    JoinType::Inner | JoinType::Left | JoinType::Right
+                ) {
+                    relation_coalesced_keys
+                        .last_mut()
+                        .expect("a right relation was just added")
+                        .extend(
+                            left_on
+                                .iter()
+                                .zip(&right_on)
+                                .filter(|(left, right)| left == right)
+                                .map(|(left, right)| (right.clone(), left.clone())),
+                        );
+                }
                 let left_refs: Vec<&str> = left_on.iter().map(|s| s.as_str()).collect();
                 let right_refs: Vec<&str> = right_on.iter().map(|s| s.as_str()).collect();
                 df = join(
@@ -1533,7 +1557,12 @@ fn translate_select_from(
         // continue to resolve to prefixed column names (e_project_id) across multiple JOINs
         // (issue #376 / robust 3-join SQL tests).
     }
-    Ok((df, relation_columns, relation_left_columns))
+    Ok((
+        df,
+        relation_columns,
+        relation_left_columns,
+        relation_coalesced_keys,
+    ))
 }
 
 fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
@@ -1959,12 +1988,14 @@ struct SqlRelationQualifier {
     is_right_relation: bool,
     source_columns: Vec<String>,
     left_columns: Vec<String>,
+    coalesced_keys: Vec<(String, String)>,
 }
 
 fn sql_relation_qualifiers(
     select: &Select,
     relation_columns: &[Vec<String>],
     relation_left_columns: &[Vec<String>],
+    relation_coalesced_keys: &[Vec<(String, String)>],
 ) -> Vec<SqlRelationQualifier> {
     let mut qualifiers = Vec::new();
     let mut relation_index = 0usize;
@@ -1982,6 +2013,10 @@ fn sql_relation_qualifiers(
                 .get(relation_index - 1)
                 .cloned()
                 .unwrap_or_default();
+            let coalesced_keys = relation_coalesced_keys
+                .get(relation_index - 1)
+                .cloned()
+                .unwrap_or_default();
             match relation {
                 TableFactor::Table { name, alias, .. } => {
                     if let Some(alias) = alias {
@@ -1993,6 +2028,7 @@ fn sql_relation_qualifiers(
                             is_right_relation,
                             source_columns: source_columns.clone(),
                             left_columns: left_columns.clone(),
+                            coalesced_keys: coalesced_keys.clone(),
                         });
                     } else {
                         let parts = name
@@ -2007,6 +2043,7 @@ fn sql_relation_qualifiers(
                                 is_right_relation,
                                 source_columns: source_columns.clone(),
                                 left_columns: left_columns.clone(),
+                                coalesced_keys: coalesced_keys.clone(),
                             });
                             if parts.len() > 1 {
                                 qualifiers.push(SqlRelationQualifier {
@@ -2015,6 +2052,7 @@ fn sql_relation_qualifiers(
                                     is_right_relation,
                                     source_columns: source_columns.clone(),
                                     left_columns: left_columns.clone(),
+                                    coalesced_keys: coalesced_keys.clone(),
                                 });
                             }
                         }
@@ -2029,6 +2067,7 @@ fn sql_relation_qualifiers(
                         is_right_relation,
                         source_columns: source_columns.clone(),
                         left_columns: left_columns.clone(),
+                        coalesced_keys: coalesced_keys.clone(),
                     });
                 }
                 _ => {}
@@ -2085,15 +2124,24 @@ fn sql_struct_field_expr(
             .as_ref()
             .map(|prefix| format!("{prefix}_{column}"))
             .filter(|candidate| df.get_column_dtype(candidate).is_some());
-        let mut right_output = None;
-        if qualifier.is_right_relation && prefixed.is_none() {
-            let same_name = |left: &str, right: &str| {
-                if df.case_sensitive {
-                    left == right
-                } else {
-                    left.eq_ignore_ascii_case(right)
-                }
-            };
+        let same_name = |left: &str, right: &str| {
+            if df.case_sensitive {
+                left == right
+            } else {
+                left.eq_ignore_ascii_case(right)
+            }
+        };
+        let mut right_output = qualifier
+            .is_right_relation
+            .then(|| {
+                qualifier
+                    .coalesced_keys
+                    .iter()
+                    .find(|(source, _)| same_name(source, column))
+                    .map(|(_, output)| output.clone())
+            })
+            .flatten();
+        if qualifier.is_right_relation && prefixed.is_none() && right_output.is_none() {
             let mut used_names = qualifier.left_columns.clone();
             for source_name in &qualifier.source_columns {
                 let overlaps_left = qualifier
@@ -4607,6 +4655,51 @@ mod insert_literal_tests {
         assert_eq!(
             selected.column("selected_b").unwrap().i64().unwrap().get(0),
             Some(200)
+        );
+    }
+
+    #[test]
+    fn qualified_coalesced_join_key_ignores_unrelated_suffix_column() {
+        let session = SparkSession::new(
+            Some("qualified-coalesced-key-lineage-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session.sql("CREATE TABLE left_items (id BIGINT)").unwrap();
+        session
+            .sql("CREATE TABLE right_items (id BIGINT, id_right BIGINT)")
+            .unwrap();
+        session.sql("INSERT INTO left_items VALUES (1)").unwrap();
+        session
+            .sql("INSERT INTO right_items VALUES (1, 777)")
+            .unwrap();
+
+        let selected = session
+            .sql(
+                "SELECT right_items.id AS actual \
+                 FROM left_items INNER JOIN right_items ON left_items.id = right_items.id",
+            )
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            selected.column("actual").unwrap().i64().unwrap().get(0),
+            Some(1)
+        );
+
+        let filtered = session
+            .sql(
+                "SELECT right_items.id AS actual \
+                 FROM left_items INNER JOIN right_items ON left_items.id = right_items.id \
+                 WHERE right_items.id = 1",
+            )
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(filtered.height(), 1);
+        assert_eq!(
+            filtered.column("actual").unwrap().i64().unwrap().get(0),
+            Some(1)
         );
     }
 
