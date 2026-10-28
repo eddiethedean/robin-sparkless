@@ -5,8 +5,7 @@ This directory contains tools for testing sparkless compatibility across multipl
 ## Overview
 
 The compatibility testing system:
-- Tests sparkless against Python 3.9-3.13
-- Tests against PySpark 3.2, 3.3, 3.4, and 3.5
+- Tests supported Python versions 3.11-3.13 against known-compatible PySpark 3.4 and 3.5 combinations
 - Uses Docker to ensure clean, isolated test environments
 - Generates a comprehensive compatibility report
 

@@ -13,7 +13,7 @@ Thank you for contributing. This repository contains the **Sparkless** Python pa
 ## Prerequisites
 
 - **Rust** — pinned in [rust-toolchain.toml](rust-toolchain.toml) (currently 1.93.x)
-- **Python 3.8+** — supported by the package; the contributor commands below use Python 3.11
+- **Python 3.11+** — supported by the package; the contributor commands below use Python 3.11
 - **uv** — for Python environments, dependencies, and commands ([installation](https://docs.astral.sh/uv/getting-started/installation/))
 - **maturin** — for Python/native builds; installed with the development dependencies below
 - **Java** (optional) — only for `SPARKLESS_TEST_MODE=pyspark` parity runs

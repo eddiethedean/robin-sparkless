@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use polars::prelude::{PolarsError, SchemaRef};
-use robin_sparkless_core::{DataType, StructField, StructType};
+use robin_sparkless_core::{DataType, LogicalField as StructField, StructType};
 
 use crate::dataframe::DataFrame;
 #[cfg(any(
@@ -398,7 +398,7 @@ fn parse_simple_spark_ddl(ddl: &str) -> Result<StructType, String> {
     if fields.is_empty() {
         return Err("empty schema".to_string());
     }
-    Ok(StructType::new(fields))
+    Ok(StructType::from_logical_fields(fields))
 }
 
 fn spark_type_token_to_data_type(token: &str) -> Option<DataType> {
@@ -424,10 +424,13 @@ mod tests {
     #[test]
     fn parse_simple_ddl_types() {
         let st = parse_simple_spark_ddl("id LONG, name STRING, active BOOLEAN").unwrap();
-        assert_eq!(st.fields().len(), 3);
-        assert!(matches!(st.fields()[0].data_type, DataType::Long));
-        assert!(matches!(st.fields()[1].data_type, DataType::String));
-        assert!(matches!(st.fields()[2].data_type, DataType::Boolean));
+        assert_eq!(st.logical_fields().len(), 3);
+        assert!(matches!(st.logical_fields()[0].data_type, DataType::Long));
+        assert!(matches!(st.logical_fields()[1].data_type, DataType::String));
+        assert!(matches!(
+            st.logical_fields()[2].data_type,
+            DataType::Boolean
+        ));
     }
 
     #[test]
@@ -449,7 +452,13 @@ mod tests {
             .csv(&path)
             .unwrap();
         let schema = df.schema().unwrap();
-        assert!(matches!(schema.fields()[0].data_type, DataType::Long));
-        assert!(matches!(schema.fields()[1].data_type, DataType::String));
+        assert!(matches!(
+            schema.logical_fields()[0].data_type,
+            DataType::Long
+        ));
+        assert!(matches!(
+            schema.logical_fields()[1].data_type,
+            DataType::String
+        ));
     }
 }

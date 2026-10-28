@@ -41,16 +41,13 @@ class CompatibilityTester:
         Returns list of (version, java_version) tuples.
         """
         return [
-            ("3.2.4", "11"),  # Latest 3.2.x
-            ("3.3.4", "11"),  # Latest 3.3.x
             ("3.4.3", "11"),  # Latest 3.4.x
             ("3.5.1", "17"),  # Latest 3.5.x (requires Java 17)
-            ("4.1.0", "17"),  # PySpark 4.1.x (requires Java 17, Python 3.10+)
         ]
 
     def get_python_versions(self) -> List[str]:
         """Get Python versions to test."""
-        return ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        return ["3.11", "3.12", "3.13"]
 
     def get_working_combinations(self) -> List[Tuple[str, str, str]]:
         """
@@ -58,16 +55,6 @@ class CompatibilityTester:
         Returns list of (python_version, pyspark_version, java_version) tuples.
         """
         return [
-            # Python 3.9 - all PySpark versions work
-            ("3.9", "3.2.4", "11"),
-            ("3.9", "3.3.4", "11"),
-            ("3.9", "3.4.3", "11"),
-            ("3.9", "3.5.1", "17"),
-            # Python 3.10 - all PySpark versions work
-            ("3.10", "3.2.4", "11"),
-            ("3.10", "3.3.4", "11"),
-            ("3.10", "3.4.3", "11"),
-            ("3.10", "3.5.1", "17"),
             # Python 3.11 - only 3.4+ work
             ("3.11", "3.4.3", "11"),
             ("3.11", "3.5.1", "17"),

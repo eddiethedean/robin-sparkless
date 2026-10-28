@@ -1,0 +1,7 @@
+# Consumer Cargo configuration: cargo --config /absolute/path/to/this/file build
+# This immutable revision contains the fixed dependency manifests and regression tests.
+[patch.crates-io]
+polars-arrow = { git = "https://github.com/eddiethedean/robin-sparkless", rev = "49d92c1f7c33f3b66f0d6b0ec1f7314f757b6f8c", version = "=0.53.0" }
+polars-parquet = { git = "https://github.com/eddiethedean/robin-sparkless", rev = "49d92c1f7c33f3b66f0d6b0ec1f7314f757b6f8c", version = "=0.53.0" }
+parquet-57 = { package = "parquet", git = "https://github.com/eddiethedean/robin-sparkless", rev = "49d92c1f7c33f3b66f0d6b0ec1f7314f757b6f8c", version = "=57.2.0" }
+parquet-58 = { package = "parquet", git = "https://github.com/eddiethedean/robin-sparkless", rev = "49d92c1f7c33f3b66f0d6b0ec1f7314f757b6f8c", version = "=58.3.0" }

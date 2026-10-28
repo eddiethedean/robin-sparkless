@@ -6,7 +6,7 @@ pub const MAX_LOGICAL_SCHEMA_METADATA_BYTES: usize = 32 * 1024;
 /// Maximum nesting depth allowed in field metadata JSON values.
 pub const MAX_LOGICAL_SCHEMA_METADATA_DEPTH: usize = 16;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum DataType {
     String,
@@ -34,24 +34,167 @@ pub enum DataType {
         value_contains_null: bool,
     },
     Struct(Vec<StructField>),
+    /// Metadata-bearing nested fields; serializes using the existing Struct wire tag.
+    LogicalStruct(Vec<LogicalField>),
 }
 
+#[derive(Serialize, Deserialize)]
+enum TypeWire {
+    String,
+    Byte,
+    Integer,
+    Short,
+    Long,
+    Double,
+    Float,
+    Decimal(u8, u8),
+    Boolean,
+    Date,
+    Timestamp,
+    TimestampNtz,
+    Binary,
+    Array(Box<DataType>),
+    Map(Box<DataType>, Box<DataType>),
+    ArrayWithNullability {
+        element_type: Box<DataType>,
+        contains_null: bool,
+    },
+    MapWithNullability {
+        key_type: Box<DataType>,
+        value_type: Box<DataType>,
+        value_contains_null: bool,
+    },
+    Struct(Vec<LogicalField>),
+}
+impl Serialize for DataType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let wire = match self {
+            Self::String => TypeWire::String,
+            Self::Byte => TypeWire::Byte,
+            Self::Integer => TypeWire::Integer,
+            Self::Short => TypeWire::Short,
+            Self::Long => TypeWire::Long,
+            Self::Double => TypeWire::Double,
+            Self::Float => TypeWire::Float,
+            Self::Boolean => TypeWire::Boolean,
+            Self::Date => TypeWire::Date,
+            Self::Timestamp => TypeWire::Timestamp,
+            Self::TimestampNtz => TypeWire::TimestampNtz,
+            Self::Binary => TypeWire::Binary,
+            Self::Decimal(p, s) => TypeWire::Decimal(*p, *s),
+            Self::Array(v) => TypeWire::Array(v.clone()),
+            Self::Map(k, v) => TypeWire::Map(k.clone(), v.clone()),
+            Self::ArrayWithNullability {
+                element_type,
+                contains_null,
+            } => TypeWire::ArrayWithNullability {
+                element_type: element_type.clone(),
+                contains_null: *contains_null,
+            },
+            Self::MapWithNullability {
+                key_type,
+                value_type,
+                value_contains_null,
+            } => TypeWire::MapWithNullability {
+                key_type: key_type.clone(),
+                value_type: value_type.clone(),
+                value_contains_null: *value_contains_null,
+            },
+            Self::Struct(fields) => {
+                TypeWire::Struct(fields.iter().cloned().map(LogicalField::from).collect())
+            }
+            Self::LogicalStruct(fields) => TypeWire::Struct(fields.clone()),
+        };
+        wire.serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for DataType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match TypeWire::deserialize(deserializer)? {
+            TypeWire::String => Self::String,
+            TypeWire::Byte => Self::Byte,
+            TypeWire::Integer => Self::Integer,
+            TypeWire::Short => Self::Short,
+            TypeWire::Long => Self::Long,
+            TypeWire::Double => Self::Double,
+            TypeWire::Float => Self::Float,
+            TypeWire::Boolean => Self::Boolean,
+            TypeWire::Date => Self::Date,
+            TypeWire::Timestamp => Self::Timestamp,
+            TypeWire::TimestampNtz => Self::TimestampNtz,
+            TypeWire::Binary => Self::Binary,
+            TypeWire::Decimal(p, s) => Self::Decimal(p, s),
+            TypeWire::Array(v) => Self::Array(v),
+            TypeWire::Map(k, v) => Self::Map(k, v),
+            TypeWire::ArrayWithNullability {
+                element_type,
+                contains_null,
+            } => Self::ArrayWithNullability {
+                element_type,
+                contains_null,
+            },
+            TypeWire::MapWithNullability {
+                key_type,
+                value_type,
+                value_contains_null,
+            } => Self::MapWithNullability {
+                key_type,
+                value_type,
+                value_contains_null,
+            },
+            TypeWire::Struct(fields) => {
+                let has_metadata = fields
+                    .iter()
+                    .any(|f| !f.metadata.is_empty() || f.data_type.has_field_metadata());
+                if has_metadata {
+                    Self::LogicalStruct(fields)
+                } else {
+                    Self::Struct(fields.into_iter().map(LogicalField::into_legacy).collect())
+                }
+            }
+        })
+    }
+}
+
+/// The original three-field Rust schema descriptor remains source-compatible.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructField {
     pub name: String,
     pub data_type: DataType,
     pub nullable: bool,
-    /// JSON-compatible Spark field metadata. Empty metadata is omitted when serialized so old
-    /// schema JSON remains byte-compatible.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
 impl StructField {
     pub fn new(name: String, data_type: DataType, nullable: bool) -> Self {
-        StructField {
+        Self {
             name,
             data_type,
+            nullable,
+        }
+    }
+
+    /// Opt into the additive descriptor when metadata is required.
+    pub fn with_metadata(self, metadata: BTreeMap<String, serde_json::Value>) -> LogicalField {
+        LogicalField::from(self).with_metadata(metadata)
+    }
+}
+
+/// A logical field including Spark metadata. Use StructType::from_logical_fields
+/// and StructType::logical_fields to retain this information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogicalField {
+    pub name: String,
+    pub data_type: DataType,
+    pub nullable: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+impl LogicalField {
+    pub fn new(name: String, data_type: DataType, nullable: bool) -> Self {
+        Self {
+            name,
+            data_type: data_type.into_logical(),
             nullable,
             metadata: BTreeMap::new(),
         }
@@ -61,47 +204,182 @@ impl StructField {
         self.metadata = metadata;
         self
     }
+
+    fn into_legacy(self) -> StructField {
+        StructField::new(self.name, self.data_type.into_legacy(), self.nullable)
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl From<StructField> for LogicalField {
+    fn from(field: StructField) -> Self {
+        Self::new(field.name, field.data_type, field.nullable)
+    }
+}
+
+impl DataType {
+    fn has_field_metadata(&self) -> bool {
+        match self {
+            Self::Struct(fields) => fields.iter().any(|f| f.data_type.has_field_metadata()),
+            Self::LogicalStruct(fields) => fields
+                .iter()
+                .any(|f| !f.metadata.is_empty() || f.data_type.has_field_metadata()),
+            Self::Array(inner)
+            | Self::ArrayWithNullability {
+                element_type: inner,
+                ..
+            } => inner.has_field_metadata(),
+            Self::Map(k, v)
+            | Self::MapWithNullability {
+                key_type: k,
+                value_type: v,
+                ..
+            } => k.has_field_metadata() || v.has_field_metadata(),
+            _ => false,
+        }
+    }
+
+    fn into_logical(self) -> Self {
+        match self {
+            Self::Struct(fields) => {
+                Self::LogicalStruct(fields.into_iter().map(LogicalField::from).collect())
+            }
+            Self::LogicalStruct(fields) => Self::LogicalStruct(
+                fields
+                    .into_iter()
+                    .map(|mut f| {
+                        f.data_type = f.data_type.into_logical();
+                        f
+                    })
+                    .collect(),
+            ),
+            Self::Array(inner) => Self::Array(Box::new(inner.into_logical())),
+            Self::Map(k, v) => Self::Map(Box::new(k.into_logical()), Box::new(v.into_logical())),
+            Self::ArrayWithNullability {
+                element_type,
+                contains_null,
+            } => Self::ArrayWithNullability {
+                element_type: Box::new(element_type.into_logical()),
+                contains_null,
+            },
+            Self::MapWithNullability {
+                key_type,
+                value_type,
+                value_contains_null,
+            } => Self::MapWithNullability {
+                key_type: Box::new(key_type.into_logical()),
+                value_type: Box::new(value_type.into_logical()),
+                value_contains_null,
+            },
+            other => other,
+        }
+    }
+
+    fn into_legacy(self) -> Self {
+        match self {
+            Self::LogicalStruct(fields) => {
+                Self::Struct(fields.into_iter().map(LogicalField::into_legacy).collect())
+            }
+            Self::Array(inner) => Self::Array(Box::new(inner.into_legacy())),
+            Self::Map(k, v) => Self::Map(Box::new(k.into_legacy()), Box::new(v.into_legacy())),
+            Self::ArrayWithNullability {
+                element_type,
+                contains_null,
+            } => Self::ArrayWithNullability {
+                element_type: Box::new(element_type.into_legacy()),
+                contains_null,
+            },
+            Self::MapWithNullability {
+                key_type,
+                value_type,
+                value_contains_null,
+            } => Self::MapWithNullability {
+                key_type: Box::new(key_type.into_legacy()),
+                value_type: Box::new(value_type.into_legacy()),
+                value_contains_null,
+            },
+            other => other,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct StructType {
     fields: Vec<StructField>,
+    logical_fields: Vec<LogicalField>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SchemaWire {
+    fields: Vec<LogicalField>,
+}
+
+impl Serialize for StructType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        SchemaWire {
+            fields: self.logical_fields.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for StructType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::from_logical_fields(
+            SchemaWire::deserialize(deserializer)?.fields,
+        ))
+    }
 }
 
 impl StructType {
     pub fn new(fields: Vec<StructField>) -> Self {
-        StructType { fields }
+        Self::from_logical_fields(fields.into_iter().map(LogicalField::from).collect())
     }
 
+    pub fn from_logical_fields(fields: Vec<LogicalField>) -> Self {
+        let logical_fields: Vec<_> = fields
+            .into_iter()
+            .map(|mut f| {
+                f.data_type = f.data_type.into_logical();
+                f
+            })
+            .collect();
+        let fields = logical_fields
+            .iter()
+            .cloned()
+            .map(LogicalField::into_legacy)
+            .collect();
+        Self {
+            fields,
+            logical_fields,
+        }
+    }
+
+    /// Legacy descriptors, without metadata. The slice type is unchanged from 4.16.
     pub fn fields(&self) -> &[StructField] {
         &self.fields
     }
 
-    /// Validate JSON metadata against the native-schema limits: at most 32 KiB per schema and
-    /// sixteen nested JSON containers. This does not claim that a physical engine conversion
-    /// can preserve metadata; checked converters must still reject unsupported mappings.
+    pub fn logical_fields(&self) -> &[LogicalField] {
+        &self.logical_fields
+    }
+
     pub fn validate_metadata(&self) -> Result<(), String> {
         let mut total_bytes = 0usize;
-        for field in &self.fields {
+        for field in &self.logical_fields {
             validate_field_metadata(field, 0, &mut total_bytes)?;
         }
         Ok(())
     }
 
-    /// Serialize the schema to a JSON string (array of field objects with name, data_type, nullable).
-    /// Useful for bindings that need to expose schema to the host without Polars types.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
     }
-
-    /// Serialize the schema to a pretty-printed JSON string.
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
 }
 
 fn validate_field_metadata(
-    field: &StructField,
+    field: &LogicalField,
     depth: usize,
     total_bytes: &mut usize,
 ) -> Result<(), String> {
@@ -141,7 +419,7 @@ fn validate_data_type_metadata(
             validate_data_type_metadata(key, depth + 1, total_bytes)?;
             validate_data_type_metadata(value, depth + 1, total_bytes)
         }
-        DataType::Struct(fields) => {
+        DataType::LogicalStruct(fields) => {
             for field in fields {
                 validate_field_metadata(field, depth + 1, total_bytes)?;
             }
@@ -223,7 +501,7 @@ mod tests {
     fn legacy_schema_json_defaults_metadata_and_new_logical_flags_roundtrip() {
         let legacy = r#"{"fields":[{"name":"id","data_type":"Long","nullable":false}]}"#;
         let parsed: StructType = serde_json::from_str(legacy).unwrap();
-        assert!(parsed.fields()[0].metadata.is_empty());
+        assert!(parsed.logical_fields()[0].metadata.is_empty());
         assert_eq!(parsed.to_json().unwrap(), legacy);
 
         let mut metadata = BTreeMap::new();
@@ -232,8 +510,8 @@ mod tests {
             "policy".into(),
             serde_json::json!({"tier": 2, "tags": ["pii"]}),
         );
-        let schema = StructType::new(vec![
-            StructField::new(
+        let schema = StructType::from_logical_fields(vec![
+            LogicalField::new(
                 "items".into(),
                 DataType::ArrayWithNullability {
                     element_type: Box::new(DataType::Byte),
@@ -242,7 +520,7 @@ mod tests {
                 false,
             )
             .with_metadata(metadata),
-            StructField::new(
+            LogicalField::new(
                 "attributes".into(),
                 DataType::MapWithNullability {
                     key_type: Box::new(DataType::String),
@@ -251,22 +529,38 @@ mod tests {
                 },
                 true,
             ),
-            StructField::new("event_time".into(), DataType::TimestampNtz, true),
+            LogicalField::new(
+                "required_attributes".into(),
+                DataType::MapWithNullability {
+                    key_type: Box::new(DataType::String),
+                    value_type: Box::new(DataType::Integer),
+                    value_contains_null: false,
+                },
+                true,
+            ),
+            LogicalField::new("event_time".into(), DataType::TimestampNtz, true),
         ]);
         schema.validate_metadata().unwrap();
         let roundtrip: StructType = serde_json::from_str(&schema.to_json().unwrap()).unwrap();
-        assert_eq!(roundtrip.fields()[0].metadata["owner"], "analytics");
+        assert_eq!(roundtrip.logical_fields()[0].metadata["owner"], "analytics");
         assert!(matches!(
-            roundtrip.fields()[0].data_type,
+            roundtrip.logical_fields()[0].data_type,
             DataType::ArrayWithNullability {
                 contains_null: false,
                 ..
             }
         ));
         assert!(matches!(
-            roundtrip.fields()[1].data_type,
+            roundtrip.logical_fields()[1].data_type,
             DataType::MapWithNullability {
                 value_contains_null: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            roundtrip.logical_fields()[2].data_type,
+            DataType::MapWithNullability {
+                value_contains_null: false,
                 ..
             }
         ));
@@ -282,8 +576,8 @@ mod tests {
         .unwrap();
         let mut metadata = BTreeMap::new();
         metadata.insert("deep".into(), nested);
-        let schema = StructType::new(vec![
-            StructField::new("value".into(), DataType::String, true).with_metadata(metadata),
+        let schema = StructType::from_logical_fields(vec![
+            LogicalField::new("value".into(), DataType::String, true).with_metadata(metadata),
         ]);
         assert!(schema.validate_metadata().is_err());
     }
@@ -303,11 +597,11 @@ mod tests {
         let parent_payload = payload_budget / 2;
         let child_payload = payload_budget - parent_payload;
         let schema_for_child_size = |child_size| {
-            StructType::new(vec![
-                StructField::new(
+            StructType::from_logical_fields(vec![
+                LogicalField::new(
                     "outer".into(),
-                    DataType::Struct(vec![
-                        StructField::new("child".into(), DataType::String, true)
+                    DataType::LogicalStruct(vec![
+                        LogicalField::new("child".into(), DataType::String, true)
                             .with_metadata(metadata_with_payload(child_size)),
                     ]),
                     true,
@@ -317,11 +611,11 @@ mod tests {
         };
 
         let at_limit = schema_for_child_size(child_payload);
-        let child_metadata = match &at_limit.fields()[0].data_type {
-            DataType::Struct(fields) => &fields[0].metadata,
+        let child_metadata = match &at_limit.logical_fields()[0].data_type {
+            DataType::LogicalStruct(fields) => &fields[0].metadata,
             _ => unreachable!("test fixture must contain a nested struct"),
         };
-        let total_metadata_bytes = serde_json::to_vec(&at_limit.fields()[0].metadata)
+        let total_metadata_bytes = serde_json::to_vec(&at_limit.logical_fields()[0].metadata)
             .unwrap()
             .len()
             + serde_json::to_vec(child_metadata).unwrap().len();
@@ -336,7 +630,7 @@ mod tests {
 
     #[test]
     fn test_empty_struct_type() {
-        let empty = StructType::new(vec![]);
-        assert!(empty.fields().is_empty());
+        let empty = StructType::from_logical_fields(vec![]);
+        assert!(empty.logical_fields().is_empty());
     }
 }

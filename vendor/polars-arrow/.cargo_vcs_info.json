@@ -1,0 +1,6 @@
+{
+  "git": {
+    "sha1": "8a81b0e0578a1ec717f4f18666f427abf4315b9b"
+  },
+  "path_in_vcs": "crates/polars-arrow"
+}

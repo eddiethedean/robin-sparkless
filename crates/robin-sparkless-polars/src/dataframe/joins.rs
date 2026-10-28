@@ -646,7 +646,7 @@ pub fn join(
                         left_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == left_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -684,7 +684,7 @@ pub fn join(
                         let dtype = right_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == right_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -707,7 +707,7 @@ pub fn join(
                 let dtype = right_struct
                     .as_ref()
                     .and_then(|s| {
-                        s.fields()
+                        s.logical_fields()
                             .iter()
                             .find(|f| f.name.as_str() == right_name.as_str())
                             .map(|f| data_type_to_polars_type(&f.data_type))
@@ -757,7 +757,7 @@ pub fn join(
                         left_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == result_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -767,7 +767,7 @@ pub fn join(
                         right_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == base)
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -777,7 +777,7 @@ pub fn join(
                         right_struct
                             .as_ref()
                             .and_then(|s| {
-                                s.fields()
+                                s.logical_fields()
                                     .iter()
                                     .find(|f| f.name.as_str() == result_name.as_str())
                                     .map(|f| data_type_to_polars_type(&f.data_type))
@@ -928,11 +928,15 @@ pub fn join(
     } else {
         None
     };
-    Ok(super::DataFrame::from_lazy_with_options_and_ambiguous(
+    let mut output = super::DataFrame::from_lazy_with_options_and_ambiguous(
         result_lf,
         case_sensitive,
         ambiguous_columns,
-    ))
+    );
+    let global_suffix = (case_sensitive || keys_differ || matches!(how, JoinType::Outer))
+        .then_some(join_suffix.as_str());
+    output.logical_schema = left.joined_logical_schema(right, &output, how, global_suffix);
+    Ok(output)
 }
 
 fn max_cross_join_rows() -> u64 {
@@ -967,6 +971,7 @@ mod tests {
         try_extract_join_eq_columns, try_extract_join_eq_columns_all,
     };
     use crate::functions::col;
+    use crate::schema::{DataType as LogicalDataType, LogicalField as StructField, StructType};
     use crate::{DataFrame, SparkSession};
     use std::collections::HashMap;
 
@@ -1074,6 +1079,561 @@ mod tests {
         assert!(cols.iter().any(|c| c == "id" || c.ends_with("_right")));
     }
 
+    #[test]
+    fn left_join_preserves_nested_logical_schema_for_suffixed_right_fields() {
+        use polars::prelude::{IntoSeries, ListChunked, NamedFrom, Series};
+        use std::collections::BTreeMap;
+
+        fn metadata(origin: &str) -> BTreeMap<String, serde_json::Value> {
+            [("origin".to_string(), serde_json::json!(origin))]
+                .into_iter()
+                .collect()
+        }
+
+        fn list_column(name: &str, rows: &[Option<Vec<i32>>]) -> Series {
+            let lists = ListChunked::from_iter(rows.iter().map(|row| {
+                row.as_ref()
+                    .map(|values| Series::new("".into(), values.as_slice()))
+            }))
+            .with_name(name.into())
+            .into_series();
+            lists
+        }
+
+        let left_physical = polars::prelude::DataFrame::new_infer_height(vec![
+            Series::new("id".into(), [1_i32, 2]).into(),
+            list_column("payload", &[Some(vec![10]), Some(vec![20])]).into(),
+        ])
+        .unwrap();
+        let right_physical = polars::prelude::DataFrame::new_infer_height(vec![
+            Series::new("id".into(), [1_i32]).into(),
+            list_column("payload", &[Some(vec![100])]).into(),
+        ])
+        .unwrap();
+        let list_type = || LogicalDataType::ArrayWithNullability {
+            element_type: Box::new(LogicalDataType::Integer),
+            contains_null: false,
+        };
+        let left = DataFrame::from_polars(left_physical)
+            .with_logical_schema(StructType::from_logical_fields(vec![
+                StructField::new("id".into(), LogicalDataType::Integer, false)
+                    .with_metadata(metadata("left-key")),
+                StructField::new("payload".into(), list_type(), false)
+                    .with_metadata(metadata("left-payload")),
+            ]))
+            .unwrap();
+        let right = DataFrame::from_polars(right_physical)
+            .with_logical_schema(StructType::from_logical_fields(vec![
+                StructField::new("id".into(), LogicalDataType::Integer, false)
+                    .with_metadata(metadata("right-key")),
+                StructField::new("payload".into(), list_type(), false)
+                    .with_metadata(metadata("right-payload")),
+            ]))
+            .unwrap();
+
+        let joined = left.join(&right, vec!["id"], JoinType::Left).unwrap();
+        assert_eq!(joined.count().unwrap(), 2);
+        let schema = joined.schema().unwrap();
+        let field = |name: &str| {
+            schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap()
+        };
+        assert_eq!(field("id").metadata["origin"], "left-key");
+        assert_eq!(field("payload").metadata["origin"], "left-payload");
+        assert!(!field("payload").nullable);
+        assert_eq!(field("payload_right").metadata["origin"], "right-payload");
+        assert!(field("payload_right").nullable);
+        assert!(matches!(
+            field("payload_right").data_type,
+            LogicalDataType::ArrayWithNullability {
+                contains_null: false,
+                ..
+            }
+        ));
+
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::SerReader;
+        let expected_schema = schema.to_json().unwrap();
+        let batch = joined
+            .to_arrow_ipc_batches_with_cancellation(
+                8,
+                16 * 1024,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+            )
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded, Some(expected_schema.as_str()));
+        let decoded = reader.finish().unwrap();
+        let right_payloads = decoded.column("payload_right").unwrap().list().unwrap();
+        let mut right_payload_values = (0..right_payloads.len())
+            .map(|row| {
+                right_payloads
+                    .get_as_series(row)
+                    .and_then(|values| values.i32().ok()?.get(0))
+            })
+            .collect::<Vec<_>>();
+        right_payload_values.sort();
+        assert_eq!(right_payload_values, vec![None, Some(100)]);
+
+        let crossed = left.cross_join(&right).unwrap();
+        let crossed_schema = crossed.schema().unwrap();
+        let right_key = crossed_schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "id_right")
+            .unwrap();
+        assert_eq!(right_key.metadata["origin"], "right-key");
+        assert!(!right_key.nullable);
+        let right_payload = crossed_schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "payload_right")
+            .unwrap();
+        assert_eq!(right_payload.metadata["origin"], "right-payload");
+        assert!(!right_payload.nullable);
+
+        let full = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
+        let full_schema = full.schema().unwrap();
+        for name in ["payload", "payload_right"] {
+            assert!(
+                full_schema
+                    .logical_fields()
+                    .iter()
+                    .find(|field| field.name == name)
+                    .unwrap()
+                    .nullable,
+                "full outer join must mark {name} nullable"
+            );
+        }
+
+        let alias_left_physical = polars::prelude::DataFrame::new_infer_height(vec![
+            Series::new("id".into(), [1_i32]).into(),
+            list_column("payload", &[Some(vec![50])]).into(),
+            Series::new("payload_right".into(), ["local"]).into(),
+        ])
+        .unwrap();
+        let alias_left = DataFrame::from_polars(alias_left_physical)
+            .with_logical_schema(StructType::from_logical_fields(vec![
+                StructField::new("id".into(), LogicalDataType::Integer, false),
+                StructField::new("payload".into(), list_type(), false)
+                    .with_metadata(metadata("left-payload")),
+                StructField::new("payload_right".into(), LogicalDataType::String, false)
+                    .with_metadata(metadata("left-suffix-collision")),
+            ]))
+            .unwrap();
+        let alias_collision = alias_left.join(&right, vec!["id"], JoinType::Left).unwrap();
+        let alias_schema = alias_collision.schema().unwrap();
+        let alias_names = alias_schema
+            .logical_fields()
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(alias_names.contains(&"payload_right_1"), "{alias_names:?}");
+        assert_eq!(
+            alias_schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name == "payload_right")
+                .unwrap()
+                .metadata["origin"],
+            "left-suffix-collision"
+        );
+        assert_eq!(
+            alias_schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name == "payload_right_1")
+                .unwrap()
+                .metadata["origin"],
+            "right-payload"
+        );
+    }
+
+    #[test]
+    fn case_insensitive_cross_join_preserves_exact_source_field_schema() {
+        use polars::prelude::NamedFrom;
+        use std::collections::BTreeMap;
+
+        let field = |name: &str, nullable: bool, origin: &str| {
+            StructField::new(name.into(), LogicalDataType::Long, nullable).with_metadata(
+                BTreeMap::from([("origin".to_string(), serde_json::json!(origin))]),
+            )
+        };
+        let left = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                polars::prelude::Series::new("ID".into(), [1_i64]).into(),
+            ])
+            .unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![field(
+            "ID", false, "left",
+        )]))
+        .unwrap();
+        let right = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                polars::prelude::Series::new("id".into(), [None::<i64>]).into(),
+            ])
+            .unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![field(
+            "id", true, "right",
+        )]))
+        .unwrap();
+
+        let joined = left.cross_join(&right).unwrap();
+        let rows = joined.collect().unwrap();
+        assert_eq!(rows.column("id").unwrap().null_count(), 1);
+        let schema = joined.schema().unwrap();
+        let right_id = schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "id")
+            .unwrap();
+        assert!(right_id.nullable);
+        assert_eq!(right_id.metadata["origin"], "right");
+    }
+
+    #[test]
+    fn full_outer_join_preserves_metadata_for_every_globally_suffixed_field() {
+        use polars::prelude::{NamedFrom, Series};
+        use robin_sparkless_core::DataType as CoreDataType;
+        use std::collections::BTreeMap;
+
+        fn metadata(origin: &str) -> BTreeMap<String, serde_json::Value> {
+            [("origin".to_string(), serde_json::json!(origin))]
+                .into_iter()
+                .collect()
+        }
+
+        let left_physical = polars::prelude::DataFrame::new_infer_height(vec![
+            Series::new("id".into(), [1_i64]).into(),
+            Series::new("a".into(), [10_i64]).into(),
+            Series::new("a_right".into(), [90_i64]).into(),
+            Series::new("a_right_1".into(), [91_i64]).into(),
+            Series::new("a_right_2".into(), [92_i64]).into(),
+            Series::new("a_right_3".into(), [93_i64]).into(),
+            Series::new("a_right_4".into(), [94_i64]).into(),
+            Series::new("b".into(), [20_i64]).into(),
+        ])
+        .unwrap();
+        let right_physical = polars::prelude::DataFrame::new_infer_height(vec![
+            Series::new("id".into(), [1_i64]).into(),
+            Series::new("a".into(), [100_i64]).into(),
+            Series::new("b".into(), [200_i64]).into(),
+        ])
+        .unwrap();
+        let left = DataFrame::from_polars(left_physical)
+            .with_logical_schema(StructType::from_logical_fields(vec![
+                StructField::new("id".into(), CoreDataType::Long, false),
+                StructField::new("a".into(), CoreDataType::Long, false),
+                StructField::new("a_right".into(), CoreDataType::Long, false),
+                StructField::new("a_right_1".into(), CoreDataType::Long, false),
+                StructField::new("a_right_2".into(), CoreDataType::Long, false),
+                StructField::new("a_right_3".into(), CoreDataType::Long, false),
+                StructField::new("a_right_4".into(), CoreDataType::Long, false),
+                StructField::new("b".into(), CoreDataType::Long, false),
+            ]))
+            .unwrap();
+        let right = DataFrame::from_polars(right_physical)
+            .with_logical_schema(StructType::from_logical_fields(vec![
+                StructField::new("id".into(), CoreDataType::Long, false),
+                StructField::new("a".into(), CoreDataType::Long, false)
+                    .with_metadata(metadata("right-a")),
+                StructField::new("b".into(), CoreDataType::Long, false)
+                    .with_metadata(metadata("right-b")),
+            ]))
+            .unwrap();
+
+        let joined = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
+        let schema = joined.schema().unwrap();
+        for (name, origin) in [("a_right_5", "right-a"), ("b_right_5", "right-b")] {
+            assert_eq!(
+                schema
+                    .logical_fields()
+                    .iter()
+                    .find(|field| field.name == name)
+                    .unwrap()
+                    .metadata["origin"],
+                origin
+            );
+        }
+
+        for how in [JoinType::Inner, JoinType::Left] {
+            let joined = left.join(&right, vec!["id"], how).unwrap();
+            let schema = joined.schema().unwrap();
+            let right_a = schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name == "a_right_5")
+                .unwrap();
+            assert_eq!(right_a.metadata["origin"], "right-a");
+            assert_eq!(right_a.nullable, matches!(how, JoinType::Left));
+            assert_eq!(
+                joined
+                    .collect()
+                    .unwrap()
+                    .column("a_right_5")
+                    .unwrap()
+                    .i64()
+                    .unwrap()
+                    .get(0),
+                Some(100)
+            );
+            assert_eq!(
+                schema
+                    .logical_fields()
+                    .iter()
+                    .find(|field| field.name == "b_right")
+                    .unwrap()
+                    .metadata["origin"],
+                "right-b"
+            );
+        }
+    }
+
+    #[test]
+    fn full_outer_join_preserves_nested_struct_schema_and_ipc_values() {
+        use polars::chunked_array::StructChunked;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{AnyValue, IntoSeries, NamedFrom, SerReader, Series};
+        use robin_sparkless_core::DataType as CoreDataType;
+        use std::collections::BTreeMap;
+
+        fn metadata(origin: &str) -> BTreeMap<String, serde_json::Value> {
+            [("origin".to_string(), serde_json::json!(origin))]
+                .into_iter()
+                .collect()
+        }
+
+        fn source(keys: &[i32], scores: &[i32], labels: &[&str], side: &str) -> DataFrame {
+            let key = Series::new("id".into(), keys.to_vec());
+            let score = Series::new("score".into(), scores.to_vec());
+            let label = Series::new("label".into(), labels.to_vec());
+            let payload = StructChunked::from_series(
+                "payload".into(),
+                keys.len(),
+                [&score, &label].into_iter(),
+            )
+            .unwrap()
+            .into_series();
+            let physical =
+                polars::prelude::DataFrame::new_infer_height(vec![key.into(), payload.into()])
+                    .unwrap();
+            let nested = CoreDataType::LogicalStruct(vec![
+                StructField::new("score".into(), CoreDataType::Integer, false)
+                    .with_metadata(metadata(&format!("{side}-score"))),
+                StructField::new("label".into(), CoreDataType::String, false),
+            ]);
+            let logical = StructType::from_logical_fields(vec![
+                StructField::new("id".into(), CoreDataType::Integer, false),
+                StructField::new("payload".into(), nested, false)
+                    .with_metadata(metadata(&format!("{side}-payload"))),
+            ]);
+            DataFrame::from_polars(physical)
+                .with_logical_schema(logical)
+                .unwrap()
+        }
+
+        let left = source(&[1, 2], &[11, 22], &["left-one", "left-two"], "left");
+        let right = source(&[1, 3], &[100, 300], &["right-one", "right-three"], "right");
+        let joined = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
+        assert_eq!(joined.count().unwrap(), 3);
+
+        let schema = joined.schema().unwrap();
+        for (name, side) in [("payload", "left"), ("payload_right", "right")] {
+            let field = schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap();
+            assert!(field.nullable, "full outer join must make {name} nullable");
+            assert_eq!(field.metadata["origin"], format!("{side}-payload"));
+            let CoreDataType::LogicalStruct(fields) = &field.data_type else {
+                panic!("{name} must retain its nested struct type");
+            };
+            assert!(!fields[0].nullable, "the nested score remains non-nullable");
+            assert_eq!(fields[0].metadata["origin"], format!("{side}-score"));
+        }
+
+        let expected_schema = schema.to_json().unwrap();
+        let batch = joined
+            .to_arrow_ipc_batches_with_cancellation(
+                8,
+                16 * 1024,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+            )
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        let score_for = |column: &str, row: usize| -> Option<i32> {
+            let column = decoded.column(column).unwrap();
+            if matches!(column.get(row).unwrap(), AnyValue::Null) {
+                return None;
+            }
+            column
+                .struct_()
+                .unwrap()
+                .field_by_name("score")
+                .unwrap()
+                .i32()
+                .unwrap()
+                .get(row)
+        };
+        let mut observed = (0..decoded.height())
+            .map(|row| (score_for("payload", row), score_for("payload_right", row)))
+            .collect::<Vec<_>>();
+        observed.sort();
+        let mut expected = vec![(Some(11), Some(100)), (Some(22), None), (None, Some(300))];
+        expected.sort();
+        assert_eq!(observed, expected);
+    }
+
+    #[test]
+    fn full_outer_join_preserves_timestamp_and_ntz_distinctions_and_values() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{
+            DataType as PlDataType, NamedFrom, SerReader, Series, TimeUnit, TimeZone,
+        };
+        use robin_sparkless_core::DataType as CoreDataType;
+
+        fn source(keys: &[i32], wall_clock_values: &[i64], instant_values: &[i64]) -> DataFrame {
+            let id = Series::new("id".into(), keys.to_vec());
+            let wall_clock = Series::new("wall_clock".into(), wall_clock_values.to_vec())
+                .cast(&PlDataType::Datetime(TimeUnit::Microseconds, None))
+                .unwrap();
+            let instant = Series::new("instant".into(), instant_values.to_vec())
+                .cast(&PlDataType::Datetime(
+                    TimeUnit::Microseconds,
+                    Some(TimeZone::UTC),
+                ))
+                .unwrap();
+            let physical = polars::prelude::DataFrame::new_infer_height(vec![
+                id.into(),
+                wall_clock.into(),
+                instant.into(),
+            ])
+            .unwrap();
+            let logical = StructType::from_logical_fields(vec![
+                StructField::new("id".into(), CoreDataType::Integer, false),
+                StructField::new("wall_clock".into(), CoreDataType::TimestampNtz, false),
+                StructField::new("instant".into(), CoreDataType::Timestamp, false),
+            ]);
+            DataFrame::from_polars(physical)
+                .with_logical_schema(logical)
+                .unwrap()
+        }
+
+        let left = source(&[1, 2], &[1_234_567, -1], &[8_765_432, -2]);
+        let right = source(&[1, 3], &[9_876_543, 42], &[7_654_321, 43]);
+        let joined = left.join(&right, vec!["id"], JoinType::Outer).unwrap();
+        let schema = joined.schema().unwrap();
+        for name in ["wall_clock", "wall_clock_right"] {
+            let field = schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap();
+            assert!(matches!(&field.data_type, CoreDataType::TimestampNtz));
+            assert!(field.nullable, "outer join must mark {name} nullable");
+        }
+        for name in ["instant", "instant_right"] {
+            let field = schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap();
+            assert!(matches!(&field.data_type, CoreDataType::Timestamp));
+            assert!(field.nullable, "outer join must mark {name} nullable");
+        }
+
+        let expected_schema = schema.to_json().unwrap();
+        let batch = joined
+            .to_arrow_ipc_batches_with_cancellation(
+                8,
+                16 * 1024,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+            )
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+
+        let decoded = reader.finish().unwrap();
+        for name in ["wall_clock", "wall_clock_right"] {
+            assert_eq!(
+                decoded.column(name).unwrap().dtype(),
+                &PlDataType::Datetime(TimeUnit::Microseconds, None),
+                "{name} must remain a timezone-free physical timestamp"
+            );
+        }
+        for name in ["instant", "instant_right"] {
+            assert_eq!(
+                decoded.column(name).unwrap().dtype(),
+                &PlDataType::Datetime(TimeUnit::Microseconds, Some(TimeZone::UTC)),
+                "{name} must remain a UTC instant"
+            );
+        }
+        let physical_values =
+            |name: &str| decoded.column(name).unwrap().datetime().unwrap().physical();
+        let left_wall_clock = physical_values("wall_clock");
+        let right_wall_clock = physical_values("wall_clock_right");
+        let mut wall_clock_values = (0..decoded.height())
+            .map(|row| (left_wall_clock.get(row), right_wall_clock.get(row)))
+            .collect::<Vec<_>>();
+        wall_clock_values.sort();
+        assert_eq!(
+            wall_clock_values,
+            vec![
+                (None, Some(42)),
+                (Some(-1), None),
+                (Some(1_234_567), Some(9_876_543)),
+            ]
+        );
+
+        let left_instant = physical_values("instant");
+        let right_instant = physical_values("instant_right");
+        let mut instant_values = (0..decoded.height())
+            .map(|row| (left_instant.get(row), right_instant.get(row)))
+            .collect::<Vec<_>>();
+        instant_values.sort();
+        assert_eq!(
+            instant_values,
+            vec![
+                (None, Some(43)),
+                (Some(-2), None),
+                (Some(8_765_432), Some(7_654_321)),
+            ]
+        );
+    }
+
     /// #1165: Join with same-named keys and coalesce: non-key columns keep correct dtypes in schema and collect.
     #[test]
     fn join_coalesce_preserves_non_key_column_types() {
@@ -1096,8 +1656,8 @@ mod tests {
         .unwrap();
         assert_eq!(out.count().unwrap(), 1);
         let schema = out.schema().unwrap();
-        let v_field = schema.fields().iter().find(|f| f.name == "v");
-        let w_field = schema.fields().iter().find(|f| f.name == "w");
+        let v_field = schema.logical_fields().iter().find(|f| f.name == "v");
+        let w_field = schema.logical_fields().iter().find(|f| f.name == "w");
         assert!(
             matches!(v_field.map(|f| &f.data_type), Some(CoreDataType::Long)),
             "v should be Long"

@@ -1,6 +1,6 @@
 # SS-13: Optional native Delta Lake and Unity Catalog
 
-> **Status: planned; owner unassigned.** Phase: 4; optional.
+> **Status: planned; owner unassigned.** Phase: 6; target 4.22.0; optional.
 > [Index](README.md) · [Epic contract](EPIC.md#acceptance-and-release-gates) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## Outcome
@@ -43,4 +43,4 @@ Resolve or explicitly defer D09, D10, D13 in the [decision register](DECISIONS.m
 
 ## Scope notes
 
-Phase numbering describes the roadmap; Delta/UC does not inherently require the optional Python worker phase to ship first.
+Phase numbering describes the roadmap. This work moves to Phase 6 / 4.22 after the two DuckDB phases and Python workers; it has no inherent dependency on those optional capabilities. Earlier native Delta/catalog primitives may already exist, but their presence does not complete this server integration phase.

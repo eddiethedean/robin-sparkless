@@ -7,11 +7,11 @@
 
 Separate logical session state from shared saved objects and make commit/cleanup/retry semantics explicit.
 
-The [4.17 implementation plan](RELEASE_4_17.md) refines Phase 1 into 417-01–417-04: an ephemeral shared native catalog, statement snapshots, explicit managed DDL/append and local-view commands, one writer lane, and a versioned HTTP identity/status extension. Proposed process-lifetime outcome records survive session close and reject old-instance requests after restart. Durable storage and broader DML remain gated separately; V15/V16 and integrated SDK evidence are required before enabling the declared writes.
+The [4.17 implementation plan](RELEASE_4_17.md) refines Phase 1 into 417-01–417-04: an ephemeral shared native catalog, statement snapshots, explicit managed DDL/append and local-view commands, one writer lane, and a versioned HTTP identity/status extension. Proposed process-lifetime outcome records survive session close and reject old-instance requests after restart. Durable storage and broader DML remain gated separately; V15/V16 and integrated native/direct-HTTP evidence are required before enabling the declared writes.
 
 ## Dependencies and delivery slices
 
-SS-04 operation ownership; SS-01 identity/adapter contracts. Complete mutation work before enabling any remote DDL/DML.
+SS-04 operation ownership; SS-01 identity/HTTP contracts. Complete mutation work before enabling any remote DDL/DML.
 
 Plan numbers are workstream identifiers, not a strict execution order. Only the applicable phase slice blocks a milestone; later extensions must not delay an earlier gate.
 

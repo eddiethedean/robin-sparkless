@@ -10,7 +10,7 @@ use crate::schema::{DataType as CoreDataType, StructType};
 use crate::session::{SparkSession, set_thread_udf_session};
 use crate::temporal::{parse_sql_date, parse_sql_timestamp_micros};
 use polars::prelude::{
-    AnyValue, DataFrame as PlDataFrame, Expr, PolarsError, Scalar, col, lit, when,
+    AnyValue, DataFrame as PlDataFrame, Expr, NewChunkedArray, PolarsError, Scalar, col, lit, when,
 };
 use polars_plan::dsl::functions::nth;
 use robin_sparkless_core::CancellationToken;
@@ -299,6 +299,7 @@ pub fn translate_with_cancellation(
                 session.is_case_sensitive(),
             );
             snapshot = snapshot.with_logical_schema(schema)?;
+            snapshot.validate_json_values()?;
             check_cancellation(token)?;
             let _publish_guard = session
                 .shared_catalog_guard()
@@ -312,7 +313,10 @@ pub fn translate_with_cancellation(
         Statement::CreateTable(create_table) => {
             let table_name = table_name_from_object_name(&create_table.name);
             session.check_saved_table_database(&table_name)?;
-            let exists = session.local_table_exists(&table_name)
+            // CREATE TABLE IF NOT EXISTS applies to saved tables, not session temp views.
+            // A temp view may shadow this name during unqualified lookup, but it is not a
+            // durable object in the default namespace and cannot satisfy this DDL.
+            let exists = session.saved_table_exists(&table_name)
                 || session
                     .resolve_external_table_descriptor(&table_name)?
                     .0
@@ -591,7 +595,7 @@ fn align_insert_select_to_target(
     use crate::schema_conv::checked_data_type_to_polars_type;
 
     let select_schema = select_df.schema()?;
-    let select_fields = select_schema.fields();
+    let select_fields = select_schema.logical_fields();
     if select_fields.len() != insert_col_count {
         return Err(PolarsError::InvalidOperation(
             format!(
@@ -609,7 +613,7 @@ fn align_insert_select_to_target(
             let src = &select_col_names[val_pos];
             let resolved = select_df.resolve_column_name(src)?;
             let target_type = checked_data_type_to_polars_type(
-                &target_schema.fields()[target_idx].data_type,
+                &target_schema.logical_fields()[target_idx].data_type,
                 target_name,
             )?;
             exprs.push(
@@ -619,7 +623,7 @@ fn align_insert_select_to_target(
             );
         } else {
             let pl_ty = checked_data_type_to_polars_type(
-                &target_schema.fields()[target_idx].data_type,
+                &target_schema.logical_fields()[target_idx].data_type,
                 target_name,
             )?;
             let null_expr = lit(polars::prelude::NULL).strict_cast(pl_ty);
@@ -638,6 +642,11 @@ fn translate_insert(
     token: &CancellationToken,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     check_cancellation(token)?;
+    if insert.or.is_some() || insert.ignore || insert.replace_into {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: INSERT OR conflict modes are not supported".into(),
+        ));
+    }
     // Capture the target and SELECT source against one catalog publication point. The shared
     // mutation lane remains held by SQL execution while this short catalog writer guard is
     // released for candidate materialization.
@@ -672,7 +681,7 @@ fn translate_insert(
     };
     let target_schema: StructType = target_df.schema()?;
     let target_cols: Vec<String> = target_schema
-        .fields()
+        .logical_fields()
         .iter()
         .map(|f| f.name.clone())
         .collect();
@@ -700,6 +709,10 @@ fn translate_insert(
         index_map.push(idx);
     }
 
+    // UNION currently materializes branches during translation, so let readers acquire the
+    // catalog while translating and staging the source. The target frame above is already a
+    // captured snapshot, and the SQL mutation lane prevents competing SQL writers.
+    drop(snapshot_guard);
     // Build DataFrame of rows to append.
     let new_rows_df: DataFrame = match &insert.source {
         Some(query) => match query.body.as_ref() {
@@ -725,7 +738,7 @@ fn translate_insert(
                         let target_idx = index_map[val_pos];
                         let v = sql_literal_expr_to_json(
                             expr,
-                            &target_schema.fields()[target_idx].data_type,
+                            &target_schema.logical_fields()[target_idx].data_type,
                         )?;
                         row[target_idx] = v;
                     }
@@ -733,7 +746,7 @@ fn translate_insert(
                 }
 
                 let schema: Vec<(String, String)> = target_schema
-                    .fields()
+                    .logical_fields()
                     .iter()
                     .map(|f| (f.name.clone(), core_data_type_to_insert_type(&f.data_type)))
                     .collect();
@@ -777,7 +790,6 @@ fn translate_insert(
     // Append rows to existing table in the same namespace that provided the target table.
     let appended = target_df.union(&new_rows_df)?;
     let logical_schema = appended.logical_schema.clone();
-    drop(snapshot_guard);
     check_cancellation(token)?;
     // Materialize the complete candidate before catalog publication. A lazy append plan could
     // otherwise be registered successfully and then fail only when a later reader collects it,
@@ -788,9 +800,19 @@ fn translate_insert(
     check_cancellation(token)?;
     let mut appended_df =
         DataFrame::from_polars_with_options(staged.as_ref().clone(), session.is_case_sensitive());
+    // Shared catalog snapshots are serialized through the server's strict JSON boundary.
+    // Embedded sessions retain Polars' supported NaN and infinity values.
+    if session.uses_shared_catalog() {
+        appended_df.validate_json_values()?;
+    }
     if let Some(schema) = logical_schema {
         appended_df = appended_df.with_logical_schema(schema)?;
     }
+    #[cfg(feature = "test-hooks")]
+    crate::sql::test_hooks::after_insert_stage();
+    // Validation and logical-schema attachment can be expensive. Do not publish a candidate
+    // when cancellation arrived while either operation was running.
+    check_cancellation(token)?;
     let appended = appended_df;
     if session.has_exact_temp_view(&table_name)
         || (!has_provider && session.has_temp_view(&table_name))
@@ -799,6 +821,7 @@ fn translate_insert(
             let _publication_guard = session
                 .shared_catalog_guard()
                 .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            check_cancellation(token)?;
             session.register_temp_view_during_sql(&table_name, appended)?;
         } else {
             session.create_or_replace_temp_view(&table_name, appended);
@@ -808,6 +831,7 @@ fn translate_insert(
             .shared_catalog_guard()
             .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
         session.check_catalog_table_growth(&table_name, &appended)?;
+        check_cancellation(token)?;
         session.register_table_during_sql(&table_name, appended);
     }
 
@@ -844,7 +868,7 @@ fn core_data_type_to_str(dt: &CoreDataType) -> String {
                 core_data_type_to_str(v)
             )
         }
-        CoreDataType::Struct(fields) => {
+        CoreDataType::LogicalStruct(fields) => {
             let parts: Vec<String> = fields
                 .iter()
                 .map(|f| format!("{}:{}", f.name, core_data_type_to_str(&f.data_type)))
@@ -874,7 +898,7 @@ pub(crate) fn translate_describe_table_optional_col(
     let schema: StructType = df.schema()?;
     let case_sensitive = session.is_case_sensitive();
     let fields: Vec<_> = schema
-        .fields()
+        .logical_fields()
         .iter()
         .filter(|f| {
             col_name.is_none_or(|c| {
@@ -916,7 +940,7 @@ pub(crate) fn translate_describe_table_extended(
     // metadata row so that DESCRIBE EXTENDED returns more rows than basic DESCRIBE.
     let df = session.table(table_name)?;
     let schema: StructType = df.schema()?;
-    let fields = schema.fields();
+    let fields = schema.logical_fields();
     let mut rows: Vec<Vec<JsonValue>> = fields
         .iter()
         .map(|f| {
@@ -1121,8 +1145,14 @@ fn translate_select_body(
     session: &SparkSession,
     body: &Select,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    let mut df = translate_select_from(session, body)?;
-    let relation_qualifiers = sql_relation_qualifiers(body);
+    let (mut df, relation_columns, relation_left_columns, relation_coalesced_keys) =
+        translate_select_from(session, body)?;
+    let relation_qualifiers = sql_relation_qualifiers(
+        body,
+        &relation_columns,
+        &relation_left_columns,
+        &relation_coalesced_keys,
+    );
     if let Some(selection) = &body.selection {
         let expr = sql_expr_to_polars_with_qualifiers(
             selection,
@@ -1286,8 +1316,30 @@ fn translate_select_body(
             Some(relation_qualifiers.as_slice()),
         )?;
         let agg_exprs = disambiguate_agg_output_names(agg_exprs);
-        let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
-        df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
+        if df.range_cardinality.is_some() {
+            if let Some(count_names) =
+                count_star_projection_names(&body.projection, df.case_sensitive)
+            {
+                let count = df.count()?;
+                let rows = vec![
+                    count_names
+                        .iter()
+                        .map(|_| JsonValue::from(count as u64))
+                        .collect(),
+                ];
+                let schema = count_names
+                    .into_iter()
+                    .map(|name| (name, "long".to_string()))
+                    .collect();
+                df = session.create_dataframe_from_rows(rows, schema, false, false)?;
+            } else {
+                let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
+                df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
+            }
+        } else {
+            let pl_df = df.lazy_frame().select(agg_exprs).collect()?;
+            df = DataFrame::from_polars_with_options(pl_df, df.case_sensitive);
+        }
     } else {
         df = apply_projection(&df, &body.projection, session, &relation_qualifiers)?;
     }
@@ -1315,18 +1367,23 @@ pub(crate) fn translate_query(
     if let Some(order_by) = &query.order_by {
         if let OrderByKind::Expressions(exprs) = &order_by.kind {
             if !exprs.is_empty() {
-                let pairs: Vec<(String, bool)> = exprs
+                let orders: Vec<crate::functions::SortOrder> = exprs
                     .iter()
                     .map(|o| {
                         let col_name = sql_expr_to_col_name(&o.expr)?;
                         let resolved = df.resolve_column_name(&col_name)?;
                         let ascending = o.options.asc.unwrap_or(true);
-                        Ok((resolved, ascending))
+                        let column = Column::new(resolved);
+                        let nulls_first = o.options.nulls_first.unwrap_or(ascending);
+                        Ok(match (ascending, nulls_first) {
+                            (true, true) => functions::asc_nulls_first(&column),
+                            (true, false) => functions::asc_nulls_last(&column),
+                            (false, true) => functions::desc_nulls_first(&column),
+                            (false, false) => functions::desc_nulls_last(&column),
+                        })
                     })
                     .collect::<Result<Vec<_>, PolarsError>>()?;
-                let (cols, asc): (Vec<String>, Vec<bool>) = pairs.into_iter().unzip();
-                let col_refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-                df = df.order_by(col_refs, asc)?;
+                df = df.order_by_exprs(orders)?;
             }
         }
     }
@@ -1354,10 +1411,17 @@ fn limit_clause_to_expr(lc: &LimitClause) -> Option<&SqlExpr> {
     }
 }
 
+type SelectFromTranslation = (
+    crate::dataframe::DataFrame,
+    Vec<Vec<String>>,
+    Vec<Vec<String>>,
+    Vec<Vec<(String, String)>>,
+);
+
 fn translate_select_from(
     session: &SparkSession,
     select: &Select,
-) -> Result<crate::dataframe::DataFrame, PolarsError> {
+) -> Result<SelectFromTranslation, PolarsError> {
     if select.from.is_empty() {
         // Spark allows "SELECT 1 AS x WHERE 1 = 1" (no FROM). We model this as a single-row
         // relation with a dummy column that is not projected unless explicitly selected.
@@ -1383,13 +1447,18 @@ fn translate_select_from(
             PolarsError::InvalidOperation(format!("SQL: failed to create dummy frame: {e}").into())
         })?;
 
-        return Ok(DataFrame::from_polars_with_options(
-            pl_df,
-            session.is_case_sensitive(),
+        return Ok((
+            DataFrame::from_polars_with_options(pl_df, session.is_case_sensitive()),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
         ));
     }
     let first_tj = &select.from[0];
     let mut df = resolve_table_factor(session, &first_tj.relation)?;
+    let mut relation_columns = vec![df.columns()?];
+    let mut relation_left_columns = vec![Vec::new()];
+    let mut relation_coalesced_keys = vec![Vec::new()];
     #[cfg(test)]
     test_hooks::after_first_relation_resolution();
     #[cfg(feature = "test-hooks")]
@@ -1400,16 +1469,23 @@ fn translate_select_from(
             df = df_prefix_columns(&df, prefix)?;
         }
     }
-    let current_left_alias = left_alias_opt.as_deref();
+    let current_left_alias = left_alias_opt
+        .as_deref()
+        .filter(|_| should_prefix_columns(&first_tj.relation));
     for join_spec in &first_tj.joins {
+        relation_left_columns.push(df.columns()?);
         let mut right_df = resolve_table_factor(session, &join_spec.relation)?;
+        relation_columns.push(right_df.columns()?);
+        relation_coalesced_keys.push(Vec::new());
         let right_alias_opt = table_alias_from_factor(&join_spec.relation);
         if let Some(ref prefix) = right_alias_opt {
             if should_prefix_columns(&join_spec.relation) {
                 right_df = df_prefix_columns(&right_df, prefix)?;
             }
         }
-        let right_alias_ref = right_alias_opt.as_deref();
+        let right_alias_ref = right_alias_opt
+            .as_deref()
+            .filter(|_| should_prefix_columns(&join_spec.relation));
         match &join_spec.join_operator {
             JoinOperator::CrossJoin(_) => {
                 df = df.cross_join(&right_df).map_err(|e| {
@@ -1436,11 +1512,29 @@ fn translate_select_from(
                         ));
                     }
                 };
-                let (left_on, right_on) = join_condition_to_on_columns(
+                let (left_on, right_on) = join_condition_to_on_columns_for_factors(
                     &join_spec.join_operator,
                     current_left_alias,
                     right_alias_ref,
+                    &first_tj.relation,
+                    &join_spec.relation,
+                    session.is_case_sensitive(),
                 )?;
+                if matches!(
+                    join_type,
+                    JoinType::Inner | JoinType::Left | JoinType::Right
+                ) {
+                    relation_coalesced_keys
+                        .last_mut()
+                        .expect("a right relation was just added")
+                        .extend(
+                            left_on
+                                .iter()
+                                .zip(&right_on)
+                                .filter(|(left, right)| left == right)
+                                .map(|(left, right)| (right.clone(), left.clone())),
+                        );
+                }
                 let left_refs: Vec<&str> = left_on.iter().map(|s| s.as_str()).collect();
                 let right_refs: Vec<&str> = right_on.iter().map(|s| s.as_str()).collect();
                 df = join(
@@ -1463,7 +1557,12 @@ fn translate_select_from(
         // continue to resolve to prefixed column names (e_project_id) across multiple JOINs
         // (issue #376 / robust 3-join SQL tests).
     }
-    Ok(df)
+    Ok((
+        df,
+        relation_columns,
+        relation_left_columns,
+        relation_coalesced_keys,
+    ))
 }
 
 fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
@@ -1521,8 +1620,8 @@ fn table_alias_from_factor(factor: &TableFactor) -> Option<String> {
 }
 
 /// Derived tables keep inner column names; plain tables with aliases are prefixed (#152).
-fn should_prefix_columns(factor: &TableFactor) -> bool {
-    !matches!(factor, TableFactor::Derived { .. })
+fn should_prefix_columns(_factor: &TableFactor) -> bool {
+    !matches!(_factor, TableFactor::Derived { .. })
 }
 
 /// Prefix all column names with "prefix_". Used when FROM has alias so qualified refs (e.name) become e_name.
@@ -1590,6 +1689,190 @@ fn join_on_equality_pairs(
             "SQL: JOIN ON must be equality conditions combined with AND.".into(),
         )),
     }
+}
+
+fn join_operand_side(
+    expr: &SqlExpr,
+    left: &TableFactor,
+    right: &TableFactor,
+    case_sensitive: bool,
+) -> Option<bool> {
+    let SqlExpr::CompoundIdentifier(parts) = expr else {
+        return None;
+    };
+    if parts.len() < 2 {
+        return None;
+    }
+    let qualifier: Vec<&str> = parts[..parts.len() - 1]
+        .iter()
+        .map(|part| part.value.as_str())
+        .collect();
+    let names_match = |left: &str, right: &str| {
+        if case_sensitive {
+            left == right
+        } else {
+            left.eq_ignore_ascii_case(right)
+        }
+    };
+    let matches = |factor: &TableFactor| {
+        let alias = match factor {
+            TableFactor::Table { alias, .. } | TableFactor::Derived { alias, .. } => {
+                alias.as_ref().map(|a| a.name.value.as_str())
+            }
+            _ => None,
+        };
+        if let Some(alias) = alias {
+            // An explicit alias replaces the source table name as the relation's
+            // qualifier. Falling back to the table name can make a qualifier match
+            // both sides of a self-join with crossed aliases.
+            return qualifier.len() == 1 && names_match(qualifier[0], alias);
+        }
+        match factor {
+            TableFactor::Table { name, .. } => {
+                let idents: Vec<&str> = name
+                    .0
+                    .iter()
+                    .filter_map(|part| part.as_ident().map(|ident| ident.value.as_str()))
+                    .collect();
+                (qualifier.len() == idents.len()
+                    && qualifier
+                        .iter()
+                        .zip(&idents)
+                        .all(|(left, right)| names_match(left, right)))
+                    || (qualifier.len() == 1
+                        && idents
+                            .last()
+                            .is_some_and(|last| names_match(qualifier[0], last)))
+            }
+            _ => false,
+        }
+    };
+    match (matches(left), matches(right)) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        _ => None,
+    }
+}
+
+fn join_equality_pairs_for_factors(
+    expr: &SqlExpr,
+    left_alias: Option<&str>,
+    right_alias: Option<&str>,
+    left_factor: &TableFactor,
+    right_factor: &TableFactor,
+    case_sensitive: bool,
+) -> Result<Vec<(String, String)>, PolarsError> {
+    match expr {
+        SqlExpr::BinaryOp {
+            left,
+            op: BinaryOperator::Eq,
+            right,
+        } => {
+            let left_side = join_operand_side(left, left_factor, right_factor, case_sensitive);
+            let right_side = join_operand_side(right, left_factor, right_factor, case_sensitive);
+            let (left_expr, right_expr) = match (left_side, right_side) {
+                (Some(true), Some(false)) | (None, None) => (left.as_ref(), right.as_ref()),
+                (Some(false), Some(true)) => (right.as_ref(), left.as_ref()),
+                (Some(true), None) => (left.as_ref(), right.as_ref()),
+                (None, Some(false)) => (left.as_ref(), right.as_ref()),
+                (Some(false), None) => (right.as_ref(), left.as_ref()),
+                (None, Some(true)) => (right.as_ref(), left.as_ref()),
+                _ => {
+                    return Err(PolarsError::InvalidOperation(
+                        "SQL: JOIN ON equality must compare columns from opposite relations."
+                            .into(),
+                    ));
+                }
+            };
+            Ok(vec![(
+                sql_expr_to_qualified_col_name(left_expr, left_alias)?,
+                sql_expr_to_qualified_col_name(right_expr, right_alias)?,
+            )])
+        }
+        SqlExpr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } => {
+            let mut pairs = join_equality_pairs_for_factors(
+                left,
+                left_alias,
+                right_alias,
+                left_factor,
+                right_factor,
+                case_sensitive,
+            )?;
+            pairs.extend(join_equality_pairs_for_factors(
+                right,
+                left_alias,
+                right_alias,
+                left_factor,
+                right_factor,
+                case_sensitive,
+            )?);
+            Ok(pairs)
+        }
+        SqlExpr::Nested(inner) => join_equality_pairs_for_factors(
+            inner,
+            left_alias,
+            right_alias,
+            left_factor,
+            right_factor,
+            case_sensitive,
+        ),
+        _ => Err(PolarsError::InvalidOperation(
+            "SQL: JOIN ON must be equality conditions combined with AND.".into(),
+        )),
+    }
+}
+
+fn join_condition_to_on_columns_for_factors(
+    join_op: &JoinOperator,
+    left_alias: Option<&str>,
+    right_alias: Option<&str>,
+    left_factor: &TableFactor,
+    right_factor: &TableFactor,
+    case_sensitive: bool,
+) -> Result<(Vec<String>, Vec<String>), PolarsError> {
+    let constraint = match join_op {
+        JoinOperator::Join(c)
+        | JoinOperator::Inner(c)
+        | JoinOperator::Left(c)
+        | JoinOperator::LeftOuter(c)
+        | JoinOperator::Right(c)
+        | JoinOperator::RightOuter(c)
+        | JoinOperator::FullOuter(c)
+        | JoinOperator::LeftSemi(c)
+        | JoinOperator::LeftAnti(c)
+        | JoinOperator::Semi(c)
+        | JoinOperator::Anti(c) => c,
+        JoinOperator::CrossJoin(_) => return Ok((vec![], vec![])),
+        other => {
+            return Err(PolarsError::InvalidOperation(
+                format!("SQL: unsupported join type {:?}.", other).into(),
+            ));
+        }
+    };
+    let JoinConstraint::On(expr) = constraint else {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: JOIN must use ON (equality); NATURAL/USING not supported.".into(),
+        ));
+    };
+    let pairs = join_equality_pairs_for_factors(
+        expr,
+        left_alias,
+        right_alias,
+        left_factor,
+        right_factor,
+        case_sensitive,
+    )?;
+    if pairs.is_empty() {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: JOIN ON requires at least one equality condition.".into(),
+        ));
+    }
+    let (left_on, right_on) = pairs.into_iter().unzip();
+    Ok((left_on, right_on))
 }
 
 /// Returns (left_column_names, right_column_names) for JOIN ON. When table aliases are used, names are prefixed (e.g. e_dept_id, d_id) (#152).
@@ -1702,14 +1985,38 @@ fn any_value_to_lit(av: AnyValue) -> Result<Expr, PolarsError> {
 struct SqlRelationQualifier {
     parts: Vec<String>,
     column_prefix: Option<String>,
+    is_right_relation: bool,
+    source_columns: Vec<String>,
+    left_columns: Vec<String>,
+    coalesced_keys: Vec<(String, String)>,
 }
 
-fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
+fn sql_relation_qualifiers(
+    select: &Select,
+    relation_columns: &[Vec<String>],
+    relation_left_columns: &[Vec<String>],
+    relation_coalesced_keys: &[Vec<(String, String)>],
+) -> Vec<SqlRelationQualifier> {
     let mut qualifiers = Vec::new();
+    let mut relation_index = 0usize;
     for table_with_joins in &select.from {
         let mut relations = vec![&table_with_joins.relation];
         relations.extend(table_with_joins.joins.iter().map(|join| &join.relation));
         for relation in relations {
+            let is_right_relation = relation_index > 0;
+            relation_index += 1;
+            let source_columns = relation_columns
+                .get(relation_index - 1)
+                .cloned()
+                .unwrap_or_default();
+            let left_columns = relation_left_columns
+                .get(relation_index - 1)
+                .cloned()
+                .unwrap_or_default();
+            let coalesced_keys = relation_coalesced_keys
+                .get(relation_index - 1)
+                .cloned()
+                .unwrap_or_default();
             match relation {
                 TableFactor::Table { name, alias, .. } => {
                     if let Some(alias) = alias {
@@ -1718,6 +2025,10 @@ fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
                         qualifiers.push(SqlRelationQualifier {
                             parts: vec![alias.name.value.clone()],
                             column_prefix,
+                            is_right_relation,
+                            source_columns: source_columns.clone(),
+                            left_columns: left_columns.clone(),
+                            coalesced_keys: coalesced_keys.clone(),
                         });
                     } else {
                         let parts = name
@@ -1729,11 +2040,19 @@ fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
                             qualifiers.push(SqlRelationQualifier {
                                 parts: parts.clone(),
                                 column_prefix: None,
+                                is_right_relation,
+                                source_columns: source_columns.clone(),
+                                left_columns: left_columns.clone(),
+                                coalesced_keys: coalesced_keys.clone(),
                             });
                             if parts.len() > 1 {
                                 qualifiers.push(SqlRelationQualifier {
                                     parts: vec![parts.last().unwrap().clone()],
                                     column_prefix: None,
+                                    is_right_relation,
+                                    source_columns: source_columns.clone(),
+                                    left_columns: left_columns.clone(),
+                                    coalesced_keys: coalesced_keys.clone(),
                                 });
                             }
                         }
@@ -1745,6 +2064,10 @@ fn sql_relation_qualifiers(select: &Select) -> Vec<SqlRelationQualifier> {
                     qualifiers.push(SqlRelationQualifier {
                         parts: vec![alias.name.value.clone()],
                         column_prefix: None,
+                        is_right_relation,
+                        source_columns: source_columns.clone(),
+                        left_columns: left_columns.clone(),
+                        coalesced_keys: coalesced_keys.clone(),
                     });
                 }
                 _ => {}
@@ -1784,12 +2107,82 @@ fn sql_struct_field_expr(
             .map(|qualifier| (qualifier, qualifier.parts.len()))
     }) {
         let column = names[qualifier_len];
-        let root = qualifier
+        let source_has_column = qualifier.source_columns.iter().any(|source| {
+            if df.case_sensitive {
+                source == column
+            } else {
+                source.eq_ignore_ascii_case(column)
+            }
+        });
+        if !source_has_column {
+            return Err(PolarsError::ColumnNotFound(
+                format!("column '{column}' not found in qualified relation").into(),
+            ));
+        }
+        let prefixed = qualifier
             .column_prefix
             .as_ref()
             .map(|prefix| format!("{prefix}_{column}"))
+            .filter(|candidate| df.get_column_dtype(candidate).is_some());
+        let same_name = |left: &str, right: &str| {
+            if df.case_sensitive {
+                left == right
+            } else {
+                left.eq_ignore_ascii_case(right)
+            }
+        };
+        let mut right_output = qualifier
+            .is_right_relation
+            .then(|| {
+                qualifier
+                    .coalesced_keys
+                    .iter()
+                    .find(|(source, _)| same_name(source, column))
+                    .map(|(_, output)| output.clone())
+            })
+            .flatten();
+        if qualifier.is_right_relation && prefixed.is_none() && right_output.is_none() {
+            let mut used_names = qualifier.left_columns.clone();
+            for source_name in &qualifier.source_columns {
+                let overlaps_left = qualifier
+                    .left_columns
+                    .iter()
+                    .any(|left| same_name(left, source_name));
+                let output_name = if overlaps_left {
+                    (0..=qualifier.left_columns.len() + qualifier.source_columns.len())
+                        .find_map(|index| {
+                            let candidate = if index == 0 {
+                                format!("{source_name}_right")
+                            } else {
+                                format!("{source_name}_right_{index}")
+                            };
+                            (!used_names.iter().any(|used| same_name(used, &candidate))
+                                && df.get_column_dtype(&candidate).is_some())
+                            .then_some(candidate)
+                        })
+                        .or_else(|| df.resolve_column_name(source_name).ok())
+                } else {
+                    df.resolve_column_name(source_name).ok()
+                };
+                if let Some(output_name) = output_name {
+                    if same_name(source_name, column) {
+                        right_output = Some(output_name.clone());
+                    }
+                    used_names.push(output_name);
+                }
+            }
+        }
+        let root = prefixed
+            .or(right_output)
             .unwrap_or_else(|| column.to_string());
-        return sql_struct_path_expr(&root, &names[qualifier_len + 1..], df);
+        let field_path = &names[qualifier_len + 1..];
+        if field_path.is_empty() {
+            return Ok(df
+                .resolve_column_name(&root)
+                .ok()
+                .map(|resolved| col(resolved.as_str())));
+        }
+        return sql_struct_path_expr(&root, field_path, df);
     }
 
     for start in 0..names.len() - 1 {
@@ -1869,7 +2262,125 @@ fn sql_expr_to_polars(
     sql_expr_to_polars_with_qualifiers(expr, session, df, having_agg_map, having_agg_list, None)
 }
 
+fn common_signed_integer_type(
+    left: &polars::prelude::DataType,
+    right: &polars::prelude::DataType,
+) -> Option<polars::prelude::DataType> {
+    use polars::prelude::DataType;
+    let rank = |dtype: &DataType| match dtype {
+        DataType::Int8 => Some(0),
+        DataType::Int16 => Some(1),
+        DataType::Int32 => Some(2),
+        DataType::Int64 => Some(3),
+        DataType::Int128 => Some(4),
+        _ => None,
+    };
+    let left_rank = rank(left);
+    let right_rank = rank(right);
+    let integer_literal_rank = |dtype: &DataType| match dtype {
+        DataType::Unknown(polars::prelude::UnknownKind::Int(value)) => {
+            Some(if i32::try_from(*value).is_ok() {
+                2
+            } else if i64::try_from(*value).is_ok() {
+                3
+            } else {
+                4
+            })
+        }
+        _ => None,
+    };
+    let (left_rank, right_rank) = match (left_rank, right_rank) {
+        (Some(left), Some(right)) => (left, right),
+        (Some(left), None) if integer_literal_rank(right).is_some() => (
+            left.max(integer_literal_rank(right)?.max(2)),
+            left.max(integer_literal_rank(right)?.max(2)),
+        ),
+        (None, Some(right)) if integer_literal_rank(left).is_some() => (
+            right.max(integer_literal_rank(left)?.max(2)),
+            right.max(integer_literal_rank(left)?.max(2)),
+        ),
+        (None, None)
+            if integer_literal_rank(left).is_some() && integer_literal_rank(right).is_some() =>
+        {
+            let rank = integer_literal_rank(left)?
+                .max(integer_literal_rank(right)?)
+                .max(2);
+            (rank, rank)
+        }
+        _ => return None,
+    };
+    Some(match left_rank.max(right_rank) {
+        0 => DataType::Int8,
+        1 => DataType::Int16,
+        2 => DataType::Int32,
+        3 => DataType::Int64,
+        _ => DataType::Int128,
+    })
+}
+
+thread_local! {
+    static SQL_EXPR_TRANSLATION_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SQL_EXPR_ANSI_FAILURES: std::cell::RefCell<Vec<(Expr, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn record_ansi_failure(condition: Expr, message: &'static str) {
+    SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow_mut().push((condition, message)));
+}
+
+fn mask_ansi_failures_since(start: usize, condition: Expr) {
+    SQL_EXPR_ANSI_FAILURES.with(|failures| {
+        for (failure, _) in failures.borrow_mut().iter_mut().skip(start) {
+            *failure = condition.clone().and(failure.clone());
+        }
+    });
+}
+
 fn sql_expr_to_polars_with_qualifiers(
+    expr: &SqlExpr,
+    session: &SparkSession,
+    df: Option<&crate::dataframe::DataFrame>,
+    having_agg_map: Option<&HashMap<(String, String), String>>,
+    having_agg_list: Option<&[(Function, String)]>,
+    relation_qualifiers: Option<&[SqlRelationQualifier]>,
+) -> Result<Expr, PolarsError> {
+    let outermost = SQL_EXPR_TRANSLATION_DEPTH.with(|depth| depth.get() == 0);
+    if outermost {
+        SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow_mut().clear());
+    }
+    SQL_EXPR_TRANSLATION_DEPTH.with(|depth| depth.set(depth.get() + 1));
+    let result = sql_expr_to_polars_with_qualifiers_inner(
+        expr,
+        session,
+        df,
+        having_agg_map,
+        having_agg_list,
+        relation_qualifiers,
+    );
+    SQL_EXPR_TRANSLATION_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    if !outermost {
+        return result;
+    }
+
+    let mut result = result?;
+    let failures =
+        SQL_EXPR_ANSI_FAILURES.with(|failures| std::mem::take(&mut *failures.borrow_mut()));
+    for (condition, message) in failures {
+        result = result.map_many(
+            move |columns| {
+                let invalid = columns[1].as_materialized_series().bool()?;
+                if invalid.into_iter().any(|value| value.unwrap_or(false)) {
+                    return Err(PolarsError::ComputeError(message.into()));
+                }
+                Ok(columns[0].clone())
+            },
+            &[condition],
+            |_, fields| Ok(fields[0].clone()),
+        );
+    }
+    Ok(result)
+}
+
+fn sql_expr_to_polars_with_qualifiers_inner(
     expr: &SqlExpr,
     session: &SparkSession,
     df: Option<&DataFrame>,
@@ -2001,6 +2512,101 @@ fn sql_expr_to_polars_with_qualifiers(
                 {
                     l = coerced_l;
                     r = coerced_r;
+                }
+                if matches!(op, BinaryOperator::Divide) {
+                    // Spark SQL promotes integral division to DOUBLE. Polars' native integer
+                    // division truncates (1 / 2 => 0), so keep non-decimal division fractional.
+                    if session.runtime_config().ansi_enabled {
+                        let left = l.clone().cast(polars::prelude::DataType::Float64);
+                        let right = r.clone().cast(polars::prelude::DataType::Float64);
+                        record_ansi_failure(
+                            l.clone().is_not_null().and(left.clone().is_null()),
+                            "invalid cast in ANSI division",
+                        );
+                        record_ansi_failure(
+                            r.clone().is_not_null().and(right.clone().is_null()),
+                            "invalid cast in ANSI division",
+                        );
+                        record_ansi_failure(
+                            left.clone().is_not_null().and(right.clone().eq(lit(0.0))),
+                            "division by zero (ANSI mode)",
+                        );
+                        return Ok(left.map_many(
+                            |columns| {
+                                let left = columns[0].as_materialized_series().f64()?;
+                                let right = columns[1].as_materialized_series().f64()?;
+                                let len = if left.is_empty() || right.is_empty() {
+                                    0
+                                } else {
+                                    left.len().max(right.len())
+                                };
+                                if left.len() != 1 && right.len() != 1 && left.len() != right.len() {
+                                    return Err(PolarsError::ShapeMismatch(
+                                        "division operands have incompatible lengths".into(),
+                                    ));
+                                }
+                                let mut values = Vec::with_capacity(len);
+                                for index in 0..len {
+                                    let left_value = left.get(if left.len() == 1 { 0 } else { index });
+                                    let right_value = right.get(if right.len() == 1 { 0 } else { index });
+                                    values.push(
+                                        left_value
+                                            .zip(right_value)
+                                            .and_then(|(left, right)| (right != 0.0).then_some(left / right)),
+                                    );
+                                }
+                                let values = polars::prelude::Float64Chunked::from_iter_options(
+                                    "".into(),
+                                    values.into_iter(),
+                                );
+                                Ok(polars::prelude::Series::from(values).into())
+                            },
+                            &[right],
+                            |_, fields| {
+                                Ok(polars::prelude::Field::new(
+                                    fields[0].name().clone(),
+                                    polars::prelude::DataType::Float64,
+                                ))
+                            },
+                        ));
+                    }
+                    // Spark returns NULL for invalid casts or a zero denominator when ANSI mode is disabled.
+                    let left = l.cast(polars::prelude::DataType::Float64);
+                    let right = r.cast(polars::prelude::DataType::Float64);
+                    return Ok(when(right.clone().eq(lit(0.0)))
+                        .then(lit(polars::prelude::NULL).cast(polars::prelude::DataType::Float64))
+                        .otherwise(left / right));
+                } else if session.runtime_config().ansi_enabled
+                    && matches!(op, BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Multiply)
+                    && let (Ok(left_field), Ok(right_field)) =
+                        (l.to_field(&schema), r.to_field(&schema))
+                    && let Some(result_type) = common_signed_integer_type(
+                        left_field.dtype(), right_field.dtype()
+                    )
+                {
+                    // Widen signed arithmetic, then strictly cast back to the SQL operand
+                    // type. The strict cast turns overflow into an execution error instead
+                    // of Polars' default wrapping behavior.
+                    use polars::prelude::DataType;
+                    let widened = match result_type {
+                        DataType::Int8 | DataType::Int16 | DataType::Int32 => Some(DataType::Int64),
+                        DataType::Int64 => Some(DataType::Int128),
+                        _ => None,
+                    };
+                    if let Some(widened) = widened {
+                        let value = match op {
+                            BinaryOperator::Plus => l.cast(result_type.clone()).cast(widened.clone()) + r.cast(result_type.clone()).cast(widened),
+                            BinaryOperator::Minus => l.cast(result_type.clone()).cast(widened.clone()) - r.cast(result_type.clone()).cast(widened),
+                            BinaryOperator::Multiply => l.cast(result_type.clone()).cast(widened.clone()) * r.cast(result_type.clone()).cast(widened),
+                            _ => unreachable!(),
+                        };
+                        let narrowed = value.clone().cast(result_type.clone());
+                        record_ansi_failure(
+                            value.is_not_null().and(narrowed.clone().is_null()),
+                            "arithmetic overflow (ANSI mode)",
+                        );
+                        return Ok(narrowed);
+                    }
                 }
             }
             match op {
@@ -2139,22 +2745,74 @@ fn sql_expr_to_polars_with_qualifiers(
             else_result,
             ..
         } => {
-            // Simple CASE: CASE x WHEN a THEN b -> when(x.eq(a)).then(b). Searched CASE: CASE WHEN p THEN b -> when(p).then(b).
-            // Build from the end so we stay in Expr type: else_e = else; for (cond, res) in reverse, else_e = when(cond).then(res).otherwise(else_e).
-            let else_e = match else_result {
-                Some(e) => sql_expr_to_polars_with_qualifiers(e.as_ref(), session, df, having_agg_map, having_agg_list, relation_qualifiers)?,
+            // ANSI arithmetic failures are collected beside their value expression. Mask each
+            // result by its searched/simple CASE selection so a failure in an unselected arm
+            // does not escape Polars' eager evaluation of `when` branches.
+            let operand_expr = operand
+                .as_ref()
+                .map(|operand| {
+                    sql_expr_to_polars_with_qualifiers(
+                        operand,
+                        session,
+                        df,
+                        having_agg_map,
+                        having_agg_list,
+                        relation_qualifiers,
+                    )
+                })
+                .transpose()?;
+            let mut prior_match = lit(false);
+            let mut branches = Vec::with_capacity(conditions.len());
+            for condition_when in conditions {
+                let condition_start = SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow().len());
+                let condition_value = sql_expr_to_polars_with_qualifiers(
+                    &condition_when.condition,
+                    session,
+                    df,
+                    having_agg_map,
+                    having_agg_list,
+                    relation_qualifiers,
+                )?;
+                mask_ansi_failures_since(condition_start, prior_match.clone().not());
+                let condition_value = if let Some(operand) = &operand_expr {
+                    operand.clone().eq(condition_value)
+                } else {
+                    condition_value
+                };
+                let condition_truth = when(condition_value)
+                    .then(lit(true))
+                    .otherwise(lit(false));
+                let selected = prior_match.clone().not().and(condition_truth.clone());
+
+                let result_start = SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow().len());
+                let result = sql_expr_to_polars_with_qualifiers(
+                    &condition_when.result,
+                    session,
+                    df,
+                    having_agg_map,
+                    having_agg_list,
+                    relation_qualifiers,
+                )?;
+                mask_ansi_failures_since(result_start, selected.clone());
+                branches.push((selected, result));
+                prior_match = prior_match.or(condition_truth);
+            }
+
+            let else_start = SQL_EXPR_ANSI_FAILURES.with(|failures| failures.borrow().len());
+            let mut expr = match else_result {
+                Some(e) => sql_expr_to_polars_with_qualifiers(
+                    e.as_ref(),
+                    session,
+                    df,
+                    having_agg_map,
+                    having_agg_list,
+                    relation_qualifiers,
+                )?,
                 None => lit(polars::prelude::NULL),
             };
-            let mut expr = else_e;
-            for cw in conditions.iter().rev() {
-                let cond = if let Some(op) = &operand {
-                    sql_expr_to_polars_with_qualifiers(op.as_ref(), session, df, having_agg_map, having_agg_list, relation_qualifiers)?
-                        .eq(sql_expr_to_polars_with_qualifiers(&cw.condition, session, df, having_agg_map, having_agg_list, relation_qualifiers)?)
-                } else {
-                    sql_expr_to_polars_with_qualifiers(&cw.condition, session, df, having_agg_map, having_agg_list, relation_qualifiers)?
-                };
-                let res = sql_expr_to_polars_with_qualifiers(&cw.result, session, df, having_agg_map, having_agg_list, relation_qualifiers)?;
-                expr = when(cond).then(res).otherwise(expr);
+            mask_ansi_failures_since(else_start, prior_match.not());
+            for (selected, result) in branches.into_iter().rev() {
+                expr = when(selected).then(result).otherwise(expr);
             }
             Ok(expr)
         }
@@ -2790,17 +3448,23 @@ impl ProjItem {
 }
 
 /// Disambiguate duplicate output aliases (e.g. multiple aggs named "count" -> count, count_1, count_2).
-fn disambiguate_aliases(aliases: &[String]) -> Vec<String> {
-    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+fn disambiguate_aliases(aliases: &[String], case_sensitive: bool) -> Vec<String> {
+    let key = |name: &str| {
+        if case_sensitive {
+            name.to_string()
+        } else {
+            name.to_lowercase()
+        }
+    };
+    let mut seen = std::collections::HashSet::new();
     let mut out = Vec::with_capacity(aliases.len());
     for alias in aliases {
-        let count = seen.entry(alias.clone()).or_insert(0);
-        let name = if *count == 0 {
-            alias.clone()
-        } else {
-            format!("{}_{}", alias, count)
-        };
-        *count += 1;
+        let mut name = alias.clone();
+        let mut suffix = 1;
+        while !seen.insert(key(&name)) {
+            name = format!("{}_{}", alias, suffix);
+            suffix += 1;
+        }
         out.push(name);
     }
     out
@@ -2812,25 +3476,20 @@ fn apply_projection(
     session: &SparkSession,
     relation_qualifiers: &[SqlRelationQualifier],
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    // Wildcard: expand to all columns (disambiguate if JOIN produced duplicate names)
+    let mut items = Vec::new();
+    // Keep positional lineage for wildcard-expanded columns. Rebuilding a wildcard
+    // as col(name) reparses dots and other special characters as expressions.
+    let mut wildcard_source_indices = Vec::new();
     for item in projection {
         if matches!(item, SelectItem::Wildcard(_)) {
-            let column_names: Vec<String> = df.columns()?.into_iter().collect();
-            let unique_aliases = disambiguate_aliases(&column_names);
-            if unique_aliases == column_names {
-                let refs: Vec<&str> = column_names.iter().map(|s| s.as_str()).collect();
-                return df.select(refs);
+            let column_names = df.columns()?;
+            for (i, name) in column_names.iter().enumerate() {
+                let expr = nth(i as i64).as_expr();
+                items.push(ProjItem::Expr(expr, name.clone()));
+                wildcard_source_indices.push(Some(i));
             }
-            // Duplicate names: select by index then alias (col("x") would be ambiguous).
-            let exprs: Vec<Expr> = (0..column_names.len())
-                .map(|i| nth(i as i64).as_expr().alias(unique_aliases[i].as_str()))
-                .collect();
-            return df.select_exprs(exprs);
+            continue;
         }
-    }
-
-    let mut items = Vec::new();
-    for item in projection {
         let proj = match item {
             SelectItem::UnnamedExpr(SqlExpr::Identifier(ident)) => {
                 let name = ident.value.as_str();
@@ -2839,10 +3498,29 @@ fn apply_projection(
             }
             SelectItem::UnnamedExpr(SqlExpr::CompoundIdentifier(parts)) => {
                 if let Some(expr) = sql_struct_field_expr(parts, df, Some(relation_qualifiers))? {
-                    let output_name = parts
-                        .last()
-                        .map(|part| part.value.clone())
-                        .unwrap_or_default();
+                    let is_prefixed_relation_column = relation_qualifiers.iter().any(|qualifier| {
+                        qualifier.column_prefix.is_some()
+                            && qualifier.parts.len() + 1 == parts.len()
+                            && qualifier.parts.iter().zip(parts).all(|(left, right)| {
+                                if df.case_sensitive {
+                                    left == &right.value
+                                } else {
+                                    left.eq_ignore_ascii_case(&right.value)
+                                }
+                            })
+                    });
+                    let output_name = if is_prefixed_relation_column {
+                        parts
+                            .iter()
+                            .map(|part| part.value.as_str())
+                            .collect::<Vec<_>>()
+                            .join("_")
+                    } else {
+                        parts
+                            .last()
+                            .map(|part| part.value.clone())
+                            .unwrap_or_default()
+                    };
                     ProjItem::Expr(expr, output_name)
                 } else {
                     // Qualified column (e.g. e.name): try alias_column form (e_name) first for aliased JOIN (#152); else bare column.
@@ -2944,23 +3622,32 @@ fn apply_projection(
             }
         };
         items.push(proj);
+        wildcard_source_indices.push(None);
     }
 
     if items.is_empty() {
+        if !projection.is_empty()
+            && projection
+                .iter()
+                .all(|item| matches!(item, SelectItem::Wildcard(_)))
+        {
+            return Ok(df.clone());
+        }
         return Err(PolarsError::InvalidOperation(
             "SQL: SELECT must list at least one column or *.".into(),
         ));
     }
 
     let aliases: Vec<String> = items.iter().map(|i| i.alias().to_string()).collect();
-    let final_aliases = disambiguate_aliases(&aliases);
+    let final_aliases = disambiguate_aliases(&aliases, df.case_sensitive);
 
     // Check if any Python UDF (requires with_column path)
     let has_python_udf = items.iter().any(|i| matches!(i, ProjItem::PythonUdf(_, _)));
 
+    let source_fields = df.schema()?.logical_fields().to_vec();
     let mut df = df.clone();
 
-    if has_python_udf {
+    let projected = if has_python_udf {
         // Add Python UDF columns first (with disambiguated names), then select all in order
         for (i, item) in items.iter().enumerate() {
             if let ProjItem::PythonUdf(col, _) = item {
@@ -2977,7 +3664,7 @@ fn apply_projection(
                 }
             })
             .collect();
-        df.select_exprs(exprs)
+        df.select_exprs(exprs)?
     } else {
         // All exprs: use select_with_exprs (disambiguated aliases avoid duplicate column names)
         let exprs: Vec<Expr> = items
@@ -2988,8 +3675,29 @@ fn apply_projection(
                 ProjItem::PythonUdf(_, _) => unreachable!(),
             })
             .collect();
-        df.select_exprs(exprs)
+        df.select_exprs(exprs)?
+    };
+
+    // Polars expressions do not carry Spark's nullability and metadata. Restore
+    // those fields for wildcard projections using their original positional source.
+    // Some SQL expressions (notably an untyped NULL) have no faithful logical-schema
+    // representation in StructType. Keep the valid Polars result if schema attachment
+    // cannot represent such an output field.
+    if !wildcard_source_indices.iter().any(Option::is_some) {
+        return Ok(projected);
     }
+    let mut output_fields = projected.schema()?.logical_fields().to_vec();
+    for (output_index, source_index) in wildcard_source_indices.into_iter().enumerate() {
+        if let Some(source_index) = source_index {
+            let mut field = source_fields[source_index].clone();
+            field.name = final_aliases[output_index].clone();
+            output_fields[output_index] = field;
+        }
+    }
+    Ok(projected
+        .clone()
+        .with_logical_schema(StructType::from_logical_fields(output_fields))
+        .unwrap_or(projected))
 }
 
 fn sql_function_alias(func: &Function) -> String {
@@ -3328,6 +4036,43 @@ fn projection_is_scalar_aggregate(projection: &[SelectItem]) -> bool {
         }
     }
     true
+}
+
+/// Return output names when every scalar aggregate is a plain COUNT(*).
+/// Range-backed frames can answer that aggregate from their cardinality metadata
+/// without materializing the generated rows.
+fn count_star_projection_names(
+    projection: &[SelectItem],
+    case_sensitive: bool,
+) -> Option<Vec<String>> {
+    let mut names = Vec::with_capacity(projection.len());
+    for item in projection {
+        let (func, alias) = match item {
+            SelectItem::UnnamedExpr(SqlExpr::Function(func)) => (func, None),
+            SelectItem::ExprWithAlias {
+                expr: SqlExpr::Function(func),
+                alias,
+            } => (func, Some(alias.value.clone())),
+            _ => return None,
+        };
+        let func_name = func
+            .name
+            .0
+            .last()
+            .and_then(|part| part.as_ident())
+            .map(|ident| ident.value.as_str())?;
+        let args = function_args_slice(&func.args);
+        if !func_name.eq_ignore_ascii_case("COUNT")
+            || func.filter.is_some()
+            || func.over.is_some()
+            || args.len() != 1
+            || !matches!(args[0], FunctionArg::Unnamed(FunctionArgExpr::Wildcard))
+        {
+            return None;
+        }
+        names.push(alias.unwrap_or_else(|| "count".to_string()));
+    }
+    Some(disambiguate_aliases(&names, case_sensitive))
 }
 
 fn is_agg_function_name(func: &Function) -> bool {
@@ -3686,6 +4431,629 @@ mod insert_literal_tests {
     use super::*;
 
     #[test]
+    fn wildcard_projection_preserves_rows_names_and_logical_schema() {
+        let session = SparkSession::new(Some("wildcard-regression".into()), None, HashMap::new());
+        let frame = polars::df!("a.b" => &[1i64, 3], "A" => &[2i64, 4], "a" => &[5i64, 6], "*" => &[7i64, 8]).unwrap();
+        let fields = ["a.b", "A", "a", "*"]
+            .into_iter()
+            .map(|name| {
+                crate::schema::LogicalField::new(name.into(), CoreDataType::Long, false)
+                    .with_metadata(std::collections::BTreeMap::from([(
+                        "tag".into(),
+                        JsonValue::from("kept"),
+                    )]))
+            })
+            .collect();
+        let source = DataFrame::from_polars_with_options(frame, false)
+            .with_logical_schema(StructType::from_logical_fields(fields))
+            .unwrap();
+        session.create_or_replace_temp_view("wildcard_source", source);
+        for sql in [
+            "SELECT * FROM wildcard_source",
+            "SELECT *, 0 AS extra FROM wildcard_source",
+            "SELECT *, * FROM wildcard_source",
+        ] {
+            let output = session.sql(sql).unwrap();
+            let values = output.collect().unwrap();
+            assert_eq!(values.height(), 2, "{sql}");
+            for (name, expected) in [
+                ("a.b", [1, 3]),
+                ("A", [2, 4]),
+                ("a_1", [5, 6]),
+                ("*", [7, 8]),
+            ] {
+                let column = values.column(name).unwrap().i64().unwrap();
+                assert_eq!(
+                    column.into_no_null_iter().collect::<Vec<_>>(),
+                    expected,
+                    "{sql}: {name}"
+                );
+            }
+            for field in output.schema().unwrap().logical_fields().iter().take(4) {
+                assert!(!field.nullable, "{sql}");
+                assert_eq!(field.metadata["tag"], "kept", "{sql}");
+            }
+        }
+    }
+
+    #[test]
+    fn untyped_null_projections_remain_valid_with_and_without_wildcards() {
+        let session = SparkSession::new(
+            Some("null-projection-regression".into()),
+            None,
+            HashMap::new(),
+        );
+        session.create_or_replace_temp_view("null_source", session.range(0, 2, 1).unwrap());
+        for (sql, rows) in [
+            ("SELECT NULL AS n", 1),
+            ("SELECT NULL AS n FROM null_source", 2),
+            ("SELECT *, NULL AS n FROM null_source", 2),
+            ("SELECT COALESCE(NULL, NULL) AS n FROM null_source", 2),
+            (
+                "SELECT CASE WHEN id = 0 THEN NULL ELSE NULL END AS n FROM null_source",
+                2,
+            ),
+        ] {
+            let output = session.sql(sql).unwrap().collect().unwrap();
+            assert_eq!(output.height(), rows, "{sql}");
+            assert_eq!(output.column("n").unwrap().null_count(), rows, "{sql}");
+        }
+    }
+
+    #[test]
+    fn wildcard_projection_accepts_an_empty_schema() {
+        let session = SparkSession::new(Some("empty-schema-wildcard".into()), None, HashMap::new());
+        let empty = session
+            .create_dataframe_from_rows(Vec::new(), Vec::new(), false, false)
+            .unwrap();
+        session.create_or_replace_temp_view("empty_schema", empty);
+        for sql in [
+            "SELECT * FROM empty_schema",
+            "SELECT *, * FROM empty_schema",
+        ] {
+            let result = session.sql(sql).unwrap();
+            assert!(result.columns().unwrap().is_empty());
+            assert_eq!(result.collect().unwrap().height(), 0);
+        }
+    }
+
+    #[test]
+    fn qualified_join_columns_keep_their_relation_values() {
+        let session = SparkSession::new(
+            Some("qualified-join-lineage-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .sql("CREATE TABLE left_items (id BIGINT, value BIGINT)")
+            .unwrap();
+        session
+            .sql("CREATE TABLE right_items (id BIGINT, value BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO left_items VALUES (1, 11)")
+            .unwrap();
+        session
+            .sql("INSERT INTO right_items VALUES (1, 101)")
+            .unwrap();
+        let joined = session
+            .sql("SELECT left_items.value AS left_value, right_items.value AS right_value FROM left_items INNER JOIN right_items ON left_items.id = right_items.id")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            joined.column("left_value").unwrap().get(0).unwrap(),
+            AnyValue::Int64(11)
+        );
+        assert_eq!(
+            joined.column("right_value").unwrap().get(0).unwrap(),
+            AnyValue::Int64(101)
+        );
+
+        let derived = session
+            .sql("SELECT l.id AS left_id, r.id AS right_id FROM (SELECT 1 AS id) l CROSS JOIN (SELECT 2 AS id) r")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            derived.column("left_id").unwrap().get(0).unwrap(),
+            AnyValue::Int32(1)
+        );
+        assert_eq!(
+            derived.column("right_id").unwrap().get(0).unwrap(),
+            AnyValue::Int32(2)
+        );
+        let derived_star = session
+            .sql("SELECT * FROM (SELECT 1 AS id) l CROSS JOIN (SELECT 2 AS id) r")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(derived_star.get_column_names(), ["id", "id_right"]);
+
+        session
+            .sql("CREATE TABLE suffix_left (id BIGINT, value_right BIGINT, only_left BIGINT)")
+            .unwrap();
+        session
+            .sql("CREATE TABLE suffix_right (id BIGINT, value BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO suffix_left VALUES (1, 900, 777)")
+            .unwrap();
+        session
+            .sql("INSERT INTO suffix_right VALUES (1, 100)")
+            .unwrap();
+        let suffix_join = session
+            .sql("SELECT suffix_left.value_right AS a, suffix_right.value AS b FROM suffix_left INNER JOIN suffix_right ON suffix_left.id = suffix_right.id")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            suffix_join.column("a").unwrap().get(0).unwrap(),
+            AnyValue::Int64(900)
+        );
+        assert_eq!(
+            suffix_join.column("b").unwrap().get(0).unwrap(),
+            AnyValue::Int64(100)
+        );
+        assert!(session
+            .sql("SELECT suffix_right.only_left FROM suffix_left INNER JOIN suffix_right ON suffix_left.id = suffix_right.id")
+            .is_err());
+
+        session
+            .sql("CREATE TABLE third_items (id BIGINT, value BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO third_items VALUES (1, 1001)")
+            .unwrap();
+        let three_way = session
+            .sql("SELECT a.value AS a_value, b.value AS b_value, c.value AS c_value FROM left_items a INNER JOIN right_items b ON a.id = b.id INNER JOIN third_items c ON a.id = c.id")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            three_way.column("a_value").unwrap().get(0).unwrap(),
+            AnyValue::Int64(11)
+        );
+        assert_eq!(
+            three_way.column("b_value").unwrap().get(0).unwrap(),
+            AnyValue::Int64(101)
+        );
+        assert_eq!(
+            three_way.column("c_value").unwrap().get(0).unwrap(),
+            AnyValue::Int64(1001)
+        );
+    }
+
+    #[test]
+    fn qualified_join_column_skips_an_earlier_right_field_with_the_suffix_name() {
+        let session = SparkSession::new(
+            Some("qualified-join-suffix-lineage-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .sql("CREATE TABLE left_items (id BIGINT, a BIGINT, a_right BIGINT, b BIGINT)")
+            .unwrap();
+        session
+            .sql("CREATE TABLE right_items (id BIGINT, a BIGINT, b_right BIGINT, b BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO left_items VALUES (1, 10, 99, 20)")
+            .unwrap();
+        session
+            .sql("INSERT INTO right_items VALUES (1, 100, 999, 200)")
+            .unwrap();
+
+        let selected = session
+            .sql(
+                "SELECT right_items.b AS selected_b \
+                 FROM left_items INNER JOIN right_items ON left_items.id = right_items.id",
+            )
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            selected.column("selected_b").unwrap().i64().unwrap().get(0),
+            Some(200)
+        );
+    }
+
+    #[test]
+    fn qualified_coalesced_join_key_ignores_unrelated_suffix_column() {
+        let session = SparkSession::new(
+            Some("qualified-coalesced-key-lineage-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session.sql("CREATE TABLE left_items (id BIGINT)").unwrap();
+        session
+            .sql("CREATE TABLE right_items (id BIGINT, id_right BIGINT)")
+            .unwrap();
+        session.sql("INSERT INTO left_items VALUES (1)").unwrap();
+        session
+            .sql("INSERT INTO right_items VALUES (1, 777)")
+            .unwrap();
+
+        let selected = session
+            .sql(
+                "SELECT right_items.id AS actual \
+                 FROM left_items INNER JOIN right_items ON left_items.id = right_items.id",
+            )
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            selected.column("actual").unwrap().i64().unwrap().get(0),
+            Some(1)
+        );
+
+        let filtered = session
+            .sql(
+                "SELECT right_items.id AS actual \
+                 FROM left_items INNER JOIN right_items ON left_items.id = right_items.id \
+                 WHERE right_items.id = 1",
+            )
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(filtered.height(), 1);
+        assert_eq!(
+            filtered.column("actual").unwrap().i64().unwrap().get(0),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn create_if_not_exists_does_not_confuse_a_temp_view_with_a_table() {
+        let session = SparkSession::new(
+            Some("create-temp-view-shadow-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session
+            .sql("CREATE TEMP VIEW shadow AS SELECT 1 AS id")
+            .unwrap();
+        session
+            .sql("CREATE TABLE IF NOT EXISTS shadow (id BIGINT)")
+            .unwrap();
+        let saved = session
+            .sql("SELECT * FROM default.shadow")
+            .unwrap()
+            .collect();
+        assert!(
+            saved.is_ok(),
+            "CREATE TABLE must create the saved object despite the temp view"
+        );
+    }
+
+    #[test]
+    fn integral_division_and_ansi_overflow_keep_sql_semantics() {
+        let session = SparkSession::new(
+            Some("ansi-arithmetic-semantics-test".into()),
+            None,
+            HashMap::from([("spark.sql.ansi.enabled".into(), "true".into())]),
+        );
+        let divided = session.sql("SELECT 1 / 2 AS n").unwrap().collect().unwrap();
+        assert_eq!(
+            divided.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.5)
+        );
+        assert!(
+            session
+                .sql("SELECT 1 / 0 AS n")
+                .and_then(|result| result.collect())
+                .is_err()
+        );
+        assert!(
+            session
+                .sql("SELECT CAST(2147483647 AS INT) + CAST(1 AS INT) AS n")
+                .and_then(|result| result.collect())
+                .is_err()
+        );
+        let exact = session
+            .sql("SELECT CAST('9007199254740993' AS BIGINT) + 0 AS n")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            exact.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Int64(9_007_199_254_740_993)
+        );
+        for (query, expected) in [
+            ("SELECT 2147483648 + 1 AS n", AnyValue::Int64(2_147_483_649)),
+            (
+                "SELECT 9007199254740993 + 0 AS n",
+                AnyValue::Int64(9_007_199_254_740_993),
+            ),
+            (
+                "SELECT CAST(100 AS SMALLINT) + 30000 AS n",
+                AnyValue::Int32(30_100),
+            ),
+        ] {
+            let actual = session.sql(query).unwrap().collect().unwrap();
+            assert_eq!(actual.column("n").unwrap().get(0).unwrap(), expected);
+        }
+        assert!(
+            session
+                .sql("SELECT CAST('9223372036854775807' AS BIGINT) + CAST(1 AS INT) AS n")
+                .and_then(|result| result.collect())
+                .is_err()
+        );
+        session
+            .sql("CREATE TABLE overflow_sink (n BIGINT)")
+            .unwrap();
+        assert!(session
+            .sql("INSERT INTO overflow_sink SELECT CAST('9223372036854775807' AS BIGINT) + CAST(1 AS BIGINT) AS n")
+            .is_err());
+        assert_eq!(
+            session
+                .sql("SELECT n FROM overflow_sink")
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            0
+        );
+
+        for query in ["SELECT 'invalid' / 2 AS n", "SELECT 2 / 'invalid' AS n"] {
+            assert!(
+                session
+                    .sql(query)
+                    .and_then(|result| result.collect())
+                    .is_err(),
+                "{query}"
+            );
+        }
+        let valid_string = session
+            .sql("SELECT '1.5' / 2 AS n")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            valid_string.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.75)
+        );
+
+        session
+            .sql("CREATE TABLE division_sink (n DOUBLE)")
+            .unwrap();
+        assert!(
+            session
+                .sql("INSERT INTO division_sink SELECT 'invalid' / 2 AS n")
+                .is_err()
+        );
+        assert!(
+            session
+                .sql("INSERT INTO division_sink SELECT 2 / 'invalid' AS n")
+                .is_err()
+        );
+        session
+            .sql("INSERT INTO division_sink SELECT 1 / 2 AS n")
+            .unwrap();
+        assert!(
+            session
+                .sql("INSERT INTO division_sink SELECT 1 / 0 AS n")
+                .is_err()
+        );
+        session
+            .sql("CREATE TABLE divisor_source (denominator BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO divisor_source VALUES (0), (2), (4), (8)")
+            .unwrap();
+        let guarded = session
+            .sql("SELECT CASE WHEN denominator = 0 THEN 0 ELSE 1 / denominator END AS n FROM divisor_source")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(guarded.height(), 4);
+        assert_eq!(
+            guarded.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.0)
+        );
+        assert_eq!(
+            guarded.column("n").unwrap().get(1).unwrap(),
+            AnyValue::Float64(0.5)
+        );
+
+        session
+            .sql("CREATE TABLE guarded_invalid_source (value BIGINT)")
+            .unwrap();
+        session
+            .sql("INSERT INTO guarded_invalid_source VALUES (0)")
+            .unwrap();
+        let guarded_invalid = session
+            .sql("SELECT CASE WHEN value = 0 THEN 7 ELSE 'invalid' / 2 END AS n FROM guarded_invalid_source")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            guarded_invalid.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(7.0)
+        );
+
+        let guarded_overflow = session
+            .sql("SELECT CASE WHEN denominator = 0 THEN 0 ELSE CAST(2147483647 AS INT) + CAST(1 AS INT) END AS n FROM divisor_source WHERE denominator = 0")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(
+            guarded_overflow.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Int32(0)
+        );
+        assert!(
+            session
+                .sql("INSERT INTO division_sink SELECT 1 / denominator AS n FROM divisor_source")
+                .is_err()
+        );
+        let divided = session
+            .sql("SELECT 1 / denominator AS n FROM divisor_source WHERE denominator > 0")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(divided.height(), 3);
+        assert_eq!(
+            divided.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.5)
+        );
+        assert_eq!(
+            divided.column("n").unwrap().get(1).unwrap(),
+            AnyValue::Float64(0.25)
+        );
+        assert_eq!(
+            divided.column("n").unwrap().get(2).unwrap(),
+            AnyValue::Float64(0.125)
+        );
+        let divided_by_scalar = session
+            .sql("SELECT denominator / 2 AS n FROM divisor_source WHERE denominator > 0")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(divided_by_scalar.height(), 3);
+        assert_eq!(
+            session
+                .sql("SELECT 1 / denominator AS n FROM divisor_source WHERE denominator = 999")
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            0
+        );
+        assert_eq!(
+            session
+                .sql("SELECT denominator / 2 AS n FROM divisor_source WHERE denominator = 999")
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            0
+        );
+        session
+            .sql("CREATE TABLE multi_division_sink (n DOUBLE)")
+            .unwrap();
+        session
+            .sql("INSERT INTO multi_division_sink SELECT 1 / denominator AS n FROM divisor_source WHERE denominator > 0")
+            .unwrap();
+        assert_eq!(
+            session
+                .sql("SELECT n FROM multi_division_sink")
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            3
+        );
+        let committed = session
+            .sql("SELECT n FROM division_sink")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(committed.height(), 1);
+        assert_eq!(
+            committed.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.5)
+        );
+        session.sql("CREATE TABLE float_sink (n DOUBLE)").unwrap();
+        session
+            .sql("INSERT INTO float_sink SELECT CAST('NaN' AS DOUBLE) AS n")
+            .unwrap();
+        let stored_nan = session
+            .sql("SELECT n FROM float_sink")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert!(
+            stored_nan
+                .column("n")
+                .unwrap()
+                .f64()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .is_nan()
+        );
+    }
+
+    #[test]
+    fn non_ansi_division_by_zero_returns_null() {
+        let session = SparkSession::new(
+            Some("non-ansi-division-zero-test".into()),
+            None,
+            HashMap::from([("spark.sql.ansi.enabled".into(), "false".into())]),
+        );
+        let result = session.sql("SELECT 1 / 0 AS n").unwrap().collect().unwrap();
+        assert_eq!(result.column("n").unwrap().get(0).unwrap(), AnyValue::Null);
+        for query in ["SELECT 'invalid' / 2 AS n", "SELECT 2 / 'invalid' AS n"] {
+            let result = session.sql(query).unwrap().collect().unwrap();
+            assert_eq!(
+                result.column("n").unwrap().get(0).unwrap(),
+                AnyValue::Null,
+                "{query}"
+            );
+        }
+
+        let fractional = session.sql("SELECT 1 / 2 AS n").unwrap().collect().unwrap();
+        assert_eq!(
+            fractional.column("n").unwrap().get(0).unwrap(),
+            AnyValue::Float64(0.5)
+        );
+    }
+
+    #[test]
+    fn embedded_insert_preserves_non_finite_double_values() {
+        let session = SparkSession::new(
+            Some("embedded-non-finite-insert-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session.sql("CREATE TABLE nan_values (n DOUBLE)").unwrap();
+        session
+            .sql("INSERT INTO nan_values SELECT CAST('NaN' AS DOUBLE) AS n")
+            .unwrap();
+        let stored = session
+            .sql("SELECT n FROM nan_values")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert!(
+            stored
+                .column("n")
+                .unwrap()
+                .f64()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .is_nan()
+        );
+    }
+
+    #[test]
+    fn insert_or_conflict_modes_are_rejected() {
+        let session = SparkSession::new(
+            Some("insert-conflict-mode-test".into()),
+            None,
+            HashMap::new(),
+        );
+        session.sql("CREATE TABLE mode_sink (n BIGINT)").unwrap();
+        assert!(
+            session
+                .sql("INSERT OR REPLACE INTO mode_sink VALUES (2)")
+                .is_err()
+        );
+        assert!(
+            session
+                .sql("INSERT OR IGNORE INTO mode_sink VALUES (3)")
+                .is_err()
+        );
+        let rows = session
+            .sql("SELECT n FROM mode_sink")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(rows.height(), 0);
+    }
+
+    #[test]
     fn insert_preserves_exact_signed_decimal_literals() {
         let session = SparkSession::new(
             Some("exact-signed-decimal-insert-test".into()),
@@ -3888,5 +5256,42 @@ mod snapshot_tests {
         assert_eq!(new_rows.len(), 1);
         assert_eq!(new_rows[0].get("left_id"), Some(&json!(2)));
         assert_eq!(new_rows[0].get("right_id"), Some(&json!(20)));
+    }
+
+    #[test]
+    fn shared_catalog_temp_view_rejects_non_finite_json_snapshot() {
+        let session = SparkSession::new(
+            Some("shared-view-non-finite-test".into()),
+            None,
+            HashMap::new(),
+        )
+        .with_shared_catalog(SharedCatalog::new());
+
+        let result =
+            session.sql("CREATE TEMP VIEW invalid_json_view AS SELECT CAST('NaN' AS DOUBLE) AS n");
+        assert!(result.is_err());
+        assert!(!session.has_temp_view("invalid_json_view"));
+    }
+
+    #[test]
+    fn shared_catalog_insert_rejects_non_finite_json_values_before_publish() {
+        let session = SparkSession::new(
+            Some("shared-insert-non-finite-test".into()),
+            None,
+            HashMap::new(),
+        )
+        .with_shared_catalog(SharedCatalog::new());
+        session
+            .sql("CREATE TABLE invalid_json_rows (n DOUBLE)")
+            .unwrap();
+
+        let result = session.sql("INSERT INTO invalid_json_rows SELECT CAST('NaN' AS DOUBLE) AS n");
+        assert!(result.is_err());
+        let stored = session
+            .sql("SELECT n FROM invalid_json_rows")
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(stored.height(), 0);
     }
 }

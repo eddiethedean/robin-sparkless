@@ -1,0 +1,6 @@
+{
+  "git": {
+    "sha1": "8a6bd505c8141b5991a5a18461640610eab97d4b"
+  },
+  "path_in_vcs": "crates/polars-parquet"
+}

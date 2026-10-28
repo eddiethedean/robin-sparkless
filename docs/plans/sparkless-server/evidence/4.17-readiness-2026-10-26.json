@@ -1,0 +1,402 @@
+{
+  "reviewed_branch": "codex/release-4.17",
+  "reviewed_commit": "a017821c2c64c513640d5428f94bd813cccaf24f",
+  "review_date_local": "2026-10-26",
+  "timezone": "America/New_York",
+  "verdict": "HOLD",
+  "environment": {
+    "platform": "macOS arm64",
+    "rustc": "1.93.1",
+    "cargo": "1.93.1"
+  },
+  "checks": {
+    "native_workspace": {
+      "passed": 625,
+      "ignored": 2,
+      "failed": 0,
+      "targets": 30,
+      "features": [
+        "sql",
+        "delta"
+      ],
+      "command": "cargo test --release --locked --offline --workspace --features sql,delta --lib --tests"
+    },
+    "doctests": {
+      "passed": 7
+    },
+    "release_verifier_tests": {
+      "passed": 52
+    },
+    "live_http_verifier_tests": {
+      "passed": 5
+    },
+    "launcher_tests": {
+      "passed": 5
+    },
+    "metadata_tag_check": "pass",
+    "rust_package_archives": {
+      "count": 5,
+      "normalization_check": "pass"
+    },
+    "source_archive": {
+      "filename": "sparkless-4.17.0.tar.gz",
+      "sha256": "85dde381f456b3d322d7c23a7777a4c64dee329f632316f60a0fd21d1cb50551",
+      "pep517_sdist_build": "pass",
+      "isolated_locked_source_check": "pass",
+      "default_delta_feature": true,
+      "source_wheel_build": "pass on CPython 3.11.15",
+      "minimum_python_compile": {
+        "interpreter": "CPython 3.8.20",
+        "exit_code": 1,
+        "error": "SyntaxError: invalid syntax",
+        "line": 67,
+        "python_39_compile": "pass",
+        "python_311_compile": "pass"
+      }
+    },
+    "format": "pass",
+    "ruff_touched_python": "pass",
+    "deny_advisories_bans_sources": "pass",
+    "deny_licenses": "pass_with_soundex_missing_license_field_warning",
+    "strict_clippy": "passed in preceding integration of identical source tree",
+    "workflow_graph": {
+      "jobs": 32,
+      "acyclic": true,
+      "all_needs_defined": true
+    },
+    "isolated_local_wheel_consumers": {
+      "python_versions": [
+        "3.8.20",
+        "3.11.15"
+      ],
+      "offline_install": "pass",
+      "dependency_check": "pass",
+      "native_dataframe_create_and_count": "pass through documented createDataFrame API",
+      "packaged_server_mutations": "pass: exact values/schema, shared catalog, duplicate/conflict, status after close",
+      "platform": "local macOS arm64; not the final advertised platform matrix",
+      "server_build": "cargo build --release --locked --offline -p sparkless-server (production feature set)"
+    }
+  },
+  "workspace_audit": {
+    "database": {
+      "advisory-count": 1378,
+      "last-commit": "3279c99911354c400e1d41e47c7d60e39258b147",
+      "last-updated": "2026-10-26T22:32:25+01:00"
+    },
+    "nonignored_vulnerabilities": 0,
+    "warnings": {}
+  },
+  "consumer_graph": {
+    "method": "Isolated first-party workspace with root patch table removed; normal server dependency path separately checked with cargo tree --edges normal",
+    "audit_policy": "Original repository advisory config",
+    "findings": [
+      {
+        "id": "RUSTSEC-2026-0391",
+        "package": "zstd",
+        "version": "0.13.3",
+        "patched": [
+          ">=0.14.3"
+        ]
+      },
+      {
+        "id": "RUSTSEC-2026-0403",
+        "package": "zstd-safe",
+        "version": "7.3.0",
+        "patched": [
+          ">=8.2.0"
+        ]
+      },
+      {
+        "id": "RUSTSEC-2026-0398",
+        "package": "zstd-safe",
+        "version": "7.3.0",
+        "patched": [
+          ">=8.2.0"
+        ]
+      }
+    ],
+    "actual_packaged_server_lockfile_corrobates": true
+  },
+  "structfield_source_compatibility": {
+    "baseline": "v4.16.1",
+    "baseline_check_exit": 0,
+    "candidate_check_exit": 101,
+    "diagnostic": "E0063: missing field metadata in initializer of StructField",
+    "fixture": "use robin_sparkless_core::schema::{DataType, StructField};\nfn main(){let _field=StructField{name:\"id\".into(),data_type:DataType::Long,nullable:false};}\n"
+  },
+  "planning_probe": {
+    "sql_bytes": 156906,
+    "configured_compute": 1,
+    "configured_pending": 1,
+    "tokio_workers": 1,
+    "requests": 24,
+    "baseline_health_max_seconds": 0.010466624999999397,
+    "loaded_health_max_seconds": 0.5330508750000007,
+    "loaded_health_samples": 4,
+    "request_error_names": [
+      "UnsupportedSql"
+    ],
+    "request_max_seconds": 0.6603840000000005,
+    "query_construction": "'SELECT '+','.join('1 AS c'+str(i) for i in range(14000))+', random()'",
+    "note": "Single-host observation; not a production latency bound. Parsing occurs before admission and all requests were rejected before execution."
+  },
+  "vendor_integrity": [
+    {
+      "vendor": "vendor/polars-arrow",
+      "version": "0.53.0",
+      "compared_files": 282,
+      "changed": [
+        "Cargo.toml"
+      ],
+      "vendor_only": [],
+      "upstream_only": []
+    },
+    {
+      "vendor": "vendor/polars-parquet",
+      "version": "0.53.0",
+      "compared_files": 152,
+      "changed": [
+        "Cargo.toml"
+      ],
+      "vendor_only": [],
+      "upstream_only": []
+    },
+    {
+      "vendor": "vendor/parquet-57",
+      "version": "57.2.0",
+      "compared_files": 189,
+      "changed": [
+        "Cargo.toml"
+      ],
+      "vendor_only": [],
+      "upstream_only": []
+    },
+    {
+      "vendor": "vendor/parquet-58",
+      "version": "58.3.0",
+      "compared_files": 208,
+      "changed": [
+        "Cargo.toml"
+      ],
+      "vendor_only": [],
+      "upstream_only": []
+    }
+  ],
+  "public_417_metadata": [
+    {
+      "url": "https://pypi.org/pypi/sparkless/4.17.0/json",
+      "status": 404
+    },
+    {
+      "url": "https://pypi.org/pypi/sparkless-server-bin/4.17.0/json",
+      "status": 404
+    },
+    {
+      "url": "https://crates.io/api/v1/crates/spark-sql-parser/4.17.0",
+      "status": 404
+    },
+    {
+      "url": "https://crates.io/api/v1/crates/robin-sparkless-core/4.17.0",
+      "status": 404
+    },
+    {
+      "url": "https://crates.io/api/v1/crates/robin-sparkless-polars/4.17.0",
+      "status": 404
+    },
+    {
+      "url": "https://crates.io/api/v1/crates/robin-sparkless/4.17.0",
+      "status": 404
+    },
+    {
+      "url": "https://crates.io/api/v1/crates/sparkless-server/4.17.0",
+      "status": 404
+    }
+  ],
+  "public_417_tag_status": 404,
+  "public_4161_inventory": "verified",
+  "ci": {
+    "origin_commit": "e3f85cb447392bba185f11dd87a32c56cd8658e1",
+    "reviewed_commit_has_remote_run": false,
+    "predecessor_ci": {
+      "run": 40428106702,
+      "result": "success"
+    },
+    "predecessor_release": {
+      "run": 40428101113,
+      "state": "in_progress",
+      "observed_job_count": 42,
+      "successful_jobs": 33,
+      "in_progress_jobs": [
+        "Build PyPI manylinux x86_64 + sdist",
+        "Build PyPI macOS x86_64",
+        "Build PyPI macOS arm64",
+        "Build PyPI musllinux x86_64",
+        "Build PyPI musllinux aarch64",
+        "Build PyPI manylinux aarch64",
+        "Build PyPI Windows x86_64",
+        "Build PyPI Windows aarch64"
+      ],
+      "failures": []
+    },
+    "prior_complete_release": {
+      "run": 40391967226,
+      "commit": "7ae807d94638cb0d62a8265d48904f2c94f140a3",
+      "prepublication_jobs_passed": 42,
+      "publication_recovery_jobs_skipped": 6
+    }
+  },
+  "not_repeated_locally": [
+    "full cross-platform Python matrix",
+    "full V17 resource witness script",
+    "advertised linux/amd64 container rebuild"
+  ],
+  "no_release_actions_performed": true,
+  "packaged_compression": [
+    {
+      "archive": "robin-sparkless-4.17.0.crate",
+      "compression": [
+        [
+          "zstd",
+          "0.13.3"
+        ],
+        [
+          "zstd-safe",
+          "7.3.0"
+        ],
+        [
+          "zstd-sys",
+          "2.1.2+zstd.1.5.7"
+        ]
+      ]
+    },
+    {
+      "archive": "robin-sparkless-core-4.17.0.crate",
+      "compression": []
+    },
+    {
+      "archive": "robin-sparkless-polars-4.17.0.crate",
+      "compression": [
+        [
+          "zstd",
+          "0.13.3"
+        ],
+        [
+          "zstd",
+          "0.14.3"
+        ],
+        [
+          "zstd-safe",
+          "7.3.0"
+        ],
+        [
+          "zstd-safe",
+          "8.2.0"
+        ],
+        [
+          "zstd-sys",
+          "2.1.2+zstd.1.5.7"
+        ]
+      ]
+    },
+    {
+      "archive": "spark-sql-parser-4.17.0.crate",
+      "compression": []
+    },
+    {
+      "archive": "sparkless-server-4.17.0.crate",
+      "compression": [
+        [
+          "zstd",
+          "0.13.3"
+        ],
+        [
+          "zstd-safe",
+          "7.3.0"
+        ],
+        [
+          "zstd-sys",
+          "2.1.2+zstd.1.5.7"
+        ]
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "R1",
+      "priority": "P1",
+      "summary": "Published Rust archives resolve vulnerable compression dependencies",
+      "location": "crates/robin-sparkless-polars/Cargo.toml:38",
+      "gates": [
+        "417-07",
+        "V31"
+      ]
+    },
+    {
+      "id": "R2",
+      "priority": "P1",
+      "summary": "StructField.metadata breaks existing three-field Rust literals",
+      "location": "crates/robin-sparkless-core/src/schema.rs:44",
+      "gates": [
+        "417-05",
+        "V18"
+      ]
+    },
+    {
+      "id": "R3",
+      "priority": "P2",
+      "summary": "SQL parsing and validation run before compute admission",
+      "location": "crates/sparkless-server/src/lib.rs:861",
+      "gates": [
+        "417-06",
+        "V17"
+      ]
+    },
+    {
+      "id": "R4",
+      "priority": "P1",
+      "summary": "Candidate artifact installs do not run Phase 1 mutation verification",
+      "location": ".github/workflows/release.yml:382",
+      "gates": [
+        "417-07",
+        "V31"
+      ]
+    },
+    {
+      "id": "R5",
+      "priority": "P2",
+      "summary": "Public crates.io binary is tested only with --version",
+      "location": ".github/workflows/release.yml:1143",
+      "gates": [
+        "417-08",
+        "V32"
+      ]
+    },
+    {
+      "id": "R6",
+      "priority": "P1",
+      "summary": "Source build backend has a SyntaxError on supported Python 3.8",
+      "location": "python/_sparkless_build.py:66",
+      "gates": [
+        "417-07",
+        "V31"
+      ]
+    }
+  ],
+  "release_evidence_requirements": [
+    "C1: freeze applicable contracts and accept integrated Phase 1 matrices",
+    "C2: full non-publishing candidate on the final exact SHA"
+  ],
+  "review_completed_utc": "2026-10-27T02:07:23.667681+00:00",
+  "local_artifacts": [
+    {
+      "filename": "sparkless-4.17.0-cp38-abi3-macosx_11_0_arm64.whl",
+      "bytes": 44131758,
+      "sha256": "4b9a01f205a98970d058b286dd9163aaeb5be5b3ca773a7fad349c8b726a88aa"
+    },
+    {
+      "filename": "sparkless_server_bin-4.17.0-py3-none-macosx_11_0_arm64.whl",
+      "bytes": 28513775,
+      "sha256": "32b6971d39c7f24233d85df26806abd17329a085860fec2d435762a858e09b1d"
+    }
+  ]
+}

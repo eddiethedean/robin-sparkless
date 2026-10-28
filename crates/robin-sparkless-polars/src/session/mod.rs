@@ -24,7 +24,9 @@ use polars_arrow::with_match_primitive_type_full;
 use robin_sparkless_core::engine::{
     ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
 };
-use robin_sparkless_core::schema::{DataType as CoreDataType, StructField, StructType};
+use robin_sparkless_core::schema::{
+    DataType as CoreDataType, LogicalField as StructField, StructType,
+};
 use robin_sparkless_core::{
     PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils,
     decimal_allow_precision_loss_from_session_map,
@@ -4561,7 +4563,7 @@ impl SparkSession {
         )?;
         DataFrame::from_lazy_with_options(lazy, self.is_case_sensitive())
             .with_range_cardinality(start, step, row_count)
-            .with_logical_schema(StructType::new(vec![StructField::new(
+            .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
                 "id".into(),
                 CoreDataType::Long,
                 false,
@@ -4940,8 +4942,8 @@ fn external_schemas_match(
     actual: &StructType,
     logical_map_paths: &[String],
 ) -> bool {
-    let expected_fields = expected.fields();
-    let actual_fields = actual.fields();
+    let expected_fields = expected.logical_fields();
+    let actual_fields = actual.logical_fields();
     expected_fields.len() == actual_fields.len()
         && expected_fields
             .iter()
@@ -4991,7 +4993,7 @@ fn external_data_types_match(
         (Map(expected_key, expected_value), Array(actual_entries))
             if logical_map_paths.iter().any(|p| p == path) =>
         {
-            let Struct(actual_fields) = actual_entries.as_ref() else {
+            let LogicalStruct(actual_fields) = actual_entries.as_ref() else {
                 return false;
             };
             actual_fields.len() == 2
@@ -5010,7 +5012,7 @@ fn external_data_types_match(
                     logical_map_paths,
                 )
         }
-        (Struct(expected_fields), Struct(actual_fields)) => {
+        (LogicalStruct(expected_fields), LogicalStruct(actual_fields)) => {
             expected_fields.len() == actual_fields.len()
                 && expected_fields
                     .iter()
@@ -5094,7 +5096,10 @@ mod tests {
         DataFrame::from_eager_with_options(physical, false)
     }
 
-    fn catalog_test_session(max_catalog_bytes: usize) -> SparkSession {
+    fn catalog_test_session_with_limits(
+        max_catalog_bytes: usize,
+        max_table_bytes: usize,
+    ) -> SparkSession {
         let mut config = HashMap::new();
         config.insert(
             "sparkless.server.max_catalog_bytes".to_string(),
@@ -5102,10 +5107,115 @@ mod tests {
         );
         config.insert(
             "sparkless.server.max_table_bytes".to_string(),
-            usize::MAX.to_string(),
+            max_table_bytes.to_string(),
         );
         SparkSession::new(Some("catalog-accounting-test".into()), None, config)
             .with_shared_catalog(SharedCatalog::new())
+    }
+
+    fn catalog_test_session(max_catalog_bytes: usize) -> SparkSession {
+        catalog_test_session_with_limits(max_catalog_bytes, usize::MAX)
+    }
+
+    /// Manual resource witness for staged and snapshot-pinned table versions.
+    /// Run with SPARKLESS_CATALOG_BENCH_ROWS set for separate increasing-cardinality processes.
+    #[test]
+    #[ignore = "manual V17 retained/staged catalog memory measurement"]
+    fn shared_catalog_retention_and_staging_memory_measurement() {
+        let rows = std::env::var("SPARKLESS_CATALOG_BENCH_ROWS")
+            .expect("set SPARKLESS_CATALOG_BENCH_ROWS")
+            .parse::<usize>()
+            .expect("SPARKLESS_CATALOG_BENCH_ROWS must be a positive integer");
+        assert!(rows > 0);
+        let row_count = i64::try_from(rows).expect("row count must fit i64");
+        let make_frame = |start: i64| {
+            let end = start
+                .checked_add(row_count)
+                .expect("benchmark range end must fit i64");
+            let values = (start..end).collect::<Vec<_>>();
+            let physical =
+                PlDataFrame::new_infer_height(vec![Series::new("id".into(), values).into()])
+                    .unwrap();
+            DataFrame::from_polars(physical)
+        };
+
+        let construction_started = std::time::Instant::now();
+        let original = make_frame(0);
+        let candidate = make_frame(row_count);
+        let construction_micros = construction_started.elapsed().as_micros();
+        let original_bytes = deduplicated_catalog_bytes(std::slice::from_ref(&original)).unwrap();
+        let candidate_bytes = deduplicated_catalog_bytes(std::slice::from_ref(&candidate)).unwrap();
+
+        let session = catalog_test_session(usize::MAX);
+        session.register_table("phase1_memory", original.clone());
+        let read_lease = session.begin_catalog_read_snapshot().unwrap().unwrap();
+        let resolved_reader = session.table("phase1_memory").unwrap();
+
+        let staging_started = std::time::Instant::now();
+        let staged_accounted_bytes =
+            deduplicated_catalog_bytes(&[original.clone(), candidate.clone()]).unwrap();
+        {
+            let _mutation = session.shared_catalog_mutation_guard().unwrap();
+            let _writer = session.shared_catalog_guard().unwrap();
+            session
+                .check_catalog_table_growth("phase1_memory", &candidate)
+                .unwrap();
+            session.register_table_during_sql("phase1_memory", candidate.clone());
+        }
+        let staging_micros = staging_started.elapsed().as_micros();
+        let retained_pinned_bytes = session.catalog_auxiliary_bytes().unwrap();
+        assert_eq!(retained_pinned_bytes, original_bytes);
+        let read_started = std::time::Instant::now();
+        let read = resolved_reader.collect().unwrap();
+        let read_micros = read_started.elapsed().as_micros();
+        let old_values = read.column("id").unwrap().i64().unwrap();
+        assert_eq!(old_values.len(), rows);
+        assert_eq!(old_values.get(0), Some(0));
+        assert_eq!(old_values.get(rows - 1), Some(row_count - 1));
+        let current = session.table("phase1_memory").unwrap().collect().unwrap();
+        let current_values = current.column("id").unwrap().i64().unwrap();
+        assert_eq!(current_values.get(0), Some(row_count));
+        assert_eq!(current_values.get(rows - 1), Some(row_count * 2 - 1));
+
+        println!(
+            "catalog_memory rows={rows} strategy=eager_i64_table_replacement \
+             construction_us={construction_micros} original_bytes={original_bytes} \
+             candidate_bytes={candidate_bytes} staged_accounted_bytes={staged_accounted_bytes} \
+             staging_us={staging_micros} retained_pinned_bytes={retained_pinned_bytes} \
+             read_us={read_micros} read_rows={rows} read_bytes={original_bytes}",
+        );
+
+        drop(read_lease);
+        assert_eq!(session.catalog_auxiliary_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn shared_catalog_cancelled_insert_before_execution_has_no_effect() {
+        let session = SparkSession::new(Some("cancelled-insert-test".into()), None, HashMap::new())
+            .with_shared_catalog(SharedCatalog::new());
+        session.register_database("default");
+        session
+            .sql("CREATE TABLE default.cancel_before_publish (id BIGINT)")
+            .unwrap();
+
+        let token = robin_sparkless_core::CancellationToken::new();
+        token.cancel();
+        let error = match session.sql_with_cancellation(
+            "INSERT INTO default.cancel_before_publish VALUES (1)",
+            &token,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("pre-cancelled insert unexpectedly returned a result"),
+        };
+        assert!(matches!(error, EngineError::Cancelled(_)), "{error}");
+        assert_eq!(
+            session
+                .table("default.cancel_before_publish")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -5162,6 +5272,34 @@ mod tests {
                 .unwrap();
             session.register_table_during_sql("first", replacement);
             assert_eq!(session.list_table_names(), vec!["default.first"]);
+        }
+    }
+
+    #[test]
+    fn shared_catalog_per_table_byte_limit_accepts_exact_boundary_and_rejects_before_publish() {
+        let candidate = catalog_test_frame();
+        let candidate_bytes = candidate.estimated_size().unwrap();
+        let over_limit = catalog_test_session_with_limits(usize::MAX, candidate_bytes - 1);
+        {
+            let _mutation = over_limit.shared_catalog_mutation_guard().unwrap();
+            let _writer = over_limit.shared_catalog_guard().unwrap();
+            let error = over_limit
+                .check_catalog_table_growth("oversized", &candidate)
+                .unwrap_err();
+            assert!(error.to_string().contains("CatalogCapacityExceeded"));
+            assert!(error.to_string().contains("staged table"));
+            assert!(!over_limit.saved_table_exists("oversized"));
+        }
+
+        let exact_limit = catalog_test_session_with_limits(usize::MAX, candidate_bytes);
+        {
+            let _mutation = exact_limit.shared_catalog_mutation_guard().unwrap();
+            let _writer = exact_limit.shared_catalog_guard().unwrap();
+            exact_limit
+                .check_catalog_table_growth("exact", &candidate)
+                .unwrap();
+            exact_limit.register_table_during_sql("exact", candidate);
+            assert!(exact_limit.saved_table_exists("exact"));
         }
     }
 
@@ -7723,11 +7861,12 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("orders");
         let _actual_schema = write_test_delta_table(&path);
-        let wrong_schema = StructType::new(vec![robin_sparkless_core::StructField::new(
-            "id".into(),
-            CoreDataType::String,
-            true,
-        )]);
+        let wrong_schema =
+            StructType::from_logical_fields(vec![robin_sparkless_core::LogicalField::new(
+                "id".into(),
+                CoreDataType::String,
+                true,
+            )]);
         let descriptor = external_descriptor(&path, wrong_schema);
         let (provider, _) = test_external_catalog("main.analytics.orders", Some(descriptor), None);
         let session = SparkSession::builder()
@@ -7748,11 +7887,12 @@ mod tests {
     #[cfg(not(feature = "delta"))]
     fn external_catalog_requires_delta_feature_for_delta_descriptors() {
         let path = std::path::Path::new("/tmp/external-catalog-delta-feature-required");
-        let schema = StructType::new(vec![robin_sparkless_core::StructField::new(
-            "id".into(),
-            CoreDataType::Long,
-            true,
-        )]);
+        let schema =
+            StructType::from_logical_fields(vec![robin_sparkless_core::LogicalField::new(
+                "id".into(),
+                CoreDataType::Long,
+                true,
+            )]);
         let descriptor = external_descriptor(path, schema);
         let (provider, _) = test_external_catalog("main.analytics.orders", Some(descriptor), None);
         let session = SparkSession::builder()

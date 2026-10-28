@@ -12,7 +12,7 @@ This guide is for the **Sparkless v4** Python package: a PySpark-like API backed
 pip install "sparkless>=4,<5"
 ```
 
-Requires **Python 3.8+**. Prebuilt wheels: Linux (glibc and musl), macOS (arm64 and x86_64), Windows (x86_64 and arm64). See [Supported platforms](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md#supported-platforms) in the package README.
+Requires **Python 3.11+**. Prebuilt wheels: Linux (glibc and musl), macOS (arm64 and x86_64), Windows (x86_64 and arm64). See [Supported platforms](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md#supported-platforms) in the package README.
 
 Optional extras:
 

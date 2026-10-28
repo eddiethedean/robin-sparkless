@@ -4,6 +4,8 @@
 **Audience:** Maintainers of `sparkless` (Python) and `robin-sparkless` (Rust engine)  
 **Related:** [FULL_PARITY_ROADMAP.md](FULL_PARITY_ROADMAP.md), [PARITY_STATUS.md](PARITY_STATUS.md), [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md), [PYSPARK_VERSION_NOTES.md](PYSPARK_VERSION_NOTES.md), [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md), [python_migration.md](python_migration.md)
 
+**4.17 Python support update (2026-10-27):** Sparkless 4.17 requires Python 3.11 or newer and no longer supports or ships for Python 3.8–3.10. The historical matrix below is planning context; the active compatibility runner now covers Python 3.11–3.13 only where the pinned PySpark releases support it.
+
 ---
 
 ## 1. Goals

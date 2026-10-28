@@ -13,11 +13,17 @@ class VerifyReleaseDistributionsTest(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
 
-    def make_wheel(self, filename, project="sparkless", version="4.16.0"):
+    def make_wheel(
+        self, filename, project="sparkless", version="4.16.0", requires_python=None
+    ):
         path = self.directory / filename
         metadata = "Metadata-Version: 2.1\nName: {}\nVersion: {}\n\n".format(
             project, version
         )
+        if requires_python:
+            metadata = (
+                metadata.rstrip() + "\nRequires-Python: " + requires_python + "\n\n"
+            )
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr(
                 "{}-{}.dist-info/METADATA".format(project, version), metadata
@@ -87,6 +93,30 @@ class VerifyReleaseDistributionsTest(unittest.TestCase):
             sdist_count=0,
             platforms={"win_amd64"},
         )
+
+    def test_417_requires_python_311_and_the_new_abi_floor(self):
+        wheel = self.make_wheel(
+            "sparkless-4.17.0-cp38-abi3-win_amd64.whl",
+            version="4.17.0",
+            requires_python=">=3.11",
+        )
+        with self.assertRaisesRegex(ValueError, "cp311-abi3"):
+            verify_distributions(self.directory, "sparkless", "4.17.0", 1, 0)
+        wheel.unlink()
+        wheel = self.make_wheel(
+            "sparkless-4.17.0-cp311-abi3-win_amd64.whl",
+            version="4.17.0",
+            requires_python=">=3.8",
+        )
+        with self.assertRaisesRegex(ValueError, "Requires-Python"):
+            verify_distributions(self.directory, "sparkless", "4.17.0", 1, 0)
+        wheel.unlink()
+        self.make_wheel(
+            "sparkless-4.17.0-cp311-abi3-win_amd64.whl",
+            version="4.17.0",
+            requires_python=">=3.11",
+        )
+        verify_distributions(self.directory, "sparkless", "4.17.0", 1, 0)
 
 
 if __name__ == "__main__":

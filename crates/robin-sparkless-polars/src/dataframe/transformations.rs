@@ -46,6 +46,20 @@ fn expr_referenced_columns(expr: &Expr) -> HashSet<String> {
     refs.into_inner()
 }
 
+/// Selectors such as `nth(0)` refer to frame columns without naming them in the
+/// expression tree. Treat them as input references so literal expansion does not
+/// cross-join a positional projection with the source frame.
+fn expr_contains_selector(expr: &Expr) -> bool {
+    let found = RefCell::new(false);
+    let _ = expr.clone().try_map_expr(|e| {
+        if matches!(&e, Expr::Selector(_)) {
+            *found.borrow_mut() = true;
+        }
+        Ok(e)
+    });
+    found.into_inner()
+}
+
 /// Returns true if the expression tree contains a reference to the given column name (so we must not drop it before adding).
 fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
     expr_referenced_columns(expr).contains(column_name)
@@ -517,10 +531,11 @@ pub fn select_with_exprs(
     let no_col_refs = !had_explode
         && first_col.is_some()
         && exprs.iter().all(|e| {
-            expr_referenced_columns(e)
-                .intersection(&df_columns)
-                .next()
-                .is_none()
+            !expr_contains_selector(e)
+                && expr_referenced_columns(e)
+                    .intersection(&df_columns)
+                    .next()
+                    .is_none()
         });
     let lf = if no_col_refs {
         let first = first_col.unwrap();
@@ -2423,7 +2438,7 @@ pub fn explain(_df: &DataFrame) -> String {
 pub fn print_schema(df: &DataFrame) -> Result<String, PolarsError> {
     let schema = df.schema()?;
     let mut s = "root\n".to_string();
-    for f in schema.fields() {
+    for f in schema.logical_fields() {
         let dt = match &f.data_type {
             crate::schema::DataType::String => "string".to_string(),
             crate::schema::DataType::Short => "smallint".to_string(),
@@ -2556,12 +2571,113 @@ pub fn with_columns(
     exprs: &[(String, crate::column::Column)],
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    let pl = df.collect_inner()?.as_ref().clone();
-    let mut current = super::DataFrame::from_polars_with_options(pl, case_sensitive);
-    for (name, col) in exprs {
-        current = with_column(&current, name, col, case_sensitive)?;
+    let physical = df.collect_inner()?.as_ref().clone();
+    let original_names = df.columns()?;
+    let mut snapshot = super::DataFrame::from_polars_with_options(physical.clone(), case_sensitive);
+    snapshot.logical_schema = df.logical_schema.clone();
+    let same_name = |left: &str, right: &str| {
+        if case_sensitive {
+            left == right
+        } else {
+            left.eq_ignore_ascii_case(right)
+        }
+    };
+
+    // Evaluate every ordinary expression against the same input. Temporary columns carry
+    // those values through a generator so its expanded rows retain the corresponding values.
+    let mut physical = physical;
+    let mut temporary_columns = Vec::new();
+    let mut generator = None;
+    for (index, (name, column)) in exprs.iter().enumerate() {
+        if explode_expr_parts(column.expr()).is_some() {
+            if generator.replace((name, column)).is_some() {
+                return Err(PolarsError::InvalidOperation(
+                    "withColumns supports at most one generator expression".into(),
+                ));
+            }
+            continue;
+        }
+        let evaluated = with_column(&snapshot, name, column, case_sensitive)?;
+        let names = evaluated.columns()?;
+        let resolved_name = names
+            .iter()
+            .find(|candidate| *candidate == name)
+            .or_else(|| names.iter().find(|candidate| same_name(candidate, name)))
+            .ok_or_else(|| PolarsError::ColumnNotFound(name.clone().into()))?;
+        let mut temporary = format!("__sparkless_with_columns_{index}");
+        while physical
+            .get_column_names()
+            .iter()
+            .any(|existing| same_name(existing.as_str(), &temporary))
+            || exprs
+                .iter()
+                .any(|(requested, _)| same_name(requested, &temporary))
+        {
+            temporary.push('_');
+        }
+        let mut value = evaluated.collect_inner()?.column(resolved_name)?.clone();
+        value.rename(temporary.clone().into());
+        physical.with_column(value)?;
+        temporary_columns.push((name, temporary));
     }
-    Ok(current)
+
+    if let Some((name, column)) = generator {
+        let input = super::DataFrame::from_polars_with_options(physical, case_sensitive);
+        physical = with_column(&input, name, column, case_sensitive)?
+            .collect_inner()?
+            .as_ref()
+            .clone();
+        if let Some(existing) = physical
+            .get_column_names()
+            .iter()
+            .find(|existing| {
+                same_name(existing.as_str(), name) && existing.as_str() != name.as_str()
+            })
+            .map(|existing| existing.to_string())
+        {
+            physical.rename(&existing, name.clone().into())?;
+        }
+    }
+    for (name, temporary) in &temporary_columns {
+        let mut value = physical.column(temporary)?.clone();
+        value.rename((*name).clone().into());
+        if let Some(existing) = physical
+            .get_column_names()
+            .iter()
+            .find(|existing| {
+                same_name(existing.as_str(), name) && existing.as_str() != name.as_str()
+            })
+            .map(|existing| existing.to_string())
+        {
+            physical.rename(&existing, (*name).clone().into())?;
+        }
+        physical.with_column(value)?;
+    }
+    for (_, temporary) in &temporary_columns {
+        physical.drop_in_place(temporary)?;
+    }
+
+    // Preserve input positions for replacements and append new names in request order.
+    let mut order = original_names
+        .into_iter()
+        .map(|original| {
+            exprs
+                .iter()
+                .find(|(name, _)| same_name(&original, name))
+                .map(|(name, _)| name.clone())
+                .unwrap_or(original)
+        })
+        .collect::<Vec<_>>();
+    for (name, _) in exprs {
+        if !order.iter().any(|existing| same_name(existing, name)) {
+            order.push(name.clone());
+        }
+    }
+    let physical = physical.select(order.iter().map(String::as_str))?;
+    Ok(super::DataFrame::from_polars_with_options(
+        physical,
+        case_sensitive,
+    ))
 }
 
 /// Rename multiple columns. PySpark withColumnsRenamed.
@@ -3457,7 +3573,11 @@ mod tests {
         assert!(cols.contains(&"name".to_string()));
         // #1262: collected rows must have id as string (PySpark union coerces numeric+string to string).
         let (_names, rows, schema) = out.collect_as_json_rows_with_names().unwrap();
-        let id_field = schema.fields().iter().find(|f| f.name == "id").unwrap();
+        let id_field = schema
+            .logical_fields()
+            .iter()
+            .find(|f| f.name == "id")
+            .unwrap();
         assert!(matches!(
             id_field.data_type,
             robin_sparkless_core::DataType::String

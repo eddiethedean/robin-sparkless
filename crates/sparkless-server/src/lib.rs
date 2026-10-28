@@ -17,7 +17,9 @@ use hyper::http::{HeaderValue, Method, Request, Response, StatusCode};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use robin_sparkless::{DataType, EngineError, SharedCatalog, SparkSession, StructField};
+use robin_sparkless::{
+    DataType, EngineError, LogicalField as StructField, SharedCatalog, SparkSession,
+};
 use robin_sparkless_core::CancellationToken;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
@@ -94,6 +96,8 @@ struct ServerInner {
     catalog_sequence: AtomicU64,
     draining: AtomicBool,
     ready: AtomicBool,
+    #[cfg(test)]
+    test_mutation_before_outcome_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 struct Admission {
@@ -292,6 +296,8 @@ impl Server {
             catalog_sequence: AtomicU64::new(1),
             draining: AtomicBool::new(false),
             ready: AtomicBool::new(false),
+            #[cfg(test)]
+            test_mutation_before_outcome_hook: Mutex::new(None),
         });
         Ok(Self { inner })
     }
@@ -854,9 +860,53 @@ impl Server {
         if parsed.kind != "sql" {
             return agent_error("UnsupportedKind", "only kind=sql is supported", None);
         }
-        let class = match validate_statement(&parsed.code) {
-            Ok(class) => class,
-            Err((name, message)) => return agent_error(name, &message, None),
+        // A retained mutation can be replayed even when admission is saturated or its
+        // originating session is closed. Conflicting or new requests still need SQL
+        // classification before applying mutation-specific identity rules.
+        if parsed.server_instance_id.as_deref() == Some(self.inner.instance_id.as_str())
+            && let Some(operation_id) = parsed.operation_id.as_deref()
+            && validate_identifier("operation_id", operation_id).is_ok()
+            && let Ok(Some(existing)) = self.inner.lookup_operation(
+                operation_id,
+                request_fingerprint(&parsed),
+                &parsed.session,
+            )
+        {
+            return existing_operation_response(&self.inner, operation_id, &existing);
+        }
+        let ticket = match self.inner.reserve_admission() {
+            Ok(ticket) => ticket,
+            Err(error) => return request_failure_response(error),
+        };
+        let planning_permit = match timeout(
+            self.inner.config.queue_timeout,
+            Arc::clone(&self.inner.admission.active).acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            _ => return agent_error("QueueTimeout", "timed out waiting for SQL validation", None),
+        };
+        let planning_code = parsed.code.clone();
+        let planning = tokio::task::spawn_blocking(move || {
+            let _permit = planning_permit;
+            (validate_statement(&planning_code), ticket)
+        });
+        // The blocking task owns both reservations until parsing actually finishes,
+        // including when this response times out. No catalog effects occur here.
+        let (class, ticket) = match timeout(self.inner.config.response_timeout, planning).await {
+            Ok(Ok((Ok(class), ticket))) => (class, ticket),
+            Ok(Ok((Err((name, message)), _))) => return agent_error(name, &message, None),
+            Ok(Err(_)) => {
+                return agent_error("InternalError", "SQL validation worker failed", None);
+            }
+            Err(_) => {
+                return agent_error(
+                    "ResponseTimeout",
+                    "SQL validation timed out before execution",
+                    None,
+                );
+            }
         };
         let is_mutation = matches!(class, StatementClass::Mutation { .. });
         let operation_id = if is_mutation {
@@ -952,20 +1002,6 @@ impl Server {
             None
         };
         let mut pending_operation = PendingOperationGuard(operation.clone());
-        let ticket = match self.inner.reserve_admission() {
-            Ok(ticket) => ticket,
-            Err(error) => {
-                if let Some(record) = &operation {
-                    set_operation_failure(
-                        record,
-                        "OperationCapacityExceeded",
-                        "operation capacity is full",
-                        "failed",
-                    );
-                }
-                return request_failure_response(error);
-            }
-        };
         let session_guard = match timeout(
             self.inner.config.queue_timeout,
             lease.0.serial.clone().lock_owned(),
@@ -1110,6 +1146,16 @@ impl Server {
                 execute_statement(&session, &code, "read", None, limits, &token_for_work)
                     .map(|response| (response, None))
             };
+            #[cfg(test)]
+            if matches!(class_for_job, StatementClass::Mutation { .. })
+                && let Some(hook) = instance
+                    .test_mutation_before_outcome_hook
+                    .lock()
+                    .ok()
+                    .and_then(|hook| hook.clone())
+            {
+                hook();
+            }
             if let Some(record) = &operation_record_for_job {
                 match &result {
                     Ok((_, receipt)) => set_operation_committed(record, receipt.clone()),
@@ -2001,6 +2047,7 @@ fn supported_scalar_sql_type(dtype: &str) -> bool {
 
 fn validate_insert(insert: &ast::Insert) -> Result<(), (&'static str, String)> {
     if !insert.into
+        || insert.or.is_some()
         || insert.overwrite
         || insert.table_alias.is_some()
         || !insert.assignments.is_empty()
@@ -2192,7 +2239,7 @@ fn execute_statement(
     let mut fields = frame
         .schema()
         .map_err(|error| execution_failure("QueryError", &error.to_string()))?
-        .fields()
+        .logical_fields()
         .to_vec();
     if let Ok(SparkStatement::Sqlparser(statement)) = spark_sql_parser::parse_spark_sql(sql)
         && let ast::Statement::Query(query) = statement.as_ref()
@@ -2387,6 +2434,9 @@ fn map_engine_failure(error: EngineError) -> ExecutionFailure {
                 || message.contains("configured serialized byte limit") =>
         {
             "ResultLimitExceeded"
+        }
+        EngineError::Internal(_) if message.contains("CatalogCapacityExceeded") => {
+            "CatalogCapacityExceeded"
         }
         EngineError::User(_) if message.contains("CatalogCapacityExceeded") => {
             "CatalogCapacityExceeded"
@@ -2724,6 +2774,8 @@ mod tests {
         assert!(validate_statement("SELECT TRY_CAST('1' AS BIGINT)").is_err());
         assert!(validate_statement("SELECT CAST('1' AS ARRAY<INT>)").is_err());
         assert!(validate_statement("SELECT CAST(1 AS BIGINT)").is_ok());
+        assert!(validate_statement("INSERT OR REPLACE INTO t VALUES (1)").is_err());
+        assert!(validate_statement("INSERT OR IGNORE INTO t VALUES (1)").is_err());
         assert!(
             validate_statement("SELECT l.id FROM left_items l CROSS JOIN right_items r").is_ok()
         );
@@ -2994,7 +3046,7 @@ mod tests {
         let config = ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
             max_mutation_records: 1,
-            max_mutation_bytes: 4096,
+            max_mutation_bytes: MIN_MUTATION_RECORD_BYTES,
             ..ServerConfig::default()
         };
         let server = Server::new(config).unwrap();
@@ -3015,27 +3067,26 @@ mod tests {
         };
 
         let instance = server.instance_id().to_string();
-        let accepted = statement_request(
-            address,
-            &instance,
-            "writer",
-            "retained-create",
-            "CREATE DATABASE retained_db",
-        )
-        .await;
+        let accepted =
+            statement_request(address, &instance, "w", "a", "CREATE DATABASE retained_db").await;
         assert_eq!(accepted["status"], "ok");
         assert_eq!(accepted["operation"]["effect_outcome"], "committed");
+        assert_eq!(
+            server.inner.operation_records.lock().unwrap().bytes,
+            MIN_MUTATION_RECORD_BYTES,
+            "the smallest valid operation key consumes the exact minimum byte budget"
+        );
 
         let (status, rejected) = request_json(
             address,
             "POST",
             "/statements",
             &json!({
-                "session":"writer",
+                "session":"w",
                 "kind":"sql",
                 "code":"CREATE DATABASE must_not_exist",
                 "server_instance_id":instance,
-                "operation_id":"rejected-create"
+                "operation_id":"b"
             }),
         )
         .await;
@@ -3047,12 +3098,12 @@ mod tests {
             address,
             "POST",
             "/operations/status",
-            &json!({"server_instance_id":instance,"operation_id":"retained-create"}),
+            &json!({"server_instance_id":instance,"operation_id":"a"}),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(retained_status["effect_outcome"], "committed");
-        assert!(server.inner.operation("rejected-create").is_none());
+        assert!(server.inner.operation("b").is_none());
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
@@ -3135,6 +3186,294 @@ mod tests {
         assert_eq!(replay["status"], "ok", "{replay}");
         assert_eq!(replay["operation"]["effect_outcome"], "committed");
         assert!(server.inner.root_session.database_exists("byte_first"));
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn mutation_retention_accepts_exact_byte_capacity_boundary() {
+        let config = ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_mutation_records: 2,
+            max_mutation_bytes: 2 * MIN_MUTATION_RECORD_BYTES,
+            ..ServerConfig::default()
+        };
+        let server = Server::new(config).unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        for operation_id in ["a", "b"] {
+            let response =
+                statement_request(address, &instance, "s", operation_id, "USE default").await;
+            assert_eq!(response["status"], "ok", "{operation_id}: {response}");
+            assert_eq!(response["operation"]["effect_outcome"], "committed");
+        }
+        {
+            let registry = server.inner.operation_records.lock().unwrap();
+            assert_eq!(registry.records.len(), 2);
+            assert_eq!(registry.bytes, 2 * MIN_MUTATION_RECORD_BYTES);
+        }
+
+        let (status, rejected) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"s",
+                "kind":"sql",
+                "code":"USE default",
+                "server_instance_id":instance,
+                "operation_id":"c"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{rejected}");
+        assert_eq!(rejected["ename"], "MutationRetentionCapacityExceeded");
+        assert!(server.inner.operation("c").is_none());
+
+        for operation_id in ["a", "b"] {
+            let (status, retained) = request_json(
+                address,
+                "POST",
+                "/operations/status",
+                &json!({"server_instance_id":instance,"operation_id":operation_id}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{operation_id}: {retained}");
+            assert_eq!(retained["effect_outcome"], "committed");
+        }
+        let replay = statement_request(address, &instance, "s", "a", "USE default").await;
+        assert_eq!(replay["status"], "ok", "{replay}");
+        assert_eq!(replay["operation"]["effect_outcome"], "committed");
+        assert_eq!(
+            server.inner.operation_records.lock().unwrap().bytes,
+            2 * MIN_MUTATION_RECORD_BYTES,
+            "replay must not reserve another record"
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn catalog_capacity_failure_retains_atomic_mutation_outcome() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        // The staged i64 candidate is one bitmap byte above the 64 MiB per-table limit.
+        let source = server
+            .inner
+            .root_session
+            .range(0, 8_388_609, 1)
+            .expect("capacity source range");
+        server
+            .inner
+            .root_session
+            .register_table("capacity_source", source);
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let created = statement_request(
+            address,
+            &instance,
+            "capacity-writer",
+            "capacity-target-create",
+            "CREATE TABLE default.capacity_target (id BIGINT)",
+        )
+        .await;
+        assert_eq!(created["status"], "ok", "{created}");
+
+        let mutation_sql =
+            "INSERT INTO default.capacity_target SELECT id FROM default.capacity_source";
+        let failed = statement_request(
+            address,
+            &instance,
+            "capacity-writer",
+            "catalog-capacity-failure",
+            mutation_sql,
+        )
+        .await;
+        assert_eq!(failed["status"], "error", "{failed}");
+        assert_eq!(failed["ename"], "CatalogCapacityExceeded", "{failed}");
+        assert_eq!(failed["operation"]["execution_state"], "failed");
+        assert_eq!(failed["operation"]["effect_outcome"], "failed");
+        assert_eq!(
+            server
+                .inner
+                .root_session
+                .table("default.capacity_target")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0,
+            "capacity rejection must leave the prior table version intact"
+        );
+
+        let (status, retained) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({
+                "server_instance_id":instance,
+                "operation_id":"catalog-capacity-failure"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{retained}");
+        assert_eq!(retained["execution_state"], "failed");
+        assert_eq!(retained["effect_outcome"], "failed");
+        assert_eq!(retained["error"]["ename"], "CatalogCapacityExceeded");
+
+        let replay = statement_request(
+            address,
+            server.instance_id(),
+            "capacity-writer",
+            "catalog-capacity-failure",
+            mutation_sql,
+        )
+        .await;
+        assert_eq!(replay["status"], "error", "{replay}");
+        assert_eq!(replay["ename"], "CatalogCapacityExceeded", "{replay}");
+        assert_eq!(
+            server
+                .inner
+                .root_session
+                .table("default.capacity_target")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0,
+            "replaying a retained capacity failure must not run another append"
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn default_mutation_retention_limit_keeps_success_and_failure_records() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let capacity = server.inner.config.max_mutation_records;
+        for index in 0..capacity - 1 {
+            let operation_id = format!("keep-{index}");
+            let response =
+                statement_request(address, &instance, "w", &operation_id, "USE default").await;
+            assert_eq!(response["status"], "ok", "{operation_id}: {response}");
+        }
+
+        let failure_session = "s".repeat(MAX_IDENTIFIER_BYTES);
+        let failure_operation = "f".repeat(MAX_IDENTIFIER_BYTES);
+        let max_record_bytes =
+            MUTATION_RECORD_BASE_BYTES + failure_session.len() + failure_operation.len();
+        assert_eq!(max_record_bytes, 2304);
+        assert!(max_record_bytes <= 4 * 1024);
+        let retained_failure = statement_request(
+            address,
+            &instance,
+            &failure_session,
+            &failure_operation,
+            "DROP DATABASE default",
+        )
+        .await;
+        assert_eq!(retained_failure["status"], "error", "{retained_failure}");
+        assert_eq!(
+            retained_failure["operation"]["effect_outcome"], "failed",
+            "failed outcomes consume retention capacity"
+        );
+
+        let (status, oldest) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({"server_instance_id":instance,"operation_id":"keep-0"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{oldest}");
+        assert_eq!(oldest["effect_outcome"], "committed");
+        let (status, failure_status) = request_json(
+            address,
+            "POST",
+            "/operations/status",
+            &json!({"server_instance_id":instance,"operation_id":failure_operation}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{failure_status}");
+        assert_eq!(failure_status["effect_outcome"], "failed");
+
+        let (status, rejected) = request_json(
+            address,
+            "POST",
+            "/statements",
+            &json!({
+                "session":"w",
+                "kind":"sql",
+                "code":"CREATE DATABASE over_limit",
+                "server_instance_id":instance,
+                "operation_id":"over-limit"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{rejected}");
+        assert_eq!(rejected["ename"], "MutationRetentionCapacityExceeded");
+        assert!(!server.inner.root_session.database_exists("over_limit"));
+        assert!(server.inner.operation("over-limit").is_none());
+        {
+            let registry = server.inner.operation_records.lock().unwrap();
+            assert_eq!(registry.records.len(), capacity);
+            assert!(registry.bytes < server.inner.config.max_mutation_bytes);
+        }
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
@@ -3487,6 +3826,103 @@ mod tests {
 
         let replacement = server.inner.session_lease("closing-client").unwrap();
         assert_ne!(replacement.0.generation, generation);
+    }
+
+    #[tokio::test]
+    async fn rejected_sql_planning_obeys_admission_and_keeps_health_responsive() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            max_active_operations: 1,
+            max_pending_operations: 1,
+            queue_timeout: Duration::from_secs(5),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+        let retained = statement_request(
+            address,
+            server.instance_id(),
+            "planning-writer",
+            "planning-replay",
+            "CREATE TABLE planning_replay (id BIGINT)",
+        )
+        .await;
+        assert_eq!(retained["status"], "ok");
+        let held_ticket = server.inner.reserve_admission().unwrap();
+        let held_permit = Arc::clone(&server.inner.admission.active)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let sql = format!(
+            "SELECT {}, random()",
+            (0..12_000)
+                .map(|i| format!("1 AS c{i}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert!(sql.len() < server.inner.config.max_sql_bytes);
+        let body = json!({"session":"planning-reader","kind":"sql","code":sql});
+        let queued = {
+            let body = body.clone();
+            tokio::spawn(async move { request_json(address, "POST", "/statements", &body).await })
+        };
+        timeout(Duration::from_secs(2), async {
+            while server.inner.admission.accepted.load(Ordering::Acquire) != 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("SQL parsing must wait for the occupied compute permit");
+        assert!(!queued.is_finished());
+        for _ in 0..5 {
+            let (status, _) = timeout(
+                Duration::from_millis(250),
+                request_json(address, "GET", "/health", &JsonValue::Null),
+            )
+            .await
+            .expect("health must progress while planning waits");
+            assert_eq!(status, StatusCode::OK);
+        }
+        let replay = timeout(
+            Duration::from_millis(250),
+            statement_request(
+                address,
+                server.instance_id(),
+                "planning-writer",
+                "planning-replay",
+                "CREATE TABLE planning_replay (id BIGINT)",
+            ),
+        )
+        .await
+        .expect("retained replay must not need compute admission");
+        assert_eq!(replay["operation"], retained["operation"]);
+        let (status, response) = request_json(address, "POST", "/statements", &body).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response["ename"], "OperationCapacityExceeded");
+        drop(held_permit);
+        drop(held_ticket);
+        let (_, response) = timeout(Duration::from_secs(5), queued)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(response["ename"], "UnsupportedSql");
+        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+        shutdown_tx.send(()).unwrap();
+        server_task.await.unwrap().unwrap();
     }
 
     #[tokio::test]
@@ -3903,7 +4339,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn sustained_multi_client_lazy_counts_keep_health_progressing() {
         const CLIENTS: usize = 4;
-        const REQUESTS_PER_CLIENT: usize = 256;
+        // Keep the debug workspace suite bounded; the optimized V17 witness
+        // still runs all 1,024 requests per repetition.
+        const REQUESTS_PER_CLIENT: usize = if cfg!(debug_assertions) { 64 } else { 256 };
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
             max_active_operations: CLIENTS,
@@ -4172,6 +4610,294 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn deadline_after_publication_keeps_worker_owned_committed_outcome() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            response_timeout: Duration::from_millis(100),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = std::sync::Mutex::new(release_rx);
+        *server
+            .inner
+            .test_mutation_before_outcome_hook
+            .lock()
+            .unwrap() = Some(Arc::new(move || {
+            reached_tx
+                .send(())
+                .expect("signal after the catalog mutation is published");
+            release_rx
+                .lock()
+                .expect("release channel lock")
+                .recv_timeout(Duration::from_secs(3))
+                .expect("release the worker to retain its committed outcome");
+        }));
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let request_instance = instance.clone();
+        let mutation = tokio::spawn(async move {
+            statement_request(
+                address,
+                &request_instance,
+                "post-publication-deadline",
+                "post-publication-create",
+                "CREATE DATABASE published_before_deadline",
+            )
+            .await
+        });
+        tokio::task::spawn_blocking(move || reached_rx.recv_timeout(Duration::from_secs(2)))
+            .await
+            .expect("wait for mutation worker")
+            .expect("SQL returns after publishing and before recording the outcome");
+
+        assert!(
+            server
+                .inner
+                .root_session
+                .database_exists("published_before_deadline")
+        );
+        let running = server
+            .inner
+            .operation("post-publication-create")
+            .expect("accepted operation record");
+        {
+            let record = running.lock().unwrap();
+            assert_eq!(record.execution_state, "running");
+            assert_eq!(record.effect_outcome, "pending");
+        }
+
+        let deadline = timeout(Duration::from_secs(2), mutation)
+            .await
+            .expect("HTTP response deadline should elapse while the worker is paused")
+            .unwrap();
+        assert_eq!(deadline["ename"], "DeadlineExceeded", "{deadline}");
+        assert_eq!(deadline["operation"]["execution_state"], "running");
+        assert_eq!(deadline["operation"]["effect_outcome"], "pending");
+
+        release_tx
+            .send(())
+            .expect("release the worker after the transport deadline");
+        let (status, settled) = timeout(Duration::from_secs(2), async {
+            loop {
+                let response = request_json(
+                    address,
+                    "POST",
+                    "/operations/status",
+                    &json!({
+                        "server_instance_id":instance,
+                        "operation_id":"post-publication-create"
+                    }),
+                )
+                .await;
+                if response.1["execution_state"] == "succeeded" {
+                    break response;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("worker should settle the retained operation after its deadline");
+        assert_eq!(status, StatusCode::OK, "{settled}");
+        assert_eq!(settled["effect_outcome"], "committed", "{settled}");
+        assert_eq!(
+            settled["receipt"]["name"], "published_before_deadline",
+            "{settled}"
+        );
+        assert!(
+            server
+                .inner
+                .root_session
+                .database_exists("published_before_deadline")
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn deadline_during_insert_staging_retains_cancelled_outcome_without_effects() {
+        let server = Server::new(ServerConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            response_timeout: Duration::from_millis(250),
+            ..ServerConfig::default()
+        })
+        .unwrap();
+        let source = server
+            .inner
+            .root_session
+            .range(0, 10_000, 1)
+            .expect("staging source range");
+        server
+            .inner
+            .root_session
+            .register_table("staging_source", source);
+        server.startup_check().await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        server.inner.ready.store(true, Ordering::Release);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let server_task = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                server
+                    .run_listener(listener, async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+            })
+        };
+
+        let instance = server.instance_id().to_string();
+        let created = statement_request(
+            address,
+            &instance,
+            "staging-writer",
+            "staging-target-create",
+            "CREATE TABLE default.staging_target (id BIGINT)",
+        )
+        .await;
+        assert_eq!(created["status"], "ok", "{created}");
+
+        let (staged_tx, staged_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = std::sync::Mutex::new(release_rx);
+        robin_sparkless_polars::sql::test_hooks::after_insert_stage_for_query(
+            "INSERT INTO default.staging_target",
+            move || {
+                staged_tx
+                    .send(())
+                    .expect("signal after the complete append candidate is staged");
+                release_rx
+                    .lock()
+                    .expect("staging release channel lock")
+                    .recv_timeout(Duration::from_secs(3))
+                    .expect("release the cancelled staging worker");
+            },
+        );
+
+        let request_instance = instance.clone();
+        let mutation = tokio::spawn(async move {
+            statement_request(
+                address,
+                &request_instance,
+                "staging-writer",
+                "staging-deadline-insert",
+                "INSERT INTO default.staging_target SELECT id FROM default.staging_source UNION ALL SELECT id FROM default.staging_source",
+            )
+            .await
+        });
+        tokio::task::spawn_blocking(move || staged_rx.recv_timeout(Duration::from_secs(2)))
+            .await
+            .expect("wait for append staging worker")
+            .expect("the complete append candidate should be staged before the deadline");
+
+        let deadline = timeout(Duration::from_secs(2), mutation)
+            .await
+            .expect("response should time out while the candidate is staged")
+            .unwrap();
+        assert_eq!(deadline["ename"], "DeadlineExceeded", "{deadline}");
+        assert_eq!(deadline["operation"]["execution_state"], "running");
+        assert_eq!(deadline["operation"]["effect_outcome"], "pending");
+
+        let reader_instance = instance.clone();
+        let read = timeout(
+            Duration::from_millis(150),
+            statement_request(
+                address,
+                &reader_instance,
+                "staging-reader",
+                "staging-target-read-during-stage",
+                "SELECT COUNT(*) AS count FROM default.staging_target",
+            ),
+        )
+        .await
+        .expect("catalog reads must proceed while INSERT staging is paused");
+        assert_eq!(read["status"], "ok", "{read}");
+        assert_eq!(read["data"]["application/json"]["data"], json!([[0]]));
+
+        release_tx
+            .send(())
+            .expect("release the worker after its response deadline");
+        let (status, settled) = timeout(Duration::from_secs(2), async {
+            loop {
+                let response = request_json(
+                    address,
+                    "POST",
+                    "/operations/status",
+                    &json!({
+                        "server_instance_id":instance,
+                        "operation_id":"staging-deadline-insert"
+                    }),
+                )
+                .await;
+                if response.1["execution_state"] != "running" {
+                    break response;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the worker should retain its cancelled staging outcome");
+        assert_eq!(status, StatusCode::OK, "{settled}");
+        assert_eq!(settled["execution_state"], "failed", "{settled}");
+        assert_eq!(settled["effect_outcome"], "cancelled", "{settled}");
+        assert_eq!(settled["error"]["ename"], "Cancelled", "{settled}");
+        assert_eq!(
+            server
+                .inner
+                .root_session
+                .table("default.staging_target")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0,
+            "cancellation after staging but before publication must leave no rows"
+        );
+
+        let replay = statement_request(
+            address,
+            server.instance_id(),
+            "staging-writer",
+            "staging-deadline-insert",
+            "INSERT INTO default.staging_target SELECT id FROM default.staging_source UNION ALL SELECT id FROM default.staging_source",
+        )
+        .await;
+        assert_eq!(replay["ename"], "Cancelled", "{replay}");
+        assert_eq!(replay["operation"]["effect_outcome"], "cancelled");
+        assert_eq!(
+            server
+                .inner
+                .root_session
+                .table("default.staging_target")
+                .unwrap()
+                .count()
+                .unwrap(),
+            0,
+            "replaying a cancelled mutation identity must not publish its staged rows"
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn mutation_deadline_leaves_operation_status_for_worker_to_resolve() {
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
@@ -4402,8 +5128,33 @@ mod tests {
         let encoded = spark_schema(&[field]).unwrap();
         assert_eq!(encoded["fields"][0]["metadata"]["owner"], "analytics");
 
-        let byte_field = StructField::new("tiny".into(), DataType::Byte, true);
-        assert!(spark_schema(&[byte_field]).is_err());
+        let unsupported_types = vec![
+            DataType::Byte,
+            DataType::Float,
+            DataType::TimestampNtz,
+            DataType::Binary,
+            DataType::Array(Box::new(DataType::Long)),
+            DataType::ArrayWithNullability {
+                element_type: Box::new(DataType::Long),
+                contains_null: false,
+            },
+            DataType::Map(Box::new(DataType::Long), Box::new(DataType::String)),
+            DataType::MapWithNullability {
+                key_type: Box::new(DataType::Long),
+                value_type: Box::new(DataType::String),
+                value_contains_null: false,
+            },
+            DataType::LogicalStruct(vec![StructField::new(
+                "nested".into(),
+                DataType::Long,
+                true,
+            )]),
+        ];
+        for data_type in unsupported_types {
+            let field = StructField::new("unsupported".into(), data_type, true);
+            let error = spark_schema(&[field]).unwrap_err();
+            assert_eq!(error.name, "UnsupportedResultType");
+        }
     }
 
     #[test]

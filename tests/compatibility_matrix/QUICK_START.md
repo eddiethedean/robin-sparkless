@@ -12,7 +12,7 @@ cat COMPATIBILITY_REPORT.md
 
 ## What It Does
 
-Tests sparkless against **20 combinations** of Python (3.9-3.13) and PySpark (3.2-3.5) versions using Docker.
+Tests sparkless against known-compatible combinations of Python 3.11-3.13 and PySpark 3.4-3.5 using Docker. Python 3.8-3.10 are no longer supported by this release.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ Tests sparkless against **20 combinations** of Python (3.9-3.13) and PySpark (3.
 
 ### Test Single Combination
 ```bash
-./tests/compatibility_matrix/test_single_combination.sh 3.10 3.3.4
+./tests/compatibility_matrix/test_single_combination.sh 3.11 3.5.1 17
 ```
 
 ### Run Programmatically
@@ -74,15 +74,15 @@ Edit `run_matrix_tests.py` to test fewer combinations.
 ```
 Sparkless Compatibility Matrix
 
-**Total combinations tested:** 20
-**Passed:** 18 ✓
-**Failed:** 2 ✗
+**Total combinations tested:** 5
+**Passed:** 5 ✓
+**Failed:** 0 ✗
 
-| Python | PySpark 3.2 | PySpark 3.3 | PySpark 3.4 | PySpark 3.5 |
-|--------|-------------|-------------|-------------|-------------|
-| 3.9    | ✓ Pass      | ✓ Pass      | ✓ Pass      | ✓ Pass      |
-| 3.10   | ✓ Pass      | ✓ Pass      | ✓ Pass      | ✗ Fail      |
-...
+| Python | PySpark 3.4 | PySpark 3.5 |
+|--------|-------------|-------------|
+| 3.11   | ✓ Pass      | ✓ Pass      |
+| 3.12   | ✓ Pass      | ✓ Pass      |
+| 3.13   | —           | ✓ Pass      |
 ```
 
 ## Need More Details?

@@ -21,7 +21,9 @@ pub use transformations::{
 use crate::column::Column;
 use crate::error::{EngineError, polars_to_core_error};
 use crate::functions::SortOrder;
-use crate::schema::{DataType as LogicalDataType, StructField, StructType, StructTypePolarsExt};
+use crate::schema::{
+    DataType as LogicalDataType, LogicalField as StructField, StructType, StructTypePolarsExt,
+};
 use crate::session::SparkSession;
 use crate::type_coercion::{coerce_for_pyspark_comparison, is_numeric_public};
 use polars::datatypes::TimeUnit;
@@ -37,6 +39,140 @@ use robin_sparkless_core::engine::{
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
+
+fn validate_logical_nullability(
+    value: &polars::prelude::AnyValue<'_>,
+    data_type: &LogicalDataType,
+    nullable: bool,
+    path: &str,
+) -> Result<(), PolarsError> {
+    use polars::prelude::AnyValue;
+    if matches!(value, AnyValue::Null) {
+        return if nullable {
+            Ok(())
+        } else {
+            Err(PolarsError::InvalidOperation(
+                format!("saveAsTable append: non-nullable field '{path}' contains null values")
+                    .into(),
+            ))
+        };
+    }
+    match (value, data_type) {
+        (AnyValue::Struct(_, _, physical_fields), LogicalDataType::LogicalStruct(fields)) => {
+            for (child, physical_field) in value._iter_struct_av().zip(physical_fields.iter()) {
+                if let Some(logical_field) = fields
+                    .iter()
+                    .find(|field| field.name == physical_field.name.as_str())
+                {
+                    let child_path = format!("{path}.{}", logical_field.name);
+                    validate_logical_nullability(
+                        &child,
+                        &logical_field.data_type,
+                        logical_field.nullable,
+                        &child_path,
+                    )?;
+                }
+            }
+        }
+        (AnyValue::StructOwned(payload), LogicalDataType::LogicalStruct(fields)) => {
+            let (values, physical_fields) = &**payload;
+            for (child, physical_field) in values.iter().zip(physical_fields.iter()) {
+                if let Some(logical_field) = fields
+                    .iter()
+                    .find(|field| field.name == physical_field.name.as_str())
+                {
+                    let child_path = format!("{path}.{}", logical_field.name);
+                    validate_logical_nullability(
+                        child,
+                        &logical_field.data_type,
+                        logical_field.nullable,
+                        &child_path,
+                    )?;
+                }
+            }
+        }
+        (
+            AnyValue::List(values),
+            LogicalDataType::Array(inner)
+            | LogicalDataType::ArrayWithNullability {
+                element_type: inner,
+                ..
+            },
+        ) => {
+            let contains_null = match data_type {
+                LogicalDataType::ArrayWithNullability { contains_null, .. } => *contains_null,
+                _ => true,
+            };
+            for index in 0..values.len() {
+                let child = values.get(index)?;
+                validate_logical_nullability(&child, inner, contains_null, &format!("{path}[]"))?;
+            }
+        }
+        (
+            AnyValue::List(entries),
+            LogicalDataType::Map(key_type, value_type)
+            | LogicalDataType::MapWithNullability {
+                key_type,
+                value_type,
+                ..
+            },
+        ) => {
+            let value_nullable = match data_type {
+                LogicalDataType::MapWithNullability {
+                    value_contains_null,
+                    ..
+                } => *value_contains_null,
+                _ => true,
+            };
+            for index in 0..entries.len() {
+                let entry = entries.get(index)?;
+                let fields = match &entry {
+                    AnyValue::Struct(_, _, fields) => fields.to_vec(),
+                    AnyValue::StructOwned(payload) => payload.1.clone(),
+                    _ => continue,
+                };
+                let mut key = None;
+                let mut value = None;
+                match &entry {
+                    AnyValue::Struct(_, _, _) => {
+                        for (child, field) in entry._iter_struct_av().zip(fields.iter()) {
+                            if field.name == "key" {
+                                key = Some(child.clone());
+                            }
+                            if field.name == "value" {
+                                value = Some(child);
+                            }
+                        }
+                    }
+                    AnyValue::StructOwned(payload) => {
+                        for (child, field) in payload.0.iter().zip(fields.iter()) {
+                            if field.name == "key" {
+                                key = Some(child.clone());
+                            }
+                            if field.name == "value" {
+                                value = Some(child.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                if let Some(key) = key {
+                    validate_logical_nullability(&key, key_type, false, &format!("{path}{{key}}"))?;
+                }
+                if let Some(value) = value {
+                    validate_logical_nullability(
+                        &value,
+                        value_type,
+                        value_nullable,
+                        &format!("{path}{{value}}"),
+                    )?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
@@ -93,7 +229,7 @@ fn logical_field_for_projected_column(
 
     // Prefer an exact top-level match so columns whose names contain dots remain addressable.
     if let Some(field) = schema
-        .fields()
+        .logical_fields()
         .iter()
         .find(|field| matches_name(&field.name, source_name))
     {
@@ -104,7 +240,7 @@ fn logical_field_for_projected_column(
     // Try each component as the root, then follow only declared struct fields.
     for (root_index, root_name) in parts.iter().enumerate() {
         let Some(mut field) = schema
-            .fields()
+            .logical_fields()
             .iter()
             .find(|field| matches_name(&field.name, root_name))
             .cloned()
@@ -114,7 +250,7 @@ fn logical_field_for_projected_column(
         let mut nullable = field.nullable;
         let mut found = true;
         for child_name in &parts[root_index + 1..] {
-            let robin_sparkless_core::DataType::Struct(children) = &field.data_type else {
+            let robin_sparkless_core::DataType::LogicalStruct(children) = &field.data_type else {
                 found = false;
                 break;
             };
@@ -219,6 +355,7 @@ enum RangeOperation {
     Filter(Expr),
     Limit(u64),
     Project(Vec<Expr>),
+    Rename(Vec<(String, String)>),
 }
 
 enum RangeBatchError {
@@ -312,6 +449,13 @@ impl RangeBatchProducer {
                         }
                         self.limit_consumed[operation_index] = self.limit_consumed[operation_index]
                             .saturating_add(batch.height() as u64);
+                    }
+                    RangeOperation::Rename(renames) => {
+                        for (old_name, new_name) in renames {
+                            batch
+                                .rename(old_name, new_name.as_str().into())
+                                .map_err(RangeBatchError::Polars)?;
+                        }
                     }
                     RangeOperation::Project(expressions) => {
                         let frame = DataFrame::from_polars_with_options(batch, self.case_sensitive);
@@ -525,9 +669,12 @@ fn merge_union_logical_type(
                 contains_null: left_nullable || right_nullable,
             })
         }
-        (D::Struct(left_fields), D::Struct(right_fields), DataType::Struct(output_fields))
-            if left_fields.len() == right_fields.len()
-                && left_fields.len() == output_fields.len() =>
+        (
+            D::LogicalStruct(left_fields),
+            D::LogicalStruct(right_fields),
+            DataType::Struct(output_fields),
+        ) if left_fields.len() == right_fields.len()
+            && left_fields.len() == output_fields.len() =>
         {
             let fields = left_fields
                 .iter()
@@ -547,7 +694,7 @@ fn merge_union_logical_type(
                     Some(field)
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(D::Struct(fields))
+            Some(D::LogicalStruct(fields))
         }
         _ => crate::schema_conv::checked_polars_type_to_data_type(output_physical, "union").ok(),
     }
@@ -559,7 +706,7 @@ fn conservative_union_logical_type(output_physical: &DataType) -> Option<Logical
             element_type: Box::new(conservative_union_logical_type(element)?),
             contains_null: true,
         }),
-        DataType::Struct(fields) => Some(LogicalDataType::Struct(
+        DataType::Struct(fields) => Some(LogicalDataType::LogicalStruct(
             fields
                 .iter()
                 .map(|field| {
@@ -2274,18 +2421,18 @@ impl DataFrame {
             .validate_metadata()
             .map_err(|error| PolarsError::InvalidOperation(error.into()))?;
         let physical = self.schema_or_collect()?;
-        if schema.fields().len() != physical.len() {
+        if schema.logical_fields().len() != physical.len() {
             return Err(PolarsError::SchemaMismatch(
                 format!(
                     "logical schema has {} fields but the Polars plan has {}",
-                    schema.fields().len(),
+                    schema.logical_fields().len(),
                     physical.len()
                 )
                 .into(),
             ));
         }
         for (logical, (physical_name, physical_dtype)) in
-            schema.fields().iter().zip(physical.iter())
+            schema.logical_fields().iter().zip(physical.iter())
         {
             if logical.name != physical_name.as_str() {
                 return Err(PolarsError::SchemaMismatch(
@@ -2363,7 +2510,7 @@ impl DataFrame {
                 Some(StructField::new(output_name.to_string(), data_type, true))
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     fn projected_logical_schema_for_paths(
@@ -2401,7 +2548,7 @@ impl DataFrame {
                 Some(projected)
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     fn logical_schema_by_output_names(&self, output: &DataFrame) -> Option<StructType> {
@@ -2410,7 +2557,7 @@ impl DataFrame {
         let fields = output_schema
             .iter()
             .map(|(output_name, output_dtype)| {
-                if let Some(source) = source_schema.fields().iter().find(|field| {
+                if let Some(source) = source_schema.logical_fields().iter().find(|field| {
                     if self.case_sensitive {
                         field.name == output_name.as_str()
                     } else {
@@ -2436,7 +2583,7 @@ impl DataFrame {
                 ))
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     fn merged_logical_schema(
@@ -2469,7 +2616,7 @@ impl DataFrame {
         let mut fields = Vec::with_capacity(output_schema.len());
         for (index, (output_name, output_dtype)) in output_schema.iter().enumerate() {
             let left_field = left_schema.and_then(|schema| {
-                let matched = schema.fields().iter().find(|field| {
+                let matched = schema.logical_fields().iter().find(|field| {
                     if self.case_sensitive {
                         field.name == output_name.as_str()
                     } else {
@@ -2478,13 +2625,13 @@ impl DataFrame {
                 });
                 matched.or_else(|| {
                     (!align_by_name)
-                        .then(|| schema.fields().get(index))
+                        .then(|| schema.logical_fields().get(index))
                         .flatten()
                 })
             });
             let right_field = right_schema.and_then(|schema| {
                 if match_by_name {
-                    schema.fields().iter().find(|field| {
+                    schema.logical_fields().iter().find(|field| {
                         if self.case_sensitive {
                             field.name == output_name.as_str()
                         } else {
@@ -2492,7 +2639,7 @@ impl DataFrame {
                         }
                     })
                 } else {
-                    schema.fields().get(index)
+                    schema.logical_fields().get(index)
                 }
             });
 
@@ -2549,7 +2696,180 @@ impl DataFrame {
                 || right_field.map(|field| field.nullable).unwrap_or(true);
             fields.push(field);
         }
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
+    }
+
+    /// Preserve field declarations across joins by following the result names back to their
+    /// input columns. Polars does not carry Spark field metadata or nested nullability in its
+    /// physical schema, so the join result must retain the logical descriptor explicitly.
+    pub(crate) fn joined_logical_schema(
+        &self,
+        other: &DataFrame,
+        output: &DataFrame,
+        how: JoinType,
+        global_suffix: Option<&str>,
+    ) -> Option<StructType> {
+        if self.logical_schema.is_none() && other.logical_schema.is_none() {
+            return None;
+        }
+
+        let output_schema = output.schema_or_collect().ok()?;
+        let left_schema = self.schema_or_collect().ok()?;
+        let right_schema = other.schema_or_collect().ok()?;
+        let left_names = self.columns().ok()?;
+        let right_names = other.columns().ok()?;
+        let matches_name = |left: &str, right: &str| {
+            if self.case_sensitive {
+                left == right
+            } else {
+                left.eq_ignore_ascii_case(right)
+            }
+        };
+
+        let logical_or_physical_field = |frame: &DataFrame,
+                                         physical_schema: &Schema,
+                                         source_name: &str|
+         -> Option<StructField> {
+            if let Some(field) = frame.logical_schema.as_ref().and_then(|schema| {
+                schema
+                    .logical_fields()
+                    .iter()
+                    .find(|field| matches_name(&field.name, source_name))
+            }) {
+                return Some(field.clone());
+            }
+            let dtype = physical_schema
+                .iter()
+                .find(|(name, _)| matches_name(name.as_str(), source_name))
+                .map(|(_, dtype)| dtype)?;
+            Some(StructField::new(
+                source_name.to_string(),
+                crate::schema_conv::checked_polars_type_to_data_type(dtype, source_name).ok()?,
+                true,
+            ))
+        };
+
+        // Inner/left/right joins allocate suffixes independently for each right field. Rebuild
+        // that allocation in source-column order, accounting for left names and earlier aliases.
+        let mut used_names: HashSet<String> = left_names.iter().cloned().collect();
+        let mut aliased_right_sources = HashMap::<String, String>::new();
+        for right_name in &right_names {
+            if !left_names
+                .iter()
+                .any(|left_name| matches_name(left_name, right_name))
+            {
+                if output_schema.get(right_name).is_some() {
+                    used_names.insert(right_name.clone());
+                }
+                continue;
+            }
+            if let Some(suffix) = global_suffix {
+                let alias = format!("{right_name}{suffix}");
+                if output_schema.get(&alias).is_some() {
+                    aliased_right_sources.insert(alias, right_name.clone());
+                }
+                continue;
+            }
+            let mut index = 0usize;
+            let alias = loop {
+                let candidate = if index == 0 {
+                    format!("{right_name}_right")
+                } else {
+                    format!("{right_name}_right_{index}")
+                };
+                if !used_names.iter().any(|used| matches_name(used, &candidate)) {
+                    break candidate;
+                }
+                index += 1;
+            };
+            if output_schema.get(&alias).is_some() {
+                used_names.insert(alias.clone());
+                aliased_right_sources.insert(alias, right_name.clone());
+            }
+        }
+        let aliased_right_source = |output_name: &str| -> Option<&str> {
+            aliased_right_sources
+                .iter()
+                .find(|(alias, _)| matches_name(alias, output_name))
+                .map(|(_, source)| source.as_str())
+        };
+
+        let fields = output_schema
+            .iter()
+            .map(|(output_name, output_dtype)| {
+                let right_exact_source = right_names
+                    .iter()
+                    .find(|name| name.as_str() == output_name.as_str())
+                    .or_else(|| {
+                        right_names
+                            .iter()
+                            .find(|name| matches_name(name, output_name.as_str()))
+                    })
+                    .map(String::as_str);
+                // Exact physical names take precedence over case-insensitive matches. A
+                // cross join can retain `ID` and `id` as distinct output columns; mapping
+                // both to the first left-side match copies the wrong metadata and nullability.
+                let left_source = left_names
+                    .iter()
+                    .find(|name| name.as_str() == output_name.as_str())
+                    .or_else(|| {
+                        right_exact_source
+                            .is_none()
+                            .then(|| {
+                                left_names
+                                    .iter()
+                                    .find(|name| matches_name(name, output_name.as_str()))
+                            })
+                            .flatten()
+                    })
+                    .map(String::as_str);
+                let right_source =
+                    right_exact_source.or_else(|| aliased_right_source(output_name.as_str()));
+
+                // An unsuffixed collision is the left field (including a coalesced join key).
+                // Right fields renamed by the join implementation are recovered from `_right`.
+                let (source_frame, source_schema, source_name, is_right) =
+                    if let Some(source_name) = left_source {
+                        (self, left_schema.as_ref(), source_name, false)
+                    } else if let Some(source_name) = right_source {
+                        (other, right_schema.as_ref(), source_name, true)
+                    } else {
+                        return Some(StructField::new(
+                            output_name.to_string(),
+                            crate::schema_conv::checked_polars_type_to_data_type(
+                                output_dtype,
+                                output_name,
+                            )
+                            .ok()?,
+                            true,
+                        ));
+                    };
+
+                let mut field =
+                    logical_or_physical_field(source_frame, source_schema, source_name)?;
+                if !crate::schema_conv::checked_data_type_to_polars_type(
+                    &field.data_type,
+                    source_name,
+                )
+                .is_ok_and(|expected| &expected == output_dtype)
+                {
+                    field.data_type = crate::schema_conv::checked_polars_type_to_data_type(
+                        output_dtype,
+                        output_name,
+                    )
+                    .ok()?;
+                }
+                field.name = output_name.to_string();
+                if matches!(how, JoinType::Outer)
+                    || (matches!(how, JoinType::Left) && is_right)
+                    || (matches!(how, JoinType::Right) && !is_right)
+                {
+                    field.nullable = true;
+                }
+                Some(field)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(StructType::from_logical_fields(fields))
     }
 
     /// Same as [`schema`](Self::schema) but returns [`EngineError`]. Use in bindings to avoid Polars.
@@ -2575,7 +2895,7 @@ impl DataFrame {
         }
         self.schema()
             .ok()?
-            .fields()
+            .logical_fields()
             .iter()
             .find(|f| f.name.eq_ignore_ascii_case(resolved.as_str()))
             .map(|f| crate::schema_conv::data_type_to_polars_type(&f.data_type))
@@ -2848,7 +3168,7 @@ impl DataFrame {
                     .map(|(source, _)| source.as_str())
                     .unwrap_or(output_name.as_str());
                 let Some(source) = source_schema
-                    .fields()
+                    .logical_fields()
                     .iter()
                     .find(|field| same_name(&field.name, source_name))
                 else {
@@ -2879,7 +3199,7 @@ impl DataFrame {
                 Some(projected)
             })
             .collect::<Option<Vec<_>>>()?;
-        Some(StructType::new(fields))
+        Some(StructType::from_logical_fields(fields))
     }
 
     /// Count rows while checking cooperative cancellation at the native materialization boundary.
@@ -3094,6 +3414,32 @@ impl DataFrame {
         let rows = self.collect_as_json_rows().map_err(polars_to_core_error)?;
         token.check_cancelled()?;
         Ok(rows)
+    }
+
+    /// Reject values that cannot be returned through the server's strict JSON result contract.
+    /// SQL mutations call this on their fully staged candidate before publishing it.
+    pub(crate) fn validate_json_values(&self) -> Result<(), PolarsError> {
+        let collected = self.collect_inner()?;
+        for column in collected.columns() {
+            let name = column.name().as_str();
+            let dtype = column.dtype();
+            let path = serde_json::to_string(name)
+                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+            for row in 0..collected.height() {
+                let value = column.get(row)?;
+                if matches!(value, AnyValue::Null) {
+                    continue;
+                }
+                let _ = any_value_to_json_with_array_struct_override_policy(
+                    &value,
+                    dtype,
+                    &HashSet::new(),
+                    &path,
+                    true,
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// Collect named JSON rows and schema while honoring cancellation at materialization
@@ -3414,7 +3760,7 @@ impl DataFrame {
                 let json = if matches!(value, AnyValue::Null) {
                     JsonValue::Null
                 } else {
-                    any_value_to_json_with_array_struct_override(
+                    any_value_to_json_with_array_struct_override_policy(
                         &value,
                         dtype,
                         array_struct_paths,
@@ -3423,6 +3769,7 @@ impl DataFrame {
                                 "could not encode result column name: {error}"
                             ))
                         })?,
+                        true,
                     )
                     .map_err(polars_to_core_error)?
                 };
@@ -4065,7 +4412,9 @@ impl DataFrame {
 
     /// Cross join with another DataFrame (cartesian product). PySpark crossJoin.
     pub fn cross_join(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
-        transformations::cross_join(self, other, self.case_sensitive)
+        let mut output = transformations::cross_join(self, other, self.case_sensitive)?;
+        output.logical_schema = self.joined_logical_schema(other, &output, JoinType::Inner, None);
+        Ok(output)
     }
 
     /// Summary statistics. PySpark describe.
@@ -4313,10 +4662,29 @@ impl DataFrame {
     /// Add or replace multiple columns. PySpark withColumns. Accepts `Column` so rand/randn get per-row values.
     pub fn with_columns(&self, exprs: &[(String, Column)]) -> Result<DataFrame, PolarsError> {
         let mut output = transformations::with_columns(self, exprs, self.case_sensitive)?;
-        if self.logical_schema.is_some()
-            && let Some(schema) = self.logical_schema_by_output_names(&output)
-        {
-            output.logical_schema = Some(schema);
+        if self.logical_schema.is_some() {
+            // Infer every replacement against the original input schema, while retaining the
+            // source metadata and nullability of untouched columns.
+            let expressions = output
+                .columns()?
+                .into_iter()
+                .map(|output_name| {
+                    exprs
+                        .iter()
+                        .find(|(name, _)| {
+                            if self.case_sensitive {
+                                name == &output_name
+                            } else {
+                                name.eq_ignore_ascii_case(&output_name)
+                            }
+                        })
+                        .map(|(_, column)| column.expr().clone())
+                        .unwrap_or_else(|| polars::prelude::col(output_name.as_str()))
+                })
+                .collect::<Vec<_>>();
+            output.logical_schema = self
+                .projected_logical_schema(&expressions, &output)
+                .or_else(|| self.logical_schema_by_output_names(&output));
         }
         Ok(output)
     }
@@ -4327,6 +4695,23 @@ impl DataFrame {
         renames: &[(String, String)],
     ) -> Result<DataFrame, PolarsError> {
         let mut output = transformations::with_columns_renamed(self, renames, self.case_sensitive)?;
+        if let Some(mut range) = self.range_cardinality.clone() {
+            let applied_renames: Vec<(String, String)> = renames
+                .iter()
+                .filter_map(|(old_name, new_name)| {
+                    self.resolve_column_name(old_name)
+                        .ok()
+                        .map(|resolved| (resolved, new_name.clone()))
+                })
+                .collect();
+            if !applied_renames.is_empty() {
+                range
+                    .operations
+                    .push(RangeOperation::Rename(applied_renames));
+                output.range_cardinality = Some(range);
+            }
+        }
+        output.row_count_hint = self.row_count_hint;
         if self.logical_schema.is_some()
             && let Some(schema) = self.logical_schema_after_renames(&output, renames)
         {
@@ -4778,9 +5163,16 @@ impl<'a> DataFrameWriter<'a> {
         fn contains_map(dtype: &crate::schema::DataType) -> bool {
             use crate::schema::DataType;
             match dtype {
-                DataType::Map(_, _) => true,
-                DataType::Array(element) => contains_map(element),
+                DataType::Map(_, _) | DataType::MapWithNullability { .. } => true,
+                DataType::Array(element)
+                | DataType::ArrayWithNullability {
+                    element_type: element,
+                    ..
+                } => contains_map(element),
                 DataType::Struct(fields) => {
+                    fields.iter().any(|field| contains_map(&field.data_type))
+                }
+                DataType::LogicalStruct(fields) => {
                     fields.iter().any(|field| contains_map(&field.data_type))
                 }
                 _ => false,
@@ -4789,7 +5181,7 @@ impl<'a> DataFrameWriter<'a> {
         if !logical_map_paths.is_empty()
             || descriptor
                 .schema
-                .fields()
+                .logical_fields()
                 .iter()
                 .any(|field| contains_map(&field.data_type))
         {
@@ -5249,7 +5641,66 @@ impl<'a> DataFrameWriter<'a> {
                 self.df.clone()
             }
             SaveMode::Append => {
-                let existing_pl = if let Some(existing) = session.get_saved_table(name) {
+                let saved_existing = session.get_saved_table(name);
+                if let (Some(existing), Some(incoming)) = (
+                    saved_existing
+                        .as_ref()
+                        .and_then(|frame| frame.logical_schema.as_ref()),
+                    self.df.logical_schema.as_ref(),
+                ) {
+                    let same_name = |left: &str, right: &str| {
+                        if self.df.case_sensitive {
+                            left == right
+                        } else {
+                            left.eq_ignore_ascii_case(right)
+                        }
+                    };
+                    for existing_field in existing.logical_fields() {
+                        let incoming_field = incoming
+                            .logical_fields()
+                            .iter()
+                            .find(|field| same_name(&field.name, &existing_field.name));
+                        if incoming_field.is_none() && !merge_schema {
+                            return Err(PolarsError::SchemaMismatch(
+                                format!(
+                                    "saveAsTable append: logical field '{}' is missing from incoming schema for table '{name}'",
+                                    existing_field.name
+                                )
+                                .into(),
+                            ));
+                        }
+                        if let Some(incoming_field) = incoming_field {
+                            if serde_json::to_value(&existing_field.data_type).ok()
+                                != serde_json::to_value(&incoming_field.data_type).ok()
+                                || existing_field.metadata != incoming_field.metadata
+                            {
+                                return Err(PolarsError::SchemaMismatch(
+                                    format!(
+                                        "saveAsTable append: logical field '{}' does not match existing table '{name}'",
+                                        existing_field.name
+                                    )
+                                    .into(),
+                                ));
+                            }
+                        }
+                    }
+                    if !merge_schema
+                        && incoming.logical_fields().iter().any(|incoming_field| {
+                            !existing
+                                .logical_fields()
+                                .iter()
+                                .any(|field| same_name(&field.name, &incoming_field.name))
+                        })
+                    {
+                        return Err(PolarsError::SchemaMismatch(
+                            format!(
+                                "saveAsTable append: incoming logical schema has extra fields for table '{name}'"
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                let existing_pl = if let Some(existing) = saved_existing.as_ref() {
                     existing.collect_inner()?.as_ref().clone()
                 } else if warehouse_exists {
                     // Read from warehouse (data.parquet convention). For schema-qualified names,
@@ -5308,7 +5759,41 @@ impl<'a> DataFrameWriter<'a> {
                     .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
                     .as_ref()
                     .clone();
+                if let Some(schema) = saved_existing
+                    .as_ref()
+                    .and_then(|existing| existing.logical_schema.as_ref())
+                {
+                    for field in schema.logical_fields() {
+                        let column = match new_pl.column(&field.name) {
+                            Ok(column) => column,
+                            Err(_) if merge_schema => {
+                                if !field.nullable {
+                                    return Err(PolarsError::InvalidOperation(
+                                        format!("saveAsTable append: non-nullable field '{}' contains null values", field.name).into(),
+                                    ));
+                                }
+                                continue;
+                            }
+                            Err(_) => continue,
+                        };
+                        for row in 0..new_pl.height() {
+                            let value = column.get(row)?;
+                            validate_logical_nullability(
+                                &value,
+                                &field.data_type,
+                                field.nullable,
+                                &field.name,
+                            )?;
+                        }
+                    }
+                }
                 check_cancelled(token)?;
+                let existing_for_schema = saved_existing.clone().unwrap_or_else(|| {
+                    crate::dataframe::DataFrame::from_polars_with_options(
+                        existing_pl.clone(),
+                        self.df.case_sensitive,
+                    )
+                });
                 let merged = if merge_schema {
                     let (aligned_existing, aligned_new) =
                         align_to_merged_schema_inline(&existing_pl, &new_pl)?;
@@ -5345,6 +5830,13 @@ impl<'a> DataFrameWriter<'a> {
                         combined,
                         self.df.case_sensitive,
                     )
+                };
+                let merged = if let Some(logical_schema) =
+                    existing_for_schema.merged_logical_schema(self.df, &merged, merge_schema)
+                {
+                    merged.with_logical_schema(logical_schema)?
+                } else {
+                    merged
                 };
                 if let Some(ref p) = warehouse_path {
                     let stage = stage_warehouse_write(&merged, p, token)?;
@@ -5872,11 +6364,11 @@ fn map_value_string_to_json(s: &str) -> JsonValue {
 fn float_to_json_number(f: f64) -> JsonValue {
     const EPSILON: f64 = 1e-6;
     if f.is_finite() {
-        let r = f.round();
-        if (f - r).abs() < EPSILON {
-            if let Some(n) = serde_json::Number::from_f64(r) {
-                return JsonValue::Number(n);
-            }
+        let rounded = f.round();
+        if (f - rounded).abs() < EPSILON
+            && let Some(number) = serde_json::Number::from_f64(rounded)
+        {
+            return JsonValue::Number(number);
         }
     }
     serde_json::Number::from_f64(f)
@@ -6013,6 +6505,16 @@ fn any_value_to_json_with_array_struct_override(
     array_struct_paths: &HashSet<String>,
     path: &str,
 ) -> Result<JsonValue, PolarsError> {
+    any_value_to_json_with_array_struct_override_policy(av, dtype, array_struct_paths, path, false)
+}
+
+fn any_value_to_json_with_array_struct_override_policy(
+    av: &AnyValue<'_>,
+    dtype: &DataType,
+    array_struct_paths: &HashSet<String>,
+    path: &str,
+    preserve_float_precision: bool,
+) -> Result<JsonValue, PolarsError> {
     use serde_json::Map;
     // Plan says String but execution may yield numeric (e.g. get_json_object; #1146): emit string.
     if matches!(dtype, DataType::String) {
@@ -6080,6 +6582,32 @@ fn any_value_to_json_with_array_struct_override(
         AnyValue::UInt16(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::UInt32(u) => JsonValue::Number(serde_json::Number::from(*u)),
         AnyValue::UInt64(u) => JsonValue::Number(serde_json::Number::from(*u)),
+        AnyValue::Float32(f) if preserve_float_precision && !f.is_finite() => {
+            return Err(PolarsError::ComputeError(
+                "non-finite floating-point values cannot be encoded as JSON".into(),
+            ));
+        }
+        AnyValue::Float64(f) if preserve_float_precision && !f.is_finite() => {
+            return Err(PolarsError::ComputeError(
+                "non-finite floating-point values cannot be encoded as JSON".into(),
+            ));
+        }
+        AnyValue::Float32(f) if preserve_float_precision => {
+            serde_json::Number::from_f64(f64::from(*f))
+                .map(JsonValue::Number)
+                .ok_or_else(|| {
+                    PolarsError::ComputeError(
+                        "non-finite floating-point values cannot be encoded as JSON".into(),
+                    )
+                })?
+        }
+        AnyValue::Float64(f) if preserve_float_precision => serde_json::Number::from_f64(*f)
+            .map(JsonValue::Number)
+            .ok_or_else(|| {
+                PolarsError::ComputeError(
+                    "non-finite floating-point values cannot be encoded as JSON".into(),
+                )
+            })?,
         AnyValue::Float32(f) => float_to_json_number(f64::from(*f)),
         AnyValue::Float64(f) => float_to_json_number(*f),
         AnyValue::String(s) => {
@@ -6172,19 +6700,21 @@ fn any_value_to_json_with_array_struct_override(
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json_with_array_struct_override(
+                                                any_value_to_json_with_array_struct_override_policy(
                                                     &fld_av,
                                                     &fld.dtype,
                                                     array_struct_paths,
                                                     &format!("{path}{{value}}"),
+                                                    preserve_float_precision,
                                                 )?
                                             }
                                         } else {
-                                            any_value_to_json_with_array_struct_override(
+                                            any_value_to_json_with_array_struct_override_policy(
                                                 &fld_av,
                                                 &fld.dtype,
                                                 array_struct_paths,
                                                 &format!("{path}{{value}}"),
+                                                preserve_float_precision,
                                             )?
                                         });
                                     }
@@ -6211,19 +6741,21 @@ fn any_value_to_json_with_array_struct_override(
                                             if let Some(s) = fld_av.get_str() {
                                                 map_value_string_to_json(s)
                                             } else {
-                                                any_value_to_json_with_array_struct_override(
+                                                any_value_to_json_with_array_struct_override_policy(
                                                     fld_av,
                                                     &fld.dtype,
                                                     array_struct_paths,
                                                     &format!("{path}{{value}}"),
+                                                    preserve_float_precision,
                                                 )?
                                             }
                                         } else {
-                                            any_value_to_json_with_array_struct_override(
+                                            any_value_to_json_with_array_struct_override_policy(
                                                 fld_av,
                                                 &fld.dtype,
                                                 array_struct_paths,
                                                 &format!("{path}{{value}}"),
+                                                preserve_float_precision,
                                             )?
                                         });
                                     }
@@ -6268,11 +6800,12 @@ fn any_value_to_json_with_array_struct_override(
                 let arr: Vec<JsonValue> = (0..s.len())
                     .filter_map(|i| s.get(i).ok())
                     .map(|a| {
-                        any_value_to_json_with_array_struct_override(
+                        any_value_to_json_with_array_struct_override_policy(
                             &a,
                             inner_dtype,
                             array_struct_paths,
                             &format!("{path}[]"),
+                            preserve_float_precision,
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -6282,7 +6815,7 @@ fn any_value_to_json_with_array_struct_override(
         AnyValue::Struct(_, _, fields) => {
             let mut vals: Vec<JsonValue> = Vec::with_capacity(fields.len());
             for (fld_av, fld) in av._iter_struct_av().zip(fields.iter()) {
-                vals.push(any_value_to_json_with_array_struct_override(
+                vals.push(any_value_to_json_with_array_struct_override_policy(
                     &fld_av,
                     &fld.dtype,
                     array_struct_paths,
@@ -6291,6 +6824,7 @@ fn any_value_to_json_with_array_struct_override(
                         serde_json::to_string(fld.name.as_str())
                             .expect("field names serialize as JSON strings")
                     ),
+                    preserve_float_precision,
                 )?);
             }
             let mut obj = Map::new();
@@ -6305,7 +6839,7 @@ fn any_value_to_json_with_array_struct_override(
                 .iter()
                 .zip(fields.iter())
                 .map(|(fld_av, fld)| {
-                    any_value_to_json_with_array_struct_override(
+                    any_value_to_json_with_array_struct_override_policy(
                         fld_av,
                         &fld.dtype,
                         array_struct_paths,
@@ -6314,6 +6848,7 @@ fn any_value_to_json_with_array_struct_override(
                             serde_json::to_string(fld.name.as_str())
                                 .expect("field names serialize as JSON strings")
                         ),
+                        preserve_float_precision,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -6351,6 +6886,258 @@ pub fn broadcast(df: &DataFrame) -> DataFrame {
 mod tests {
     use super::*;
     use polars::prelude::{IntoSeries, NamedFrom, Series};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn with_columns_updates_replaced_column_nullability() {
+        use polars::prelude::{DataType as PolarsDataType, NULL, lit};
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let source = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                Series::new("value".into(), ["keep"]).into(),
+            ])
+            .unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
+            "value".into(),
+            LogicalDataType::String,
+            false,
+        )]))
+        .unwrap();
+        let replacement = Column::from_expr(lit(NULL).cast(PolarsDataType::String), None);
+        let replaced = source
+            .with_columns(&[("value".into(), replacement)])
+            .unwrap();
+
+        assert!(replaced.schema().unwrap().logical_fields()[0].nullable);
+        assert_eq!(
+            replaced
+                .collect()
+                .unwrap()
+                .column("value")
+                .unwrap()
+                .get(0)
+                .unwrap(),
+            AnyValue::Null
+        );
+    }
+
+    #[test]
+    fn with_columns_replacements_are_simultaneous() {
+        use polars::prelude::{NamedFrom, Series, col};
+
+        let source = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                Series::new("a".into(), [1_i64]).into(),
+                Series::new("b".into(), [2_i64]).into(),
+            ])
+            .unwrap(),
+        );
+        let swapped = source
+            .with_columns(&[
+                ("a".into(), Column::from_expr(col("b"), None)),
+                ("b".into(), Column::from_expr(col("a"), None)),
+            ])
+            .unwrap()
+            .collect()
+            .unwrap();
+        assert_eq!(swapped.column("a").unwrap().i64().unwrap().get(0), Some(2));
+        assert_eq!(swapped.column("b").unwrap().i64().unwrap().get(0), Some(1));
+    }
+
+    #[test]
+    fn with_columns_evaluates_its_input_once() {
+        use polars::prelude::{IntoLazy, col, df};
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let source_calls = calls.clone();
+        let source = df!("x" => [0_i64, 0])
+            .unwrap()
+            .lazy()
+            .with_column(col("x").map(
+                move |column| {
+                    let value = source_calls.fetch_add(1, Ordering::SeqCst) as i64;
+                    Ok(Series::new(column.name().clone(), vec![value; column.len()]).into())
+                },
+                |_, field| Ok(field.clone()),
+            ));
+        let source = DataFrame::from_lazy(source);
+        let output = source
+            .with_columns(&[("y".into(), crate::functions::col("x"))])
+            .unwrap()
+            .collect()
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(output.column("x").unwrap().i64().unwrap().get(0), Some(0));
+        assert_eq!(output.column("y").unwrap().i64().unwrap().get(0), Some(0));
+    }
+
+    #[test]
+    fn different_join_keys_preserve_global_suffix_metadata() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [10_i64], "a_right" => [99_i64], "b" => [20_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("key" => [1_i64], "a" => [100_i64], "b" => [200_i64]).unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![
+            StructField::new("key".into(), LogicalDataType::Long, false),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+            StructField::new("b".into(), LogicalDataType::Long, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-b"))].into()),
+        ]))
+        .unwrap();
+
+        let schema = left
+            .join_with_keys(&right, vec!["id"], vec!["key"], JoinType::Inner, false)
+            .unwrap()
+            .schema()
+            .unwrap();
+        let field = schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "b_right_1")
+            .unwrap();
+        assert_eq!(
+            field.metadata.get("origin"),
+            Some(&serde_json::json!("right-b"))
+        );
+        assert!(!field.nullable);
+    }
+
+    #[test]
+    fn case_sensitive_same_key_join_preserves_global_suffix_metadata() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left = DataFrame::from_polars_with_options(
+            polars::prelude::df!("id" => [1_i64], "a" => [10_i64], "a_right" => [99_i64], "b" => [20_i64]).unwrap(),
+            true,
+        );
+        let right = DataFrame::from_polars_with_options(
+            polars::prelude::df!("id" => [1_i64], "a" => [100_i64], "b" => [200_i64]).unwrap(),
+            true,
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![
+            StructField::new("id".into(), LogicalDataType::Long, false),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+            StructField::new("b".into(), LogicalDataType::Long, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-b"))].into()),
+        ]))
+        .unwrap();
+
+        let schema = left
+            .join_with_keys(&right, vec!["id"], vec!["id"], JoinType::Inner, false)
+            .unwrap()
+            .schema()
+            .unwrap();
+        let field = schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "b_right_1")
+            .unwrap();
+        assert_eq!(
+            field.metadata.get("origin"),
+            Some(&serde_json::json!("right-b"))
+        );
+        assert!(!field.nullable);
+    }
+
+    #[test]
+    fn earlier_nonoverlap_right_column_reserves_its_name_for_join_aliases() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [10_i64], "a_right" => [99_i64], "b" => [20_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [100_i64], "b_right" => [999_i64], "b" => [200_i64]).unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![
+            StructField::new("id".into(), LogicalDataType::Long, false),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+            StructField::new("b_right".into(), LogicalDataType::Long, false),
+            StructField::new("b".into(), LogicalDataType::Long, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-b"))].into()),
+        ]))
+        .unwrap();
+
+        let schema = left
+            .join_with_keys(&right, vec!["id"], vec!["id"], JoinType::Inner, false)
+            .unwrap()
+            .schema()
+            .unwrap();
+        let field = schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "b_right_1")
+            .unwrap();
+        assert_eq!(
+            field.metadata.get("origin"),
+            Some(&serde_json::json!("right-b"))
+        );
+        assert!(!field.nullable);
+    }
+
+    #[test]
+    fn json_float_encoding_preserves_finite_values_and_rejects_non_finite() {
+        assert_eq!(float_to_json_number(1.0000001), serde_json::json!(1.0));
+        assert_eq!(
+            any_value_to_json_with_array_struct_override_policy(
+                &AnyValue::Float64(0.0000001),
+                &DataType::Float64,
+                &HashSet::new(),
+                "\"n\"",
+                true,
+            )
+            .unwrap(),
+            serde_json::json!(0.0000001)
+        );
+        assert_eq!(
+            any_value_to_json_with_array_struct_override_policy(
+                &AnyValue::Float64(1.0000001),
+                &DataType::Float64,
+                &HashSet::new(),
+                "\"n\"",
+                true,
+            )
+            .unwrap(),
+            serde_json::json!(1.0000001)
+        );
+
+        let error = any_value_to_json_with_array_struct_override_policy(
+            &AnyValue::Float64(f64::NAN),
+            &DataType::Float64,
+            &HashSet::new(),
+            "\"n\"",
+            true,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("non-finite floating-point"));
+
+        let frame = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![
+                Series::new("n".into(), [f64::NAN]).into(),
+            ])
+            .unwrap(),
+        );
+        let error = frame
+            .collect_as_positional_json_with_limits(
+                10,
+                1024,
+                1024,
+                &HashSet::new(),
+                &CancellationToken::new(),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("non-finite floating-point"));
+    }
 
     #[test]
     fn arrow_ipc_batches_reject_zero_max_rows() {
@@ -6364,6 +7151,43 @@ mod tests {
             result,
             Err(EngineError::User(message)) if message == "max_rows must be greater than zero"
         ));
+    }
+
+    /// Manual resource witness for lazy range construction and schema inspection.
+    /// Run in separate processes with `SPARKLESS_RANGE_BENCH_ROWS` set to increasing sizes.
+    #[test]
+    #[ignore = "manual V17 lazy range construction RSS measurement"]
+    fn lazy_range_construction_memory_measurement() {
+        let rows = std::env::var("SPARKLESS_RANGE_BENCH_ROWS")
+            .expect("set SPARKLESS_RANGE_BENCH_ROWS")
+            .parse::<usize>()
+            .expect("SPARKLESS_RANGE_BENCH_ROWS must be a positive integer");
+        assert!(rows > 0);
+        let end = i64::try_from(rows).expect("row count must fit i64");
+        let session = SparkSession::builder()
+            .app_name("lazy-range-memory-measurement")
+            .get_or_create();
+
+        let construction_started = std::time::Instant::now();
+        let frame = session.range(0, end, 1).unwrap();
+        let construction_micros = construction_started.elapsed().as_micros();
+        std::hint::black_box(&frame);
+
+        let schema_started = std::time::Instant::now();
+        let schema = frame.schema().unwrap();
+        let schema_micros = schema_started.elapsed().as_micros();
+        assert_eq!(frame.row_count_hint, Some(rows as u64));
+        assert_eq!(schema.logical_fields()[0].name, "id");
+        assert!(matches!(
+            schema.logical_fields()[0].data_type,
+            crate::schema::DataType::Long
+        ));
+        assert!(!schema.logical_fields()[0].nullable);
+
+        println!(
+            "range_memory rows={rows} strategy=lazy_scan construction_us={construction_micros} \
+             schema_us={schema_micros} row_count_hint={rows} columns=1",
+        );
     }
 
     #[test]
@@ -6381,7 +7205,7 @@ mod tests {
                 .unwrap()
                 .filter(col("id").gt(5i64))
                 .unwrap();
-            assert_eq!(frame.schema().unwrap().fields()[0].name, "id");
+            assert_eq!(frame.schema().unwrap().logical_fields()[0].name, "id");
             assert_eq!(frame.count().unwrap(), expected as usize);
 
             if rows == 10_000_000 {
@@ -6464,7 +7288,7 @@ mod tests {
         let empty = projected.limit(0).unwrap();
         assert_eq!(empty.columns().unwrap(), vec!["next_id"]);
         assert_eq!(empty.collect().unwrap().height(), 0);
-        assert_eq!(empty.schema().unwrap().fields()[0].name, "next_id");
+        assert_eq!(empty.schema().unwrap().logical_fields()[0].name, "next_id");
 
         let limited = projected.limit(3).unwrap();
         let collected = limited.collect().unwrap();
@@ -6635,7 +7459,7 @@ mod tests {
         let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![
+        let logical = StructType::from_logical_fields(vec![
             StructField::new("id".into(), robin_sparkless_core::DataType::Long, false)
                 .with_metadata(metadata),
         ]);
@@ -6681,10 +7505,14 @@ mod tests {
             payload.into(),
         ])
         .unwrap();
-        let logical = StructType::new(vec![
+        let timestamp_metadata = [("semantics".to_string(), serde_json::json!("wall-clock"))]
+            .into_iter()
+            .collect();
+        let logical = StructType::from_logical_fields(vec![
             StructField::new("tiny".into(), LogicalDataType::Byte, true),
             StructField::new("single".into(), LogicalDataType::Float, true),
-            StructField::new("wall_clock".into(), LogicalDataType::TimestampNtz, true),
+            StructField::new("wall_clock".into(), LogicalDataType::TimestampNtz, true)
+                .with_metadata(timestamp_metadata),
             StructField::new("payload".into(), LogicalDataType::Binary, true),
         ]);
         let expected_schema = logical.to_json().unwrap();
@@ -6758,6 +7586,166 @@ mod tests {
             .map(|(_, value)| value.as_str());
         assert_eq!(encoded_schema, Some(expected_schema.as_str()));
         assert_eq!(reader.finish().unwrap().height(), 0);
+
+        let scalar_transformed = source
+            .filter(col("tiny").is_not_null())
+            .unwrap()
+            .select_exprs(vec![
+                col("tiny").cast(PlDataType::Int8).alias("tiny_copy"),
+                col("single").cast(PlDataType::Float32).alias("single_copy"),
+                col("payload").alias("payload_copy"),
+            ])
+            .unwrap();
+        let scalar_union = scalar_transformed.union(&scalar_transformed).unwrap();
+        assert_eq!(scalar_union.count().unwrap(), 4);
+        let scalar_schema = scalar_union.schema().unwrap();
+        assert!(matches!(
+            &scalar_schema.logical_fields()[0].data_type,
+            LogicalDataType::Byte
+        ));
+        assert!(matches!(
+            &scalar_schema.logical_fields()[1].data_type,
+            LogicalDataType::Float
+        ));
+        assert!(matches!(
+            &scalar_schema.logical_fields()[2].data_type,
+            LogicalDataType::Binary
+        ));
+        let scalar_expected_schema = scalar_schema.to_json().unwrap();
+        let scalar_batch = scalar_union
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut scalar_reader = IpcStreamReader::new(std::io::Cursor::new(scalar_batch.bytes));
+        let scalar_metadata = scalar_reader.custom_metadata().unwrap().unwrap();
+        let scalar_encoded_schema = scalar_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(scalar_encoded_schema, Some(scalar_expected_schema.as_str()));
+        let scalar_values = scalar_reader.finish().unwrap();
+        assert_eq!(
+            scalar_values
+                .column("tiny_copy")
+                .unwrap()
+                .i8()
+                .unwrap()
+                .into_no_null_iter()
+                .collect::<Vec<_>>(),
+            vec![i8::MIN, i8::MAX, i8::MIN, i8::MAX]
+        );
+        assert_eq!(
+            scalar_values
+                .column("single_copy")
+                .unwrap()
+                .f32()
+                .unwrap()
+                .into_no_null_iter()
+                .collect::<Vec<_>>(),
+            vec![1.25, -0.5, 1.25, -0.5]
+        );
+        let binary_values = scalar_values
+            .column("payload_copy")
+            .unwrap()
+            .binary()
+            .unwrap();
+        assert_eq!(binary_values.get(0), Some(&b"\x00\xff"[..]));
+        assert_eq!(binary_values.get(1), Some(&b"ok"[..]));
+        assert_eq!(binary_values.get(2), Some(&b"\x00\xff"[..]));
+        assert_eq!(binary_values.get(3), Some(&b"ok"[..]));
+
+        let empty_scalar_union = scalar_union.limit(0).unwrap();
+        let empty_scalar_batch = empty_scalar_union
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut empty_scalar_reader =
+            IpcStreamReader::new(std::io::Cursor::new(empty_scalar_batch.bytes));
+        let empty_scalar_metadata = empty_scalar_reader.custom_metadata().unwrap().unwrap();
+        let empty_scalar_schema = empty_scalar_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(empty_scalar_schema, Some(scalar_expected_schema.as_str()));
+        assert_eq!(empty_scalar_reader.finish().unwrap().height(), 0);
+
+        let transformed = source
+            .filter(col("wall_clock").is_not_null())
+            .unwrap()
+            .select_exprs(vec![
+                col("wall_clock")
+                    .cast(PlDataType::Datetime(TimeUnit::Microseconds, None))
+                    .alias("local_time"),
+            ])
+            .unwrap();
+        let unioned = transformed.union(&transformed).unwrap();
+        assert_eq!(unioned.count().unwrap(), 4);
+        let unioned_schema = unioned.schema().unwrap();
+        let timestamp_field = &unioned_schema.logical_fields()[0];
+        assert!(matches!(
+            &timestamp_field.data_type,
+            LogicalDataType::TimestampNtz
+        ));
+        assert!(timestamp_field.nullable);
+        assert_eq!(timestamp_field.metadata["semantics"], "wall-clock");
+        let unioned_expected_schema = unioned_schema.to_json().unwrap();
+        let unioned_batch = unioned
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut unioned_reader = IpcStreamReader::new(std::io::Cursor::new(unioned_batch.bytes));
+        let unioned_metadata = unioned_reader.custom_metadata().unwrap().unwrap();
+        let unioned_encoded_schema = unioned_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(
+            unioned_encoded_schema,
+            Some(unioned_expected_schema.as_str())
+        );
+        let unioned_values = unioned_reader.finish().unwrap();
+        let local_time = unioned_values.column("local_time").unwrap();
+        assert_eq!(
+            local_time.dtype(),
+            &PlDataType::Datetime(TimeUnit::Microseconds, None)
+        );
+        let mut timestamps = local_time
+            .datetime()
+            .unwrap()
+            .physical()
+            .into_iter()
+            .collect::<Vec<_>>();
+        timestamps.sort();
+        assert_eq!(
+            timestamps,
+            vec![Some(-1), Some(-1), Some(1_234_567), Some(1_234_567)]
+        );
+
+        let empty_union = unioned.limit(0).unwrap();
+        let empty_union_batch = empty_union
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut empty_union_reader =
+            IpcStreamReader::new(std::io::Cursor::new(empty_union_batch.bytes));
+        let empty_union_metadata = empty_union_reader.custom_metadata().unwrap().unwrap();
+        let empty_union_encoded_schema = empty_union_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(
+            empty_union_encoded_schema,
+            Some(unioned_expected_schema.as_str())
+        );
+        assert_eq!(empty_union_reader.finish().unwrap().height(), 0);
     }
 
     #[test]
@@ -6776,7 +7764,7 @@ mod tests {
         let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![
+        let logical = StructType::from_logical_fields(vec![
             StructField::new(
                 "items".into(),
                 robin_sparkless_core::DataType::ArrayWithNullability {
@@ -6858,10 +7846,10 @@ mod tests {
         let nested_metadata = [("origin".to_string(), serde_json::json!("nested IPC"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![StructField::new(
+        let logical = StructType::from_logical_fields(vec![StructField::new(
             "elements".into(),
             LogicalDataType::ArrayWithNullability {
-                element_type: Box::new(LogicalDataType::Struct(vec![
+                element_type: Box::new(LogicalDataType::LogicalStruct(vec![
                     StructField::new("id".into(), LogicalDataType::Integer, false)
                         .with_metadata(nested_metadata),
                     StructField::new("label".into(), LogicalDataType::String, true),
@@ -6885,13 +7873,13 @@ mod tests {
         let LogicalDataType::ArrayWithNullability {
             element_type,
             contains_null,
-        } = &transformed_schema.fields()[0].data_type
+        } = &transformed_schema.logical_fields()[0].data_type
         else {
             panic!("array-of-struct logical type must survive transformations");
         };
-        assert_eq!(transformed_schema.fields()[0].name, "payload");
+        assert_eq!(transformed_schema.logical_fields()[0].name, "payload");
         assert!(!contains_null);
-        let LogicalDataType::Struct(nested_fields) = element_type.as_ref() else {
+        let LogicalDataType::LogicalStruct(nested_fields) = element_type.as_ref() else {
             panic!("array element must retain its logical struct schema");
         };
         assert!(!nested_fields[0].nullable);
@@ -6931,7 +7919,75 @@ mod tests {
             }
         }
 
-        let empty = transformed.limit(0).unwrap();
+        let copied = transformed
+            .with_column("replica", &transformed.column("payload").unwrap())
+            .unwrap();
+        let renamed = copied
+            .with_column_renamed("replica", "payload_copy")
+            .unwrap();
+        let renamed_schema = renamed.schema().unwrap();
+        let payload_schema = transformed_schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "payload")
+            .unwrap();
+        let copy_schema = renamed_schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "payload_copy")
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&copy_schema.data_type).unwrap(),
+            serde_json::to_value(&payload_schema.data_type).unwrap()
+        );
+        let LogicalDataType::ArrayWithNullability { element_type, .. } = &copy_schema.data_type
+        else {
+            panic!("copied array must preserve its logical declaration");
+        };
+        let LogicalDataType::LogicalStruct(copy_fields) = element_type.as_ref() else {
+            panic!("copied array elements must preserve their logical struct");
+        };
+        assert!(!copy_fields[0].nullable);
+        assert_eq!(copy_fields[0].metadata["origin"], "nested IPC");
+
+        let renamed_expected_schema = renamed_schema.to_json().unwrap();
+        let renamed_batch = renamed
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(renamed_batch.bytes));
+        let custom_metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = custom_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(renamed_expected_schema.as_str()));
+        let decoded = reader.finish().unwrap();
+        let original = decoded.column("payload").unwrap().list().unwrap();
+        let copy = decoded.column("payload_copy").unwrap().list().unwrap();
+        for row in 0..4 {
+            let original_series = original.get_as_series(row).unwrap();
+            let original = original_series.struct_().unwrap();
+            let copied_series = copy.get_as_series(row).unwrap();
+            let copied = copied_series.struct_().unwrap();
+            assert_eq!(
+                original.field_by_name("id").unwrap().i32().unwrap().get(0),
+                copied.field_by_name("id").unwrap().i32().unwrap().get(0)
+            );
+            assert_eq!(
+                original
+                    .field_by_name("label")
+                    .unwrap()
+                    .str()
+                    .unwrap()
+                    .get(0),
+                copied.field_by_name("label").unwrap().str().unwrap().get(0)
+            );
+        }
+
+        let empty = renamed.limit(0).unwrap();
         let empty_batch = empty
             .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
             .unwrap()
@@ -6944,7 +8000,7 @@ mod tests {
             .iter()
             .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
             .map(|(_, value)| value.as_str());
-        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+        assert_eq!(encoded_schema, Some(renamed_expected_schema.as_str()));
         assert_eq!(reader.finish().unwrap().height(), 0);
     }
 
@@ -6962,7 +8018,7 @@ mod tests {
         .with_name("items".into())
         .into_series();
         let physical = polars::prelude::DataFrame::new_infer_height(vec![items.into()]).unwrap();
-        let logical = StructType::new(vec![StructField::new(
+        let logical = StructType::from_logical_fields(vec![StructField::new(
             "items".into(),
             LogicalDataType::ArrayWithNullability {
                 element_type: Box::new(LogicalDataType::Integer),
@@ -6982,9 +8038,9 @@ mod tests {
             .unwrap();
         let unioned = projected.union(&projected).unwrap();
         let unioned_schema = unioned.schema().unwrap();
-        assert_eq!(unioned_schema.fields()[0].name, "payload");
+        assert_eq!(unioned_schema.logical_fields()[0].name, "payload");
         assert!(matches!(
-            &unioned_schema.fields()[0].data_type,
+            &unioned_schema.logical_fields()[0].data_type,
             LogicalDataType::ArrayWithNullability {
                 contains_null: false,
                 ..
@@ -7050,9 +8106,9 @@ mod tests {
         let nested_metadata = [("origin".to_string(), serde_json::json!("shared catalog"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![StructField::new(
+        let logical = StructType::from_logical_fields(vec![StructField::new(
             "payload".into(),
-            robin_sparkless_core::DataType::Struct(vec![
+            robin_sparkless_core::DataType::LogicalStruct(vec![
                 StructField::new("id".into(), robin_sparkless_core::DataType::Integer, false)
                     .with_metadata(nested_metadata),
                 StructField::new("label".into(), robin_sparkless_core::DataType::String, true),
@@ -7073,10 +8129,11 @@ mod tests {
             .select_exprs(vec![col("payload").alias("copy")])
             .unwrap();
         let projected_schema = projected.schema().unwrap();
-        let projected_field = &projected_schema.fields()[0];
+        let projected_field = &projected_schema.logical_fields()[0];
         assert_eq!(projected_field.name, "copy");
         assert!(projected_field.nullable);
-        let robin_sparkless_core::DataType::Struct(nested_fields) = &projected_field.data_type
+        let robin_sparkless_core::DataType::LogicalStruct(nested_fields) =
+            &projected_field.data_type
         else {
             panic!("projected payload must retain its nested logical schema");
         };
@@ -7130,9 +8187,9 @@ mod tests {
             let nested_metadata = [("origin".to_string(), serde_json::json!("shared catalog"))]
                 .into_iter()
                 .collect();
-            let logical = StructType::new(vec![StructField::new(
+            let logical = StructType::from_logical_fields(vec![StructField::new(
                 "payload".into(),
-                LogicalDataType::Struct(vec![
+                LogicalDataType::LogicalStruct(vec![
                     StructField::new("id".into(), LogicalDataType::Integer, false)
                         .with_metadata(nested_metadata),
                     StructField::new("label".into(), LogicalDataType::String, true),
@@ -7144,6 +8201,32 @@ mod tests {
                 .unwrap()
         }
 
+        fn assert_nested_ids(frame: &DataFrame, column_name: &str, expected: &[Option<i32>]) {
+            let collected = frame.collect().unwrap();
+            assert_eq!(collected.height(), expected.len());
+            let payload = collected.column(column_name).unwrap();
+            let fields = payload.struct_().unwrap();
+            let ids = fields.field_by_name("id").unwrap();
+            let ids = ids.i32().unwrap();
+            let labels = fields.field_by_name("label").unwrap();
+            let labels = labels.str().unwrap();
+            for (index, expected) in expected.iter().enumerate() {
+                match expected {
+                    Some(value) => {
+                        assert_eq!(ids.get(index), Some(*value));
+                        let expected_label = match value {
+                            1 => "first",
+                            2 => "hidden",
+                            3 => "third",
+                            _ => panic!("unexpected nested id {value}"),
+                        };
+                        assert_eq!(labels.get(index), Some(expected_label));
+                    }
+                    None => assert!(matches!(payload.get(index).unwrap(), AnyValue::Null)),
+                }
+            }
+        }
+
         let source = source_frame();
         let source_schema_json = source.schema().unwrap().to_json().unwrap();
         let unioned = source.union(&source).unwrap();
@@ -7152,23 +8235,87 @@ mod tests {
             .select_exprs(vec![col("payload").alias("renamed")])
             .unwrap();
 
+        let duplicated = source
+            .select_exprs(vec![
+                col("payload").alias("payload"),
+                col("payload").alias("payload"),
+            ])
+            .unwrap();
+        let duplicated_schema = duplicated.schema().unwrap();
+        assert_eq!(duplicated_schema.logical_fields().len(), 2);
+        assert_eq!(
+            duplicated_schema
+                .logical_fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["payload", "payload_1"]
+        );
+        for field in duplicated_schema.logical_fields() {
+            let LogicalDataType::LogicalStruct(fields) = &field.data_type else {
+                panic!("duplicate nested labels must retain their struct schema");
+            };
+            assert!(!fields[0].nullable);
+            assert_eq!(fields[0].metadata["origin"], "shared catalog");
+        }
+        let duplicated_expected_schema = duplicated_schema.to_json().unwrap();
+        let duplicated_batch = duplicated
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut duplicated_reader =
+            IpcStreamReader::new(std::io::Cursor::new(duplicated_batch.bytes));
+        let duplicated_metadata = duplicated_reader.custom_metadata().unwrap().unwrap();
+        let duplicated_encoded_schema = duplicated_metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(
+            duplicated_encoded_schema,
+            Some(duplicated_expected_schema.as_str())
+        );
+        let duplicated_values = duplicated_reader.finish().unwrap();
+        assert_eq!(duplicated_values.width(), 2);
+        assert_eq!(
+            duplicated_values
+                .select_at_idx(0)
+                .unwrap()
+                .as_materialized_series(),
+            duplicated_values
+                .select_at_idx(1)
+                .unwrap()
+                .as_materialized_series()
+        );
+        assert_nested_ids(&duplicated, "payload", &[Some(1), None, Some(3)]);
+        assert_nested_ids(&duplicated, "payload_1", &[Some(1), None, Some(3)]);
+
         assert_eq!(projected.count().unwrap(), 4);
+        assert_nested_ids(&projected, "renamed", &[Some(1), Some(3), Some(1), Some(3)]);
         let schema = projected.schema().unwrap();
-        assert_eq!(schema.fields().len(), 1);
-        assert_eq!(schema.fields()[0].name, "renamed");
-        let LogicalDataType::Struct(nested_fields) = &schema.fields()[0].data_type else {
+        assert_eq!(schema.logical_fields().len(), 1);
+        assert_eq!(schema.logical_fields()[0].name, "renamed");
+        let LogicalDataType::LogicalStruct(nested_fields) = &schema.logical_fields()[0].data_type
+        else {
             panic!("nested logical struct must survive union, filter, and projection");
         };
         assert!(!nested_fields[0].nullable);
         assert_eq!(nested_fields[0].metadata["origin"], "shared catalog");
 
-        let nested_field = source.select(vec!["payload.id"]).unwrap().schema().unwrap();
-        assert_eq!(nested_field.fields()[0].name, "id");
-        assert!(nested_field.fields()[0].nullable);
+        let dotted = source.select(vec!["payload.id"]).unwrap();
+        let nested_field = dotted.schema().unwrap();
+        assert_eq!(nested_field.logical_fields()[0].name, "id");
+        assert!(nested_field.logical_fields()[0].nullable);
         assert_eq!(
-            nested_field.fields()[0].metadata["origin"],
+            nested_field.logical_fields()[0].metadata["origin"],
             "shared catalog"
         );
+        let dotted_values = dotted.collect().unwrap();
+        let dotted_ids = dotted_values.column("id").unwrap().i32().unwrap();
+        assert_eq!(dotted_ids.get(0), Some(1));
+        assert_eq!(dotted_ids.get(1), None);
+        assert_eq!(dotted_ids.get(2), Some(3));
 
         let nested_projection = source.select(vec!["payload.id"]).unwrap();
         let nested_schema_json = nested_projection.schema().unwrap().to_json().unwrap();
@@ -7187,68 +8334,91 @@ mod tests {
         assert_eq!(encoded_nested_schema, Some(nested_schema_json.as_str()));
         nested_reader.finish().unwrap();
 
-        let selected_items = source
+        let selected_items_frame = source
             .select_items(vec![SelectItem::Expr(col("payload").alias("item_payload"))])
-            .unwrap()
-            .schema()
             .unwrap();
-        let LogicalDataType::Struct(item_fields) = &selected_items.fields()[0].data_type else {
+        let selected_items = selected_items_frame.schema().unwrap();
+        let LogicalDataType::LogicalStruct(item_fields) =
+            &selected_items.logical_fields()[0].data_type
+        else {
             panic!("mixed select must retain the nested logical schema");
         };
-        assert_eq!(selected_items.fields()[0].name, "item_payload");
+        assert_eq!(selected_items.logical_fields()[0].name, "item_payload");
         assert!(!item_fields[0].nullable);
         assert_eq!(item_fields[0].metadata["origin"], "shared catalog");
+        assert_nested_ids(
+            &selected_items_frame,
+            "item_payload",
+            &[Some(1), None, Some(3)],
+        );
 
         let selected_nested_item = source
             .select_items(vec![SelectItem::ColumnName("payload.id")])
             .unwrap()
             .schema()
             .unwrap();
-        assert_eq!(selected_nested_item.fields()[0].name, "id");
-        assert!(selected_nested_item.fields()[0].nullable);
+        assert_eq!(selected_nested_item.logical_fields()[0].name, "id");
+        assert!(selected_nested_item.logical_fields()[0].nullable);
         assert_eq!(
-            selected_nested_item.fields()[0].metadata["origin"],
+            selected_nested_item.logical_fields()[0].metadata["origin"],
             "shared catalog"
         );
 
-        let selected_expr = source
+        let selected_expr_frame = source
             .select_expr(&["payload as expr_payload".to_string()])
-            .unwrap()
-            .schema()
             .unwrap();
-        let LogicalDataType::Struct(expr_fields) = &selected_expr.fields()[0].data_type else {
+        let selected_expr = selected_expr_frame.schema().unwrap();
+        let LogicalDataType::LogicalStruct(expr_fields) =
+            &selected_expr.logical_fields()[0].data_type
+        else {
             panic!("selectExpr must retain the nested logical schema");
         };
-        assert_eq!(selected_expr.fields()[0].name, "expr_payload");
+        assert_eq!(selected_expr.logical_fields()[0].name, "expr_payload");
         assert!(!expr_fields[0].nullable);
         assert_eq!(expr_fields[0].metadata["origin"], "shared catalog");
+        assert_nested_ids(
+            &selected_expr_frame,
+            "expr_payload",
+            &[Some(1), None, Some(3)],
+        );
 
         let copied = source
             .with_column_expr("payload_copy", col("payload"))
             .unwrap();
         let copied_schema = copied.schema().unwrap();
-        assert_eq!(copied_schema.fields().len(), 2);
-        let LogicalDataType::Struct(copied_fields) = &copied_schema.fields()[1].data_type else {
+        assert_eq!(copied_schema.logical_fields().len(), 2);
+        let LogicalDataType::LogicalStruct(copied_fields) =
+            &copied_schema.logical_fields()[1].data_type
+        else {
             panic!("a copied nested column must retain its logical struct type");
         };
         assert!(!copied_fields[0].nullable);
         assert_eq!(copied_fields[0].metadata["origin"], "shared catalog");
+        assert_nested_ids(&copied, "payload_copy", &[Some(1), None, Some(3)]);
 
         let renamed = source
             .with_column_renamed("payload", "renamed_payload")
             .unwrap();
         let renamed_schema = renamed.schema().unwrap();
-        let LogicalDataType::Struct(renamed_fields) = &renamed_schema.fields()[0].data_type else {
+        let LogicalDataType::LogicalStruct(renamed_fields) =
+            &renamed_schema.logical_fields()[0].data_type
+        else {
             panic!("renaming must retain the nested logical schema");
         };
-        assert_eq!(renamed_schema.fields()[0].name, "renamed_payload");
+        assert_eq!(renamed_schema.logical_fields()[0].name, "renamed_payload");
         assert!(!renamed_fields[0].nullable);
         assert_eq!(renamed_fields[0].metadata["origin"], "shared catalog");
+        assert_nested_ids(&renamed, "renamed_payload", &[Some(1), None, Some(3)]);
 
         let by_name = source.union_by_name(&source, false).unwrap();
         assert_eq!(
             by_name.schema().unwrap().to_json().unwrap(),
             source_schema_json
+        );
+        assert_nested_ids(
+            &by_name,
+            "payload",
+            &[Some(1), None, Some(3), Some(1), None, Some(3)],
         );
 
         let row_filtered = source.dropna(None, "any", None).unwrap();
@@ -7256,6 +8426,7 @@ mod tests {
             row_filtered.schema().unwrap().to_json().unwrap(),
             source_schema_json
         );
+        assert_nested_ids(&row_filtered, "payload", &[Some(1), Some(3)]);
 
         let expected_schema = schema.to_json().unwrap();
         let batch = projected
@@ -7318,6 +8489,228 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn nested_logical_schema_survives_saved_table_append_and_temp_view_roundtrip() {
+        use polars::chunked_array::StructChunked;
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::{SerReader, Series};
+        use polars_arrow::bitmap::Bitmap;
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        fn source_frame(metadata_value: &str) -> DataFrame {
+            let id = Series::new("id".into(), vec![1_i32, 2, 3]);
+            let label = Series::new("label".into(), ["first", "hidden", "third"]);
+            let payload =
+                StructChunked::from_series("payload".into(), 3, [&id, &label].into_iter())
+                    .unwrap()
+                    .with_outer_validity(Some(Bitmap::from_iter([true, false, true])))
+                    .into_series();
+            let physical = PlDataFrame::new_infer_height(vec![payload.into()]).unwrap();
+            let metadata = [("origin".to_string(), serde_json::json!(metadata_value))]
+                .into_iter()
+                .collect();
+            let logical = StructType::from_logical_fields(vec![StructField::new(
+                "payload".into(),
+                LogicalDataType::LogicalStruct(vec![
+                    StructField::new("id".into(), LogicalDataType::Integer, false)
+                        .with_metadata(metadata),
+                    StructField::new("label".into(), LogicalDataType::String, true),
+                ]),
+                true,
+            )]);
+            DataFrame::from_polars(physical)
+                .with_logical_schema(logical)
+                .unwrap()
+        }
+
+        fn assert_nested_ids(frame: &PlDataFrame, expected: &[Option<i32>]) {
+            assert_eq!(frame.height(), expected.len());
+            let payload = frame.column("payload").unwrap();
+            let fields = payload.struct_().unwrap();
+            let ids = fields.field_by_name("id").unwrap();
+            let ids = ids.i32().unwrap();
+            for (index, expected) in expected.iter().enumerate() {
+                match expected {
+                    Some(value) => assert_eq!(ids.get(index), Some(*value)),
+                    None => assert!(matches!(payload.get(index).unwrap(), AnyValue::Null)),
+                }
+            }
+        }
+
+        let suffix = std::process::id();
+        let table_name = format!("nested_append_{suffix}");
+        let view_name = format!("nested_append_view_{suffix}");
+        let session = SparkSession::builder()
+            .app_name(format!("nested-append-{suffix}"))
+            .get_or_create();
+        let source = source_frame("table metadata");
+        let expected_schema = source.schema().unwrap().to_json().unwrap();
+
+        source
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Overwrite)
+            .unwrap();
+        let original = session.table(&table_name).unwrap();
+        assert_eq!(
+            original.schema().unwrap().to_json().unwrap(),
+            expected_schema
+        );
+
+        // A physical-compatible append that changes declared nested metadata must fail before
+        // replacing the saved table or changing its original rows/schema.
+        let incompatible = source_frame("different metadata");
+        let mismatch = incompatible
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Append);
+        assert!(
+            matches!(mismatch, Err(PolarsError::SchemaMismatch(_))),
+            "unexpected logical-schema append result: {mismatch:?}"
+        );
+        let unchanged = session.table(&table_name).unwrap();
+        assert_eq!(
+            unchanged.schema().unwrap().to_json().unwrap(),
+            expected_schema
+        );
+        assert_nested_ids(&unchanged.collect().unwrap(), &[Some(1), None, Some(3)]);
+
+        source
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Append)
+            .unwrap();
+        let appended = session.table(&table_name).unwrap();
+        assert_eq!(
+            appended.schema().unwrap().to_json().unwrap(),
+            expected_schema
+        );
+        assert_nested_ids(
+            &appended.collect().unwrap(),
+            &[Some(1), None, Some(3), Some(1), None, Some(3)],
+        );
+
+        session.create_or_replace_temp_view(&view_name, appended);
+        let view = session.table(&view_name).unwrap();
+        assert_eq!(view.schema().unwrap().to_json().unwrap(), expected_schema);
+        let batch = view
+            .to_arrow_ipc_batches_with_cancellation(8, 16 * 1024, &CancellationToken::new())
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        let mut reader = IpcStreamReader::new(std::io::Cursor::new(batch.bytes));
+        let metadata = reader.custom_metadata().unwrap().unwrap();
+        let encoded_schema = metadata
+            .iter()
+            .find(|(key, _)| key.as_str() == "sparkless.logical_schema.v1")
+            .map(|(_, value)| value.as_str());
+        assert_eq!(encoded_schema, Some(expected_schema.as_str()));
+        assert_nested_ids(
+            &reader.finish().unwrap(),
+            &[Some(1), None, Some(3), Some(1), None, Some(3)],
+        );
+
+        assert!(session.drop_temp_view(&view_name));
+        assert!(session.drop_table(&table_name));
+    }
+
+    #[test]
+    fn saved_table_append_aligns_reordered_and_merged_logical_schemas() {
+        use crate::schema::DataType as LogicalDataType;
+
+        fn frame(order: &[&str]) -> DataFrame {
+            let mut columns = Vec::new();
+            let mut fields = Vec::new();
+            for name in order {
+                match *name {
+                    "a" => {
+                        columns.push(Series::new("a".into(), [1_i32]).into());
+                        fields.push(StructField::new(
+                            "a".to_string(),
+                            LogicalDataType::Integer,
+                            false,
+                        ));
+                    }
+                    "b" => {
+                        columns.push(Series::new("b".into(), ["b"]).into());
+                        fields.push(StructField::new(
+                            "b".to_string(),
+                            LogicalDataType::String,
+                            false,
+                        ));
+                    }
+                    "c" => {
+                        columns.push(Series::new("c".into(), [true]).into());
+                        fields.push(StructField::new(
+                            "c".to_string(),
+                            LogicalDataType::Boolean,
+                            true,
+                        ));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            DataFrame::from_polars(PlDataFrame::new_infer_height(columns).unwrap())
+                .with_logical_schema(StructType::from_logical_fields(fields))
+                .unwrap()
+        }
+
+        let suffix = std::process::id();
+        let table_name = format!("logical_append_alignment_{suffix}");
+        let session = SparkSession::builder()
+            .app_name(format!("logical-append-alignment-{suffix}"))
+            .get_or_create();
+        frame(&["a", "b"])
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Overwrite)
+            .unwrap();
+        frame(&["b", "a"])
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Append)
+            .unwrap();
+        frame(&["a", "c", "b"])
+            .write()
+            .option("mergeSchema", "true")
+            .save_as_table(&session, &table_name, SaveMode::Append)
+            .unwrap();
+
+        let appended = session.table(&table_name).unwrap();
+        assert_eq!(appended.columns().unwrap(), ["a", "b", "c"]);
+        assert_eq!(appended.count().unwrap(), 3);
+        let schema = appended.schema().unwrap();
+        assert_eq!(
+            schema
+                .logical_fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+        assert!(session.drop_table(&table_name));
+    }
+
+    #[test]
+    fn saved_table_append_accepts_nonnullable_input_for_nullable_target() {
+        let suffix = std::process::id();
+        let table_name = format!("nullable_append_target_{suffix}");
+        let session = SparkSession::builder()
+            .app_name(format!("nullable-append-target-{suffix}"))
+            .get_or_create();
+        session
+            .sql(&format!("CREATE TABLE {table_name} (id BIGINT)"))
+            .unwrap();
+
+        session
+            .range(0, 2, 1)
+            .unwrap()
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Append)
+            .unwrap();
+
+        let appended = session.table(&table_name).unwrap();
+        assert_eq!(appended.count().unwrap(), 2);
+        assert!(appended.schema().unwrap().logical_fields()[0].nullable);
+        assert!(session.drop_table(&table_name));
+    }
+
     /// Issue #235: root-level string–numeric comparison coercion in filter.
     #[test]
     fn coerce_string_numeric_root_in_filter() {
@@ -7358,7 +8751,7 @@ mod tests {
         let metadata = [("owner".to_string(), serde_json::json!("analytics"))]
             .into_iter()
             .collect();
-        let logical = StructType::new(vec![
+        let logical = StructType::from_logical_fields(vec![
             StructField::new("id".into(), robin_sparkless_core::DataType::Long, false)
                 .with_metadata(metadata),
         ]);
@@ -7368,7 +8761,7 @@ mod tests {
 
         let filtered = source.filter(col("id").gt(lit(1i64))).unwrap();
         let filtered_schema = filtered.schema().unwrap();
-        let field = &filtered_schema.fields()[0];
+        let field = &filtered_schema.logical_fields()[0];
         assert!(!field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
 
@@ -7376,7 +8769,7 @@ mod tests {
             .select_exprs(vec![col("id").cast(DataType::Float64).alias("cast_id")])
             .unwrap();
         let casted_schema = casted.schema().unwrap();
-        let field = &casted_schema.fields()[0];
+        let field = &casted_schema.logical_fields()[0];
         assert!(matches!(
             field.data_type,
             robin_sparkless_core::DataType::Double
@@ -7388,14 +8781,14 @@ mod tests {
             .select_exprs(vec![col("id").alias("renamed")])
             .unwrap();
         let projected_schema = projected.schema().unwrap();
-        let field = &projected_schema.fields()[0];
+        let field = &projected_schema.logical_fields()[0];
         assert_eq!(field.name, "renamed");
         assert!(!field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
 
         let unioned = projected.union(&projected).unwrap();
         let unioned_schema = unioned.schema().unwrap();
-        let field = &unioned_schema.fields()[0];
+        let field = &unioned_schema.logical_fields()[0];
         assert!(!field.nullable);
         assert_eq!(field.metadata["owner"], "analytics");
     }
@@ -7408,7 +8801,7 @@ mod tests {
         let left_array = Series::new("items".into(), [left_values]);
         let left =
             DataFrame::from_polars(PlDataFrame::new_infer_height(vec![left_array.into()]).unwrap())
-                .with_logical_schema(StructType::new(vec![StructField::new(
+                .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
                     "items".into(),
                     LogicalDataType::ArrayWithNullability {
                         element_type: Box::new(LogicalDataType::Integer),
@@ -7423,7 +8816,7 @@ mod tests {
         let right = DataFrame::from_polars(
             PlDataFrame::new_infer_height(vec![right_array.into()]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![StructField::new(
+        .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
             "items".into(),
             LogicalDataType::ArrayWithNullability {
                 element_type: Box::new(LogicalDataType::Long),
@@ -7435,7 +8828,7 @@ mod tests {
 
         let unioned = left.union(&right).unwrap();
         assert!(matches!(
-            &unioned.schema().unwrap().fields()[0].data_type,
+            &unioned.schema().unwrap().logical_fields()[0].data_type,
             LogicalDataType::ArrayWithNullability {
                 element_type,
                 contains_null: true,
@@ -7452,7 +8845,7 @@ mod tests {
         let declared = DataFrame::from_polars(
             PlDataFrame::new_infer_height(vec![declared_array.into()]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![StructField::new(
+        .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
             "items".into(),
             LogicalDataType::ArrayWithNullability {
                 element_type: Box::new(LogicalDataType::Long),
@@ -7470,12 +8863,111 @@ mod tests {
 
         let unioned = declared.union(&undeclared).unwrap();
         assert!(matches!(
-            &unioned.schema().unwrap().fields()[0].data_type,
+            &unioned.schema().unwrap().logical_fields()[0].data_type,
             LogicalDataType::ArrayWithNullability {
                 contains_null: true,
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn append_without_incoming_logical_sidecar_checks_nonnullable_values() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let session = SparkSession::new(
+            Some("append-nullability-sidecar-test".into()),
+            None,
+            HashMap::new(),
+        );
+        let table_name = format!("append_nullability_{}", std::process::id());
+        let existing = DataFrame::from_polars(polars::prelude::df!("value" => [1_i64]).unwrap())
+            .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
+                "value".into(),
+                LogicalDataType::Long,
+                false,
+            )]))
+            .unwrap();
+        existing
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Overwrite)
+            .unwrap();
+
+        let incoming = DataFrame::from_lazy_with_options(
+            polars::prelude::df!("value" => [None::<i64>])
+                .unwrap()
+                .lazy(),
+            false,
+        );
+        assert!(
+            incoming
+                .write()
+                .save_as_table(&session, &table_name, SaveMode::Append)
+                .is_err()
+        );
+        assert_eq!(
+            session
+                .table(&table_name)
+                .unwrap()
+                .collect()
+                .unwrap()
+                .height(),
+            1
+        );
+    }
+
+    #[test]
+    fn append_without_sidecar_checks_nested_nonnullable_values() {
+        use polars::chunked_array::StructChunked;
+        use polars::prelude::{IntoLazy, NamedFrom, Series};
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let session = SparkSession::new(
+            Some("append-nested-nullability-test".into()),
+            None,
+            HashMap::new(),
+        );
+        let table_name = format!("append_nested_nullability_{}", std::process::id());
+        let child = Series::new("child".into(), [Some(1_i64)]);
+        let saved_payload = StructChunked::from_series("payload".into(), 1, [&child].into_iter())
+            .unwrap()
+            .into_series();
+        let saved = DataFrame::from_polars(
+            polars::prelude::DataFrame::new_infer_height(vec![saved_payload.into()]).unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![StructField::new(
+            "payload".into(),
+            LogicalDataType::LogicalStruct(vec![StructField::new(
+                "child".into(),
+                LogicalDataType::Long,
+                false,
+            )]),
+            true,
+        )]))
+        .unwrap();
+        saved
+            .write()
+            .save_as_table(&session, &table_name, SaveMode::Overwrite)
+            .unwrap();
+
+        let null_child = Series::new("child".into(), [None::<i64>]);
+        let incoming_payload =
+            StructChunked::from_series("payload".into(), 1, [&null_child].into_iter())
+                .unwrap()
+                .into_series();
+        let incoming = DataFrame::from_lazy_with_options(
+            polars::prelude::DataFrame::new_infer_height(vec![incoming_payload.into()])
+                .unwrap()
+                .lazy(),
+            false,
+        );
+        assert!(
+            incoming
+                .write()
+                .save_as_table(&session, &table_name, SaveMode::Append)
+                .is_err()
+        );
+        assert_eq!(session.table(&table_name).unwrap().count().unwrap(), 1);
     }
 
     #[test]
@@ -7486,7 +8978,7 @@ mod tests {
             .into_iter()
             .collect();
         let numeric = DataFrame::from_polars(polars::prelude::df!("key" => [1i64]).unwrap())
-            .with_logical_schema(StructType::new(vec![
+            .with_logical_schema(StructType::from_logical_fields(vec![
                 StructField::new("key".into(), LogicalDataType::Long, false)
                     .with_metadata(metadata),
             ]))
@@ -7496,14 +8988,14 @@ mod tests {
 
         let first = numeric.union(&text).unwrap();
         let first_schema = first.schema().unwrap();
-        let first_field = &first_schema.fields()[0];
+        let first_field = &first_schema.logical_fields()[0];
         assert!(matches!(&first_field.data_type, LogicalDataType::String));
         assert!(first_field.nullable);
         assert_eq!(first_field.metadata["owner"], "left");
 
         let chained = first.union(&third_number).unwrap();
         let chained_schema = chained.schema().unwrap();
-        let chained_field = &chained_schema.fields()[0];
+        let chained_field = &chained_schema.logical_fields()[0];
         assert!(matches!(&chained_field.data_type, LogicalDataType::String));
         assert_eq!(chained_field.metadata["owner"], "left");
         let (_, rows, _) = chained.collect_as_json_rows_with_names().unwrap();
@@ -7520,7 +9012,7 @@ mod tests {
         let right = DataFrame::from_polars(
             polars::prelude::df!("extra" => [9i64], "payload" => [2i64]).unwrap(),
         )
-        .with_logical_schema(StructType::new(vec![
+        .with_logical_schema(StructType::from_logical_fields(vec![
             StructField::new("extra".into(), robin_sparkless_core::DataType::Long, false)
                 .with_metadata(
                     [("owner".to_string(), serde_json::json!("extra"))]
@@ -7542,9 +9034,9 @@ mod tests {
 
         let combined = left.union_by_name(&right, false).unwrap();
         let schema = combined.schema().unwrap();
-        assert_eq!(schema.fields().len(), 1);
-        assert_eq!(schema.fields()[0].name, "payload");
-        assert_eq!(schema.fields()[0].metadata["owner"], "payload");
+        assert_eq!(schema.logical_fields().len(), 1);
+        assert_eq!(schema.logical_fields()[0].name, "payload");
+        assert_eq!(schema.logical_fields()[0].metadata["owner"], "payload");
         let rows = combined.collect_as_json_rows().unwrap();
         assert_eq!(rows[0]["payload"], serde_json::json!(1));
         assert_eq!(rows[1]["payload"], serde_json::json!(2));
@@ -7553,7 +9045,7 @@ mod tests {
     #[test]
     fn logical_schema_attachment_checks_physical_type_compatibility() {
         let physical = polars::prelude::df!("id" => [1i64]).unwrap();
-        let logical = StructType::new(vec![StructField::new(
+        let logical = StructType::from_logical_fields(vec![StructField::new(
             "id".into(),
             robin_sparkless_core::DataType::Double,
             true,

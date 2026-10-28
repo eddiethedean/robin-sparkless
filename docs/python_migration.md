@@ -45,7 +45,7 @@ See [PYSPARK_COMPAT_PROFILES.md](PYSPARK_COMPAT_PROFILES.md) for bundled config 
 | Oracle | Requirements | Env |
 |--------|--------------|-----|
 | PySpark 3.5 (default CI) | `tests/requirements-pyspark.txt` | `SPARKLESS_TEST_MODE=pyspark` |
-| PySpark 4.1 (nightly) | `tests/requirements-pyspark4.txt`, Java 17, Python 3.10+ | `SPARKLESS_TEST_MODE=pyspark` + `SPARKLESS_PYSPARK_COMPAT=4.0` |
+| PySpark 4.1 (nightly) | `tests/requirements-pyspark4.txt`, Java 17, Python 3.11+ | `SPARKLESS_TEST_MODE=pyspark` + `SPARKLESS_PYSPARK_COMPAT=4.0` |
 
 Use `@pytest.mark.pyspark4_only` / `pyspark3_only` for profile-specific tests. The `spark` fixture applies `sparkless.pyspark.compat` automatically when running against the sparkless backend.
 

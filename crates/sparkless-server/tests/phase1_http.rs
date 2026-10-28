@@ -137,6 +137,36 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     let mut server = ServerProcess::start();
     let instance_id = server.instance_id.clone();
 
+    let (status, unknown_operation) = post(
+        &server,
+        "/operations/status",
+        &json!({
+            "server_instance_id":instance_id,
+            "operation_id":"unknown-before-acceptance"
+        }),
+    );
+    assert_eq!(status, 404, "{unknown_operation}");
+    assert_eq!(unknown_operation["ename"], "UnknownOperation");
+    let (status, accepted_after_unknown_status) = statement(
+        &server,
+        "owner",
+        "CREATE DATABASE status_probe",
+        Some("unknown-before-acceptance"),
+    );
+    assert_eq!(status, 200, "{accepted_after_unknown_status}");
+    assert_eq!(accepted_after_unknown_status["status"], "ok");
+    let (status, accepted_status) = post(
+        &server,
+        "/operations/status",
+        &json!({
+            "server_instance_id":instance_id,
+            "operation_id":"unknown-before-acceptance"
+        }),
+    );
+    assert_eq!(status, 200, "{accepted_status}");
+    assert_eq!(accepted_status["execution_state"], "succeeded");
+    assert_eq!(accepted_status["effect_outcome"], "committed");
+
     let (status, created_db) = statement(
         &server,
         "owner",
@@ -154,6 +184,35 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     );
     assert_eq!(status, 200, "{created_table}");
     assert_eq!(created_table["status"], "ok");
+
+    let (status, existing_table_noop) = statement(
+        &server,
+        "owner",
+        "CREATE TABLE IF NOT EXISTS phase_http.items (id BIGINT, note STRING)",
+        Some("create-existing-table-noop"),
+    );
+    assert_eq!(status, 200, "{existing_table_noop}");
+    assert_eq!(existing_table_noop["status"], "ok");
+    assert_eq!(
+        existing_table_noop["operation"]["effect_outcome"],
+        "committed"
+    );
+    assert_eq!(
+        existing_table_noop["receipt"], created_table["receipt"],
+        "a successful idempotent create returns the existing table receipt"
+    );
+    let (status, no_op_status) = post(
+        &server,
+        "/operations/status",
+        &json!({
+            "server_instance_id":instance_id,
+            "operation_id":"create-existing-table-noop"
+        }),
+    );
+    assert_eq!(status, 200, "{no_op_status}");
+    assert_eq!(no_op_status["execution_state"], "succeeded");
+    assert_eq!(no_op_status["effect_outcome"], "committed");
+    assert_eq!(no_op_status["receipt"], created_table["receipt"]);
 
     let (status, created_default_items) = statement(
         &server,
@@ -568,6 +627,30 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     assert_eq!(rejected_append["status"], "error");
     assert_eq!(rejected_append["operation"]["effect_outcome"], "failed");
 
+    let (status, failed_operation) = post(
+        &server,
+        "/operations/status",
+        &json!({"server_instance_id":instance_id,"operation_id":"rejected-cast-append"}),
+    );
+    assert_eq!(status, 200, "{failed_operation}");
+    assert_eq!(failed_operation["execution_state"], "failed");
+    assert_eq!(failed_operation["effect_outcome"], "failed");
+    assert_eq!(failed_operation["error"]["ename"], rejected_append["ename"]);
+
+    let (status, replayed_failure) = statement(
+        &server,
+        "owner",
+        "INSERT INTO phase_http.items (id, note) VALUES ('not-an-integer', 'invalid')",
+        Some("rejected-cast-append"),
+    );
+    assert_eq!(status, 200, "{replayed_failure}");
+    assert_eq!(replayed_failure["ename"], rejected_append["ename"]);
+    assert_eq!(replayed_failure["operation"]["effect_outcome"], "failed");
+    assert_eq!(
+        replayed_failure["operation"]["error"],
+        failed_operation["error"]
+    );
+
     let (status, rejected_select_cast) = statement(
         &server,
         "owner",
@@ -758,4 +841,29 @@ fn phase1_http_shared_tables_mutations_and_restart_contract() {
     );
     assert_eq!(status, 200, "{new_instance_create}");
     assert_eq!(new_instance_create["status"], "ok");
+}
+
+#[test]
+fn ansi_division_cast_failure_is_atomic_and_retained() {
+    let mut server = ServerProcess::start();
+    let (_, created) = statement(
+        &server,
+        "review",
+        "CREATE TABLE division_sink (n DOUBLE)",
+        Some("create-division-sink"),
+    );
+    assert_eq!(created["status"], "ok", "{created}");
+    let sql = "INSERT INTO division_sink SELECT 'invalid' / 2 AS n";
+    let (_, failed) = statement(&server, "review", sql, Some("invalid-division"));
+    assert_eq!(failed["status"], "error", "{failed}");
+    assert_eq!(failed["operation"]["effect_outcome"], "failed", "{failed}");
+    let (_, replay) = statement(&server, "review", sql, Some("invalid-division"));
+    assert_eq!(replay["operation"]["effect_outcome"], "failed", "{replay}");
+    let (_, rows) = statement(&server, "review", "SELECT n FROM division_sink", None);
+    assert_eq!(
+        rows["data"]["application/json"]["data"],
+        json!([]),
+        "{rows}"
+    );
+    server.stop();
 }

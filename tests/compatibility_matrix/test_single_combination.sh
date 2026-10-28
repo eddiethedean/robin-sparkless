@@ -3,9 +3,9 @@
 
 set -e
 
-PYTHON_VERSION=${1:-3.10}
-PYSPARK_VERSION=${2:-3.3.4}
-JAVA_VERSION=${3:-11}
+PYTHON_VERSION=${1:-3.11}
+PYSPARK_VERSION=${2:-3.5.1}
+JAVA_VERSION=${3:-17}
 
 echo "=========================================="
 echo "Testing Single Combination"
