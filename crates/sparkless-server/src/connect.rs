@@ -1,17 +1,19 @@
 //! Spark Connect 4.0.5 gRPC adapter and bounded protobuf boundary.
 //!
 //! The bounded public service translates the frozen relation subset, serves schema/config
-//! analysis, and streams native Arrow results while sharing the HTTP service's identity and
-//! admission registries. Response replay and reconnect remain a later delivery slice.
+//! analysis, streams native Arrow results, and retains bounded response history for reconnect
+//! while sharing the HTTP service's identity and admission registries.
 
 use crate::{ConnectReserveError, ConnectSessionIdentity, RequestFailure, Server, connect_proto};
 use bytes::Buf;
 use prost::Message;
 use prost_reflect::{DescriptorPool, Kind as ReflectKind, MessageDescriptor};
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tonic::codec::{BufferSettings, Codec, DecodeBuf, Decoder};
@@ -34,6 +36,856 @@ pub const MAX_CONNECT_ARROW_BATCH_ROWS: usize = 16_384;
 pub const MAX_CONNECT_ARROW_RESPONSE_BYTES: usize = 1024 * 1024;
 pub const MAX_CONNECT_RESULT_ROWS: u64 = 1_000_000;
 pub const MAX_CONNECT_RESULT_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_CONNECT_LIVE_OPERATIONS: usize = 128;
+pub const MAX_CONNECT_STREAM_SENDERS: usize = 32;
+pub const MAX_CONNECT_HISTORY_ENTRIES: usize = 1024;
+pub const MAX_CONNECT_HISTORY_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_CONNECT_REPLAY_OPERATION_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_CONNECT_REPLAY_PROCESS_BYTES: usize = 32 * 1024 * 1024;
+pub const CONNECT_DETACHED_RETENTION: Duration = Duration::from_secs(60);
+
+struct StoredConnectResponse {
+    sequence: u64,
+    response: connect_proto::ExecutePlanResponse,
+    encoded_bytes: usize,
+}
+
+struct StoredConnectError {
+    id: String,
+    class: String,
+    message: String,
+    created_at: Instant,
+}
+
+struct ConnectReplayState {
+    responses: VecDeque<StoredConnectResponse>,
+    response_ids: HashMap<String, u64>,
+    released_response_ids: HashMap<String, u64>,
+    released_response_order: VecDeque<String>,
+    next_sequence: u64,
+    replay_bytes: usize,
+    sender_bytes: usize,
+    replay_headroom_bytes: usize,
+    sender_reservations: HashMap<u64, (usize, bool)>,
+    next_sender_reservation: u64,
+    history_bytes: usize,
+    terminal: Option<Result<(), Status>>,
+    attached: bool,
+    released: bool,
+    expired: bool,
+    detached_at: Option<Instant>,
+    sender: Option<tokio::sync::mpsc::Sender<()>>,
+    cancellation: robin_sparkless_core::engine::CancellationToken,
+    producer_stopped: bool,
+    producer_done: tokio::sync::watch::Sender<bool>,
+    error: Option<StoredConnectError>,
+}
+
+/// Bounded in-memory response history for one Connect operation. The producer owns this state
+/// after admission; transports only attach cursors and acknowledge response prefixes.
+pub(crate) struct ConnectReplayRecord {
+    pub(crate) operation_key: String,
+    pub(crate) session_key: String,
+    pub(crate) session_generation: u64,
+    pub(crate) reattachable: bool,
+    pub(crate) tags: HashSet<String>,
+    pub(crate) operation_id: String,
+    state: Mutex<ConnectReplayState>,
+    process_bytes: Arc<AtomicUsize>,
+    process_history_bytes: Arc<AtomicUsize>,
+}
+
+impl ConnectReplayRecord {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        operation_key: String,
+        session_key: String,
+        client_session_id: String,
+        server_side_session_id: String,
+        operation_id: String,
+        session_generation: u64,
+        reattachable: bool,
+        tags: Vec<String>,
+        process_bytes: Arc<AtomicUsize>,
+        process_history_bytes: Arc<AtomicUsize>,
+    ) -> Result<Self, ()> {
+        let (producer_done, _) = tokio::sync::watch::channel(false);
+        let tag_bytes = tags.iter().map(String::len).sum::<usize>();
+        let base_history_bytes = operation_key
+            .len()
+            .saturating_add(session_key.len())
+            .saturating_add(client_session_id.len())
+            .saturating_add(server_side_session_id.len())
+            .saturating_add(operation_id.len())
+            .saturating_add(tag_bytes)
+            .saturating_add(256);
+        if !reserve_history_bytes(&process_history_bytes, base_history_bytes) {
+            return Err(());
+        }
+        Ok(Self {
+            operation_key,
+            session_key,
+            session_generation,
+            reattachable,
+            tags: tags.into_iter().collect(),
+            operation_id,
+            state: Mutex::new(ConnectReplayState {
+                responses: VecDeque::new(),
+                response_ids: HashMap::new(),
+                released_response_ids: HashMap::new(),
+                released_response_order: VecDeque::new(),
+                next_sequence: 0,
+                replay_bytes: 0,
+                sender_bytes: 0,
+                replay_headroom_bytes: 0,
+                sender_reservations: HashMap::new(),
+                next_sender_reservation: 1,
+                history_bytes: base_history_bytes,
+                terminal: None,
+                attached: true,
+                released: false,
+                expired: false,
+                detached_at: None,
+                sender: None,
+                cancellation: robin_sparkless_core::engine::CancellationToken::new(),
+                producer_stopped: false,
+                producer_done,
+                error: None,
+            }),
+            process_bytes,
+            process_history_bytes,
+        })
+    }
+
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ConnectReplayState>, Status> {
+        self.state
+            .lock()
+            .map_err(|_| Status::internal("Connect replay state is unavailable"))
+    }
+
+    pub(crate) fn is_producer_active(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| !state.producer_stopped)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn retain_in_registry(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| {
+                state
+                    .error
+                    .as_ref()
+                    .is_some_and(|error| error.created_at.elapsed() < CONNECT_DETACHED_RETENTION)
+                    || (!state.released
+                        && !state.expired
+                        && (self.reattachable || !state.producer_stopped))
+            })
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn cancellation(&self) -> robin_sparkless_core::engine::CancellationToken {
+        self.state
+            .lock()
+            .map(|state| state.cancellation.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn matches_session(&self, session_key: &str, generation: u64) -> bool {
+        self.session_key == session_key && self.session_generation == generation
+    }
+
+    fn notify(state: &ConnectReplayState) {
+        if let Some(sender) = state.sender.as_ref() {
+            let _ = sender.try_send(());
+        }
+    }
+
+    fn reserve_process_bytes(&self, bytes: usize) -> bool {
+        let mut current = self.process_bytes.load(Ordering::Acquire);
+        loop {
+            let Some(next) = current.checked_add(bytes) else {
+                return false;
+            };
+            if next > MAX_CONNECT_REPLAY_PROCESS_BYTES {
+                return false;
+            }
+            match self.process_bytes.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    fn release_process_bytes(&self, bytes: usize) {
+        if bytes != 0 {
+            self.process_bytes.fetch_sub(bytes, Ordering::AcqRel);
+        }
+    }
+
+    fn reserve_history_bytes(&self, bytes: usize) -> bool {
+        reserve_history_bytes(&self.process_history_bytes, bytes)
+    }
+
+    fn release_history_bytes(&self, bytes: usize) {
+        if bytes != 0 {
+            self.process_history_bytes
+                .fetch_sub(bytes, Ordering::AcqRel);
+        }
+    }
+
+    fn store_error(&self, state: &mut ConnectReplayState, status: Status) -> Status {
+        const ERROR_DETAIL_BASE_BYTES: usize = 96;
+        let message = status.message().chars().take(1024).collect::<String>();
+        let error_bytes = ERROR_DETAIL_BASE_BYTES.saturating_add(message.len());
+        if !self.reserve_history_bytes(error_bytes) {
+            return Status::new(status.code(), message);
+        }
+        state.history_bytes += error_bytes;
+        let error_id = Uuid::new_v4().to_string();
+        state.error = Some(StoredConnectError {
+            id: error_id.clone(),
+            class: "SPARKLESS_CONNECT_ERROR".to_string(),
+            message: message.clone(),
+            created_at: Instant::now(),
+        });
+        enrich_connect_status(Status::new(status.code(), message), &error_id)
+    }
+
+    fn append(&self, response: connect_proto::ExecutePlanResponse) -> Result<(), Status> {
+        self.append_inner(response, false)
+    }
+
+    fn append_completion(
+        &self,
+        response: connect_proto::ExecutePlanResponse,
+    ) -> Result<(), Status> {
+        self.append_inner(response, true)
+    }
+
+    fn append_inner(
+        &self,
+        response: connect_proto::ExecutePlanResponse,
+        completes_operation: bool,
+    ) -> Result<(), Status> {
+        if !self.reattachable {
+            return Ok(());
+        }
+        let encoded_bytes = response.encoded_len();
+        let mut state = self.lock()?;
+        if state.released || state.expired {
+            return Err(Status::cancelled("Connect operation was released"));
+        }
+        if let Some(Err(status)) = state.terminal.as_ref() {
+            return Err(status.clone());
+        }
+        if completes_operation && state.terminal.is_some() {
+            return Err(Status::failed_precondition(
+                "Connect operation already has a terminal outcome",
+            ));
+        }
+        let next_replay_bytes = state.replay_bytes.saturating_add(encoded_bytes);
+        let largest_response = state
+            .responses
+            .iter()
+            .map(|response| response.encoded_bytes)
+            .max()
+            .unwrap_or(0)
+            .max(encoded_bytes);
+        let next_headroom = largest_response;
+        let additional_headroom = next_headroom.saturating_sub(state.replay_headroom_bytes);
+        if next_replay_bytes
+            .saturating_add(state.sender_bytes)
+            .saturating_add(next_headroom)
+            > MAX_CONNECT_REPLAY_OPERATION_BYTES
+        {
+            return Err(Status::resource_exhausted(format!(
+                "Connect replay and sender buffers exceed {MAX_CONNECT_REPLAY_OPERATION_BYTES} bytes for one operation"
+            )));
+        }
+        if !self.reserve_process_bytes(encoded_bytes.saturating_add(additional_headroom)) {
+            return Err(Status::resource_exhausted(format!(
+                "Connect replay exceeds the {MAX_CONNECT_REPLAY_PROCESS_BYTES}-byte process budget"
+            )));
+        }
+        const RESPONSE_INDEX_BYTES: usize = 64;
+        if !self.reserve_history_bytes(RESPONSE_INDEX_BYTES) {
+            self.release_process_bytes(encoded_bytes.saturating_add(additional_headroom));
+            return Err(Status::resource_exhausted(format!(
+                "Connect response history exceeds the {MAX_CONNECT_HISTORY_BYTES}-byte metadata budget"
+            )));
+        }
+        let sequence = state.next_sequence;
+        state.next_sequence = state.next_sequence.checked_add(1).ok_or_else(|| {
+            self.release_process_bytes(encoded_bytes.saturating_add(additional_headroom));
+            self.release_history_bytes(RESPONSE_INDEX_BYTES);
+            Status::resource_exhausted("Connect response sequence overflow")
+        })?;
+        state.replay_bytes = next_replay_bytes;
+        state.replay_headroom_bytes = next_headroom;
+        state.history_bytes += RESPONSE_INDEX_BYTES;
+        state
+            .response_ids
+            .insert(response.response_id.clone(), sequence);
+        state.responses.push_back(StoredConnectResponse {
+            sequence,
+            response,
+            encoded_bytes,
+        });
+        if completes_operation {
+            state.terminal = Some(Ok(()));
+        }
+        Self::notify(&state);
+        Ok(())
+    }
+
+    fn reserve_sender_buffer(&self, bytes: usize) -> Result<u64, Status> {
+        if !self.reattachable {
+            return Ok(0);
+        }
+        let mut state = self.lock()?;
+        if state
+            .replay_bytes
+            .saturating_add(state.sender_bytes)
+            .saturating_add(state.replay_headroom_bytes)
+            .saturating_add(bytes)
+            > MAX_CONNECT_REPLAY_OPERATION_BYTES
+        {
+            return Err(Status::resource_exhausted(format!(
+                "Connect replay and sender buffers exceed {MAX_CONNECT_REPLAY_OPERATION_BYTES} bytes for one operation"
+            )));
+        }
+        let id = state.next_sender_reservation;
+        let next_id = state
+            .next_sender_reservation
+            .checked_add(1)
+            .ok_or_else(|| Status::resource_exhausted("Connect sender reservation id overflow"))?;
+        if !self.reserve_process_bytes(bytes) {
+            return Err(Status::resource_exhausted(format!(
+                "Connect replay and sender buffers exceed the {MAX_CONNECT_REPLAY_PROCESS_BYTES}-byte process budget"
+            )));
+        }
+        state.next_sender_reservation = next_id;
+        state.sender_bytes = state.sender_bytes.saturating_add(bytes);
+        state.sender_reservations.insert(id, (bytes, false));
+        Ok(id)
+    }
+
+    fn release_sender_buffer(&self, reservation_id: u64) {
+        if !self.reattachable {
+            return;
+        }
+        if let Ok(mut state) = self.state.lock() {
+            let Some((released, from_headroom)) = state.sender_reservations.remove(&reservation_id)
+            else {
+                return;
+            };
+            state.sender_bytes -= released;
+            if from_headroom && !state.released && !state.expired {
+                let required_headroom = state
+                    .responses
+                    .iter()
+                    .map(|response| response.encoded_bytes)
+                    .max()
+                    .unwrap_or(0);
+                let restored =
+                    released.min(required_headroom.saturating_sub(state.replay_headroom_bytes));
+                state.replay_headroom_bytes += restored;
+                self.release_process_bytes(released.saturating_sub(restored));
+            } else {
+                self.release_process_bytes(released);
+            }
+        }
+    }
+
+    pub(crate) fn finish(&self, outcome: ConnectOutcome) -> ConnectOutcome {
+        let Ok(mut state) = self.state.lock() else {
+            return outcome;
+        };
+        if let Some(terminal) = state.terminal.clone() {
+            return terminal;
+        }
+        let outcome = match outcome {
+            Ok(()) => Ok(()),
+            Err(status) => Err(self.store_error(&mut state, status)),
+        };
+        state.terminal = Some(outcome.clone());
+        Self::notify(&state);
+        outcome
+    }
+
+    pub(crate) fn mark_producer_stopped(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.producer_stopped = true;
+            state.producer_done.send_replace(true);
+            Self::notify(&state);
+        }
+    }
+
+    pub(crate) fn producer_done(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.state
+            .lock()
+            .map(|state| state.producer_done.subscribe())
+            .unwrap_or_else(|_| tokio::sync::watch::channel(true).1)
+    }
+
+    pub(crate) fn detach(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.attached = false;
+            state.sender = None;
+            if self.reattachable && !state.released && !state.expired {
+                state.detached_at = Some(Instant::now());
+            } else if !self.reattachable {
+                state.cancellation.cancel();
+            }
+        }
+    }
+
+    fn attach(
+        self: &Arc<Self>,
+        last_response_id: Option<&str>,
+    ) -> Result<(u64, tokio::sync::mpsc::Receiver<()>), Status> {
+        if !self.reattachable {
+            return Err(Status::failed_precondition(
+                "INVALID_HANDLE.OPERATION_NOT_REATTACHABLE: operation is not reattachable",
+            ));
+        }
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let mut state = self.lock()?;
+        if state.released || state.expired {
+            return Err(Status::not_found(
+                "INVALID_HANDLE.OPERATION_NOT_FOUND: retained operation is unavailable",
+            ));
+        }
+        if state.attached {
+            return Err(Status::already_exists(
+                "Connect operation already has an attached response stream",
+            ));
+        }
+        let cursor = if let Some(response_id) = last_response_id {
+            if let Some(sequence) = state
+                .response_ids
+                .get(response_id)
+                .or_else(|| state.released_response_ids.get(response_id))
+            {
+                sequence.saturating_add(1)
+            } else {
+                return Err(Status::not_found(
+                    "INVALID_HANDLE.RESPONSE_NOT_FOUND: reattach cursor is not retained",
+                ));
+            }
+        } else {
+            0
+        };
+        let first_retained = state
+            .responses
+            .front()
+            .map(|response| response.sequence)
+            .unwrap_or(state.next_sequence);
+        if cursor < first_retained {
+            return Err(Status::out_of_range(
+                "INVALID_HANDLE.RESPONSE_NOT_FOUND: requested response prefix has been released",
+            ));
+        }
+        state.attached = true;
+        state.detached_at = None;
+        state.sender = Some(sender.clone());
+        if cursor < state.next_sequence || state.terminal.is_some() {
+            let _ = sender.try_send(());
+        }
+        Ok((cursor, receiver))
+    }
+
+    fn next_response_for_sender(&self, cursor: u64) -> Result<ReplayPoll, Status> {
+        self.next_response_inner(cursor, true)
+    }
+
+    fn next_response_inner(&self, cursor: u64, reserve_sender: bool) -> Result<ReplayPoll, Status> {
+        let mut state = self.lock()?;
+        if state.released {
+            return match state.terminal.clone() {
+                Some(Err(status)) => Ok(ReplayPoll::Error(status)),
+                Some(Ok(())) => Ok(ReplayPoll::Complete),
+                None => Ok(ReplayPoll::Error(Status::cancelled(
+                    "Connect operation was released",
+                ))),
+            };
+        }
+        let first_retained = state
+            .responses
+            .front()
+            .map(|response| response.sequence)
+            .unwrap_or(state.next_sequence);
+        if cursor < first_retained {
+            return Err(Status::out_of_range(
+                "INVALID_HANDLE.RESPONSE_NOT_FOUND: requested response prefix has been released",
+            ));
+        }
+        if let Some(index) = state
+            .responses
+            .iter()
+            .position(|response| response.sequence == cursor)
+        {
+            if reserve_sender {
+                let bytes = state.responses[index].encoded_bytes;
+                if bytes > state.replay_headroom_bytes {
+                    return Err(Status::resource_exhausted(
+                        "Connect replay headroom is unavailable",
+                    ));
+                }
+                if state
+                    .replay_bytes
+                    .saturating_add(state.sender_bytes)
+                    .saturating_add(state.replay_headroom_bytes)
+                    > MAX_CONNECT_REPLAY_OPERATION_BYTES
+                {
+                    return Err(Status::resource_exhausted(format!(
+                        "Connect replay and sender buffers exceed {MAX_CONNECT_REPLAY_OPERATION_BYTES} bytes for one operation"
+                    )));
+                }
+                let id = state.next_sender_reservation;
+                state.next_sender_reservation = state
+                    .next_sender_reservation
+                    .checked_add(1)
+                    .ok_or_else(|| {
+                        Status::resource_exhausted("Connect sender reservation id overflow")
+                    })?;
+                state.replay_headroom_bytes -= bytes;
+                state.sender_bytes = state.sender_bytes.saturating_add(bytes);
+                state.sender_reservations.insert(id, (bytes, true));
+                return Ok(ReplayPoll::Response(
+                    Box::new(state.responses[index].response.clone()),
+                    id,
+                ));
+            }
+            return Ok(ReplayPoll::Response(
+                Box::new(state.responses[index].response.clone()),
+                0,
+            ));
+        }
+        let outcome = state.terminal.clone();
+        if let Some(outcome) = outcome
+            && cursor >= state.next_sequence
+        {
+            return match outcome {
+                Ok(()) => Ok(ReplayPoll::Complete),
+                Err(status) => Ok(ReplayPoll::Error(status)),
+            };
+        }
+        Ok(ReplayPoll::Pending)
+    }
+
+    fn release_until(&self, response_id: &str) -> usize {
+        let Ok(mut state) = self.state.lock() else {
+            return 0;
+        };
+        let Some(sequence) = state.response_ids.get(response_id).copied() else {
+            return 0;
+        };
+        let mut released_bytes = 0usize;
+        while state
+            .responses
+            .front()
+            .is_some_and(|response| response.sequence <= sequence)
+        {
+            let Some(response) = state.responses.pop_front() else {
+                break;
+            };
+            released_bytes = released_bytes.saturating_add(response.encoded_bytes);
+            state.response_ids.remove(&response.response.response_id);
+            state
+                .released_response_ids
+                .insert(response.response.response_id.clone(), response.sequence);
+            state
+                .released_response_order
+                .push_back(response.response.response_id);
+        }
+        let mut evicted_indexes = 0usize;
+        while state.released_response_order.len() > MAX_CONNECT_HISTORY_ENTRIES {
+            if let Some(oldest) = state.released_response_order.pop_front() {
+                state.released_response_ids.remove(&oldest);
+                evicted_indexes += 1;
+            }
+        }
+        let evicted_metadata = evicted_indexes.saturating_mul(64);
+        state.history_bytes = state.history_bytes.saturating_sub(evicted_metadata);
+        self.release_history_bytes(evicted_metadata);
+        state.replay_bytes = state.replay_bytes.saturating_sub(released_bytes);
+        self.release_process_bytes(released_bytes);
+        let required_headroom = state
+            .responses
+            .iter()
+            .map(|response| response.encoded_bytes)
+            .max()
+            .unwrap_or(0);
+        if required_headroom < state.replay_headroom_bytes {
+            let released_headroom = state.replay_headroom_bytes - required_headroom;
+            state.replay_headroom_bytes = required_headroom;
+            self.release_process_bytes(released_headroom);
+        }
+        Self::notify(&state);
+        released_bytes
+    }
+
+    pub(crate) fn release_all(&self) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if state.released {
+            return;
+        }
+        state.released = true;
+        state.attached = false;
+        state.detached_at = None;
+        let released_bytes = state.replay_bytes;
+        state.replay_bytes = 0;
+        let released_headroom = state.replay_headroom_bytes;
+        state.replay_headroom_bytes = 0;
+        let released_indexes = state.response_ids.len() + state.released_response_ids.len();
+        let released_metadata = released_indexes.saturating_mul(64);
+        state.history_bytes = state.history_bytes.saturating_sub(released_metadata);
+        state.responses.clear();
+        state.response_ids.clear();
+        state.released_response_ids.clear();
+        state.released_response_order.clear();
+        if !state.producer_stopped {
+            state.cancellation.cancel();
+        }
+        if state.terminal.is_none() {
+            let status = Status::cancelled("Connect operation was released");
+            state.terminal = Some(Err(self.store_error(&mut state, status)));
+        }
+        self.release_process_bytes(released_bytes.saturating_add(released_headroom));
+        self.release_history_bytes(released_metadata);
+        Self::notify(&state);
+        state.sender = None;
+    }
+
+    pub(crate) fn cancel(&self, message: &str) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.producer_stopped || state.terminal.is_some() {
+            return false;
+        }
+        state.cancellation.cancel();
+        let status = Status::cancelled(message.to_string());
+        state.terminal = Some(Err(self.store_error(&mut state, status)));
+        Self::notify(&state);
+        true
+    }
+
+    pub(crate) fn expire_if_detached(&self, now: Instant) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.released
+            || state.expired
+            || state.attached
+            || state
+                .detached_at
+                .is_none_or(|detached| now.duration_since(detached) < CONNECT_DETACHED_RETENTION)
+        {
+            return false;
+        }
+        state.expired = true;
+        state.detached_at = None;
+        state.cancellation.cancel();
+        if state.terminal.is_none() {
+            let status = Status::deadline_exceeded("Connect detached execution expired");
+            state.terminal = Some(Err(self.store_error(&mut state, status)));
+        }
+        let released_bytes = state.replay_bytes;
+        state.replay_bytes = 0;
+        let released_headroom = state.replay_headroom_bytes;
+        state.replay_headroom_bytes = 0;
+        let released_indexes = state.response_ids.len() + state.released_response_ids.len();
+        let released_metadata = released_indexes.saturating_mul(64);
+        state.history_bytes = state.history_bytes.saturating_sub(released_metadata);
+        state.responses.clear();
+        state.response_ids.clear();
+        state.released_response_ids.clear();
+        state.released_response_order.clear();
+        Self::notify(&state);
+        self.release_process_bytes(released_bytes.saturating_add(released_headroom));
+        self.release_history_bytes(released_metadata);
+        true
+    }
+
+    fn fail_if_detached_stalled(&self, now: Instant) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if !self.reattachable
+            || state.producer_stopped
+            || state.terminal.is_some()
+            || state.attached
+            || state
+                .detached_at
+                .is_none_or(|detached| now.duration_since(detached) < Duration::from_secs(5))
+        {
+            return false;
+        }
+        state.cancellation.cancel();
+        let status = Status::deadline_exceeded(
+            "Connect detached response stream made no progress for 5 seconds",
+        );
+        state.terminal = Some(Err(self.store_error(&mut state, status)));
+        Self::notify(&state);
+        true
+    }
+
+    pub(crate) fn error_details(
+        &self,
+        error_id: &str,
+    ) -> Option<connect_proto::fetch_error_details_response::Error> {
+        let state = self.state.lock().ok()?;
+        let error = state.error.as_ref().filter(|error| error.id == error_id)?;
+        Some(connect_proto::fetch_error_details_response::Error {
+            error_type_hierarchy: vec!["org.apache.spark.SparkException".to_string()],
+            message: error.message.clone(),
+            stack_trace: Vec::new(),
+            cause_idx: None,
+            spark_throwable: Some(
+                connect_proto::fetch_error_details_response::SparkThrowable {
+                    error_class: Some(error.class.clone()),
+                    message_parameters: HashMap::new(),
+                    query_contexts: Vec::new(),
+                    sql_state: None,
+                },
+            ),
+        })
+    }
+
+    pub(crate) fn session_identity(&self) -> (&str, u64) {
+        (&self.session_key, self.session_generation)
+    }
+
+    pub(crate) fn has_error(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.error.is_some())
+            .unwrap_or(false)
+    }
+}
+
+impl Drop for ConnectReplayRecord {
+    fn drop(&mut self) {
+        if let Ok(state) = self.state.get_mut() {
+            let retained_process_bytes = state
+                .replay_bytes
+                .saturating_add(state.sender_bytes)
+                .saturating_add(state.replay_headroom_bytes);
+            if retained_process_bytes != 0 {
+                self.process_bytes
+                    .fetch_sub(retained_process_bytes, Ordering::AcqRel);
+            }
+            if state.history_bytes != 0 {
+                self.process_history_bytes
+                    .fetch_sub(state.history_bytes, Ordering::AcqRel);
+            }
+        }
+    }
+}
+
+enum ReplayPoll {
+    Response(Box<connect_proto::ExecutePlanResponse>, u64),
+    Error(Status),
+    Complete,
+    Pending,
+}
+
+enum InterruptTarget {
+    All,
+    Tag(String),
+    Operation(String),
+}
+
+fn reserve_history_bytes(counter: &AtomicUsize, bytes: usize) -> bool {
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        let Some(next) = current.checked_add(bytes) else {
+            return false;
+        };
+        if next > MAX_CONNECT_HISTORY_BYTES {
+            return false;
+        }
+        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+#[derive(prost::Message)]
+struct GoogleRpcStatus {
+    #[prost(int32, tag = "1")]
+    code: i32,
+    #[prost(string, tag = "2")]
+    message: String,
+    #[prost(message, repeated, tag = "3")]
+    details: Vec<prost_types::Any>,
+}
+
+#[derive(prost::Message)]
+struct GoogleRpcErrorInfo {
+    #[prost(string, tag = "1")]
+    reason: String,
+    #[prost(string, tag = "2")]
+    domain: String,
+    #[prost(map = "string, string", tag = "3")]
+    metadata: HashMap<String, String>,
+}
+
+fn enrich_connect_status(status: Status, error_id: &str) -> Status {
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "errorClass".to_string(),
+        "SPARKLESS_CONNECT_ERROR".to_string(),
+    );
+    metadata.insert("errorId".to_string(), error_id.to_string());
+    metadata.insert(
+        "classes".to_string(),
+        "[\"org.apache.spark.SparkException\"]".to_string(),
+    );
+    let details = GoogleRpcStatus {
+        code: status.code() as i32,
+        message: status.message().to_string(),
+        details: vec![prost_types::Any {
+            type_url: "type.googleapis.com/google.rpc.ErrorInfo".to_string(),
+            value: GoogleRpcErrorInfo {
+                reason: "SPARKLESS_CONNECT_ERROR".to_string(),
+                domain: "sparkless".to_string(),
+                metadata,
+            }
+            .encode_to_vec(),
+        }],
+    };
+    Status::with_details(
+        status.code(),
+        status.message().to_string(),
+        bytes::Bytes::from(details.encode_to_vec()),
+    )
+}
+
+fn status_with_standard_details(status: Status) -> Status {
+    let details = GoogleRpcStatus {
+        code: status.code() as i32,
+        message: status.message().to_string(),
+        details: Vec::new(),
+    };
+    Status::with_details(
+        status.code(),
+        status.message().to_string(),
+        bytes::Bytes::from(details.encode_to_vec()),
+    )
+}
 
 /// Tonic codec whose wire scanner rejects structurally excessive protobufs before Prost
 /// allocates their generated message trees.
@@ -120,13 +972,25 @@ impl Server {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        tonic::transport::Server::builder()
+        let serve = tonic::transport::Server::builder()
             .add_service(self.connect_service())
-            .serve_with_shutdown(bind, shutdown)
-            .await
-            .map_err(|error| crate::ServerError {
-                message: format!("Spark Connect listener failed: {error}"),
-            })
+            .serve_with_shutdown(bind, shutdown);
+        tokio::pin!(serve);
+        let mut reaper = tokio::time::interval(Duration::from_secs(5));
+        reaper.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                result = &mut serve => {
+                    return result.map_err(|error| crate::ServerError {
+                        message: format!("Spark Connect listener failed: {error}"),
+                    });
+                }
+                _ = reaper.tick() => {
+                    let _ = self.inner.expire_idle_sessions();
+                    self.inner.expire_detached_connect_operations();
+                }
+            }
+        }
     }
 }
 
@@ -135,6 +999,7 @@ impl ConnectService {
         &self,
         session: &crate::SessionLease,
         deadline: Instant,
+        cancellation: robin_sparkless_core::engine::CancellationToken,
     ) -> Result<
         (
             tokio::sync::OwnedMutexGuard<()>,
@@ -146,26 +1011,28 @@ impl ConnectService {
         let queue_timeout = self.server.inner.config.queue_timeout;
         let queue_deadline =
             tokio::time::Instant::from_std((Instant::now() + queue_timeout).min(deadline));
-        let session_guard =
-            tokio::time::timeout_at(queue_deadline, session.0.serial.clone().lock_owned())
-                .await
-                .map_err(|_| {
-                    Status::deadline_exceeded("timed out waiting for Connect session planning")
-                })?;
-        let session_compute_permit = tokio::time::timeout_at(
-            queue_deadline,
-            session.0.connect_execution.clone().acquire_owned(),
-        )
-        .await
-        .map_err(|_| Status::deadline_exceeded("timed out waiting for Connect session execution"))?
-        .map_err(|_| Status::unavailable("Connect session execution is closed"))?;
-        let compute_permit = tokio::time::timeout_at(
-            queue_deadline,
-            self.server.inner.admission.active.clone().acquire_owned(),
-        )
-        .await
-        .map_err(|_| Status::deadline_exceeded("timed out waiting for Connect compute admission"))?
-        .map_err(|_| Status::unavailable("Connect compute admission is closed"))?;
+        let cancellation_wait = wait_for_cancellation(cancellation.clone());
+        tokio::pin!(cancellation_wait);
+        let session_guard = tokio::select! {
+            _ = &mut cancellation_wait => return Err(Status::cancelled("Connect execution was cancelled while queued")),
+            result = tokio::time::timeout_at(queue_deadline, session.0.serial.clone().lock_owned()) => {
+                result.map_err(|_| Status::deadline_exceeded("timed out waiting for Connect session planning"))?
+            }
+        };
+        let session_compute_permit = tokio::select! {
+            _ = &mut cancellation_wait => return Err(Status::cancelled("Connect execution was cancelled while queued")),
+            result = tokio::time::timeout_at(queue_deadline, session.0.connect_execution.clone().acquire_owned()) => {
+                result.map_err(|_| Status::deadline_exceeded("timed out waiting for Connect session execution"))?
+                    .map_err(|_| Status::unavailable("Connect session execution is closed"))?
+            }
+        };
+        let compute_permit = tokio::select! {
+            _ = &mut cancellation_wait => return Err(Status::cancelled("Connect execution was cancelled while queued")),
+            result = tokio::time::timeout_at(queue_deadline, self.server.inner.admission.active.clone().acquire_owned()) => {
+                result.map_err(|_| Status::deadline_exceeded("timed out waiting for Connect compute admission"))?
+                    .map_err(|_| Status::unavailable("Connect compute admission is closed"))?
+            }
+        };
         Ok((session_guard, compute_permit, session_compute_permit))
     }
 }
@@ -200,6 +1067,26 @@ fn request_reattachable(
     Ok(reattachable.unwrap_or(false))
 }
 
+async fn wait_for_cancellation(cancellation: robin_sparkless_core::engine::CancellationToken) {
+    while !cancellation.is_cancelled() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+fn validate_operation_tags(tags: &[String]) -> Result<(), Status> {
+    if tags.len() > 128
+        || tags.iter().map(String::len).sum::<usize>() > 1024
+        || tags
+            .iter()
+            .any(|tag| tag.is_empty() || tag.contains(',') || tag.len() > 256)
+    {
+        return Err(Status::invalid_argument(
+            "operation tags must be nonempty, at most 256 bytes, and may not contain commas",
+        ));
+    }
+    Ok(())
+}
+
 fn connect_execution_failure(message: String) -> Status {
     let lower = message.to_ascii_lowercase();
     if lower.contains("exceed") || lower.contains("limit") || lower.contains("too large") {
@@ -213,11 +1100,34 @@ type ConnectOutcome = Result<(), Status>;
 
 /// The terminal outcome has its own slot, so a full batch queue cannot discard an error.
 #[derive(Clone)]
-struct ConnectTerminal(Arc<Mutex<Option<tokio::sync::oneshot::Sender<ConnectOutcome>>>>);
+struct ConnectTerminal {
+    sender: Arc<Mutex<Option<tokio::sync::oneshot::Sender<ConnectOutcome>>>>,
+    replay: Arc<ConnectReplayRecord>,
+}
 
 impl ConnectTerminal {
     fn finish(&self, outcome: ConnectOutcome) -> bool {
-        let Some(sender) = self.0.lock().ok().and_then(|mut sender| sender.take()) else {
+        let requested = outcome.clone();
+        let outcome = self.replay.finish(outcome);
+        let accepted = match (&requested, &outcome) {
+            (Ok(()), Ok(())) => true,
+            (Err(requested), Err(settled)) => {
+                requested.code() == settled.code() && requested.message() == settled.message()
+            }
+            _ => false,
+        };
+        self.deliver(outcome) && accepted
+    }
+
+    fn finish_deadline(&self, status: Status) -> bool {
+        let outcome = self.replay.finish(Err(status));
+        let should_cancel = outcome.is_err();
+        self.deliver(outcome);
+        should_cancel
+    }
+
+    fn deliver(&self, outcome: ConnectOutcome) -> bool {
+        let Some(sender) = self.sender.lock().ok().and_then(|mut sender| sender.take()) else {
             return false;
         };
         let _ = sender.send(outcome);
@@ -230,10 +1140,15 @@ fn connect_deadline_status() -> Status {
 }
 
 struct ConnectResponseSender {
-    sender: tokio::sync::mpsc::Sender<connect_proto::ExecutePlanResponse>,
+    sender: tokio::sync::mpsc::Sender<ConnectQueuedResponse>,
     deadline: Instant,
     cancellation: robin_sparkless_core::engine::CancellationToken,
     terminal: ConnectTerminal,
+}
+
+struct ConnectQueuedResponse {
+    response: connect_proto::ExecutePlanResponse,
+    reservation_id: u64,
 }
 
 impl ConnectResponseSender {
@@ -249,24 +1164,90 @@ impl ConnectResponseSender {
                 return false;
             }
         };
-        loop {
-            let now = Instant::now();
-            if now >= self.deadline {
+        let completes_operation = matches!(
+            response.response_type.as_ref(),
+            Some(connect_proto::execute_plan_response::ResponseType::ResultComplete(_))
+        );
+        let now = Instant::now();
+        if now >= self.deadline {
+            if self.terminal.finish_deadline(connect_deadline_status()) {
                 operation.reject(
                     "CONNECT_RESPONSE_DEADLINE",
                     "Connect execution exceeded its response deadline",
                 );
-                self.terminal.finish(Err(connect_deadline_status()));
+                self.cancellation.cancel();
+            }
+            return false;
+        }
+        let sender_bytes = response.encoded_len();
+        let reservation_id = match operation.replay.reserve_sender_buffer(sender_bytes) {
+            Ok(id) => id,
+            Err(status) => {
+                operation.reject("CONNECT_REPLAY_CAPACITY", status.message());
+                self.terminal.finish(Err(status));
                 self.cancellation.cancel();
                 return false;
             }
-            match self.sender.try_send(response) {
+        };
+        let appended = if completes_operation {
+            operation.replay.append_completion(response.clone())
+        } else {
+            operation.replay.append(response.clone())
+        };
+        if let Err(status) = appended {
+            operation.replay.release_sender_buffer(reservation_id);
+            operation.reject("CONNECT_REPLAY_CAPACITY", status.message());
+            self.terminal.finish(Err(status));
+            self.cancellation.cancel();
+            return false;
+        }
+        if completes_operation {
+            operation.complete();
+            self.terminal.finish(Ok(()));
+        }
+        let send_started = now;
+        loop {
+            let now = Instant::now();
+            if now >= self.deadline {
+                operation.replay.release_sender_buffer(reservation_id);
+                if self.terminal.finish_deadline(connect_deadline_status()) {
+                    operation.reject(
+                        "CONNECT_RESPONSE_DEADLINE",
+                        "Connect execution exceeded its response deadline",
+                    );
+                    self.cancellation.cancel();
+                }
+                return false;
+            }
+            if now.duration_since(send_started) >= Duration::from_secs(5) {
+                operation.replay.release_sender_buffer(reservation_id);
+                let status = Status::deadline_exceeded(
+                    "Connect response stream stalled without progress for 5 seconds",
+                );
+                if self.terminal.finish_deadline(status.clone()) {
+                    operation.reject("CONNECT_REPLAY_STALL", status.message());
+                    self.cancellation.cancel();
+                }
+                return false;
+            }
+            match self.sender.try_send(ConnectQueuedResponse {
+                response,
+                reservation_id,
+            }) {
                 Ok(()) => return true,
-                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(queued)) => {
+                    operation
+                        .replay
+                        .release_sender_buffer(queued.reservation_id);
+                    if operation.replay.reattachable {
+                        return true;
+                    }
                     self.cancellation.cancel();
                     return false;
                 }
-                Err(tokio::sync::mpsc::error::TrySendError::Full(returned)) => response = returned,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(returned)) => {
+                    response = returned.response;
+                }
             }
             std::thread::sleep((self.deadline - now).min(Duration::from_millis(10)));
         }
@@ -274,9 +1255,13 @@ impl ConnectResponseSender {
 }
 
 struct ConnectExecutionStream {
-    receiver: tokio::sync::mpsc::Receiver<connect_proto::ExecutePlanResponse>,
+    receiver: tokio::sync::mpsc::Receiver<ConnectQueuedResponse>,
     outcome: Option<tokio::sync::oneshot::Receiver<ConnectOutcome>>,
     cancellation: robin_sparkless_core::engine::CancellationToken,
+    replay: Arc<ConnectReplayRecord>,
+    _session: crate::SessionLease,
+    _sender_permit: tokio::sync::OwnedSemaphorePermit,
+    pending_sender_reservation: u64,
     ended: bool,
 }
 
@@ -290,6 +1275,10 @@ impl tonic::codegen::tokio_stream::Stream for ConnectExecutionStream {
         use std::task::Poll;
 
         let this = self.get_mut();
+        if this.pending_sender_reservation != 0 {
+            this.replay
+                .release_sender_buffer(std::mem::take(&mut this.pending_sender_reservation));
+        }
         if this.ended {
             return Poll::Ready(None);
         }
@@ -310,7 +1299,10 @@ impl tonic::codegen::tokio_stream::Stream for ConnectExecutionStream {
             }
         }
         match this.receiver.poll_recv(cx) {
-            Poll::Ready(Some(response)) => Poll::Ready(Some(Ok(response))),
+            Poll::Ready(Some(queued)) => {
+                this.pending_sender_reservation = queued.reservation_id;
+                Poll::Ready(Some(Ok(queued.response)))
+            }
             Poll::Ready(None) if this.outcome.is_some() => Poll::Pending,
             Poll::Ready(None) => {
                 this.ended = true;
@@ -323,15 +1315,118 @@ impl tonic::codegen::tokio_stream::Stream for ConnectExecutionStream {
 
 impl Drop for ConnectExecutionStream {
     fn drop(&mut self) {
-        self.cancellation.cancel();
+        self.receiver.close();
+        self.replay
+            .release_sender_buffer(self.pending_sender_reservation);
+        while let Ok(queued) = self.receiver.try_recv() {
+            self.replay.release_sender_buffer(queued.reservation_id);
+        }
+        if self.replay.reattachable {
+            self.replay.detach();
+        } else {
+            self.cancellation.cancel();
+        }
     }
 }
 
-struct ConnectProducerFinished(Option<tokio::sync::oneshot::Sender<()>>);
+struct ConnectReplayStream {
+    record: Arc<ConnectReplayRecord>,
+    receiver: tokio::sync::mpsc::Receiver<()>,
+    cursor: u64,
+    _session: crate::SessionLease,
+    _sender_permit: tokio::sync::OwnedSemaphorePermit,
+    pending_sender_reservation: u64,
+    ended: bool,
+}
+
+impl tonic::codegen::tokio_stream::Stream for ConnectReplayStream {
+    type Item = Result<connect_proto::ExecutePlanResponse, Status>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use std::task::Poll;
+
+        let this = self.get_mut();
+        if this.pending_sender_reservation != 0 {
+            this.record
+                .release_sender_buffer(std::mem::take(&mut this.pending_sender_reservation));
+        }
+        if this.ended {
+            return Poll::Ready(None);
+        }
+        loop {
+            match this.record.next_response_for_sender(this.cursor) {
+                Ok(ReplayPoll::Response(response, reservation_id)) => {
+                    this.pending_sender_reservation = reservation_id;
+                    this.cursor = this.cursor.saturating_add(1);
+                    return Poll::Ready(Some(Ok(*response)));
+                }
+                Ok(ReplayPoll::Error(status)) => {
+                    this.ended = true;
+                    return Poll::Ready(Some(Err(status)));
+                }
+                Ok(ReplayPoll::Complete) => {
+                    this.ended = true;
+                    return Poll::Ready(None);
+                }
+                Err(status) => {
+                    this.ended = true;
+                    return Poll::Ready(Some(Err(status)));
+                }
+                Ok(ReplayPoll::Pending) => match this.receiver.poll_recv(cx) {
+                    Poll::Ready(Some(())) => continue,
+                    Poll::Ready(None) | Poll::Pending => return Poll::Pending,
+                },
+            }
+        }
+    }
+}
+
+impl Drop for ConnectReplayStream {
+    fn drop(&mut self) {
+        self.record
+            .release_sender_buffer(self.pending_sender_reservation);
+        self.record.detach();
+    }
+}
+
+struct ConnectAdmissionGuard {
+    replay: Arc<ConnectReplayRecord>,
+    armed: bool,
+}
+
+impl ConnectAdmissionGuard {
+    fn new(replay: Arc<ConnectReplayRecord>) -> Self {
+        Self {
+            replay,
+            armed: true,
+        }
+    }
+
+    fn hand_off(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ConnectAdmissionGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.replay.detach();
+        }
+    }
+}
+
+struct ConnectProducerFinished {
+    sender: Option<tokio::sync::oneshot::Sender<()>>,
+    replay: Arc<ConnectReplayRecord>,
+}
 
 impl Drop for ConnectProducerFinished {
     fn drop(&mut self) {
-        if let Some(sender) = self.0.take() {
+        self.replay.mark_producer_stopped();
+        if let Some(sender) = self.sender.take() {
             let _ = sender.send(());
         }
     }
@@ -352,19 +1447,57 @@ fn start_connect_producer(
     operation_id: String,
     reattachable: bool,
     cancellation: robin_sparkless_core::engine::CancellationToken,
-    sender: tokio::sync::mpsc::Sender<connect_proto::ExecutePlanResponse>,
+    sender: tokio::sync::mpsc::Sender<ConnectQueuedResponse>,
     deadline: Instant,
 ) -> tokio::sync::oneshot::Receiver<ConnectOutcome> {
     let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
-    let terminal = ConnectTerminal(Arc::new(Mutex::new(Some(outcome_tx))));
+    let replay = Arc::clone(&operation.replay);
+    let terminal = ConnectTerminal {
+        sender: Arc::new(Mutex::new(Some(outcome_tx))),
+        replay: Arc::clone(&replay),
+    };
     let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
     let timer_cancellation = cancellation.clone();
     let timer_terminal = terminal.clone();
     let mark_deadline = operation.deadline_marker();
+    let mut producer_done = replay.producer_done();
+    let stall_replay = Arc::clone(&replay);
+    let stall_cancellation = cancellation.clone();
+    let stall_operation = Arc::clone(&operation.record);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(100));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if stall_replay.fail_if_detached_stalled(Instant::now()) {
+                        if let Ok(mut record) = stall_operation.lock()
+                            && record.execution_state == "running"
+                            && record.effect_outcome == "pending"
+                        {
+                            record.execution_state = "failed";
+                            record.effect_outcome = "rejected";
+                            record.error = Some((
+                                "CONNECT_REPLAY_STALL".to_string(),
+                                "Connect detached response stream made no progress for 5 seconds".to_string(),
+                            ));
+                        }
+                        stall_cancellation.cancel();
+                        break;
+                    }
+                }
+                changed = producer_done.changed() => {
+                    if changed.is_err() || *producer_done.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
     tokio::spawn(async move {
         tokio::select! {
             _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
-                if timer_terminal.finish(Err(connect_deadline_status())) {
+                if timer_terminal.finish_deadline(connect_deadline_status()) {
                     mark_deadline();
                     timer_cancellation.cancel();
                 }
@@ -373,7 +1506,10 @@ fn start_connect_producer(
         }
     });
     tokio::task::spawn_blocking(move || {
-        let _finished = ConnectProducerFinished(Some(finished_tx));
+        let _finished = ConnectProducerFinished {
+            sender: Some(finished_tx),
+            replay,
+        };
         let sender = ConnectResponseSender {
             sender,
             deadline,
@@ -452,7 +1588,7 @@ fn start_connect_producer(
         let mut response_bytes = 0usize;
         let mut first_batch = true;
         loop {
-            if sender.sender.is_closed() {
+            if sender.sender.is_closed() && !operation.replay.reattachable {
                 cancellation.cancel();
                 return;
             }
@@ -577,7 +1713,7 @@ fn start_connect_producer(
                 let _ = sender.send(Err(status), &operation);
                 return;
             }
-            if sender.send(Ok(response), &operation) && sender.terminal.finish(Ok(())) {
+            if sender.send(Ok(response), &operation) {
                 operation.complete();
             }
         } else if sender.terminal.finish(Ok(())) {
@@ -613,6 +1749,12 @@ impl SparkConnectService for ConnectService {
             ));
         }
         let reattachable = request_reattachable(&request.request_options)?;
+        validate_operation_tags(&request.tags)?;
+        let sender_permit = Arc::clone(&self.server.inner.connect_stream_senders)
+            .try_acquire_owned()
+            .map_err(|_| {
+                Status::resource_exhausted("Connect live-stream sender capacity is full")
+            })?;
         let client_session_id = request.session_id.clone();
         let fingerprint = Sha256::digest(request.encode_to_vec()).into();
         let identity = session_identity(
@@ -629,6 +1771,8 @@ impl SparkConnectService for ConnectService {
             &identity,
             &operation_id,
             fingerprint,
+            reattachable,
+            request.tags.clone(),
         ) {
             Ok(operation) => operation,
             Err(ConnectReserveError::Request(error)) => return Err(status_from_failure(error)),
@@ -643,23 +1787,27 @@ impl SparkConnectService for ConnectService {
                 ));
             }
         };
+        let mut admission_guard = ConnectAdmissionGuard::new(Arc::clone(&operation.replay));
         let plan = request
             .plan
             .take()
             .expect("plan presence was validated above");
+        let operation_replay = Arc::clone(&operation.replay);
+        let cancellation = operation_replay.cancellation();
+        let stream_session = operation._session.clone();
         let planning_resources = match self
-            .acquire_planning_resources(&operation._session, deadline)
+            .acquire_planning_resources(&operation._session, deadline, cancellation.clone())
             .await
         {
             Ok(resources) => resources,
             Err(status) => {
                 operation.reject("CONNECT_PLAN_QUEUE_TIMEOUT", status.message());
+                let _ = operation.replay.finish(Err(status.clone()));
                 return Err(status);
             }
         };
         let session = operation._session.0.session.clone();
         let server_side_session_id = operation._session.0.server_side_session_id.clone();
-        let cancellation = robin_sparkless_core::engine::CancellationToken::new();
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         let outcome = start_connect_producer(
             operation,
@@ -678,8 +1826,13 @@ impl SparkConnectService for ConnectService {
             receiver,
             outcome: Some(outcome),
             cancellation,
+            replay: Arc::clone(&operation_replay),
+            _session: stream_session,
+            _sender_permit: sender_permit,
+            pending_sender_reservation: 0,
             ended: false,
         };
+        admission_guard.hand_off();
         Ok(Response::new(Box::pin(stream)))
     }
 
@@ -705,7 +1858,13 @@ impl SparkConnectService for ConnectService {
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
-        let planning_resources = self.acquire_planning_resources(&session, deadline).await?;
+        let planning_resources = self
+            .acquire_planning_resources(
+                &session,
+                deadline,
+                robin_sparkless_core::engine::CancellationToken::new(),
+            )
+            .await?;
         let session_id = identity.client_session_id;
         let server_side_session_id = session.0.server_side_session_id.clone();
         let planning = tokio::task::spawn_blocking(move || {
@@ -785,14 +1944,71 @@ impl SparkConnectService for ConnectService {
             request.session_id,
             request.client_observed_server_side_session_id,
         )?;
-        let _session = self
+        let session = self
             .server
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
-        Err(Status::unimplemented(
-            "Connect operation interruption is implemented in delivery slice 5",
-        ))
+        let interrupt_type =
+            connect_proto::interrupt_request::InterruptType::try_from(request.interrupt_type)
+                .map_err(|_| Status::invalid_argument("unknown Connect interrupt type"))?;
+        let target = match (interrupt_type, request.interrupt) {
+            (connect_proto::interrupt_request::InterruptType::All, None) => InterruptTarget::All,
+            (
+                connect_proto::interrupt_request::InterruptType::Tag,
+                Some(connect_proto::interrupt_request::Interrupt::OperationTag(tag)),
+            ) if !tag.is_empty() && !tag.contains(',') && tag.len() <= 256 => {
+                InterruptTarget::Tag(tag)
+            }
+            (
+                connect_proto::interrupt_request::InterruptType::OperationId,
+                Some(connect_proto::interrupt_request::Interrupt::OperationId(operation_id)),
+            ) => {
+                validate_uuid("operation_id", &operation_id)?;
+                InterruptTarget::Operation(operation_id)
+            }
+            (connect_proto::interrupt_request::InterruptType::All, Some(_)) => {
+                return Err(Status::invalid_argument(
+                    "session-wide interrupt must not include an operation target",
+                ));
+            }
+            (connect_proto::interrupt_request::InterruptType::Tag, _) => {
+                return Err(Status::invalid_argument(
+                    "tag interrupt requires a nonempty operation_tag without commas",
+                ));
+            }
+            (connect_proto::interrupt_request::InterruptType::OperationId, _) => {
+                return Err(Status::invalid_argument(
+                    "operation interrupt requires operation_id",
+                ));
+            }
+            (connect_proto::interrupt_request::InterruptType::Unspecified, _) => {
+                return Err(Status::invalid_argument(
+                    "Connect interrupt_type must be specified",
+                ));
+            }
+        };
+        let operations = self
+            .server
+            .inner
+            .connect_operations_for_session(&identity, session.0.generation);
+        let mut interrupted_ids = Vec::new();
+        for operation in operations {
+            let matches = match &target {
+                InterruptTarget::All => true,
+                InterruptTarget::Tag(tag) => operation.tags.contains(tag),
+                InterruptTarget::Operation(id) => operation.operation_id == *id,
+            };
+            if matches && operation.cancel("Connect execution was interrupted") {
+                interrupted_ids.push(operation.operation_id.clone());
+            }
+        }
+        interrupted_ids.sort();
+        Ok(Response::new(connect_proto::InterruptResponse {
+            session_id: identity.client_session_id,
+            server_side_session_id: session.0.server_side_session_id.clone(),
+            interrupted_ids,
+        }))
     }
 
     async fn reattach_execute(
@@ -806,15 +2022,45 @@ impl SparkConnectService for ConnectService {
             request.session_id,
             request.client_observed_server_side_session_id,
         )?;
-        let _session = self
+        let sender_permit = Arc::clone(&self.server.inner.connect_stream_senders)
+            .try_acquire_owned()
+            .map_err(|_| {
+                Status::resource_exhausted("Connect live-stream sender capacity is full")
+            })?;
+        let session = self
             .server
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
         validate_uuid("operation_id", &request.operation_id)?;
-        Err(Status::unimplemented(
-            "Connect response reattachment is implemented in delivery slice 5",
-        ))
+        let operation = self
+            .server
+            .inner
+            .connect_operation(&identity, &request.operation_id)
+            .ok_or_else(|| {
+                status_with_standard_details(Status::not_found(
+                    "INVALID_HANDLE.OPERATION_NOT_FOUND: operation is not retained",
+                ))
+            })?;
+        if !operation.matches_session(&identity.registry_key(), session.0.generation) {
+            return Err(Status::failed_precondition(
+                "INVALID_HANDLE.SESSION_CHANGED: operation belongs to a stale session generation",
+            ));
+        }
+        if let Some(response_id) = request.last_response_id.as_deref() {
+            validate_uuid("last_response_id", response_id)?;
+        }
+        let (cursor, receiver) = operation.attach(request.last_response_id.as_deref())?;
+        let stream = ConnectReplayStream {
+            record: operation,
+            receiver,
+            cursor,
+            _session: session,
+            _sender_permit: sender_permit,
+            pending_sender_reservation: 0,
+            ended: false,
+        };
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn release_execute(
@@ -828,15 +2074,67 @@ impl SparkConnectService for ConnectService {
             request.session_id,
             request.client_observed_server_side_session_id,
         )?;
-        let _session = self
+        let session = self
             .server
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
         validate_uuid("operation_id", &request.operation_id)?;
-        Err(Status::unimplemented(
-            "Connect operation release is implemented in delivery slice 5",
-        ))
+        let operation = self
+            .server
+            .inner
+            .connect_operation(&identity, &request.operation_id)
+            .filter(|operation| {
+                operation.matches_session(&identity.registry_key(), session.0.generation)
+            });
+        let Some(release) = request.release else {
+            return Err(Status::invalid_argument(
+                "ReleaseExecuteRequest.release must be specified",
+            ));
+        };
+        if let Some(operation) = operation.as_ref() {
+            if !operation.reattachable {
+                return Err(Status::failed_precondition(
+                    "INVALID_HANDLE.OPERATION_NOT_REATTACHABLE: operation cannot be released through ReleaseExecute",
+                ));
+            }
+            match release {
+                connect_proto::release_execute_request::Release::ReleaseAll(_) => {
+                    let mut producer_done = operation.producer_done();
+                    operation.release_all();
+                    if !*producer_done.borrow() {
+                        let timeout = self.server.inner.config.response_timeout;
+                        let stopped = tokio::time::timeout(timeout, async {
+                            while !*producer_done.borrow() {
+                                if producer_done.changed().await.is_err() {
+                                    break;
+                                }
+                            }
+                        })
+                        .await;
+                        if stopped.is_err() {
+                            return Err(Status::deadline_exceeded(
+                                "timed out waiting for released Connect execution to stop",
+                            ));
+                        }
+                    }
+                    if !operation.has_error()
+                        && let Ok(mut operations) = self.server.inner.connect_operations.lock()
+                    {
+                        operations.remove(&operation.operation_key);
+                    }
+                }
+                connect_proto::release_execute_request::Release::ReleaseUntil(until) => {
+                    validate_uuid("response_id", &until.response_id)?;
+                    operation.release_until(&until.response_id);
+                }
+            }
+        }
+        Ok(Response::new(connect_proto::ReleaseExecuteResponse {
+            session_id: identity.client_session_id,
+            server_side_session_id: session.0.server_side_session_id.clone(),
+            operation_id: operation.map(|operation| operation.operation_id.clone()),
+        }))
     }
 
     async fn release_session(
@@ -868,14 +2166,23 @@ impl SparkConnectService for ConnectService {
             request.session_id,
             request.client_observed_server_side_session_id,
         )?;
-        let _session = self
+        let session = self
             .server
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
-        Err(Status::unimplemented(
-            "Connect error-detail retrieval is implemented in delivery slice 5",
-        ))
+        let error = self
+            .server
+            .inner
+            .connect_operations_for_session(&identity, session.0.generation)
+            .into_iter()
+            .find_map(|operation| operation.error_details(&request.error_id));
+        Ok(Response::new(connect_proto::FetchErrorDetailsResponse {
+            server_side_session_id: session.0.server_side_session_id.clone(),
+            session_id: identity.client_session_id,
+            root_error_idx: error.as_ref().map(|_| 0),
+            errors: error.into_iter().collect(),
+        }))
     }
 }
 
@@ -1405,6 +2712,489 @@ mod tests {
             responses.push(response?);
         }
         Ok(responses)
+    }
+
+    fn reattach_request(
+        execute: &connect_proto::ExecutePlanRequest,
+        last_response_id: Option<String>,
+    ) -> connect_proto::ReattachExecuteRequest {
+        connect_proto::ReattachExecuteRequest {
+            session_id: execute.session_id.clone(),
+            user_context: execute.user_context.clone(),
+            operation_id: execute.operation_id.clone().unwrap(),
+            last_response_id,
+            ..Default::default()
+        }
+    }
+
+    fn release_request(
+        execute: &connect_proto::ExecutePlanRequest,
+        release: connect_proto::release_execute_request::Release,
+    ) -> connect_proto::ReleaseExecuteRequest {
+        connect_proto::ReleaseExecuteRequest {
+            session_id: execute.session_id.clone(),
+            user_context: execute.user_context.clone(),
+            operation_id: execute.operation_id.clone().unwrap(),
+            release: Some(release),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dropped_connect_stream_reattaches_after_released_cursor_without_reexecution() {
+        use tonic::codegen::tokio_stream::StreamExt;
+
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let execute = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::Range(
+                connect_proto::Range {
+                    end: 20_000,
+                    step: 1,
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        });
+        let operation_id = execute.operation_id.clone().unwrap();
+        let mut original = service
+            .execute_plan(Request::new(execute.clone()))
+            .await
+            .unwrap()
+            .into_inner();
+        let first = original.next().await.unwrap().unwrap();
+        assert!(matches!(
+            first.response_type,
+            Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(_))
+        ));
+        let first_response_id = first.response_id.clone();
+
+        let prefix_release = release_request(
+            &execute,
+            connect_proto::release_execute_request::Release::ReleaseUntil(
+                connect_proto::release_execute_request::ReleaseUntil {
+                    response_id: first_response_id.clone(),
+                },
+            ),
+        );
+        service
+            .release_execute(Request::new(prefix_release))
+            .await
+            .unwrap();
+        drop(original);
+
+        let mut resumed = service
+            .reattach_execute(Request::new(reattach_request(
+                &execute,
+                Some(first_response_id.clone()),
+            )))
+            .await
+            .unwrap()
+            .into_inner();
+        let mut resumed_responses = Vec::new();
+        while let Some(response) = resumed.next().await {
+            resumed_responses.push(response.unwrap());
+        }
+        assert_eq!(resumed_responses.len(), 2);
+        let Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(batch)) =
+            resumed_responses[0].response_type.as_ref()
+        else {
+            panic!("reattachment after the first batch must resume with Arrow data");
+        };
+        assert_eq!(batch.start_offset, Some(16_384));
+        assert_ne!(resumed_responses[0].response_id, first_response_id);
+        assert!(matches!(
+            resumed_responses[1].response_type,
+            Some(connect_proto::execute_plan_response::ResponseType::ResultComplete(_))
+        ));
+        drop(resumed);
+
+        let duplicate = service
+            .execute_plan(Request::new(execute.clone()))
+            .await
+            .err()
+            .expect("reexecuting a retained operation is rejected");
+        assert_eq!(duplicate.code(), Code::AlreadyExists);
+        assert!(duplicate.message().contains("OPERATION_ALREADY_EXISTS"));
+
+        let released = service
+            .release_execute(Request::new(release_request(
+                &execute,
+                connect_proto::release_execute_request::Release::ReleaseAll(
+                    connect_proto::release_execute_request::ReleaseAll {},
+                ),
+            )))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            released.operation_id.as_deref(),
+            Some(operation_id.as_str())
+        );
+        let missing = service
+            .reattach_execute(Request::new(reattach_request(&execute, None)))
+            .await
+            .err()
+            .expect("released operation cannot be reattached");
+        assert_eq!(missing.code(), Code::NotFound);
+        assert!(missing.message().contains("OPERATION_NOT_FOUND"));
+        assert_eq!(
+            service
+                .server
+                .inner
+                .connect_replay_bytes
+                .load(Ordering::Acquire),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_errors_support_the_pinned_clients_error_detail_lookup() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let execute = execute_request(connect_proto::Relation::default());
+        let operation_id = execute.operation_id.clone().unwrap();
+        let identity = ConnectSessionIdentity {
+            user_id: "slice-four-test".to_string(),
+            client_session_id: execute.session_id.clone(),
+            observed_server_session_id: None,
+        };
+        let status = collect_execute_responses(&service, execute.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(status.code(), Code::InvalidArgument);
+        let rpc_status = GoogleRpcStatus::decode(status.details())
+            .expect("errors expose standard google.rpc.Status details");
+        let info = GoogleRpcErrorInfo::decode(rpc_status.details[0].value.as_slice())
+            .expect("status includes standard ErrorInfo");
+        let error_id = info.metadata.get("errorId").unwrap().clone();
+        assert!(Uuid::parse_str(&error_id).is_ok());
+
+        let details = service
+            .fetch_error_details(Request::new(connect_proto::FetchErrorDetailsRequest {
+                session_id: identity.client_session_id,
+                user_context: Some(connect_proto::UserContext {
+                    user_id: identity.user_id,
+                    ..Default::default()
+                }),
+                error_id,
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(details.root_error_idx, Some(0));
+        assert_eq!(details.errors.len(), 1);
+        assert_eq!(details.errors[0].message, status.message());
+        assert_eq!(
+            details.errors[0].error_type_hierarchy[0],
+            "org.apache.spark.SparkException"
+        );
+        assert_eq!(execute.operation_id.as_deref(), Some(operation_id.as_str()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tag_interrupt_cancels_the_matching_native_producer() {
+        use tonic::codegen::tokio_stream::StreamExt;
+
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let mut execute = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::Range(
+                connect_proto::Range {
+                    end: 1_000_000,
+                    step: 1,
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        });
+        execute.tags = vec!["cancel-me".to_string()];
+        let operation_id = execute.operation_id.clone().unwrap();
+        let mut stream = service
+            .execute_plan(Request::new(execute.clone()))
+            .await
+            .unwrap()
+            .into_inner();
+        let interrupted = service
+            .interrupt(Request::new(connect_proto::InterruptRequest {
+                session_id: execute.session_id.clone(),
+                user_context: execute.user_context.clone(),
+                interrupt_type: connect_proto::interrupt_request::InterruptType::Tag as i32,
+                interrupt: Some(connect_proto::interrupt_request::Interrupt::OperationTag(
+                    "cancel-me".to_string(),
+                )),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(interrupted.interrupted_ids, vec![operation_id.clone()]);
+
+        let terminal = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match stream.next().await {
+                    Some(Ok(_)) => continue,
+                    Some(Err(status)) => break status,
+                    None => panic!("interrupted operation must end with a visible failure"),
+                }
+            }
+        })
+        .await
+        .expect("native producer observes cancellation");
+        assert_eq!(terminal.code(), Code::Cancelled);
+        assert!(terminal.message().contains("interrupted"));
+    }
+
+    #[test]
+    fn session_release_cancels_reserved_connect_operations_before_tombstoning() {
+        let server = Server::new(ServerConfig::default()).unwrap();
+        let identity = identity("release-user", &Uuid::new_v4().to_string(), None);
+        let operation_id = Uuid::new_v4().to_string();
+        let operation = server
+            .inner
+            .reserve_connect_operation(
+                &identity,
+                &operation_id,
+                [9; 32],
+                true,
+                vec!["session-op".to_string()],
+            )
+            .unwrap();
+        let cancellation = operation.replay.cancellation();
+        server
+            .inner
+            .release_connect_session(&identity, false)
+            .unwrap();
+        assert!(cancellation.is_cancelled());
+        assert!(
+            server
+                .inner
+                .connect_operation(&identity, &operation_id)
+                .is_none()
+        );
+        drop(operation);
+        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn attached_replay_stream_pins_session_until_transport_detaches() {
+        use tonic::codegen::tokio_stream::StreamExt;
+
+        let server = Server::new(ServerConfig {
+            session_idle_ttl: Duration::from_millis(10),
+            ..Default::default()
+        })
+        .unwrap();
+        let service = ConnectService {
+            server: server.clone(),
+        };
+        let execute = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::Range(
+                connect_proto::Range {
+                    end: 3,
+                    step: 1,
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        });
+        let identity = identity("slice-four-test", &execute.session_id, None);
+        let mut stream = service
+            .execute_plan(Request::new(execute))
+            .await
+            .unwrap()
+            .into_inner();
+        while stream.next().await.is_some() {}
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(server.inner.expire_idle_sessions().unwrap(), 0);
+        drop(stream);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(server.inner.expire_idle_sessions().unwrap(), 1);
+        assert_eq!(
+            server
+                .inner
+                .connect_session_lease(&identity)
+                .err()
+                .expect("expired Connect session is tombstoned")
+                .name,
+            "SessionReleased"
+        );
+    }
+
+    #[test]
+    fn replay_capacity_and_prefix_release_account_for_retained_bytes() {
+        let process_bytes = Arc::new(AtomicUsize::new(0));
+        let history_bytes = Arc::new(AtomicUsize::new(0));
+        let record = Arc::new(
+            ConnectReplayRecord::new(
+                "connect-operation:test".to_string(),
+                "connect:test-session".to_string(),
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                1,
+                true,
+                Vec::new(),
+                Arc::clone(&process_bytes),
+                Arc::clone(&history_bytes),
+            )
+            .unwrap(),
+        );
+        let response_id = Uuid::new_v4().to_string();
+        let response = connect_proto::ExecutePlanResponse {
+            response_id: response_id.clone(),
+            response_type: Some(
+                connect_proto::execute_plan_response::ResponseType::ArrowBatch(
+                    connect_proto::execute_plan_response::ArrowBatch {
+                        row_count: 0,
+                        data: vec![0; 4096],
+                        start_offset: Some(0),
+                    },
+                ),
+            ),
+            ..Default::default()
+        };
+        record.append(response).unwrap();
+        assert!(process_bytes.load(Ordering::Acquire) > 0);
+        assert!(record.release_until(&response_id) > 0);
+        assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+
+        let oversized = connect_proto::ExecutePlanResponse {
+            response_id: Uuid::new_v4().to_string(),
+            response_type: Some(
+                connect_proto::execute_plan_response::ResponseType::ArrowBatch(
+                    connect_proto::execute_plan_response::ArrowBatch {
+                        row_count: 0,
+                        data: vec![0; MAX_CONNECT_REPLAY_OPERATION_BYTES],
+                        start_offset: Some(0),
+                    },
+                ),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(
+            record.append(oversized).unwrap_err().code(),
+            Code::ResourceExhausted
+        );
+        assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+        drop(record);
+        assert_eq!(history_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn sender_reservations_are_released_by_identity_across_detach_and_reattach() {
+        let process_bytes = Arc::new(AtomicUsize::new(0));
+        let history_bytes = Arc::new(AtomicUsize::new(0));
+        let record = Arc::new(
+            ConnectReplayRecord::new(
+                "connect-operation:reservation-test".to_string(),
+                "connect:reservation-session".to_string(),
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                1,
+                true,
+                Vec::new(),
+                Arc::clone(&process_bytes),
+                Arc::clone(&history_bytes),
+            )
+            .unwrap(),
+        );
+        let response = connect_proto::ExecutePlanResponse {
+            response_id: Uuid::new_v4().to_string(),
+            response_type: Some(
+                connect_proto::execute_plan_response::ResponseType::ArrowBatch(
+                    connect_proto::execute_plan_response::ArrowBatch {
+                        row_count: 0,
+                        data: vec![0; 500_000],
+                        start_offset: Some(0),
+                    },
+                ),
+            ),
+            ..Default::default()
+        };
+        let bytes = response.encoded_len();
+        let old_sender = record.reserve_sender_buffer(bytes).unwrap();
+        record.append(response).unwrap();
+        record.detach();
+        let (_cursor, _wake) = record.attach(None).unwrap();
+        let ReplayPoll::Response(_, replay_sender) = record.next_response_for_sender(0).unwrap()
+        else {
+            panic!("retained response must be replayable");
+        };
+
+        record.release_sender_buffer(old_sender);
+        assert_eq!(record.lock().unwrap().sender_bytes, bytes);
+        record.release_all();
+        assert_eq!(record.lock().unwrap().sender_bytes, bytes);
+        assert_eq!(process_bytes.load(Ordering::Acquire), bytes);
+        record.release_sender_buffer(replay_sender);
+        assert_eq!(record.lock().unwrap().sender_bytes, 0);
+        drop(record);
+        assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+        assert_eq!(history_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn retained_history_reserves_enough_capacity_for_replay() {
+        let process_bytes = Arc::new(AtomicUsize::new(0));
+        let history_bytes = Arc::new(AtomicUsize::new(0));
+        let record = Arc::new(
+            ConnectReplayRecord::new(
+                "connect-operation:headroom-test".to_string(),
+                "connect:headroom-session".to_string(),
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                1,
+                true,
+                Vec::new(),
+                Arc::clone(&process_bytes),
+                Arc::clone(&history_bytes),
+            )
+            .unwrap(),
+        );
+        for index in 0..7 {
+            record
+                .append(connect_proto::ExecutePlanResponse {
+                    response_id: Uuid::new_v4().to_string(),
+                    response_type: Some(
+                        connect_proto::execute_plan_response::ResponseType::ArrowBatch(
+                            connect_proto::execute_plan_response::ArrowBatch {
+                                row_count: 0,
+                                data: vec![0; 900_000],
+                                start_offset: Some(index * 900_000),
+                            },
+                        ),
+                    ),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let _ = record.finish(Ok(()));
+        record.detach();
+        let (_cursor, _wake) = record.attach(None).unwrap();
+        let ReplayPoll::Response(response, reservation) =
+            record.next_response_for_sender(0).unwrap()
+        else {
+            panic!("completed retained response must be replayable");
+        };
+        assert!(matches!(
+            response.response_type.as_ref(),
+            Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(batch))
+                if batch.data.len() == 900_000
+        ));
+        record.release_sender_buffer(reservation);
+        assert!(matches!(record.lock().unwrap().terminal, Some(Ok(()))));
+        record.release_all();
+        drop(record);
+        assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+        assert_eq!(history_bytes.load(Ordering::Acquire), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1980,7 +3770,7 @@ mod tests {
         let operation_id = Uuid::new_v4().to_string();
         let first = server
             .inner
-            .reserve_connect_operation(&identity, &operation_id, [7; 32])
+            .reserve_connect_operation(&identity, &operation_id, [7; 32], false, Vec::new())
             .unwrap();
         first.reject("UNIMPLEMENTED", "slice boundary");
         assert_eq!(
@@ -2004,16 +3794,24 @@ mod tests {
             .map(|_| server.inner.reserve_admission().unwrap())
             .collect::<Vec<_>>();
         assert!(matches!(
-            server
-                .inner
-                .reserve_connect_operation(&identity, &operation_id, [7; 32]),
+            server.inner.reserve_connect_operation(
+                &identity,
+                &operation_id,
+                [7; 32],
+                false,
+                Vec::new()
+            ),
             Err(ConnectReserveError::Duplicate)
         ));
         drop(tickets);
         assert!(matches!(
-            server
-                .inner
-                .reserve_connect_operation(&identity, &operation_id, [8; 32]),
+            server.inner.reserve_connect_operation(
+                &identity,
+                &operation_id,
+                [8; 32],
+                false,
+                Vec::new()
+            ),
             Err(ConnectReserveError::Conflict)
         ));
     }
@@ -2088,6 +3886,8 @@ mod tests {
                     &reserve_identity,
                     &reserve_id,
                     [3; 32],
+                    false,
+                    Vec::new(),
                 )
             });
             let release_server = server.clone();

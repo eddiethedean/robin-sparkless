@@ -31,8 +31,20 @@ In another terminal, using the environment created by the fixture setup above, r
 
 The smoke checks the range/filter/count witness, scalar local relations and their Arrow physical
 types, schema-only empty input, multi-batch offsets, and duplicate aliases through both
-`collect()` and `toArrow()`. It is development evidence only; it does not complete V18/V20 or test
-reattachment, replay, the reference engine, or the response-byte/total-output failure boundaries.
+`collect()` and `toArrow()`. It is development evidence only; it does not complete V18/V20, the
+reference comparison, or the response-byte/total-output failure boundaries.
+
+With the same listener still running, test replay over a dropped gRPC connection:
+
+```sh
+/tmp/sparkless-connect-client-py311/bin/python tests/connect/smoke_lifecycle_public_client.py
+```
+
+This sends the standard Spark Connect range request over gRPC, closes the connection after the
+first Arrow response, acknowledges that prefix from a new connection, reattaches after the
+acknowledged response ID, and releases the completed operation. The in-process Rust tests cover
+tag interruption, session-release cancellation, enriched error lookup, duplicate protection, and
+capacity/accounting behavior; these focused checks do not pass V21/V22 as an integrated gate.
 Stop the listener with Ctrl-C when finished.
 
 The interpreter-specific dependency snapshots are hash-locked for CPython 3.11:

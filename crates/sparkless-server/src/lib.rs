@@ -105,6 +105,14 @@ struct ServerInner {
     connect_tombstones: Mutex<HashMap<String, String>>,
     #[cfg(feature = "connect")]
     connect_session_lifecycle: Mutex<()>,
+    #[cfg(feature = "connect")]
+    connect_operations: Mutex<HashMap<String, Arc<connect::ConnectReplayRecord>>>,
+    #[cfg(feature = "connect")]
+    connect_replay_bytes: Arc<AtomicUsize>,
+    #[cfg(feature = "connect")]
+    connect_history_bytes: Arc<AtomicUsize>,
+    #[cfg(feature = "connect")]
+    connect_stream_senders: Arc<Semaphore>,
     active_sessions: AtomicUsize,
     next_session_generation: AtomicU64,
     operation_records: Mutex<OperationRegistry>,
@@ -202,6 +210,7 @@ struct ConnectOperationLease {
     record: Arc<Mutex<OperationRecord>>,
     _session: SessionLease,
     _admission: AdmissionTicket,
+    replay: Arc<connect::ConnectReplayRecord>,
 }
 
 #[cfg(feature = "connect")]
@@ -257,6 +266,7 @@ impl ConnectOperationLease {
 #[cfg(feature = "connect")]
 impl Drop for ConnectOperationLease {
     fn drop(&mut self) {
+        self.replay.mark_producer_stopped();
         if let Ok(mut record) = self.record.lock()
             && record.execution_state == "running"
             && record.effect_outcome == "pending"
@@ -267,6 +277,9 @@ impl Drop for ConnectOperationLease {
                 "Cancelled".to_string(),
                 "Connect plan request was cancelled before planning completed".to_string(),
             ));
+            let _ = self.replay.finish(Err(tonic::Status::cancelled(
+                "Connect plan request was cancelled before planning completed",
+            )));
         }
     }
 }
@@ -413,6 +426,14 @@ impl Server {
             connect_tombstones: Mutex::new(HashMap::new()),
             #[cfg(feature = "connect")]
             connect_session_lifecycle: Mutex::new(()),
+            #[cfg(feature = "connect")]
+            connect_operations: Mutex::new(HashMap::new()),
+            #[cfg(feature = "connect")]
+            connect_replay_bytes: Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "connect")]
+            connect_history_bytes: Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "connect")]
+            connect_stream_senders: Arc::new(Semaphore::new(connect::MAX_CONNECT_STREAM_SENDERS)),
             active_sessions: AtomicUsize::new(0),
             next_session_generation: AtomicU64::new(1),
             mutation_lane: Arc::new(AsyncMutex::new(())),
@@ -745,8 +766,67 @@ impl ServerInner {
             }
             tombstones.insert(key.clone(), server_side_session_id.clone());
         }
+        if let Ok(mut operations) = self.connect_operations.lock() {
+            let released = operations
+                .iter()
+                .filter(|(_, operation)| operation.session_identity().0 == key)
+                .map(|(operation_key, operation)| {
+                    operation.release_all();
+                    operation_key.clone()
+                })
+                .collect::<Vec<_>>();
+            for operation_key in released {
+                operations.remove(&operation_key);
+            }
+        }
         self.close_session(&key)?;
         Ok(server_side_session_id)
+    }
+
+    #[cfg(feature = "connect")]
+    fn connect_operation(
+        &self,
+        identity: &ConnectSessionIdentity,
+        operation_id: &str,
+    ) -> Option<Arc<connect::ConnectReplayRecord>> {
+        let key = connect_operation_key(identity, operation_id);
+        self.connect_operations.lock().ok()?.get(&key).cloned()
+    }
+
+    #[cfg(feature = "connect")]
+    fn connect_operations_for_session(
+        &self,
+        identity: &ConnectSessionIdentity,
+        generation: u64,
+    ) -> Vec<Arc<connect::ConnectReplayRecord>> {
+        self.connect_operations
+            .lock()
+            .map(|operations| {
+                operations
+                    .values()
+                    .filter(|operation| {
+                        operation.matches_session(&identity.registry_key(), generation)
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[cfg(feature = "connect")]
+    fn expire_detached_connect_operations(&self) -> usize {
+        let now = Instant::now();
+        let Ok(mut operations) = self.connect_operations.lock() else {
+            return 0;
+        };
+        let mut expired = 0usize;
+        operations.retain(|_, operation| {
+            if operation.expire_if_detached(now) {
+                expired += 1;
+            }
+            operation.retain_in_registry()
+        });
+        expired
     }
 
     fn close_session(&self, id: &str) -> Result<(), RequestFailure> {
@@ -771,6 +851,11 @@ impl ServerInner {
     }
 
     fn expire_idle_sessions(&self) -> Result<usize, RequestFailure> {
+        #[cfg(feature = "connect")]
+        let _connect_lifecycle = self
+            .connect_session_lifecycle
+            .lock()
+            .map_err(|_| internal_failure())?;
         let now = Instant::now();
         let mut expired = Vec::new();
         {
@@ -789,6 +874,38 @@ impl ServerInner {
                 }
             }
             for id in expired_ids {
+                #[cfg(feature = "connect")]
+                if id.starts_with("connect:") {
+                    let Some(session) = sessions.get(&id) else {
+                        continue;
+                    };
+                    let mut tombstones = self
+                        .connect_tombstones
+                        .lock()
+                        .map_err(|_| internal_failure())?;
+                    if !tombstones.contains_key(&id)
+                        && tombstones.len() >= MAX_CONNECT_SESSION_TOMBSTONES
+                    {
+                        continue;
+                    }
+                    tombstones.insert(id.clone(), session.server_side_session_id.clone());
+                    drop(tombstones);
+                    let mut operations = self
+                        .connect_operations
+                        .lock()
+                        .map_err(|_| internal_failure())?;
+                    let operation_keys = operations
+                        .iter()
+                        .filter(|(_, operation)| operation.session_identity().0 == id)
+                        .map(|(key, operation)| {
+                            operation.release_all();
+                            key.clone()
+                        })
+                        .collect::<Vec<_>>();
+                    for key in operation_keys {
+                        operations.remove(&key);
+                    }
+                }
                 if let Some(session) = sessions.remove(&id) {
                     session.closing.store(true, Ordering::Release);
                     expired.push(session);
@@ -906,6 +1023,8 @@ impl ServerInner {
         identity: &ConnectSessionIdentity,
         operation_id: &str,
         fingerprint: [u8; 32],
+        reattachable: bool,
+        tags: Vec<String>,
     ) -> Result<ConnectOperationLease, ConnectReserveError> {
         let _lifecycle = self
             .connect_session_lifecycle
@@ -925,17 +1044,70 @@ impl ServerInner {
         let session = self
             .connect_session_lease_locked(identity)
             .map_err(ConnectReserveError::Request)?;
+        {
+            let mut operations = self
+                .connect_operations
+                .lock()
+                .map_err(|_| ConnectReserveError::Request(internal_failure()))?;
+            operations.retain(|_, operation| operation.retain_in_registry());
+            let active = operations
+                .values()
+                .filter(|operation| operation.is_producer_active())
+                .count();
+            if active >= connect::MAX_CONNECT_LIVE_OPERATIONS {
+                return Err(ConnectReserveError::Request(connect_request_failure(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "ConnectOperationCapacityExceeded",
+                    "Connect live-operation capacity is full",
+                )));
+            }
+            if operations.len() >= connect::MAX_CONNECT_HISTORY_ENTRIES {
+                return Err(ConnectReserveError::Request(connect_request_failure(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "ConnectOperationHistoryCapacityExceeded",
+                    "Connect operation history is full",
+                )));
+            }
+        }
+        let replay = Arc::new(
+            connect::ConnectReplayRecord::new(
+                operation_key.clone(),
+                identity.registry_key(),
+                identity.client_session_id.clone(),
+                session.0.server_side_session_id.clone(),
+                operation_id.to_string(),
+                session.0.generation,
+                reattachable,
+                tags,
+                Arc::clone(&self.connect_replay_bytes),
+                Arc::clone(&self.connect_history_bytes),
+            )
+            .map_err(|_| {
+                ConnectReserveError::Request(connect_request_failure(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "ConnectOperationHistoryCapacityExceeded",
+                    "Connect retained-history metadata budget is full",
+                ))
+            })?,
+        );
         match self.reserve_operation(
             &operation_key,
             fingerprint,
             &session.0.id,
             session.0.generation,
         ) {
-            ReserveOperation::New(record) => Ok(ConnectOperationLease {
-                record,
-                _session: session,
-                _admission: admission,
-            }),
+            ReserveOperation::New(record) => {
+                self.connect_operations
+                    .lock()
+                    .map_err(|_| ConnectReserveError::Request(internal_failure()))?
+                    .insert(operation_key, Arc::clone(&replay));
+                Ok(ConnectOperationLease {
+                    record,
+                    _session: session,
+                    _admission: admission,
+                    replay,
+                })
+            }
             ReserveOperation::Existing(_) => Err(ConnectReserveError::Duplicate),
             ReserveOperation::Conflict => Err(ConnectReserveError::Conflict),
             ReserveOperation::Full => Err(ConnectReserveError::Request(connect_request_failure(
@@ -1023,6 +1195,16 @@ impl Drop for SessionLease {
                 }
             }
         }
+    }
+}
+
+impl Clone for SessionLease {
+    fn clone(&self) -> Self {
+        self.0.active.fetch_add(1, Ordering::AcqRel);
+        if let Ok(mut last_activity) = self.0.last_activity.lock() {
+            *last_activity = Instant::now();
+        }
+        Self(Arc::clone(&self.0))
     }
 }
 
