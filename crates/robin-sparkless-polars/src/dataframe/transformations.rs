@@ -60,6 +60,19 @@ fn expr_contains_selector(expr: &Expr) -> bool {
     found.into_inner()
 }
 
+/// Aggregates reduce the input to a result row and must not be broadcast back to the
+/// original height by the scalar projection cross-join below.
+fn expr_contains_aggregation(expr: &Expr) -> bool {
+    let found = RefCell::new(false);
+    let _ = expr.clone().try_map_expr(|e| {
+        if matches!(&e, Expr::Agg(_) | Expr::Len) {
+            *found.borrow_mut() = true;
+        }
+        Ok(e)
+    });
+    found.into_inner()
+}
+
 /// Returns true if the expression tree contains a reference to the given column name (so we must not drop it before adding).
 fn expr_refs_column(expr: &Expr, column_name: &str) -> bool {
     expr_referenced_columns(expr).contains(column_name)
@@ -460,6 +473,7 @@ pub fn select_with_exprs(
         })
         .collect();
     let mut name_count: HashMap<String, u32> = HashMap::new();
+    let mut used_output_names = HashSet::new();
     let mut output_names: Vec<String> = Vec::new();
     let exprs: Vec<Expr> = exprs
         .into_iter()
@@ -467,15 +481,30 @@ pub fn select_with_exprs(
             let base_name = polars_plan::utils::expr_output_name(&e)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|_| "_".to_string());
-            let count = name_count.entry(base_name.clone()).or_insert(0);
-            *count += 1;
-            let final_name = if *count == 1 {
-                base_name.clone()
-            } else {
-                format!("{}_{}", base_name, *count - 1)
+            let next_suffix = name_count.entry(base_name.clone()).or_insert(0);
+            let final_name = loop {
+                let candidate = if *next_suffix == 0 {
+                    base_name.clone()
+                } else {
+                    format!("{base_name}_{next_suffix}")
+                };
+                *next_suffix = next_suffix.saturating_add(1);
+                let name_is_unique = if case_sensitive {
+                    used_output_names.insert(candidate.clone())
+                } else if used_output_names
+                    .iter()
+                    .any(|used| used.to_lowercase() == candidate.to_lowercase())
+                {
+                    false
+                } else {
+                    used_output_names.insert(candidate.clone())
+                };
+                if name_is_unique {
+                    break candidate;
+                }
             };
             output_names.push(final_name.clone());
-            if *count == 1 {
+            if final_name == base_name {
                 e
             } else {
                 e.alias(final_name.as_str())
@@ -532,6 +561,7 @@ pub fn select_with_exprs(
         && first_col.is_some()
         && exprs.iter().all(|e| {
             !expr_contains_selector(e)
+                && !expr_contains_aggregation(e)
                 && expr_referenced_columns(e)
                     .intersection(&df_columns)
                     .next()
@@ -539,7 +569,17 @@ pub fn select_with_exprs(
         });
     let lf = if no_col_refs {
         let first = first_col.unwrap();
-        let lf_key = lf.clone().select([col(first)]);
+        let mut row_key = "__sparkless_projection_row_key".to_string();
+        let mut suffix = 0usize;
+        while df_columns
+            .iter()
+            .chain(output_names.iter())
+            .any(|name| name.to_lowercase() == row_key.to_lowercase())
+        {
+            suffix = suffix.saturating_add(1);
+            row_key = format!("__sparkless_projection_row_key_{suffix}");
+        }
+        let lf_key = lf.clone().select([col(first).alias(row_key.as_str())]);
         let lf_vals = lf.select(&exprs);
         let joined = lf_key.cross_join(lf_vals, None);
         let right_exprs: Vec<Expr> = output_names.iter().map(|n| col(n.as_str())).collect();

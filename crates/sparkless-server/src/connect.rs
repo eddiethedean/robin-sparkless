@@ -1,7 +1,8 @@
 //! Spark Connect 4.0.5 gRPC adapter and bounded protobuf boundary.
 //!
-//! This slice establishes the public service and shared identity/admission contracts. Plan
-//! translation, response production, and replay are deliberately implemented in later slices.
+//! The bounded public service translates the frozen relation subset and serves schema/config
+//! analysis while sharing the HTTP service's identity and admission registries. Arrow response
+//! production and replay remain later delivery slices.
 
 use crate::{ConnectReserveError, ConnectSessionIdentity, RequestFailure, Server, connect_proto};
 use bytes::Buf;
@@ -15,6 +16,10 @@ use std::sync::OnceLock;
 use tonic::codec::{BufferSettings, Codec, DecodeBuf, Decoder};
 use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
+
+mod analysis;
+mod config;
+mod plan;
 
 pub const MAX_CONNECT_PROTO_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_CONNECT_PROTO_DEPTH: usize = 64;
@@ -116,6 +121,35 @@ impl Server {
     }
 }
 
+impl ConnectService {
+    async fn acquire_planning_resources(
+        &self,
+        session: &crate::SessionLease,
+    ) -> Result<
+        (
+            tokio::sync::OwnedMutexGuard<()>,
+            tokio::sync::OwnedSemaphorePermit,
+        ),
+        Status,
+    > {
+        let queue_timeout = self.server.inner.config.queue_timeout;
+        let session_guard =
+            tokio::time::timeout(queue_timeout, session.0.serial.clone().lock_owned())
+                .await
+                .map_err(|_| {
+                    Status::deadline_exceeded("timed out waiting for Connect session planning")
+                })?;
+        let compute_permit = tokio::time::timeout(
+            queue_timeout,
+            self.server.inner.admission.active.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("timed out waiting for Connect compute admission"))?
+        .map_err(|_| Status::unavailable("Connect compute admission is closed"))?;
+        Ok((session_guard, compute_permit))
+    }
+}
+
 type ConnectResponseStream = std::pin::Pin<
     Box<
         dyn tonic::codegen::tokio_stream::Stream<
@@ -134,7 +168,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::ExecutePlanRequest>,
     ) -> Result<Response<Self::ExecutePlanStream>, Status> {
-        let request = request.into_inner();
+        let mut request = request.into_inner();
         validate_request_budget("ExecutePlanRequest", &request)?;
         if request.plan.is_none() {
             return Err(Status::invalid_argument(
@@ -169,13 +203,48 @@ impl SparkConnectService for ConnectService {
                 ));
             }
         };
-        operation.reject(
-            "UNIMPLEMENTED_CONNECT_PLAN",
-            "Connect plan translation is implemented in delivery slice 3",
-        );
-        Err(Status::unimplemented(
-            "Connect plan translation is implemented in delivery slice 3",
-        ))
+        let plan = request
+            .plan
+            .take()
+            .expect("plan presence was validated above");
+        let planning_resources = match self.acquire_planning_resources(&operation._session).await {
+            Ok(resources) => resources,
+            Err(status) => {
+                operation.reject("CONNECT_PLAN_QUEUE_TIMEOUT", status.message());
+                return Err(status);
+            }
+        };
+        let session = operation._session.0.session.clone();
+        let response_timeout = self.server.inner.config.response_timeout;
+        let planning = tokio::task::spawn_blocking(move || {
+            let (_session_guard, _compute_permit) = planning_resources;
+            let result = plan::translate_plan(&session, &plan)
+                .and_then(|translated| plan::schema_to_proto(&translated.schema).map(|_| ()));
+            match result {
+                Ok(()) => {
+                    operation.reject(
+                        "UNIMPLEMENTED_CONNECT_ARROW_RESPONSE",
+                        "Connect result streaming and Arrow encoding are implemented in delivery slice 4",
+                    );
+                    Err(Status::unimplemented(
+                        "Connect result streaming and Arrow encoding are implemented in delivery slice 4",
+                    ))
+                }
+                Err(status) => {
+                    operation.reject("CONNECT_PLAN_TRANSLATION_FAILED", status.message());
+                    Err(status)
+                }
+            }
+        });
+        match tokio::time::timeout(response_timeout, planning).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => Err(Status::internal(format!(
+                "Connect planning worker failed: {error}"
+            ))),
+            Err(_) => Err(Status::deadline_exceeded(
+                "Connect plan analysis exceeded its deadline",
+            )),
+        }
     }
 
     async fn analyze_plan(
@@ -189,14 +258,41 @@ impl SparkConnectService for ConnectService {
             request.session_id,
             request.client_observed_server_side_session_id,
         )?;
-        let _session = self
+        let admission = self
+            .server
+            .inner
+            .reserve_admission()
+            .map_err(status_from_failure)?;
+        let session = self
             .server
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
-        Err(Status::unimplemented(
-            "Connect analysis is implemented in delivery slice 3",
-        ))
+        let planning_resources = self.acquire_planning_resources(&session).await?;
+        let session_id = identity.client_session_id;
+        let server_side_session_id = session.0.server_side_session_id.clone();
+        let response_timeout = self.server.inner.config.response_timeout;
+        let planning = tokio::task::spawn_blocking(move || {
+            let _admission = admission;
+            let (_session_guard, _compute_permit) = planning_resources;
+            let response = analysis::response(
+                &session_id,
+                &server_side_session_id,
+                &session.0.session,
+                request.analyze,
+            )?;
+            Ok::<_, Status>(response)
+        });
+        match tokio::time::timeout(response_timeout, planning).await {
+            Ok(Ok(Ok(response))) => Ok(Response::new(response)),
+            Ok(Ok(Err(status))) => Err(status),
+            Ok(Err(error)) => Err(Status::internal(format!(
+                "Connect analysis worker failed: {error}"
+            ))),
+            Err(_) => Err(Status::deadline_exceeded(
+                "Connect analysis exceeded its deadline",
+            )),
+        }
     }
 
     async fn config(
@@ -210,14 +306,18 @@ impl SparkConnectService for ConnectService {
             request.session_id,
             request.client_observed_server_side_session_id,
         )?;
-        let _session = self
+        let session = self
             .server
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
-        Err(Status::unimplemented(
-            "Connect configuration is implemented in delivery slice 3",
-        ))
+        let response = config::response(
+            &identity.client_session_id,
+            &session.0.server_side_session_id,
+            &session.0.session,
+            request.operation,
+        )?;
+        Ok(Response::new(response))
     }
 
     async fn add_artifacts(
@@ -644,6 +744,194 @@ mod tests {
         .expect("unknown public protobuf fields remain skippable");
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn captured_public_analysis_requests_return_native_schemas_without_execution() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let schema_request = connect_proto::AnalyzePlanRequest::decode(
+            include_bytes!(
+                "../../../tests/connect/fixtures/pyspark-client-4.0.5/analyze-range-schema.pb"
+            )
+            .as_slice(),
+        )
+        .unwrap();
+        let schema_response = service
+            .analyze_plan(Request::new(schema_request))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            schema_response.session_id,
+            "11111111-1111-4111-8111-111111111111"
+        );
+        assert!(Uuid::parse_str(&schema_response.server_side_session_id).is_ok());
+        let Some(connect_proto::analyze_plan_response::Result::Schema(schema)) =
+            schema_response.result
+        else {
+            panic!("captured schema request must return a schema result");
+        };
+        let Some(connect_proto::data_type::Kind::Struct(schema)) =
+            schema.schema.and_then(|schema| schema.kind)
+        else {
+            panic!("range schema must be a StructType");
+        };
+        assert_eq!(schema.fields.len(), 1);
+        assert_eq!(schema.fields[0].name, "id");
+        assert!(!schema.fields[0].nullable);
+        assert!(matches!(
+            schema.fields[0]
+                .data_type
+                .as_ref()
+                .and_then(|field| field.kind.as_ref()),
+            Some(connect_proto::data_type::Kind::Long(_))
+        ));
+
+        let ddl_request = connect_proto::AnalyzePlanRequest::decode(
+            include_bytes!(
+                "../../../tests/connect/fixtures/pyspark-client-4.0.5/analyze-ddl-schema.pb"
+            )
+            .as_slice(),
+        )
+        .unwrap();
+        let ddl_response = service
+            .analyze_plan(Request::new(ddl_request))
+            .await
+            .unwrap()
+            .into_inner();
+        let Some(connect_proto::analyze_plan_response::Result::DdlParse(ddl)) = ddl_response.result
+        else {
+            panic!("captured DDL request must return a DDL parse result");
+        };
+        let Some(connect_proto::data_type::Kind::Struct(schema)) =
+            ddl.parsed.and_then(|schema| schema.kind)
+        else {
+            panic!("DDL parse result must be a StructType");
+        };
+        assert_eq!(
+            schema
+                .fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["id", "label"]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelled_queued_execute_plan_settles_its_operation_record() {
+        use std::sync::atomic::Ordering;
+
+        let config = ServerConfig {
+            max_active_operations: 1,
+            ..ServerConfig::default()
+        };
+        let server = Server::new(config).unwrap();
+        let _compute = server
+            .inner
+            .admission
+            .active
+            .clone()
+            .acquire_owned()
+            .await
+            .unwrap();
+        let service = ConnectService {
+            server: server.clone(),
+        };
+        let plan = connect_proto::Plan {
+            op_type: Some(connect_proto::plan::OpType::Root(connect_proto::Relation {
+                common: None,
+                rel_type: Some(connect_proto::relation::RelType::Range(
+                    connect_proto::Range {
+                        end: 10,
+                        step: 1,
+                        ..Default::default()
+                    },
+                )),
+            })),
+        };
+        let request = connect_proto::ExecutePlanRequest {
+            session_id: Uuid::new_v4().to_string(),
+            operation_id: Some(Uuid::new_v4().to_string()),
+            user_context: Some(connect_proto::UserContext {
+                user_id: "cancel-test".into(),
+                ..Default::default()
+            }),
+            plan: Some(plan),
+            ..Default::default()
+        };
+        let handle = tokio::spawn(async move { service.execute_plan(Request::new(request)).await });
+        let record = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(record) = server
+                    .inner
+                    .operation_records
+                    .lock()
+                    .unwrap()
+                    .records
+                    .values()
+                    .next()
+                    .cloned()
+                {
+                    break record;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("ExecutePlan should reserve an operation before waiting for compute");
+
+        handle.abort();
+        assert!(handle.await.is_err());
+        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+        let record = record.lock().unwrap();
+        assert_eq!(record.execution_state, "failed");
+        assert_eq!(record.effect_outcome, "cancelled");
+    }
+
+    #[tokio::test]
+    async fn captured_public_config_requests_use_the_frozen_effective_profile() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        for fixture in [
+            "config-create-dataframe-defaults",
+            "config-get",
+            "config-get-all",
+            "config-get-option",
+            "config-get-with-default",
+            "config-is-modifiable",
+            "config-set",
+            "config-unset",
+        ] {
+            let path = format!(
+                "{}/../../tests/connect/fixtures/pyspark-client-4.0.5/{fixture}.pb",
+                env!("CARGO_MANIFEST_DIR"),
+            );
+            let bytes = std::fs::read(path).expect("captured config request fixture");
+            let request = connect_proto::ConfigRequest::decode(bytes.as_slice()).unwrap();
+            let response = service
+                .config(Request::new(request))
+                .await
+                .unwrap_or_else(|status| panic!("{fixture} should be supported: {status}"))
+                .into_inner();
+            assert!(Uuid::parse_str(&response.server_side_session_id).is_ok());
+            if fixture == "config-create-dataframe-defaults" {
+                let values = response
+                    .pairs
+                    .into_iter()
+                    .map(|pair| (pair.key, pair.value.unwrap()))
+                    .collect::<std::collections::HashMap<_, _>>();
+                assert_eq!(values["spark.sql.timestampType"], "TIMESTAMP_LTZ");
+                assert_eq!(values["spark.sql.session.timeZone"], "UTC");
+                assert_eq!(
+                    values["spark.sql.session.localRelationCacheThreshold"],
+                    "67108864"
+                );
+            }
+        }
+    }
+
     #[test]
     fn recursive_schema_depth_and_schema_field_limits_are_rejected() {
         let deep_type = nested_data_type(MAX_CONNECT_PROTO_DEPTH / 2 + 1);
@@ -977,9 +1265,13 @@ mod tests {
             }),
             operation_id: Some(Uuid::new_v4().to_string()),
             plan: Some(connect_proto::Plan {
-                op_type: Some(connect_proto::plan::OpType::Root(
-                    connect_proto::Relation::default(),
-                )),
+                op_type: Some(connect_proto::plan::OpType::Root(connect_proto::Relation {
+                    rel_type: Some(connect_proto::relation::RelType::Sql(connect_proto::Sql {
+                        query: "SELECT 1".into(),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                })),
             }),
             ..Default::default()
         };

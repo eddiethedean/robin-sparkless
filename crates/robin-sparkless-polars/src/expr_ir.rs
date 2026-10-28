@@ -1,6 +1,6 @@
 //! Convert core ExprIr to Polars Expr. Used when the root API passes ExprIr into the backend.
 
-use polars::prelude::{DataType, Expr, QuantileMethod, coalesce, col, lit, when};
+use polars::prelude::{DataType, Expr, QuantileMethod, coalesce, col, len, lit, when};
 use robin_sparkless_core::{EngineError, ExprIr, LiteralValue};
 
 /// Convert engine-agnostic ExprIr into a Polars Expr.
@@ -203,6 +203,7 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
 /// Aggregation-style calls (sum, count, avg, percentiles, etc.).
 fn agg_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineError> {
     let out = match (name, args) {
+        ("count_rows", []) => Some(len().cast(DataType::Int64)),
         ("sum", [a]) => {
             let input = crate::column::Column::from_expr(expr_ir_to_expr(a)?, None);
             Some(crate::functions::sum(&input).expr().clone())

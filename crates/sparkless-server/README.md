@@ -24,11 +24,14 @@ transport.
 The default `http` feature serves the existing bounded SQL allowlist, in-memory service
 catalog, positional JSON results, and same-instance mutation identity records. The optional
 `connect` feature generates the Apache Spark 4.0.5 public gRPC service and provides a bounded
-adapter on the same `Server` instance (`connect_service` / `serve_connect_until`). It currently
-establishes protobuf, session-identity, and shared admission boundaries; plan translation,
-analysis, configuration, result streaming, and operation replay remain in later 4.18 slices.
-Connect methods outside that implemented boundary return explicit gRPC errors. The Connect
-listener is not advertised by the HTTP launcher yet.
+adapter on the same `Server` instance (`connect_service` / `serve_connect_until`). The implemented
+4.18 subset translates Range, Filter, Project, Limit, and global `count(1)` plans; it serves scalar
+schema and bounded DDL analysis without collecting rows; and it exposes the captured 4.0.5 config
+profile with idempotent same-value sets and explicit rejection of unsupported changes. `ExecutePlan`
+validates and analyzes supported plans, then returns an explicit slice-4 error until Arrow result
+streaming is enabled. Local relations, artifact-backed relations, replay/lifecycle RPC behavior, and
+other plan or analysis variants remain unsupported. The Connect listener is not advertised by the
+HTTP launcher yet.
 
 Build the features independently:
 

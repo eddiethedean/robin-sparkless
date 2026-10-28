@@ -461,6 +461,99 @@ pub fn parse_select_expr(expr_str: &str) -> Result<(SqlExpr, Option<Ident>), Par
     }
 }
 
+/// Parse one self-contained expression suitable for an adapter that evaluates the result against
+/// a separately supplied relation. Unlike [`parse_select_expr`], this rejects query clauses,
+/// additional projections, and changes to the synthetic source table instead of silently
+/// discarding them.
+pub fn parse_single_expression(expr_str: &str) -> Result<SqlExpr, ParseError> {
+    let e = expr_str.trim();
+    if e.is_empty() {
+        return Err(ParseError(
+            "SQL: expected an expression string, got empty.".to_string(),
+        ));
+    }
+    const TMP_TABLE: &str = "__spark_sql_parser_expr_t";
+    let query = format!("SELECT {e} FROM {TMP_TABLE}");
+    let stmt = parse_one_statement_with_dialect(&query, &MySqlDialect {})?;
+    let query_ast = match stmt {
+        Statement::Query(query) => query,
+        other => {
+            return Err(ParseError(format!(
+                "SQL: expected a single expression query, got {other:?}."
+            )));
+        }
+    };
+    if query_ast.with.is_some()
+        || query_ast.order_by.is_some()
+        || query_ast.limit_clause.is_some()
+        || query_ast.fetch.is_some()
+        || !query_ast.locks.is_empty()
+        || query_ast.for_clause.is_some()
+        || query_ast.settings.is_some()
+        || query_ast.format_clause.is_some()
+        || !query_ast.pipe_operators.is_empty()
+    {
+        return Err(ParseError(
+            "SQL: query clauses are not allowed in a single expression.".to_string(),
+        ));
+    }
+    let select = query_ast.body.as_select().ok_or_else(|| {
+        ParseError("SQL: expected one SELECT expression without set operations.".to_string())
+    })?;
+    if select.projection.len() != 1
+        || select.distinct.is_some()
+        || select.top.is_some()
+        || select.exclude.is_some()
+        || select.into.is_some()
+        || select.from.len() != 1
+        || !select.lateral_views.is_empty()
+        || select.prewhere.is_some()
+        || select.selection.is_some()
+        || !select.cluster_by.is_empty()
+        || !select.distribute_by.is_empty()
+        || !select.sort_by.is_empty()
+        || select.having.is_some()
+        || !select.named_window.is_empty()
+        || select.qualify.is_some()
+        || select.value_table_mode.is_some()
+        || !select.connect_by.is_empty()
+    {
+        return Err(ParseError(
+            "SQL: expected one expression and no SELECT clauses.".to_string(),
+        ));
+    }
+    let source = &select.from[0];
+    if !source.joins.is_empty()
+        || !matches!(
+            &source.relation,
+            sqlparser::ast::TableFactor::Table { name, alias: None, args: None, .. }
+                if name.0.len() == 1
+                    && name.0[0]
+                        .as_ident()
+                        .is_some_and(|identifier| identifier.value == TMP_TABLE)
+        )
+    {
+        return Err(ParseError(
+            "SQL: the synthetic expression source cannot be changed.".to_string(),
+        ));
+    }
+    if !matches!(
+        &select.group_by,
+        sqlparser::ast::GroupByExpr::Expressions(expressions, modifiers)
+            if expressions.is_empty() && modifiers.is_empty()
+    ) {
+        return Err(ParseError(
+            "SQL: GROUP BY is not allowed in a single expression.".to_string(),
+        ));
+    }
+    match &select.projection[0] {
+        SelectItem::UnnamedExpr(expression) => Ok(expression.clone()),
+        other => Err(ParseError(format!(
+            "SQL: expected one unaliased expression, got {other:?}."
+        ))),
+    }
+}
+
 /// Parse a single SQL statement (SELECT or DDL: CREATE SCHEMA / CREATE DATABASE / DROP TABLE/VIEW/SCHEMA).
 ///
 /// Returns the [sqlparser::ast::Statement] on success. Only one statement per call;
@@ -1162,6 +1255,27 @@ mod tests {
         // Unmatched parenthesis or invalid token sequence should yield a parse error.
         let err = parse_select_expr("( unclosed").unwrap_err();
         assert!(!err.0.is_empty());
+    }
+
+    #[test]
+    fn parse_single_expression_rejects_discarded_select_clauses() {
+        assert!(matches!(
+            parse_single_expression("id > 5").unwrap(),
+            SqlExpr::BinaryOp { .. }
+        ));
+        for expression in [
+            "id > 5, id < 10",
+            "id > 5 WHERE id < 10",
+            "id > 5 ORDER BY id",
+            "id > 5 JOIN another ON id = another.id",
+            "id > 5 FROM another",
+            "id > 5; SELECT 1",
+        ] {
+            assert!(
+                parse_single_expression(expression).is_err(),
+                "unexpectedly accepted {expression:?}"
+            );
+        }
     }
 
     // ========== CREATE OR REPLACE TABLE ... USING <format> AS SELECT tests (#1462) ==========

@@ -221,6 +221,23 @@ impl ConnectOperationLease {
     }
 }
 
+#[cfg(feature = "connect")]
+impl Drop for ConnectOperationLease {
+    fn drop(&mut self) {
+        if let Ok(mut record) = self.record.lock()
+            && record.execution_state == "running"
+            && record.effect_outcome == "pending"
+        {
+            record.execution_state = "failed";
+            record.effect_outcome = "cancelled";
+            record.error = Some((
+                "Cancelled".to_string(),
+                "Connect plan request was cancelled before planning completed".to_string(),
+            ));
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct StatementRequest {
     session: String,
