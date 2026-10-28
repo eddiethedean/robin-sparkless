@@ -100,7 +100,10 @@ def verify(
                     "--outdir",
                     str(wheel_output_dir),
                 ],
-                cwd=root / "python",
+                # The published sdist is rooted at the Python project and has
+                # its Rust extension manifest in python/Cargo.toml. Building
+                # from that nested Rust directory loses the root pyproject.
+                cwd=root,
                 env=environment,
                 check=True,
             )

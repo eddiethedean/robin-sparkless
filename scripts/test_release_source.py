@@ -98,8 +98,12 @@ class SourceDistributionTest(unittest.TestCase):
         with tarfile.open(archive, "w:gz") as output:
             for name, content in (
                 ("source/Cargo.lock", "version = 4\n"),
+                (
+                    "source/pyproject.toml",
+                    '[build-system]\nbuild-backend="_sparkless_build"\n'
+                    '[tool.maturin]\nmanifest-path="python/Cargo.toml"\n',
+                ),
                 ("source/python/Cargo.toml", "[package]\nname='sparkless-native'\n"),
-                ("source/python/pyproject.toml", "[build-system]\nbuild-backend='maturin'\n"),
             ):
                 data = content.encode()
                 member = tarfile.TarInfo(name)
@@ -133,8 +137,7 @@ class SourceDistributionTest(unittest.TestCase):
 
         command = run.call_args.args[0]
         self.assertEqual(command[1:4], ["-m", "build", "--wheel"])
-        self.assertEqual(run.call_args.kwargs["cwd"].name, "python")
-        self.assertEqual(run.call_args.kwargs["cwd"].parent.name, "source")
+        self.assertEqual(run.call_args.kwargs["cwd"].name, "source")
         self.assertEqual(run.call_args.kwargs["env"]["CARGO_NET_OFFLINE"], "true")
         self.assertEqual(len(list(output_dir.glob("*.whl"))), 1)
 
