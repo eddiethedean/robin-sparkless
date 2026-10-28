@@ -1854,7 +1854,7 @@ jobs:
         with:
           pattern: release-wheel-evidence-*
           path: dist/evidence/wheels
-          merge-multiple: true
+          merge-multiple: false
       - name: Verify suite, runner, source, and exact artifact digest inventory
         env:
           RELEASE_WORKFLOW: ${{ github.workflow }}

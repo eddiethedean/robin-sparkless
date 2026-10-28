@@ -92,6 +92,27 @@ class ReleaseWheelEvidenceTests(unittest.TestCase):
                 [],
             )
 
+    def test_accepts_artifacts_extracted_into_separate_subdirectories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence_dir, wheel_dir = _write_inventory(Path(temporary))
+            for evidence in list(evidence_dir.glob("*.json")):
+                artifact_dir = evidence_dir / evidence.stem
+                artifact_dir.mkdir()
+                evidence.replace(artifact_dir / evidence.name)
+
+            self.assertEqual(
+                verify(
+                    evidence_dir,
+                    wheel_dir,
+                    source_sha="abc123",
+                    run_id="42",
+                    run_attempt="1",
+                    workflow="Release",
+                    mode="release_candidate",
+                ),
+                [],
+            )
+
     def test_rejects_missing_cell_and_changed_wheel_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             evidence_dir, wheel_dir = _write_inventory(Path(temporary))
