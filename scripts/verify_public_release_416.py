@@ -206,7 +206,7 @@ def validate_pypi_release(
         local_hashes = {
             path.name: hashlib.sha256(path.read_bytes()).hexdigest()
             for path in local_directory.iterdir()
-            if path.is_file()
+            if path.is_file() and not path.name.endswith(".publish.attestation")
         }
         published_hashes = {
             entry["filename"]: entry["digests"]["sha256"] for entry in files
