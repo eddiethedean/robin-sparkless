@@ -13,6 +13,8 @@ from typing import Any
 RELEASE_WORKFLOW = ".github/workflows/release.yml"
 VERIFIED_CANDIDATE_JOB = "Verify complete candidate PyPI inventory (V31)"
 PUBLISHED_CRATES_JOB = "Build docs and publish to crates.io"
+SOURCE_EVIDENCE_ARTIFACT = "release-sdist-source-witness-v1"
+SOURCE_EVIDENCE_MARKER = "Verify isolated source build from the exact sdist (evidence schema v1)"
 REQUIRED_ARTIFACTS = {
     "verified-server-bin-candidate",
     "verified-sparkless-candidate",
@@ -25,8 +27,23 @@ def validate_recovery_source(
     artifacts: dict[str, Any],
     repository: str,
     workflow_id: int,
+    source_workflow: str | None = None,
 ) -> str:
     """Return the stable version only for an eligible completed tag run."""
+    return validate_recovery_source_details(
+        run, jobs, artifacts, repository, workflow_id, source_workflow
+    )["version"]
+
+
+def validate_recovery_source_details(
+    run: dict[str, Any],
+    jobs: dict[str, Any],
+    artifacts: dict[str, Any],
+    repository: str,
+    workflow_id: int,
+    source_workflow: str | None = None,
+) -> dict[str, str]:
+    """Validate the original run and select its declared evidence compatibility policy."""
     if run.get("event") != "push":
         raise ValueError("source run must be triggered by a tag push")
     if run.get("status") != "completed":
@@ -57,11 +74,12 @@ def validate_recovery_source(
     ):
         raise ValueError("source run did not successfully publish the Rust crates")
 
-    available_artifacts = {
-        artifact.get("name")
+    live_artifacts = [
+        artifact
         for artifact in artifacts.get("artifacts", [])
         if artifact.get("expired") is False
-    }
+    ]
+    available_artifacts = {artifact.get("name") for artifact in live_artifacts}
     missing_artifacts = REQUIRED_ARTIFACTS - available_artifacts
     if missing_artifacts:
         raise ValueError(
@@ -69,7 +87,34 @@ def validate_recovery_source(
                 ", ".join(sorted(missing_artifacts))
             )
         )
-    return match.group(1)
+    uses_source_manifest = (
+        source_workflow is not None and SOURCE_EVIDENCE_MARKER in source_workflow
+    )
+    has_source_manifest_artifact = SOURCE_EVIDENCE_ARTIFACT in available_artifacts
+    if uses_source_manifest and not has_source_manifest_artifact:
+        raise ValueError("source workflow requires the unexpired schema v1 source evidence artifact")
+    if not uses_source_manifest and has_source_manifest_artifact:
+        raise ValueError("source evidence artifact is present without its workflow schema marker")
+    policy = "manifest_v1" if uses_source_manifest else "legacy_inventory_v0"
+
+    source_sha = run.get("head_sha", "")
+    if not re.fullmatch(r"[0-9a-f]{40,64}", source_sha):
+        raise ValueError("source run is missing its immutable head SHA")
+    run_id = run.get("id")
+    run_attempt = run.get("run_attempt")
+    if not isinstance(run_id, int) or not isinstance(run_attempt, int):
+        raise ValueError("source run is missing its run ID or attempt")
+    workflow_name = run.get("name", "")
+    if not isinstance(workflow_name, str) or not workflow_name:
+        raise ValueError("source run is missing its workflow name")
+    return {
+        "version": match.group(1),
+        "source_sha": source_sha,
+        "source_run_id": str(run_id),
+        "source_run_attempt": str(run_attempt),
+        "source_workflow": workflow_name,
+        "source_evidence_policy": policy,
+    }
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -86,19 +131,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--artifacts-json", type=Path, required=True)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--workflow-id", type=int, required=True)
+    parser.add_argument("--source-workflow", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        version = validate_recovery_source(
+        details = validate_recovery_source_details(
             _read_json(args.run_json),
             _read_json(args.jobs_json),
             _read_json(args.artifacts_json),
             args.repository,
             args.workflow_id,
+            args.source_workflow.read_text(encoding="utf-8"),
         )
     except (OSError, json.JSONDecodeError, ValueError) as error:
         print("PyPI recovery source rejected: {}".format(error), file=sys.stderr)
         return 1
-    print("version={}".format(version))
+    for name, value in details.items():
+        print("{}={}".format(name, value))
     return 0
 
 

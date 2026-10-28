@@ -1,6 +1,11 @@
 import unittest
 
-from verify_pypi_recovery_source import validate_recovery_source
+from verify_pypi_recovery_source import (
+    SOURCE_EVIDENCE_ARTIFACT,
+    SOURCE_EVIDENCE_MARKER,
+    validate_recovery_source,
+    validate_recovery_source_details,
+)
 
 
 class PypiRecoverySourceTest(unittest.TestCase):
@@ -12,6 +17,10 @@ class PypiRecoverySourceTest(unittest.TestCase):
             "path": ".github/workflows/release.yml",
             "head_repository": {"full_name": "example/project"},
             "head_branch": "v4.16.1",
+            "head_sha": "c" * 40,
+            "id": 9876,
+            "run_attempt": 1,
+            "name": "Release",
         }
         self.jobs = {
             "jobs": [
@@ -86,6 +95,48 @@ class PypiRecoverySourceTest(unittest.TestCase):
         self.run["head_branch"] = "v4.17.0-rc.1"
         with self.assertRaisesRegex(ValueError, "stable version tag"):
             self.validate()
+
+    def test_legacy_workflow_uses_explicit_compatibility_policy(self):
+        result = validate_recovery_source_details(
+            self.run,
+            self.jobs,
+            self.artifacts,
+            "example/project",
+            123,
+            "name: Release\n# historical workflow without source evidence v1\n",
+        )
+        self.assertEqual(result["source_evidence_policy"], "legacy_inventory_v0")
+        self.assertEqual(result["source_sha"], "c" * 40)
+        self.assertEqual(result["source_run_attempt"], "1")
+
+    def test_new_workflow_requires_the_versioned_source_evidence_artifact(self):
+        workflow = "name: Release\n- " + SOURCE_EVIDENCE_MARKER + "\n"
+        with self.assertRaisesRegex(ValueError, "requires the unexpired schema v1"):
+            validate_recovery_source_details(
+                self.run, self.jobs, self.artifacts, "example/project", 123, workflow
+            )
+
+        self.artifacts["artifacts"].append(
+            {"name": SOURCE_EVIDENCE_ARTIFACT, "expired": False}
+        )
+        result = validate_recovery_source_details(
+            self.run, self.jobs, self.artifacts, "example/project", 123, workflow
+        )
+        self.assertEqual(result["source_evidence_policy"], "manifest_v1")
+
+    def test_evidence_artifact_cannot_be_claimed_by_a_legacy_workflow(self):
+        self.artifacts["artifacts"].append(
+            {"name": SOURCE_EVIDENCE_ARTIFACT, "expired": False}
+        )
+        with self.assertRaisesRegex(ValueError, "without its workflow schema marker"):
+            validate_recovery_source_details(
+                self.run,
+                self.jobs,
+                self.artifacts,
+                "example/project",
+                123,
+                "name: Release\n",
+            )
 
 
 if __name__ == "__main__":

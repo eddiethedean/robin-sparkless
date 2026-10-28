@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 
@@ -49,7 +51,11 @@ def verify_graph(metadata: dict, root: Path) -> None:
             Path(package["manifest_path"]).resolve().relative_to(root.resolve())
 
 
-def verify(archive: Path, offline: bool = False) -> None:
+def verify(
+    archive: Path,
+    offline: bool = False,
+    wheel_output_dir: Path | None = None,
+) -> None:
     with tempfile.TemporaryDirectory(prefix="sparkless-source-") as scratch:
         root = extract_source(archive, Path(scratch))
         manifest = root / "python/Cargo.toml"
@@ -66,17 +72,42 @@ def verify(archive: Path, offline: bool = False) -> None:
             command.append("--offline")
         metadata = json.loads(subprocess.check_output(command, cwd=root))
         verify_graph(metadata, root)
-        command = [
-            "cargo",
-            "check",
-            "--locked",
-            "--release",
-            "--manifest-path",
-            str(manifest),
-        ]
-        if offline:
-            command.append("--offline")
-        subprocess.run(command, cwd=root, check=True)
+        lockfile = root / "Cargo.lock"
+        locked_bytes = lockfile.read_bytes()
+        if wheel_output_dir is None:
+            command = [
+                "cargo",
+                "check",
+                "--locked",
+                "--release",
+                "--manifest-path",
+                str(manifest),
+            ]
+            if offline:
+                command.append("--offline")
+            subprocess.run(command, cwd=root, check=True)
+        else:
+            wheel_output_dir = wheel_output_dir.resolve()
+            wheel_output_dir.mkdir(parents=True, exist_ok=True)
+            environment = os.environ.copy()
+            environment["CARGO_NET_OFFLINE"] = "true"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "build",
+                    "--wheel",
+                    "--outdir",
+                    str(wheel_output_dir),
+                ],
+                cwd=root / "python",
+                env=environment,
+                check=True,
+            )
+            if lockfile.read_bytes() != locked_bytes:
+                raise ValueError("isolated source build modified the locked dependency graph")
+    if wheel_output_dir is not None and len(list(wheel_output_dir.glob("*.whl"))) != 1:
+        raise ValueError("isolated source build must produce exactly one wheel")
     print("isolated Python source build and fixed compression graph verified")
 
 
@@ -84,8 +115,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--wheel-output-dir", type=Path)
     args = parser.parse_args()
-    verify(args.archive.resolve(), args.offline)
+    verify(args.archive.resolve(), args.offline, args.wheel_output_dir)
 
 
 if __name__ == "__main__":

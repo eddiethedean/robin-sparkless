@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import json
 from pathlib import Path
 import sys
 import tarfile
@@ -10,7 +11,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from verify_release_source import extract_source, verify_graph
+from verify_release_source import extract_source, verify, verify_graph
 
 
 class SourceDistributionTest(unittest.TestCase):
@@ -91,6 +92,51 @@ class SourceDistributionTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             verify_graph({"packages": packages}, self.root)
+
+    def test_source_witness_builds_a_wheel_from_the_extracted_python_project(self):
+        archive = self.root / "source.tar.gz"
+        with tarfile.open(archive, "w:gz") as output:
+            for name, content in (
+                ("source/Cargo.lock", "version = 4\n"),
+                ("source/python/Cargo.toml", "[package]\nname='sparkless-native'\n"),
+                ("source/python/pyproject.toml", "[build-system]\nbuild-backend='maturin'\n"),
+            ):
+                data = content.encode()
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                output.addfile(member, io.BytesIO(data))
+        metadata = {
+            "packages": [
+                {"name": name, "version": version, "source": "registry"}
+                for name, version in (
+                    ("zstd", "0.14.3"),
+                    ("zstd-safe", "8.2.0"),
+                    ("zstd-sys", "2.1.2+zstd.1.5.7"),
+                )
+            ]
+        }
+        output_dir = self.root / "derived"
+
+        def fake_build(command, **kwargs):
+            wheel_index = command.index("--outdir") + 1
+            Path(command[wheel_index]).mkdir(parents=True, exist_ok=True)
+            (Path(command[wheel_index]) / "sparkless-4.17.0-cp311-abi3-linux_x86_64.whl").write_bytes(b"wheel")
+
+        with (
+            patch(
+                "verify_release_source.subprocess.check_output",
+                return_value=json.dumps(metadata).encode(),
+            ),
+            patch("verify_release_source.subprocess.run", side_effect=fake_build) as run,
+        ):
+            verify(archive, wheel_output_dir=output_dir)
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[1:4], ["-m", "build", "--wheel"])
+        self.assertEqual(run.call_args.kwargs["cwd"].name, "python")
+        self.assertEqual(run.call_args.kwargs["cwd"].parent.name, "source")
+        self.assertEqual(run.call_args.kwargs["env"]["CARGO_NET_OFFLINE"], "true")
+        self.assertEqual(len(list(output_dir.glob("*.whl"))), 1)
 
 
 if __name__ == "__main__":

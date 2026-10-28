@@ -179,16 +179,39 @@ def host_facts() -> dict[str, Any]:
     }
 
 
-def run_build(command: list[str]) -> None:
+def stream_process(
+    command: list[str],
+    *,
+    environment: dict[str, str] | None = None,
+    log_path: Path,
+) -> subprocess.CompletedProcess[str]:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    output: list[str] = []
+    with log_path.open("w", encoding="utf-8", errors="replace") as log:
+        process = subprocess.Popen(
+            command,
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            log.write(line)
+            log.flush()
+            output.append(line)
+        returncode = process.wait()
+    return subprocess.CompletedProcess(command, returncode, "".join(output), "")
+
+
+def run_build(command: list[str], log_path: Path) -> None:
     print("$ " + " ".join(command), flush=True)
-    result = subprocess.run(command, text=True, capture_output=True, check=False)
-    if result.stdout:
-        print(result.stdout, end="", flush=True)
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr, flush=True)
+    result = stream_process(command, log_path=log_path)
     if result.returncode:
         raise RuntimeError(
-            f"test binary build failed with exit code {result.returncode}"
+            f"test binary build failed with exit code {result.returncode}; log: {log_path}"
         )
 
 
@@ -201,6 +224,7 @@ def timed_test(
     marker: str | None = None,
     rows: int | None = None,
     expect_test: bool = True,
+    log_path: Path,
 ) -> dict[str, Any]:
     time_binary = Path("/usr/bin/time")
     if not time_binary.is_file():
@@ -215,21 +239,11 @@ def timed_test(
             else [str(time_binary), "-v", "-o", str(report_path), *command]
         )
         started = time.perf_counter()
-        result = subprocess.run(
-            timed_command,
-            env=environment,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        result = stream_process(timed_command, environment=environment, log_path=log_path)
         elapsed_seconds = time.perf_counter() - started
-        if result.stdout:
-            print(result.stdout, end="", flush=True)
-        if result.stderr:
-            print(result.stderr, end="", file=sys.stderr, flush=True)
         combined = result.stdout + "\n" + result.stderr
         if result.returncode:
-            raise RuntimeError(f"{label} failed with exit code {result.returncode}")
+            raise RuntimeError(f"{label} failed with exit code {result.returncode}; log: {log_path}")
         if expect_test and not PASSED_PATTERN.search(combined):
             raise RuntimeError(f"{label} did not report exactly one passing Rust test")
 
@@ -398,6 +412,21 @@ def write_step_summary(report: dict[str, Any]) -> None:
 
 
 def run_witness(args: argparse.Namespace) -> dict[str, Any]:
+    log_directory = Path(args.output).parent / "v17-logs" if args.output else Path("v17-logs")
+    log_directory.mkdir(parents=True, exist_ok=True)
+    args.diagnostic_state = {
+        "schema_version": 1,
+        "status": "running",
+        "candidate_sha": os.environ.get("GITHUB_SHA", "local"),
+        "run_id": os.environ.get("GITHUB_RUN_ID"),
+        "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+        "workflow": os.environ.get("GITHUB_WORKFLOW"),
+        "phase": "initializing",
+        "completed_steps": [],
+        "log_directory": str(log_directory),
+    }
+    _write_diagnostic(args)
+
     build_commands = [
         [
             "cargo",
@@ -434,8 +463,12 @@ def run_witness(args: argparse.Namespace) -> dict[str, Any]:
             "phase1_range_benchmark",
         ],
     ]
-    for command in build_commands:
-        run_build(command)
+    for index, command in enumerate(build_commands, start=1):
+        args.diagnostic_state["phase"] = "build-{}".format(index)
+        _write_diagnostic(args)
+        run_build(command, log_directory / "build-{}.log".format(index))
+        args.diagnostic_state["completed_steps"].append("build-{}".format(index))
+        _write_diagnostic(args)
 
     metadata = subprocess.run(
         ["cargo", "metadata", "--format-version", "1", "--no-deps"],
@@ -485,10 +518,12 @@ def run_witness(args: argparse.Namespace) -> dict[str, Any]:
                 rss_cap_mib=range_cap,
                 marker="range_memory",
                 rows=rows,
+                log_path=log_directory / "lazy-range-{}-{}.log".format(rows, repeat),
             )
             validate_range_measurement(entry["measurement"], rows)
             entry["repeat"] = repeat
             range_runs.append(entry)
+            _record_diagnostic_step(args, "lazy-range-{}-{}".format(rows, repeat))
 
             environment = base_environment.copy()
             environment["SPARKLESS_MAX_RANGE_ROWS"] = str(max(args.rows))
@@ -500,10 +535,12 @@ def run_witness(args: argparse.Namespace) -> dict[str, Any]:
                 marker=f"rows={rows}",
                 rows=rows,
                 expect_test=False,
+                log_path=log_directory / "range-workload-{}-{}.log".format(rows, repeat),
             )
             validate_range_benchmark_measurement(entry["measurement"], rows)
             entry["repeat"] = repeat
             range_workload_runs.append(entry)
+            _record_diagnostic_step(args, "range-workload-{}-{}".format(rows, repeat))
 
             environment = base_environment.copy()
             environment["SPARKLESS_CATALOG_BENCH_ROWS"] = str(rows)
@@ -528,10 +565,12 @@ def run_witness(args: argparse.Namespace) -> dict[str, Any]:
                 rss_cap_mib=shared_cap,
                 marker="catalog_memory",
                 rows=rows,
+                log_path=log_directory / "catalog-{}-{}.log".format(rows, repeat),
             )
             validate_catalog_measurement(entry["measurement"], rows)
             entry["repeat"] = repeat
             catalog_runs.append(entry)
+            _record_diagnostic_step(args, "catalog-{}-{}".format(rows, repeat))
 
     range_count = timed_test(
         label="bounded-filtered-range-count",
@@ -551,7 +590,9 @@ def run_witness(args: argparse.Namespace) -> dict[str, Any]:
         ],
         environment=base_environment,
         rss_cap_mib=shared_cap,
+        log_path=log_directory / "bounded-filtered-range-count.log",
     )
+    _record_diagnostic_step(args, "bounded-filtered-range-count")
 
     http_runs: list[dict[str, Any]] = []
     for repeat in range(1, args.repetitions + 1):
@@ -571,15 +612,20 @@ def run_witness(args: argparse.Namespace) -> dict[str, Any]:
             ],
             environment=base_environment,
             rss_cap_mib=shared_cap,
+            log_path=log_directory / "sustained-http-{}.log".format(repeat),
         )
         entry["repeat"] = repeat
         http_runs.append(entry)
+        _record_diagnostic_step(args, "sustained-http-{}".format(repeat))
 
     report = {
         "schema_version": 1,
         "candidate_sha": os.environ.get("GITHUB_SHA", "local"),
         "run_id": os.environ.get("GITHUB_RUN_ID"),
+        "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
         "workflow": os.environ.get("GITHUB_WORKFLOW"),
+        "status": "success",
+        "diagnostic_logs": sorted(path.name for path in log_directory.glob("*.log")),
         "host": host_facts(),
         "rustc": subprocess.run(
             ["rustc", "--version"], text=True, capture_output=True, check=True
@@ -606,9 +652,29 @@ def run_witness(args: argparse.Namespace) -> dict[str, Any]:
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    args.diagnostic_state["status"] = "success"
+    args.diagnostic_state["phase"] = "complete"
+    _write_diagnostic(args, report)
     print(json.dumps(report, indent=2, sort_keys=True))
     write_step_summary(report)
     return report
+
+
+def _write_diagnostic(
+    args: argparse.Namespace, report: dict[str, Any] | None = None
+) -> None:
+    if not args.output:
+        return
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    diagnostic = report if report is not None else args.diagnostic_state
+    output.write_text(json.dumps(diagnostic, indent=2, sort_keys=True) + "\n")
+
+
+def _record_diagnostic_step(args: argparse.Namespace, name: str) -> None:
+    args.diagnostic_state["phase"] = name
+    args.diagnostic_state["completed_steps"].append(name)
+    _write_diagnostic(args)
 
 
 def main() -> int:
@@ -643,6 +709,10 @@ def main() -> int:
         KeyError,
         TypeError,
     ) as error:
+        if not args.verify_report and args.output and hasattr(args, "diagnostic_state"):
+            args.diagnostic_state["status"] = "failed"
+            args.diagnostic_state["failure"] = str(error)
+            _write_diagnostic(args)
         print(f"V17 resource verification failed: {error}", file=sys.stderr)
         return 1
     return 0
