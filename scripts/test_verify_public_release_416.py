@@ -114,6 +114,45 @@ class VerifyPublicRelease416Test(unittest.TestCase):
                     local_directory=directory,
                 )
 
+    def test_ignores_pypi_publish_attestation_sidecars(self):
+        metadata = release_metadata("sparkless-server-bin", "4.17.0")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for entry in metadata["urls"]:
+                path = directory / entry["filename"]
+                path.write_bytes(entry["filename"].encode("utf-8"))
+                entry["digests"]["sha256"] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+                Path(str(path) + ".publish.attestation").write_text(
+                    "PyPI publish attestation", encoding="utf-8"
+                )
+            validate_pypi_release(
+                metadata,
+                "sparkless-server-bin",
+                version="4.17.0",
+                local_directory=directory,
+            )
+
+    def test_still_rejects_other_unexpected_local_files(self):
+        metadata = release_metadata("sparkless-server-bin", "4.17.0")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for entry in metadata["urls"]:
+                path = directory / entry["filename"]
+                path.write_bytes(entry["filename"].encode("utf-8"))
+                entry["digests"]["sha256"] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+            (directory / "unexpected.txt").write_text("not a distribution", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "differ from verified inputs"):
+                validate_pypi_release(
+                    metadata,
+                    "sparkless-server-bin",
+                    version="4.17.0",
+                    local_directory=directory,
+                )
+
     def test_rejects_missing_wheel_platform(self):
         metadata = release_metadata("sparkless")
         metadata["urls"].pop(0)
