@@ -91,7 +91,7 @@ For both phases record exact native DuckDB/library/service/client/reference vers
 
 ### Recovering a partial PyPI upload
 
-Dispatch the `Release` workflow from `main` and set `pypi_recovery_run_id` to the completed tag-run ID. Recovery accepts only a same-repository `Release` run from a stable version tag whose V31 inventory and crates.io publication succeeded and whose two verified distribution artifacts are still available. It rechecks both inventories, uploads with PyPI `skip-existing`, then verifies public file hashes, crates.io versions, and a fresh exact-version `sparkless[server]` install. This recovers PyPI publication only; GHCR remains governed by the release run.
+Dispatch the `Release` workflow from `main` and set `pypi_recovery_run_id` to the completed tag-run ID. Recovery accepts only a same-repository `Release` run from a stable version tag whose V31 inventory and crates.io publication succeeded and whose verified distributions and tested container image are still available. It rechecks the exact artifacts, uploads PyPI distributions with `skip-existing`, publishes the evidenced container bytes to GHCR without overwriting an existing tag, and verifies public file hashes, crates.io versions, a fresh exact-version `sparkless[server]` install, and the pulled container digest and smoke contract.
 
 ## Test implementation guidance
 
