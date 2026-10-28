@@ -1277,7 +1277,8 @@ jobs:
           wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
           test -n "$wheel"
           echo "path=$wheel" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(shasum -a 256 "$wheel" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          sha256="$(python -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$wheel")"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
       - name: Install the exact publication wheel
         env:
           WHEEL: ${{ steps.wheel.outputs.path }}
@@ -1614,7 +1615,8 @@ jobs:
           wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
           test -n "$wheel"
           echo "path=$wheel" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(shasum -a 256 "$wheel" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          sha256="$(python -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$wheel")"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
       - name: Install the exact publication wheel and check dependencies
         env:
           WHEEL: ${{ steps.wheel.outputs.path }}

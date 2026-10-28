@@ -62,6 +62,19 @@ def _value(row: object, key: str, index: int) -> object:
         return row[index]  # type: ignore[index]
 
 
+def _missing_shared_libraries(output: str) -> list[str]:
+    markers = (
+        "=> not found",
+        "error loading shared library",
+        "cannot open shared object file",
+    )
+    return [
+        line.strip()
+        for line in output.splitlines()
+        if any(marker in line.lower() for marker in markers)
+    ]
+
+
 def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> None:
     with zipfile.ZipFile(wheel) as archive:
         native_name = next(
@@ -88,8 +101,13 @@ def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> Non
             raise ValueError("ELF extension architecture does not match its native runner")
         result = subprocess.run(["ldd", str(native_path)], text=True, capture_output=True, check=False)
         output = result.stdout + result.stderr
-        if result.returncode != 0 or "not found" in output.lower():
-            raise ValueError("wheel extension has unresolved runtime dependencies: {}".format(output))
+        missing_libraries = _missing_shared_libraries(output)
+        if missing_libraries:
+            raise ValueError(
+                "wheel extension has unresolved runtime dependencies: {}".format(
+                    "\n".join(missing_libraries)
+                )
+            )
     elif sys.platform == "darwin":
         if contents[:4] not in {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf"}:
             raise ValueError("macOS wheel extension is not a 64-bit Mach-O binary")

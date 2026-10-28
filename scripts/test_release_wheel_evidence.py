@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 import tempfile
 import unittest
 
+from release_wheel_evidence import write_evidence
 from verify_release_wheel_evidence import EXPECTED, EXPECTED_MACHINE, verify
 
 
@@ -66,6 +69,13 @@ def _write_inventory(root: Path) -> tuple[Path, Path]:
 
 
 class ReleaseWheelEvidenceTests(unittest.TestCase):
+    def test_evidence_is_readable_by_the_host_artifact_uploader(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "evidence.json"
+            write_evidence({"result": "success"}, output)
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o644)
+
     def test_accepts_complete_digest_bound_candidate_matrix(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             evidence_dir, wheel_dir = _write_inventory(Path(temporary))

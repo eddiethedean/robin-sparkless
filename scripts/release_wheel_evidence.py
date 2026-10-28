@@ -113,4 +113,8 @@ def write_evidence(evidence: dict[str, Any], output: Path) -> None:
         temporary = Path(stream.name)
         json.dump(evidence, stream, sort_keys=True, indent=2)
         stream.write("\n")
+    # Linux runtime witnesses write into a host-mounted directory from a
+    # container running as root. Keep the evidence readable by the runner's
+    # artifact uploader after the atomic rename.
+    temporary.chmod(0o644)
     temporary.replace(output)
