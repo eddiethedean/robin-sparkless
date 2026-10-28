@@ -7,6 +7,8 @@
 
 Implement the actual execution stream lifecycle, including disconnection, retained responses, release, and cancellation.
 
+The [4.18 implementation plan](RELEASE_4_18.md) specifies 418-04–418-06: checked physical IPC, bounded inline data, shared compute ownership, replay/history budgets, fault scenarios and standalone conformance. The [source review](CONNECT_PROTOCOL_RESEARCH.md) records the normal client's first-response retry, opaque UUIDs, per-response IPC decoding, asynchronous release, and reference error behavior. Proposed limits and retention-until-release are Sparkless policies to verify, not Apache defaults.
+
 ## Dependencies and delivery slices
 
 SS-03 protocol traces, SS-04 operation accounting, SS-07 session lifecycle, SS-08 schema/IPC, SS-09 native plans.
@@ -15,9 +17,9 @@ Plan numbers are workstream identifiers, not a strict execution order. Only the 
 
 ## Implementation sequence
 
-1. Define stable session generations, operation IDs, ordered response IDs, offsets, and completion markers. Validate client-observed session identity.
+1. Define stable session generations, operation IDs, response UUIDs ordered by internal sequence, offsets, and completion markers. Validate client-observed session identity; never sort/increment opaque IDs.
 
-2. Emit client-compatible Arrow batches and schema-bearing empty results with row/byte limits; reject oversize cells rather than silently truncating.
+2. Emit independently readable Arrow IPC streams in each Arrow response and schema-bearing empty results with row/actual serialized-byte limits; reject oversize cells/schema rather than silently truncating. Private native schema metadata cannot replace public physical Arrow types.
 
 3. Retain bounded unacknowledged responses for reattachment. Resume after the acknowledged response without rerunning the plan or duplicating mutation effects.
 
@@ -33,6 +35,7 @@ Plan numbers are workstream identifiers, not a strict execution order. Only the 
 
 - [ ] Reattach resumes after one or more delivered batches with correct offsets and no reexecution.
 - [ ] Duplicate execute, repeated release, release/reattach races, detached interruption, expired operations, and changed sessions have tested outcomes.
+- [ ] Request loss before acceptance and response loss before the first response exercise default-client ExecutePlan retry; retained/abandoned identities cannot start a second producer. Connect duplicate errors and released-session behavior remain distinct from HTTP receipt replay and ID recreation.
 - [ ] Replay capacity exhaustion produces explicit bounded behavior and resource accounting returns to baseline.
 - [ ] The JVM-free public client witness and complete supported-surface suite pass before Phase 2 is declared ready.
 

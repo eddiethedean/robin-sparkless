@@ -14,7 +14,7 @@ This is a native single-node backend, not Apache Spark or general Spark compatib
 ## Prerequisites and decisions
 
 - Phase 2 SS-09/10 Connect translation, analysis, Arrow, replay, session, interruption, and release conformance.
-- Phase 3 SS-14/D14 native DuckDB dependencies, ownership, names, snapshots, types, and measured resource behavior; V33/V34 completed for advertised shared data.
+- Phase 3 SS-14/D14 native DuckDB dependencies, ownership, names, snapshots, types, and measured resource behavior; V35/V36 completed for advertised shared data.
 - Resolve D15 before implementation: server/backend selection, engine-neutral plan interfaces, Spark SQL translation, supported expressions/commands, analysis/execution schema agreement, transaction/outcome persistence, and backend-specific resource accounting.
 - Existing engine traits provide a boundary to assess, not proof that the server is backend-neutral. Audit server construction, shared catalog assumptions, Polars-only APIs, logical schema sidecars, and cancellation hooks before reusing them.
 
@@ -26,7 +26,7 @@ This is a native single-node backend, not Apache Spark or general Spark compatib
 | 420-02 | Implement DuckDB plan translation, analysis, and bounded Arrow results | Same declared SQL/DataFrame corpus and schemas through the pinned Connect client |
 | 420-03 | Add enumerated transactional writes and truthful operation outcomes | Atomic effects/receipts, duplicate/conflict/deadline/disconnect/restart evidence; unsupported writes fail before effects |
 | 420-04 | Complete Connect lifecycle and shared-database interoperability | Cancellation/reattach/release/saturation plus independent DuckDB client read/write visibility through one owner |
-| 420-05 | Complete V35/V36, backend documentation, benchmarks, and distribution | Numeric budgets and capability matrix; default regressions; fresh enabled/disabled installs |
+| 420-05 | Complete V37/V38, backend documentation, benchmarks, and distribution | Numeric budgets and capability matrix; default regressions; fresh enabled/disabled installs |
 
 ## SQL, plans, and type compatibility
 
@@ -52,8 +52,8 @@ Use an in-repository fixture with a standard DuckDB client and Sparkless Connect
 
 ## Acceptance and release gates
 
-- **V35:** the declared SQL and DataFrame matrix runs through the unmodified Connect client using DuckDB computation, with reference-semantic/value/schema checks, truthful unsupported behavior, and optional/default installation evidence. The Polars backend's supported surface continues to pass.
-- **V36:** transactional effects and receipts, repeated/changed operation identities, source close/loss, deadline/commit races, cancellation, result replay, session release, and restart match documented guarantees. Independent client interoperability uses one database owner; multi-client benchmarks validate results and numeric RSS/latency/queue bounds while health progresses.
+- **V37:** the declared SQL and DataFrame matrix runs through the unmodified Connect client using DuckDB computation, with reference-semantic/value/schema checks, truthful unsupported behavior, and optional/default installation evidence. The Polars backend's supported surface continues to pass.
+- **V38:** transactional effects and receipts, repeated/changed operation identities, source close/loss, deadline/commit races, cancellation, result replay, session release, and restart match documented guarantees. Independent client interoperability uses one database owner; multi-client benchmarks validate results and numeric RSS/latency/queue bounds while health progresses.
 - Apply all applicable V19–V24 Connect lifecycle requirements to the enabled backend, not only the original Polars implementation. Any separately advertised third-party route requires supplemental V25 certification and does not gate the standalone backend release.
 - Record backend/client/reference revisions, settings, commands, platform dependencies, artifact hashes, and known deviations. Shared database service processes belong in end-to-end resource measurements.
 - Publish all first-party artifacts at coordinated 4.20.0 only after the complete phase gates, previous regressions, isolated installs, and public-artifact checks pass. Optional DuckDB dependencies remain absent from default builds/images.

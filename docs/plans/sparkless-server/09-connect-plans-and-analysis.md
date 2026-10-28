@@ -7,6 +7,8 @@
 
 Translate a documented subset of actual Connect relations/expressions into native operations.
 
+The [4.18 implementation plan](RELEASE_4_18.md) refines this work into 418-01–418-03, integrated with Arrow/replay slices 418-04–418-06. Its [Apache source review](CONNECT_PROTOCOL_RESEARCH.md) pins Spark 4.0.5 and distinguishes public protocol behavior from the Sparkless subset. The actual client encoders and config/lifecycle requests are captured in the 418-01 fixtures; server conformance remains open, and Connect SQL commands, writes, grouped aggregates, artifact-backed inputs, and additional nodes are explicitly gated.
+
 ## Dependencies and delivery slices
 
 SS-01/03 pinned surface, SS-04 runtime, SS-07 sessions, SS-08 logical schema/lazy execution, SS-10 operation transport contract.
@@ -21,7 +23,7 @@ Plan numbers are workstream identifiers, not a strict execution order. Only the 
 
 3. Preserve column/plan identity, aliases, logical schema, and session semantic settings; reject unresolved/unsupported nodes with actionable protocol errors.
 
-4. Implement required Config and AnalyzePlan operations against real capabilities. Never acknowledge unsupported config or return fabricated analysis.
+4. Implement required Config and AnalyzePlan operations against real capabilities. Preserve valid optional/default configuration lookups, including batched reads performed before local-relation encoding; never acknowledge an ineffective unsupported setting change or return fabricated analysis. Supporting a SQL relation alone does not implement the public `spark.sql()` command/result path.
 
 5. Bound local-relation decoded size, including expansion from compression. Test when the client switches to artifact-backed relations and refuse that path explicitly until supported.
 
@@ -34,6 +36,7 @@ Plan numbers are workstream identifiers, not a strict execution order. Only the 
 - [ ] The public pinned client succeeds with its normal encoders for each enabled operation.
 - [ ] Unsupported plans/config/artifact paths fail clearly without executing unrelated work.
 - [ ] Analysis schema matches results for aliases, empty inputs, expressions, aggregates, and enabled null/ANSI semantics.
+- [ ] Normal client configuration/rename/schema parsing paths and actual inline-to-cached local-relation boundaries are tested without changing client defaults.
 - [ ] No Python/JVM is used in native plan execution.
 
 ## Decisions and implementation touchpoints

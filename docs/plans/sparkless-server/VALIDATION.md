@@ -2,7 +2,7 @@
 
 [Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
 
-**Status: implementation checks in progress; no full 4.17 release-readiness gate is marked passed.** Targeted native, launcher, release-inventory, and packaging checks have run locally; they do not establish release-gate conformance. Every gate evidence field remains pending until its complete scenario and required artifact are recorded. Documentation checks do not establish server conformance.
+**Status: 4.17.0 public release verification is complete; 4.18.0 remains planned.** The Spark 4.0.5 client/protocol contract and reproducible client-request corpus are recorded, but no Phase 2 server interoperability gate is passed. Targeted component checks do not establish release-gate conformance; every gate remains pending until its complete scenario and required artifact are recorded.
 
 The 4.16 prerequisite accepted for 4.17 is **4.16.1**. [Release run 40159241607](https://github.com/eddiethedean/robin-sparkless/actions/runs/40159241607) published and verified that version. The older 4.16.0 recovery failure below is historical and is not being used as the 4.17 prerequisite.
 
@@ -50,10 +50,12 @@ The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Ru
 | V30 | 4.16 release completion / SS-11 | Public registry/binary/container verification after publication | Fresh exact-version installs and functional witnesses pass; hashes/digests, binary metadata and every inventory item match 4.16.0 |
 | V31 | 4.17 candidate / SS-02, SS-06, SS-11 | Complete 4.17.0 inventory, isolated consumer installs and prior applicable regressions plus V15–V18 | All packages/dependencies/binaries align, launcher and enabled capabilities match; no checkout paths/root Cargo patches; native/direct-HTTP mutation matrix verified; unsupported gRPC absent |
 | V32 | 4.17 release completion / SS-11 | Public registry/binary/container verification after publication | Fresh exact-version installs exercise shared catalog writes/reads and owned launcher; complete inventory, hashes/digests and metadata match 4.17.0 |
-| V33 | 3 / SS-14 | DuckDB table source through unmodified Connect and Polars computation | Actual typed/bounded scans, empty results, supported transformations and exact schemas/values; no full-table materialization at resolution; source writes and unsupported types fail before effects |
-| V34 | 3 / SS-14 | DuckDB ownership, snapshots, independent DuckDB writer, source failures and resource pressure | Standalone plus supported shared owner; stable multi-table snapshots under concurrent changes; truthful lock/loss errors; bounded RSS/queues and health progress; cancellation/reattach/close retain producer ownership; no export/sync or snapshot reread on replay |
-| V35 | 4 / SS-15 | DuckDB execution backend through unmodified Connect, analysis/Arrow and reference semantics | Actual DuckDB computation for the declared SQL/DataFrame/type/configuration matrix; Spark semantic/schema agreement; explicit unsupported errors without engine fallback; default Polars regressions and fresh optional/default package installs |
-| V36 | 4 / SS-15 | DuckDB transactional outcomes, Connect lifecycle, independent DuckDB client reads/writes and multiple clients | Atomic documented effects/receipts, duplicate/conflict/commit/disconnect/deadline/cancel/restart matrix; no reexecution on replay; durable data versus operation lifetime explicit; one database owner and common catalog; measured resource bounds and health progress |
+| V33 | 4.18 candidate / SS-02, SS-06, SS-09–11 | Complete 4.18.0 inventory, isolated installs, applicable regressions and Phase 2 V18–V26 | All packages/dependencies/binaries align; packaged standalone Connect and any advertised proxy route pass; no checkout paths/root Cargo patches; unsupported gRPC remains absent from HTTP-only artifacts |
+| V34 | 4.18 release completion / SS-11 | Public registry/binary/container verification after publication | Fresh exact-version public installs exercise the advertised transports, launcher, reconnect and release behavior; hashes/digests and complete 4.18.0 inventory match |
+| V35 | 3 / SS-14 | DuckDB table source through unmodified Connect and Polars computation | Actual typed/bounded scans, empty results, supported transformations and exact schemas/values; no full-table materialization at resolution; source writes and unsupported types fail before effects |
+| V36 | 3 / SS-14 | DuckDB ownership, snapshots, independent DuckDB writer, source failures and resource pressure | Standalone plus supported shared owner; stable multi-table snapshots under concurrent changes; truthful lock/loss errors; bounded RSS/queues and health progress; cancellation/reattach/close retain producer ownership; no export/sync or snapshot reread on replay |
+| V37 | 4 / SS-15 | DuckDB execution backend through unmodified Connect, analysis/Arrow and reference semantics | Actual DuckDB computation for the declared SQL/DataFrame/type/configuration matrix; Spark semantic/schema agreement; explicit unsupported errors without engine fallback; default Polars regressions and fresh optional/default package installs |
+| V38 | 4 / SS-15 | DuckDB transactional outcomes, Connect lifecycle, independent DuckDB client reads/writes and multiple clients | Atomic documented effects/receipts, duplicate/conflict/commit/disconnect/deadline/cancel/restart matrix; no reexecution on replay; durable data versus operation lifetime explicit; one database owner and common catalog; measured resource bounds and health progress |
 
 ## 4.16 execution order
 
@@ -69,6 +71,20 @@ Use the [4.17 validation corpus](RELEASE_4_17.md#validation-corpus-and-release-g
 
 V31 checks the complete 4.17.0 candidate before tagging/publication; V32 establishes completion after fresh public installs. A focused direct mutation test cannot substitute for the complete native/direct-HTTP outcome matrix. All evidence remains pending until implementation runs these checks.
 
+## 4.18 execution order
+
+Follow [418-01 through 418-10](RELEASE_4_18.md#ordered-delivery-slices). The [4.0.5 client/protocol/oracle pins and source comparison](CONNECT_PROTOCOL_RESEARCH.md) are frozen and reproducible client request fixtures are checked in; they do not establish server interoperability. Resolve earlier release prerequisites, then use V18–V26 for logical/physical type fidelity, native plan/config/analysis behavior, independently readable Arrow IPC, empty/multi-batch streams, replay/session lifecycle, multiple clients and benchmarks.
+
+### 418-01 contract-freeze verification
+
+On 2026-10-28, the hash-locked CPython 3.11 client environment installed cleanly and `capture_public_client_fixtures.py --write` followed by `--check` regenerated and verified all 27 deterministic request messages (54 `.pb`/`.textproto` files) plus `manifest.json`. Both lock inputs re-resolved with `uv pip compile --python-version 3.11 --generate-hashes`; normalized lock bodies and package hashes matched the committed snapshots. The fixture recorder invokes the pinned public client against a fake service and stops before server execution. This verifies fixture provenance and reproducibility only; it did not run Spark or Sparkless, so V18–V26 and V33/V34 remain open.
+
+Use the [4.18 corpus](RELEASE_4_18.md#validation-corpus-and-release-gates) with real unmodified client defaults. Preserve missing/default config semantics, verify actual local-relation cache thresholds, and reject unsupported Connect SQL/commands/artifacts without effects. Record differences between the selected oracle and source comments, especially release-cursor behavior. Distinguish Sparkless retention policies and proposed numeric budgets from Apache protocol requirements.
+
+V23 verifies JVM-free client processes against the native service plus shared HTTP/Connect saturation and health progress. V24 verifies installed launcher endpoints and feature variants after standalone conformance; V25 separately certifies the actual emulator gRPC route. V26 records correctness and concurrent-client performance/resource evidence. Prior HTTP SDK evidence cannot substitute for Connect proxy certification.
+
+V33 verifies the complete 4.18.0 candidate, applicable earlier regressions and all required Phase 2 gates before tagging/publication; V34 establishes release completion through fresh public-artifact installs. Both are planned gates; the existing 4.17 publication jobs do not implement them. All evidence remains pending.
+
 ## zstd compatibility evidence for 4.17
 
 Current integration is based on `codex/release-4.17` commit `e3f85cb447392bba185f11dd87a32c56cd8658e1`, with the working-tree changes below tested on 2026-10-26, macOS arm64 / Rust 1.93.1. The branch's four vendored Polars/Parquet consumers depend directly on zstd 0.14.3, zstd-safe 8.2.0, and zstd-sys 2.1.2. The earlier 0.13 compatibility adapter is superseded; its [prototype evidence](../../history/zstd-013-prototype-evidence.md) is historical. No zstd advisory exception was added to this candidate.
@@ -83,9 +99,9 @@ These results close the local source-archive omission and add native regression 
 
 ## DuckDB phase execution order
 
-Complete the supported Phase 2 Connect server before [SS-14 / Phase 3 / 4.19](14-duckdb-data-source.md). Resolve D14, then V33 proves DuckDB source reads feeding Polars and V34 proves database ownership, snapshots, source lifecycle/resources, and independent DuckDB writer visibility. All DuckDB source writes are initially unsupported. A standalone read-only file scan cannot satisfy the live shared-owner scenarios.
+Complete the supported Phase 2 Connect server before [SS-14 / Phase 3 / 4.19](14-duckdb-data-source.md). Resolve D14, then V35 proves DuckDB source reads feeding Polars and V36 proves database ownership, snapshots, source lifecycle/resources, and independent DuckDB writer visibility. All DuckDB source writes are initially unsupported. A standalone read-only file scan cannot satisfy the live shared-owner scenarios.
 
-Only then deliver [SS-15 / Phase 4 / 4.20](15-duckdb-connect-backend.md). Resolve D15, then V35 proves the separate DuckDB query execution/semantic matrix and V36 proves database writes, truthful transaction outcomes, backend Connect lifecycle, and bidirectional shared-table interoperability. Rerun applicable V19–V24 per backend and supplemental V25 for each separately advertised third-party route. Source scans do not prove DuckDB execution compatibility.
+Only then deliver [SS-15 / Phase 4 / 4.20](15-duckdb-connect-backend.md). Resolve D15, then V37 proves the separate DuckDB query execution/semantic matrix and V38 proves database writes, truthful transaction outcomes, backend Connect lifecycle, and bidirectional shared-table interoperability. Rerun applicable V19–V24 per backend and supplemental V25 for each separately advertised third-party route. Source scans do not prove DuckDB execution compatibility.
 
 For both phases record exact native DuckDB/library/service/client/reference versions, ownership mode, source snapshots, semantic settings, numeric workload/resource limits, enabled features, and artifact hashes. Include source/service memory in end-to-end measurements. Run previous capability regressions, native enabled/disabled builds, isolated installs, and fresh public artifact checks at each coordinated release. These are planned gates; no evidence is passed by creating the documents. V27/V28 retain their identities while moving to Phases 5/6.
 

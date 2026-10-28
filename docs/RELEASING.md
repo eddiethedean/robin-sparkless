@@ -1,6 +1,8 @@
 # Releasing robin-sparkless
 
-Use this guide with the [server release roadmap](plans/sparkless-server/ROADMAP.md), [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md), and [4.17 implementation plan](plans/sparkless-server/RELEASE_4_17.md). A green source build is only one part of a release: the candidate workflow must verify the coordinated package inventory, standalone server integration, binary wheels, and native container before a release tag is ready.
+Use this guide with the [server release roadmap](plans/sparkless-server/ROADMAP.md), [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md), [4.17 implementation plan](plans/sparkless-server/RELEASE_4_17.md), and [4.18 implementation plan](plans/sparkless-server/RELEASE_4_18.md). A green source build is only one part of a release: the candidate workflow must verify the coordinated package inventory, public SDK integration, binary wheels, and native container before a release tag is ready.
+
+For 4.18, the workflow still needs the planned Connect candidate and public-artifact gates, including standalone default-client conformance followed by separately pinned emulator gRPC certification. The existing 4.17 HTTP/SDK publication jobs do not implement those checks. Follow the 4.18 plan before tagging or advertising supported Connect; source research alone does not pass interoperability gates.
 
 ## Release inventory and version policy
 

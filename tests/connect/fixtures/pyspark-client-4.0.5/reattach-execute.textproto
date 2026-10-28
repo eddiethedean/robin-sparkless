@@ -1,0 +1,7 @@
+session_id: "11111111-1111-4111-8111-111111111111"
+user_context {
+  user_id: "contract-fixture-user"
+}
+operation_id: "66666666-6666-4666-8666-666666666666"
+last_response_id: "opaque-response-id"
+client_observed_server_side_session_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"

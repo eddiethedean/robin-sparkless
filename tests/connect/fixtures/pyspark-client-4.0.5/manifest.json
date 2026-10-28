@@ -1,0 +1,213 @@
+{
+  "client": "pyspark-client",
+  "client_version": "4.0.5",
+  "fixture_runtime": "CPython 3.11; patch version omitted from canonical requests",
+  "fixtures": {
+    "analyze-ddl-schema": {
+      "protobuf_bytes": 87,
+      "protobuf_sha256": "8fff7bfaed011ade2cc0877b1f0941e8ebf65c942f5e1a1277e469ed399b3571",
+      "protobuf_type": "spark.connect.AnalyzePlanRequest",
+      "rpc": "AnalyzePlan",
+      "textproto_sha256": "d7820f039e64c3d8762a361d397e3366d0e2488c607ddd47952d27a9058624c1"
+    },
+    "analyze-range-schema": {
+      "protobuf_bytes": 81,
+      "protobuf_sha256": "7390614c971a2d6a7aee6e56ee58717788296526fb2eec2f76234f7d7f20f655",
+      "protobuf_type": "spark.connect.AnalyzePlanRequest",
+      "rpc": "AnalyzePlan",
+      "textproto_sha256": "fadbc415c95ea0b2eed140d279c986879129317c9fef7a2877b7c8ce4efb2dc2"
+    },
+    "config-create-dataframe-defaults": {
+      "protobuf_bytes": 492,
+      "protobuf_sha256": "85165e636da900658b348966ab718412b66fddb9d559ca4fc53864289b88997b",
+      "protobuf_type": "spark.connect.ConfigRequest",
+      "rpc": "Config",
+      "textproto_sha256": "296fb29885c9969bd269d643a2907090ff5f1756c31f6361cf2716ba69337625"
+    },
+    "config-get": {
+      "protobuf_bytes": 95,
+      "protobuf_sha256": "05a08f74f860630e476852507300c767ea00f7d16ecb43f97b7c6fea341f0b3f",
+      "protobuf_type": "spark.connect.ConfigRequest",
+      "rpc": "Config",
+      "textproto_sha256": "755aa4470419a5f3cfecfb436f7cec9e1462ac43d250c7ee7adc20e200b627e6"
+    },
+    "config-get-all": {
+      "protobuf_bytes": 67,
+      "protobuf_sha256": "d52367b56716a5788c8b5b147139f8a1e62197e761a7b5b433b91afaf6951642",
+      "protobuf_type": "spark.connect.ConfigRequest",
+      "rpc": "Config",
+      "textproto_sha256": "9560d0a88c7cee56e1791104df15e3f0baccc6b2ddb2013d39e15fb0e1803d54"
+    },
+    "config-get-option": {
+      "protobuf_bytes": 95,
+      "protobuf_sha256": "62595bd3e59874d90dd35a4dc2486bdf185cd28d208223b4bbf75e32af7405cd",
+      "protobuf_type": "spark.connect.ConfigRequest",
+      "rpc": "Config",
+      "textproto_sha256": "ccd999c40ae119c0f698948966e405786e2fb24d995d5181d6db904e00a46e51"
+    },
+    "config-get-with-default": {
+      "protobuf_bytes": 107,
+      "protobuf_sha256": "5a464d49c6e6833e81469852aea86c979d4b07094743c1e54b52022a8dabf585",
+      "protobuf_type": "spark.connect.ConfigRequest",
+      "rpc": "Config",
+      "textproto_sha256": "791e150b76673b54a6abc0540c0c1e479a2d6c88dbcca3ec20d7e890cd4a6df3"
+    },
+    "config-is-modifiable": {
+      "protobuf_bytes": 91,
+      "protobuf_sha256": "45e1b73382e5d7b135d66bfa5195e5f276c3502f13319fa03786835d19939218",
+      "protobuf_type": "spark.connect.ConfigRequest",
+      "rpc": "Config",
+      "textproto_sha256": "a7d89f6c1f3e6f0e777f8e73e284910d10c95bb2af3f2958cec7a1ed342ad799"
+    },
+    "config-set": {
+      "protobuf_bytes": 99,
+      "protobuf_sha256": "2d229e4bf8f0ffdb9d72254e4f754effc15808f3bed79e73d102743e2309f20e",
+      "protobuf_type": "spark.connect.ConfigRequest",
+      "rpc": "Config",
+      "textproto_sha256": "9d89b9e97518b6a75d542446679e0a69c3fac03320b5bf5589e3e38cbc1fbde1"
+    },
+    "config-unset": {
+      "protobuf_bytes": 91,
+      "protobuf_sha256": "fdaad733bded234dfe0292878f7ff194d9035a2184ac7887630aaa4c6fe7647a",
+      "protobuf_type": "spark.connect.ConfigRequest",
+      "rpc": "Config",
+      "textproto_sha256": "df3a1e61328c2a2488ca1c20f7e830a5be0d71d07e6a68c50e9ae82c4a2b5fab"
+    },
+    "execute-cached-local-relation-boundary": {
+      "protobuf_bytes": 184,
+      "protobuf_sha256": "d3d166452edc4b242744b42a1a3c97b71a11190f774964996938ebd7170432e2",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "baee1af418ae921ae14f2129805639a3a341dd4660ab15e5d84db2e5fb0c5747"
+    },
+    "execute-column-expressions": {
+      "protobuf_bytes": 196,
+      "protobuf_sha256": "a6f3d263790c3a72bad620181af222ef805f3fa0fcfc0a79a03151b009d87e17",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "cdc65f17948d72b08a509cd8b85062cf92572f07ee74b93ad118f2c415c343c9"
+    },
+    "execute-empty-local-relation": {
+      "protobuf_bytes": 276,
+      "protobuf_sha256": "1878f787aa31efbec9cff53ab74c40f8083df65edfcb5516dcee3a52648950a0",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "dea48f032431dcb3e6ef74423836cfe01f257c56c94adc534534f3846a74673a"
+    },
+    "execute-head": {
+      "protobuf_bytes": 133,
+      "protobuf_sha256": "6b1d0887be345098c5aa79aac60a06dc2b145e6b7f4405308dfd16e7dd2116e0",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "a114e6f6bea6eea7730a3dec2b01212b286d3bd3ded85ec062915e9949c46aa2"
+    },
+    "execute-local-relation": {
+      "protobuf_bytes": 765,
+      "protobuf_sha256": "a78e7d3de900e46c69c6dae5b247284f4ff65d4cd507a46d0d02ab70df17f074",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "91a3a3cdc6476f0b4c0044d589b2cf532bb9be2a81aa5c08d48b41a67ef573c2"
+    },
+    "execute-range-filter-count": {
+      "protobuf_bytes": 172,
+      "protobuf_sha256": "f91301d818dcc5f77937264a26b35f5befbce37f4decbf081540aefb4caab6d3",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "2aa43b91b1636795e10b8aa694673a58478cabba24c5431bef0824b45e056742"
+    },
+    "execute-range-select-limit": {
+      "protobuf_bytes": 151,
+      "protobuf_sha256": "be862f6fff596335122c7754d279f4de0caaa1266ebcfdc6142849b1c26cf55b",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "b213e0a2d2fd07cc362b45ed7aab835a69d5e7fe61be7e1040c8f4d4897f2b34"
+    },
+    "execute-sql-command-excluded": {
+      "protobuf_bytes": 141,
+      "protobuf_sha256": "261a6d6f639995f897e23f4351b53ab3af57ddca92ef0ed7609530032ab87d5b",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "4fcaacf0146307c8cca7f0662dc4f4e5ac49607a6be8439b375e50136df17c7d"
+    },
+    "execute-take": {
+      "protobuf_bytes": 133,
+      "protobuf_sha256": "76e1b74a76fde1d39b60f5d3057d426638b61ff3baf99523a7535edddfa29f00",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "19722fb3c0420953d924104f5ceac2503fdc056c02ea87dc4daa47e4f4ab92a0"
+    },
+    "execute-to-local-iterator": {
+      "protobuf_bytes": 123,
+      "protobuf_sha256": "5edf8a679c73ad7a941f99fdf194fa054a01d263417fbacda9ef77c4bdbcf236",
+      "protobuf_type": "spark.connect.ExecutePlanRequest",
+      "rpc": "ExecutePlan",
+      "textproto_sha256": "0d030fc40c9fdb033da30c5dcf34e62aebce98f598957653b0f81e4a2d77d1bb"
+    },
+    "interrupt-operation": {
+      "protobuf_bytes": 103,
+      "protobuf_sha256": "25fda540e84763ff51c684d8afb7b293ce2cb809e462f388141c6818204aa460",
+      "protobuf_type": "spark.connect.InterruptRequest",
+      "rpc": "Interrupt",
+      "textproto_sha256": "51b309baf4803f4d5c9e3925e03768c7dbacb7fe96cad3cfe32281625d5d0744"
+    },
+    "interrupt-session": {
+      "protobuf_bytes": 65,
+      "protobuf_sha256": "f1884d749fef18c816fb2fc631e5e5acc93ef667c53a2e57ebf9b5aa56263b03",
+      "protobuf_type": "spark.connect.InterruptRequest",
+      "rpc": "Interrupt",
+      "textproto_sha256": "e39ff192cd4e445a2403792aca8bee2750ac03df8d9a6767306d2b0e7380d528"
+    },
+    "interrupt-tag": {
+      "protobuf_bytes": 79,
+      "protobuf_sha256": "a8ba8ac144e8e80abf7d96c7d40dcaeaab3a2059af4d08cde0d1ae7fb2746dfb",
+      "protobuf_type": "spark.connect.InterruptRequest",
+      "rpc": "Interrupt",
+      "textproto_sha256": "a7a5ceb47a1e503201b6b38806426c32f3011a2283db9eb5bf7bf371029d6ba7"
+    },
+    "reattach-execute": {
+      "protobuf_bytes": 159,
+      "protobuf_sha256": "cd27393c3a6500e8d0ce5b6e65d89b70472df9998649e2f49a8e8908a386d120",
+      "protobuf_type": "spark.connect.ReattachExecuteRequest",
+      "rpc": "ReattachExecute",
+      "textproto_sha256": "f8285e6131fa3d2d516a11352df10dd0206c5c1f8e74fcf4545e1198dba8cfb9"
+    },
+    "release-execute-all": {
+      "protobuf_bytes": 103,
+      "protobuf_sha256": "fe9df88eea4cd02a0b22b4c5af0b0c2b3ff7269b97654bc05b9ce134ff2e06e1",
+      "protobuf_type": "spark.connect.ReleaseExecuteRequest",
+      "rpc": "ReleaseExecute",
+      "textproto_sha256": "d75ef7c4fd598ea209892a5d18c0f227da24f8d03a489791f8bbdd07436029fa"
+    },
+    "release-execute-prefix": {
+      "protobuf_bytes": 123,
+      "protobuf_sha256": "2db221be93a2037d8df63b53f9b7447cb00f6ff06af29f74198c249a8f3b2cab",
+      "protobuf_type": "spark.connect.ReleaseExecuteRequest",
+      "rpc": "ReleaseExecute",
+      "textproto_sha256": "b29fc6cc2a722cc260a91f5faca639528c4cb71a7912f5ea79dc860bd90a0fdd"
+    },
+    "release-session": {
+      "protobuf_bytes": 63,
+      "protobuf_sha256": "191133ec4eb4067ac50b2927dc40dff8f4e994bfb62e255a72ffd53cc320be8e",
+      "protobuf_type": "spark.connect.ReleaseSessionRequest",
+      "rpc": "ReleaseSession",
+      "textproto_sha256": "4eb986d1bf9903a190d97d9e830f2edae33d606fa03d919cc655daec6fa74a72"
+    }
+  },
+  "harness_notes": [
+    "Fake Config responses let normal public client APIs build plans; the local-relation threshold matches Spark 4.0.5's 64 MiB default except in the explicit one-byte branch fixture.",
+    "The cached-local-relation fixture replaces only the artifact-upload call with a stable ID; it does not encode AddArtifacts or certify artifact support.",
+    "GetOption is captured through the low-level Config request builder because the pinned Python RuntimeConf API does not expose it."
+  ],
+  "normalization": [
+    "fixed client session ID and user ID",
+    "fixed ExecutePlan operation IDs",
+    "empty client_type (runtime OS/Python metadata only)",
+    "plan IDs reset to zero before each captured API call"
+  ],
+  "protocol_source": {
+    "apache_license": "Apache-2.0",
+    "commit": "b472a3aa3c4b71b5a6ff068ef396f757bd662e59",
+    "tag": "v4.0.5"
+  },
+  "purpose": "Actual pinned-client request encoding; no server execution or conformance claim."
+}

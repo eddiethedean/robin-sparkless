@@ -2,7 +2,7 @@
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Validation](VALIDATION.md)
 
-**Status:** The standalone D02–D04/D07–D11 contract and Python 3.11 minimum are frozen for 4.17 below; final candidate and distribution evidence remain open. D05's coordinated package versions remain resolved. Future Connect/client/protocol and later-phase choices remain outside the 4.17 gate.
+**Status:** The standalone D02–D04/D07–D11 contract and Python 3.11 minimum are frozen for 4.17 below; final candidate and distribution evidence remain open. D05's coordinated package versions remain resolved. The 4.18 Connect client/protocol baseline is frozen below; server interoperability remains open. Spark Connect is pinned to the 4.0.5 maintenance line for 4.18; this does not change the separate project release version.
 
 Do not replace an unresolved value with a guessed version or silently treat a recommendation as implemented. Record resolution date, owner, exact immutable revisions, rationale, impacted plans, and validation evidence here.
 
@@ -10,7 +10,7 @@ Do not replace an unresolved value with a guessed version or silently treat a re
 
 ## DuckDB phase placement (resolved 2026-10-25)
 
-The project owner requested two separate phases after supported Connect: **Phase 3 / 4.19, DuckDB as a data source feeding Polars**, then **Phase 4 / 4.20, optional DuckDB execution through Connect**. [SS-14](14-duckdb-data-source.md) and [SS-15](15-duckdb-connect-backend.md) define the boundaries and delivery slices. Python workers move to Phase 5 / 4.21 and native Delta/UC integration to Phase 6 / 4.22. This resolves scheduling and scope, not the implementation choices in D14/D15 or compatibility evidence in V33–V36.
+The project owner requested two separate phases after supported Connect: **Phase 3 / 4.19, DuckDB as a data source feeding Polars**, then **Phase 4 / 4.20, optional DuckDB execution through Connect**. [SS-14](14-duckdb-data-source.md) and [SS-15](15-duckdb-connect-backend.md) define the boundaries and delivery slices. Python workers move to Phase 5 / 4.21 and native Delta/UC integration to Phase 6 / 4.22. This resolves scheduling and scope, not the implementation choices in D14/D15 or compatibility evidence in V35–V38.
 
 D14 must select a native source/driver and prove database ownership, stable snapshots, schema fidelity, and bounded batch transfer. D15 must separately select the execution/backend interface, Spark semantic translation, and transaction/outcome guarantees. Live shared-table access requires a supported common DuckDB owner; mounting the same database files or exporting a copy is not that proof. Default SQL/Connect remains Polars, and every DuckDB capability is optional and Python/JVM-free in the native server.
 
@@ -55,6 +55,21 @@ Duplicate lookup intentionally uses the request digest and session ID, rejecting
 
 D05/D06 also require the complete 4.17.0 candidate inventory, exact launcher/binary coupling, platform evidence, and public-install verification in V31/V32. Retain the independent protocol versions and coordinated package-version policy. Phase 2 replay/analysis/Arrow client decisions remain open.
 
+## 4.18 implementation baseline
+
+The [4.18 plan](RELEASE_4_18.md) divides Phase 2 into slices 418-01–418-10. Slice 418-01 freezes the source/client/interface baseline, with server behavior validation staged later. The [public-contract research](CONNECT_PROTOCOL_RESEARCH.md) pins Apache Spark `v4.0.5`, commit `b472a3aa3c4b71b5a6ff068ef396f757bd662e59`, and records source differences against `v4.0.0`.
+
+| Decisions | 418-01 frozen baseline | Remaining acceptance evidence |
+| --- | --- | --- |
+| D01 | `pyspark-client==4.0.5`; matching `pyspark[connect]==4.0.5`; hash-locked CPython 3.11 fixture environments; exact Spark source commit; pinned Rust generator/runtime crates; Apache licensing and v4.0.0 source comparison. | V18–V24 with the unmodified locked client and matching reference; other interpreter lines and release-artifact inventory. |
+| D02, D04 | Captured API-to-RPC/relation/expression/config map; read-only range/filter/project/limit/count subset; scalar and schema-bearing local relations; UTC/ANSI/case oracle profile; optional/default config behavior; explicit exclusions for Connect SQL, writes, artifacts and unlisted expressions/types. | V18/V19 differential value/schema/config tests; unsupported descendants and commands must fail with no effects. |
+| D07, D09, D10 | Shared Connect-namespaced session/operation coordinator; generation-bearing leases; one producer per retained identity; separate execution and transport state; opaque response IDs with internal ordering; active duplicate IDs return `INVALID_HANDLE.OPERATION_ALREADY_EXISTS`; default release tombstone and `allow_reconnect=true` rejected until implemented; HTTP receipts remain independent. | V21/V22 races, loss before the first batch, cursor recovery, release-cursor behavior against the pinned oracle, capacity/expiry/restart, and no repeated producer. |
+| D08 | Connect-specific resource defaults in the plan are Sparkless policies, not Apache defaults or hard RSS claims. | Enforced input/output/replay limits, saturation, slow-reader progress, bounded cleanup, retained-memory and RSS evidence. Record changed defaults. |
+| D11 | Standard Spark logical schema descriptors; checked Polars Arrow `0.53.0` physical mapping; independently readable Arrow IPC stream per response; metadata/nullability and explicit initial scalar set. | V18/V20 client-visible schemas/values, empty/multi-batch streams, nested transformations and replay round trips. |
+| D03, D05, D06 | Proxy dependency tracked against MiniLake PR #1, which has no Connect/gRPC path; Cargo features `http`/`connect`, default `sc://127.0.0.1:15002`, listener-bound readiness before capability advertisement, and HTTP-only build retained. | Separate immutable MiniLake gRPC proxy change and V25/V26; standalone V18–V24 first; V33 candidate inventory and V34 public-artifact checks. |
+
+The 418-01 client corpus and reproducible commands are in [`tests/connect`](../../../tests/connect/README.md). They record client requests, not successful server responses. Before freezing final D07 error behavior, resolve release-cursor behavior against Spark 4.0.5. Keep safe cleanup regardless of error representation. Do not claim unlimited/durable retry protection from bounded tombstones, or advertise Structured Streaming from Arrow result streaming.
+
 ## Decisions required by milestones
 
 | ID | Decision | Required by | Responsible workstream | Resolution requirements |
@@ -83,10 +98,11 @@ Populate the following together at the 0A gate; file locations may be chosen dur
 | --- | --- | --- |
 | Native engine and server source | Unselected | Pending |
 | Rust toolchain/MSRV | Follow root rust-toolchain.toml and Cargo.toml; capture exact values at build | Pending build evidence |
-| PySpark client and Python | Unselected | Pending |
-| Spark Connect protocol sources/compiler | Unselected | Pending |
-| gRPC/protobuf/PyArrow dependencies | Unselected | Pending |
-| Polars/Arrow serialization boundary | Unselected | Pending |
+| PySpark client and Python | `pyspark-client==4.0.5`, sdist SHA-256 `8ec7bd9afde36e48e65545271833e64c77b86e47d44fcc8660bfba948fca32e0`; package metadata requires Python `>=3.9`; fixture interpreter CPython 3.11 | `tests/connect/client-py311.lock`; actual public-client request fixtures |
+| Spark Connect protocol sources/compiler | Apache Spark `v4.0.5`, commit `b472a3aa3c4b71b5a6ff068ef396f757bd662e59`; Spark `.proto` files Apache-2.0; `tonic`/`tonic-prost`/`tonic-prost-build` `0.14.8`, `prost`/`prost-build` `0.14.4`, `protoc-bin-vendored` `3.3.0` | Source hashes and 4.0.0 comparison in `CONNECT_PROTOCOL_RESEARCH.md`; generation evidence remains in 418-02 |
+| gRPC/protobuf/PyArrow dependencies | Hash-pinned CPython 3.11 client and separate reference environments | `tests/connect/client-py311.lock` and `oracle-py311.lock`; regeneration/fixture checks in `tests/connect/README.md` |
+| Polars/Arrow serialization boundary | `polars-arrow==0.53.0`; each protobuf Arrow batch is an independently readable Arrow IPC stream | Existing Cargo.lock; client-visible value/schema validation remains V18/V20 |
+| Reference Spark and settings | Apache Spark `4.0.5`, archive `spark-4.0.5-bin-hadoop3-connect.tgz`, SHA-512 `4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b`; Java 17; UTC, ANSI enabled, case-insensitive, `useLargeVarTypes=false` | Apache checksum/signature instructions and `tests/connect/oracle-py311.lock`; differential server tests remain V18/V19 |
 | V16 native mutation follow-up | Native candidate [`66fb57d6bfcf82ce9cd2c65817213391147c0648`](https://github.com/eddiethedean/robin-sparkless/commit/66fb57d6bfcf82ce9cd2c65817213391147c0648) | Direct HTTP verifies unknown status, 1,024-record retention, 2,050-byte minimum and 2,304-byte largest record reservation. Optional SDK evidence is preserved in [history](../../history/phase1-417-branch-evidence.md); external acceptance is nonblocking. |
 | Reference Spark/Sail and settings | Unselected | Pending |
 | Launcher control and HTTP envelope versions | Unselected | Pending |

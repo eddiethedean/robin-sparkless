@@ -1,0 +1,5 @@
+# Matching Python reference client/dependencies; keep separate from pyspark-client.
+# The Spark 4.0.5 Connect-enabled server binary is pinned in tests/connect/README.md.
+pyspark[connect]==4.0.5
+# Match Spark 4.0.5's documented Connect dependency support matrix.
+pandas>=2.0,<3.0

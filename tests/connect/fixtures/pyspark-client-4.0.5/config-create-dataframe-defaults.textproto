@@ -1,0 +1,17 @@
+session_id: "11111111-1111-4111-8111-111111111111"
+user_context {
+  user_id: "contract-fixture-user"
+}
+operation {
+  get {
+    keys: "spark.sql.timestampType"
+    keys: "spark.sql.session.timeZone"
+    keys: "spark.sql.session.localRelationCacheThreshold"
+    keys: "spark.sql.execution.pandas.convertToArrowArraySafely"
+    keys: "spark.sql.execution.pandas.inferPandasDictAsMap"
+    keys: "spark.sql.pyspark.inferNestedDictAsStruct.enabled"
+    keys: "spark.sql.pyspark.legacy.inferArrayTypeFromFirstElement.enabled"
+    keys: "spark.sql.pyspark.legacy.inferMapTypeFromFirstPair.enabled"
+    keys: "spark.sql.execution.arrow.useLargeVarTypes"
+  }
+}

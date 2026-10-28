@@ -7,6 +7,8 @@
 
 Add optional sync/async lifecycle support in the existing sparkless package for an owned native executable.
 
+The [4.18 implementation plan](RELEASE_4_18.md) assigns supported endpoint work to 418-07 after standalone conformance: independent HTTP/gRPC binds, actual ephemeral endpoint readiness, negotiated control/capability validation, installed-platform lifecycle checks, and V24. Update the current validator that rejects Connect advertisement; disabled/experimental builds continue to reject `spark_connect_url`. Starting the native child must not import PySpark.
+
 ## Dependencies and delivery slices
 
 SS-02 owned control/packaging and SS-04/05 readiness/drain contracts; SS-10 release gate before enabling gRPC URL.

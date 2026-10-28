@@ -9,6 +9,8 @@ Build a single-node Rust service in `crates/sparkless-server/` that calls Robin'
 - [Release roadmap](ROADMAP.md): 4.16.0 and later release scope, coordinated package versions, and publication gates.
 - [4.16 implementation plan](RELEASE_4_16.md): ordered delivery slices, SQL/type boundary, proposed limits, lifecycle/control design, and package/release checks.
 - [4.17 implementation plan](RELEASE_4_17.md): shared catalog/snapshot ownership, controlled mutation identities and outcomes, logical schemas, lazy execution, and coordinated release checks.
+- [4.18 implementation plan](RELEASE_4_18.md): public Connect subset, physical Arrow encoding, bounded replay/lifecycle, standalone then proxy conformance, and candidate/publication gates.
+- [Spark Connect public-contract research](CONNECT_PROTOCOL_RESEARCH.md): Apache Spark 4.0.5 source review, 4.0.0 source comparison, pinned client fixtures, retry/config/IPC requirements, and product scope versus public protocol behavior.
 - [DuckDB data source](14-duckdb-data-source.md) and [DuckDB Connect backend](15-duckdb-connect-backend.md): separate Phases 3/4 after supported Connect, targeted at 4.19/4.20.
 - [Full revised epic](EPIC.md): baseline architecture, contracts, limitations, and phase gates.
 - [Decision register](DECISIONS.md): unresolved choices, required milestones, and evidence to record.
@@ -46,8 +48,8 @@ All workstreams are **planned**, with owners unassigned and implementation issue
 | 0B | SS-02 native package; SS-04 runtime; SS-05 HTTP; SS-06 launcher; SS-07 read-only session slice; SS-08 minimum scalar/schema repairs; SS-11 release checks | Direct HTTP values/schema and packaged launcher checks; lifecycle, admission, isolation, negative and shutdown checks |
 | 1 | SS-07 shared catalogs/mutation coordination; SS-08 richer schema and lazy paths; SS-04 accounting extensions | Visibility/restart/commit/concurrency/type/laziness evidence for each newly enabled capability |
 | 2 | SS-09 plans/config/analysis and SS-10 Arrow/replay jointly; SS-06 gRPC endpoint exposure; SS-11 standalone release checks | Standalone unmodified JVM-free client conformance; optional proxy certification is supplemental |
-| 3, optional | SS-14 after supported Connect; D14 source/ownership contract | V33/V34 typed DuckDB-to-Polars scans, snapshots, bounded resources, and independent writer/reader sharing |
-| 4, optional | SS-15 after SS-14; D15 execution/backend contract | V35/V36 DuckDB computation, transaction outcomes, Connect lifecycle, and shared managed-table writes |
+| 3, optional | SS-14 after supported Connect; D14 source/ownership contract | V35/V36 typed DuckDB-to-Polars scans, snapshots, bounded resources, and independent writer/reader sharing |
+| 4, optional | SS-15 after SS-14; D15 execution/backend contract | V37/V38 DuckDB computation, transaction outcomes, Connect lifecycle, and shared managed-table writes |
 | 5, optional | SS-12 and its runtime/catalog/release prerequisites | V27 isolated Python workers; core remains Python-free |
 | 6, optional | SS-13 and native catalog/type/release prerequisites | V28 independent Delta/UC readers validate transactions; no dependency on Python workers |
 

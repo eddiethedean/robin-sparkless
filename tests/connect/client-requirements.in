@@ -1,0 +1,5 @@
+# Contract-fixture generator/client for Spark Connect Phase 2.
+# Compile and sync on CPython 3.11; do not install alongside the pyspark oracle.
+pyspark-client==4.0.5
+# Stay inside Spark 4.0.5's documented Connect dependency support matrix.
+pandas>=2.0,<3.0

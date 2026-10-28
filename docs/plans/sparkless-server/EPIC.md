@@ -25,8 +25,8 @@ This epic covers the complete direction. Each phase has its own supported surfac
 | **Phase 0B** | Read-only HTTP SQL service, minimum bounded runtime/session management, sync/async Python launcher, native image | Exact values and schemas through direct HTTP and fresh packaged consumer environments |
 | **Phase 1** | Shared catalog ownership, controlled mutations, richer logical types, lazy execution improvements | Visibility, concurrency, mutation outcomes, type fidelity, and resource-accounting tests |
 | **Phase 2** | Supported Spark Connect release with Arrow streaming and resumable executions | Pinned unmodified client, lifecycle/conformance suite, with optional external route certification outside the standalone release gate |
-| **Phase 3** | Optional DuckDB data source feeding Polars execution | Supported Connect first; V33/V34 typed scans, source snapshots, database ownership, and bounded resources |
-| **Phase 4** | Optional DuckDB execution backend through Connect | Phase 3 first; V35/V36 Spark semantics, backend lifecycle, persistent transaction outcomes, and shared-table interoperability |
+| **Phase 3** | Optional DuckDB data source feeding Polars execution | Supported Connect first; V35/V36 typed scans, source snapshots, database ownership, and bounded resources |
+| **Phase 4** | Optional DuckDB execution backend through Connect | Phase 3 first; V37/V38 Spark semantics, backend lifecycle, persistent transaction outcomes, and shared-table interoperability |
 | **Phase 5** | Optional isolated Python workers | Separate trust, packaging, resource, and lifecycle contract |
 | **Phase 6** | Optional Delta Lake / Unity Catalog | Verified native transactions and interoperability |
 
@@ -208,9 +208,10 @@ Expose the actual pinned Spark Connect gRPC service, with loopback CLI default p
 
 ### Reattachment, release, and operation state
 
-The reviewed Spark 4.0 client enables reattachable execution by default. Implement and verify the selected client's requirements for `ExecutePlan`, `AnalyzePlan`, `Config`, `ReattachExecute`, `ReleaseExecute`, `ReleaseSession`, and `Interrupt`, plus error-detail behavior where used.
+The reviewed Spark 4.0 client enables reattachable execution by default. Implement and verify the selected client's requirements for `ExecutePlan`, `AnalyzePlan`, `Config`, `ReattachExecute`, `ReleaseExecute`, `ReleaseSession`, and `Interrupt`, plus `FetchErrorDetails` behavior where used. The [public-contract research](CONNECT_PROTOCOL_RESEARCH.md) records source-backed retry, release, configuration, and IPC details; production pins and interoperability tests remain open. Excluded UDFs/Structured Streaming/artifact paths are Sparkless scope choices, not general Spark Connect limitations.
 
 - Maintain stable session generation, operation IDs, ordered response IDs, and Arrow offsets. Validate client-observed server session IDs.
+- Response IDs are opaque UUIDs ordered by an internal sequence; each Arrow response payload must be independently readable by the pinned client's IPC decoder. Configuration optional/default lookups preserve their normal missing/default outcomes without claiming support for ineffective settings.
 - Send the protocol's completion marker and required metadata; transport end-of-stream alone must not falsely signal query completion.
 - Reattachment resumes retained responses after the acknowledged response; it must not rerun the plan or a mutation.
 - Release acknowledged prefixes and complete operations according to the protocol. Cleanup is idempotent and safe under concurrent release/reattach.
@@ -218,6 +219,7 @@ The reviewed Spark 4.0 client enables reattachable execution by default. Impleme
 - Bound replay bytes, active/detached operations, retained errors, and retention time. Pause production where safe and fail/expire explicitly when budgets are exhausted; never silently evict required replay data or truncate successful results.
 - Define expiration, released-session behavior, and server-restart behavior. A lost session/operation must not be silently recreated and reexecuted.
 - Test reconnect after at least one batch, duplicate execute, repeated release, interrupt during detached execution, retention expiry/capacity exhaustion, and stop/release races.
+- Also test request loss before acceptance and response loss before the first response. The default client can retry `ExecutePlan` after a missing handle at that boundary; abandoned identity/history handling must prevent reexecution within the declared retention scope. Connect duplicate errors and session-release behavior are distinct from HTTP receipt replay and session recreation.
 
 Optional third-party proxy certification follows standalone conformance. Transport, authentication, session handling, and streaming require their own evidence before advertising that route; external changes or acceptance cannot block standalone Sparkless releases.
 
@@ -225,7 +227,7 @@ Optional third-party proxy certification follows standalone conformance. Transpo
 
 Follow the [SS-14 source plan](14-duckdb-data-source.md) in Phase 3 / 4.19, then the [SS-15 execution backend plan](15-duckdb-connect-backend.md) in Phase 4 / 4.20. The first phase reads DuckDB tables through bounded native Arrow batches while Polars computes; the second executes supported SQL/DataFrame plans and enumerated writes inside DuckDB. Each has its own decisions, implementation slices, and release gates. Neither expands the Phase 2 release prerequisite.
 
-Live access to independently written DuckDB tables requires a proven shared database owner and matching catalog/snapshot semantics. Independent writable processes cannot be assumed to share embedded database files. Keep sources read-only until the execution phase proves its write/outcome contract. Use self-contained DuckDB writer/reader fixtures; external application changes are not prerequisites. See D14/D15 and V33–V36 for the required ownership, semantic, memory, lifecycle, and interoperability evidence.
+Live access to independently written DuckDB tables requires a proven shared database owner and matching catalog/snapshot semantics. Independent writable processes cannot be assumed to share embedded database files. Keep sources read-only until the execution phase proves its write/outcome contract. Use self-contained DuckDB writer/reader fixtures; external application changes are not prerequisites. See D14/D15 and V35–V38 for the required ownership, semantic, memory, lifecycle, and interoperability evidence.
 
 ## Python lifecycle API
 
@@ -318,6 +320,8 @@ The [4.17 implementation plan](RELEASE_4_17.md) refines this phase into delivery
 
 ### Phase 2
 
+The [4.18 implementation plan](RELEASE_4_18.md) refines this phase into 418-01–418-10, freezes the Spark 4.0.5 client/protocol and API/type/resource boundaries, and defines V33/V34 candidate/public-artifact gates. The accompanying [source review](CONNECT_PROTOCOL_RESEARCH.md) establishes public protocol provenance, not implementation conformance. Earlier release prerequisites remain required.
+
 - [ ] Unmodified pinned JVM-free client computes `spark.range(10).filter("id > 5").count() == 4` through Robin's engine.
 - [ ] Multi-batch and empty results, supported type boundaries, schema analysis, expressions, null/ANSI behavior, and unsupported plans are tested against real Spark with the same semantic settings.
 - [ ] Execute/reattach/release/interrupt/session-release lifecycle passes under disconnects, retries, capacity pressure, and restart.
@@ -327,8 +331,8 @@ The [4.17 implementation plan](RELEASE_4_17.md) refines this phase into delivery
 
 ### Optional phases after Connect
 
-- **Phase 3:** DuckDB source integration, with read-only typed Arrow scans into Polars, stable multi-table snapshots, native database ownership, independent DuckDB writer visibility, and measured memory/cancellation behavior. Complete V33/V34 before the 4.19 release.
-- **Phase 4:** DuckDB execution behind the Connect endpoint, with explicit backend selection, reference-semantic and schema agreement, persistent transactional write outcomes, Connect lifecycle, and independent client read/write visibility. Complete V35/V36 before the 4.20 release; a source scan alone does not complete this phase.
+- **Phase 3:** DuckDB source integration, with read-only typed Arrow scans into Polars, stable multi-table snapshots, native database ownership, independent DuckDB writer visibility, and measured memory/cancellation behavior. Complete V35/V36 before the 4.19 release.
+- **Phase 4:** DuckDB execution behind the Connect endpoint, with explicit backend selection, reference-semantic and schema agreement, persistent transactional write outcomes, Connect lifecycle, and independent client read/write visibility. Complete V37/V38 before the 4.20 release; a source scan alone does not complete this phase.
 - **Phase 5:** isolated Python worker packaging, code trust, quotas, environment/secrets handling, output/errors, Jobs/notebook behavior, and worker cleanup. Core SQL/Connect images remain free of Python.
 - **Phase 6:** native Delta/UC integration with independent-reader verification of schema and transactions, decimal preservation, and explicit rejection of unsupported writes/DDL.
 
@@ -368,5 +372,5 @@ Record cross-repository owners and immutable test revisions in those issues. Do 
 - [Core schema](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/schema.rs), [schema conversion](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/src/schema_conv.rs), [native session ownership](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/src/session/mod.rs)
 - [Emulator agent adapter](https://github.com/calvinchengx/databricks-emulator/blob/main/internal/spark/spark.go), [Statement Execution response](https://github.com/calvinchengx/databricks-emulator/blob/main/internal/server/sql.go), [gRPC proxy](https://github.com/calvinchengx/databricks-emulator/blob/main/internal/server/connect.go)
 - [Family SQL agent envelope](https://github.com/calvinchengx/fabric-emulator/blob/main/python/spark_agent/sqlrun.py), [Databricks SDK SQL models](https://github.com/databricks/databricks-sdk-py/blob/main/databricks/sdk/service/sql.py)
-- [Spark 4.0 protocol](https://github.com/apache/spark/blob/v4.0.0/sql/connect/common/src/main/protobuf/spark/connect/base.proto), [types](https://github.com/apache/spark/blob/v4.0.0/sql/connect/common/src/main/protobuf/spark/connect/types.proto), [reattachment client](https://github.com/apache/spark/blob/v4.0.0/python/pyspark/sql/connect/client/reattach.py)
+- [Spark 4.0.5 protocol](https://github.com/apache/spark/blob/v4.0.5/sql/connect/common/src/main/protobuf/spark/connect/base.proto), [types](https://github.com/apache/spark/blob/v4.0.5/sql/connect/common/src/main/protobuf/spark/connect/types.proto), [reattachment client](https://github.com/apache/spark/blob/v4.0.5/python/pyspark/sql/connect/client/reattach.py)
 - [Tokio blocking-task cancellation limits](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html), [Go JSON number decoding](https://pkg.go.dev/encoding/json#Unmarshal)

@@ -1,0 +1,43 @@
+session_id: "11111111-1111-4111-8111-111111111111"
+user_context {
+  user_id: "contract-fixture-user"
+}
+plan {
+  root {
+    common {
+      plan_id: 2
+    }
+    limit {
+      input {
+        common {
+          plan_id: 1
+        }
+        project {
+          input {
+            common {
+              plan_id: 0
+            }
+            range {
+              start: 0
+              end: 10
+              step: 1
+            }
+          }
+          expressions {
+            unresolved_attribute {
+              unparsed_identifier: "id"
+              is_metadata_column: false
+            }
+          }
+        }
+      }
+      limit: 3
+    }
+  }
+}
+request_options {
+  reattach_options {
+    reattachable: true
+  }
+}
+operation_id: "33333333-3333-4333-8333-333333333333"

@@ -128,6 +128,19 @@ Primary plans: [SS-07](07-sessions-catalogs-and-mutations.md), [SS-08](08-native
 
 Complete **Phase 2**, with standalone client conformance, then publish all packages at **4.18.0**.
 
+The [detailed 4.18 implementation plan](RELEASE_4_18.md) freezes the Spark 4.0.5 client/protocol baseline, public API/RPC/node/type/config matrix, shared execution boundary, physical Arrow payloads, replay/session lifecycle, resource budgets, and candidate/publication gates. Its [public-contract research](CONNECT_PROTOCOL_RESEARCH.md) compares the 4.0.5 source with the earlier 4.0.0 review. Actual interoperability and release evidence remain required.
+
+### Delivery sequence
+
+| Slices | Result | Dependency to advance |
+| --- | --- | --- |
+| 418-01–418-02 | Frozen public contracts, generated service, bounded session/admission boundary | Actual client fixtures and exact compatibility pins; prior native interfaces |
+| 418-03–418-05 | Native plans/analysis/config, physical Arrow and replay/release lifecycle | Joint client/oracle and fault/capacity evidence; no independent compatibility claim |
+| 418-06–418-07 | Standalone conformance and packaged launcher endpoint | V18–V24 plus applicable V17; unmodified default client |
+| 418-08 | Separate proxy certification and concurrent-client benchmarks | Standalone conformance first; V25/V26 with pinned proxy |
+| 418-09 | Complete integrated 4.18.0 candidate | Prior releases complete, applicable regressions and V33 |
+| 418-10 | Coordinated publication | V34 fresh public-artifact verification |
+
 ### Scope
 
 - Implement the supported relations, expressions, analysis/configuration, and actions of the pinned unmodified client.
@@ -145,7 +158,9 @@ Primary plans: [SS-09](09-connect-plans-and-analysis.md), [SS-10](10-arrow-repla
 - [ ] Reconnection after delivered batches does not rerun the plan; release/expiry/capacity-pressure tests demonstrate bounded retention.
 - [ ] Multiple real client processes produce independent correct results while health traffic progresses.
 - [ ] **V26** records reproducible concurrent-client benchmarks and limitations, without unmeasured speedup claims.
+- [ ] **V33** verifies the complete 4.18.0 candidate inventory, isolated installs, earlier regressions, and standalone/proxied Connect from packaged artifacts before tagging/publication.
 - [ ] All packages/artifacts are published and verified at **4.18.0**.
+- [ ] **V34** verifies fresh exact-version public installs, artifact hashes/digests, both supported transports, proxy route, and launcher/reconnect/release behavior after publication.
 
 ## 4.19.0 — Optional DuckDB data source
 
@@ -161,8 +176,8 @@ Primary plan: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordere
 ### Release gate
 
 - [ ] Phase 2 is complete; existing native/HTTP/Connect surfaces still pass.
-- [ ] **V33** proves real DuckDB scans, enabled Sparkless computations through Polars, exact schemas/values, and unsupported-type/write rejection.
-- [ ] **V34** proves multi-table snapshots, concurrent source changes, cancellation/disconnect/reattach, ownership cleanup, source failures, and numeric memory/queue limits. Independent DuckDB writer visibility uses one database owner.
+- [ ] **V35** proves real DuckDB scans, enabled Sparkless computations through Polars, exact schemas/values, and unsupported-type/write rejection.
+- [ ] **V36** proves multi-table snapshots, concurrent source changes, cancellation/disconnect/reattach, ownership cleanup, source failures, and numeric memory/queue limits. Independent DuckDB writer visibility uses one database owner.
 - [ ] Native enabled/disabled builds and fresh packaged installs pass on advertised platforms; default dependencies remain lightweight and Python/JVM-free.
 - [ ] All first-party packages/artifacts publish and pass fresh public verification at coordinated **4.19.0** after the complete phase exits pass. A standalone DuckDB file scan does not certify live shared-owner access.
 
@@ -181,8 +196,8 @@ Primary plan: [SS-15: DuckDB Connect backend](15-duckdb-connect-backend.md), wit
 ### Release gate
 
 - [ ] Phase 3 is complete; earlier Polars and optional source capabilities retain their tested behavior.
-- [ ] **V35** proves the declared SQL/DataFrame/analysis/type matrix through unmodified Connect clients, pinned reference semantics, and explicit unsupported results.
-- [ ] **V36** proves truthful transactional effects/receipts, duplicate/conflicting identities, deadline/commit/disconnect/cancel/restart cases, independent client read/write visibility, and numeric multi-client resource budgets.
+- [ ] **V37** proves the declared SQL/DataFrame/analysis/type matrix through unmodified Connect clients, pinned reference semantics, and explicit unsupported results.
+- [ ] **V38** proves truthful transactional effects/receipts, duplicate/conflicting identities, deadline/commit/disconnect/cancel/restart cases, independent client read/write visibility, and numeric multi-client resource budgets.
 - [ ] Applicable V19–V24 lifecycle checks pass for DuckDB; V25 remains supplemental for any advertised third-party route. Reattach must not reexecute a query or mutation.
 - [ ] Optional dependency/build/platform boundaries, clean enabled/default installs, and public artifact verification pass at coordinated **4.20.0**. Neither server runtime requires Python or a JVM.
 

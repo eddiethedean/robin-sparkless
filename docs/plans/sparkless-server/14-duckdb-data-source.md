@@ -32,7 +32,7 @@ The native Sparkless process must remain Python/JVM-free. A shared-process appro
 | 419-02 | Resolve configured DuckDB catalogs/schemas/tables and analysis schemas | Stable table identity and snapshot; case/qualification rules; no name collision or silent fallback |
 | 419-03 | Stream typed, cancellable Arrow batches into Polars scans | Empty/nonempty schemas and values; bounded batch buffers; no full-table collection during resolution |
 | 419-04 | Run the supported Connect transformations against real DuckDB sources | Filters/projections/joins/aggregates/count/limit; truthful source errors; read-only enforcement |
-| 419-05 | Complete V33/V34, opt-in packaging, capabilities, docs, and clean installs | Default Polars regressions; native image; source dependencies and supported platform matrix |
+| 419-05 | Complete V35/V36, opt-in packaging, capabilities, docs, and clean installs | Default Polars regressions; native image; source dependencies and supported platform matrix |
 
 ## Required semantics
 
@@ -46,8 +46,8 @@ The native Sparkless process must remain Python/JVM-free. A shared-process appro
 
 ## Acceptance and evidence
 
-- **V33:** a pinned unmodified Connect client reads real DuckDB tables, computes the advertised transformation corpus through Polars, preserves values/schema, and receives explicit errors for unsupported types and source writes. Test empty tables and joins as well as scalar smoke queries.
-- **V34:** controlled concurrent source writes/replacements demonstrate snapshots; cancellation, disconnect, reattach, source loss, and shutdown preserve ownership. Increasing source sizes demonstrate numeric allocation/RSS/queue budgets recorded in D14. An independent DuckDB writer and a Connect reader share one database owner and observe the declared commit visibility without export or synchronization.
+- **V35:** a pinned unmodified Connect client reads real DuckDB tables, computes the advertised transformation corpus through Polars, preserves values/schema, and receives explicit errors for unsupported types and source writes. Test empty tables and joins as well as scalar smoke queries.
+- **V36:** controlled concurrent source writes/replacements demonstrate snapshots; cancellation, disconnect, reattach, source loss, and shutdown preserve ownership. Increasing source sizes demonstrate numeric allocation/RSS/queue budgets recorded in D14. An independent DuckDB writer and a Connect reader share one database owner and observe the declared commit visibility without export or synchronization.
 - Record source/library/client revisions, schemas, commands, source sizes, platforms, latency/RSS, and limits. If live sharing fails feasibility, keep its gate open and revise advertised scope explicitly instead of claiming live shared-table support from a standalone scan.
 - Keep the feature optional and verify a default installation without DuckDB dependencies. Package/install the enabled native binary and image on each advertised platform. Apply the coordinated 4.19.0 publication policy only after all phase exits and previous regressions pass.
 

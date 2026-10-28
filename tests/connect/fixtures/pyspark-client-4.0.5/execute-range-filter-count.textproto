@@ -1,0 +1,53 @@
+session_id: "11111111-1111-4111-8111-111111111111"
+user_context {
+  user_id: "contract-fixture-user"
+}
+plan {
+  root {
+    common {
+      plan_id: 2
+    }
+    aggregate {
+      input {
+        common {
+          plan_id: 1
+        }
+        filter {
+          input {
+            common {
+              plan_id: 0
+            }
+            range {
+              start: 0
+              end: 10
+              step: 1
+              num_partitions: 1
+            }
+          }
+          condition {
+            expression_string {
+              expression: "id > 5"
+            }
+          }
+        }
+      }
+      group_type: GROUP_TYPE_GROUPBY
+      aggregate_expressions {
+        unresolved_function {
+          function_name: "count"
+          arguments {
+            literal {
+              integer: 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
+request_options {
+  reattach_options {
+    reattachable: true
+  }
+}
+operation_id: "22222222-2222-4222-8222-222222222222"

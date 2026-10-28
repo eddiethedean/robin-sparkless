@@ -1,0 +1,6 @@
+session_id: "11111111-1111-4111-8111-111111111111"
+user_context {
+  user_id: "contract-fixture-user"
+}
+interrupt_type: INTERRUPT_TYPE_TAG
+operation_tag: "contract-tag"

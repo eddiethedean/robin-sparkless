@@ -4,7 +4,7 @@
 
 ## Current release roadmap: Sparkless Server 4.16+
 
-The current product release plan adds the native Sparkless Server to the existing Sparkless and robin-sparkless packages. These milestones are planned scope, not calendar commitments. The [Sparkless Server release roadmap](plans/sparkless-server/ROADMAP.md) is the detailed source for phase scope, dependencies, and release gates; the [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md) details the first release and the [4.17 implementation plan](plans/sparkless-server/RELEASE_4_17.md) refines shared catalogs, controlled mutations, logical schemas, and lazy execution.
+The current product release plan adds the native Sparkless Server to the existing Sparkless and robin-sparkless packages. These milestones are planned scope, not calendar commitments. The [Sparkless Server release roadmap](plans/sparkless-server/ROADMAP.md) is the detailed source for phase scope, dependencies, and release gates. Implementation plans cover the [4.16 HTTP release](plans/sparkless-server/RELEASE_4_16.md), [4.17 catalogs and native execution](plans/sparkless-server/RELEASE_4_17.md), and [4.18 Spark Connect, Arrow, and replay](plans/sparkless-server/RELEASE_4_18.md). The 4.18 scope is informed by [Apache public-contract research](plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md).
 
 | Release | Shared version | Planned scope |
 | --- | --- | --- |
