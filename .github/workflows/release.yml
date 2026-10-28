@@ -185,7 +185,7 @@ jobs:
             mkdir -p "$(dirname "$tool")"
             install "$RUNNER_TEMP/cargo-audit-root/bin/cargo-audit" "$tool"
           fi
-          echo "$(dirname "$tool")" >> "$GITHUB_PATH"
+          dirname "$tool" >> "$GITHUB_PATH"
       - name: Resolve and audit the graph consumers receive
         run: |
           python3 scripts/verify_rust_consumer_graph.py --output "$RUNNER_TEMP/rust-consumer-audit.json"
@@ -844,7 +844,7 @@ jobs:
           docker push "$target"
           digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
           echo "digest=${digest##*@}" >> "$GITHUB_OUTPUT"
-          echo "Published and smoke-tested `$digest`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published and smoke-tested $digest" >> "$GITHUB_STEP_SUMMARY"
 
   # --- Python (lint + tests, then PyPI publish for 3.11+) ---
   python-lint:
@@ -951,9 +951,9 @@ jobs:
       - name: Set Python path
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            echo "PY=$GITHUB_WORKSPACE/.venv/Scripts/python" >> $GITHUB_ENV
+            echo "PY=$GITHUB_WORKSPACE/.venv/Scripts/python" >> "$GITHUB_ENV"
           else
-            echo "PY=$GITHUB_WORKSPACE/.venv/bin/python" >> $GITHUB_ENV
+            echo "PY=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
           fi
       - name: Download built wheel
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
