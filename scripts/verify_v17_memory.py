@@ -239,11 +239,15 @@ def timed_test(
             else [str(time_binary), "-v", "-o", str(report_path), *command]
         )
         started = time.perf_counter()
-        result = stream_process(timed_command, environment=environment, log_path=log_path)
+        result = stream_process(
+            timed_command, environment=environment, log_path=log_path
+        )
         elapsed_seconds = time.perf_counter() - started
         combined = result.stdout + "\n" + result.stderr
         if result.returncode:
-            raise RuntimeError(f"{label} failed with exit code {result.returncode}; log: {log_path}")
+            raise RuntimeError(
+                f"{label} failed with exit code {result.returncode}; log: {log_path}"
+            )
         if expect_test and not PASSED_PATTERN.search(combined):
             raise RuntimeError(f"{label} did not report exactly one passing Rust test")
 
@@ -412,7 +416,9 @@ def write_step_summary(report: dict[str, Any]) -> None:
 
 
 def run_witness(args: argparse.Namespace) -> dict[str, Any]:
-    log_directory = Path(args.output).parent / "v17-logs" if args.output else Path("v17-logs")
+    log_directory = (
+        Path(args.output).parent / "v17-logs" if args.output else Path("v17-logs")
+    )
     log_directory.mkdir(parents=True, exist_ok=True)
     args.diagnostic_state = {
         "schema_version": 1,
@@ -535,7 +541,8 @@ def run_witness(args: argparse.Namespace) -> dict[str, Any]:
                 marker=f"rows={rows}",
                 rows=rows,
                 expect_test=False,
-                log_path=log_directory / "range-workload-{}-{}.log".format(rows, repeat),
+                log_path=log_directory
+                / "range-workload-{}-{}.log".format(rows, repeat),
             )
             validate_range_benchmark_measurement(entry["measurement"], rows)
             entry["repeat"] = repeat

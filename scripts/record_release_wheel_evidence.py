@@ -20,7 +20,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
-        with tempfile.TemporaryDirectory(prefix="sparkless-wheel-inspect-") as temporary:
+        with tempfile.TemporaryDirectory(
+            prefix="sparkless-wheel-inspect-"
+        ) as temporary:
             _verify_native_binary(
                 args.wheel,
                 Path(temporary),

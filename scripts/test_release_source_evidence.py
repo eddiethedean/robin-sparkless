@@ -75,7 +75,9 @@ class ReleaseSourceEvidenceTests(unittest.TestCase):
                 workflow=RELEASE_ENV["GITHUB_WORKFLOW"],
                 mode=RELEASE_ENV["RELEASE_MODE"],
             )
-            self.assertTrue(any("source distribution digest" in error for error in errors))
+            self.assertTrue(
+                any("source distribution digest" in error for error in errors)
+            )
             self.assertTrue(any("derived wheel digest" in error for error in errors))
 
 

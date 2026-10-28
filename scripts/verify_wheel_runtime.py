@@ -15,11 +15,15 @@ import zipfile
 from release_wheel_evidence import build_evidence, canonical_machine, write_evidence
 
 
-def _check_wheel(wheel: Path, expected_tag: str, expected_machine: str) -> tuple[str, str]:
+def _check_wheel(
+    wheel: Path, expected_tag: str, expected_machine: str
+) -> tuple[str, str]:
     if not wheel.is_file() or wheel.suffix != ".whl":
         raise ValueError("wheel path does not name a local wheel: {}".format(wheel))
     if "cp311-abi3" not in wheel.name:
-        raise ValueError("release wheel must use the cp311-abi3 tag: {}".format(wheel.name))
+        raise ValueError(
+            "release wheel must use the cp311-abi3 tag: {}".format(wheel.name)
+        )
     if expected_tag not in wheel.name:
         raise ValueError(
             "wheel {} does not contain its expected platform tag {}".format(
@@ -30,16 +34,14 @@ def _check_wheel(wheel: Path, expected_tag: str, expected_machine: str) -> tuple
     actual_machine = canonical_machine(platform.machine())
     if actual_machine != expected_machine:
         raise ValueError(
-            "runtime machine is {}, expected native {}".format(actual_machine, expected_machine)
+            "runtime machine is {}, expected native {}".format(
+                actual_machine, expected_machine
+            )
         )
 
     with zipfile.ZipFile(wheel) as archive:
         wheel_metadata = next(
-            (
-                name
-                for name in archive.namelist()
-                if name.endswith(".dist-info/WHEEL")
-            ),
+            (name for name in archive.namelist() if name.endswith(".dist-info/WHEEL")),
             None,
         )
         if wheel_metadata is None:
@@ -47,7 +49,9 @@ def _check_wheel(wheel: Path, expected_tag: str, expected_machine: str) -> tuple
         metadata = archive.read(wheel_metadata).decode("utf-8")
         wheel_tags = set(re.findall(r"^Tag: cp311-abi3-(\S+)$", metadata, re.MULTILINE))
         if not set(expected_tag.split(".")).issubset(wheel_tags):
-            raise ValueError("wheel metadata does not declare the expected abi3 platform tag")
+            raise ValueError(
+                "wheel metadata does not declare the expected abi3 platform tag"
+            )
 
     from release_wheel_evidence import wheel_sha256
 
@@ -98,8 +102,12 @@ def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> Non
         machine_code = struct.unpack(byte_order + "H", contents[18:20])[0]
         expected_code = 62 if expected_machine == "x86_64" else 183
         if machine_code != expected_code:
-            raise ValueError("ELF extension architecture does not match its native runner")
-        result = subprocess.run(["ldd", str(native_path)], text=True, capture_output=True, check=False)
+            raise ValueError(
+                "ELF extension architecture does not match its native runner"
+            )
+        result = subprocess.run(
+            ["ldd", str(native_path)], text=True, capture_output=True, check=False
+        )
         output = result.stdout + result.stderr
         missing_libraries = _missing_shared_libraries(output)
         if missing_libraries:
@@ -115,8 +123,15 @@ def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> Non
         cpu_type = struct.unpack(byte_order + "I", contents[4:8])[0]
         expected_code = 0x01000007 if expected_machine == "x86_64" else 0x0100000C
         if cpu_type != expected_code:
-            raise ValueError("Mach-O extension architecture does not match its native runner")
-        commands = subprocess.run(["otool", "-l", str(native_path)], text=True, capture_output=True, check=True).stdout
+            raise ValueError(
+                "Mach-O extension architecture does not match its native runner"
+            )
+        commands = subprocess.run(
+            ["otool", "-l", str(native_path)],
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
         match = re.search(r"\bminos\s+(\d+)\.(\d+)", commands)
         if match is None:
             match = re.search(
@@ -124,11 +139,15 @@ def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> Non
                 commands,
             )
         if not match:
-            raise ValueError("could not read the macOS deployment target from Mach-O metadata")
+            raise ValueError(
+                "could not read the macOS deployment target from Mach-O metadata"
+            )
         actual_target = (int(match.group(1)), int(match.group(2)))
         expected_target = (10, 12) if expected_machine == "x86_64" else (11, 0)
         if actual_target > expected_target:
-            raise ValueError("Mach-O deployment target exceeds the wheel's declared platform tag")
+            raise ValueError(
+                "Mach-O deployment target exceeds the wheel's declared platform tag"
+            )
     elif sys.platform == "win32":
         if contents[:2] != b"MZ" or len(contents) < 0x40:
             raise ValueError("Windows wheel extension is not a PE binary")
@@ -138,7 +157,9 @@ def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> Non
         machine_code = struct.unpack("<H", contents[pe_offset + 4 : pe_offset + 6])[0]
         expected_code = 0x8664 if expected_machine == "x86_64" else 0xAA64
         if machine_code != expected_code:
-            raise ValueError("PE extension architecture does not match its native runner")
+            raise ValueError(
+                "PE extension architecture does not match its native runner"
+            )
     else:
         raise ValueError("unsupported runtime platform: {}".format(sys.platform))
 
@@ -146,7 +167,9 @@ def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> Non
 def _exercise_runtime(root: Path) -> None:
     from sparkless.sql import SparkSession
 
-    session = SparkSession.builder.app_name("sparkless-wheel-runtime-witness").get_or_create()
+    session = SparkSession.builder.app_name(
+        "sparkless-wheel-runtime-witness"
+    ).get_or_create()
     try:
         left = session.createDataFrame([(1,), (2,)], ["id"])
         right = session.createDataFrame([(1, 777), (2, 888)], ["id", "id_right"])
@@ -157,7 +180,9 @@ def _exercise_runtime(root: Path) -> None:
             "LEFT JOIN wheel_right AS rhs ON lhs.id = rhs.id WHERE rhs.id = 1"
         ).collect()
         if len(joined) != 1 or _value(joined[0], "id", 0) != 1:
-            raise ValueError("qualified SQL projection, join, or filter returned the wrong row")
+            raise ValueError(
+                "qualified SQL projection, join, or filter returned the wrong row"
+            )
 
         nested = session.createDataFrame(
             [(1, {"name": "alpha"}, None), (2, None, "present")],
@@ -169,9 +194,15 @@ def _exercise_runtime(root: Path) -> None:
         ).collect()
         if len(projected) != 2:
             raise ValueError("nested/nullable SQL projection did not return two rows")
-        if _value(projected[0], "id", 0) != 1 or _value(projected[0], "optional", 2) is not None:
+        if (
+            _value(projected[0], "id", 0) != 1
+            or _value(projected[0], "optional", 2) is not None
+        ):
             raise ValueError("nested/nullable SQL projection changed the first row")
-        if _value(projected[1], "id", 0) != 2 or _value(projected[1], "optional", 2) != "present":
+        if (
+            _value(projected[1], "id", 0) != 2
+            or _value(projected[1], "optional", 2) != "present"
+        ):
             raise ValueError("nested/nullable SQL projection changed the second row")
 
         parquet_path = root / "parquet-roundtrip"
@@ -182,7 +213,9 @@ def _exercise_runtime(root: Path) -> None:
 
         delta_path = root / "delta-roundtrip"
         nested.write.format("delta").mode("overwrite").save(str(delta_path))
-        delta_rows = session.read.format("delta").load(str(delta_path)).orderBy("id").collect()
+        delta_rows = (
+            session.read.format("delta").load(str(delta_path)).orderBy("id").collect()
+        )
         if len(delta_rows) != 2 or _value(delta_rows[0], "optional", 2) is not None:
             raise ValueError("local Delta round trip did not preserve nullable rows")
     finally:
@@ -200,11 +233,15 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        digest, _actual_machine = _check_wheel(args.wheel, args.platform_tag, args.machine)
+        digest, _actual_machine = _check_wheel(
+            args.wheel, args.platform_tag, args.machine
+        )
         if digest != args.expected_sha256.lower():
             raise ValueError("wheel changed after its pre-install digest was recorded")
 
-        with tempfile.TemporaryDirectory(prefix="sparkless-wheel-witness-") as temporary:
+        with tempfile.TemporaryDirectory(
+            prefix="sparkless-wheel-witness-"
+        ) as temporary:
             root = Path(temporary)
             _verify_native_binary(args.wheel, root, args.machine)
             _exercise_runtime(root)

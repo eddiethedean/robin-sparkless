@@ -144,7 +144,9 @@ class VerifyPublicRelease416Test(unittest.TestCase):
                 entry["digests"]["sha256"] = hashlib.sha256(
                     path.read_bytes()
                 ).hexdigest()
-            (directory / "unexpected.txt").write_text("not a distribution", encoding="utf-8")
+            (directory / "unexpected.txt").write_text(
+                "not a distribution", encoding="utf-8"
+            )
             with self.assertRaisesRegex(ValueError, "differ from verified inputs"):
                 validate_pypi_release(
                     metadata,

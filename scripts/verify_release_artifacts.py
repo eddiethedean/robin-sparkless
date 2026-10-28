@@ -71,7 +71,11 @@ def _release_context() -> dict[str, str]:
     }
     if not re.fullmatch(r"[0-9a-f]{40,64}", context["source_sha"]):
         raise ValueError("GITHUB_SHA must identify the tested source commit")
-    if not context["workflow"] or not context["run_id"].isdigit() or not context["run_attempt"].isdigit():
+    if (
+        not context["workflow"]
+        or not context["run_id"].isdigit()
+        or not context["run_attempt"].isdigit()
+    ):
         raise ValueError("GitHub workflow run provenance is required")
     if context["mode"] not in {
         "manual_validation",
@@ -85,7 +89,9 @@ def _release_context() -> dict[str, str]:
 
 def _write(record: dict[str, Any], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    output.write_text(
+        json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def record_server_wheel(wheel: Path, target: str, output: Path) -> None:
@@ -119,7 +125,9 @@ def record_server_wheel(wheel: Path, target: str, output: Path) -> None:
 def record_container(archive: Path, image: str, image_id: str, output: Path) -> None:
     if not archive.is_file() or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
         raise ValueError("container archive and immutable image ID are required")
-    record = _base_record("server-container", "linux-native", "nonroot-http-mutations-shutdown")
+    record = _base_record(
+        "server-container", "linux-native", "nonroot-http-mutations-shutdown"
+    )
     record.update(_release_context())
     record.update(
         {
@@ -137,7 +145,13 @@ def record_container(archive: Path, image: str, image_id: str, output: Path) -> 
 
 
 def _validate_common(
-    record: dict[str, Any], *, source_sha: str, run_id: str, run_attempt: str, workflow: str, mode: str
+    record: dict[str, Any],
+    *,
+    source_sha: str,
+    run_id: str,
+    run_attempt: str,
+    workflow: str,
+    mode: str,
 ) -> list[str]:
     errors: list[str] = []
     if record.get("schema_version") != 1:
@@ -191,26 +205,50 @@ def verify_server_wheels(
                 mode=mode,
             )
         )
-        if record.get("kind") != "server-bin-wheel" or record.get("suite") != "version-http-mutations-graceful-shutdown":
-            errors.append("{} does not record the server wheel runtime suite".format(path.name))
+        if (
+            record.get("kind") != "server-bin-wheel"
+            or record.get("suite") != "version-http-mutations-graceful-shutdown"
+        ):
+            errors.append(
+                "{} does not record the server wheel runtime suite".format(path.name)
+            )
         if record.get("build") != SERVER_BUILD:
-            errors.append("{} has unexpected server binary build provenance".format(path.name))
+            errors.append(
+                "{} has unexpected server binary build provenance".format(path.name)
+            )
         wheel_name = record.get("artifact")
         wheel = wheels.get(wheel_name) if isinstance(wheel_name, str) else None
         if wheel is None:
-            errors.append("{} refers to a wheel absent from the candidate distribution".format(path.name))
+            errors.append(
+                "{} refers to a wheel absent from the candidate distribution".format(
+                    path.name
+                )
+            )
             continue
         if sha256_file(wheel) != record.get("sha256"):
-            errors.append("{} wheel digest does not match the candidate bytes".format(path.name))
+            errors.append(
+                "{} wheel digest does not match the candidate bytes".format(path.name)
+            )
         try:
             binary_name, binary_sha = embedded_server_binary(wheel)
         except (OSError, ValueError, zipfile.BadZipFile) as error:
             errors.append("{} server wheel is malformed: {}".format(path.name, error))
         else:
-            if record.get("embedded_binary") != {"filename": binary_name, "sha256": binary_sha}:
-                errors.append("{} embedded server binary digest does not match the wheel".format(path.name))
-        if target in SERVER_WHEELS and not wheel.name.endswith(SERVER_WHEELS[target] + ".whl"):
-            errors.append("{} wheel platform tag does not match its target".format(path.name))
+            if record.get("embedded_binary") != {
+                "filename": binary_name,
+                "sha256": binary_sha,
+            }:
+                errors.append(
+                    "{} embedded server binary digest does not match the wheel".format(
+                        path.name
+                    )
+                )
+        if target in SERVER_WHEELS and not wheel.name.endswith(
+            SERVER_WHEELS[target] + ".whl"
+        ):
+            errors.append(
+                "{} wheel platform tag does not match its target".format(path.name)
+            )
     if set(observed) != set(SERVER_WHEELS):
         errors.append("server wheel evidence inventory is incomplete or unexpected")
     return errors
@@ -238,20 +276,27 @@ def verify_container(
         workflow=workflow,
         mode=mode,
     )
-    if record.get("kind") != "server-container" or record.get("suite") != "nonroot-http-mutations-shutdown":
+    if (
+        record.get("kind") != "server-container"
+        or record.get("suite") != "nonroot-http-mutations-shutdown"
+    ):
         errors.append("container evidence does not record the expected smoke contract")
     if record.get("checks") != CONTAINER_CHECKS:
         errors.append("container evidence is missing a required runtime check")
     if record.get("build") != CONTAINER_BUILD:
         errors.append("container evidence has unexpected build provenance")
-    if record.get("artifact") != archive.name or record.get("sha256") != sha256_file(archive):
+    if record.get("artifact") != archive.name or record.get("sha256") != sha256_file(
+        archive
+    ):
         errors.append("container archive digest does not match the tested image bytes")
     if not isinstance(record.get("image_id"), str) or not re.fullmatch(
         r"sha256:[0-9a-f]{64}", record["image_id"]
     ):
         errors.append("container evidence is missing the immutable image ID")
     if record.get("image") != "sparkless-server:candidate-{}".format(source_sha):
-        errors.append("container evidence does not identify this source candidate image")
+        errors.append(
+            "container evidence does not identify this source candidate image"
+        )
     return errors
 
 
@@ -273,7 +318,9 @@ def main() -> int:
         command.add_argument("--run-id", required=True)
         command.add_argument("--run-attempt", required=True)
         command.add_argument("--workflow", required=True)
-        command.add_argument("--mode", choices=("release_candidate", "stable_tag"), required=True)
+        command.add_argument(
+            "--mode", choices=("release_candidate", "stable_tag"), required=True
+        )
         if name == "verify-server-wheels":
             command.add_argument("--evidence-dir", type=Path, required=True)
             command.add_argument("--wheel-dir", type=Path, required=True)

@@ -14,7 +14,9 @@ RELEASE_WORKFLOW = ".github/workflows/release.yml"
 VERIFIED_CANDIDATE_JOB = "Verify complete candidate PyPI inventory (V31)"
 PUBLISHED_CRATES_JOB = "Build docs and publish to crates.io"
 SOURCE_EVIDENCE_ARTIFACT = "release-sdist-source-witness-v1"
-SOURCE_EVIDENCE_MARKER = "Verify isolated source build from the exact sdist (evidence schema v1)"
+SOURCE_EVIDENCE_MARKER = (
+    "Verify isolated source build from the exact sdist (evidence schema v1)"
+)
 REQUIRED_ARTIFACTS = {
     "verified-server-bin-candidate",
     "verified-sparkless-candidate",
@@ -63,14 +65,12 @@ def validate_recovery_source_details(
         raise ValueError("source run must target a stable version tag")
 
     if not any(
-        job.get("name") == VERIFIED_CANDIDATE_JOB
-        and job.get("conclusion") == "success"
+        job.get("name") == VERIFIED_CANDIDATE_JOB and job.get("conclusion") == "success"
         for job in jobs.get("jobs", [])
     ):
         raise ValueError("source run did not pass the complete V31 inventory gate")
     if not any(
-        job.get("name") == PUBLISHED_CRATES_JOB
-        and job.get("conclusion") == "success"
+        job.get("name") == PUBLISHED_CRATES_JOB and job.get("conclusion") == "success"
         for job in jobs.get("jobs", [])
     ):
         raise ValueError("source run did not successfully publish the Rust crates")
@@ -93,9 +93,13 @@ def validate_recovery_source_details(
     )
     has_source_manifest_artifact = SOURCE_EVIDENCE_ARTIFACT in available_artifacts
     if uses_source_manifest and not has_source_manifest_artifact:
-        raise ValueError("source workflow requires the unexpired schema v1 source evidence artifact")
+        raise ValueError(
+            "source workflow requires the unexpired schema v1 source evidence artifact"
+        )
     if not uses_source_manifest and has_source_manifest_artifact:
-        raise ValueError("source evidence artifact is present without its workflow schema marker")
+        raise ValueError(
+            "source evidence artifact is present without its workflow schema marker"
+        )
     policy = "manifest_v1" if uses_source_manifest else "legacy_inventory_v0"
 
     source_sha = run.get("head_sha", "")

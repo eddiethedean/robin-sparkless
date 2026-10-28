@@ -28,7 +28,7 @@ def create_data_and_spark_df(n):
     spark.conf.set("parquet.bloom.filter.enabled", True)
     spark.conf.set("parquet.bloom.filter.expected.ndv", 10)
     spark.conf.set("parquet.bloom.filter.max.bytes", 32)
-    data = [(f"id-{i % 10}", f"name-{i%10}", i * 2, i * 2 + 1) for i in range(n)]
+    data = [(f"id-{i % 10}", f"name-{i % 10}", i * 2, i * 2 + 1) for i in range(n)]
     schema = StructType(
         [
             StructField("id", StringType(), True),
@@ -42,7 +42,7 @@ def create_data_and_spark_df(n):
 
 
 def create_data_and_pandas_df(n):
-    data = [(f"id-{i % 10}", f"name-{i%10}", i * 2, i * 2 + 1) for i in range(n)]
+    data = [(f"id-{i % 10}", f"name-{i % 10}", i * 2, i * 2 + 1) for i in range(n)]
     df = pd.DataFrame(data, columns=["id", "name", "int32", "int64"])
     return data, df
 
@@ -103,9 +103,11 @@ class TestParquetIntegration:
 
     def test_bloom_filter_round_trip(self, n):
         data, df = create_data_and_pandas_df(n)
-        with NamedTemporaryFile(suffix=".csv") as csv_file, NamedTemporaryFile(
-            suffix=".schema"
-        ) as schema_file, TemporaryDirectory() as output_dir:
+        with (
+            NamedTemporaryFile(suffix=".csv") as csv_file,
+            NamedTemporaryFile(suffix=".schema") as schema_file,
+            TemporaryDirectory() as output_dir,
+        ):
             schema_file.write(SCHEMA)
             schema_file.flush()
             df.to_csv(csv_file.name, index=False, header=True)

@@ -37,7 +37,9 @@ def build_evidence(
         raise ValueError("artifact path does not name a local wheel: {}".format(wheel))
     match = re.match(r"^sparkless-([^-]+)-cp311-abi3-", wheel.name)
     if not match:
-        raise ValueError("artifact is not a Sparkless cp311-abi3 wheel: {}".format(wheel.name))
+        raise ValueError(
+            "artifact is not a Sparkless cp311-abi3 wheel: {}".format(wheel.name)
+        )
 
     digest = wheel_sha256(wheel)
     if digest != expected_sha256.lower():

@@ -51,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
             args.version, args.server_bin_directory, args.sparkless_directory
         )
     except (OSError, ValueError, zipfile.BadZipFile, tarfile.TarError) as error:
-        print("PyPI recovery distribution check failed: {}".format(error), file=sys.stderr)
+        print(
+            "PyPI recovery distribution check failed: {}".format(error), file=sys.stderr
+        )
         return 1
     print("verified recovery distributions for {}".format(args.version))
     return 0

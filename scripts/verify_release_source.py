@@ -108,7 +108,9 @@ def verify(
                 check=True,
             )
             if lockfile.read_bytes() != locked_bytes:
-                raise ValueError("isolated source build modified the locked dependency graph")
+                raise ValueError(
+                    "isolated source build modified the locked dependency graph"
+                )
     if wheel_output_dir is not None and len(list(wheel_output_dir.glob("*.whl"))) != 1:
         raise ValueError("isolated source build must produce exactly one wheel")
     print("isolated Python source build and fixed compression graph verified")

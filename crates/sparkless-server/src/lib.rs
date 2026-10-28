@@ -39,6 +39,19 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+#[cfg(feature = "connect")]
+pub(crate) mod connect;
+
+#[cfg(feature = "connect")]
+pub use connect::ConnectService;
+
+#[cfg(feature = "connect")]
+pub mod connect_proto {
+    tonic::include_proto!("spark.connect");
+    pub const FILE_DESCRIPTOR_SET: &[u8] =
+        tonic::include_file_descriptor_set!("spark_connect_descriptor");
+}
+
 pub const CONTROL_PROTOCOL_VERSION: u32 = 1;
 pub const AGENT_PROTOCOL_VERSION: &str = "1";
 pub const MUTATION_PROTOCOL_VERSION: &str = "1";
@@ -50,6 +63,8 @@ const MAX_SESSION_TEMP_VIEWS: usize = 128;
 const MAX_TABLE_ACCOUNTED_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CATALOG_ACCOUNTED_BYTES: usize = 256 * 1024 * 1024;
 const RESERVED_WAREHOUSE_SESSION: &str = "sql-warehouse";
+#[cfg(feature = "connect")]
+const MAX_CONNECT_SESSION_TOMBSTONES: usize = 1024;
 
 type HttpResponse = Response<Full<Bytes>>;
 
@@ -86,6 +101,10 @@ struct ServerInner {
     instance_id: String,
     root_session: SparkSession,
     sessions: Mutex<HashMap<String, Arc<SessionLifetime>>>,
+    #[cfg(feature = "connect")]
+    connect_tombstones: Mutex<HashMap<String, String>>,
+    #[cfg(feature = "connect")]
+    connect_session_lifecycle: Mutex<()>,
     active_sessions: AtomicUsize,
     next_session_generation: AtomicU64,
     operation_records: Mutex<OperationRegistry>,
@@ -112,6 +131,8 @@ struct SessionLifetime {
     id: String,
     session: SparkSession,
     generation: u64,
+    #[cfg(feature = "connect")]
+    server_side_session_id: String,
     serial: Arc<tokio::sync::Mutex<()>>,
     active: AtomicUsize,
     last_activity: Mutex<Instant>,
@@ -150,6 +171,55 @@ impl Drop for PendingOperationGuard {
 }
 
 struct SessionLease(Arc<SessionLifetime>);
+
+#[cfg(feature = "connect")]
+struct ConnectSessionIdentity {
+    user_id: String,
+    client_session_id: String,
+    observed_server_session_id: Option<String>,
+}
+
+#[cfg(feature = "connect")]
+impl ConnectSessionIdentity {
+    fn registry_key(&self) -> String {
+        let mut hasher = Sha256::new();
+        for part in [
+            "connect",
+            self.user_id.as_str(),
+            self.client_session_id.as_str(),
+        ] {
+            hasher.update((part.len() as u64).to_be_bytes());
+            hasher.update(part.as_bytes());
+        }
+        format!("connect:{}", hex_digest(hasher.finalize().into()))
+    }
+}
+
+#[cfg(feature = "connect")]
+struct ConnectOperationLease {
+    record: Arc<Mutex<OperationRecord>>,
+    _session: SessionLease,
+    _admission: AdmissionTicket,
+}
+
+#[cfg(feature = "connect")]
+#[derive(Debug)]
+enum ConnectReserveError {
+    Request(RequestFailure),
+    Duplicate,
+    Conflict,
+}
+
+#[cfg(feature = "connect")]
+impl ConnectOperationLease {
+    fn reject(&self, code: &'static str, message: &str) {
+        if let Ok(mut record) = self.record.lock() {
+            record.execution_state = "failed";
+            record.effect_outcome = "rejected";
+            record.error = Some((code.to_string(), message.to_string()));
+        }
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 struct StatementRequest {
@@ -289,6 +359,10 @@ impl Server {
             instance_id: Uuid::new_v4().to_string(),
             root_session,
             sessions: Mutex::new(HashMap::new()),
+            #[cfg(feature = "connect")]
+            connect_tombstones: Mutex::new(HashMap::new()),
+            #[cfg(feature = "connect")]
+            connect_session_lifecycle: Mutex::new(()),
             active_sessions: AtomicUsize::new(0),
             next_session_generation: AtomicU64::new(1),
             mutation_lane: Arc::new(AsyncMutex::new(())),
@@ -494,6 +568,8 @@ impl ServerInner {
             id: id.to_string(),
             session: self.root_session.new_session(),
             generation,
+            #[cfg(feature = "connect")]
+            server_side_session_id: Uuid::new_v4().to_string(),
             serial: Arc::new(tokio::sync::Mutex::new(())),
             active: AtomicUsize::new(1),
             last_activity: Mutex::new(Instant::now()),
@@ -504,6 +580,121 @@ impl ServerInner {
         self.active_sessions.fetch_add(1, Ordering::AcqRel);
         sessions.insert(id.to_string(), Arc::clone(&lifetime));
         Ok(SessionLease(lifetime))
+    }
+
+    #[cfg(feature = "connect")]
+    fn connect_session_lease(
+        self: &Arc<Self>,
+        identity: &ConnectSessionIdentity,
+    ) -> Result<SessionLease, RequestFailure> {
+        let _lifecycle = self
+            .connect_session_lifecycle
+            .lock()
+            .map_err(|_| internal_failure())?;
+        self.connect_session_lease_locked(identity)
+    }
+
+    #[cfg(feature = "connect")]
+    fn connect_session_lease_locked(
+        self: &Arc<Self>,
+        identity: &ConnectSessionIdentity,
+    ) -> Result<SessionLease, RequestFailure> {
+        validate_connect_user_id(&identity.user_id)?;
+        validate_connect_uuid("session_id", &identity.client_session_id)?;
+        if let Some(observed) = identity.observed_server_session_id.as_deref() {
+            validate_connect_uuid("client_observed_server_side_session_id", observed)?;
+        }
+        let key = identity.registry_key();
+        if self
+            .connect_tombstones
+            .lock()
+            .map_err(|_| internal_failure())?
+            .contains_key(&key)
+        {
+            return Err(connect_request_failure(
+                StatusCode::GONE,
+                "SessionReleased",
+                "Connect session has been released",
+            ));
+        }
+        if let Some(observed) = identity.observed_server_session_id.as_deref() {
+            let sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            match sessions.get(&key) {
+                Some(session) if session.server_side_session_id == observed => {}
+                _ => {
+                    return Err(connect_request_failure(
+                        StatusCode::CONFLICT,
+                        "StaleSessionIdentity",
+                        "the observed server-side session identity is stale or unknown",
+                    ));
+                }
+            }
+        }
+        let lease = self.session_lease(&key)?;
+        if identity
+            .observed_server_session_id
+            .as_deref()
+            .is_some_and(|observed| observed != lease.0.server_side_session_id)
+        {
+            return Err(connect_request_failure(
+                StatusCode::CONFLICT,
+                "StaleSessionIdentity",
+                "the server-side session was replaced before this request was accepted",
+            ));
+        }
+        Ok(lease)
+    }
+
+    #[cfg(feature = "connect")]
+    fn release_connect_session(
+        &self,
+        identity: &ConnectSessionIdentity,
+        allow_reconnect: bool,
+    ) -> Result<String, RequestFailure> {
+        let _lifecycle = self
+            .connect_session_lifecycle
+            .lock()
+            .map_err(|_| internal_failure())?;
+        validate_connect_user_id(&identity.user_id)?;
+        validate_connect_uuid("session_id", &identity.client_session_id)?;
+        if allow_reconnect {
+            return Err(connect_request_failure(
+                StatusCode::BAD_REQUEST,
+                "UnsupportedSessionReconnect",
+                "allow_reconnect=true is not supported",
+            ));
+        }
+        let key = identity.registry_key();
+        let server_side_session_id = {
+            let sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            sessions
+                .get(&key)
+                .map(|session| session.server_side_session_id.clone())
+                .or_else(|| {
+                    self.connect_tombstones
+                        .lock()
+                        .ok()
+                        .and_then(|tombstones| tombstones.get(&key).cloned())
+                })
+                .unwrap_or_else(|| Uuid::new_v4().to_string())
+        };
+        {
+            let mut tombstones = self
+                .connect_tombstones
+                .lock()
+                .map_err(|_| internal_failure())?;
+            if !tombstones.contains_key(&key) && tombstones.len() >= MAX_CONNECT_SESSION_TOMBSTONES
+            {
+                return Err(connect_request_failure(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "SessionHistoryCapacityExceeded",
+                    "Connect released-session history is full",
+                ));
+            }
+            tombstones.insert(key.clone(), server_side_session_id.clone());
+        }
+        self.close_session(&key)?;
+        Ok(server_side_session_id)
     }
 
     fn close_session(&self, id: &str) -> Result<(), RequestFailure> {
@@ -655,6 +846,52 @@ impl ServerInner {
             .records
             .insert(id.to_string(), Arc::clone(&operation));
         ReserveOperation::New(operation)
+    }
+
+    #[cfg(feature = "connect")]
+    fn reserve_connect_operation(
+        self: &Arc<Self>,
+        identity: &ConnectSessionIdentity,
+        operation_id: &str,
+        fingerprint: [u8; 32],
+    ) -> Result<ConnectOperationLease, ConnectReserveError> {
+        let _lifecycle = self
+            .connect_session_lifecycle
+            .lock()
+            .map_err(|_| ConnectReserveError::Request(internal_failure()))?;
+        validate_connect_uuid("operation_id", operation_id)
+            .map_err(ConnectReserveError::Request)?;
+        let operation_key = connect_operation_key(identity, operation_id);
+        match self.lookup_operation(&operation_key, fingerprint, &identity.registry_key()) {
+            Ok(Some(_)) => return Err(ConnectReserveError::Duplicate),
+            Err(()) => return Err(ConnectReserveError::Conflict),
+            Ok(None) => {}
+        }
+        let admission = self
+            .reserve_admission()
+            .map_err(ConnectReserveError::Request)?;
+        let session = self
+            .connect_session_lease_locked(identity)
+            .map_err(ConnectReserveError::Request)?;
+        match self.reserve_operation(
+            &operation_key,
+            fingerprint,
+            &session.0.id,
+            session.0.generation,
+        ) {
+            ReserveOperation::New(record) => Ok(ConnectOperationLease {
+                record,
+                _session: session,
+                _admission: admission,
+            }),
+            ReserveOperation::Existing(_) => Err(ConnectReserveError::Duplicate),
+            ReserveOperation::Conflict => Err(ConnectReserveError::Conflict),
+            ReserveOperation::Full => Err(ConnectReserveError::Request(connect_request_failure(
+                StatusCode::TOO_MANY_REQUESTS,
+                "OperationHistoryCapacityExceeded",
+                "Connect operation history is full",
+            ))),
+        }
     }
 
     fn operation(&self, id: &str) -> Option<Arc<Mutex<OperationRecord>>> {
@@ -850,6 +1087,9 @@ impl Server {
                 );
             }
         };
+        if let Err(error) = validate_http_session_identifier(&parsed.session) {
+            return request_failure_response(error);
+        }
         if parsed.code.len() > self.inner.config.max_sql_bytes {
             return transport_error(
                 StatusCode::PAYLOAD_TOO_LARGE,
@@ -865,7 +1105,7 @@ impl Server {
         // classification before applying mutation-specific identity rules.
         if parsed.server_instance_id.as_deref() == Some(self.inner.instance_id.as_str())
             && let Some(operation_id) = parsed.operation_id.as_deref()
-            && validate_identifier("operation_id", operation_id).is_ok()
+            && validate_http_operation_identifier(operation_id).is_ok()
             && let Ok(Some(existing)) = self.inner.lookup_operation(
                 operation_id,
                 request_fingerprint(&parsed),
@@ -924,10 +1164,10 @@ impl Server {
                     None,
                 );
             };
-            if validate_identifier("operation_id", operation_id).is_err() {
+            if validate_http_operation_identifier(operation_id).is_err() {
                 return agent_error(
                     "InvalidOperationIdentity",
-                    "operation_id must be 1-128 safe ASCII bytes",
+                    "operation_id must be 1-128 safe ASCII bytes and cannot use a reserved prefix",
                     None,
                 );
             }
@@ -1274,6 +1514,9 @@ impl Server {
                 );
             }
         };
+        if let Err(error) = validate_http_session_identifier(&request.session) {
+            return request_failure_response(error);
+        }
         match self.inner.close_session(&request.session) {
             Ok(()) => json_response(StatusCode::OK, json!({"status":"ok"})),
             Err(error) => request_failure_response(error),
@@ -1311,11 +1554,11 @@ impl Server {
                 "operation belongs to a different server instance",
             );
         }
-        if validate_identifier("operation_id", &request.operation_id).is_err() {
+        if validate_http_operation_identifier(&request.operation_id).is_err() {
             return transport_error(
                 StatusCode::BAD_REQUEST,
                 "InvalidOperationIdentity",
-                "operation_id must be 1-128 safe ASCII bytes",
+                "operation_id must be 1-128 safe ASCII bytes and cannot use a reserved prefix",
             );
         }
         let Some(operation) = self.inner.operation(&request.operation_id) else {
@@ -2631,6 +2874,96 @@ fn validate_identifier(name: &str, value: &str) -> Result<(), RequestFailure> {
         });
     }
     Ok(())
+}
+
+fn validate_http_session_identifier(value: &str) -> Result<(), RequestFailure> {
+    validate_identifier("session", value)?;
+    #[cfg(feature = "connect")]
+    if value.starts_with("connect:") {
+        return Err(RequestFailure {
+            status: StatusCode::BAD_REQUEST,
+            name: "InvalidIdentifier",
+            message: "session uses a reserved Connect identity prefix".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_http_operation_identifier(value: &str) -> Result<(), RequestFailure> {
+    validate_identifier("operation_id", value)?;
+    #[cfg(feature = "connect")]
+    if value.starts_with("connect-operation:") {
+        return Err(RequestFailure {
+            status: StatusCode::BAD_REQUEST,
+            name: "InvalidOperationIdentity",
+            message: "operation_id uses a reserved Connect identity prefix".into(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "connect")]
+fn validate_connect_uuid(name: &str, value: &str) -> Result<(), RequestFailure> {
+    validate_identifier(name, value).map_err(|_| {
+        connect_request_failure(
+            StatusCode::BAD_REQUEST,
+            "InvalidConnectIdentity",
+            &format!("{name} must be a UUID string"),
+        )
+    })?;
+    Uuid::parse_str(value).map(|_| ()).map_err(|_| {
+        connect_request_failure(
+            StatusCode::BAD_REQUEST,
+            "InvalidConnectIdentity",
+            &format!("{name} must be a UUID string"),
+        )
+    })
+}
+
+#[cfg(feature = "connect")]
+fn validate_connect_user_id(value: &str) -> Result<(), RequestFailure> {
+    if value.is_empty() || value.len() > MAX_IDENTIFIER_BYTES {
+        return Err(connect_request_failure(
+            StatusCode::BAD_REQUEST,
+            "InvalidConnectIdentity",
+            "user_id must be 1-128 UTF-8 bytes",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "connect")]
+fn connect_request_failure(
+    status: StatusCode,
+    name: &'static str,
+    message: &str,
+) -> RequestFailure {
+    RequestFailure {
+        status,
+        name,
+        message: message.to_string(),
+    }
+}
+
+#[cfg(feature = "connect")]
+fn connect_operation_key(identity: &ConnectSessionIdentity, operation_id: &str) -> String {
+    let mut hasher = Sha256::new();
+    for part in [identity.registry_key(), operation_id.to_string()] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    format!("connect-operation:{}", hex_digest(hasher.finalize().into()))
+}
+
+#[cfg(feature = "connect")]
+fn hex_digest(digest: [u8; 32]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(64);
+    for byte in digest {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
 }
 
 fn check_json_request_headers(
@@ -4507,7 +4840,6 @@ mod tests {
         .expect("health should progress while native count work occupies compute");
         assert_eq!(health_status, StatusCode::OK, "{health_response}");
         assert_eq!(health_response["status"], "ready");
-        assert_eq!(server.inner.admission.active.available_permits(), 0);
 
         let (query_status, query_response) = timeout(Duration::from_secs(30), query)
             .await

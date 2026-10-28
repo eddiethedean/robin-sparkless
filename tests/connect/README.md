@@ -2,6 +2,20 @@
 
 This corpus is pinned to **`pyspark-client==4.0.5`**, with the matching Apache Spark **4.0.5** protocol source. It captures protobuf requests from unmodified public Python APIs and the client's own reattachment/release encoder. The recording stub stops before a server executes a plan. These files establish client wire shapes; they do not claim Sparkless interoperability or server behavior.
 
+The native `connect` feature compiles Apache Spark's ten unchanged protocol sources vendored in
+`crates/sparkless-server/proto/spark/connect/`. Their reviewed source hashes and selected client
+behavior are recorded in `docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md`. The Rust
+service tests decode the checked-in `execute-range-filter-count.pb` fixture and cover malformed
+session IDs, duplicate operation IDs, session-generation/tombstone behavior, structural protobuf
+limits, and a real gRPC listener's inbound-size rejection. Run them with:
+
+```sh
+cargo test -p sparkless-server --no-default-features --features connect connect::tests --lib
+```
+
+These are slice 2 transport and identity tests. They do not exercise native plan translation or
+successful Spark Connect results.
+
 The interpreter-specific dependency snapshots are hash-locked for CPython 3.11:
 
 - `client-requirements.in` and `client-py311.lock` install only the standalone client package.

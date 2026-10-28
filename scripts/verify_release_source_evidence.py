@@ -35,7 +35,11 @@ def _release_context() -> dict[str, str]:
     }
     if not re.fullmatch(r"[0-9a-f]{40,64}", result["source_sha"]):
         raise ValueError("GITHUB_SHA must identify the tested source commit")
-    if not result["workflow"] or not result["run_id"].isdigit() or not result["run_attempt"].isdigit():
+    if (
+        not result["workflow"]
+        or not result["run_id"].isdigit()
+        or not result["run_attempt"].isdigit()
+    ):
         raise ValueError("GitHub workflow run provenance is required")
     if result["mode"] not in {"release_candidate", "stable_tag"}:
         raise ValueError("RELEASE_MODE must identify a candidate or stable tag")
@@ -62,14 +66,18 @@ def record(sdist: Path, wheel: Path, output: Path) -> None:
         "result": "success",
     }
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    output.write_text(
+        json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _read_record(path: Path) -> dict[str, Any]:
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("source-build evidence is malformed: {}".format(error)) from error
+        raise ValueError(
+            "source-build evidence is malformed: {}".format(error)
+        ) from error
     if not isinstance(record, dict):
         raise ValueError("source-build evidence must be a JSON object")
     return record
@@ -113,11 +121,15 @@ def verify(
     if len(sdists) == 1:
         expected_sdist = {"artifact": sdists[0].name, "sha256": sha256_file(sdists[0])}
         if record_data.get("sdist") != expected_sdist:
-            errors.append("source distribution digest does not match the candidate bytes")
+            errors.append(
+                "source distribution digest does not match the candidate bytes"
+            )
     if len(wheels) == 1:
         expected_wheel = {"artifact": wheels[0].name, "sha256": sha256_file(wheels[0])}
         if record_data.get("derived_wheel") != expected_wheel:
-            errors.append("derived wheel digest does not match the tested source-build bytes")
+            errors.append(
+                "derived wheel digest does not match the tested source-build bytes"
+            )
     return errors
 
 
@@ -136,7 +148,9 @@ def main(argv: list[str] | None = None) -> int:
     verify_parser.add_argument("--run-id", required=True)
     verify_parser.add_argument("--run-attempt", required=True)
     verify_parser.add_argument("--workflow", required=True)
-    verify_parser.add_argument("--mode", choices=("release_candidate", "stable_tag"), required=True)
+    verify_parser.add_argument(
+        "--mode", choices=("release_candidate", "stable_tag"), required=True
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "record":

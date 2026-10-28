@@ -1,6 +1,6 @@
 # sparkless-server
 
-Standalone native HTTP statement service for Robin Sparkless.
+Standalone native statement service for Robin Sparkless.
 
 **4.17.0 security notice:** plain `cargo install` retains a temporary zstd
 dependency exception. Prebuilt server distributions use the fixed implementation;
@@ -21,12 +21,30 @@ native `SELECT 1` witness and a `stopped` record after shutdown. Send
 shutdown; diagnostics remain on stderr. Do not use this pipe protocol as an SQL
 transport.
 
-The server executes through the Rust engine directly. It exposes a bounded SQL allowlist,
-an in-memory service catalog, positional JSON results, and same-instance mutation identity
-records. It does not expose Spark Connect, file/network readers, arbitrary functions, Python,
-or nested and binary HTTP results. The in-memory catalog and operation records are lost on
-restart. Native CPU and intermediate-memory limits remain cooperative rather than hard
-per-query isolation.
+The default `http` feature serves the existing bounded SQL allowlist, in-memory service
+catalog, positional JSON results, and same-instance mutation identity records. The optional
+`connect` feature generates the Apache Spark 4.0.5 public gRPC service and provides a bounded
+adapter on the same `Server` instance (`connect_service` / `serve_connect_until`). It currently
+establishes protobuf, session-identity, and shared admission boundaries; plan translation,
+analysis, configuration, result streaming, and operation replay remain in later 4.18 slices.
+Connect methods outside that implemented boundary return explicit gRPC errors. The Connect
+listener is not advertised by the HTTP launcher yet.
+
+Build the features independently:
+
+```sh
+cargo check -p sparkless-server --no-default-features --features http
+cargo check -p sparkless-server --no-default-features --features connect
+```
+
+The Connect proto sources are vendored under `proto/spark/connect` from Apache Spark tag
+`v4.0.5` and generated during a Connect-feature build; see `proto/README.md` and the
+[4.18 protocol research](../../docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md).
+Connect user IDs partition session identity and are not authentication credentials. The
+HTTP reserves session IDs beginning with `connect:` and operation IDs beginning with
+`connect-operation:` to keep its registry namespace separate from Connect. The in-memory catalog
+and operation records are lost on restart. Native CPU and intermediate-memory limits remain
+cooperative rather than hard per-query isolation.
 
 Build the JVM-free native image from the workspace root with:
 

@@ -124,14 +124,19 @@ class SourceDistributionTest(unittest.TestCase):
         def fake_build(command, **kwargs):
             wheel_index = command.index("--outdir") + 1
             Path(command[wheel_index]).mkdir(parents=True, exist_ok=True)
-            (Path(command[wheel_index]) / "sparkless-4.17.0-cp311-abi3-linux_x86_64.whl").write_bytes(b"wheel")
+            (
+                Path(command[wheel_index])
+                / "sparkless-4.17.0-cp311-abi3-linux_x86_64.whl"
+            ).write_bytes(b"wheel")
 
         with (
             patch(
                 "verify_release_source.subprocess.check_output",
                 return_value=json.dumps(metadata).encode(),
             ),
-            patch("verify_release_source.subprocess.run", side_effect=fake_build) as run,
+            patch(
+                "verify_release_source.subprocess.run", side_effect=fake_build
+            ) as run,
         ):
             verify(archive, wheel_output_dir=output_dir)
 

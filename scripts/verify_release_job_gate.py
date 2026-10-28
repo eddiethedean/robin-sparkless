@@ -51,7 +51,9 @@ def classify_mode(event: str, ref: str, publish_rust: str, recovery_run_id: str)
 
     if wants_rust:
         if ref != "refs/heads/main":
-            raise ValueError("Rust publication is restricted to workflow_dispatch on main")
+            raise ValueError(
+                "Rust publication is restricted to workflow_dispatch on main"
+            )
         return "manual_rust_publish"
 
     if not (ref.startswith("refs/heads/") or STABLE_TAG.fullmatch(ref)):
@@ -59,7 +61,9 @@ def classify_mode(event: str, ref: str, publish_rust: str, recovery_run_id: str)
     return "manual_validation"
 
 
-def _required_jobs(manifest: dict[str, Any], mode: str, ref: str) -> tuple[set[str], set[str]]:
+def _required_jobs(
+    manifest: dict[str, Any], mode: str, ref: str
+) -> tuple[set[str], set[str]]:
     """Return (required, explicitly-optional) job IDs for one run mode."""
     shared = set(manifest["shared_release_jobs"])
     candidate = set(manifest["candidate_jobs"])
@@ -90,7 +94,9 @@ def _is_417_ref(ref: str) -> bool:
     )
 
 
-def validate_gate(mode: str, ref: str, needs: dict[str, Any], manifest: dict[str, Any]) -> list[str]:
+def validate_gate(
+    mode: str, ref: str, needs: dict[str, Any], manifest: dict[str, Any]
+) -> list[str]:
     """Fail missing jobs, unlisted skips, failures, and unexpected dependencies."""
     errors: list[str] = []
     expected = (
@@ -102,9 +108,13 @@ def validate_gate(mode: str, ref: str, needs: dict[str, Any], manifest: dict[str
         missing = sorted((expected | {"release-mode"}) - set(needs))
         unexpected = sorted(set(needs) - expected - {"release-mode"})
         if missing:
-            errors.append("gate is missing manifest job result(s): {}".format(", ".join(missing)))
+            errors.append(
+                "gate is missing manifest job result(s): {}".format(", ".join(missing))
+            )
         if unexpected:
-            errors.append("gate has unlisted dependency job(s): {}".format(", ".join(unexpected)))
+            errors.append(
+                "gate has unlisted dependency job(s): {}".format(", ".join(unexpected))
+            )
 
     mode_job = needs.get("release-mode", {})
     if mode_job.get("result") != "success":
@@ -114,7 +124,9 @@ def validate_gate(mode: str, ref: str, needs: dict[str, Any], manifest: dict[str
     for job_id in sorted(required):
         status = (needs.get(job_id) or {}).get("result")
         if status != "success":
-            errors.append("required job {} concluded {}".format(job_id, status or "missing"))
+            errors.append(
+                "required job {} concluded {}".format(job_id, status or "missing")
+            )
 
     for job_id in sorted(optional):
         status = (needs.get(job_id) or {}).get("result")
@@ -151,7 +163,11 @@ def _classify(args: argparse.Namespace) -> int:
     with output.open("a", encoding="utf-8") as stream:
         stream.write("mode={}\n".format(mode))
         stream.write("source_sha={}\n".format(os.environ.get("GITHUB_SHA", "")))
-    print("Release mode: {} for {}".format(mode, os.environ.get("GITHUB_SHA", "unknown SHA")))
+    print(
+        "Release mode: {} for {}".format(
+            mode, os.environ.get("GITHUB_SHA", "unknown SHA")
+        )
+    )
     return 0
 
 
@@ -187,7 +203,11 @@ def _gate(args: argparse.Namespace) -> int:
                     mode, os.environ.get("GITHUB_SHA", "unknown")
                 )
             )
-    print("Accepted release mode {} for {}".format(mode, os.environ.get("GITHUB_SHA", "unknown SHA")))
+    print(
+        "Accepted release mode {} for {}".format(
+            mode, os.environ.get("GITHUB_SHA", "unknown SHA")
+        )
+    )
     return 0
 
 
@@ -195,7 +215,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     classify_parser = subparsers.add_parser("classify")
-    classify_parser.add_argument("--output", default=os.environ.get("GITHUB_OUTPUT", "/dev/null"))
+    classify_parser.add_argument(
+        "--output", default=os.environ.get("GITHUB_OUTPUT", "/dev/null")
+    )
     gate_parser = subparsers.add_parser("gate")
     gate_parser.add_argument("--mode", required=True)
     gate_parser.add_argument("--needs-json", required=True)

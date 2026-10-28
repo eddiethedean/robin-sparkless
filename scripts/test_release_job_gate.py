@@ -20,7 +20,13 @@ class ReleaseModeTests(unittest.TestCase):
             ("push", "refs/tags/v4.17.0", "false", "", "stable_tag"),
             ("workflow_dispatch", "refs/heads/main", "false", "", "manual_validation"),
             ("workflow_dispatch", "refs/heads/main", "true", "", "manual_rust_publish"),
-            ("workflow_dispatch", "refs/heads/main", "false", "123456", "pypi_recovery"),
+            (
+                "workflow_dispatch",
+                "refs/heads/main",
+                "false",
+                "123456",
+                "pypi_recovery",
+            ),
         )
         for event, ref, publish_rust, recovery_id, expected in cases:
             with self.subTest(mode=expected):
@@ -53,14 +59,22 @@ class ReleaseGateTests(unittest.TestCase):
     def test_candidate_requires_exact_artifact_and_witness_matrix(self) -> None:
         needs = self._needs("release_candidate", "refs/heads/codex/release-4.17")
         self.assertEqual(
-            validate_gate("release_candidate", "refs/heads/codex/release-4.17", needs, MANIFEST),
+            validate_gate(
+                "release_candidate", "refs/heads/codex/release-4.17", needs, MANIFEST
+            ),
             [],
         )
         needs["python-wheel-linux-runtime"]["result"] = "failure"
         self.assertTrue(
-            any("python-wheel-linux-runtime" in issue for issue in validate_gate(
-                "release_candidate", "refs/heads/codex/release-4.17", needs, MANIFEST
-            ))
+            any(
+                "python-wheel-linux-runtime" in issue
+                for issue in validate_gate(
+                    "release_candidate",
+                    "refs/heads/codex/release-4.17",
+                    needs,
+                    MANIFEST,
+                )
+            )
         )
 
     def test_manual_validation_uses_only_manual_python_cells(self) -> None:
@@ -107,8 +121,12 @@ class ReleasePublicationConditionTests(unittest.TestCase):
                     r"(?ms)^    if:\s*(?P<condition>.*?)(?=^    [A-Za-z0-9_-]+:|\Z)",
                     job,
                 )
-                self.assertIsNotNone(needs_match, f"{job_id} must declare prerequisites")
-                self.assertIsNotNone(condition_match, f"{job_id} must declare a condition")
+                self.assertIsNotNone(
+                    needs_match, f"{job_id} must declare prerequisites"
+                )
+                self.assertIsNotNone(
+                    condition_match, f"{job_id} must declare a condition"
+                )
 
                 needs_text = needs_match.group("needs")
                 if "[" in needs_text:
@@ -121,7 +139,8 @@ class ReleasePublicationConditionTests(unittest.TestCase):
                 condition = condition_match.group("condition")
                 self.assertIn("always()", condition)
                 self.assertIn(
-                    "needs.release-validation-gate.outputs.mode == 'stable_tag'", condition
+                    "needs.release-validation-gate.outputs.mode == 'stable_tag'",
+                    condition,
                 )
                 for dependency in direct_needs:
                     self.assertRegex(
@@ -130,7 +149,9 @@ class ReleasePublicationConditionTests(unittest.TestCase):
                         f"{job_id} must explicitly require successful {dependency}",
                     )
                 if job_id == "verify-public-release":
-                    self.assertIn("startsWith(github.ref, 'refs/tags/v4.17.')", condition)
+                    self.assertIn(
+                        "startsWith(github.ref, 'refs/tags/v4.17.')", condition
+                    )
 
 
 if __name__ == "__main__":

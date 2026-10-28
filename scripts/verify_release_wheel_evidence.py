@@ -23,7 +23,9 @@ for target in (
     "macos-x86_64",
     "windows-arm64",
 ):
-    EXPECTED.update((target, "platform-runtime", version) for version in ("3.11", "3.14"))
+    EXPECTED.update(
+        (target, "platform-runtime", version) for version in ("3.11", "3.14")
+    )
 
 EXPECTED_MACHINE = {
     "manylinux-x86_64": "x86_64",
@@ -65,8 +67,18 @@ def verify(
     for path in evidence_files:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
-            key = (record["target"], record["suite"], record["python"].rsplit(".", 1)[0])
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
+            key = (
+                record["target"],
+                record["suite"],
+                record["python"].rsplit(".", 1)[0],
+            )
+        except (
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as error:
             errors.append("{} is malformed: {}".format(path.name, error))
             continue
         if key in observed:
@@ -84,22 +96,49 @@ def verify(
             ("result", "success"),
         ):
             if record.get(field) != expected:
-                errors.append("{} has unexpected {}={!r}".format(path.name, field, record.get(field)))
+                errors.append(
+                    "{} has unexpected {}={!r}".format(
+                        path.name, field, record.get(field)
+                    )
+                )
         if record.get("machine") != EXPECTED_MACHINE.get(record.get("target")):
-            errors.append("{} did not run on the target's native architecture".format(path.name))
-        if record.get("python_architecture") != EXPECTED_MACHINE.get(record.get("target")):
-            errors.append("{} used a Python interpreter with the wrong architecture".format(path.name))
+            errors.append(
+                "{} did not run on the target's native architecture".format(path.name)
+            )
+        if record.get("python_architecture") != EXPECTED_MACHINE.get(
+            record.get("target")
+        ):
+            errors.append(
+                "{} used a Python interpreter with the wrong architecture".format(
+                    path.name
+                )
+            )
         build = record.get("build")
-        if build != {"profile": "release", "features": ["delta"], "rust_toolchain": "1.93.1"}:
+        if build != {
+            "profile": "release",
+            "features": ["delta"],
+            "rust_toolchain": "1.93.1",
+        }:
             errors.append("{} has unexpected wheel build provenance".format(path.name))
         artifact = record.get("artifact")
         wheel = wheels.get(artifact) if isinstance(artifact, str) else None
         if wheel is None:
-            errors.append("{} refers to a wheel absent from the candidate inventory".format(path.name))
-        elif not isinstance(record.get("sha256"), str) or _sha256(wheel) != record["sha256"]:
-            errors.append("{} digest does not match the candidate wheel bytes".format(path.name))
+            errors.append(
+                "{} refers to a wheel absent from the candidate inventory".format(
+                    path.name
+                )
+            )
+        elif (
+            not isinstance(record.get("sha256"), str)
+            or _sha256(wheel) != record["sha256"]
+        ):
+            errors.append(
+                "{} digest does not match the candidate wheel bytes".format(path.name)
+            )
         if record.get("preinstall_sha256") != record.get("sha256"):
-            errors.append("{} was not checked against its pre-install digest".format(path.name))
+            errors.append(
+                "{} was not checked against its pre-install digest".format(path.name)
+            )
         if isinstance(artifact, str) and "cp311-abi3-" not in artifact:
             errors.append("{} does not name a cp311-abi3 artifact".format(path.name))
 
@@ -117,7 +156,11 @@ def verify(
             if record_target == target
         }
         if len(digests) != 1:
-            errors.append("{} evidence does not refer to one identical wheel digest".format(target))
+            errors.append(
+                "{} evidence does not refer to one identical wheel digest".format(
+                    target
+                )
+            )
     return errors
 
 
@@ -129,7 +172,9 @@ def main() -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
     parser.add_argument("--workflow", required=True)
-    parser.add_argument("--mode", choices=("release_candidate", "stable_tag"), required=True)
+    parser.add_argument(
+        "--mode", choices=("release_candidate", "stable_tag"), required=True
+    )
     args = parser.parse_args()
     errors = verify(
         args.evidence_dir,
@@ -144,7 +189,11 @@ def main() -> int:
         for error in errors:
             print("Release wheel evidence rejected: {}".format(error), file=sys.stderr)
         return 1
-    print("Verified {} exact-wheel suite results across {} wheel targets".format(len(EXPECTED), len(EXPECTED_MACHINE)))
+    print(
+        "Verified {} exact-wheel suite results across {} wheel targets".format(
+            len(EXPECTED), len(EXPECTED_MACHINE)
+        )
+    )
     return 0
 
 
