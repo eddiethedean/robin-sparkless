@@ -9,7 +9,7 @@ use robin_sparkless::{
     DataType, EngineError, ExprIr, LiteralValue, LogicalField, SparkSession, StructType,
 };
 use spark_sql_parser::ast::{BinaryOperator, Expr as SqlExpr, Value};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use tonic::{Code, Status};
 
 const MAX_PLAN_DEPTH: usize = 64;
@@ -18,12 +18,16 @@ const MAX_FILTER_EXPRESSION_BYTES: usize = 4096;
 pub(super) struct TranslatedPlan {
     pub dataframe: robin_sparkless::DataFrame,
     pub schema: StructType,
+    /// Source for the one supported global count aggregate. It is evaluated only after the
+    /// execution request has been accepted, never while answering schema analysis.
+    pub deferred_count_input: Option<robin_sparkless::DataFrame>,
 }
 
 struct TranslatedRelation {
     dataframe: robin_sparkless::DataFrame,
     schema: StructType,
     plan_ids: HashSet<i64>,
+    deferred_count_input: Option<robin_sparkless::DataFrame>,
 }
 
 #[derive(Clone, Copy)]
@@ -49,6 +53,7 @@ pub(super) fn translate_plan(
     Ok(TranslatedPlan {
         dataframe: relation.dataframe,
         schema: relation.schema,
+        deferred_count_input: relation.deferred_count_input,
     })
 }
 
@@ -63,6 +68,7 @@ fn translate_relation(
         )));
     }
     let common = relation.common.as_ref();
+    let mut deferred_count_input = None;
     let (dataframe, schema, mut plan_ids) = match relation.rel_type.as_ref() {
         Some(RelType::Range(range)) => {
             if let Some(partitions) = range.num_partitions
@@ -88,8 +94,55 @@ fn translate_relation(
             let schema = dataframe.schema_engine().map_err(engine_failure)?;
             (dataframe, schema, HashSet::new())
         }
+        Some(RelType::LocalRelation(local)) => {
+            if local
+                .data
+                .as_ref()
+                .is_some_and(|data| data.len() > super::MAX_CONNECT_LOCAL_IPC_BYTES)
+            {
+                return Err(Status::resource_exhausted(format!(
+                    "Connect local Arrow IPC data exceeds {} bytes",
+                    super::MAX_CONNECT_LOCAL_IPC_BYTES
+                )));
+            }
+            let schema = local
+                .schema
+                .as_deref()
+                .map(parse_local_schema)
+                .transpose()?;
+            if local.data.is_none() && schema.is_none() {
+                return Err(Status::invalid_argument(
+                    "Connect LocalRelation requires data or a schema",
+                ));
+            }
+            if let Some(schema) = schema.as_ref() {
+                validate_connect_scalar_schema(schema)?;
+            }
+            let (dataframe, schema) = session
+                .create_dataframe_from_arrow_ipc(
+                    local.data.as_deref(),
+                    schema,
+                    super::MAX_CONNECT_LOCAL_IPC_BYTES,
+                    super::MAX_CONNECT_LOCAL_ROWS,
+                    super::MAX_CONNECT_LOCAL_DECODED_BYTES,
+                    super::MAX_CONNECT_LOCAL_SCALAR_BYTES,
+                )
+                .map_err(local_relation_failure)?;
+            validate_connect_scalar_schema(&schema)?;
+            (dataframe, schema, HashSet::new())
+        }
+        Some(RelType::CachedLocalRelation(_)) => {
+            return Err(Status::unimplemented(
+                "CachedLocalRelation requires the unsupported AddArtifacts transfer path",
+            ));
+        }
         Some(RelType::Filter(filter)) => {
             let input = translate_child(session, filter.input.as_deref(), "Filter.input", depth)?;
+            if input.deferred_count_input.is_some() {
+                return Err(unsupported(
+                    "filters over a global aggregate are outside the 4.18 subset",
+                ));
+            }
             let condition = filter
                 .condition
                 .as_ref()
@@ -115,6 +168,11 @@ fn translate_relation(
         }
         Some(RelType::Project(project)) => {
             let input = translate_child(session, project.input.as_deref(), "Project.input", depth)?;
+            if input.deferred_count_input.is_some() {
+                return Err(unsupported(
+                    "projections over a global aggregate are outside the 4.18 subset",
+                ));
+            }
             if project.expressions.is_empty() {
                 return Err(Status::invalid_argument(
                     "Project.expressions must contain at least one expression",
@@ -147,6 +205,11 @@ fn translate_relation(
         }
         Some(RelType::Limit(limit)) => {
             let input = translate_child(session, limit.input.as_deref(), "Limit.input", depth)?;
+            if input.deferred_count_input.is_some() {
+                return Err(unsupported(
+                    "limits over a global aggregate are outside the 4.18 subset",
+                ));
+            }
             if limit.limit < 0 {
                 return Err(Status::invalid_argument("Limit.limit must be nonnegative"));
             }
@@ -175,6 +238,11 @@ fn translate_relation(
                     "only a global GROUP_TYPE_GROUPBY count(1) aggregate is supported",
                 ));
             }
+            if input.deferred_count_input.is_some() {
+                return Err(unsupported(
+                    "nested global aggregates are outside the 4.18 subset",
+                ));
+            }
             if aggregate.aggregate_expressions.len() != 1 {
                 return Err(unsupported(
                     "only one global count(1) aggregate expression is supported",
@@ -190,6 +258,7 @@ fn translate_relation(
                 .dataframe
                 .select_expr_ir(&[expr])
                 .map_err(engine_failure)?;
+            deferred_count_input = Some(input.dataframe);
             let schema = StructType::from_logical_fields(vec![LogicalField::new(
                 "count(1)".to_string(),
                 DataType::Long,
@@ -217,6 +286,7 @@ fn translate_relation(
         dataframe,
         schema,
         plan_ids,
+        deferred_count_input,
     })
 }
 
@@ -584,6 +654,7 @@ pub(super) fn schema_to_proto(schema: &StructType) -> Result<proto::DataType, St
     schema.validate_metadata().map_err(|error| {
         Status::invalid_argument(format!("invalid Connect schema metadata: {error}"))
     })?;
+    validate_connect_scalar_schema(schema)?;
     validate_schema_width(schema)?;
     Ok(proto::DataType {
         kind: Some(DataTypeKind::Struct(data_type::Struct {
@@ -595,6 +666,163 @@ pub(super) fn schema_to_proto(schema: &StructType) -> Result<proto::DataType, St
             type_variation_reference: 0,
         })),
     })
+}
+
+fn validate_connect_scalar_schema(schema: &StructType) -> Result<(), Status> {
+    for field in schema.logical_fields() {
+        let supported = matches!(
+            &field.data_type,
+            DataType::Boolean
+                | DataType::Short
+                | DataType::Integer
+                | DataType::Long
+                | DataType::Double
+                | DataType::String
+                | DataType::Date
+                | DataType::Timestamp
+        ) || matches!(&field.data_type, DataType::Decimal(p, s) if (1..=38).contains(p) && s <= p);
+        if !supported {
+            return Err(unsupported(format!(
+                "Connect schema type {:?} is not enabled in the scalar Arrow subset",
+                field.data_type
+            )));
+        }
+        if field.name.is_empty() || field.name.len() > 128 {
+            return Err(Status::invalid_argument(
+                "Connect schema field names must contain 1-128 bytes",
+            ));
+        }
+    }
+    validate_schema_width(schema)
+}
+
+fn parse_local_schema(input: &str) -> Result<StructType, Status> {
+    const MAX_JSON_SCHEMA_BYTES: usize = 256 * 1024;
+    if input.len() > MAX_JSON_SCHEMA_BYTES {
+        return Err(Status::resource_exhausted(format!(
+            "Connect JSON schema exceeds {MAX_JSON_SCHEMA_BYTES} bytes"
+        )));
+    }
+    let schema = if input.trim_start().starts_with('{') {
+        validate_json_schema_depth(input)?;
+        let value: serde_json::Value = serde_json::from_str(input).map_err(|error| {
+            Status::invalid_argument(format!("invalid Connect JSON schema: {error}"))
+        })?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| Status::invalid_argument("Connect JSON schema must be an object"))?;
+        if object.get("type").and_then(serde_json::Value::as_str) != Some("struct") {
+            return Err(unsupported(
+                "Connect JSON schema must have top-level type 'struct'",
+            ));
+        }
+        let fields = object
+            .get("fields")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| Status::invalid_argument("Connect JSON schema fields are required"))?;
+        if fields.is_empty() || fields.len() > super::MAX_CONNECT_SCHEMA_FIELDS {
+            return Err(Status::resource_exhausted(format!(
+                "Connect JSON schema must contain 1-{} fields",
+                super::MAX_CONNECT_SCHEMA_FIELDS
+            )));
+        }
+        let fields =
+            fields
+                .iter()
+                .map(|field| {
+                    let field = field.as_object().ok_or_else(|| {
+                        Status::invalid_argument("Connect JSON schema fields must be objects")
+                    })?;
+                    let name = field
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| {
+                            Status::invalid_argument("Connect JSON field name is required")
+                        })?;
+                    if name.is_empty() || name.len() > 128 {
+                        return Err(Status::invalid_argument(
+                            "Connect schema field names must contain 1-128 bytes",
+                        ));
+                    }
+                    let type_name = field
+                        .get("type")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| unsupported("nested Connect JSON types are not enabled"))?;
+                    let data_type = parse_ddl_type(type_name)?;
+                    let nullable = field
+                        .get("nullable")
+                        .and_then(serde_json::Value::as_bool)
+                        .ok_or_else(|| {
+                            Status::invalid_argument("Connect JSON nullable must be boolean")
+                        })?;
+                    let metadata = match field.get("metadata") {
+                        None => BTreeMap::new(),
+                        Some(serde_json::Value::Object(metadata)) => metadata
+                            .iter()
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect(),
+                        _ => {
+                            return Err(Status::invalid_argument(
+                                "Connect JSON field metadata must be an object",
+                            ));
+                        }
+                    };
+                    Ok(LogicalField::new(name.to_string(), data_type, nullable)
+                        .with_metadata(metadata))
+                })
+                .collect::<Result<Vec<_>, Status>>()?;
+        StructType::from_logical_fields(fields)
+    } else {
+        parse_ddl_schema(input)?
+    };
+    schema.validate_metadata().map_err(|error| {
+        Status::invalid_argument(format!("invalid Connect schema metadata: {error}"))
+    })?;
+    validate_connect_scalar_schema(&schema)?;
+    Ok(schema)
+}
+
+fn validate_json_schema_depth(json: &str) -> Result<(), Status> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for byte in json.bytes() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                depth += 1;
+                if depth > MAX_PLAN_DEPTH {
+                    return Err(Status::resource_exhausted(format!(
+                        "Connect JSON schema nesting exceeds {MAX_PLAN_DEPTH}"
+                    )));
+                }
+            }
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn local_relation_failure(error: EngineError) -> Status {
+    let message = error.to_string();
+    if message.contains("not enabled") || message.contains("unsupported") {
+        Status::unimplemented(format!("Connect local relation is unsupported: {message}"))
+    } else if message.contains("exceeds") {
+        Status::resource_exhausted(message)
+    } else {
+        Status::invalid_argument(format!("invalid Connect local relation: {message}"))
+    }
 }
 
 fn count_schema_fields(data_type: &DataType, count: &mut usize) -> Result<(), Status> {

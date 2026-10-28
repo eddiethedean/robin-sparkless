@@ -6,19 +6,24 @@
 
 use crate::dataframe::DataFrame;
 use crate::error::{EngineError, polars_to_core_error};
+use crate::schema_conv::StructTypePolarsExt;
 use crate::udf_registry::UdfRegistry;
 use base64::Engine;
 use polars::chunked_array::StructChunked;
 use polars::chunked_array::builder::get_list_builder;
+use polars::chunked_array::cast::CastOptions;
 use polars::polars_utils;
 use polars::prelude::{
     AnonymousScan, AnonymousScanArgs, DataFrame as PlDataFrame, DataType, Field, IntoSeries,
-    LazyFrame, NamedFrom, PlSmallStr, PolarsError, ScanArgsAnonymous, Schema, Series, TimeUnit,
-    TimeZone,
+    LazyFrame, NamedFrom, PlSmallStr, PolarsError, ScanArgsAnonymous, Schema, SerReader, Series,
+    TimeUnit, TimeZone,
 };
 use polars_arrow::array::*;
 use polars_arrow::bitmap::Bitmap;
-use polars_arrow::datatypes::{PhysicalType, PrimitiveType};
+use polars_arrow::datatypes::{ArrowDataType, PhysicalType, PrimitiveType};
+use polars_arrow::io::ipc::format::ipc::planus::ReadAsRoot;
+use polars_arrow::io::ipc::format::ipc::{MessageHeaderRef, MessageRef};
+use polars_arrow::io::ipc::read::read_stream_metadata;
 use polars_arrow::match_integer_type;
 use polars_arrow::with_match_primitive_type_full;
 use robin_sparkless_core::engine::{
@@ -33,6 +38,7 @@ use robin_sparkless_core::{
 };
 use serde_json::Value as JsonValue;
 use std::cell::RefCell;
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -42,6 +48,626 @@ mod reader;
 pub use reader::DataFrameReader;
 
 type ResolvedExternalTable = (Arc<dyn ExternalCatalogProvider>, ExternalTableDescriptor);
+
+const MAX_CONNECT_ARROW_SCHEMA_DEPTH: usize = 64;
+const MAX_CONNECT_ARROW_SCHEMA_FIELDS: usize = 256;
+
+fn connect_local_column_name(index: usize) -> String {
+    format!("__sparkless_connect_local_{index}")
+}
+
+fn connect_physical_schema(schema: &StructType) -> Result<StructType, EngineError> {
+    schema.validate_metadata().map_err(|error| {
+        EngineError::User(format!("invalid Connect local schema metadata: {error}"))
+    })?;
+    if schema.logical_fields().is_empty()
+        || schema.logical_fields().len() > MAX_CONNECT_ARROW_SCHEMA_FIELDS
+    {
+        return Err(EngineError::User(format!(
+            "Connect local schema must contain 1-{MAX_CONNECT_ARROW_SCHEMA_FIELDS} scalar fields"
+        )));
+    }
+    let fields = schema
+        .logical_fields()
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let supported = matches!(
+                &field.data_type,
+                CoreDataType::Boolean
+                    | CoreDataType::Short
+                    | CoreDataType::Integer
+                    | CoreDataType::Long
+                    | CoreDataType::Double
+                    | CoreDataType::String
+                    | CoreDataType::Date
+                    | CoreDataType::Timestamp
+            ) || matches!(&field.data_type, CoreDataType::Decimal(p, s) if (1..=38).contains(p) && s <= p);
+            if !supported {
+                return Err(EngineError::User(format!(
+                    "Connect local type {:?} is not enabled in the scalar Arrow subset",
+                    field.data_type
+                )));
+            }
+            let mut physical = field.clone();
+            physical.name = connect_local_column_name(index);
+            Ok(physical)
+        })
+        .collect::<Result<Vec<_>, EngineError>>()?;
+    Ok(StructType::from_logical_fields(fields))
+}
+
+fn infer_connect_schema(
+    arrow_schema: &polars_arrow::datatypes::ArrowSchema,
+    public_names: &[String],
+) -> Result<StructType, EngineError> {
+    if arrow_schema.len() != public_names.len() {
+        return Err(EngineError::User(
+            "Connect Arrow schema field-name count does not match its fields".into(),
+        ));
+    }
+    let fields = arrow_schema
+        .iter()
+        .enumerate()
+        .map(|(index, (_name, field))| {
+            let data_type = match &field.dtype {
+                ArrowDataType::Boolean => CoreDataType::Boolean,
+                ArrowDataType::Int16 => CoreDataType::Short,
+                ArrowDataType::Int32 => CoreDataType::Integer,
+                ArrowDataType::Int64 => CoreDataType::Long,
+                ArrowDataType::Float64 => CoreDataType::Double,
+                ArrowDataType::Utf8 => CoreDataType::String,
+                ArrowDataType::Date32 => CoreDataType::Date,
+                ArrowDataType::Timestamp(
+                    polars_arrow::datatypes::TimeUnit::Microsecond,
+                    Some(timezone),
+                ) if timezone.as_str() == "UTC" => CoreDataType::Timestamp,
+                ArrowDataType::Decimal(precision, scale)
+                    if (1..=38).contains(precision) && scale <= precision =>
+                {
+                    CoreDataType::Decimal(*precision as u8, *scale as u8)
+                }
+                other => {
+                    return Err(EngineError::User(format!(
+                        "Connect Arrow type {other:?} is not enabled in the scalar subset"
+                    )));
+                }
+            };
+            let metadata = field
+                .metadata
+                .as_ref()
+                .map(|metadata| {
+                    metadata
+                        .iter()
+                        .map(|(key, value)| {
+                            (
+                                key.to_string(),
+                                serde_json::from_str(value.as_str())
+                                    .unwrap_or_else(|_| JsonValue::String(value.to_string())),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(
+                StructField::new(public_names[index].clone(), data_type, field.is_nullable)
+                    .with_metadata(metadata),
+            )
+        })
+        .collect::<Result<Vec<_>, EngineError>>()?;
+    Ok(StructType::from_logical_fields(fields))
+}
+
+fn validate_connect_arrow_source_schema(
+    schema: &polars_arrow::datatypes::ArrowSchema,
+) -> Result<(), EngineError> {
+    if schema.is_empty() || schema.len() > MAX_CONNECT_ARROW_SCHEMA_FIELDS {
+        return Err(EngineError::User(format!(
+            "Connect Arrow schema must contain 1-{MAX_CONNECT_ARROW_SCHEMA_FIELDS} scalar fields"
+        )));
+    }
+    for (_, field) in schema.iter() {
+        let supported = matches!(
+            &field.dtype,
+            ArrowDataType::Boolean
+                | ArrowDataType::Int16
+                | ArrowDataType::Int32
+                | ArrowDataType::Int64
+                | ArrowDataType::Float64
+                | ArrowDataType::Utf8
+                | ArrowDataType::Date32
+        ) || matches!(
+            &field.dtype,
+            ArrowDataType::Timestamp(
+                polars_arrow::datatypes::TimeUnit::Microsecond,
+                Some(timezone)
+            ) if timezone.as_str() == "UTC"
+        ) || matches!(
+            &field.dtype,
+            ArrowDataType::Decimal(precision, scale)
+                if (1..=38).contains(precision) && scale <= precision
+        );
+        if !supported {
+            return Err(EngineError::User(format!(
+                "Connect Arrow type {:?} is not enabled in the scalar subset",
+                field.dtype
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_connect_scalar_values(
+    series: &Series,
+    max_scalar_bytes: usize,
+    name: &str,
+) -> Result<(), EngineError> {
+    match series.dtype() {
+        DataType::String => {
+            for value in series
+                .str()
+                .map_err(polars_to_core_error)?
+                .into_iter()
+                .flatten()
+            {
+                if value.len() > max_scalar_bytes {
+                    return Err(EngineError::User(format!(
+                        "Connect local value in column {name:?} exceeds {max_scalar_bytes} bytes"
+                    )));
+                }
+            }
+        }
+        DataType::Float64 => {
+            for value in series
+                .f64()
+                .map_err(polars_to_core_error)?
+                .into_iter()
+                .flatten()
+            {
+                if !value.is_finite() {
+                    return Err(EngineError::User(format!(
+                        "Connect local column {name:?} contains a non-finite DOUBLE value"
+                    )));
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn read_connect_ipc_message_metadata(
+    reader: &mut Cursor<&[u8]>,
+    data_len: usize,
+) -> Result<Option<Vec<u8>>, EngineError> {
+    let mut prefix = [0u8; 4];
+    reader.read_exact(&mut prefix).map_err(|error| {
+        EngineError::User(format!(
+            "malformed Connect Arrow IPC stream framing: {error}"
+        ))
+    })?;
+    if prefix == [0xff; 4] {
+        reader.read_exact(&mut prefix).map_err(|error| {
+            EngineError::User(format!("malformed Connect Arrow IPC continuation: {error}"))
+        })?;
+    }
+    let metadata_len = i32::from_le_bytes(prefix);
+    if metadata_len < 0 {
+        return Err(EngineError::User(
+            "malformed Connect Arrow IPC metadata length".into(),
+        ));
+    }
+    let metadata_len = metadata_len as usize;
+    if metadata_len == 0 {
+        return Ok(None);
+    }
+    if metadata_len > data_len.saturating_sub(reader.position() as usize) {
+        return Err(EngineError::User(
+            "malformed Connect Arrow IPC metadata extends past the payload".into(),
+        ));
+    }
+    let mut metadata = vec![0; metadata_len];
+    reader.read_exact(&mut metadata).map_err(|error| {
+        EngineError::User(format!("malformed Connect Arrow IPC metadata: {error}"))
+    })?;
+    Ok(Some(metadata))
+}
+
+struct ConnectArrowSchemaBudget {
+    total_fields: usize,
+    schema_bytes: usize,
+    metadata_bytes: usize,
+    max_schema_bytes: usize,
+}
+
+impl ConnectArrowSchemaBudget {
+    fn add_schema_bytes(&mut self, bytes: usize) -> Result<(), EngineError> {
+        self.schema_bytes = self.schema_bytes.saturating_add(bytes);
+        if self.schema_bytes > self.max_schema_bytes {
+            return Err(EngineError::User(format!(
+                "Connect Arrow expanded schema exceeds {} bytes",
+                self.max_schema_bytes
+            )));
+        }
+        Ok(())
+    }
+
+    fn inspect_metadata<'a>(
+        &mut self,
+        metadata: impl IntoIterator<
+            Item = Result<
+                polars_arrow::io::ipc::format::ipc::KeyValueRef<'a>,
+                polars_arrow::io::ipc::format::ipc::planus::Error,
+            >,
+        >,
+    ) -> Result<(), EngineError> {
+        use polars_arrow::io::ipc::format::ipc::KeyValue;
+        use robin_sparkless_core::schema::MAX_LOGICAL_SCHEMA_METADATA_BYTES;
+
+        for entry in metadata {
+            let entry = entry.map_err(|error| {
+                EngineError::User(format!("invalid Connect Arrow metadata entry: {error}"))
+            })?;
+            let key = entry.key().map_err(|error| {
+                EngineError::User(format!("invalid Connect Arrow metadata key: {error}"))
+            })?;
+            let value = entry.value().map_err(|error| {
+                EngineError::User(format!("invalid Connect Arrow metadata value: {error}"))
+            })?;
+            // Count each reference, including shared/duplicate entries, before owning the
+            // FlatBuffer. Count entry storage too, so empty aliased entries are bounded.
+            self.metadata_bytes = self
+                .metadata_bytes
+                .saturating_add(std::mem::size_of::<KeyValue>())
+                .saturating_add(key.map(str::len).unwrap_or(0))
+                .saturating_add(value.map(str::len).unwrap_or(0));
+            if self.metadata_bytes > MAX_LOGICAL_SCHEMA_METADATA_BYTES {
+                return Err(EngineError::User(format!(
+                    "Connect Arrow metadata exceeds {MAX_LOGICAL_SCHEMA_METADATA_BYTES} bytes"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn inspect_connect_arrow_field_tree(
+    field: polars_arrow::io::ipc::format::ipc::FieldRef<'_>,
+    depth: usize,
+    budget: &mut ConnectArrowSchemaBudget,
+) -> Result<bool, EngineError> {
+    use polars_arrow::io::ipc::format::ipc::TypeRef;
+
+    if depth > MAX_CONNECT_ARROW_SCHEMA_DEPTH {
+        return Err(EngineError::User(format!(
+            "Connect Arrow schema nesting exceeds {MAX_CONNECT_ARROW_SCHEMA_DEPTH}"
+        )));
+    }
+    budget.total_fields = budget.total_fields.saturating_add(1);
+    if budget.total_fields > MAX_CONNECT_ARROW_SCHEMA_FIELDS {
+        return Err(EngineError::User(format!(
+            "Connect Arrow schema exceeds {MAX_CONNECT_ARROW_SCHEMA_FIELDS} fields"
+        )));
+    }
+    let name = field
+        .name()
+        .map_err(|error| EngineError::User(format!("invalid Connect Arrow field name: {error}")))?;
+    budget.add_schema_bytes(name.map(str::len).unwrap_or(0))?;
+    if let Some(metadata) = field.custom_metadata().map_err(|error| {
+        EngineError::User(format!("invalid Connect Arrow field metadata: {error}"))
+    })? {
+        budget.inspect_metadata(metadata)?;
+    }
+    if field
+        .dictionary()
+        .map_err(|error| EngineError::User(format!("invalid Arrow dictionary metadata: {error}")))?
+        .is_some()
+    {
+        return Err(EngineError::User(
+            "dictionary-encoded Connect Arrow input is unsupported".into(),
+        ));
+    }
+    let children = field.children().map_err(|error| {
+        EngineError::User(format!("invalid Arrow nested schema metadata: {error}"))
+    })?;
+    let mut has_children = false;
+    if let Some(children) = children {
+        for child in children.iter() {
+            has_children = true;
+            let child = child.map_err(|error| {
+                EngineError::User(format!("invalid Arrow nested schema field: {error}"))
+            })?;
+            inspect_connect_arrow_field_tree(child, depth + 1, budget)?;
+        }
+    }
+    match field
+        .type_()
+        .map_err(|error| EngineError::User(format!("invalid Connect Arrow field type: {error}")))?
+    {
+        Some(TypeRef::Timestamp(timestamp)) => {
+            let timezone = timestamp.timezone().map_err(|error| {
+                EngineError::User(format!("invalid Connect Arrow timezone: {error}"))
+            })?;
+            budget.add_schema_bytes(timezone.map(str::len).unwrap_or(0))?;
+        }
+        Some(
+            TypeRef::Bool(_)
+            | TypeRef::Int(_)
+            | TypeRef::FloatingPoint(_)
+            | TypeRef::Utf8(_)
+            | TypeRef::Date(_)
+            | TypeRef::Decimal(_),
+        ) => {}
+        _ => {
+            return Err(EngineError::User(
+                "Connect Arrow field type is not enabled in the scalar subset".into(),
+            ));
+        }
+    }
+    Ok(has_children)
+}
+
+fn preflight_connect_arrow_stream(
+    data: &[u8],
+    max_rows: usize,
+    max_decoded_bytes: usize,
+) -> Result<u64, EngineError> {
+    if data.is_empty() {
+        return Err(EngineError::User(
+            "Connect Arrow IPC payload is empty".into(),
+        ));
+    }
+    let mut reader = Cursor::new(data);
+    let first = read_connect_ipc_message_metadata(&mut reader, data.len())?.ok_or_else(|| {
+        EngineError::User("Connect Arrow IPC stream does not begin with a schema".into())
+    })?;
+    let message = MessageRef::read_as_root(first.as_slice()).map_err(|error| {
+        EngineError::User(format!(
+            "malformed Connect Arrow IPC schema message: {error}"
+        ))
+    })?;
+    let header = message
+        .header()
+        .map_err(|error| {
+            EngineError::User(format!(
+                "malformed Connect Arrow IPC schema header: {error}"
+            ))
+        })?
+        .ok_or_else(|| EngineError::User("Connect Arrow IPC schema header is missing".into()))?;
+    let schema = match header {
+        MessageHeaderRef::Schema(schema) => schema,
+        _ => {
+            return Err(EngineError::User(
+                "Connect Arrow IPC stream does not begin with a schema".into(),
+            ));
+        }
+    };
+    let fields = schema
+        .fields()
+        .map_err(|error| {
+            EngineError::User(format!("malformed Connect Arrow schema fields: {error}"))
+        })?
+        .ok_or_else(|| EngineError::User("Connect Arrow schema fields are missing".into()))?;
+    let mut budget = ConnectArrowSchemaBudget {
+        total_fields: 0,
+        schema_bytes: 0,
+        metadata_bytes: 0,
+        max_schema_bytes: max_decoded_bytes,
+    };
+    if let Some(metadata) = message.custom_metadata().map_err(|error| {
+        EngineError::User(format!("invalid Connect Arrow message metadata: {error}"))
+    })? {
+        budget.inspect_metadata(metadata)?;
+    }
+    if let Some(metadata) = schema.custom_metadata().map_err(|error| {
+        EngineError::User(format!("invalid Connect Arrow schema metadata: {error}"))
+    })? {
+        budget.inspect_metadata(metadata)?;
+    }
+    for field in fields.iter() {
+        let field = field.map_err(|error| {
+            EngineError::User(format!("malformed Connect Arrow field: {error}"))
+        })?;
+        if inspect_connect_arrow_field_tree(field, 1, &mut budget)? {
+            return Err(EngineError::User(
+                "nested Connect Arrow types are not enabled".into(),
+            ));
+        }
+    }
+    let schema_body_len = message.body_length().map_err(|error| {
+        EngineError::User(format!("invalid Connect Arrow schema body length: {error}"))
+    })?;
+    if schema_body_len != 0 {
+        return Err(EngineError::User(
+            "Connect Arrow schema message must not have a body".into(),
+        ));
+    }
+
+    // The schema tree is now known to be shallow before Polars recursively converts it.
+    let _stream_metadata = read_stream_metadata(&mut Cursor::new(data))
+        .map_err(|error| EngineError::User(format!("invalid Connect Arrow schema: {error}")))?;
+    let mut total_rows = 0u64;
+    let mut total_buffer_bytes = 0usize;
+    loop {
+        let Some(metadata) = read_connect_ipc_message_metadata(&mut reader, data.len())? else {
+            if reader.position() as usize != data.len() {
+                return Err(EngineError::User(
+                    "Connect Arrow IPC stream has trailing bytes".into(),
+                ));
+            }
+            break;
+        };
+        let message = MessageRef::read_as_root(metadata.as_slice()).map_err(|error| {
+            EngineError::User(format!("malformed Connect Arrow IPC message: {error}"))
+        })?;
+        let body_len = message.body_length().map_err(|error| {
+            EngineError::User(format!("invalid Connect Arrow IPC body length: {error}"))
+        })?;
+        let body_len = usize::try_from(body_len).map_err(|_| {
+            EngineError::User("invalid negative Connect Arrow IPC body length".into())
+        })?;
+        let header = message
+            .header()
+            .map_err(|error| {
+                EngineError::User(format!(
+                    "malformed Connect Arrow IPC message header: {error}"
+                ))
+            })?
+            .ok_or_else(|| {
+                EngineError::User("Connect Arrow IPC message header is missing".into())
+            })?;
+        match header {
+            MessageHeaderRef::RecordBatch(batch) => {
+                if batch
+                    .compression()
+                    .map_err(|error| {
+                        EngineError::User(format!(
+                            "invalid Connect Arrow compression metadata: {error}"
+                        ))
+                    })?
+                    .is_some()
+                {
+                    return Err(EngineError::User(
+                        "compressed Connect Arrow record batches are unsupported".into(),
+                    ));
+                }
+                let rows = batch.length().map_err(|error| {
+                    EngineError::User(format!("invalid Connect Arrow row count: {error}"))
+                })?;
+                if rows < 0 {
+                    return Err(EngineError::User(
+                        "invalid negative Connect Arrow row count".into(),
+                    ));
+                }
+                total_rows = total_rows.saturating_add(rows as u64);
+                if total_rows > max_rows as u64 {
+                    return Err(EngineError::User(format!(
+                        "Connect local relation exceeds {max_rows} rows"
+                    )));
+                }
+                let buffers = batch
+                    .buffers()
+                    .map_err(|error| {
+                        EngineError::User(format!("invalid Connect Arrow buffer table: {error}"))
+                    })?
+                    .ok_or_else(|| {
+                        EngineError::User("Connect Arrow record batch has no buffer table".into())
+                    })?;
+                for buffer in buffers.iter() {
+                    let offset = buffer.offset();
+                    let length = buffer.length();
+                    let offset = usize::try_from(offset).map_err(|_| {
+                        EngineError::User("negative Connect Arrow buffer offset".into())
+                    })?;
+                    let length = usize::try_from(length).map_err(|_| {
+                        EngineError::User("negative Connect Arrow buffer length".into())
+                    })?;
+                    let end = offset.checked_add(length).ok_or_else(|| {
+                        EngineError::User("Connect Arrow buffer range overflow".into())
+                    })?;
+                    if end > body_len {
+                        return Err(EngineError::User(
+                            "Connect Arrow buffer extends past its record batch body".into(),
+                        ));
+                    }
+                    total_buffer_bytes =
+                        total_buffer_bytes.checked_add(length).ok_or_else(|| {
+                            EngineError::User("Connect Arrow decoded byte count overflow".into())
+                        })?;
+                    if total_buffer_bytes > max_decoded_bytes {
+                        return Err(EngineError::User(format!(
+                            "Connect local Arrow buffers exceed {max_decoded_bytes} decoded bytes"
+                        )));
+                    }
+                }
+            }
+            MessageHeaderRef::DictionaryBatch(_) => {
+                return Err(EngineError::User(
+                    "dictionary-encoded Connect Arrow input is unsupported".into(),
+                ));
+            }
+            _ => {
+                return Err(EngineError::User(
+                    "unexpected message in Connect Arrow IPC stream".into(),
+                ));
+            }
+        }
+        let next = reader
+            .position()
+            .checked_add(body_len as u64)
+            .ok_or_else(|| EngineError::User("Connect Arrow IPC body length overflow".into()))?;
+        if next > data.len() as u64 {
+            return Err(EngineError::User(
+                "Connect Arrow IPC body extends past the payload".into(),
+            ));
+        }
+        reader.seek(SeekFrom::Start(next)).map_err(|error| {
+            EngineError::User(format!("invalid Connect Arrow IPC body offset: {error}"))
+        })?;
+    }
+    Ok(total_rows)
+}
+
+fn rewrite_connect_arrow_input_schema(data: &[u8]) -> Result<(Vec<u8>, Vec<String>), EngineError> {
+    use polars_arrow::io::ipc::format::ipc::planus::{Builder, ReadAsRoot};
+    use polars_arrow::io::ipc::format::ipc::{Message, MessageHeader, MessageRef};
+
+    let continuation = data.starts_with(&[0xff; 4]);
+    let mut reader = Cursor::new(data);
+    let metadata =
+        read_connect_ipc_message_metadata(&mut reader, data.len())?.ok_or_else(|| {
+            EngineError::User("Connect Arrow IPC stream does not begin with a schema".into())
+        })?;
+    let original_message_end = usize::try_from(reader.position())
+        .map_err(|_| EngineError::User("Connect Arrow schema offset is out of range".into()))?;
+    let message_ref = MessageRef::read_as_root(&metadata).map_err(|error| {
+        EngineError::User(format!(
+            "malformed Connect Arrow IPC schema message: {error}"
+        ))
+    })?;
+    let mut message = Message::try_from(message_ref).map_err(|error| {
+        EngineError::User(format!("invalid Connect Arrow IPC schema message: {error}"))
+    })?;
+    let Some(MessageHeader::Schema(schema_message)) = message.header.as_mut() else {
+        return Err(EngineError::User(
+            "Connect Arrow IPC stream does not begin with a schema".into(),
+        ));
+    };
+    let fields = schema_message
+        .fields
+        .as_mut()
+        .ok_or_else(|| EngineError::User("Connect Arrow IPC schema has no fields".into()))?;
+    let mut public_names = Vec::with_capacity(fields.len());
+    for (index, field) in fields.iter_mut().enumerate() {
+        public_names.push(field.name.clone().unwrap_or_default());
+        field.name = Some(connect_local_column_name(index));
+    }
+    let serialized_message = {
+        let mut builder = Builder::new();
+        builder.finish(&message, None).to_vec()
+    };
+    let padded_message_len = serialized_message
+        .len()
+        .checked_add(7)
+        .map(|length| length & !7)
+        .ok_or_else(|| EngineError::User("Connect Arrow schema size overflow".into()))?;
+    let framed_len = i32::try_from(padded_message_len)
+        .map_err(|_| EngineError::User("Connect Arrow schema exceeds IPC framing range".into()))?;
+    let prefix_len: usize = if continuation { 8 } else { 4 };
+    let mut output = Vec::with_capacity(
+        prefix_len
+            .saturating_add(padded_message_len)
+            .saturating_add(data.len().saturating_sub(original_message_end)),
+    );
+    if continuation {
+        output.extend_from_slice(&[0xff; 4]);
+    }
+    output.extend_from_slice(&framed_len.to_le_bytes());
+    output.extend_from_slice(&serialized_message);
+    output.resize(prefix_len + padded_message_len, 0);
+    output.extend_from_slice(&data[original_message_end..]);
+    Ok((output, public_names))
+}
 
 /// Parse "array<element_type>" to get inner type string. Returns None if not array<>.
 fn parse_array_element_type(type_str: &str) -> Option<String> {
@@ -3488,6 +4114,160 @@ impl SparkSession {
     /// Create a DataFrame from a Polars DataFrame
     pub fn create_dataframe_from_polars(&self, df: PlDataFrame) -> DataFrame {
         DataFrame::from_polars_with_options(df, self.is_case_sensitive())
+    }
+
+    /// Create a one-column Long result for Spark Connect's deferred global count node.
+    pub fn create_dataframe_from_i64_column(
+        &self,
+        name: &str,
+        values: Vec<i64>,
+    ) -> Result<DataFrame, EngineError> {
+        let column = Series::new(name.into(), values);
+        let frame =
+            PlDataFrame::new_infer_height(vec![column.into()]).map_err(polars_to_core_error)?;
+        Ok(self.create_dataframe_from_polars(frame))
+    }
+
+    /// Decode a bounded Arrow IPC stream as a Connect local relation, applying the declared
+    /// Spark schema by position while retaining public labels and logical field metadata.
+    ///
+    /// The input is preflighted before Polars materializes any record batch: IPC compression,
+    /// dictionary encoding, nested Arrow fields, excessive rows, and oversized scalar values are
+    /// rejected at this boundary. A missing payload creates a typed empty relation.
+    pub fn create_dataframe_from_arrow_ipc(
+        &self,
+        data: Option<&[u8]>,
+        schema: Option<StructType>,
+        max_ipc_bytes: usize,
+        max_rows: usize,
+        max_decoded_bytes: usize,
+        max_scalar_bytes: usize,
+    ) -> Result<(DataFrame, StructType), EngineError> {
+        match data {
+            Some(data) => {
+                if data.len() > max_ipc_bytes {
+                    return Err(EngineError::User(format!(
+                        "Connect local Arrow IPC data exceeds {max_ipc_bytes} bytes"
+                    )));
+                }
+                let row_count = preflight_connect_arrow_stream(data, max_rows, max_decoded_bytes)?;
+                let (normalized_data, public_names) = rewrite_connect_arrow_input_schema(data)?;
+                let mut reader =
+                    polars::io::ipc::IpcStreamReader::new(Cursor::new(normalized_data.as_slice()));
+                let arrow_schema = reader.arrow_schema().map_err(|error| {
+                    EngineError::User(format!("invalid Connect Arrow schema: {error}"))
+                })?;
+                let source_schema = match schema {
+                    Some(schema) => schema,
+                    None => infer_connect_schema(&arrow_schema, &public_names)?,
+                };
+                if source_schema.logical_fields().len() != arrow_schema.len() {
+                    return Err(EngineError::User(format!(
+                        "Connect local schema has {} fields but Arrow data has {}",
+                        source_schema.logical_fields().len(),
+                        arrow_schema.len()
+                    )));
+                }
+                validate_connect_arrow_source_schema(&arrow_schema)?;
+                let frame = reader
+                    .with_n_rows(Some(max_rows.saturating_add(1)))
+                    .set_rechunk(false)
+                    .finish()
+                    .map_err(|error| {
+                        EngineError::User(format!("invalid Connect Arrow IPC data: {error}"))
+                    })?;
+                if frame.height() > max_rows {
+                    return Err(EngineError::User(format!(
+                        "Connect local relation exceeds {max_rows} rows"
+                    )));
+                }
+                if frame.height() as u64 != row_count {
+                    return Err(EngineError::User(format!(
+                        "Connect Arrow IPC row count mismatch: metadata declares {row_count}, decoder produced {}",
+                        frame.height()
+                    )));
+                }
+                if frame.estimated_size() > max_decoded_bytes {
+                    return Err(EngineError::User(format!(
+                        "Connect local decoded buffers exceed {max_decoded_bytes} bytes"
+                    )));
+                }
+                let physical_schema = connect_physical_schema(&source_schema)?;
+                let mut columns = Vec::with_capacity(frame.width());
+                for (index, (column, logical_field)) in frame
+                    .columns()
+                    .iter()
+                    .zip(source_schema.logical_fields())
+                    .enumerate()
+                {
+                    let internal_name = connect_local_column_name(index);
+                    let target_type = crate::schema_conv::checked_data_type_to_polars_type(
+                        &logical_field.data_type,
+                        &logical_field.name,
+                    )
+                    .map_err(|error| {
+                        EngineError::User(format!("invalid Connect local schema: {error}"))
+                    })?;
+                    let source = column.as_materialized_series();
+                    validate_connect_scalar_values(source, max_scalar_bytes, &logical_field.name)?;
+                    let mut converted = source
+                        .cast_with_options(&target_type, CastOptions::Strict)
+                        .map_err(|error| EngineError::User(format!(
+                            "Connect local column {:?} cannot be cast to its declared type: {error}",
+                            logical_field.name
+                        )))?;
+                    converted.rename(internal_name.into());
+                    if !logical_field.nullable && converted.null_count() != 0 {
+                        return Err(EngineError::User(format!(
+                            "Connect local non-nullable column {:?} contains null values",
+                            logical_field.name
+                        )));
+                    }
+                    validate_connect_scalar_values(
+                        &converted,
+                        max_scalar_bytes,
+                        &logical_field.name,
+                    )?;
+                    columns.push(converted.into());
+                }
+                let imported = PlDataFrame::new_infer_height(columns).map_err(|error| {
+                    EngineError::User(format!("cannot stage Connect local relation: {error}"))
+                })?;
+                let decoded_bytes = imported.estimated_size();
+                if decoded_bytes > max_decoded_bytes {
+                    return Err(EngineError::User(format!(
+                        "Connect local decoded buffers exceed {max_decoded_bytes} bytes"
+                    )));
+                }
+                let dataframe =
+                    DataFrame::from_polars_with_options(imported, self.is_case_sensitive())
+                        .with_logical_schema(physical_schema.clone())
+                        .map_err(|error| {
+                            EngineError::User(format!(
+                                "invalid Connect local logical schema: {error}"
+                            ))
+                        })?;
+                Ok((dataframe, source_schema))
+            }
+            None => {
+                let source_schema = schema.ok_or_else(|| {
+                    EngineError::User("Connect LocalRelation requires data or a schema".into())
+                })?;
+                source_schema.validate_metadata().map_err(|error| {
+                    EngineError::User(format!("invalid Connect local schema metadata: {error}"))
+                })?;
+                let physical_schema = connect_physical_schema(&source_schema)?;
+                let empty_schema = physical_schema.to_polars_schema();
+                let empty = PlDataFrame::empty_with_schema(&empty_schema);
+                let dataframe =
+                    DataFrame::from_polars_with_options(empty, self.is_case_sensitive())
+                        .with_logical_schema(physical_schema)
+                        .map_err(|error| {
+                            EngineError::User(format!("invalid Connect empty schema: {error}"))
+                        })?;
+                Ok((dataframe, source_schema))
+            }
+        }
     }
 
     /// Infer dtype string from a single JSON value (for schema inference). Returns None for Null.
@@ -7943,5 +8723,180 @@ mod tests {
             *resolutions.lock().expect("test resolution lock"),
             vec!["main.analytics.orders".to_string()]
         );
+    }
+}
+
+#[cfg(test)]
+mod connect_arrow_tests {
+    use super::*;
+    use polars_arrow::io::ipc::format::ipc;
+
+    fn shared_schema_stream(
+        name: &str,
+        field_count: usize,
+        metadata_value: &str,
+        metadata_count: usize,
+    ) -> Vec<u8> {
+        let mut builder = ipc::planus::Builder::new();
+        let entry = ipc::KeyValue::create(&mut builder, "key", metadata_value);
+        let metadata = builder.create_vector(vec![entry; metadata_count].as_slice());
+        let dtype = ipc::Type::create_int(
+            &mut builder,
+            &ipc::Int {
+                bit_width: 64,
+                is_signed: true,
+            },
+        );
+        let field = ipc::Field::create(&mut builder, name, true, dtype, (), (), ());
+        let schema = ipc::Schema::create(
+            &mut builder,
+            ipc::Endianness::Little,
+            vec![field; field_count].as_slice(),
+            metadata,
+            (),
+        );
+        let header = ipc::MessageHeader::create_schema(&mut builder, schema);
+        let message = ipc::Message::create(&mut builder, ipc::MetadataVersion::V5, header, 0, ());
+        let metadata = builder.finish(message, None);
+        let padded_len = (metadata.len() + 7) & !7;
+        let mut stream = vec![0xff; 4];
+        stream.extend_from_slice(&(padded_len as i32).to_le_bytes());
+        stream.extend_from_slice(metadata);
+        stream.resize(8 + padded_len, 0);
+        stream.extend_from_slice(&[0xff; 4]);
+        stream.extend_from_slice(&0i32.to_le_bytes());
+        stream
+    }
+
+    #[test]
+    fn connect_arrow_preflight_bounds_shared_metadata_before_owning_the_schema() {
+        let stream = shared_schema_stream("value", 1, &"v".repeat(1024), 64);
+        assert!(stream.len() < 4096, "wire data shares the metadata entry");
+        let error = preflight_connect_arrow_stream(&stream, 10_000, 8 * 1024 * 1024)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("metadata exceeds"), "{error}");
+    }
+
+    #[test]
+    fn connect_arrow_preflight_bounds_shared_field_names_before_owning_the_schema() {
+        let stream = shared_schema_stream(&"x".repeat(65_537), 128, "", 0);
+        assert!(stream.len() < 70_000, "wire data shares the field table");
+        let error = preflight_connect_arrow_stream(&stream, 10_000, 8 * 1024 * 1024)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("expanded schema exceeds"), "{error}");
+    }
+
+    #[test]
+    fn connect_arrow_preflight_rejects_buffer_ranges_and_decoded_byte_overflow() {
+        for (buffer_length, budget, expected_error) in [
+            (16 * 1024 * 1024, 8 * 1024 * 1024, "extends past"),
+            (8, 4, "decoded bytes"),
+        ] {
+            let mut stream = shared_schema_stream("x", 1, "", 0);
+            stream.truncate(stream.len() - 8);
+            let message = ipc::Message {
+                version: ipc::MetadataVersion::V5,
+                header: Some(ipc::MessageHeader::RecordBatch(Box::new(
+                    ipc::RecordBatch {
+                        length: 1,
+                        nodes: Some(vec![ipc::FieldNode {
+                            length: 1,
+                            null_count: 0,
+                        }]),
+                        buffers: Some(vec![
+                            ipc::Buffer {
+                                offset: 0,
+                                length: 0,
+                            },
+                            ipc::Buffer {
+                                offset: 0,
+                                length: buffer_length,
+                            },
+                        ]),
+                        ..Default::default()
+                    },
+                ))),
+                body_length: 8,
+                ..Default::default()
+            };
+            let mut builder = ipc::planus::Builder::new();
+            let metadata = builder.finish(&message, None);
+            let padded_len = (metadata.len() + 7) & !7;
+            let metadata_start = stream.len();
+            stream.extend_from_slice(&[0xff; 4]);
+            stream.extend_from_slice(&(padded_len as i32).to_le_bytes());
+            stream.extend_from_slice(metadata);
+            stream.resize(metadata_start + 8 + padded_len, 0);
+            stream.extend_from_slice(&7i64.to_le_bytes());
+            stream.extend_from_slice(&[0xff; 4]);
+            stream.extend_from_slice(&0i32.to_le_bytes());
+            let error = preflight_connect_arrow_stream(&stream, 10_000, budget)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(expected_error), "{error}");
+        }
+    }
+
+    #[test]
+    fn connect_arrow_import_preserves_duplicate_fields_with_and_without_a_schema() {
+        let session = SparkSession::builder().get_or_create();
+        let native = PlDataFrame::new_infer_height(vec![
+            Series::new("first".into(), vec![7i64]).into(),
+            Series::new("second".into(), vec![11i64]).into(),
+        ])
+        .unwrap();
+        let source = session.create_dataframe_from_polars(native);
+        let schema = StructType::from_logical_fields(vec![
+            StructField::new("duplicate".into(), CoreDataType::Long, true),
+            StructField::new("duplicate".into(), CoreDataType::Long, true),
+        ]);
+        let mut batches = source
+            .to_arrow_ipc_batches_with_schema_and_cancellation(
+                10,
+                1024 * 1024,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+                &schema,
+            )
+            .unwrap();
+        let data = batches.next().unwrap().unwrap().bytes;
+        for declared_schema in [None, Some(schema)] {
+            let (frame, imported_schema) = session
+                .create_dataframe_from_arrow_ipc(
+                    Some(&data),
+                    declared_schema,
+                    1024 * 1024,
+                    10_000,
+                    8 * 1024 * 1024,
+                    512 * 1024,
+                )
+                .unwrap();
+            let frame = frame.collect().unwrap();
+            assert_eq!(imported_schema.logical_fields().len(), 2);
+            assert!(
+                imported_schema
+                    .logical_fields()
+                    .iter()
+                    .all(|field| field.name == "duplicate")
+            );
+            assert_eq!(frame.width(), 2);
+            assert_eq!(
+                frame.columns()[0]
+                    .as_materialized_series()
+                    .i64()
+                    .unwrap()
+                    .get(0),
+                Some(7)
+            );
+            assert_eq!(
+                frame.columns()[1]
+                    .as_materialized_series()
+                    .i64()
+                    .unwrap()
+                    .get(0),
+                Some(11)
+            );
+        }
     }
 }

@@ -1,6 +1,6 @@
 # 4.18.0 implementation and release plan
 
-**Status: 418-01 contract frozen; 418-02 and 418-03 implemented locally; no Phase 2 interoperability or release gates completed.** This plan refines **Phase 2**, following the [4.17 plan](RELEASE_4_17.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.18.0**, including unchanged packages. Owners, implementation issues, and release evidence remain unassigned.
+**Status: 418-01 contract frozen; 418-02 through 418-04 implemented locally; no formal Phase 2 interoperability or release gates completed.** This plan refines **Phase 2**, following the [4.17 plan](RELEASE_4_17.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.18.0**, including unchanged packages. Owners, implementation issues, and release evidence remain unassigned.
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Roadmap](ROADMAP.md) · [Protocol research](CONNECT_PROTOCOL_RESEARCH.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
@@ -21,7 +21,7 @@ Slice IDs are local plan identifiers. Assign an owner, reviewable change, exact 
 | **418-01 — complete** | Freeze public protocol/client pins, API/RPC/node/config/type matrix, shared transport interface, and proxy prerequisite | SS-03 traces; applicable 4.17 interfaces | D01–D04/D06–D11 baselines recorded; 27 actual client request fixtures and source comparison checked in; proxy prerequisite pinned. See [freeze record](#418-01-frozen-contract-record) and [fixture instructions](../../../tests/connect/README.md). |
 | **418-02 — complete locally** | Generated service, bounded decoders, session identities, shared admission/operation ownership | 418-01; SS-04/07 | HTTP and Connect feature builds; public request decode, malformed identity, duplicate operation, message/depth/node/schema caps, release tombstones, and real gRPC wire-size tests; no second execution runtime. This does not pass V18–V26 or establish plan execution/interoperability. |
 | **418-03 — complete locally** | Explicit plan/expression translation, configuration and analysis | 418-01/02; SS-08 | Captured plan/schema/config fixtures, schema inference without row actions, and explicit unsupported errors pass locally. V19 public-client/oracle interoperability remains an integrated gate for 418-04/06. |
-| **418-04** | Checked Connect schema/Arrow encoder and bounded inline local relations | 418-01/02; logical schema and native batches | Phase 2 V18/V20: PyArrow/client decoding, exact values, empty/multi-batch and byte boundaries |
+| **418-04 — complete locally** | Checked Connect schema/Arrow encoder and bounded inline local relations | 418-01/02; logical schema and native batches | Local service tests and pinned-client smoke cover exact scalar values, schema-bearing empty results, duplicate names, and multi-batch offsets. Full Phase 2 V18/V20 boundary and reference-engine evidence remains open. |
 | **418-05** | Replay, reconnect, prefix/all release, interrupt, expiry, session release/restart | 418-02; 418-03/04 agreed producer interface | V21/V22 deterministic races plus real network failures and measured accounting |
 | **418-06** | Standalone integrated conformance and multiple real clients | 418-03–418-05 | V18–V23 and applicable V17; unmodified JVM-free client, health progress, native execution evidence |
 | **418-07** | Public launcher readiness, CLI endpoints, packaged Connect feature | 418-06; SS-02/06 | V24 and launcher regressions across advertised platforms; HTTP-only build remains testable |
@@ -105,7 +105,7 @@ Use one server-owned runtime/catalog service, with a distinct transport namespac
 
 ## 418-04: logical types, physical Arrow, and local data
 
-Required Connect types initially match the proven HTTP scalar set: BOOLEAN, SMALLINT, INT, BIGINT, finite DOUBLE, STRING, DATE, UTC microsecond TIMESTAMP, and DECIMAL precision 1–38 with valid nonnegative scale. Support typed nulls and schema-bearing empty results. These are required delivery targets, not currently enabled Connect types. PySpark 4.0.5 maps the initial logical types to these Arrow physical types:
+Required Connect types initially match the proven HTTP scalar set: BOOLEAN, SMALLINT, INT, BIGINT, finite DOUBLE, STRING, DATE, UTC microsecond TIMESTAMP, and DECIMAL precision 1–38 with valid nonnegative scale. Support typed nulls and schema-bearing empty results. Slice 418-04 implements these scalar input and output mappings; the public interoperability gates below remain open. PySpark 4.0.5 maps the initial logical types to these Arrow physical types:
 
 | Spark logical type | Arrow physical type |
 | --- | --- |
@@ -126,6 +126,20 @@ Reuse native `polars-arrow` batches through a checked IPC boundary; do not assum
 Encode each response's Arrow payload as a complete independently readable IPC stream. Assign opaque response IDs and internal sequence positions, track cumulative row offsets, validate row counts, and retain the serialized response for replay before handing it to a transport. Test an empty result through both PyArrow and the public client. Bound actual serialized bytes including schema/protobuf overhead, rather than relying only on a row estimate.
 
 For inline inputs, enforce protobuf message, IPC data, decoded-buffer, schema-depth, row/column, and individual-value limits before expensive allocation where possible. Count compressed/dictionary expansion separately from wire size; reject unsupported IPC encodings/compression explicitly. Test schema-only empty local relations, DDL/JSON schema overrides, mismatched schemas, malformed IPC, deep nested rejected types, and cached-local-relation threshold crossing. Do not alter client defaults or raise its cache threshold to make conformance pass.
+
+### 418-04 local implementation record — 2026-10-28
+
+`ExecutePlan` now produces a bounded stream from the shared native Polars backend. Each Arrow response contains one independently readable IPC stream, carries an opaque UUID response ID and exact row count/start offset, and includes the public schema on the first batch. The producer bounds batches at 16,384 rows and checks complete serialized protobuf responses against 1 MiB and cumulative output against 1,000,000 rows/64 MiB. A one-item async channel provides backpressure; failures after delivered batches end with a visible gRPC error rather than a success marker. Requests using the client's normal reattachable option receive `ResultComplete`; response replay and reconnect remain 418-05.
+
+Execution and analysis share one deadline from admission, including time spent waiting for session and process permits. Terminal outcomes use a separate bounded slot so a full batch queue cannot discard a deadline error or turn a partial result into successful EOF. Native producers retain their per-session and process compute permits until they stop.
+
+The native IPC boundary rewrites only the emitted schema message to the checked public field names and nullability while reusing native record-batch buffers. This preserves duplicate public aliases even though Polars assigns unique internal names. It removes Sparkless-private schema metadata from Connect output and does not depend on private metadata to decode values. The schema is type-checked against the physical plan before export.
+
+Inline `LocalRelation` accepts schema-only empty input or an Arrow stream with a supplied Spark JSON/DDL schema; absent a schema, a supported scalar schema is inferred from Arrow. Values cast by column position with strict failure behavior, preserving logical labels, nullability, and metadata in the Connect schema. Preflight rejects malformed/trailing IPC, nested or dictionary fields, compression, unsupported scalar types, and inputs beyond the 1 MiB IPC, 8 MiB decoded-buffer, 10,000-row, 512 KiB scalar, 64-depth, and 256-field caps. Cached relations fail explicitly because artifact transfer is still unsupported.
+
+Input preflight checks record-batch buffer ranges and cumulative buffer lengths before decoding. It counts every metadata reference against the existing 32 KiB metadata budget and bounds expanded field names/timezones before owning or rewriting the Arrow schema. Duplicate input field names are assigned unique physical names before Polars reads the stream, while their public names remain ordered in the inferred or supplied logical schema.
+
+Local evidence includes `cargo test -p sparkless-server --lib --no-default-features --features connect` and `tests/connect/smoke_public_client.py` against the locked `pyspark-client==4.0.5`/PyArrow 26.0.0 environment. The client smoke exercises range/filter/global-count, all supported scalar Arrow types with exact temporal/decimal values, schema-only empty input, a 20,000-row multi-batch result, and duplicate aliases through both `collect()` and `toArrow()`. This is a focused development smoke, not the full V18/V20 gate: response-byte split boundaries, oversize-cell/total-limit error cases, reference comparison, replay, and reconnect are still pending.
 
 ## 418-05: replay and lifecycle contract
 
@@ -202,7 +216,8 @@ V26 measures correctness, cold start, throughput, p50/p95 latency, RSS, CPU, bat
 - [ ] 418-01: contracts, source review differences, pins and external prerequisite recorded.
 - [x] 418-02 local implementation and focused checks complete; this does not pass the V18–V26 interoperability or release gates.
 - [x] 418-03 local implementation and captured-fixture checks complete; V19 remains an integrated gate.
-- [ ] 418-04–418-05: physical Arrow and lifecycle verified.
+- [x] 418-04 local implementation, focused service tests, and pinned-client smoke complete; full V18/V20 exit gates remain open.
+- [ ] 418-05: replay and lifecycle verified.
 - [ ] 418-06: standalone default-client and concurrent-client conformance passes.
 - [ ] 418-07–418-08: launcher, separate proxy route and benchmark evidence passes.
 - [ ] 418-09: prior regressions and V33 complete candidate gates pass.
@@ -210,4 +225,4 @@ V26 measures correctness, cold start, throughput, p50/p95 latency, RSS, CPU, bat
 
 ## Current implementation boundary
 
-The repository contains a native HTTP service and logical-schema/IPC/lazy execution work described in the 4.17 plan. Slices 418-02/03 add an optional generated Spark 4.0.5 gRPC adapter and checked translation, schema analysis, and configuration behavior on the shared server instance. The listener is not yet wired into launcher readiness, and the launcher continues to advertise `spark_connect_supported: false` and reject Connect endpoint properties. Connect Arrow results, inline local relations, replay/lifecycle, launcher packaging, proxy certification, integrated release gates, and public artifact verification remain open.
+The repository contains a native HTTP service and logical-schema/IPC/lazy execution work described in the 4.17 plan. Slices 418-02/03 add an optional generated Spark 4.0.5 gRPC adapter and checked translation, schema analysis, and configuration behavior on the shared server instance. Slice 418-04 adds bounded Connect Arrow results and inline scalar local relations, with a focused pinned-client smoke. Replay/lifecycle, full interoperability gates, launcher packaging/readiness, proxy certification, integrated release gates, and public artifact verification remain open.

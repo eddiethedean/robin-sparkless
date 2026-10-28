@@ -180,6 +180,39 @@ impl DataFrame {
         self.0.schema_engine()
     }
 
+    /// Attach logical field metadata to a physical plan after validating field names and types.
+    pub fn with_logical_schema(self, schema: StructType) -> Result<DataFrame, PolarsError> {
+        self.0.with_logical_schema(schema).map(DataFrame)
+    }
+
+    /// Export this plan as bounded, independently readable Arrow IPC streams.
+    pub fn to_arrow_ipc_batches_with_cancellation(
+        &self,
+        max_rows: usize,
+        max_bytes: usize,
+        token: &CancellationToken,
+    ) -> Result<robin_sparkless_core::engine::ArrowIpcBatchStream, EngineError> {
+        self.0
+            .to_arrow_ipc_batches_with_cancellation(max_rows, max_bytes, token)
+    }
+
+    /// Export Connect IPC streams using the declared public field names and duplicate labels.
+    #[doc(hidden)]
+    pub fn to_arrow_ipc_batches_with_schema_and_cancellation(
+        &self,
+        max_rows: usize,
+        max_bytes: usize,
+        token: &CancellationToken,
+        output_schema: &StructType,
+    ) -> Result<robin_sparkless_core::engine::ArrowIpcBatchStream, EngineError> {
+        self.0.to_arrow_ipc_batches_with_schema_and_cancellation(
+            max_rows,
+            max_bytes,
+            token,
+            output_schema,
+        )
+    }
+
     pub fn get_column_dtype(&self, name: &str) -> Option<robin_sparkless_polars::PlDataType> {
         self.0.get_column_dtype(name)
     }

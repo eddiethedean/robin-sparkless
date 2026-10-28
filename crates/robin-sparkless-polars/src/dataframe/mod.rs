@@ -857,6 +857,7 @@ struct PolarsIpcBatchIterator {
     max_rows: usize,
     max_bytes: usize,
     logical_schema_json: Option<String>,
+    connect_output_schema: Option<StructType>,
     token: CancellationToken,
     deferred_error: Option<EngineError>,
     emitted_empty: bool,
@@ -904,15 +905,105 @@ impl PolarsIpcBatchIterator {
             use polars::io::ipc::IpcStreamWriter;
             use polars::prelude::SerWriter;
             let mut writer = IpcStreamWriter::new(&mut cursor);
-            if let Some(schema) = &self.logical_schema_json {
+            if self.connect_output_schema.is_none()
+                && let Some(schema) = &self.logical_schema_json
+            {
                 let mut metadata = polars_arrow::datatypes::Metadata::new();
                 metadata.insert("sparkless.logical_schema.v1".into(), schema.clone().into());
                 writer.set_custom_schema_metadata(Arc::new(metadata));
             }
             writer.finish(batch).map_err(polars_to_core_error)?;
         }
-        Ok(cursor.into_inner())
+        let bytes = cursor.into_inner();
+        match &self.connect_output_schema {
+            Some(schema) => rewrite_connect_arrow_stream_schema(&bytes, schema),
+            None => Ok(bytes),
+        }
     }
+}
+
+/// Replace the writer's unique physical field names with the ordered public Connect schema.
+/// Arrow schemas permit duplicate field names, while Polars' dataframe schema does not. The
+/// record-batch buffers remain unchanged; only the first IPC schema message is rebuilt.
+fn rewrite_connect_arrow_stream_schema(
+    bytes: &[u8],
+    public_schema: &StructType,
+) -> Result<Vec<u8>, EngineError> {
+    use polars_arrow::io::ipc::format::ipc::planus::{Builder, ReadAsRoot};
+    use polars_arrow::io::ipc::format::ipc::{Message, MessageHeader, MessageRef};
+
+    if bytes.len() < 8 || bytes[..4] != [0xff; 4] {
+        return Err(EngineError::Internal(
+            "native Arrow writer returned an invalid stream prefix".into(),
+        ));
+    }
+    let original_metadata_len = i32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    let original_metadata_len = usize::try_from(original_metadata_len).map_err(|_| {
+        EngineError::Internal("native Arrow writer returned an invalid schema length".into())
+    })?;
+    let original_message_end = 8usize
+        .checked_add(original_metadata_len)
+        .filter(|end| *end <= bytes.len())
+        .ok_or_else(|| {
+            EngineError::Internal("native Arrow writer returned a truncated schema".into())
+        })?;
+    let message_ref =
+        MessageRef::read_as_root(&bytes[8..original_message_end]).map_err(|error| {
+            EngineError::Internal(format!("native Arrow schema cannot be read: {error}"))
+        })?;
+    let mut message = Message::try_from(message_ref).map_err(|error| {
+        EngineError::Internal(format!("native Arrow schema cannot be converted: {error}"))
+    })?;
+    let Some(MessageHeader::Schema(schema_message)) = message.header.as_mut() else {
+        return Err(EngineError::Internal(
+            "native Arrow stream does not begin with a schema".into(),
+        ));
+    };
+    let fields = schema_message
+        .fields
+        .as_mut()
+        .ok_or_else(|| EngineError::Internal("native Arrow schema has no fields".into()))?;
+    if fields.len() != public_schema.logical_fields().len() {
+        return Err(EngineError::Internal(format!(
+            "Connect Arrow schema has {} fields but the public schema has {}",
+            fields.len(),
+            public_schema.logical_fields().len()
+        )));
+    }
+    for (arrow_field, logical_field) in fields.iter_mut().zip(public_schema.logical_fields()) {
+        arrow_field.name = Some(logical_field.name.clone());
+        arrow_field.nullable = logical_field.nullable;
+    }
+    if let Some(metadata) = schema_message.custom_metadata.as_mut() {
+        metadata.retain(|entry| entry.key.as_deref() != Some("sparkless.logical_schema.v1"));
+        if metadata.is_empty() {
+            schema_message.custom_metadata = None;
+        }
+    }
+
+    let serialized_message = {
+        let mut builder = Builder::new();
+        builder.finish(&message, None).to_vec()
+    };
+    let padded_message_len = serialized_message
+        .len()
+        .checked_add(7)
+        .map(|length| length & !7)
+        .ok_or_else(|| EngineError::Internal("Connect Arrow schema size overflow".into()))?;
+    let continuation_len = i32::try_from(padded_message_len).map_err(|_| {
+        EngineError::Internal("Connect Arrow schema exceeds IPC framing range".into())
+    })?;
+    let mut output = Vec::with_capacity(
+        8usize
+            .saturating_add(padded_message_len)
+            .saturating_add(bytes.len() - original_message_end),
+    );
+    output.extend_from_slice(&[0xff; 4]);
+    output.extend_from_slice(&continuation_len.to_le_bytes());
+    output.extend_from_slice(&serialized_message);
+    output.resize(8 + padded_message_len, 0);
+    output.extend_from_slice(&bytes[original_message_end..]);
+    Ok(output)
 }
 
 impl Iterator for PolarsIpcBatchIterator {
@@ -994,7 +1085,10 @@ impl Iterator for PolarsIpcBatchIterator {
                             self.max_bytes
                         ))));
                     }
-                    return Some(Ok(ArrowIpcStream { bytes }));
+                    return Some(Ok(ArrowIpcStream {
+                        bytes,
+                        row_count: 0,
+                    }));
                 }
                 self.close();
             }
@@ -1018,7 +1112,10 @@ impl Iterator for PolarsIpcBatchIterator {
             if source_ended {
                 self.close();
             }
-            return Some(Ok(ArrowIpcStream { bytes }));
+            return Some(Ok(ArrowIpcStream {
+                bytes,
+                row_count: rows.len() as u64,
+            }));
         }
 
         if rows.len() == 1 {
@@ -1055,6 +1152,7 @@ impl Iterator for PolarsIpcBatchIterator {
                 self.current_offset = 0;
                 return Some(Ok(ArrowIpcStream {
                     bytes: prefix_bytes,
+                    row_count: prefix_rows as u64,
                 }));
             }
             prefix_rows /= 2;
@@ -3328,6 +3426,56 @@ impl DataFrame {
         max_bytes: usize,
         token: &CancellationToken,
     ) -> Result<ArrowIpcBatchStream, EngineError> {
+        self.to_arrow_ipc_batches_internal(max_rows, max_bytes, token, None)
+    }
+
+    /// Export bounded Connect Arrow batches with their public logical field names, nullability,
+    /// and duplicate labels in the IPC schema.
+    pub fn to_arrow_ipc_batches_with_schema_and_cancellation(
+        &self,
+        max_rows: usize,
+        max_bytes: usize,
+        token: &CancellationToken,
+        output_schema: &StructType,
+    ) -> Result<ArrowIpcBatchStream, EngineError> {
+        output_schema.validate_metadata().map_err(|error| {
+            EngineError::User(format!("invalid Connect output schema metadata: {error}"))
+        })?;
+        let physical_schema = self.schema_or_collect().map_err(polars_to_core_error)?;
+        if output_schema.logical_fields().len() != physical_schema.len() {
+            return Err(EngineError::User(format!(
+                "Connect output schema has {} fields but the native plan has {}",
+                output_schema.logical_fields().len(),
+                physical_schema.len()
+            )));
+        }
+        for (logical_field, (_, physical_type)) in output_schema
+            .logical_fields()
+            .iter()
+            .zip(physical_schema.iter())
+        {
+            let expected = crate::schema_conv::checked_data_type_to_polars_type(
+                &logical_field.data_type,
+                &logical_field.name,
+            )
+            .map_err(polars_to_core_error)?;
+            if &expected != physical_type {
+                return Err(EngineError::User(format!(
+                    "Connect output field {:?} maps to {expected} but the native plan has {physical_type}",
+                    logical_field.name
+                )));
+            }
+        }
+        self.to_arrow_ipc_batches_internal(max_rows, max_bytes, token, Some(output_schema.clone()))
+    }
+
+    fn to_arrow_ipc_batches_internal(
+        &self,
+        max_rows: usize,
+        max_bytes: usize,
+        token: &CancellationToken,
+        connect_output_schema: Option<StructType>,
+    ) -> Result<ArrowIpcBatchStream, EngineError> {
         token.check_cancelled()?;
         if max_rows == 0 {
             return Err(EngineError::User(
@@ -3369,6 +3517,7 @@ impl DataFrame {
             max_rows,
             max_bytes,
             logical_schema_json,
+            connect_output_schema,
             token: token.clone(),
             deferred_error: None,
             emitted_empty: false,
@@ -5275,6 +5424,7 @@ impl<'a> DataFrameWriter<'a> {
             table: descriptor.clone(),
             data: ArrowIpcStream {
                 bytes: cursor.into_inner(),
+                row_count: materialized.height() as u64,
             },
             mode: external_mode,
             format: table_format,

@@ -16,6 +16,25 @@ cargo test -p sparkless-server --no-default-features --features connect connect:
 These are slice 2 transport and identity tests. They do not exercise native plan translation or
 successful Spark Connect results.
 
+Slice 4's focused public-client smoke starts a development gRPC listener and runs the locked,
+unmodified client against it. In one terminal, start the listener:
+
+```sh
+cargo run -p sparkless-server --example connect-dev-server --no-default-features --features connect
+```
+
+In another terminal, using the environment created by the fixture setup above, run:
+
+```sh
+/tmp/sparkless-connect-client-py311/bin/python tests/connect/smoke_public_client.py
+```
+
+The smoke checks the range/filter/count witness, scalar local relations and their Arrow physical
+types, schema-only empty input, multi-batch offsets, and duplicate aliases through both
+`collect()` and `toArrow()`. It is development evidence only; it does not complete V18/V20 or test
+reattachment, replay, the reference engine, or the response-byte/total-output failure boundaries.
+Stop the listener with Ctrl-C when finished.
+
 The interpreter-specific dependency snapshots are hash-locked for CPython 3.11:
 
 - `client-requirements.in` and `client-py311.lock` install only the standalone client package.

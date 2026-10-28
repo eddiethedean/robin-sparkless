@@ -133,6 +133,8 @@ struct SessionLifetime {
     generation: u64,
     #[cfg(feature = "connect")]
     server_side_session_id: String,
+    #[cfg(feature = "connect")]
+    connect_execution: Arc<Semaphore>,
     serial: Arc<tokio::sync::Mutex<()>>,
     active: AtomicUsize,
     last_activity: Mutex<Instant>,
@@ -212,8 +214,39 @@ enum ConnectReserveError {
 
 #[cfg(feature = "connect")]
 impl ConnectOperationLease {
+    fn deadline_marker(&self) -> impl FnOnce() + Send + 'static {
+        let record = Arc::clone(&self.record);
+        move || {
+            if let Ok(mut record) = record.lock()
+                && record.execution_state == "running"
+                && record.effect_outcome == "pending"
+            {
+                record.execution_state = "failed";
+                record.effect_outcome = "rejected";
+                record.error = Some((
+                    "CONNECT_RESPONSE_DEADLINE".to_string(),
+                    "Connect execution exceeded its response deadline".to_string(),
+                ));
+            }
+        }
+    }
+
+    fn complete(&self) {
+        if let Ok(mut record) = self.record.lock()
+            && record.execution_state == "running"
+            && record.effect_outcome == "pending"
+        {
+            record.execution_state = "completed";
+            record.effect_outcome = "committed";
+            record.error = None;
+        }
+    }
+
     fn reject(&self, code: &'static str, message: &str) {
-        if let Ok(mut record) = self.record.lock() {
+        if let Ok(mut record) = self.record.lock()
+            && record.execution_state == "running"
+            && record.effect_outcome == "pending"
+        {
             record.execution_state = "failed";
             record.effect_outcome = "rejected";
             record.error = Some((code.to_string(), message.to_string()));
@@ -587,6 +620,8 @@ impl ServerInner {
             generation,
             #[cfg(feature = "connect")]
             server_side_session_id: Uuid::new_v4().to_string(),
+            #[cfg(feature = "connect")]
+            connect_execution: Arc::new(Semaphore::new(1)),
             serial: Arc::new(tokio::sync::Mutex::new(())),
             active: AtomicUsize::new(1),
             last_activity: Mutex::new(Instant::now()),

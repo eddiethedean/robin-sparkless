@@ -41,6 +41,11 @@ pub struct ExternalTableDescriptor {
 #[derive(Debug, Clone)]
 pub struct ArrowIpcStream {
     pub bytes: Vec<u8>,
+    /// Number of rows in the single record batch encoded by this stream.
+    ///
+    /// Keeping this beside the bytes lets transports validate their row-count envelope without
+    /// decoding a second copy of the batch.
+    pub row_count: u64,
 }
 
 /// A back-pressured sequence of independently readable Arrow IPC batch streams.

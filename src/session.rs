@@ -263,6 +263,41 @@ impl SparkSession {
         DataFrame(self.0.create_dataframe_from_polars(df))
     }
 
+    /// Create a one-column Long result for Spark Connect's deferred global count node.
+    #[doc(hidden)]
+    pub fn create_dataframe_from_i64_column(
+        &self,
+        name: &str,
+        values: Vec<i64>,
+    ) -> Result<DataFrame, EngineError> {
+        self.0
+            .create_dataframe_from_i64_column(name, values)
+            .map(DataFrame)
+    }
+
+    /// Decode bounded Arrow IPC for Spark Connect's inline local-relation path.
+    #[doc(hidden)]
+    pub fn create_dataframe_from_arrow_ipc(
+        &self,
+        data: Option<&[u8]>,
+        schema: Option<robin_sparkless_core::StructType>,
+        max_ipc_bytes: usize,
+        max_rows: usize,
+        max_decoded_bytes: usize,
+        max_scalar_bytes: usize,
+    ) -> Result<(DataFrame, robin_sparkless_core::StructType), EngineError> {
+        self.0
+            .create_dataframe_from_arrow_ipc(
+                data,
+                schema,
+                max_ipc_bytes,
+                max_rows,
+                max_decoded_bytes,
+                max_scalar_bytes,
+            )
+            .map(|(dataframe, schema)| (DataFrame(dataframe), schema))
+    }
+
     pub fn create_dataframe_from_rows(
         &self,
         rows: Vec<Vec<serde_json::Value>>,

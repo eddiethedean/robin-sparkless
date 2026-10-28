@@ -1,8 +1,8 @@
 //! Spark Connect 4.0.5 gRPC adapter and bounded protobuf boundary.
 //!
-//! The bounded public service translates the frozen relation subset and serves schema/config
-//! analysis while sharing the HTTP service's identity and admission registries. Arrow response
-//! production and replay remain later delivery slices.
+//! The bounded public service translates the frozen relation subset, serves schema/config
+//! analysis, and streams native Arrow results while sharing the HTTP service's identity and
+//! admission registries. Response replay and reconnect remain a later delivery slice.
 
 use crate::{ConnectReserveError, ConnectSessionIdentity, RequestFailure, Server, connect_proto};
 use bytes::Buf;
@@ -12,7 +12,8 @@ use sha2::{Digest, Sha256};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tonic::codec::{BufferSettings, Codec, DecodeBuf, Decoder};
 use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
@@ -25,6 +26,14 @@ pub const MAX_CONNECT_PROTO_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_CONNECT_PROTO_DEPTH: usize = 64;
 pub const MAX_CONNECT_PROTO_NODES: usize = 10_000;
 pub const MAX_CONNECT_SCHEMA_FIELDS: usize = 256;
+pub const MAX_CONNECT_LOCAL_IPC_BYTES: usize = 1024 * 1024;
+pub const MAX_CONNECT_LOCAL_DECODED_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_CONNECT_LOCAL_ROWS: usize = 10_000;
+pub const MAX_CONNECT_LOCAL_SCALAR_BYTES: usize = 512 * 1024;
+pub const MAX_CONNECT_ARROW_BATCH_ROWS: usize = 16_384;
+pub const MAX_CONNECT_ARROW_RESPONSE_BYTES: usize = 1024 * 1024;
+pub const MAX_CONNECT_RESULT_ROWS: u64 = 1_000_000;
+pub const MAX_CONNECT_RESULT_BYTES: usize = 64 * 1024 * 1024;
 
 /// Tonic codec whose wire scanner rejects structurally excessive protobufs before Prost
 /// allocates their generated message trees.
@@ -125,29 +134,457 @@ impl ConnectService {
     async fn acquire_planning_resources(
         &self,
         session: &crate::SessionLease,
+        deadline: Instant,
     ) -> Result<
         (
             tokio::sync::OwnedMutexGuard<()>,
+            tokio::sync::OwnedSemaphorePermit,
             tokio::sync::OwnedSemaphorePermit,
         ),
         Status,
     > {
         let queue_timeout = self.server.inner.config.queue_timeout;
+        let queue_deadline =
+            tokio::time::Instant::from_std((Instant::now() + queue_timeout).min(deadline));
         let session_guard =
-            tokio::time::timeout(queue_timeout, session.0.serial.clone().lock_owned())
+            tokio::time::timeout_at(queue_deadline, session.0.serial.clone().lock_owned())
                 .await
                 .map_err(|_| {
                     Status::deadline_exceeded("timed out waiting for Connect session planning")
                 })?;
-        let compute_permit = tokio::time::timeout(
-            queue_timeout,
+        let session_compute_permit = tokio::time::timeout_at(
+            queue_deadline,
+            session.0.connect_execution.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("timed out waiting for Connect session execution"))?
+        .map_err(|_| Status::unavailable("Connect session execution is closed"))?;
+        let compute_permit = tokio::time::timeout_at(
+            queue_deadline,
             self.server.inner.admission.active.clone().acquire_owned(),
         )
         .await
         .map_err(|_| Status::deadline_exceeded("timed out waiting for Connect compute admission"))?
         .map_err(|_| Status::unavailable("Connect compute admission is closed"))?;
-        Ok((session_guard, compute_permit))
+        Ok((session_guard, compute_permit, session_compute_permit))
     }
+}
+
+fn request_reattachable(
+    options: &[connect_proto::execute_plan_request::RequestOption],
+) -> Result<bool, Status> {
+    use connect_proto::execute_plan_request::request_option::RequestOption;
+    let mut reattachable = None;
+    for option in options {
+        match option.request_option.as_ref() {
+            Some(RequestOption::ReattachOptions(options)) => {
+                if reattachable.is_some() {
+                    return Err(Status::invalid_argument(
+                        "ExecutePlan may contain only one ReattachOptions value",
+                    ));
+                }
+                reattachable = Some(options.reattachable);
+            }
+            Some(RequestOption::Extension(_)) => {
+                return Err(Status::unimplemented(
+                    "ExecutePlan request option extensions are not supported",
+                ));
+            }
+            None => {
+                return Err(Status::invalid_argument(
+                    "ExecutePlan request option must contain a value",
+                ));
+            }
+        }
+    }
+    Ok(reattachable.unwrap_or(false))
+}
+
+fn connect_execution_failure(message: String) -> Status {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("exceed") || lower.contains("limit") || lower.contains("too large") {
+        Status::resource_exhausted(message)
+    } else {
+        Status::internal(format!("CONNECT_EXECUTION_FAILED: {message}"))
+    }
+}
+
+type ConnectOutcome = Result<(), Status>;
+
+/// The terminal outcome has its own slot, so a full batch queue cannot discard an error.
+#[derive(Clone)]
+struct ConnectTerminal(Arc<Mutex<Option<tokio::sync::oneshot::Sender<ConnectOutcome>>>>);
+
+impl ConnectTerminal {
+    fn finish(&self, outcome: ConnectOutcome) -> bool {
+        let Some(sender) = self.0.lock().ok().and_then(|mut sender| sender.take()) else {
+            return false;
+        };
+        let _ = sender.send(outcome);
+        true
+    }
+}
+
+fn connect_deadline_status() -> Status {
+    Status::deadline_exceeded("Connect execution exceeded its response deadline")
+}
+
+struct ConnectResponseSender {
+    sender: tokio::sync::mpsc::Sender<connect_proto::ExecutePlanResponse>,
+    deadline: Instant,
+    cancellation: robin_sparkless_core::engine::CancellationToken,
+    terminal: ConnectTerminal,
+}
+
+impl ConnectResponseSender {
+    fn send(
+        &self,
+        item: Result<connect_proto::ExecutePlanResponse, Status>,
+        operation: &crate::ConnectOperationLease,
+    ) -> bool {
+        let mut response = match item {
+            Ok(response) => response,
+            Err(status) => {
+                self.terminal.finish(Err(status));
+                return false;
+            }
+        };
+        loop {
+            let now = Instant::now();
+            if now >= self.deadline {
+                operation.reject(
+                    "CONNECT_RESPONSE_DEADLINE",
+                    "Connect execution exceeded its response deadline",
+                );
+                self.terminal.finish(Err(connect_deadline_status()));
+                self.cancellation.cancel();
+                return false;
+            }
+            match self.sender.try_send(response) {
+                Ok(()) => return true,
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    self.cancellation.cancel();
+                    return false;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(returned)) => response = returned,
+            }
+            std::thread::sleep((self.deadline - now).min(Duration::from_millis(10)));
+        }
+    }
+}
+
+struct ConnectExecutionStream {
+    receiver: tokio::sync::mpsc::Receiver<connect_proto::ExecutePlanResponse>,
+    outcome: Option<tokio::sync::oneshot::Receiver<ConnectOutcome>>,
+    cancellation: robin_sparkless_core::engine::CancellationToken,
+    ended: bool,
+}
+
+impl tonic::codegen::tokio_stream::Stream for ConnectExecutionStream {
+    type Item = Result<connect_proto::ExecutePlanResponse, Status>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use std::task::Poll;
+
+        let this = self.get_mut();
+        if this.ended {
+            return Poll::Ready(None);
+        }
+        if let Some(outcome) = this.outcome.as_mut() {
+            match std::pin::Pin::new(outcome).poll(cx) {
+                Poll::Pending => {}
+                Poll::Ready(Ok(Ok(()))) => this.outcome = None,
+                Poll::Ready(result) => {
+                    this.ended = true;
+                    this.receiver.close();
+                    this.cancellation.cancel();
+                    let status = match result {
+                        Ok(Err(status)) => status,
+                        _ => Status::internal("Connect producer ended without a terminal outcome"),
+                    };
+                    return Poll::Ready(Some(Err(status)));
+                }
+            }
+        }
+        match this.receiver.poll_recv(cx) {
+            Poll::Ready(Some(response)) => Poll::Ready(Some(Ok(response))),
+            Poll::Ready(None) if this.outcome.is_some() => Poll::Pending,
+            Poll::Ready(None) => {
+                this.ended = true;
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for ConnectExecutionStream {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
+}
+
+struct ConnectProducerFinished(Option<tokio::sync::oneshot::Sender<()>>);
+
+impl Drop for ConnectProducerFinished {
+    fn drop(&mut self) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_connect_producer(
+    operation: crate::ConnectOperationLease,
+    session: robin_sparkless::SparkSession,
+    plan: connect_proto::Plan,
+    planning_resources: (
+        tokio::sync::OwnedMutexGuard<()>,
+        tokio::sync::OwnedSemaphorePermit,
+        tokio::sync::OwnedSemaphorePermit,
+    ),
+    client_session_id: String,
+    server_side_session_id: String,
+    operation_id: String,
+    reattachable: bool,
+    cancellation: robin_sparkless_core::engine::CancellationToken,
+    sender: tokio::sync::mpsc::Sender<connect_proto::ExecutePlanResponse>,
+    deadline: Instant,
+) -> tokio::sync::oneshot::Receiver<ConnectOutcome> {
+    let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
+    let terminal = ConnectTerminal(Arc::new(Mutex::new(Some(outcome_tx))));
+    let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+    let timer_cancellation = cancellation.clone();
+    let timer_terminal = terminal.clone();
+    let mark_deadline = operation.deadline_marker();
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
+                if timer_terminal.finish(Err(connect_deadline_status())) {
+                    mark_deadline();
+                    timer_cancellation.cancel();
+                }
+            }
+            _ = finished_rx => {}
+        }
+    });
+    tokio::task::spawn_blocking(move || {
+        let _finished = ConnectProducerFinished(Some(finished_tx));
+        let sender = ConnectResponseSender {
+            sender,
+            deadline,
+            cancellation: cancellation.clone(),
+            terminal,
+        };
+        let (session_guard, compute_permit, session_compute_permit) = planning_resources;
+        let translated = plan::translate_plan(&session, &plan).and_then(|translated| {
+            let schema = plan::schema_to_proto(&translated.schema)?;
+            Ok((translated, schema))
+        });
+        drop(session_guard);
+        let _session_compute_permit = session_compute_permit;
+        let (translated, schema) = match translated {
+            Ok(translated) => translated,
+            Err(status) => {
+                operation.reject("CONNECT_PLAN_TRANSLATION_FAILED", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
+        };
+        let dataframe = if let Some(count_input) = translated.deferred_count_input {
+            let count_result = count_input
+                .count_with_cancellation(&cancellation)
+                .and_then(|count| {
+                    i64::try_from(count).map_err(|_| {
+                        robin_sparkless::EngineError::User(
+                            "Connect count result exceeds the signed 64-bit range".into(),
+                        )
+                    })
+                })
+                .and_then(|count| {
+                    session.create_dataframe_from_i64_column("count(1)", vec![count])
+                });
+            match count_result {
+                Ok(dataframe) => dataframe,
+                Err(error) => {
+                    let status = connect_execution_failure(error.to_string());
+                    operation.reject("CONNECT_COUNT_FAILED", status.message());
+                    let _ = sender.send(Err(status), &operation);
+                    return;
+                }
+            }
+        } else {
+            translated.dataframe
+        };
+        let schema_overhead = schema.encoded_len();
+        let Some(max_arrow_payload_bytes) = MAX_CONNECT_ARROW_RESPONSE_BYTES
+            .checked_sub(schema_overhead)
+            .and_then(|bytes| bytes.checked_sub(512))
+            .filter(|bytes| *bytes > 0)
+        else {
+            let status = Status::resource_exhausted(
+                "Connect output schema leaves no room for a bounded Arrow response",
+            );
+            operation.reject("CONNECT_ARROW_SCHEMA_LIMIT", status.message());
+            let _ = sender.send(Err(status), &operation);
+            return;
+        };
+        let _compute_permit = compute_permit;
+        let mut batches = match dataframe.to_arrow_ipc_batches_with_schema_and_cancellation(
+            MAX_CONNECT_ARROW_BATCH_ROWS,
+            max_arrow_payload_bytes,
+            &cancellation,
+            &translated.schema,
+        ) {
+            Ok(batches) => batches,
+            Err(error) => {
+                let status = connect_execution_failure(error.to_string());
+                operation.reject("CONNECT_ARROW_STREAM_FAILED", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
+        };
+        let mut row_offset = 0u64;
+        let mut response_bytes = 0usize;
+        let mut first_batch = true;
+        loop {
+            if sender.sender.is_closed() {
+                cancellation.cancel();
+                return;
+            }
+            let Some(batch) = batches.next() else {
+                break;
+            };
+            let batch = match batch {
+                Ok(batch) => batch,
+                Err(error) => {
+                    let status = connect_execution_failure(error.to_string());
+                    operation.reject("CONNECT_ARROW_STREAM_FAILED", status.message());
+                    let _ = sender.send(Err(status), &operation);
+                    return;
+                }
+            };
+            if batch.row_count > MAX_CONNECT_ARROW_BATCH_ROWS as u64 {
+                let status = Status::resource_exhausted(format!(
+                    "Connect Arrow batch exceeds the {MAX_CONNECT_ARROW_BATCH_ROWS}-row limit"
+                ));
+                operation.reject("CONNECT_ARROW_ROW_LIMIT", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
+            let Some(next_row_offset) = row_offset.checked_add(batch.row_count) else {
+                let status = Status::resource_exhausted("Connect result row count overflow");
+                operation.reject("CONNECT_RESULT_ROW_LIMIT", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            };
+            if next_row_offset > MAX_CONNECT_RESULT_ROWS {
+                let status = Status::resource_exhausted(format!(
+                    "Connect result exceeds {MAX_CONNECT_RESULT_ROWS} rows"
+                ));
+                operation.reject("CONNECT_RESULT_ROW_LIMIT", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
+            let row_count = match i64::try_from(batch.row_count) {
+                Ok(row_count) => row_count,
+                Err(_) => {
+                    let status =
+                        Status::resource_exhausted("Connect Arrow row count is out of range");
+                    operation.reject("CONNECT_ARROW_ROW_LIMIT", status.message());
+                    let _ = sender.send(Err(status), &operation);
+                    return;
+                }
+            };
+            let response = connect_proto::ExecutePlanResponse {
+                session_id: client_session_id.clone(),
+                server_side_session_id: server_side_session_id.clone(),
+                operation_id: operation_id.clone(),
+                response_id: Uuid::new_v4().to_string(),
+                metrics: None,
+                observed_metrics: Vec::new(),
+                schema: first_batch.then(|| schema.clone()),
+                response_type: Some(
+                    connect_proto::execute_plan_response::ResponseType::ArrowBatch(
+                        connect_proto::execute_plan_response::ArrowBatch {
+                            row_count,
+                            data: batch.bytes,
+                            start_offset: Some(row_offset as i64),
+                        },
+                    ),
+                ),
+            };
+            let encoded_bytes = response.encoded_len();
+            if encoded_bytes > MAX_CONNECT_ARROW_RESPONSE_BYTES {
+                let status = Status::resource_exhausted(format!(
+                    "Connect Arrow response is {encoded_bytes} bytes, exceeding the {MAX_CONNECT_ARROW_RESPONSE_BYTES}-byte limit"
+                ));
+                operation.reject("CONNECT_ARROW_BYTE_LIMIT", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
+            let Some(next_response_bytes) = response_bytes.checked_add(encoded_bytes) else {
+                let status = Status::resource_exhausted("Connect result byte count overflow");
+                operation.reject("CONNECT_RESULT_BYTE_LIMIT", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            };
+            if next_response_bytes > MAX_CONNECT_RESULT_BYTES {
+                let status = Status::resource_exhausted(format!(
+                    "Connect result exceeds {} serialized bytes",
+                    MAX_CONNECT_RESULT_BYTES
+                ));
+                operation.reject("CONNECT_RESULT_BYTE_LIMIT", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
+            response_bytes = next_response_bytes;
+            row_offset = next_row_offset;
+            first_batch = false;
+            if !sender.send(Ok(response), &operation) {
+                return;
+            }
+        }
+        if first_batch {
+            let status = Status::internal("Connect engine returned no schema-bearing Arrow batch");
+            operation.reject("CONNECT_ARROW_STREAM_EMPTY", status.message());
+            let _ = sender.send(Err(status), &operation);
+            return;
+        }
+        if reattachable {
+            let response = connect_proto::ExecutePlanResponse {
+                session_id: client_session_id,
+                server_side_session_id,
+                operation_id,
+                response_id: Uuid::new_v4().to_string(),
+                metrics: None,
+                observed_metrics: Vec::new(),
+                schema: None,
+                response_type: Some(
+                    connect_proto::execute_plan_response::ResponseType::ResultComplete(
+                        connect_proto::execute_plan_response::ResultComplete {},
+                    ),
+                ),
+            };
+            if response_bytes.saturating_add(response.encoded_len()) > MAX_CONNECT_RESULT_BYTES {
+                let status =
+                    Status::resource_exhausted("Connect result exceeds the serialized byte limit");
+                operation.reject("CONNECT_RESULT_BYTE_LIMIT", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
+            if sender.send(Ok(response), &operation) && sender.terminal.finish(Ok(())) {
+                operation.complete();
+            }
+        } else if sender.terminal.finish(Ok(())) {
+            operation.complete();
+        }
+    });
+    outcome_rx
 }
 
 type ConnectResponseStream = std::pin::Pin<
@@ -175,6 +612,8 @@ impl SparkConnectService for ConnectService {
                 "ExecutePlanRequest.plan is required",
             ));
         }
+        let reattachable = request_reattachable(&request.request_options)?;
+        let client_session_id = request.session_id.clone();
         let fingerprint = Sha256::digest(request.encode_to_vec()).into();
         let identity = session_identity(
             request.user_context,
@@ -185,6 +624,7 @@ impl SparkConnectService for ConnectService {
             .operation_id
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let deadline = Instant::now() + self.server.inner.config.response_timeout;
         let operation = match self.server.inner.reserve_connect_operation(
             &identity,
             &operation_id,
@@ -207,7 +647,10 @@ impl SparkConnectService for ConnectService {
             .plan
             .take()
             .expect("plan presence was validated above");
-        let planning_resources = match self.acquire_planning_resources(&operation._session).await {
+        let planning_resources = match self
+            .acquire_planning_resources(&operation._session, deadline)
+            .await
+        {
             Ok(resources) => resources,
             Err(status) => {
                 operation.reject("CONNECT_PLAN_QUEUE_TIMEOUT", status.message());
@@ -215,36 +658,29 @@ impl SparkConnectService for ConnectService {
             }
         };
         let session = operation._session.0.session.clone();
-        let response_timeout = self.server.inner.config.response_timeout;
-        let planning = tokio::task::spawn_blocking(move || {
-            let (_session_guard, _compute_permit) = planning_resources;
-            let result = plan::translate_plan(&session, &plan)
-                .and_then(|translated| plan::schema_to_proto(&translated.schema).map(|_| ()));
-            match result {
-                Ok(()) => {
-                    operation.reject(
-                        "UNIMPLEMENTED_CONNECT_ARROW_RESPONSE",
-                        "Connect result streaming and Arrow encoding are implemented in delivery slice 4",
-                    );
-                    Err(Status::unimplemented(
-                        "Connect result streaming and Arrow encoding are implemented in delivery slice 4",
-                    ))
-                }
-                Err(status) => {
-                    operation.reject("CONNECT_PLAN_TRANSLATION_FAILED", status.message());
-                    Err(status)
-                }
-            }
-        });
-        match tokio::time::timeout(response_timeout, planning).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(error)) => Err(Status::internal(format!(
-                "Connect planning worker failed: {error}"
-            ))),
-            Err(_) => Err(Status::deadline_exceeded(
-                "Connect plan analysis exceeded its deadline",
-            )),
-        }
+        let server_side_session_id = operation._session.0.server_side_session_id.clone();
+        let cancellation = robin_sparkless_core::engine::CancellationToken::new();
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let outcome = start_connect_producer(
+            operation,
+            session,
+            plan,
+            planning_resources,
+            client_session_id,
+            server_side_session_id,
+            operation_id,
+            reattachable,
+            cancellation.clone(),
+            sender,
+            deadline,
+        );
+        let stream = ConnectExecutionStream {
+            receiver,
+            outcome: Some(outcome),
+            cancellation,
+            ended: false,
+        };
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn analyze_plan(
@@ -263,18 +699,18 @@ impl SparkConnectService for ConnectService {
             .inner
             .reserve_admission()
             .map_err(status_from_failure)?;
+        let deadline = Instant::now() + self.server.inner.config.response_timeout;
         let session = self
             .server
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
-        let planning_resources = self.acquire_planning_resources(&session).await?;
+        let planning_resources = self.acquire_planning_resources(&session, deadline).await?;
         let session_id = identity.client_session_id;
         let server_side_session_id = session.0.server_side_session_id.clone();
-        let response_timeout = self.server.inner.config.response_timeout;
         let planning = tokio::task::spawn_blocking(move || {
             let _admission = admission;
-            let (_session_guard, _compute_permit) = planning_resources;
+            let (_session_guard, _compute_permit, _session_compute_permit) = planning_resources;
             let response = analysis::response(
                 &session_id,
                 &server_side_session_id,
@@ -283,7 +719,7 @@ impl SparkConnectService for ConnectService {
             )?;
             Ok::<_, Status>(response)
         });
-        match tokio::time::timeout(response_timeout, planning).await {
+        match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), planning).await {
             Ok(Ok(Ok(response))) => Ok(Response::new(response)),
             Ok(Ok(Err(status))) => Err(status),
             Ok(Err(error)) => Err(Status::internal(format!(
@@ -932,6 +1368,447 @@ mod tests {
         }
     }
 
+    fn execute_request(relation: connect_proto::Relation) -> connect_proto::ExecutePlanRequest {
+        connect_proto::ExecutePlanRequest {
+            session_id: Uuid::new_v4().to_string(),
+            operation_id: Some(Uuid::new_v4().to_string()),
+            user_context: Some(connect_proto::UserContext {
+                user_id: "slice-four-test".into(),
+                ..Default::default()
+            }),
+            plan: Some(connect_proto::Plan {
+                op_type: Some(connect_proto::plan::OpType::Root(relation)),
+            }),
+            request_options: vec![connect_proto::execute_plan_request::RequestOption {
+                request_option: Some(
+                    connect_proto::execute_plan_request::request_option::RequestOption::ReattachOptions(
+                        connect_proto::ReattachOptions { reattachable: true },
+                    ),
+                ),
+            }],
+            ..Default::default()
+        }
+    }
+
+    async fn collect_execute_responses(
+        service: &ConnectService,
+        request: connect_proto::ExecutePlanRequest,
+    ) -> Result<Vec<connect_proto::ExecutePlanResponse>, Status> {
+        use tonic::codegen::tokio_stream::StreamExt;
+
+        let mut stream = service
+            .execute_plan(Request::new(request))
+            .await?
+            .into_inner();
+        let mut responses = Vec::new();
+        while let Some(response) = stream.next().await {
+            responses.push(response?);
+        }
+        Ok(responses)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_deadline_fails_a_backpressured_stream_and_releases_admission() {
+        use tonic::codegen::tokio_stream::StreamExt;
+
+        for reattachable in [false, true] {
+            let service = ConnectService {
+                server: Server::new(ServerConfig {
+                    response_timeout: Duration::from_millis(200),
+                    ..Default::default()
+                })
+                .unwrap(),
+            };
+            let mut request = execute_request(connect_proto::Relation {
+                rel_type: Some(connect_proto::relation::RelType::Range(
+                    connect_proto::Range {
+                        end: 1_000_000,
+                        step: 1,
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            });
+            if !reattachable {
+                request.request_options.clear();
+            }
+            let mut stream = service
+                .execute_plan(Request::new(request))
+                .await
+                .unwrap()
+                .into_inner();
+            let first = stream.next().await.unwrap().unwrap();
+            assert!(matches!(
+                first.response_type,
+                Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(_))
+            ));
+            // Leave the bounded response queue full until the execution deadline expires.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let error = stream
+                .next()
+                .await
+                .expect("deadline must produce a visible stream failure")
+                .unwrap_err();
+            assert_eq!(error.code(), Code::DeadlineExceeded);
+            assert!(stream.next().await.is_none());
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while service.server.inner.admission.active.available_permits() != 2 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("a stalled producer must return its compute permit");
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_admission_wait_is_bounded_by_the_acceptance_deadline() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig {
+                response_timeout: Duration::from_millis(50),
+                queue_timeout: Duration::from_secs(5),
+                ..Default::default()
+            })
+            .unwrap(),
+        };
+        let _busy = service
+            .server
+            .inner
+            .admission
+            .active
+            .clone()
+            .acquire_many_owned(2)
+            .await
+            .unwrap();
+        let request = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::Range(
+                connect_proto::Range {
+                    end: 1,
+                    step: 1,
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        });
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            service.execute_plan(Request::new(request)),
+        )
+        .await
+        .expect("queueing must not outlive the shorter response deadline");
+        assert_eq!(result.err().unwrap().code(), Code::DeadlineExceeded);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_plan_streams_the_public_global_count_result() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let request = connect_proto::ExecutePlanRequest::decode(
+            include_bytes!(
+                "../../../tests/connect/fixtures/pyspark-client-4.0.5/execute-range-filter-count.pb"
+            )
+            .as_slice(),
+        )
+        .unwrap();
+        let responses = collect_execute_responses(&service, request)
+            .await
+            .expect("public global count executes");
+        let Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(batch)) =
+            responses[0].response_type.as_ref()
+        else {
+            panic!("expected a count Arrow batch");
+        };
+        assert_eq!(batch.row_count, 1);
+        let decoder = robin_sparkless::SparkSession::builder().get_or_create();
+        let (frame, _) = decoder
+            .create_dataframe_from_arrow_ipc(
+                Some(&batch.data),
+                None,
+                MAX_CONNECT_ARROW_RESPONSE_BYTES,
+                1,
+                MAX_CONNECT_LOCAL_DECODED_BYTES,
+                MAX_CONNECT_LOCAL_SCALAR_BYTES,
+            )
+            .expect("count payload decodes");
+        let rows = frame.collect_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].values().next().and_then(serde_json::Value::as_i64),
+            Some(4)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_plan_streams_bounded_arrow_batches_and_reliable_offsets() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let request = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::Range(
+                connect_proto::Range {
+                    end: 20_000,
+                    step: 1,
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        });
+        let responses = collect_execute_responses(&service, request.clone())
+            .await
+            .expect("bounded range executes");
+        assert_eq!(responses.len(), 3);
+        let batches = responses[..2]
+            .iter()
+            .map(|response| {
+                assert_eq!(response.session_id, request.session_id);
+                assert_eq!(response.operation_id, request.operation_id.clone().unwrap());
+                assert!(Uuid::parse_str(&response.response_id).is_ok());
+                assert!(response.encoded_len() <= MAX_CONNECT_ARROW_RESPONSE_BYTES);
+                let Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(batch)) =
+                    response.response_type.as_ref()
+                else {
+                    panic!("expected an Arrow batch response");
+                };
+                assert!(batch.data.len() < MAX_CONNECT_ARROW_RESPONSE_BYTES);
+                (response, batch)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(batches[0].1.row_count, MAX_CONNECT_ARROW_BATCH_ROWS as i64);
+        assert_eq!(batches[0].1.start_offset, Some(0));
+        assert_eq!(
+            batches[1].1.row_count,
+            20_000 - MAX_CONNECT_ARROW_BATCH_ROWS as i64
+        );
+        assert_eq!(
+            batches[1].1.start_offset,
+            Some(MAX_CONNECT_ARROW_BATCH_ROWS as i64)
+        );
+        assert!(batches[0].0.schema.is_some());
+        assert!(batches[1].0.schema.is_none());
+        assert!(matches!(
+            responses[2].response_type,
+            Some(connect_proto::execute_plan_response::ResponseType::ResultComplete(_))
+        ));
+
+        let decoder = robin_sparkless::SparkSession::builder().get_or_create();
+        let mut decoded = Vec::new();
+        for (_, batch) in batches {
+            let (frame, _) = decoder
+                .create_dataframe_from_arrow_ipc(
+                    Some(&batch.data),
+                    None,
+                    MAX_CONNECT_LOCAL_IPC_BYTES,
+                    MAX_CONNECT_ARROW_BATCH_ROWS,
+                    MAX_CONNECT_LOCAL_DECODED_BYTES,
+                    MAX_CONNECT_LOCAL_SCALAR_BYTES,
+                )
+                .expect("each response is an independently readable Arrow IPC stream");
+            let rows = frame.collect_rows().unwrap();
+            assert_eq!(rows.len() as i64, batch.row_count);
+            decoded.extend(rows.into_iter().map(|row| {
+                row.values()
+                    .next()
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap()
+            }));
+        }
+        assert_eq!(decoded.len(), 20_000);
+        assert_eq!(decoded[0], 0);
+        assert_eq!(decoded[19_999], 19_999);
+    }
+
+    #[tokio::test]
+    async fn execute_plan_streams_typed_empty_results_and_local_schema_metadata() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let empty_schema = r#"{"fields":[{"metadata":{"origin":"local"},"name":"dup","nullable":false,"type":"integer"},{"metadata":{},"name":"dup","nullable":true,"type":"string"}],"type":"struct"}"#;
+        let request = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::LocalRelation(
+                connect_proto::LocalRelation {
+                    data: None,
+                    schema: Some(empty_schema.into()),
+                },
+            )),
+            ..Default::default()
+        });
+        let responses = collect_execute_responses(&service, request)
+            .await
+            .expect("schema-only local relation produces an empty result");
+        assert_eq!(responses.len(), 2);
+        let Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(batch)) =
+            responses[0].response_type.as_ref()
+        else {
+            panic!("expected an Arrow batch response");
+        };
+        assert_eq!(batch.row_count, 0);
+        assert_eq!(batch.start_offset, Some(0));
+        let Some(connect_proto::data_type::Kind::Struct(schema)) = responses[0]
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.kind.as_ref())
+        else {
+            panic!("expected a struct result schema");
+        };
+        assert_eq!(schema.fields.len(), 2);
+        assert_eq!(schema.fields[0].name, "dup");
+        assert_eq!(schema.fields[1].name, "dup");
+        assert!(!schema.fields[0].nullable);
+        assert_eq!(
+            schema.fields[0].metadata.as_deref(),
+            Some(r#"{"origin":"local"}"#)
+        );
+        assert!(matches!(
+            responses[1].response_type,
+            Some(connect_proto::execute_plan_response::ResponseType::ResultComplete(_))
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_plan_applies_local_ddl_casts_and_rejects_bad_ipc() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let source = robin_sparkless::SparkSession::builder()
+            .get_or_create()
+            .range(0, 3, 1)
+            .unwrap();
+        let mut input_batches = source
+            .to_arrow_ipc_batches_with_cancellation(
+                8,
+                MAX_CONNECT_LOCAL_IPC_BYTES,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+            )
+            .unwrap();
+        let input = input_batches.next().unwrap().unwrap().bytes;
+        let request = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::LocalRelation(
+                connect_proto::LocalRelation {
+                    data: Some(input),
+                    schema: Some("id INT NOT NULL".into()),
+                },
+            )),
+            ..Default::default()
+        });
+        let responses = collect_execute_responses(&service, request)
+            .await
+            .expect("local relation casts by declared schema");
+        let Some(connect_proto::data_type::Kind::Struct(result_schema)) = responses[0]
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.kind.as_ref())
+        else {
+            panic!("expected a struct result schema");
+        };
+        assert!(matches!(
+            result_schema.fields[0]
+                .data_type
+                .as_ref()
+                .and_then(|dtype| dtype.kind.as_ref()),
+            Some(connect_proto::data_type::Kind::Integer(_))
+        ));
+        let Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(batch)) =
+            responses[0].response_type.as_ref()
+        else {
+            panic!("expected an Arrow batch response");
+        };
+        let decoder = robin_sparkless::SparkSession::builder().get_or_create();
+        let (frame, _) = decoder
+            .create_dataframe_from_arrow_ipc(
+                Some(&batch.data),
+                None,
+                MAX_CONNECT_LOCAL_IPC_BYTES,
+                MAX_CONNECT_ARROW_BATCH_ROWS,
+                MAX_CONNECT_LOCAL_DECODED_BYTES,
+                MAX_CONNECT_LOCAL_SCALAR_BYTES,
+            )
+            .unwrap();
+        let rows = frame.collect_rows().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.values().next().unwrap().as_i64().unwrap())
+                .collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+
+        let malformed = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::LocalRelation(
+                connect_proto::LocalRelation {
+                    data: Some(vec![1, 2, 3]),
+                    schema: Some("id INT".into()),
+                },
+            )),
+            ..Default::default()
+        });
+        let error = collect_execute_responses(&service, malformed)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), Code::InvalidArgument);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_plan_rejects_mismatched_nested_and_cached_local_relations() {
+        let service = ConnectService {
+            server: Server::new(ServerConfig::default()).unwrap(),
+        };
+        let source = robin_sparkless::SparkSession::builder()
+            .get_or_create()
+            .range(0, 1, 1)
+            .unwrap();
+        let mut input_batches = source
+            .to_arrow_ipc_batches_with_cancellation(
+                1,
+                MAX_CONNECT_LOCAL_IPC_BYTES,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+            )
+            .unwrap();
+        let input = input_batches.next().unwrap().unwrap().bytes;
+        let mismatched = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::LocalRelation(
+                connect_proto::LocalRelation {
+                    data: Some(input),
+                    schema: Some(
+                        r#"{"fields":[{"metadata":{},"name":"id","nullable":true,"type":"long"},{"metadata":{},"name":"label","nullable":true,"type":"string"}],"type":"struct"}"#.into(),
+                    ),
+                },
+            )),
+            ..Default::default()
+        });
+        let error = collect_execute_responses(&service, mismatched)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), Code::InvalidArgument);
+
+        let nested = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::LocalRelation(
+                connect_proto::LocalRelation {
+                    data: None,
+                    schema: Some(
+                        r#"{"fields":[{"metadata":{},"name":"items","nullable":true,"type":{"containsNull":true,"elementType":"integer","type":"array"}}],"type":"struct"}"#.into(),
+                    ),
+                },
+            )),
+            ..Default::default()
+        });
+        let error = collect_execute_responses(&service, nested)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), Code::Unimplemented);
+
+        let cached = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::CachedLocalRelation(
+                connect_proto::CachedLocalRelation::default(),
+            )),
+            ..Default::default()
+        });
+        let error = collect_execute_responses(&service, cached)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), Code::Unimplemented);
+    }
+
     #[test]
     fn recursive_schema_depth_and_schema_field_limits_are_rejected() {
         let deep_type = nested_data_type(MAX_CONNECT_PROTO_DEPTH / 2 + 1);
@@ -1275,11 +2152,15 @@ mod tests {
             }),
             ..Default::default()
         };
-        let first = service
+        let first_response = service
             .execute_plan(Request::new(request.clone()))
             .await
-            .err()
-            .unwrap();
+            .expect("ExecutePlan returns a response stream");
+        let mut first_stream = first_response.into_inner();
+        let first = tonic::codegen::tokio_stream::StreamExt::next(&mut first_stream)
+            .await
+            .expect("unsupported plan yields a stream error")
+            .unwrap_err();
         assert_eq!(first.code(), Code::Unimplemented);
         let duplicate = service
             .execute_plan(Request::new(request.clone()))
