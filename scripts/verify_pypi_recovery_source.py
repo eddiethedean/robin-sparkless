@@ -1,4 +1,4 @@
-"""Validate a completed release run before reusing its PyPI artifacts."""
+"""Validate a completed release run before reusing its verified publication artifacts."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ SOURCE_EVIDENCE_MARKER = "Verify isolated source build from the exact sdist (evi
 REQUIRED_ARTIFACTS = {
     "verified-server-bin-candidate",
     "verified-sparkless-candidate",
+    "sparkless-server-container-image",
 }
 
 

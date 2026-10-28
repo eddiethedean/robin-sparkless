@@ -38,6 +38,7 @@ class PypiRecoverySourceTest(unittest.TestCase):
             "artifacts": [
                 {"name": "verified-server-bin-candidate", "expired": False},
                 {"name": "verified-sparkless-candidate", "expired": False},
+                {"name": "sparkless-server-container-image", "expired": False},
             ]
         }
 
@@ -86,9 +87,14 @@ class PypiRecoverySourceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "publish the Rust crates"):
             self.validate()
 
-    def test_requires_both_unexpired_verified_artifacts(self):
+    def test_requires_all_unexpired_verified_artifacts(self):
         self.artifacts["artifacts"][0]["expired"] = True
         with self.assertRaisesRegex(ValueError, "missing unexpired"):
+            self.validate()
+
+    def test_requires_the_verified_container_artifact(self):
+        self.artifacts["artifacts"].pop()
+        with self.assertRaisesRegex(ValueError, "sparkless-server-container-image"):
             self.validate()
 
     def test_rejects_prerelease_tags(self):

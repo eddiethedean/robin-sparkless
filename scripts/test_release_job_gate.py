@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import re
 import unittest
+from pathlib import Path
 
 from verify_release_job_gate import _required_jobs, classify_mode, validate_gate
 
@@ -77,6 +78,59 @@ class ReleaseGateTests(unittest.TestCase):
         issues = validate_gate("release_candidate", ref, needs, MANIFEST)
         self.assertTrue(any("missing manifest job" in issue for issue in issues))
         self.assertTrue(any("unlisted dependency" in issue for issue in issues))
+
+
+class ReleasePublicationConditionTests(unittest.TestCase):
+    def test_publish_and_public_verification_jobs_survive_allowed_skips(self) -> None:
+        workflow = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+        source = workflow.read_text(encoding="utf-8")
+        publication_jobs = (
+            "publish-server-bin",
+            "publish-server-container",
+            "publish-sparkless",
+            "verify-public-release",
+        )
+
+        for job_id in publication_jobs:
+            with self.subTest(job=job_id):
+                job_match = re.search(
+                    rf"(?ms)^  {re.escape(job_id)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+                    source,
+                )
+                self.assertIsNotNone(job_match, f"missing workflow job {job_id}")
+                job = job_match.group("body")
+                needs_match = re.search(
+                    r"(?ms)^    needs:\s*(?P<needs>.*?)(?=^    [A-Za-z0-9_-]+:|\Z)",
+                    job,
+                )
+                condition_match = re.search(
+                    r"(?ms)^    if:\s*(?P<condition>.*?)(?=^    [A-Za-z0-9_-]+:|\Z)",
+                    job,
+                )
+                self.assertIsNotNone(needs_match, f"{job_id} must declare prerequisites")
+                self.assertIsNotNone(condition_match, f"{job_id} must declare a condition")
+
+                needs_text = needs_match.group("needs")
+                if "[" in needs_text:
+                    inline_needs = needs_text.split("[", 1)[1].split("]", 1)[0]
+                    direct_needs = re.findall(r"[A-Za-z0-9_-]+", inline_needs)
+                else:
+                    direct_needs = re.findall(
+                        r"(?m)^\s*-\s+([A-Za-z0-9_-]+)\s*$", needs_text
+                    )
+                condition = condition_match.group("condition")
+                self.assertIn("always()", condition)
+                self.assertIn(
+                    "needs.release-validation-gate.outputs.mode == 'stable_tag'", condition
+                )
+                for dependency in direct_needs:
+                    self.assertRegex(
+                        condition,
+                        rf"needs\.{re.escape(dependency)}\.result\s*==\s*'success'",
+                        f"{job_id} must explicitly require successful {dependency}",
+                    )
+                if job_id == "verify-public-release":
+                    self.assertIn("startsWith(github.ref, 'refs/tags/v4.17.')", condition)
 
 
 if __name__ == "__main__":
