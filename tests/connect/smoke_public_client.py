@@ -2,13 +2,15 @@
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
+import os
 
 from pyspark.sql.connect.session import SparkSession
 from pyspark.sql.functions import col
 
 
 def main() -> None:
-    spark = SparkSession.builder.remote("sc://127.0.0.1:15002").getOrCreate()
+    connect_url = os.environ.get("SPARKLESS_CONNECT_URL", "sc://127.0.0.1:15002")
+    spark = SparkSession.builder.remote(connect_url).getOrCreate()
     try:
         assert spark.range(10).filter("id > 5").count() == 4
         print("range/filter/count passed", flush=True)

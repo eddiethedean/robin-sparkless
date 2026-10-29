@@ -47,6 +47,54 @@ tag interruption, session-release cancellation, enriched error lookup, duplicate
 capacity/accounting behavior; these focused checks do not pass V21/V22 as an integrated gate.
 Stop the listener with Ctrl-C when finished.
 
+## Slice 6 integrated conformance
+
+The integrated runner builds and launches a native release executable with HTTP and Connect on
+one shared server instance. It uses the locked, unmodified `pyspark-client` process with its
+default retry settings, injects one `UNAVAILABLE` after the first real Arrow response, and checks
+the stock client's `ReattachExecute` path against a sanitized native producer-start trace. It
+also checks the normal enriched-error path, resource failures, four synchronized client
+processes, HTTP statements, health progress, and graceful native shutdown. The native process
+inherits no `JAVA_HOME`, `SPARK_HOME`, Python path, or PySpark process overrides; the runner
+checks that it has no Python/JVM child process.
+The conformance server uses a 300-second response deadline for the deliberately large total-output
+limit case; client retry settings remain at their normal defaults. Its near-limit scalar workload
+also records Arrow response sizes and verifies accepted responses stay below 1 MiB.
+
+Run the integrated native and multi-client checks with:
+
+```sh
+python3 tests/connect/run_slice6_conformance.py \
+  --client-python /tmp/sparkless-connect-client-py311/bin/python
+```
+
+For the matched Spark 4.0.5 reference comparison, verify and extract the Apache archive as
+described above, then use the separate oracle environment:
+
+```sh
+mkdir -p /tmp/sparkless-oracle
+tar -xzf /tmp/spark-4.0.5-bin-hadoop3-connect.tgz -C /tmp/sparkless-oracle --strip-components=1
+uv venv /tmp/sparkless-connect-oracle-py311 --python 3.11
+uv pip sync --python /tmp/sparkless-connect-oracle-py311/bin/python tests/connect/oracle-py311.lock
+python3 tests/connect/run_slice6_conformance.py \
+  --client-python /tmp/sparkless-connect-client-py311/bin/python \
+  --oracle-python /tmp/sparkless-connect-oracle-py311/bin/python \
+  --oracle-home /tmp/sparkless-oracle
+```
+
+The runner starts the reference with Apache's `start-connect-server.sh --wait` in an isolated
+process group, using the frozen UTC/ANSI/case profile. Shutdown signals the whole group and waits
+for the launcher and JVM to exit, including during failure cleanup. It compares client-visible
+values, DataFrame schemas, Arrow schemas, empty results, duplicate labels, negative ranges,
+checked expressions, and global counts. Evidence is written under `target/connect-slice6/`;
+`summary.json` says whether reference comparison and concurrent-client checks passed or were
+skipped. `SPARKLESS_CONNECT_TRACE=1` emits RPC method names, monotonic native producer start
+numbers, and Arrow envelope byte/row/offset metadata, without plans, session IDs, or result data.
+
+Use `--reference-url sc://host:port` to compare against an existing Spark 4.0.5 server. If the
+Oracle interpreter is unavailable, the runner uses the validated standalone client for that
+comparison. It leaves the externally managed server running.
+
 The interpreter-specific dependency snapshots are hash-locked for CPython 3.11:
 
 - `client-requirements.in` and `client-py311.lock` install only the standalone client package.

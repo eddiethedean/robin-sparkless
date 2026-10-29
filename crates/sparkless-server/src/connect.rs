@@ -13,12 +13,28 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tonic::codec::{BufferSettings, Codec, DecodeBuf, Decoder};
 use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
+
+static CONNECT_PRODUCER_STARTS: AtomicU64 = AtomicU64::new(0);
+
+fn trace_connect_rpc(method: &str) {
+    if std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        eprintln!("connect_trace event=rpc method={method}");
+    }
+}
+
+fn trace_connect_arrow_response(bytes: usize, rows: i64, start_offset: u64) {
+    if std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        eprintln!(
+            "connect_trace event=arrow_response bytes={bytes} rows={rows} start_offset={start_offset}"
+        );
+    }
+}
 
 mod analysis;
 mod config;
@@ -1450,6 +1466,10 @@ fn start_connect_producer(
     sender: tokio::sync::mpsc::Sender<ConnectQueuedResponse>,
     deadline: Instant,
 ) -> tokio::sync::oneshot::Receiver<ConnectOutcome> {
+    let producer_sequence = CONNECT_PRODUCER_STARTS.fetch_add(1, Ordering::Relaxed) + 1;
+    if std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        eprintln!("connect_trace event=producer_started sequence={producer_sequence}");
+    }
     let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
     let replay = Arc::clone(&operation.replay);
     let terminal = ConnectTerminal {
@@ -1663,6 +1683,7 @@ fn start_connect_producer(
                 let _ = sender.send(Err(status), &operation);
                 return;
             }
+            trace_connect_arrow_response(encoded_bytes, row_count, row_offset);
             let Some(next_response_bytes) = response_bytes.checked_add(encoded_bytes) else {
                 let status = Status::resource_exhausted("Connect result byte count overflow");
                 operation.reject("CONNECT_RESULT_BYTE_LIMIT", status.message());
@@ -1741,6 +1762,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::ExecutePlanRequest>,
     ) -> Result<Response<Self::ExecutePlanStream>, Status> {
+        trace_connect_rpc("ExecutePlan");
         let mut request = request.into_inner();
         validate_request_budget("ExecutePlanRequest", &request)?;
         if request.plan.is_none() {
@@ -1840,6 +1862,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::AnalyzePlanRequest>,
     ) -> Result<Response<connect_proto::AnalyzePlanResponse>, Status> {
+        trace_connect_rpc("AnalyzePlan");
         let request = request.into_inner();
         validate_request_budget("AnalyzePlanRequest", &request)?;
         let identity = session_identity(
@@ -1894,6 +1917,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::ConfigRequest>,
     ) -> Result<Response<connect_proto::ConfigResponse>, Status> {
+        trace_connect_rpc("Config");
         let request = request.into_inner();
         validate_request_budget("ConfigRequest", &request)?;
         let identity = session_identity(
@@ -1919,6 +1943,7 @@ impl SparkConnectService for ConnectService {
         &self,
         _request: Request<tonic::Streaming<connect_proto::AddArtifactsRequest>>,
     ) -> Result<Response<connect_proto::AddArtifactsResponse>, Status> {
+        trace_connect_rpc("AddArtifacts");
         Err(Status::unimplemented(
             "AddArtifacts and cached local relations are outside the 4.18 Connect subset",
         ))
@@ -1928,6 +1953,7 @@ impl SparkConnectService for ConnectService {
         &self,
         _request: Request<connect_proto::ArtifactStatusesRequest>,
     ) -> Result<Response<connect_proto::ArtifactStatusesResponse>, Status> {
+        trace_connect_rpc("ArtifactStatus");
         Err(Status::unimplemented(
             "ArtifactStatus and cached local relations are outside the 4.18 Connect subset",
         ))
@@ -1937,6 +1963,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::InterruptRequest>,
     ) -> Result<Response<connect_proto::InterruptResponse>, Status> {
+        trace_connect_rpc("Interrupt");
         let request = request.into_inner();
         validate_request_budget("InterruptRequest", &request)?;
         let identity = session_identity(
@@ -2015,6 +2042,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::ReattachExecuteRequest>,
     ) -> Result<Response<Self::ReattachExecuteStream>, Status> {
+        trace_connect_rpc("ReattachExecute");
         let request = request.into_inner();
         validate_request_budget("ReattachExecuteRequest", &request)?;
         let identity = session_identity(
@@ -2067,6 +2095,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::ReleaseExecuteRequest>,
     ) -> Result<Response<connect_proto::ReleaseExecuteResponse>, Status> {
+        trace_connect_rpc("ReleaseExecute");
         let request = request.into_inner();
         validate_request_budget("ReleaseExecuteRequest", &request)?;
         let identity = session_identity(
@@ -2141,6 +2170,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::ReleaseSessionRequest>,
     ) -> Result<Response<connect_proto::ReleaseSessionResponse>, Status> {
+        trace_connect_rpc("ReleaseSession");
         let request = request.into_inner();
         validate_request_budget("ReleaseSessionRequest", &request)?;
         let identity = session_identity(request.user_context, request.session_id, None)?;
@@ -2159,6 +2189,7 @@ impl SparkConnectService for ConnectService {
         &self,
         request: Request<connect_proto::FetchErrorDetailsRequest>,
     ) -> Result<Response<connect_proto::FetchErrorDetailsResponse>, Status> {
+        trace_connect_rpc("FetchErrorDetails");
         let request = request.into_inner();
         validate_request_budget("FetchErrorDetailsRequest", &request)?;
         let identity = session_identity(
@@ -3024,6 +3055,59 @@ mod tests {
                 .name,
             "SessionReleased"
         );
+    }
+
+    #[test]
+    fn detached_expiry_cancels_the_producer_and_reclaims_replay_storage() {
+        let process_bytes = Arc::new(AtomicUsize::new(0));
+        let history_bytes = Arc::new(AtomicUsize::new(0));
+        let record = Arc::new(
+            ConnectReplayRecord::new(
+                "connect-operation:expiry-test".to_string(),
+                "connect:expiry-session".to_string(),
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                Uuid::new_v4().to_string(),
+                1,
+                true,
+                Vec::new(),
+                Arc::clone(&process_bytes),
+                Arc::clone(&history_bytes),
+            )
+            .unwrap(),
+        );
+        record
+            .append(connect_proto::ExecutePlanResponse {
+                response_id: Uuid::new_v4().to_string(),
+                response_type: Some(
+                    connect_proto::execute_plan_response::ResponseType::ArrowBatch(
+                        connect_proto::execute_plan_response::ArrowBatch {
+                            row_count: 1,
+                            data: vec![7; 4096],
+                            start_offset: Some(0),
+                        },
+                    ),
+                ),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(process_bytes.load(Ordering::Acquire) > 0);
+        let cancellation = record.cancellation();
+        record.detach();
+        let detached_at = record.lock().unwrap().detached_at.unwrap();
+        assert!(!record.expire_if_detached(
+            detached_at + CONNECT_DETACHED_RETENTION - Duration::from_millis(1)
+        ));
+        assert!(record.expire_if_detached(detached_at + CONNECT_DETACHED_RETENTION));
+        assert!(cancellation.is_cancelled());
+        assert_eq!(process_bytes.load(Ordering::Acquire), 0);
+        assert_eq!(
+            record.attach(None).unwrap_err().code(),
+            Code::NotFound,
+            "expired operations fail explicitly instead of replaying a partial prefix"
+        );
+        drop(record);
+        assert_eq!(history_bytes.load(Ordering::Acquire), 0);
     }
 
     #[test]

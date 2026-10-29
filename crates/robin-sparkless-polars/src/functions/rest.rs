@@ -262,6 +262,27 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                     });
                 }
 
+                let (left, right) = if crate::type_coercion::is_numeric_public(&left_type)
+                    && crate::type_coercion::is_numeric_public(&right_type)
+                {
+                    let common_type =
+                        crate::type_coercion::find_common_type(&left_type, &right_type)?;
+                    (
+                        crate::type_coercion::coerce_expr_to_common_type(
+                            left,
+                            &left_type,
+                            &common_type,
+                        ),
+                        crate::type_coercion::coerce_expr_to_common_type(
+                            right,
+                            &right_type,
+                            &common_type,
+                        ),
+                    )
+                } else {
+                    (left, right)
+                };
+
                 return Ok(match op {
                     crate::decimal_arithmetic::BinaryOp::Add => crate::ansi::add_expr(left, right),
                     crate::decimal_arithmetic::BinaryOp::Subtract => {

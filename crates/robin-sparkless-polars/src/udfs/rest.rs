@@ -4361,6 +4361,12 @@ fn ansi_checked_i64_op(
         }
         Int32Chunked::from_iter_options(name.as_str().into(), values.into_iter()).into_series()
     } else {
+        let (a_s, b_s) = match (a_s.dtype(), b_s.dtype()) {
+            (DataType::Int32, DataType::Int64) | (DataType::Int64, DataType::Int32) => {
+                (a_s.cast(&DataType::Int64)?, b_s.cast(&DataType::Int64)?)
+            }
+            _ => (a_s, b_s),
+        };
         let (ca_a, ca_b) = binary_series_i64(&a_s, &b_s, op_name)?;
         let mut values = Vec::with_capacity(ca_a.len());
         for (oa, ob) in ca_a.into_iter().zip(&ca_b) {

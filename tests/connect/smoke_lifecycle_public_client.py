@@ -2,13 +2,14 @@
 
 import time
 import uuid
+import os
 
 import grpc
 from pyspark.sql.connect.proto import base_pb2, base_pb2_grpc
 
 
 def main() -> None:
-    address = "127.0.0.1:15002"
+    address = os.environ.get("SPARKLESS_CONNECT_ADDRESS", "127.0.0.1:15002")
     session_id = str(uuid.uuid4())
     operation_id = str(uuid.uuid4())
     request = base_pb2.ExecutePlanRequest(

@@ -275,6 +275,43 @@ fn logical_field_for_projected_column(
     None
 }
 
+fn projected_expression_nullability(
+    expression: &Expr,
+    schema: &StructType,
+    case_sensitive: bool,
+) -> Option<bool> {
+    match expression {
+        Expr::Alias(inner, _) => projected_expression_nullability(inner, schema, case_sensitive),
+        Expr::Column(name) => {
+            logical_field_for_projected_column(schema, name.as_str(), case_sensitive)
+                .map(|field| field.nullable)
+        }
+        Expr::Literal(LiteralValue::Scalar(value)) => {
+            Some(matches!(value.as_any_value(), AnyValue::Null))
+        }
+        Expr::Literal(LiteralValue::Dyn(_)) => Some(false),
+        Expr::AnonymousFunction { input, fmt_str, .. } => {
+            let arithmetic =
+                crate::decimal_arithmetic::BinaryOp::from_engine_expr_marker(fmt_str.as_str())?;
+            if !matches!(
+                arithmetic,
+                crate::decimal_arithmetic::BinaryOp::Add
+                    | crate::decimal_arithmetic::BinaryOp::Subtract
+                    | crate::decimal_arithmetic::BinaryOp::Multiply
+            ) || !crate::udf_context::get_thread_ansi_enabled()
+            {
+                return Some(true);
+            }
+            let arguments = input
+                .iter()
+                .map(|argument| projected_expression_nullability(argument, schema, case_sensitive))
+                .collect::<Option<Vec<_>>>()?;
+            Some(arguments.into_iter().any(|nullable| nullable))
+        }
+        _ => None,
+    }
+}
+
 fn expression_contains(expression: &Expr, predicate: impl Fn(&Expr) -> bool) -> bool {
     let mut found = false;
     let _ = expression.clone().try_map_expr(|node| {
@@ -286,12 +323,20 @@ fn expression_contains(expression: &Expr, predicate: impl Fn(&Expr) -> bool) -> 
     found
 }
 
+fn range_batch_safe_arithmetic_function(expression: &Expr) -> bool {
+    let Expr::AnonymousFunction { fmt_str, .. } = expression else {
+        return false;
+    };
+    crate::decimal_arithmetic::BinaryOp::from_expr_marker(fmt_str.as_str()).is_some()
+        || crate::decimal_arithmetic::BinaryOp::from_engine_expr_marker(fmt_str.as_str()).is_some()
+}
+
 fn range_projection_preserves_row_count(expressions: &[Expr]) -> bool {
     // Keep the constant-count shortcut away from expressions whose result height can differ
     // from the input. Unknown Polars function nodes take the conservative fallback as well.
     expressions.iter().all(|expression| {
         !expression_contains(expression, |node| {
-            matches!(node, Expr::Literal(value) if !value.is_scalar())
+            (matches!(node, Expr::Literal(value) if !value.is_scalar())
                 || matches!(
                     node,
                     Expr::Agg(_)
@@ -308,7 +353,8 @@ fn range_projection_preserves_row_count(expressions: &[Expr]) -> bool {
                         | Expr::Over { .. }
                         | Expr::AnonymousFunction { .. }
                         | Expr::SubPlan(..)
-                )
+                ))
+                && !range_batch_safe_arithmetic_function(node)
         })
     })
 }
@@ -318,7 +364,7 @@ fn range_projection_can_run_per_batch(expressions: &[Expr]) -> bool {
     // windows). Only append a projection to the range pipeline when chunks can execute alone.
     expressions.iter().all(|expression| {
         !expression_contains(expression, |node| {
-            matches!(node, Expr::Literal(value) if !value.is_scalar())
+            (matches!(node, Expr::Literal(value) if !value.is_scalar())
                 || matches!(
                     node,
                     Expr::Agg(_)
@@ -337,7 +383,8 @@ fn range_projection_can_run_per_batch(expressions: &[Expr]) -> bool {
                         | Expr::Sort { .. }
                         | Expr::SortBy { .. }
                         | Expr::SubPlan(..)
-                )
+                ))
+                && !range_batch_safe_arithmetic_function(node)
         })
     })
 }
@@ -587,6 +634,11 @@ impl RangeCardinality {
 enum IpcBatchSource {
     Polars(CollectBatches),
     Range(RangeBatchProducer),
+    Eager {
+        frame: Arc<PlDataFrame>,
+        next_row: usize,
+        max_rows: usize,
+    },
 }
 
 impl IpcBatchSource {
@@ -601,6 +653,26 @@ impl IpcBatchSource {
                 Err(RangeBatchError::Polars(error)) => Some(Err(polars_to_core_error(error))),
                 Err(RangeBatchError::Engine(error)) => Some(Err(error)),
             },
+            Self::Eager {
+                frame,
+                next_row,
+                max_rows,
+            } => {
+                if *next_row >= frame.height() {
+                    return None;
+                }
+                let offset = match i64::try_from(*next_row) {
+                    Ok(offset) => offset,
+                    Err(_) => {
+                        return Some(Err(EngineError::User(
+                            "eager Arrow batch offset exceeds Int64".into(),
+                        )));
+                    }
+                };
+                let rows = (*max_rows).min(frame.height() - *next_row);
+                *next_row += rows;
+                Some(Ok(frame.slice(offset, rows)))
+            }
         }
     }
 }
@@ -2605,7 +2677,17 @@ impl DataFrame {
                 let data_type =
                     crate::schema_conv::checked_polars_type_to_data_type(output_dtype, output_name)
                         .ok()?;
-                Some(StructField::new(output_name.to_string(), data_type, true))
+                let nullable = projected_expression_nullability(
+                    expression,
+                    source_schema,
+                    self.case_sensitive,
+                )
+                .unwrap_or(true);
+                Some(StructField::new(
+                    output_name.to_string(),
+                    data_type,
+                    nullable,
+                ))
             })
             .collect::<Option<Vec<_>>>()?;
         Some(StructType::from_logical_fields(fields))
@@ -3403,6 +3485,12 @@ impl DataFrame {
                 Some(token.clone()),
                 max_rows,
             ))
+        } else if let DataFrameInner::Eager(frame) = &self.inner {
+            IpcBatchSource::Eager {
+                frame: Arc::clone(frame),
+                next_row: 0,
+                max_rows,
+            }
         } else {
             IpcBatchSource::Polars(
                 self.collect_batches(max_rows)
@@ -3498,6 +3586,12 @@ impl DataFrame {
                 Some(token.clone()),
                 1,
             ))
+        } else if let DataFrameInner::Eager(frame) = &self.inner {
+            IpcBatchSource::Eager {
+                frame: Arc::clone(frame),
+                next_row: 0,
+                max_rows,
+            }
         } else {
             IpcBatchSource::Polars(self.collect_batches(1).map_err(polars_to_core_error)?)
         };
@@ -7422,6 +7516,59 @@ mod tests {
             values.into_no_null_iter().collect::<Vec<_>>(),
             vec![19_999_992, 19_999_994, 19_999_996, 19_999_998]
         );
+    }
+
+    #[test]
+    fn expression_ir_arithmetic_keeps_filtered_range_on_bounded_batches() {
+        let session = SparkSession::builder()
+            .app_name("expression-ir-range-batches")
+            .config("spark.sql.ansi.enabled", "true")
+            .get_or_create();
+        let filtered = session
+            .range(0, 5, 1)
+            .unwrap()
+            .filter(col("id").gt_eq(lit(2i64)))
+            .unwrap();
+        let arithmetic = crate::column::expr_ir_binary_arithmetic_expr(
+            col("id"),
+            lit(1i32),
+            crate::decimal_arithmetic::BinaryOp::Add,
+        );
+        let python_arithmetic = crate::column::pyspark_binary_arithmetic_expr(
+            col("id"),
+            lit(1i32),
+            crate::decimal_arithmetic::BinaryOp::Add,
+            true,
+            true,
+        )
+        .alias("python_add");
+        assert_eq!(
+            projected_expression_nullability(
+                &python_arithmetic,
+                filtered.logical_schema.as_ref().unwrap(),
+                false,
+            ),
+            None,
+            "Python Column arithmetic may coerce invalid values to null"
+        );
+        let result = filtered
+            .select_exprs(vec![
+                arithmetic.clone().alias("next"),
+                col("id").alias("source"),
+            ])
+            .unwrap()
+            .limit(2)
+            .unwrap();
+        assert!(
+            result.range_cardinality.is_some(),
+            "row-wise ExprIr arithmetic must retain the bounded range source"
+        );
+        assert!(!result.schema().unwrap().logical_fields()[0].nullable);
+        let collected = result.collect().unwrap();
+        let next = collected.column("next").unwrap().i64().unwrap();
+        let source = collected.column("source").unwrap().i64().unwrap();
+        assert_eq!(next.into_no_null_iter().collect::<Vec<_>>(), vec![3, 4]);
+        assert_eq!(source.into_no_null_iter().collect::<Vec<_>>(), vec![2, 3]);
     }
 
     #[test]

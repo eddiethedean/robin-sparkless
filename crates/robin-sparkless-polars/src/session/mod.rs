@@ -4259,12 +4259,11 @@ impl SparkSession {
                 let physical_schema = connect_physical_schema(&source_schema)?;
                 let empty_schema = physical_schema.to_polars_schema();
                 let empty = PlDataFrame::empty_with_schema(&empty_schema);
-                let dataframe =
-                    DataFrame::from_polars_with_options(empty, self.is_case_sensitive())
-                        .with_logical_schema(physical_schema)
-                        .map_err(|error| {
-                            EngineError::User(format!("invalid Connect empty schema: {error}"))
-                        })?;
+                let dataframe = DataFrame::from_eager_with_options(empty, self.is_case_sensitive())
+                    .with_logical_schema(physical_schema)
+                    .map_err(|error| {
+                        EngineError::User(format!("invalid Connect empty schema: {error}"))
+                    })?;
                 Ok((dataframe, source_schema))
             }
         }
@@ -8837,6 +8836,46 @@ mod connect_arrow_tests {
                 .to_string();
             assert!(error.contains(expected_error), "{error}");
         }
+    }
+
+    #[test]
+    fn empty_connect_local_relation_streams_typed_schema_without_lazy_scan() {
+        use polars::io::ipc::IpcStreamReader;
+
+        let session = SparkSession::builder().get_or_create();
+        let schema = StructType::from_logical_fields(vec![
+            StructField::new("id".into(), CoreDataType::Long, false),
+            StructField::new("label".into(), CoreDataType::String, true),
+        ]);
+        let (frame, imported_schema) = session
+            .create_dataframe_from_arrow_ipc(None, Some(schema.clone()), 1024, 10, 1024, 512)
+            .unwrap();
+        assert!(frame.is_eager());
+        assert_eq!(imported_schema.logical_fields().len(), 2);
+        assert_eq!(imported_schema.logical_fields()[0].name, "id");
+        assert_eq!(imported_schema.logical_fields()[1].name, "label");
+
+        let mut batches = frame
+            .to_arrow_ipc_batches_with_schema_and_cancellation(
+                10,
+                1024 * 1024,
+                &robin_sparkless_core::engine::CancellationToken::new(),
+                &schema,
+            )
+            .unwrap();
+        let batch = batches.next().unwrap().unwrap();
+        assert_eq!(batch.row_count, 0);
+        let decoded = IpcStreamReader::new(Cursor::new(batch.bytes))
+            .finish()
+            .expect("decode empty Connect Arrow batch");
+        assert_eq!(decoded.height(), 0);
+        let column_names = decoded
+            .get_column_names()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(column_names, ["id", "label"]);
+        assert!(batches.next().is_none());
     }
 
     #[test]

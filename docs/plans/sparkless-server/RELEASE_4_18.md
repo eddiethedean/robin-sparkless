@@ -1,6 +1,6 @@
 # 4.18.0 implementation and release plan
 
-**Status: 418-01 contract frozen; 418-02 through 418-05 implemented locally; no formal Phase 2 interoperability or release gates completed.** This plan refines **Phase 2**, following the [4.17 plan](RELEASE_4_17.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.18.0**, including unchanged packages. Owners, implementation issues, and release evidence remain unassigned.
+**Status: 418-01 contract frozen; 418-02 through 418-06 implemented locally; no formal Phase 2 interoperability or release gates completed.** This plan refines **Phase 2**, following the [4.17 plan](RELEASE_4_17.md). Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.18.0**, including unchanged packages. Owners, implementation issues, and release evidence remain unassigned.
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Roadmap](ROADMAP.md) · [Protocol research](CONNECT_PROTOCOL_RESEARCH.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
@@ -23,7 +23,7 @@ Slice IDs are local plan identifiers. Assign an owner, reviewable change, exact 
 | **418-03 — complete locally** | Explicit plan/expression translation, configuration and analysis | 418-01/02; SS-08 | Captured plan/schema/config fixtures, schema inference without row actions, and explicit unsupported errors pass locally. V19 public-client/oracle interoperability remains an integrated gate for 418-04/06. |
 | **418-04 — complete locally** | Checked Connect schema/Arrow encoder and bounded inline local relations | 418-01/02; logical schema and native batches | Local service tests and pinned-client smoke cover exact scalar values, schema-bearing empty results, duplicate names, and multi-batch offsets. Full Phase 2 V18/V20 boundary and reference-engine evidence remains open. |
 | **418-05 — complete locally** | Replay, reconnect, prefix/all release, interrupt, expiry, session release/restart | 418-02; 418-03/04 agreed producer interface | Focused Rust lifecycle tests and a real gRPC disconnect/reconnect smoke; formal V21/V22 races, broader failure matrix, and measured accounting remain pending |
-| **418-06** | Standalone integrated conformance and multiple real clients | 418-03–418-05 | V18–V23 and applicable V17; unmodified JVM-free client, health progress, native execution evidence |
+| **418-06 — complete locally** | Standalone integrated conformance and multiple real clients | 418-03–418-05 | Local integrated suite passed against the pinned client and Spark 4.0.5 oracle, including default retry, result bounds, and concurrent HTTP/health progress. Formal V18–V23 and applicable V17 remain open; see [local evidence](#418-06-local-integrated-evidence--2026-10-29-utc). |
 | **418-07** | Public launcher readiness, CLI endpoints, packaged Connect feature | 418-06; SS-02/06 | V24 and launcher regressions across advertised platforms; HTTP-only build remains testable |
 | **418-08** | Separate emulator gRPC route and concurrent-client benchmarks | 418-06; pinned external proxy; 418-07 for packaged launcher witnesses | V25/V26: proxy/session/auth/reconnect evidence and reproducible 1/2/4/8+ client measurements |
 | **418-09** | Capability/docs freeze, regression and complete candidate distribution | 418-01–418-08; prior releases complete | V33: all pre-publication gates and exact 4.18.0 inventory pass on one integrated candidate |
@@ -196,6 +196,19 @@ Use smaller configured limits for deterministic tests and verify selected defaul
 
 Run the unmodified locked client in a fresh environment without Java/Spark jars against a separate native image without Python/JVM. Use normal Python imports, default retries and reattachment. Capture sanitized RPC traces and native producer-start counters to prove results come from the engine and reconnect never repeats work. Test errors through the client's normal exception path, including enriched error retrieval when advertised; do not fabricate JVM traces or Catalyst output.
 
+### 418-06 local integrated evidence — 2026-10-29 UTC
+
+The Slice 6 runner passed on macOS arm64 with `pyspark-client==4.0.5`, the separately pinned Apache Spark 4.0.5 Connect server/client, and the native release server. The exact native and reference JSON outputs matched, including public DataFrame schema, Arrow schema, and values. The report is [`target/connect-slice6/run-20261028T235953Z-19165/summary.json`](../../../target/connect-slice6/run-20261028T235953Z-19165/summary.json); the runner command was:
+
+```sh
+python3 tests/connect/run_slice6_conformance.py \
+  --client-python /tmp/sparkless-connect-client-py311/bin/python \
+  --oracle-python /tmp/sparkless-connect-oracle-py311/bin/python \
+  --oracle-home /tmp/sparkless-oracle
+```
+
+The stock default-retry client recovered the injected disconnect with `ReattachExecute` and exactly one producer start. Unsupported expressions, oversized local scalar/schema inputs, and the total-result byte limit all surfaced as normal client errors. Across 180 traced Arrow responses, the largest was 900,999 bytes and 16,384 rows. Four synchronized public client processes completed while 17 health requests and three HTTP statements progressed; the native server had no Python/JVM child processes. These results demonstrate the selected local workload and are not formal gate closure: the broader V18 type matrix, V19 configuration/cache-boundary cases, V21 lifecycle race matrix, V22 replay/resource/RSS accounting, and V17 measurement budgets remain open. V24–V26 also remain open, as do launcher/package certification and the separate proxy route.
+
 For the launcher, add an explicitly configured gRPC listener with CLI loopback default port 15002 and launcher-allocated ephemeral ports. Keep the HTTP listener independently configurable. Readiness must include actual bound addresses, per-launch/server identity, and independently versioned capabilities/control framing. Update the current readiness validator that rejects any Connect advertisement. Enable `spark_connect_url` only when the owned child is ready and its packaged supported matrix has passed V24; disabled/experimental builds still raise a typed unsupported error. The launcher must not import PySpark to start the native service. Check restart, port collision, failed gRPC readiness, cancellation, sync/async cleanup, and drain across both listeners.
 
 Propose server-only `http` and `connect` Cargo features, with release binary wheels/images enabling both after their gates pass. Test HTTP-only and Connect-only builds plus the supported combined build; keep tonic/prost/protobuf generation out of embedded engine and Python-extension dependency paths. Freeze the exact feature/CLI/control names in D05/D06 before packaging. Build flags alone must not advertise an experimental endpoint as supported.
@@ -228,11 +241,11 @@ V26 measures correctness, cold start, throughput, p50/p95 latency, RSS, CPU, bat
 - [x] 418-03 local implementation and captured-fixture checks complete; V19 remains an integrated gate.
 - [x] 418-04 local implementation, focused service tests, and pinned-client smoke complete; full V18/V20 exit gates remain open.
 - [x] 418-05 local replay/lifecycle implementation and focused checks complete; V21/V22 integrated conformance and measured accounting remain open.
-- [ ] 418-06: standalone default-client and concurrent-client conformance passes.
+- [x] 418-06 local integrated standalone default-client and concurrent-client suite passes; formal V18–V23 and applicable V17 evidence remains open.
 - [ ] 418-07–418-08: launcher, separate proxy route and benchmark evidence passes.
 - [ ] 418-09: prior regressions and V33 complete candidate gates pass.
 - [ ] 418-10: V34 public inventory verification completes 4.18.0.
 
 ## Current implementation boundary
 
-The repository contains a native HTTP service and logical-schema/IPC/lazy execution work described in the 4.17 plan. Slices 418-02/03 add an optional generated Spark 4.0.5 gRPC adapter and checked translation, schema analysis, and configuration behavior on the shared server instance. Slice 418-04 adds bounded Connect Arrow results and inline scalar local relations, with a focused pinned-client smoke. Slice 418-05 adds bounded replay and reconnect, prefix/all release, interrupt, error lookup, session cancellation/tombstones, and detached expiry. Full Phase 2 interoperability gates, launcher packaging/readiness, proxy certification, integrated release gates, and public artifact verification remain open.
+The repository contains a native HTTP service and logical-schema/IPC/lazy execution work described in the 4.17 plan. Slices 418-02/03 add an optional generated Spark 4.0.5 gRPC adapter and checked translation, schema analysis, and configuration behavior on the shared server instance. Slice 418-04 adds bounded Connect Arrow results and inline scalar local relations, with a focused pinned-client smoke. Slice 418-05 adds bounded replay and reconnect, prefix/all release, interrupt, error lookup, session cancellation/tombstones, and detached expiry. Slice 418-06 adds the local integrated public-client/oracle, retry, bounds, and concurrency runner recorded above. Formal Phase 2 acceptance gates, launcher packaging/readiness, proxy certification, full release gates, and public artifact verification remain open.
