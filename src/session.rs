@@ -69,6 +69,12 @@ impl Default for SparkSessionBuilder {
 }
 
 impl SparkSession {
+    /// Bind this session's runtime settings to the current worker thread.
+    /// Server integrations should call this before translating or evaluating plans.
+    pub fn sync_thread_context(&self) {
+        self.0.sync_thread_context();
+    }
+
     pub fn builder() -> SparkSessionBuilder {
         SparkSessionBuilder(PolarsSparkSession::builder())
     }

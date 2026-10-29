@@ -191,6 +191,19 @@ pub fn sum(col: &Column) -> Column {
     c
 }
 
+fn integral_literal_decimal_type(expression: &Expr) -> Option<DataType> {
+    let column = Column::from_expr(expression.clone(), None);
+    let value = match column.value_preserving_literal_value()? {
+        LiteralValue::Dyn(polars_plan::prelude::DynLiteralValue::Int(value)) => *value,
+        LiteralValue::Scalar(value) if value.dtype().is_integer() => {
+            value.as_any_value().extract::<i128>()?
+        }
+        _ => return None,
+    };
+    let precision = value.unsigned_abs().to_string().len();
+    (precision <= 38).then_some(DataType::Decimal(precision, 0))
+}
+
 /// Bind runtime-dependent expressions to the configuration of the plan being analyzed.
 /// Rebuilding the UDF gives reused expressions independent plan state.
 pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<Expr> {
@@ -216,10 +229,35 @@ pub(crate) fn bind_runtime_config(expr: Expr, schema: &Schema) -> PolarsResult<E
                 crate::decimal_arithmetic::BinaryOp::from_engine_expr_marker(fmt_str.as_str())
                 && input.len() == 2
             {
-                let left = input[0].clone();
-                let right = input[1].clone();
-                let left_type = left.to_field(schema)?.dtype().clone();
-                let right_type = right.to_field(schema)?.dtype().clone();
+                let mut left = input[0].clone();
+                let mut right = input[1].clone();
+                let mut original_left_type = left.to_field(schema)?.dtype().clone();
+                let mut original_right_type = right.to_field(schema)?.dtype().clone();
+                // Spark uses the literal's decimal digits, rather than the full
+                // integral type width, when pairing an integer literal with a decimal.
+                if matches!(original_right_type, DataType::Decimal(..))
+                    && let Some(dtype) = integral_literal_decimal_type(&left)
+                {
+                    left = left.cast(dtype.clone());
+                    original_left_type = dtype;
+                }
+                if matches!(original_left_type, DataType::Decimal(..))
+                    && let Some(dtype) = integral_literal_decimal_type(&right)
+                {
+                    right = right.cast(dtype.clone());
+                    original_right_type = dtype;
+                }
+                let (left_type, right_type) = crate::column::expr_ir_arithmetic_types(
+                    &original_left_type,
+                    &original_right_type,
+                )
+                .unwrap_or((original_left_type, original_right_type));
+                if left.to_field(schema)?.dtype() != &left_type {
+                    left = left.cast(left_type.clone());
+                }
+                if right.to_field(schema)?.dtype() != &right_type {
+                    right = right.cast(right_type.clone());
+                }
 
                 if crate::decimal_arithmetic::result_type(
                     &left_type,

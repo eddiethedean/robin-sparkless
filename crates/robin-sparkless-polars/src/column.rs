@@ -93,6 +93,15 @@ pub(crate) fn expr_ir_binary_arithmetic_expr(
     let schema_op = op;
     let mut expr = left.map_many(
         move |cols| {
+            let inferred_types = expr_ir_arithmetic_types(cols[0].dtype(), cols[1].dtype());
+            if let Some((left_type, right_type)) = inferred_types {
+                if cols[0].dtype() != &left_type {
+                    cols[0] = cols[0].cast(&left_type)?;
+                }
+                if cols[1].dtype() != &right_type {
+                    cols[1] = cols[1].cast(&right_type)?;
+                }
+            }
             let left_type = cols[0].dtype();
             let right_type = cols[1].dtype();
             let exact_decimal = crate::decimal_arithmetic::result_type(
@@ -162,11 +171,12 @@ pub(crate) fn expr_ir_binary_arithmetic_expr(
         },
         &args,
         move |_schema, fields| {
-            let left_type = fields[0].dtype();
-            let right_type = fields[1].dtype();
+            let (left_type, right_type) =
+                expr_ir_arithmetic_types(fields[0].dtype(), fields[1].dtype())
+                    .unwrap_or_else(|| (fields[0].dtype().clone(), fields[1].dtype().clone()));
             let dtype = crate::decimal_arithmetic::result_type(
-                left_type,
-                right_type,
+                &left_type,
+                &right_type,
                 schema_op,
                 allow_precision_loss,
             );
@@ -176,13 +186,16 @@ pub(crate) fn expr_ir_binary_arithmetic_expr(
                 let decimal_float = (matches!(left_type, DataType::Decimal(..))
                     && right_type.is_float())
                     || (matches!(right_type, DataType::Decimal(..)) && left_type.is_float());
-                if decimal_float
-                    || (matches!(schema_op, crate::decimal_arithmetic::BinaryOp::Divide)
-                        && !ansi_enabled)
+                if decimal_float || matches!(schema_op, crate::decimal_arithmetic::BinaryOp::Divide)
                 {
                     DataType::Float64
                 } else {
-                    crate::ansi::arithmetic_field(fields)?.dtype().clone()
+                    crate::ansi::arithmetic_field(&[
+                        polars::prelude::Field::new(fields[0].name().clone(), left_type),
+                        polars::prelude::Field::new(fields[1].name().clone(), right_type),
+                    ])?
+                    .dtype()
+                    .clone()
                 }
             };
             Ok(Field::new(fields[0].name().clone(), dtype))
@@ -192,6 +205,112 @@ pub(crate) fn expr_ir_binary_arithmetic_expr(
         **fmt_str = op.engine_expr_marker().into();
     }
     expr
+}
+
+pub(crate) fn expr_ir_arithmetic_types(
+    left: &DataType,
+    right: &DataType,
+) -> Option<(DataType, DataType)> {
+    fn integral(dtype: &DataType) -> bool {
+        matches!(
+            dtype,
+            DataType::Int8
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::UInt8
+                | DataType::UInt16
+                | DataType::UInt32
+                | DataType::UInt64
+        )
+    }
+    fn signed_integral(dtype: &DataType) -> Option<DataType> {
+        match dtype {
+            DataType::Int64 | DataType::UInt64 => Some(DataType::Int64),
+            DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::UInt8
+            | DataType::UInt16
+            | DataType::UInt32 => Some(DataType::Int32),
+            _ => None,
+        }
+    }
+
+    fn literal_type(dtype: &DataType) -> Option<DataType> {
+        match dtype {
+            DataType::Unknown(polars::prelude::UnknownKind::Int(value)) => {
+                Some(if i32::try_from(*value).is_ok() {
+                    DataType::Int32
+                } else {
+                    DataType::Int64
+                })
+            }
+            DataType::Unknown(polars::prelude::UnknownKind::Float) => Some(DataType::Float64),
+            _ => None,
+        }
+    }
+
+    let left_unknown = literal_type(left).is_some();
+    let right_unknown = literal_type(right).is_some();
+    if left_unknown && right_unknown {
+        let left = literal_type(left)?;
+        let right = literal_type(right)?;
+        if left.is_float() || right.is_float() {
+            return Some((DataType::Float64, DataType::Float64));
+        }
+        let common = if matches!(left, DataType::Int64) || matches!(right, DataType::Int64) {
+            DataType::Int64
+        } else {
+            DataType::Int32
+        };
+        return Some((common.clone(), common));
+    }
+    let left = if left_unknown {
+        literal_type(left)?
+    } else {
+        left.clone()
+    };
+    let right = if right_unknown {
+        literal_type(right)?
+    } else {
+        right.clone()
+    };
+    if (left.is_float() || right.is_float()) && left.is_numeric() && right.is_numeric() {
+        return Some((DataType::Float64, DataType::Float64));
+    }
+    if integral(&left) && integral(&right) {
+        // Keep Spark's integral width for signed operands. In particular, SMALLINT +
+        // SMALLINT is still SMALLINT and must overflow at that width under ANSI mode.
+        // Polars unsigned types have no Spark counterpart, so retain the existing
+        // widening behavior for those inputs.
+        let common = if matches!(left, DataType::Int64 | DataType::UInt64)
+            || matches!(right, DataType::Int64 | DataType::UInt64)
+        {
+            DataType::Int64
+        } else if matches!(left, DataType::Int32 | DataType::UInt32)
+            || matches!(right, DataType::Int32 | DataType::UInt32)
+            || matches!(left, DataType::UInt8 | DataType::UInt16)
+            || matches!(right, DataType::UInt8 | DataType::UInt16)
+        {
+            DataType::Int32
+        } else if matches!(left, DataType::Int16) || matches!(right, DataType::Int16) {
+            DataType::Int16
+        } else {
+            DataType::Int8
+        };
+        return Some((common.clone(), common));
+    }
+    if left_unknown || right_unknown {
+        let typed = if left_unknown { &right } else { &left };
+        if matches!(typed, DataType::Decimal(..)) {
+            return Some((left, right));
+        }
+        if let Some(common) = signed_integral(typed) {
+            return Some((common.clone(), common));
+        }
+    }
+    None
 }
 
 /// Convert SQL LIKE pattern (% = any sequence, _ = one char) to regex. Escapes regex specials.

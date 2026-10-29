@@ -285,7 +285,7 @@ impl ConnectOperationLease {
         {
             record.execution_state = "failed";
             record.effect_outcome = "rejected";
-            record.error = Some((code.to_string(), message.to_string()));
+            record.error = Some((code.to_string(), bound_text(message, MAX_ERROR_BYTES)));
         }
     }
 }
@@ -915,32 +915,122 @@ impl ServerInner {
                 "Connect session has been released",
             ));
         }
-        if let Some(observed) = identity.observed_server_session_id.as_deref() {
-            let sessions = self.sessions.lock().map_err(|_| internal_failure())?;
-            match sessions.get(&key) {
-                Some(session) if session.server_side_session_id == observed => {}
-                _ => {
-                    return Err(connect_request_failure(
-                        StatusCode::CONFLICT,
-                        "StaleSessionIdentity",
-                        "the observed server-side session identity is stale or unknown",
-                    ));
+        // Resolve expiration and acquire/create the lease under one registry lock.
+        // Otherwise the TTL can pass between an expiration check and the generic
+        // lease path, which would silently replace this Connect identity.
+        let (expired_connect_session, lease) = {
+            let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            match sessions.get(&key).cloned() {
+                Some(session) => {
+                    if session.closing.load(Ordering::Acquire) {
+                        return Err(connect_request_failure(
+                            StatusCode::CONFLICT,
+                            "SessionClosing",
+                            "session is closing",
+                        ));
+                    }
+                    let idle_expired = session.active.load(Ordering::Acquire) == 0
+                        && session
+                            .last_activity
+                            .lock()
+                            .map_err(|_| internal_failure())?
+                            .elapsed()
+                            >= self.config.session_idle_ttl;
+                    if idle_expired {
+                        let mut tombstones = self
+                            .connect_tombstones
+                            .lock()
+                            .map_err(|_| internal_failure())?;
+                        if tombstones.len() >= MAX_CONNECT_SESSION_TOMBSTONES
+                            && !tombstones.contains_key(&key)
+                        {
+                            return Err(connect_request_failure(
+                                StatusCode::TOO_MANY_REQUESTS,
+                                "SessionHistoryCapacityExceeded",
+                                "Connect released-session history is full",
+                            ));
+                        }
+                        session.closing.store(true, Ordering::Release);
+                        sessions.remove(&key);
+                        tombstones.insert(key.clone(), session.server_side_session_id.clone());
+                        (Some(session), None)
+                    } else {
+                        if identity
+                            .observed_server_session_id
+                            .as_deref()
+                            .is_some_and(|observed| observed != session.server_side_session_id)
+                        {
+                            return Err(connect_request_failure(
+                                StatusCode::CONFLICT,
+                                "StaleSessionIdentity",
+                                "the observed server-side session identity is stale or unknown",
+                            ));
+                        }
+                        *session
+                            .last_activity
+                            .lock()
+                            .map_err(|_| internal_failure())? = Instant::now();
+                        session.active.fetch_add(1, Ordering::AcqRel);
+                        (None, Some(SessionLease(session)))
+                    }
+                }
+                None => {
+                    if identity.observed_server_session_id.is_some() {
+                        return Err(connect_request_failure(
+                            StatusCode::CONFLICT,
+                            "StaleSessionIdentity",
+                            "the observed server-side session identity is stale or unknown",
+                        ));
+                    }
+                    if self.active_sessions.load(Ordering::Acquire) >= self.config.max_sessions {
+                        return Err(connect_request_failure(
+                            StatusCode::TOO_MANY_REQUESTS,
+                            "SessionCapacityExceeded",
+                            "server session capacity is full",
+                        ));
+                    }
+                    let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
+                    let lifetime = Arc::new(SessionLifetime {
+                        id: key.clone(),
+                        session: self.root_session.new_session(),
+                        generation,
+                        server_side_session_id: Uuid::new_v4().to_string(),
+                        connect_execution: Arc::new(Semaphore::new(1)),
+                        serial: Arc::new(tokio::sync::Mutex::new(())),
+                        active: AtomicUsize::new(1),
+                        last_activity: Mutex::new(Instant::now()),
+                        closing: AtomicBool::new(false),
+                        stopped: AtomicBool::new(false),
+                        server: Arc::downgrade(self),
+                    });
+                    self.active_sessions.fetch_add(1, Ordering::AcqRel);
+                    sessions.insert(key.clone(), Arc::clone(&lifetime));
+                    (None, Some(SessionLease(lifetime)))
                 }
             }
-        }
-        let lease = self.session_lease(&key)?;
-        if identity
-            .observed_server_session_id
-            .as_deref()
-            .is_some_and(|observed| observed != lease.0.server_side_session_id)
-        {
+        };
+        if let Some(session) = expired_connect_session {
+            if let Ok(mut operations) = self.connect_operations.lock() {
+                let operation_keys = operations
+                    .iter()
+                    .filter(|(_, operation)| operation.matches_session(&key, session.generation))
+                    .map(|(operation_key, operation)| {
+                        operation.release_all();
+                        operation_key.clone()
+                    })
+                    .collect::<Vec<_>>();
+                for operation_key in operation_keys {
+                    operations.remove(&operation_key);
+                }
+            }
+            session.stop_once();
             return Err(connect_request_failure(
-                StatusCode::CONFLICT,
-                "StaleSessionIdentity",
-                "the server-side session was replaced before this request was accepted",
+                StatusCode::GONE,
+                "SessionReleased",
+                "Connect session expired after being idle",
             ));
         }
-        Ok(lease)
+        Ok(lease.expect("a non-expired Connect session has a lease"))
     }
 
     #[cfg(feature = "connect")]

@@ -26,13 +26,15 @@ def test_get_or_create_expr_filter_on_other_thread(spark):
             out = df.filter(F.expr("id = 1")).collect()
             assert len(out) == 1
             assert out[0]["id"] == 1
-        except Exception as e:
+        # PyO3's unsendable guard raises PanicException (a BaseException), which
+        # Exception does not catch. Keep thread failures visible to pytest.
+        except BaseException as e:
             errors.append(str(e))
         finally:
             done.set()
 
     t = threading.Thread(target=worker)
     t.start()
-    done.wait(timeout=30)
+    assert done.wait(timeout=30), "worker did not finish"
     t.join(timeout=5)
     assert not errors, errors

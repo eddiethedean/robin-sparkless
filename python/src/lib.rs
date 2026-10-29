@@ -983,10 +983,10 @@ impl PySparkSessionBuilder {
                 inner: session,
                 external_catalog_tables: Default::default(),
                 active_actions: std::sync::Arc::new(ActionRegistry::default()),
-                backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
+                backend_type: std::sync::Mutex::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
-                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
+                delta_map_view_paths: std::sync::Mutex::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -1030,7 +1030,12 @@ fn delta_map_paths_for_catalog_table(
             .cloned()
             .unwrap_or_default());
     }
-    if let Some(paths) = session.delta_map_view_paths.borrow().get(name) {
+    if let Some(paths) = session
+        .delta_map_view_paths
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(name)
+    {
         return Ok(paths.clone());
     }
     let exact_local = session.inner.saved_table_exists(name)
@@ -1781,18 +1786,18 @@ fn yield_to_python_control_threads(py: Python<'_>) {
     py.detach(std::thread::yield_now);
 }
 
-#[pyclass(module = "sparkless.sql.session", unsendable)]
+#[pyclass(module = "sparkless.sql.session")]
 struct PySparkSession {
     inner: SparkSession,
     external_catalog_tables: external_catalog::ResolvedTables,
     active_actions: std::sync::Arc<ActionRegistry>,
     /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
-    backend_type: RefCell<String>,
+    backend_type: std::sync::Mutex<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
     stopped: std::sync::atomic::AtomicBool,
     #[cfg(feature = "delta")]
     delta_map_view_paths:
-        RefCell<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+        std::sync::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
 }
 
 fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
@@ -2731,7 +2736,8 @@ impl PySparkSession {
                     .insert(name.to_string(), df.logical_map_paths.clone());
             } else {
                 self.delta_map_view_paths
-                    .borrow_mut()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .insert(name.to_string(), df.logical_map_paths.clone());
             }
         }
@@ -2938,10 +2944,10 @@ impl PySparkSession {
                 inner: session,
                 external_catalog_tables: Default::default(),
                 active_actions: std::sync::Arc::new(ActionRegistry::default()),
-                backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
+                backend_type: std::sync::Mutex::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
-                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
+                delta_map_view_paths: std::sync::Mutex::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -2960,12 +2966,17 @@ impl PySparkSession {
 
     #[getter]
     fn backend_type(&self) -> String {
-        self.backend_type.borrow().clone()
+        self.backend_type
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     #[setter]
     fn set_backend_type(slf: PyRefMut<Self>, value: String) -> PyResult<()> {
-        *slf.backend_type.borrow_mut() = value;
+        *slf.backend_type
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = value;
         Ok(())
     }
 
@@ -3003,17 +3014,21 @@ impl PySparkSession {
                 session.get_config(),
             ),
         );
-        let backend_type = slf.backend_type.borrow().clone();
+        let backend_type = slf
+            .backend_type
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let obj = Py::new(
             py,
             PySparkSession {
                 inner: session,
                 external_catalog_tables: Default::default(),
                 active_actions: std::sync::Arc::new(ActionRegistry::default()),
-                backend_type: RefCell::new(backend_type),
+                backend_type: std::sync::Mutex::new(backend_type),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
-                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
+                delta_map_view_paths: std::sync::Mutex::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -3094,7 +3109,10 @@ impl PySparkSession {
     fn drop_temp_view(&self, name: &str) -> bool {
         let dropped = self.inner.drop_temp_view(name);
         #[cfg(feature = "delta")]
-        self.delta_map_view_paths.borrow_mut().remove(name);
+        self.delta_map_view_paths
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
         dropped
     }
 
@@ -3707,7 +3725,11 @@ impl PyCatalog {
             .borrow();
         let dropped = session.inner.drop_temp_view(name);
         #[cfg(feature = "delta")]
-        session.delta_map_view_paths.borrow_mut().remove(name);
+        session
+            .delta_map_view_paths
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
         Ok(dropped)
     }
 

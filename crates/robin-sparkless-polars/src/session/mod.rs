@@ -4016,7 +4016,7 @@ impl SparkSession {
         &self.runtime_config
     }
 
-    fn sync_thread_context(&self) {
+    pub fn sync_thread_context(&self) {
         let session_tz = self.config.get("spark.sql.session.timeZone").cloned();
         crate::set_thread_udf_context_full(
             Arc::new(self.udf_registry.clone()),
