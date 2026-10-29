@@ -4,6 +4,8 @@ Use this guide with the [server release roadmap](plans/sparkless-server/ROADMAP.
 
 For 4.18, the workflow still needs the planned Connect candidate and public-artifact gates, including standalone default-client conformance followed by separately pinned emulator gRPC certification. The existing 4.17 HTTP/SDK publication jobs do not implement those checks. Follow the 4.18 plan before tagging or advertising supported Connect; source research alone does not pass interoperability gates.
 
+The roadmap assigns additional Connect API/types, I/O/artifacts/cache, durable recovery, and Structured Streaming to 4.23–4.26 (SS-16–19 / V39–V47), and scalar/Pandas UDFs to Phase 5 V27. These are planned release requirements, not implemented workflow jobs. Add feature-specific candidate/public-artifact and optional worker/connector package checks before each release; preserve the default Python/JVM-free server and prior capability regressions.
+
 ## Release inventory and version policy
 
 For coordinated releases beginning with **4.16.0**, all first-party packages use the exact same stable semantic version:

@@ -51,3 +51,5 @@ Resolve or explicitly defer D07, D08, D11 in the [decision register](DECISIONS.m
 Keep result/operation ownership explicit so the later DuckDB source and execution phases can reuse this protocol without silently inheriting Polars' ephemeral-catalog semantics. [SS-14](14-duckdb-data-source.md) must preserve source snapshots during scans/replay; [SS-15](15-duckdb-connect-backend.md) must prove database transaction outcomes and persistent-data restart behavior separately. Phase 2 conformance remains scoped to its implemented backend.
 
 Transport end-of-stream is not necessarily query completion. Client defaults must remain enabled throughout conformance tests.
+
+[SS-17 / Phase 8](17-connect-sources-artifacts-and-persistence.md) schedules bounded artifact-backed inputs; [SS-18 / Phase 9](18-durable-connect-recovery.md) schedules durable session/outcome/result recovery and `allow_reconnect=true`; [SS-19 / Phase 10](19-structured-streaming.md) separately schedules Structured Streaming. None of these guarantees follows from Phase 2 Arrow streaming or same-instance replay.

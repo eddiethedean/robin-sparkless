@@ -38,11 +38,17 @@ This policy supersedes the earlier exception allowing `spark-sql-parser` to rema
 | **4.18** | **4.18.0** | 2 | Supported JVM-free Spark Connect, typed Arrow streaming, replay/release lifecycle, and standalone unmodified-client conformance |
 | **4.19** | **4.19.0** | 3, optional capability | DuckDB data source: typed Arrow table scans feeding the existing Polars engine |
 | **4.20** | **4.20.0** | 4, optional capability | DuckDB execution backend exposed through Sparkless's supported Connect server |
-| **4.21** | **4.21.0** | 5, optional capability | Isolated Python worker support for the declared Jobs/notebook subset |
+| **4.21** | **4.21.0** | 5, optional capability | Isolated Python Jobs/notebooks and scalar/Pandas UDF workers |
 | **4.22** | **4.22.0** | 6, optional capability | Native Delta Lake / Unity Catalog interoperability |
-| **4.23+** | **4.N.0** for release 4.N | Follow-on scope to be defined | Additional conformance, supported types/operations, and measured performance improvements |
+| **4.23** | **4.23.0** | 7 | Expanded Connect DataFrame operations, scalar/nested types, analysis, and session configuration |
+| **4.24** | **4.24.0** | 8, connectors opt-in | Connect CSV/JSON/Parquet and optional JDBC I/O, artifacts, caching, and DataFrame checkpoints |
+| **4.25** | **4.25.0** | 9, optional capability | Durable operation outcomes, replay, and eligible session recovery across restart |
+| **4.26** | **4.26.0** | 10, optional capability | Single-node Structured Streaming, state/checkpoints, and verified sink recovery |
+| **4.27+** | **4.N.0** for release 4.N | Follow-on scope to be defined | Further conformance, operations/connectors, and measured performance improvements |
 
 All rows are planned. Release scope is cumulative: each release retains and regression-tests previously shipped capabilities. Later scope cannot bypass an unfinished prerequisite. If an optional phase is deferred or reordered, explicitly revise this release map and its gates before assigning different work to that version. The two DuckDB phases are explicitly sequenced after supported Connect: source integration first, execution backend second. Python workers and Delta/UC move to Phases 5/6; neither has an inherent technical dependency on DuckDB, and Delta/UC does not require Python workers. Reordering requires an explicit roadmap revision, not an incidental dependency in the implementation.
+
+**Scope extension (2026-10-29):** formerly unassigned Connect gaps are now scheduled below. The release numbers are scope targets without calendar commitments. Phases 7–10 retain native single-node execution; RDD/SparkContext, distributed executors, and universal Spark compatibility remain outside the roadmap. Optional workers/connectors/storage are required only for the surfaces that use them, not for the default native API.
 
 ## 4.16.0 — HTTP service, launcher, and unified distribution
 
@@ -209,7 +215,8 @@ Primary plan: [SS-12](12-optional-python-workers.md).
 
 - [ ] Resolve the worker security, packaging, API, and resource contract before enabling execution.
 - [ ] Support only the declared Jobs/notebook subset with separate run/session identity, bounded output, truthful errors, and deterministic process-tree cleanup.
-- [ ] Pass **V27**, including isolation, secret handling, quota/failure cases, and disabled-feature tests.
+- [ ] Add scalar Python and scalar/grouped/iterator Pandas UDF forms under an explicit Connect API/type matrix; use separate workers and bounded Arrow batches, with no Python inside the native server.
+- [ ] Pass **V27**, including Jobs/notebooks, UDF value/schema semantics, isolation, secret handling, quota/failure cases, and disabled-feature tests.
 - [ ] Preserve Python/JVM-free core SQL/Connect images and rerun their regression gates.
 - [ ] Publish and verify all participating packages at **4.21.0**; installation of optional worker support remains opt-in.
 
@@ -224,6 +231,44 @@ Primary plan: [SS-13](13-optional-delta-and-unity-catalog.md).
 - [ ] Verify concurrent writers, cancellation/failure near commit, and explicit unsupported DDL/DML errors.
 - [ ] Preserve previously shipped capabilities and keep Delta/UC optional; no Python worker dependency is introduced.
 - [ ] Publish and verify all participating packages at **4.22.0**.
+
+## 4.23.0 — Expanded Connect API, types, and analysis
+
+Complete **Phase 7 / [SS-16](16-connect-api-types-and-analysis.md)** for the default Polars backend and publish backend-specific support matrices. Earlier DuckDB support does not establish default-backend parity.
+
+- Freeze **D16** for comparisons/boolean/null predicates, arithmetic/casts/functions, column APIs, joins/grouping/distinct aggregates, sorting/windows, and union/intersect/except semantics.
+- Enable BYTE, FLOAT, BINARY, TIMESTAMP_NTZ, arrays/maps/nested structs across local input, analysis, execution, and Arrow results.
+- Add truthful explain/analysis and explicitly mutable session settings; unsupported settings/functions remain named errors.
+- Pass **V39/V40** against the pinned unmodified client/reference, including nested/null/empty/boundary cases, expensive-operator resource budgets, session isolation, and earlier lifecycle regressions.
+- Verify the complete candidate and fresh public artifacts at coordinated **4.23.0**. Native API coverage does not require optional Python, Delta, or JDBC deployments.
+
+## 4.24.0 — Connect I/O, artifacts, caching, and checkpoints
+
+Complete **Phase 8 / [SS-17](17-connect-sources-artifacts-and-persistence.md)** after the required Phase 7 API/type work.
+
+- Freeze **D17** for CSV/JSON/Parquet and optional JDBC read/write APIs, source/sink options, catalog/view APIs, credentials/path policy, commit outcomes, and ownership.
+- Implement bounded artifact upload/status and cached local relations using actual public-client threshold behavior.
+- Implement cache/persist/unpersist, truthful storage status, and local/durable DataFrame checkpoints with explicit memory/disk/lifetime rules.
+- Keep the core server Python/JVM-free; actual JDBC drivers may run only in a separately packaged optional connector process. Delta public APIs require the SS-13 capability and their own integration checks.
+- Pass **V41–V43**, optional/default installs, existing regressions, and coordinated **4.24.0** candidate/public verification. Batch checkpoints do not imply durable operation replay or streaming support.
+
+## 4.25.0 — Durable Connect recovery
+
+Complete **Phase 9 / [SS-18](18-durable-connect-recovery.md)** as an optional persistent mode for explicitly certified backends/sinks.
+
+- Freeze **D18** for durable receipts/response spools, eligible session state, generation fencing, reconnect identity, `allow_reconnect=true`, retention, and format migration.
+- Coordinate data effects and receipts transactionally or reject automatic retries for unresolved outcomes. Reattachment must never silently rerun a lost producer.
+- Pass **V44/V45** with crashes across commit/receipt/delivery boundaries, partial response recovery, expiry, corruption, disk exhaustion, and incompatible restarts.
+- Verify persistent and ephemeral modes and publish the exact per-backend guarantees at coordinated **4.25.0**. Durable tables alone do not pass this phase; distributed failover is excluded.
+
+## 4.26.0 — Optional single-node Structured Streaming
+
+Complete **Phase 10 / [SS-19](19-structured-streaming.md)** using the enabled API, sources/sinks, and durable recovery contracts from Phases 7–9.
+
+- Freeze **D19** for the `readStream`/`writeStream`/query-management API matrix, rate/file sources, approved sinks, triggers/output modes, offsets, state, and checkpoint/sink commits.
+- Implement micro-batches, query progress/await/stop, event-time watermarks, deduplication, and declared stateful windowed aggregates.
+- Pass **V46/V47** against the pinned reference, including late data, restart/crash recovery, per-sink delivery guarantees, backpressure, bounded long-running state/disk use, and cancellation/shutdown.
+- Verify optional/default packages and coordinated **4.26.0** candidate/public artifacts. Continuous processing, distributed execution, and arbitrary connectors are outside the initial streaming scope.
 
 ## Publication checklist for every release
 

@@ -17,6 +17,8 @@ Both transports use the same native execution, session, catalog, and result serv
 
 This epic covers the complete direction. Each phase has its own supported surface and release gate; a passing smoke query does not establish general Spark or Databricks compatibility.
 
+The 2026-10-29 scope extension schedules remaining Connect API gaps in Phases 7–10 and adds scalar/Pandas UDFs to Phase 5. Optional UDF workers and JDBC connector processes remain separately packaged; the core native process/image never embeds Python or a JVM. RDD/SparkContext and distributed Spark execution remain outside this single-node roadmap.
+
 ## Delivery order and scope
 
 | Stage | Deliverable | Required dependency / gate |
@@ -27,8 +29,12 @@ This epic covers the complete direction. Each phase has its own supported surfac
 | **Phase 2** | Supported Spark Connect release with Arrow streaming and resumable executions | Pinned unmodified client, lifecycle/conformance suite, with optional external route certification outside the standalone release gate |
 | **Phase 3** | Optional DuckDB data source feeding Polars execution | Supported Connect first; V35/V36 typed scans, source snapshots, database ownership, and bounded resources |
 | **Phase 4** | Optional DuckDB execution backend through Connect | Phase 3 first; V37/V38 Spark semantics, backend lifecycle, persistent transaction outcomes, and shared-table interoperability |
-| **Phase 5** | Optional isolated Python workers | Separate trust, packaging, resource, and lifecycle contract |
+| **Phase 5** | Optional isolated Python Jobs/notebooks and scalar/Pandas UDF workers | Separate trust, packaging, resource, UDF semantics, and lifecycle contract; V27 |
 | **Phase 6** | Optional Delta Lake / Unity Catalog | Verified native transactions and interoperability |
+| **Phase 7** | Expanded default Connect DataFrame API, types, analysis, and session configuration | D16; V39/V40 client/reference conformance and resource/lifecycle evidence |
+| **Phase 8** | Connect file/optional JDBC I/O, artifacts, caches, and DataFrame checkpoints | D17; V41–V43 source/sink effects, transfer boundaries, storage ownership and quotas |
+| **Phase 9** | Optional durable Connect operation/session recovery | D18; V44/V45 atomic receipt/crash matrix and replay without reexecution |
+| **Phase 10** | Optional single-node Structured Streaming | D19; V46/V47 event-time/state/sink semantics and checkpoint/recovery/resource evidence |
 
 Phase 0 means **0A and 0B are complete**. Admission control, bounded queues/results, session ownership, cancellation accounting, and shutdown are Phase 0 prerequisites, not later hardening.
 
@@ -329,12 +335,18 @@ The [4.18 implementation plan](RELEASE_4_18.md) refines this phase into 418-01�
 - [ ] The public launcher enables `spark_connect_url` only for a ready supported endpoint.
 - [ ] Optional third-party gRPC routes need separate certification before advertising and do not gate standalone releases.
 
-### Optional phases after Connect
+### Later phases after Connect
 
 - **Phase 3:** DuckDB source integration, with read-only typed Arrow scans into Polars, stable multi-table snapshots, native database ownership, independent DuckDB writer visibility, and measured memory/cancellation behavior. Complete V35/V36 before the 4.19 release.
 - **Phase 4:** DuckDB execution behind the Connect endpoint, with explicit backend selection, reference-semantic and schema agreement, persistent transactional write outcomes, Connect lifecycle, and independent client read/write visibility. Complete V37/V38 before the 4.20 release; a source scan alone does not complete this phase.
-- **Phase 5:** isolated Python worker packaging, code trust, quotas, environment/secrets handling, output/errors, Jobs/notebook behavior, and worker cleanup. Core SQL/Connect images remain free of Python.
+- **Phase 5:** isolated Python worker packaging, code trust, quotas, environment/secrets handling, output/errors, Jobs/notebook behavior, scalar/Pandas UDF forms and type semantics, and worker cleanup. V27 covers each declared surface separately; core SQL/Connect images remain free of Python.
 - **Phase 6:** native Delta/UC integration with independent-reader verification of schema and transactions, decimal preservation, and explicit rejection of unsupported writes/DDL.
+- **Phase 7 / SS-16 / 4.23:** broaden the default Connect backend's expressions, joins/grouping/windows/set operations, scalar/nested types, truthful analysis, and mutable session settings. D16 freezes the exact matrix; V39/V40 require client/reference, lifecycle, memory, and isolation evidence.
+- **Phase 8 / SS-17 / 4.24:** add CSV/JSON/Parquet and optional JDBC read/write APIs, public table/view paths, bounded artifacts/cached local relations, cache/persist/unpersist and DataFrame checkpoints. D17 and V41–V43 verify effects, policy, expansion limits, optional connector cleanup, and storage lifetimes.
+- **Phase 9 / SS-18 / 4.25:** optional durable receipts, eligible session recovery including `allow_reconnect=true`, and response replay across restart. D18 and V44/V45 require transactional/fenced crash recovery; persistent data alone does not establish exactly-once effects or durable replay.
+- **Phase 10 / SS-19 / 4.26:** optional native micro-batch Structured Streaming with public query management, selected sources/sinks, event-time watermarks/stateful windows, and coordinated checkpoints. D19 and V46/V47 require reference results, per-sink delivery guarantees, crash recovery, and bounded long-running state/disk resources.
+
+Each new phase preserves earlier enabled capabilities and passes coordinated candidate/public installation checks. Optional Python/JDBC/Delta/DuckDB components are dependencies only for the APIs selecting them. Full Spark compatibility, RDD/SparkContext, distributed execution/failover, and continuous streaming are not implied by this extension.
 
 ### Common release checks
 

@@ -52,3 +52,5 @@ Resolve or explicitly defer D01, D02, D04, D11 in the [decision register](DECISI
 The default Phase 2 translator targets the existing Polars backend. Plan/schema interfaces should permit the later [DuckDB execution backend](15-duckdb-connect-backend.md), but implementing it is Phase 4 work after the [Phase 3 source integration](14-duckdb-data-source.md). Neither DuckDB phase is a Phase 2 release prerequisite.
 
 SS-09 and SS-10 share an interface design and can develop against agreed fixtures; their release gates require both implementations.
+
+Follow-on [SS-16 / Phase 7](16-connect-api-types-and-analysis.md) assigns expanded default-backend operations, scalar/nested types, truthful analysis, and mutable session settings to 4.23. [SS-17 / Phase 8](17-connect-sources-artifacts-and-persistence.md) assigns public I/O/table paths, artifact-backed data, and caches/checkpoints to 4.24. These plans do not expand the frozen 4.18 contract before their implementation and acceptance evidence.
