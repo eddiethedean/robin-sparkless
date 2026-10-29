@@ -1,7 +1,9 @@
 # sparkless-server-bin
 
-This distribution contains the precompiled `sparkless-server` native executable
-for one explicitly built operating-system and architecture target. Build a wheel
+This distribution contains the precompiled `sparkless-server` native HTTP and
+Spark Connect executable for one explicitly built operating-system and architecture target.
+The 4.18 release build enables both transports; the executable can also serve
+HTTP only with `--disable-connect`. Build a wheel
 with `SPARKLESS_SERVER_BINARY` pointing at a matching release executable. The
 build fails when the binary is missing; it never creates a platform-independent
 placeholder wheel. Set `SPARKLESS_SERVER_WHEEL_PLATFORM` when the build runner

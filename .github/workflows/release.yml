@@ -372,6 +372,11 @@ jobs:
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Run native server unit, control, and HTTP integration tests
         run: cargo test --locked --release -p sparkless-server
+      - name: Verify Spark Connect shutdown waits for released producers
+        run: >-
+          cargo test --locked --release -p sparkless-server
+          --no-default-features --features http,connect --lib
+          connect::tests::shutdown_cancels_work_and_waits_for_released_operation_leases
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
@@ -403,8 +408,19 @@ jobs:
           key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Build native server
-        run: cargo build --locked --release -p sparkless-server
+      - name: Install pinned public Connect client
+        run: |
+          /opt/python/cp311-cp311/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+      - name: Verify isolated and combined transport builds
+        run: |
+          set -euo pipefail
+          PY=/opt/python/cp311-cp311/bin/python
+          version="$("$PY" -c 'import tomllib; print(tomllib.load(open("crates/sparkless-server/Cargo.toml", "rb"))["package"]["version"])')"
+          cargo build --locked --release -p sparkless-server --no-default-features --features http
+          "$PY" scripts/verify_server_bin_wheel.py --binary target/release/sparkless-server --version "$version"
+          cargo build --locked --release -p sparkless-server --no-default-features --features connect
+          "$PY" scripts/verify_server_bin_wheel.py --binary target/release/sparkless-server --version "$version" --connect-only --connect-client --client-python "$PY"
+          cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
         env:
           CARGO_BUILD_JOBS: 1
       - name: Build and verify manylinux wheel
@@ -417,7 +433,7 @@ jobs:
             SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
             "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
           wheel=(dist/*.whl)
-          "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64
+          "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64 --connect --connect-client --client-python "$PY"
           auditwheel show "${wheel[0]}"
           "$PY" scripts/verify_release_artifacts.py record-server-wheel \
             --wheel "${wheel[0]}" --target server-bin-linux-x86_64 \
@@ -459,7 +475,7 @@ jobs:
           restore-keys: |
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Build native server
-        run: cargo build --locked --release -p sparkless-server
+        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
         env:
           CARGO_BUILD_JOBS: 1
       - name: Build and verify macOS wheel
@@ -468,12 +484,13 @@ jobs:
           python3 -m venv .venv-server-wheel
           SPARKLESS_WHEEL_PYTHON=.venv-server-wheel/bin/python
           "$SPARKLESS_WHEEL_PYTHON" -m pip install wheel setuptools
+          "$SPARKLESS_WHEEL_PYTHON" -m pip install --require-hashes -r tests/connect/client-py311.lock
           mkdir -p dist
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
             "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
           wheel=(dist/*.whl)
-          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64
+          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64 --connect --connect-client --client-python "$SPARKLESS_WHEEL_PYTHON"
           "$SPARKLESS_WHEEL_PYTHON" scripts/verify_release_artifacts.py record-server-wheel \
             --wheel "${wheel[0]}" --target server-bin-macos-aarch64 \
             --output dist/evidence/server-bin-macos-aarch64.json
@@ -500,7 +517,7 @@ jobs:
       }}
     needs: [release-mode, python-tests, python-canonical-linux, server-bin-manylinux-x86_64]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -529,8 +546,9 @@ jobs:
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
           python3 -m venv .venv
           .venv/bin/python -m pip install --no-index --find-links dist/sparkless --find-links dist/server-bin "sparkless[server]==${version}"
+          .venv/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
           .venv/bin/python -m pip check
-          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations
+          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations --connect-client --client-python .venv/bin/python
 
   server-container:
     name: Native server container build and smoke
@@ -541,6 +559,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
       - name: Select candidate image name
         id: image
         run: |
@@ -565,13 +586,15 @@ jobs:
         run: |
           set -euo pipefail
           name="sparkless-server-release-smoke-${GITHUB_RUN_ID}"
-          docker run -d --name "$name" -p 127.0.0.1:18099:8099 "$IMAGE"
+          python3 -m pip install --require-hashes -r tests/connect/client-py311.lock
+          docker run -d --name "$name" -p 127.0.0.1:18099:8099 -p 127.0.0.1:15002:15002 "$IMAGE"
           cleanup() {
             docker logs "$name" || true
             docker rm -f "$name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
           python3 scripts/verify_server_http.py http://127.0.0.1:18099 --mutations
+          SPARKLESS_CONNECT_URL=sc://127.0.0.1:15002 python3 tests/connect/smoke_public_client.py
           docker stop --time 10 "$name"
           exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
           if [[ "$exit_code" != 0 ]]; then
@@ -847,7 +870,7 @@ jobs:
           if [[ "$RELEASE_VERSION" == "4.16.1" ]]; then
             "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION" --protocol legacy-4.16
           else
-            "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION"
+            "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION" --protocol legacy-4.17
           fi
       - name: Publish the verified server container to GHCR
         id: publish-container
@@ -1750,7 +1773,7 @@ jobs:
     if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
     needs: [release-mode, python-canonical-macos, server-bin-macos-arm64]
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -1771,8 +1794,9 @@ jobs:
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
           python3 -m venv .venv
           .venv/bin/python -m pip install --no-index --find-links dist/sparkless --find-links dist/server-bin "sparkless[server]==${version}"
+          .venv/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
           .venv/bin/python -m pip check
-          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations
+          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations --connect-client --client-python .venv/bin/python
 
   phase1-v17-resource-witness:
     name: Phase 1 V17 range and memory witness

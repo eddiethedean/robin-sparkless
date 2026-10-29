@@ -36,7 +36,7 @@ class HttpReleaseVerificationTest(unittest.TestCase):
     def stop_server(cls):
         try:
             cls.server.stdin.write(
-                '{"control_protocol_version":1,"command":"shutdown"}\n'
+                '{"control_protocol_version":2,"command":"shutdown"}\n'
             )
             cls.server.stdin.flush()
             cls.server.wait(timeout=15)

@@ -52,7 +52,8 @@ pub mod connect_proto {
         tonic::include_file_descriptor_set!("spark_connect_descriptor");
 }
 
-pub const CONTROL_PROTOCOL_VERSION: u32 = 1;
+pub const CONTROL_PROTOCOL_VERSION: u32 = 2;
+pub const CAPABILITIES_PROTOCOL_VERSION: u32 = 1;
 pub const AGENT_PROTOCOL_VERSION: &str = "1";
 pub const MUTATION_PROTOCOL_VERSION: &str = "1";
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -99,6 +100,7 @@ pub struct Server {
 struct ServerInner {
     config: ServerConfig,
     instance_id: String,
+    http_address: Mutex<Option<SocketAddr>>,
     root_session: SparkSession,
     sessions: Mutex<HashMap<String, Arc<SessionLifetime>>>,
     #[cfg(feature = "connect")]
@@ -108,11 +110,17 @@ struct ServerInner {
     #[cfg(feature = "connect")]
     connect_operations: Mutex<HashMap<String, Arc<connect::ConnectReplayRecord>>>,
     #[cfg(feature = "connect")]
+    connect_active_operations: tokio::sync::watch::Sender<usize>,
+    #[cfg(feature = "connect")]
+    connect_draining: AtomicBool,
+    #[cfg(feature = "connect")]
     connect_replay_bytes: Arc<AtomicUsize>,
     #[cfg(feature = "connect")]
     connect_history_bytes: Arc<AtomicUsize>,
     #[cfg(feature = "connect")]
     connect_stream_senders: Arc<Semaphore>,
+    #[cfg(feature = "connect")]
+    connect_address: Mutex<Option<SocketAddr>>,
     active_sessions: AtomicUsize,
     next_session_generation: AtomicU64,
     operation_records: Mutex<OperationRegistry>,
@@ -211,6 +219,25 @@ struct ConnectOperationLease {
     _session: SessionLease,
     _admission: AdmissionTicket,
     replay: Arc<connect::ConnectReplayRecord>,
+    _active: ConnectActiveOperation,
+}
+
+#[cfg(feature = "connect")]
+struct ConnectActiveOperation(tokio::sync::watch::Sender<usize>);
+
+#[cfg(feature = "connect")]
+impl ConnectActiveOperation {
+    fn new(active: &tokio::sync::watch::Sender<usize>) -> Self {
+        active.send_modify(|count| *count += 1);
+        Self(active.clone())
+    }
+}
+
+#[cfg(feature = "connect")]
+impl Drop for ConnectActiveOperation {
+    fn drop(&mut self) {
+        self.0.send_modify(|count| *count -= 1);
+    }
 }
 
 #[cfg(feature = "connect")]
@@ -420,6 +447,7 @@ impl Server {
             connections: Arc::new(Semaphore::new(128)),
             config,
             instance_id: Uuid::new_v4().to_string(),
+            http_address: Mutex::new(None),
             root_session,
             sessions: Mutex::new(HashMap::new()),
             #[cfg(feature = "connect")]
@@ -429,11 +457,17 @@ impl Server {
             #[cfg(feature = "connect")]
             connect_operations: Mutex::new(HashMap::new()),
             #[cfg(feature = "connect")]
+            connect_active_operations: tokio::sync::watch::channel(0).0,
+            #[cfg(feature = "connect")]
+            connect_draining: AtomicBool::new(false),
+            #[cfg(feature = "connect")]
             connect_replay_bytes: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "connect")]
             connect_history_bytes: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "connect")]
             connect_stream_senders: Arc::new(Semaphore::new(connect::MAX_CONNECT_STREAM_SENDERS)),
+            #[cfg(feature = "connect")]
+            connect_address: Mutex::new(None),
             active_sessions: AtomicUsize::new(0),
             next_session_generation: AtomicU64::new(1),
             mutation_lane: Arc::new(AsyncMutex::new(())),
@@ -475,32 +509,216 @@ impl Server {
         F: Future<Output = ()> + Send + 'static,
         R: FnOnce(SocketAddr) -> Result<(), ServerError>,
     {
-        let listener = TcpListener::bind(self.inner.config.bind).await?;
-        let bound = listener.local_addr()?;
+        self.serve_until_with_endpoints(shutdown, None, move |bound, _| on_ready(bound))
+            .await
+    }
+
+    /// Bind HTTP and optionally Spark Connect before publishing a single readiness record.
+    /// Both listeners share this server's session, catalog, and admission state.
+    pub async fn serve_until_with_endpoints<F, R>(
+        self,
+        shutdown: F,
+        connect_bind: Option<SocketAddr>,
+        on_ready: R,
+    ) -> Result<(), ServerError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+        R: FnOnce(SocketAddr, Option<SocketAddr>) -> Result<(), ServerError>,
+    {
+        let http_bind = self.inner.config.bind;
+        self.serve_until_with_transports(
+            shutdown,
+            Some(http_bind),
+            connect_bind,
+            move |http_bound, connect_bound| {
+                let http_bound = http_bound.ok_or_else(|| ServerError {
+                    message: "HTTP listener did not bind".into(),
+                })?;
+                on_ready(http_bound, connect_bound)
+            },
+        )
+        .await
+    }
+
+    /// Bind any selected combination of HTTP and Spark Connect before publishing readiness.
+    pub async fn serve_until_with_transports<F, R>(
+        self,
+        shutdown: F,
+        http_bind: Option<SocketAddr>,
+        connect_bind: Option<SocketAddr>,
+        on_ready: R,
+    ) -> Result<(), ServerError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+        R: FnOnce(Option<SocketAddr>, Option<SocketAddr>) -> Result<(), ServerError>,
+    {
+        #[cfg(not(feature = "http"))]
+        if http_bind.is_some() {
+            return Err(ServerError {
+                message: "HTTP serving requires the server http feature".into(),
+            });
+        }
+        if http_bind.is_none() && connect_bind.is_none() {
+            return Err(ServerError {
+                message: "at least one HTTP or Spark Connect listener must be enabled".into(),
+            });
+        }
+        let http_listener = match http_bind {
+            Some(address) => Some(TcpListener::bind(address).await?),
+            None => None,
+        };
+        let http_bound = http_listener
+            .as_ref()
+            .map(TcpListener::local_addr)
+            .transpose()?;
+        #[cfg(feature = "connect")]
+        let connect_listener = match connect_bind {
+            Some(address) => Some(TcpListener::bind(address).await?),
+            None => None,
+        };
+        #[cfg(not(feature = "connect"))]
+        let connect_listener = {
+            if connect_bind.is_some() {
+                return Err(ServerError {
+                    message: "Spark Connect requires the server connect feature".into(),
+                });
+            }
+            None::<TcpListener>
+        };
+        let connect_bound = connect_listener
+            .as_ref()
+            .map(TcpListener::local_addr)
+            .transpose()?;
+        *self.inner.http_address.lock().map_err(|_| ServerError {
+            message: "HTTP listener address state is unavailable".into(),
+        })? = http_bound;
+        #[cfg(feature = "connect")]
+        {
+            *self.inner.connect_address.lock().map_err(|_| ServerError {
+                message: "Spark Connect listener address state is unavailable".into(),
+            })? = connect_bound;
+        }
         self.startup_check().await?;
         self.inner.ready.store(true, Ordering::Release);
         eprintln!(
-            "sparkless-server ready address={bound} instance_id={}",
+            "sparkless-server ready http_address={http_bound:?} connect_address={connect_bound:?} instance_id={}",
             self.inner.instance_id
         );
-        if let Err(error) = on_ready(bound) {
+        if let Err(error) = on_ready(http_bound, connect_bound) {
             self.inner.ready.store(false, Ordering::Release);
+            if let Ok(mut address) = self.inner.http_address.lock() {
+                *address = None;
+            }
+            #[cfg(feature = "connect")]
+            if let Ok(mut address) = self.inner.connect_address.lock() {
+                *address = None;
+            }
             return Err(error);
         }
-        self.run_listener(listener, shutdown).await
+
+        let (shutdown_tx, _) = tokio::sync::watch::channel(false);
+        let mut tasks = JoinSet::new();
+        if let Some(listener) = http_listener {
+            let http_server = self.clone();
+            let mut http_shutdown = shutdown_tx.subscribe();
+            tasks.spawn(async move {
+                http_server
+                    .run_listener(listener, async move {
+                        let _ = http_shutdown.changed().await;
+                    })
+                    .await
+            });
+        }
+        #[cfg(feature = "connect")]
+        if let Some(listener) = connect_listener {
+            let connect_server = self.clone();
+            let mut connect_shutdown = shutdown_tx.subscribe();
+            tasks.spawn(async move {
+                connect_server
+                    .serve_connect_listener_until(listener, async move {
+                        let _ = connect_shutdown.changed().await;
+                    })
+                    .await
+            });
+        }
+
+        tokio::pin!(shutdown);
+        let mut first_error = None;
+        tokio::select! {
+            _ = &mut shutdown => {},
+            result = tasks.join_next() => {
+                first_error = match result {
+                    Some(Ok(Ok(()))) => Some(ServerError {
+                        message: "listener stopped before shutdown was requested".into(),
+                    }),
+                    Some(Ok(Err(error))) => Some(error),
+                    Some(Err(error)) => Some(ServerError { message: format!("listener task failed: {error}") }),
+                    None => Some(ServerError { message: "all listeners stopped unexpectedly".into() }),
+                };
+            }
+        }
+        self.inner.draining.store(true, Ordering::Release);
+        self.inner.ready.store(false, Ordering::Release);
+        let _ = shutdown_tx.send(true);
+        while let Some(result) = tasks.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) if first_error.is_none() => first_error = Some(error),
+                Err(error) if first_error.is_none() => {
+                    first_error = Some(ServerError {
+                        message: format!("listener task failed: {error}"),
+                    });
+                }
+                _ => {}
+            }
+        }
+        if let Ok(mut address) = self.inner.http_address.lock() {
+            *address = None;
+        }
+        #[cfg(feature = "connect")]
+        if let Ok(mut address) = self.inner.connect_address.lock() {
+            *address = None;
+        }
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Control-protocol readiness record for an owned launcher process.
     pub fn readiness_record(&self, bound: SocketAddr) -> JsonValue {
+        self.readiness_record_with_endpoints(Some(bound))
+    }
+
+    /// Readiness record for independently selected listener combinations.
+    pub fn readiness_record_with_endpoints(&self, http_bound: Option<SocketAddr>) -> JsonValue {
         json!({
             "type": "ready",
             "control_protocol_version": CONTROL_PROTOCOL_VERSION,
+            "capabilities_protocol_version": CAPABILITIES_PROTOCOL_VERSION,
             "server_version": env!("CARGO_PKG_VERSION"),
             "agent_protocol_version": AGENT_PROTOCOL_VERSION,
             "server_instance_id": self.inner.instance_id,
-            "http_url": format!("http://{bound}"),
+            "http_url": http_bound.map(|bound| format!("http://{bound}")),
+            "spark_connect_url": self.connect_url(),
             "capabilities": self.capabilities_json()
         })
+    }
+
+    fn connect_url(&self) -> Option<String> {
+        #[cfg(feature = "connect")]
+        {
+            self.inner
+                .connect_address
+                .lock()
+                .ok()
+                .and_then(|address| *address)
+                .map(|address| format!("sc://{address}"))
+        }
+        #[cfg(not(feature = "connect"))]
+        {
+            None
+        }
     }
 
     pub async fn serve(self) -> Result<(), ServerError> {
@@ -672,6 +890,13 @@ impl ServerInner {
         self: &Arc<Self>,
         identity: &ConnectSessionIdentity,
     ) -> Result<SessionLease, RequestFailure> {
+        if self.connect_draining.load(Ordering::Acquire) || self.draining.load(Ordering::Acquire) {
+            return Err(connect_request_failure(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServerDraining",
+                "Spark Connect server is shutting down",
+            ));
+        }
         validate_connect_user_id(&identity.user_id)?;
         validate_connect_uuid("session_id", &identity.client_session_id)?;
         if let Some(observed) = identity.observed_server_session_id.as_deref() {
@@ -1106,6 +1331,7 @@ impl ServerInner {
                     _session: session,
                     _admission: admission,
                     replay,
+                    _active: ConnectActiveOperation::new(&self.connect_active_operations),
                 })
             }
             ReserveOperation::Existing(_) => Err(ConnectReserveError::Duplicate),
@@ -1252,12 +1478,33 @@ impl Server {
     }
 
     fn capabilities_json(&self) -> JsonValue {
+        let http_url = self
+            .inner
+            .http_address
+            .lock()
+            .ok()
+            .and_then(|address| *address)
+            .map(|address| format!("http://{address}"));
+        let connect_url = self.connect_url();
+        let mut transports = Vec::new();
+        if http_url.is_some() {
+            transports.push("http");
+        }
+        if connect_url.is_some() {
+            transports.push("spark_connect");
+        }
+        let primary_transport = transports.first().copied().unwrap_or("http");
         json!({
+            "capabilities_protocol_version": CAPABILITIES_PROTOCOL_VERSION,
             "agent_protocol_version": AGENT_PROTOCOL_VERSION,
             "mutation_protocol_version": MUTATION_PROTOCOL_VERSION,
             "server_instance_id": self.inner.instance_id,
-            "transport": "http",
-            "spark_connect_supported": false,
+            "transport": primary_transport,
+            "transports": transports,
+            "http_url": http_url,
+            "spark_connect_supported": connect_url.is_some(),
+            "spark_connect_url": connect_url,
+            "spark_connect_protocol_version": if connect_url.is_some() { Some("4.0.5") } else { None },
             "sql": {
                 "reads": ["SELECT", "COUNT(*)", "managed_tables"],
                 "mutations": ["CREATE DATABASE", "CREATE TABLE", "INSERT INTO", "DROP TABLE", "DROP DATABASE", "CREATE TEMP VIEW", "DROP VIEW", "USE"]

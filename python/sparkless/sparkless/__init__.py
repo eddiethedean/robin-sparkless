@@ -402,6 +402,7 @@ def __getattr__(name: str) -> object:
         "AsyncSparklessServer",
         "SparklessServerError",
         "UnsupportedServerPlatformError",
+        "UnsupportedSparkConnectError",
     ):
         from sparkless import server as server_module
 
@@ -505,6 +506,7 @@ __all__: List[str] = [
     "AsyncSparklessServer",
     "SparklessServerError",
     "UnsupportedServerPlatformError",
+    "UnsupportedSparkConnectError",
     "sql",
     "col",
     "lit",

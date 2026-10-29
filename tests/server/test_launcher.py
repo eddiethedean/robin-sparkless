@@ -10,6 +10,7 @@ from sparkless.server import (
     AsyncSparklessServer,
     SparklessServer,
     SparklessServerError,
+    UnsupportedSparkConnectError,
     _validate_ready,
 )
 
@@ -29,15 +30,22 @@ def _write_fake_server(path, *, delay=0.0, stderr_bytes=0):
         identity = str(uuid.uuid4())
         print(json.dumps({{
             'type': 'ready',
-            'control_protocol_version': 1,
+            'control_protocol_version': 2,
+            'capabilities_protocol_version': 1,
             'server_version': {version!r},
             'agent_protocol_version': '1',
             'server_instance_id': identity,
             'http_url': 'http://127.0.0.1:45678',
+            'spark_connect_url': None if '--disable-connect' in sys.argv else 'sc://127.0.0.1:45679',
             'capabilities': {{
+                'capabilities_protocol_version': 1,
                 'transport': 'http',
+                'http_url': 'http://127.0.0.1:45678',
+                'transports': ['http'] if '--disable-connect' in sys.argv else ['http', 'spark_connect'],
                 'server_instance_id': identity,
-                'spark_connect_supported': False,
+                'spark_connect_supported': '--disable-connect' not in sys.argv,
+                'spark_connect_url': None if '--disable-connect' in sys.argv else 'sc://127.0.0.1:45679',
+                'spark_connect_protocol_version': None if '--disable-connect' in sys.argv else '4.0.5',
                 'agent_protocol_version': '1',
                 'mutation_protocol_version': '1'
             }}
@@ -47,10 +55,10 @@ def _write_fake_server(path, *, delay=0.0, stderr_bytes=0):
                 command = json.loads(line)
             except ValueError:
                 continue
-            if command == {{'control_protocol_version': 1, 'command': 'shutdown'}}:
+            if command == {{'control_protocol_version': 2, 'command': 'shutdown'}}:
                 print(json.dumps({{
                     'type': 'stopped',
-                    'control_protocol_version': 1
+                    'control_protocol_version': 2
                 }}), flush=True)
                 break
         """
@@ -89,8 +97,7 @@ def test_sync_launcher_owns_child_restart_and_bounds_diagnostics(tmp_path, monke
     assert server.start() is server
     assert server.server_instance_id == first_identity
     assert server.http_url == "http://127.0.0.1:45678"
-    with pytest.raises(SparklessServerError, match="Spark Connect is not supported"):
-        _ = server.spark_connect_url
+    assert server.spark_connect_url == "sc://127.0.0.1:45679"
     assert len(server.diagnostics.encode("utf-8")) <= 64 * 1024
 
     server.stop()
@@ -99,6 +106,18 @@ def test_sync_launcher_owns_child_restart_and_bounds_diagnostics(tmp_path, monke
     server.start()
     assert server.server_instance_id != first_identity
     server.stop()
+
+    http_only = SparklessServer(executable_path=executable, connect_port=None)
+    http_only.start()
+    try:
+        assert http_only._ready_record["spark_connect_url"] is None
+        assert http_only._ready_record["capabilities"]["transports"] == ["http"]
+        with pytest.raises(
+            UnsupportedSparkConnectError, match="disabled or unavailable"
+        ):
+            _ = http_only.spark_connect_url
+    finally:
+        http_only.stop()
 
 
 def test_same_sync_context_owner_rejects_nested_entry(tmp_path, monkeypatch):
@@ -130,7 +149,10 @@ def test_launcher_rejects_wrong_control_protocol(tmp_path):
         _validate_ready(record)
 
 
-def test_async_launcher_reaps_child_on_startup_cancellation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("phase", ["spawn", "diagnostics"])
+def test_async_launcher_reaps_child_on_startup_cancellation(
+    tmp_path, monkeypatch, phase
+):
     executable = _write_fake_server(tmp_path / "sparkless-server", delay=10)
     _use_python_fake_server(monkeypatch)
     server = AsyncSparklessServer(
@@ -141,17 +163,39 @@ def test_async_launcher_reaps_child_on_startup_cancellation(tmp_path, monkeypatc
     )
 
     async def run():
+        diagnostics_started = asyncio.Event()
+        inspect_binary = server._binary_lacks_spark_connect
+
+        async def inspect_after_failure():
+            diagnostics_started.set()
+            return await inspect_binary()
+
+        monkeypatch.setattr(
+            server, "_binary_lacks_spark_connect", inspect_after_failure
+        )
         task = asyncio.create_task(server.start())
         for _ in range(100):
-            if server._process is not None:
+            if (
+                server._process is not None
+                if phase == "spawn"
+                else server._stderr_task is not None
+            ):
                 break
             await asyncio.sleep(0.01)
+        child = server._process
         task.cancel()
-        await asyncio.sleep(0)
+        if phase == "diagnostics":
+            await asyncio.wait_for(diagnostics_started.wait(), 2)
+        else:
+            await asyncio.sleep(0)
         task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert server._process is None
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert server._process is None
+            assert child is not None and child.returncode is not None
+        finally:
+            await server.stop()
 
     asyncio.run(run())
 

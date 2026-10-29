@@ -57,7 +57,7 @@ impl ServerProcess {
     fn stop(&mut self) {
         if let Some(mut stdin) = self.stdin.take() {
             stdin
-                .write_all(b"{\"control_protocol_version\":1,\"command\":\"shutdown\"}\n")
+                .write_all(b"{\"control_protocol_version\":2,\"command\":\"shutdown\"}\n")
                 .expect("send graceful shutdown");
             stdin.flush().expect("flush graceful shutdown");
         }

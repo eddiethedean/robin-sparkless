@@ -16,7 +16,14 @@ impl Drop for ChildGuard {
 #[test]
 fn control_mode_reports_bound_listener_and_stops_on_versioned_command() {
     let child = Command::new(env!("CARGO_BIN_EXE_sparkless-server"))
-        .args(["control", "--host", "127.0.0.1", "--port", "0"])
+        .args([
+            "control",
+            "--disable-connect",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -31,13 +38,17 @@ fn control_mode_reports_bound_listener_and_stops_on_versioned_command() {
         .expect("read readiness record");
     let ready: Value = serde_json::from_str(&ready_line).expect("valid JSON readiness record");
     assert_eq!(ready["type"], "ready");
-    assert_eq!(ready["control_protocol_version"], 1);
+    assert_eq!(ready["control_protocol_version"], 2);
+    assert_eq!(ready["capabilities_protocol_version"], 1);
+    assert_eq!(ready["capabilities"]["capabilities_protocol_version"], 1);
     assert!(
         ready["server_instance_id"]
             .as_str()
             .is_some_and(|id| !id.is_empty())
     );
     assert_eq!(ready["capabilities"]["transport"], "http");
+    assert_eq!(ready["capabilities"]["spark_connect_supported"], false);
+    assert_eq!(ready["spark_connect_url"], Value::Null);
     assert_eq!(ready["agent_protocol_version"], "1");
     assert_eq!(ready["capabilities"]["agent_protocol_version"], "1");
     assert_eq!(ready["capabilities"]["mutation_protocol_version"], "1");
@@ -94,13 +105,13 @@ fn control_mode_reports_bound_listener_and_stops_on_versioned_command() {
         .write_all(b"\n")
         .expect("terminate control frame above the size limit");
     stdin
-        .write_all(b"{\"control_protocol_version\":2,\"command\":\"shutdown\"}\n")
+        .write_all(b"{\"control_protocol_version\":1,\"command\":\"shutdown\"}\n")
         .expect("send unsupported protocol command");
     stdin
-        .write_all(b"{\"control_protocol_version\":1,\"command\":\"stop\"}\n")
+        .write_all(b"{\"control_protocol_version\":2,\"command\":\"stop\"}\n")
         .expect("send unsupported command");
     stdin
-        .write_all(b"{\"control_protocol_version\":1,\"command\":\"shutdown\"}\n")
+        .write_all(b"{\"control_protocol_version\":2,\"command\":\"shutdown\"}\n")
         .expect("send shutdown command");
     stdin.flush().expect("flush shutdown command");
     drop(child.0.stdin.take());
@@ -122,7 +133,7 @@ fn control_mode_reports_bound_listener_and_stops_on_versioned_command() {
         .expect("read stopped record");
     let stopped: Value = serde_json::from_str(&stopped_line).expect("valid stopped record");
     assert_eq!(stopped["type"], "stopped");
-    assert_eq!(stopped["control_protocol_version"], 1);
+    assert_eq!(stopped["control_protocol_version"], 2);
     assert!(stopped_line.len() <= 16 * 1024);
 }
 

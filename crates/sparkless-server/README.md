@@ -17,7 +17,7 @@ The HTTP routes are `/health`, `/capabilities`, `/statements`, `/close`, and
 Owned launchers use `sparkless-server control --host 127.0.0.1 --port 0`. In this
 mode stdout contains only bounded JSON-lines records: a `ready` record after a
 native `SELECT 1` witness and a `stopped` record after shutdown. Send
-`{"control_protocol_version":1,"command":"shutdown"}` on stdin for graceful
+`{"control_protocol_version":2,"command":"shutdown"}` on stdin for graceful
 shutdown; diagnostics remain on stderr. Do not use this pipe protocol as an SQL
 transport.
 
@@ -30,15 +30,25 @@ schema and bounded DDL analysis without collecting rows; and it exposes the capt
 profile with idempotent same-value sets and explicit rejection of unsupported changes. `ExecutePlan`
 validates and analyzes supported plans, then returns an explicit slice-4 error until Arrow result
 streaming is enabled. Local relations, artifact-backed relations, replay/lifecycle RPC behavior, and
-other plan or analysis variants remain unsupported. The Connect listener is not advertised by the
-HTTP launcher yet.
+other plan or analysis variants remain unsupported. The `serve` and `control` commands bind HTTP
+and Connect independently; Connect defaults to `127.0.0.1:15002`, while port `0` selects an
+ephemeral port. `control` readiness reports both actual endpoints, instance identity, control
+protocol version 2, and capability protocol version 1. `--disable-connect` keeps the same packaged
+binary in HTTP-only mode; `--disable-http` selects Connect-only mode when the Connect feature is
+compiled. Connect readiness is published only after both requested sockets bind.
 
 Build the features independently:
 
 ```sh
 cargo check -p sparkless-server --no-default-features --features http
 cargo check -p sparkless-server --no-default-features --features connect
+cargo check -p sparkless-server --no-default-features --features http,connect
 ```
+
+Build the release profile with both listeners using
+`cargo run -p sparkless-server --no-default-features --features http,connect -- serve`.
+The Connect-only feature build starts only gRPC:
+`cargo run -p sparkless-server --no-default-features --features connect -- serve`.
 
 The Connect proto sources are vendored under `proto/spark/connect` from Apache Spark tag
 `v4.0.5` and generated during a Connect-feature build; see `proto/README.md` and the

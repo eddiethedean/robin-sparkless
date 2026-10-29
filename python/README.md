@@ -66,23 +66,29 @@ Contributors should use the [uv setup and native build workflow](../CONTRIBUTING
 | `pip install "sparkless[dev]"` | pytest, pandas, hypothesis, pytest-xdist |
 | `pip install "sparkless[jdbc]"` | JDBC integration tests (testcontainers, drivers) |
 | `pip install "sparkless[pyspark]"` | Run tests against real PySpark (`SPARKLESS_TEST_MODE=pyspark`) |
-| `pip install "sparkless[server]"` | Own a native HTTP statement server child process |
+| `pip install "sparkless[server]"` | Own a native HTTP and Spark Connect server child process |
 
 The optional server extra installs a platform-specific `sparkless-server-bin`
 wheel. `SparklessServer` and `AsyncSparklessServer` own the child, wait for its
-versioned native-readiness record, and stop/reap it when their context exits:
+versioned native-readiness record, and stop/reap it when their context exits.
+The 4.18 candidate server binary enables HTTP and Spark Connect; the release gate
+checks the packaged public client before publication. The launcher chooses an
+ephemeral loopback gRPC port and exposes `spark_connect_url` only after both
+listeners are ready:
 
 ```python
 from sparkless import SparklessServer
 
 with SparklessServer() as server:
     print(server.http_url)
+    print(server.spark_connect_url)
 ```
 
-The async equivalent supports `async with`. Both expose HTTP only;
-`spark_connect_url` raises because Spark Connect is not enabled. An explicit
-`executable_path` can select a matching locally built binary. The launcher does
-not search `PATH`, download a binary, or compile one at runtime.
+The async equivalent supports `async with`. Set `connect_port=None` to run the
+same binary in HTTP-only mode; reading `spark_connect_url` then raises
+`UnsupportedSparkConnectError`. An explicit `executable_path` can select a
+matching locally built binary. The launcher does not import PySpark to start the
+native service, search `PATH`, download a binary, or compile one at runtime.
 
 ### Supported platforms
 

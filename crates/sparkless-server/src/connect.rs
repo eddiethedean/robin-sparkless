@@ -11,16 +11,113 @@ use prost_reflect::{DescriptorPool, Kind as ReflectKind, MessageDescriptor};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
+use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
 use tonic::codec::{BufferSettings, Codec, DecodeBuf, Decoder};
 use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
 
 static CONNECT_PRODUCER_STARTS: AtomicU64 = AtomicU64::new(0);
+const CONNECT_GRACEFUL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+const CONNECT_FORCE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Default)]
+struct ConnectConnectionRegistry {
+    next_id: AtomicU64,
+    active: Mutex<HashMap<u64, Arc<std::net::TcpStream>>>,
+}
+
+struct DrainableTcpStream {
+    stream: TcpStream,
+    registry: Arc<ConnectConnectionRegistry>,
+    id: u64,
+}
+
+impl ConnectConnectionRegistry {
+    fn track(self: &Arc<Self>, stream: TcpStream) -> io::Result<DrainableTcpStream> {
+        let standard_stream = stream.into_std()?;
+        let control = Arc::new(standard_stream.try_clone()?);
+        let stream = TcpStream::from_std(standard_stream)?;
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        self.active
+            .lock()
+            .map_err(|_| io::Error::other("Connect connection registry is unavailable"))?
+            .insert(id, Arc::clone(&control));
+        Ok(DrainableTcpStream {
+            stream,
+            registry: Arc::clone(self),
+            id,
+        })
+    }
+
+    fn force_close_all(&self) -> usize {
+        let Ok(mut active) = self.active.lock() else {
+            return 0;
+        };
+        let count = active.len();
+        for stream in active.values() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+        active.clear();
+        count
+    }
+}
+
+impl Drop for DrainableTcpStream {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.registry.active.lock() {
+            active.remove(&self.id);
+        }
+    }
+}
+
+impl AsyncRead for DrainableTcpStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_read(cx, buffer)
+    }
+}
+
+impl AsyncWrite for DrainableTcpStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().stream).poll_write(cx, buffer)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().stream).poll_shutdown(cx)
+    }
+}
+
+impl tonic::transport::server::Connected for DrainableTcpStream {
+    type ConnectInfo = tonic::transport::server::TcpConnectInfo;
+
+    fn connect_info(&self) -> Self::ConnectInfo {
+        tonic::transport::server::TcpConnectInfo {
+            local_addr: self.stream.local_addr().ok(),
+            remote_addr: self.stream.peer_addr().ok(),
+        }
+    }
+}
 
 fn trace_connect_rpc(method: &str) {
     if std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref() == Some(std::ffi::OsStr::new("1")) {
@@ -968,6 +1065,52 @@ pub struct ConnectService {
 }
 
 impl Server {
+    fn cancel_connect_work_for_shutdown(
+        &self,
+    ) -> Result<tokio::sync::watch::Receiver<usize>, crate::ServerError> {
+        let _lifecycle =
+            self.inner
+                .connect_session_lifecycle
+                .lock()
+                .map_err(|_| crate::ServerError {
+                    message: "Connect session lifecycle state is unavailable".into(),
+                })?;
+        self.inner.connect_draining.store(true, Ordering::Release);
+        let operations = self
+            .inner
+            .connect_operations
+            .lock()
+            .map_err(|_| crate::ServerError {
+                message: "Connect operation state is unavailable".into(),
+            })?;
+        for operation in operations.values() {
+            // A terminal response can precede the blocking producer's actual return.
+            operation.cancellation().cancel();
+            operation.cancel("Spark Connect server is shutting down");
+        }
+        Ok(self.inner.connect_active_operations.subscribe())
+    }
+
+    async fn wait_for_connect_work_to_stop(
+        mut active: tokio::sync::watch::Receiver<usize>,
+    ) -> Result<(), crate::ServerError> {
+        tokio::time::timeout(
+            CONNECT_GRACEFUL_DRAIN_TIMEOUT + CONNECT_FORCE_CLOSE_TIMEOUT,
+            async {
+                while *active.borrow() != 0 {
+                    active.changed().await.map_err(|_| crate::ServerError {
+                        message: "Connect producer completion state is unavailable".into(),
+                    })?;
+                }
+                Ok::<(), crate::ServerError>(())
+            },
+        )
+        .await
+        .map_err(|_| crate::ServerError {
+            message: "Connect native work did not stop after cancellation".into(),
+        })?
+    }
+
     /// Construct the generated Spark Connect service with Sparkless' inbound and outbound
     /// protobuf message caps. Callers choose the listener address and lifecycle independently.
     pub fn connect_service(&self) -> SparkConnectServiceServer<ConnectService> {
@@ -988,18 +1131,102 @@ impl Server {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        let listener = TcpListener::bind(bind)
+            .await
+            .map_err(|error| crate::ServerError {
+                message: format!("Spark Connect listener failed to bind {bind}: {error}"),
+            })?;
+        let bound = listener.local_addr().map_err(crate::ServerError::from)?;
+        *self
+            .inner
+            .connect_address
+            .lock()
+            .map_err(|_| crate::ServerError {
+                message: "Spark Connect listener address state is unavailable".into(),
+            })? = Some(bound);
+        let result = self.serve_connect_listener_until(listener, shutdown).await;
+        if let Ok(mut address) = self.inner.connect_address.lock()
+            && *address == Some(bound)
+        {
+            *address = None;
+        }
+        result
+    }
+
+    pub(crate) async fn serve_connect_listener_until<F>(
+        &self,
+        listener: TcpListener,
+        shutdown: F,
+    ) -> Result<(), crate::ServerError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        {
+            let _lifecycle =
+                self.inner
+                    .connect_session_lifecycle
+                    .lock()
+                    .map_err(|_| crate::ServerError {
+                        message: "Connect session lifecycle state is unavailable".into(),
+                    })?;
+            self.inner.connect_draining.store(false, Ordering::Release);
+        }
+        let connection_registry = Arc::new(ConnectConnectionRegistry::default());
+        let incoming_registry = Arc::clone(&connection_registry);
+        let incoming = TcpListenerStream::new(listener)
+            .map(move |result| result.and_then(|stream| incoming_registry.track(stream)));
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let serve = tonic::transport::Server::builder()
             .add_service(self.connect_service())
-            .serve_with_shutdown(bind, shutdown);
+            .serve_with_incoming_shutdown(incoming, async move {
+                let _ = shutdown_rx.await;
+            });
         tokio::pin!(serve);
+        tokio::pin!(shutdown);
         let mut reaper = tokio::time::interval(Duration::from_secs(5));
         reaper.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 result = &mut serve => {
+                    let active = self.cancel_connect_work_for_shutdown()?;
+                    Self::wait_for_connect_work_to_stop(active).await?;
                     return result.map_err(|error| crate::ServerError {
                         message: format!("Spark Connect listener failed: {error}"),
                     });
+                }
+                _ = &mut shutdown => {
+                    let active = self.cancel_connect_work_for_shutdown()?;
+                    let _ = shutdown_tx.send(());
+                    let drain_listener = async {
+                        match tokio::time::timeout(CONNECT_GRACEFUL_DRAIN_TIMEOUT, &mut serve).await {
+                            Ok(result) => {
+                                return result.map_err(|error| crate::ServerError {
+                                    message: format!("Spark Connect listener failed: {error}"),
+                                });
+                            }
+                            Err(_) => {
+                                let closed = connection_registry.force_close_all();
+                                if closed > 0 {
+                                    eprintln!("sparkless-server forced {closed} Spark Connect connection(s) closed after the drain timeout");
+                                }
+                            }
+                        }
+                        tokio::time::timeout(CONNECT_FORCE_CLOSE_TIMEOUT, &mut serve)
+                            .await
+                            .map_err(|_| crate::ServerError {
+                                message: "Spark Connect connections did not close after forced shutdown".into(),
+                            })?
+                            .map_err(|error| crate::ServerError {
+                                message: format!("Spark Connect listener failed: {error}"),
+                            })
+                    };
+                    let (listener_result, producer_result) = tokio::join!(
+                        drain_listener,
+                        Self::wait_for_connect_work_to_stop(active),
+                    );
+                    listener_result?;
+                    producer_result?;
+                    return Ok(());
                 }
                 _ = reaper.tick() => {
                     let _ = self.inner.expire_idle_sessions();
@@ -3845,6 +4072,67 @@ mod tests {
                 .name,
             "UnsupportedSessionReconnect"
         );
+    }
+
+    #[tokio::test]
+    async fn shutdown_cancels_work_and_waits_for_released_operation_leases() {
+        let server = Server::new(ServerConfig::default()).unwrap();
+        let retained_identity = identity("retained", &Uuid::new_v4().to_string(), None);
+        let released_identity = identity("released", &Uuid::new_v4().to_string(), None);
+        let retained = server
+            .inner
+            .reserve_connect_operation(
+                &retained_identity,
+                &Uuid::new_v4().to_string(),
+                [1; 32],
+                true,
+                Vec::new(),
+            )
+            .unwrap();
+        let released = server
+            .inner
+            .reserve_connect_operation(
+                &released_identity,
+                &Uuid::new_v4().to_string(),
+                [2; 32],
+                true,
+                Vec::new(),
+            )
+            .unwrap();
+        server
+            .inner
+            .release_connect_session(&released_identity, false)
+            .unwrap();
+        assert_eq!(server.inner.connect_operations.lock().unwrap().len(), 1);
+
+        let active = server.cancel_connect_work_for_shutdown().unwrap();
+        assert!(retained.replay.cancellation().is_cancelled());
+        assert!(released.replay.cancellation().is_cancelled());
+        assert_eq!(*active.borrow(), 2);
+        assert!(matches!(
+            server.inner.reserve_connect_operation(
+                &retained_identity, &Uuid::new_v4().to_string(), [3; 32], true, Vec::new(),
+            ),
+            Err(ConnectReserveError::Request(error)) if error.status.as_u16() == 503
+        ));
+        let mut stopped = tokio::spawn(Server::wait_for_connect_work_to_stop(active));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut stopped)
+                .await
+                .is_err()
+        );
+        drop(retained);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut stopped)
+                .await
+                .is_err()
+        );
+        drop(released);
+        tokio::time::timeout(Duration::from_secs(1), stopped)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 
     #[tokio::test]

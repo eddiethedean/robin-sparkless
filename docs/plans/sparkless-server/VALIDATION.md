@@ -41,7 +41,7 @@ The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Ru
 | V21 | 2 / SS-10 | Execute/reattach/release/interrupt/session-release races | No reexecution; prefix/all release is idempotent; restarted/lost sessions cannot silently resume as new executions |
 | V22 | 2 / SS-10 | Detached operations, replay expiry/capacity pressure | Finite retention; explicit failure/expiry instead of silent eviction; permits/resources eventually reclaimed |
 | V23 | 2 / SS-09, SS-10 | Multiple real client processes | Independent results and forward progress without server-side Python/JVM; clean cancellation/shutdown |
-| V24 | 2 / SS-06 | Public spark_connect_url | Exposed only for a ready endpoint whose supported client suite passed |
+| V24 | 2 / SS-06 | Packaged sync/async launcher readiness | Actual HTTP/gRPC endpoints and server/capability identity agree; the pinned public client works; restart, port collision, failed readiness, graceful listener drain, and typed HTTP-only behavior pass on advertised platforms |
 | V25 | Optional route certification / SS-11 | Separately advertised third-party proxy or adapter after standalone conformance | Independent values/schema/lifecycle/auth evidence per route; external changes and acceptance never block standalone development or release |
 | V26 | Release / SS-11 | 1/2/4/8+ client benchmarks | Correct outputs, reproducible commands, throughput/latency/RSS/CPU and hardware/version evidence |
 | V27 | 5 / SS-12 | Optional Python worker Jobs/notebooks and failures | Isolation, redaction, quotas, process-tree cleanup; disabled core remains Python-free |

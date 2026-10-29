@@ -3,7 +3,7 @@ name = "sparkless-server"
 version = "4.17.0"
 edition = "2024"
 rust-version = "1.93"
-description = "Native HTTP statement service for Robin Sparkless"
+description = "Native HTTP and Spark Connect services for Robin Sparkless"
 license = "MIT"
 repository = "https://github.com/eddiethedean/robin-sparkless"
 build = "build.rs"
@@ -19,6 +19,7 @@ connect = [
     "dep:tonic-prost",
     "dep:tonic-prost-build",
     "dep:protoc-bin-vendored",
+    "dep:tokio-stream",
 ]
 
 [[bin]]
@@ -42,6 +43,7 @@ spark-sql-parser = { version = "4.17.0", path = "../spark-sql-parser" }
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "net", "sync", "time", "signal", "io-util", "io-std"] }
 tonic = { version = "=0.14.8", features = ["transport"], optional = true }
 tonic-prost = { version = "=0.14.8", optional = true }
+tokio-stream = { version = "0.1.19", features = ["net"], optional = true }
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 
 [build-dependencies]

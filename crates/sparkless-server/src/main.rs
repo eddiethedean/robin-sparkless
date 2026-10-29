@@ -20,7 +20,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("control") => true,
         Some("--help") | Some("help") | None => {
             println!(
-                "Usage:\n  sparkless-server serve [--host IP] [--port PORT]\n  sparkless-server control [--host IP] [--port PORT]\n  sparkless-server --version\n\nThe control command writes bounded JSON-lines readiness and stopped records to stdout and accepts a shutdown command on stdin.\n\nEnvironment: SPARKLESS_SERVER_HOST, SPARKLESS_SERVER_PORT, SPARKLESS_SESSION_IDLE_TTL_MS"
+                "Usage:\n  sparkless-server serve [--host IP] [--port PORT] [--connect-host IP] [--connect-port PORT] [--disable-http] [--disable-connect]\n  sparkless-server control [--host IP] [--port PORT] [--connect-host IP] [--connect-port PORT] [--disable-http] [--disable-connect]\n  sparkless-server --version\n\nSpark Connect defaults to 127.0.0.1:15002 when built with the connect feature. Port 0 asks the OS to allocate an ephemeral port. Use --disable-http or --disable-connect to select one listener.\nThe control command writes bounded JSON-lines readiness and stopped records to stdout and accepts a shutdown command on stdin.\n\nEnvironment: SPARKLESS_SERVER_HOST, SPARKLESS_SERVER_PORT, SPARKLESS_SESSION_IDLE_TTL_MS"
             );
             return Ok(());
         }
@@ -34,19 +34,85 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     };
+    #[cfg(feature = "http")]
     let mut config = ServerConfig::from_env().map_err(std::io::Error::other)?;
+    #[cfg(not(feature = "http"))]
+    let config = ServerConfig::from_env().map_err(std::io::Error::other)?;
+    #[cfg(feature = "http")]
+    let mut http_bind = Some(config.bind);
+    #[cfg(not(feature = "http"))]
+    let mut http_bind: Option<SocketAddr> = None;
+    #[cfg(feature = "connect")]
+    let mut connect_bind = Some(SocketAddr::new(
+        IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        15002,
+    ));
+    #[cfg(not(feature = "connect"))]
+    let mut connect_bind: Option<SocketAddr> = None;
     while let Some(flag) = args.next() {
+        if flag == "--disable-http" {
+            http_bind = None;
+            continue;
+        }
+        if flag == "--disable-connect" {
+            connect_bind = None;
+            continue;
+        }
         let value = args
             .next()
             .ok_or_else(|| format!("{flag} requires a value"))?;
         match flag.as_str() {
             "--host" => {
-                let ip: IpAddr = value.parse().map_err(|_| "--host must be an IP address")?;
-                config.bind = SocketAddr::new(ip, config.bind.port());
+                #[cfg(feature = "http")]
+                {
+                    let ip: IpAddr = value.parse().map_err(|_| "--host must be an IP address")?;
+                    config.bind = SocketAddr::new(ip, config.bind.port());
+                    if http_bind.is_some() {
+                        http_bind = Some(config.bind);
+                    }
+                }
+                #[cfg(not(feature = "http"))]
+                return Err("--host requires the server http feature".into());
             }
             "--port" => {
-                let port: u16 = value.parse().map_err(|_| "--port must be in 0..=65535")?;
-                config.bind.set_port(port);
+                #[cfg(feature = "http")]
+                {
+                    let port: u16 = value.parse().map_err(|_| "--port must be in 0..=65535")?;
+                    config.bind.set_port(port);
+                    if http_bind.is_some() {
+                        http_bind = Some(config.bind);
+                    }
+                }
+                #[cfg(not(feature = "http"))]
+                return Err("--port requires the server http feature".into());
+            }
+            "--connect-host" => {
+                #[cfg(feature = "connect")]
+                {
+                    let ip: IpAddr = value
+                        .parse()
+                        .map_err(|_| "--connect-host must be an IP address")?;
+                    let address = connect_bind.unwrap_or_else(|| {
+                        SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 15002)
+                    });
+                    connect_bind = Some(SocketAddr::new(ip, address.port()));
+                }
+                #[cfg(not(feature = "connect"))]
+                return Err("--connect-host requires the server connect feature".into());
+            }
+            "--connect-port" => {
+                #[cfg(feature = "connect")]
+                {
+                    let port: u16 = value
+                        .parse()
+                        .map_err(|_| "--connect-port must be in 0..=65535")?;
+                    let address = connect_bind.unwrap_or_else(|| {
+                        SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 15002)
+                    });
+                    connect_bind = Some(SocketAddr::new(address.ip(), port));
+                }
+                #[cfg(not(feature = "connect"))]
+                return Err("--connect-port requires the server connect feature".into());
             }
             _ => return Err(format!("unknown argument '{flag}'").into()),
         }
@@ -56,25 +122,56 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     let server = Server::new(config)?;
     if mode {
-        runtime.block_on(serve_control(server))?;
+        runtime.block_on(serve_control(server, http_bind, connect_bind))?;
     } else {
-        runtime.block_on(server.serve())?;
+        runtime.block_on(server.serve_until_with_transports(
+            shutdown_signal(),
+            http_bind,
+            connect_bind,
+            |_, _| Ok(()),
+        ))?;
     }
     Ok(())
 }
 
-async fn serve_control(server: Server) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve_control(
+    server: Server,
+    http_bind: Option<SocketAddr>,
+    connect_bind: Option<SocketAddr>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let ready_server = server.clone();
     server
-        .serve_until_with_ready(control_shutdown(), move |bound| {
-            write_control_record(&ready_server.readiness_record(bound))
-        })
+        .serve_until_with_transports(
+            control_shutdown(),
+            http_bind,
+            connect_bind,
+            move |http_bound, _| {
+                write_control_record(&ready_server.readiness_record_with_endpoints(http_bound))
+            },
+        )
         .await?;
     write_control_record(&serde_json::json!({
         "type": "stopped",
         "control_protocol_version": CONTROL_PROTOCOL_VERSION
     }))?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 fn write_control_record(value: &serde_json::Value) -> Result<(), sparkless_server::ServerError> {
