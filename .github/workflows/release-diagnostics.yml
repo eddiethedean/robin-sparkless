@@ -1,0 +1,265 @@
+name: Release diagnostics
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  connect-slice8-benchmarks:
+    name: Spark Connect Slice 8 concurrency benchmark (V26 measurement)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: 1
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+        with:
+          toolchain: 1.93.1
+      - name: Repair Rust component proxies before the benchmark build
+        run: |
+          rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
+          rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
+          rustup component add rustfmt clippy --toolchain 1.93.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Cache cargo
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install hash-locked public Connect client
+        run: python -m pip install --require-hashes -r tests/connect/client-py311.lock
+      - name: Build the pinned V26 baseline on this hosted runner
+        run: |
+          BASELINE_REVISION="$(python3 -c 'import json; print(json.load(open("tests/connect/v26-regression-budget.json"))["approval"]["baseline_source_revision"])')"
+          git worktree add --detach "$RUNNER_TEMP/v26-baseline" "$BASELINE_REVISION"
+          (cd "$RUNNER_TEMP/v26-baseline" && cargo build --locked --release -p sparkless-server --no-default-features --features http,connect)
+      - name: Build the V26 candidate on this hosted runner
+        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
+      - name: Run three paired 1/2/4/8-client V26 measurements
+        run: |
+          set -euo pipefail
+          for replicate in 1 2 3; do
+            baseline_output="$GITHUB_WORKSPACE/target/connect-slice8-baseline/replicate-$replicate"
+            candidate_output="$GITHUB_WORKSPACE/target/connect-slice8/replicate-$replicate"
+            mkdir -p "$baseline_output" "$candidate_output"
+            (
+              cd "$RUNNER_TEMP/v26-baseline"
+              python3 tests/connect/run_slice8_benchmarks.py \
+                --client-python "$(python -c 'import sys; print(sys.executable)')" \
+                --server-bin "$RUNNER_TEMP/v26-baseline/target/release/sparkless-server" \
+                --concurrency 1,2,4,8 --iterations 5 --rows 1000000 \
+                --output "$baseline_output"
+            )
+            python3 tests/connect/run_slice8_benchmarks.py \
+              --client-python "$(python -c 'import sys; print(sys.executable)')" \
+              --server-bin "$GITHUB_WORKSPACE/target/release/sparkless-server" \
+              --concurrency 1,2,4,8 --iterations 5 --rows 1000000 \
+              --output "$candidate_output"
+          done
+      - name: Remove temporary baseline worktree
+        if: always()
+        run: git worktree remove --force "$RUNNER_TEMP/v26-baseline"
+      - name: Enforce the approved V26 regression budget
+        run: >-
+          python3 scripts/verify_connect_v26_budget.py
+          --reports target/connect-slice8
+          --baseline-reports target/connect-slice8-baseline
+          --budget tests/connect/v26-regression-budget.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: spark-connect-slice8-v26-measurements
+          path: |
+            target/connect-slice8/
+            target/connect-slice8-baseline/
+          if-no-files-found: warn
+          retention-days: 90
+
+  connect-slice9-conformance:
+    name: Spark Connect integrated client and oracle conformance (V18-V23)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      CARGO_BUILD_JOBS: 1
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+        with:
+          toolchain: 1.93.1
+      - name: Repair Rust component proxies before Spark Connect conformance build
+        run: |
+          rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
+          rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
+          rustup component add rustfmt clippy --toolchain 1.93.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Restore Cargo registry downloads
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install locked standalone and reference clients
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/connect-client"
+          python3 -m venv "$RUNNER_TEMP/connect-oracle"
+          "$RUNNER_TEMP/connect-client/bin/python" -m pip install --require-hashes -r tests/connect/client-py311.lock
+          "$RUNNER_TEMP/connect-oracle/bin/python" -m pip install --require-hashes -r tests/connect/oracle-py311.lock
+      - name: Download and verify Apache Spark 4.0.5 reference server
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz"
+          curl --fail --location --silent --show-error --retry 3 \
+            https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz \
+            --output "$archive"
+          printf '%s  %s\n' \
+            4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b \
+            "$archive" | sha512sum --check --status
+          mkdir -p "$RUNNER_TEMP/spark-4.0.5"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/spark-4.0.5" --strip-components=1
+      - name: Build combined native server and run V18-V23 conformance
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p sparkless-server --example connect-integration-server --no-default-features --features http,connect
+          python3 tests/connect/run_slice6_conformance.py \
+            --server-bin target/release/examples/connect-integration-server \
+            --client-python "$RUNNER_TEMP/connect-client/bin/python" \
+            --oracle-python "$RUNNER_TEMP/connect-oracle/bin/python" \
+            --oracle-home "$RUNNER_TEMP/spark-4.0.5" \
+            --oracle-archive "$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz" \
+            --output target/connect-slice9
+      - name: Preserve V18-V23 candidate conformance evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: v33-spark-connect-conformance
+          path: target/connect-slice9/
+          if-no-files-found: error
+          retention-days: 90
+
+  phase1-v17-resource-witness:
+    name: Phase 1 V17 range and memory witness
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 1
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y unixodbc-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+        with:
+          toolchain: 1.93.1
+      - name: Cache cargo
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Measure isolated range, catalog, and sustained HTTP workloads
+        run: python3 scripts/verify_v17_memory.py --output "$RUNNER_TEMP/v17-resource-witness.json"
+      - name: Preserve V17 resource evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: v17-resource-witness
+          path: |
+            ${{ runner.temp }}/v17-resource-witness.json
+            ${{ runner.temp }}/v17-logs
+          if-no-files-found: warn
+          retention-days: 90
+
+  rust-consumer-security:
+    name: Audit downstream Rust consumers without workspace patches
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+        with:
+          toolchain: 1.93.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Restore pinned cargo-audit executable
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        continue-on-error: true
+        with:
+          path: ~/.cache/sparkless/security-tools/cargo-audit-0.22.1
+          key: security-tool-cargo-audit-0.22.1-${{ runner.os }}-${{ runner.arch }}
+      - name: Verify or install cargo-audit 0.22.1
+        run: |
+          set -euo pipefail
+          tool="$HOME/.cache/sparkless/security-tools/cargo-audit-0.22.1/cargo-audit"
+          if [[ ! -x "$tool" ]] || ! "$tool" --version | grep -Fq 'cargo-audit 0.22.1'; then
+            cargo install cargo-audit --locked --version 0.22.1 --root "$RUNNER_TEMP/cargo-audit-root"
+            mkdir -p "$(dirname "$tool")"
+            install "$RUNNER_TEMP/cargo-audit-root/bin/cargo-audit" "$tool"
+          fi
+          dirname "$tool" >> "$GITHUB_PATH"
+      - name: Resolve and audit the graph consumers receive
+        run: |
+          python3 scripts/verify_rust_consumer_graph.py --output "$RUNNER_TEMP/rust-consumer-audit.json"
+          cat "$RUNNER_TEMP/rust-consumer-audit.exceptions.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify the published consumer patch configuration without exceptions
+        run: python3 scripts/verify_rust_consumer_graph.py --patch-config security/zstd-4.17-patches.toml --strict --output "$RUNNER_TEMP/rust-consumer-patched-audit.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: rust-consumer-audit
+          path: ${{ runner.temp }}/rust-consumer-*.json
+          if-no-files-found: error
+
+  # --- Rust ---
+
+  source-build:
+    name: Isolated Python source build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: 1.93.1
+      - name: Build and verify an isolated source distribution
+        run: |
+          python -m pip install build 'maturin>=1.4,<2'
+          python -m build --sdist --outdir dist python
+          python scripts/verify_release_source.py dist/*.tar.gz --wheel-output-dir "$RUNNER_TEMP/source-wheel"

@@ -1,0 +1,5 @@
+# The release workflow supplies the executable from the tested Linux server wheel.
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+COPY --chmod=755 sparkless-server /usr/local/bin/sparkless-server
+EXPOSE 8099 15002
+ENTRYPOINT ["/usr/local/bin/sparkless-server", "serve", "--host", "0.0.0.0", "--port", "8099", "--connect-host", "0.0.0.0", "--connect-port", "15002"]

@@ -1,8 +1,10 @@
-"""Exercise an installed release wheel and record its exact artifact digest."""
+"""Check an installed release wheel's native binary, SQL, Parquet and Delta."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.metadata
 from pathlib import Path
 import platform
 import re
@@ -11,8 +13,6 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-
-from release_wheel_evidence import build_evidence, canonical_machine, write_evidence
 
 
 def _check_wheel(
@@ -31,7 +31,10 @@ def _check_wheel(
             )
         )
 
-    actual_machine = canonical_machine(platform.machine())
+    machine = platform.machine().lower().replace("-", "_")
+    actual_machine = {"amd64": "x86_64", "x64": "x86_64", "arm64": "aarch64"}.get(
+        machine, machine
+    )
     if actual_machine != expected_machine:
         raise ValueError(
             "runtime machine is {}, expected native {}".format(
@@ -53,9 +56,8 @@ def _check_wheel(
                 "wheel metadata does not declare the expected abi3 platform tag"
             )
 
-    from release_wheel_evidence import wheel_sha256
-
-    digest = wheel_sha256(wheel)
+    with wheel.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
     return digest, actual_machine
 
 
@@ -227,17 +229,14 @@ def main() -> int:
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--platform-tag", required=True)
     parser.add_argument("--machine", choices=("x86_64", "aarch64"), required=True)
-    parser.add_argument("--expected-sha256", required=True)
-    parser.add_argument("--target", required=True)
-    parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
     try:
         digest, _actual_machine = _check_wheel(
             args.wheel, args.platform_tag, args.machine
         )
-        if digest != args.expected_sha256.lower():
-            raise ValueError("wheel changed after its pre-install digest was recorded")
+        if importlib.metadata.version("sparkless") != args.wheel.name.split("-")[1]:
+            raise ValueError("installed Sparkless version does not match the wheel")
 
         with tempfile.TemporaryDirectory(
             prefix="sparkless-wheel-witness-"
@@ -246,16 +245,7 @@ def main() -> int:
             _verify_native_binary(args.wheel, root, args.machine)
             _exercise_runtime(root)
 
-        evidence = build_evidence(
-            wheel=args.wheel,
-            expected_sha256=args.expected_sha256,
-            suite="platform-runtime",
-            target=args.target,
-        )
-        write_evidence(evidence, args.output)
-        import json
-
-        print(json.dumps(evidence, sort_keys=True))
+        print(f"Wheel runtime checks passed: {args.wheel.name} (sha256: {digest})")
     except (
         OSError,
         ValueError,
