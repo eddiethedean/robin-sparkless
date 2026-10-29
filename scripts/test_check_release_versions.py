@@ -96,12 +96,12 @@ class ReleaseVersionsTest(unittest.TestCase):
             server_manifest = root / "crates/sparkless-server/Cargo.toml"
             server_manifest.write_text(
                 server_manifest.read_text().replace(
+                    'spark-sql-parser = { version = "4.18.0"',
                     'spark-sql-parser = { version = "4.17.0"',
-                    'spark-sql-parser = { version = "4.16.0"',
                     1,
                 )
             )
-            errors = validate_server_inventory(root, "v4.17.0")
+            errors = validate_server_inventory(root, "v4.18.0")
             self.assertTrue(
                 any("sparkless-server/spark-sql-parser" in error for error in errors)
             )

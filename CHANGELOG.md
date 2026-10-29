@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.18.0] - 2026-10-29
+
+### Added
+
+- **Native Spark Connect server** — the coordinated native server distribution includes the optional Spark Connect 4.0.5 transport, checked plan execution, bounded Arrow streaming, operation recovery, and owned launcher lifecycle. The capability matrix and unsupported operations are documented in [Spark Connect support](docs/SPARK_CONNECT.md).
+- **Connect candidate verification** — the 4.18 candidate workflow runs the pinned client against the Spark 4.0.5 reference, exercises the packaged server binaries, checks the full distribution inventory, and preserves source-bound V33 evidence.
+
 ## [4.17.0] - 2026-10-27
 
 ### Added

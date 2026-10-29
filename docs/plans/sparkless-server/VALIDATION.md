@@ -104,7 +104,13 @@ Use the [4.18 corpus](RELEASE_4_18.md#validation-corpus-and-release-gates) with 
 
 V23 verifies JVM-free client processes against the native service plus shared HTTP/Connect saturation and health progress. V24 verifies installed launcher endpoints and feature variants after standalone conformance; V25 separately certifies the actual emulator gRPC route. V26 records correctness and concurrent-client performance/resource evidence. Prior HTTP SDK evidence cannot substitute for Connect proxy certification.
 
-V33 verifies the complete 4.18.0 candidate, applicable earlier regressions and all required Phase 2 gates before tagging/publication; V34 establishes release completion through fresh public-artifact installs. Both are planned gates; the existing 4.17 publication jobs do not implement them. All evidence remains pending.
+V33 verifies the complete 4.18.0 candidate, applicable earlier regressions and all required Phase 2 gates before tagging/publication; V34 establishes release completion through fresh public-artifact installs. The 4.18 workflow wires the V17 witness, V18–V23 client/oracle run, V24 packaged server checks, V26 measurement and numeric-budget verifier, and exact V33 inventory verifier. V26 requires a reviewed `tests/connect/v26-regression-budget.json` with recorded baseline metrics and explicit limits for each 1/2/4/8-client cohort. The file is intentionally absent until those limits are approved; its absence fails closed. No exact 4.18 candidate run has passed.
+
+### 418-09 local V33 gate implementation — 2026-10-29 UTC
+
+The 4.18 candidate workflow now reruns the applicable V17 witness, runs the pinned standalone client and Spark 4.0.5 oracle through V18–V23, requires the V24 packaged server/launcher checks and V26 measurement job, and verifies the exact 4.18.0 wheel, sdist, server-binary wheel and container inventory before preserving candidate artifacts. Server artifact evidence records the actual `http,connect` build features. The coordinated package manifests, lockfile, Python metadata and `sparkless[server]` dependency are set to `4.18.0`; the [client-facing capability matrix](../../SPARK_CONNECT.md) records the supported surface and limits.
+
+This wires V33 but does not pass it: no exact 4.18 candidate workflow run has completed. V26 still lacks an approved numeric regression budget, and the MiniLake V25 route is not advertised as supported in this release. The downstream Rust consumer audit is a separate required release gate; the current zstd risk acceptance is scoped to 4.17.0, so 4.18 needs a clean unpatched consumer graph or a fresh maintainer decision before that gate can pass.
 
 ## zstd compatibility evidence for 4.17
 

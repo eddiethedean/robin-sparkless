@@ -18,8 +18,16 @@ SERVER_WHEELS = {
     "server-bin-linux-x86_64": "manylinux_2_28_x86_64",
     "server-bin-macos-aarch64": "macosx_14_0_arm64",
 }
-SERVER_BUILD = {"profile": "release", "features": [], "rust_toolchain": "1.93.1"}
-CONTAINER_BUILD = {"profile": "release", "features": [], "rust_toolchain": "1.93"}
+SERVER_BUILD = {
+    "profile": "release",
+    "features": ["http", "connect"],
+    "rust_toolchain": "1.93.1",
+}
+CONTAINER_BUILD = {
+    "profile": "release",
+    "features": ["http", "connect"],
+    "rust_toolchain": "1.93",
+}
 CONTAINER_CHECKS = ["non-root", "sql-http-mutations", "graceful-shutdown"]
 
 

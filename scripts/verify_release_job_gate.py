@@ -75,15 +75,18 @@ def _required_jobs(
     optional: set[str] = set()
 
     if mode in {"release_candidate", "stable_tag"}:
-        required = shared | candidate
         active_line = _release_line_for_ref(ref)
-        for line, jobs in line_jobs.items():
-            if line == active_line:
-                required |= set(manifest["release_line_specific"][line]["required"])
-            else:
-                required -= jobs
-                optional |= jobs
-        return required, optional | manual
+        active_required = (
+            set(manifest["release_line_specific"][active_line]["required"])
+            if active_line in manifest["release_line_specific"]
+            else set()
+        )
+        all_line_jobs = set().union(*line_jobs.values())
+        inactive_jobs = all_line_jobs - active_required
+        required = (shared | candidate) - inactive_jobs
+        required |= active_required
+        optional = (all_line_jobs | manual) - required
+        return required, optional
 
     if mode in {"manual_validation", "manual_rust_publish"}:
         return shared | manual, candidate | set().union(*line_jobs.values())

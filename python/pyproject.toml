@@ -1,6 +1,6 @@
 [project]
 name = "sparkless"
-version = "4.17.0"
+version = "4.18.0"
 description = "PySpark-like DataFrame API in Python—no JVM. Uses robin-sparkless (Rust/Polars) as the execution engine."
 readme = "README.md"
 license = { text = "MIT" }
@@ -42,7 +42,7 @@ pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
 # PySpark 4.x oracle (Java 17, Python 3.11+)
 pyspark4 = ["pyspark>=4.0,<4.2", "delta-spark>=4.0,<5"]
 # Install the separately built, platform-specific native HTTP server executable.
-server = ["sparkless-server-bin==4.17.0"]
+server = ["sparkless-server-bin==4.18.0"]
 
 [tool.pytest.ini_options]
 markers = [

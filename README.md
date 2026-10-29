@@ -122,6 +122,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, `make check-full`, pytest, and
 | [**Python package**](python/README.md) | Install, quick start, platform matrix, API overview |
 | [**Read the Docs**](https://robin-sparkless.readthedocs.io/) | Getting started, testing, migration, FAQ |
 | [**Before you adopt**](docs/BEFORE_YOU_ADOPT.md) | UDF limits, parity caveats, production notes |
+| [**Spark Connect server**](docs/SPARK_CONNECT.md) | Spark 4.0.5 server setup, supported plans/types, lifecycle and limits |
 | [**CONTRIBUTING**](CONTRIBUTING.md) | Dev setup and PR checklist |
 | [**docs.rs**](https://docs.rs/robin-sparkless) | Rust API reference |
 | [Testing Guide](docs/TESTING_GUIDE.md) | Dual-mode testing with `sparkless.testing` |

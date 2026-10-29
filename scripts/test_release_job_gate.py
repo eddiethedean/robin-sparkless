@@ -82,7 +82,7 @@ class ReleaseGateTests(unittest.TestCase):
         needs = self._needs("release_candidate", ref)
         self.assertEqual(validate_gate("release_candidate", ref, needs, MANIFEST), [])
         self.assertEqual(needs["connect-slice8-benchmarks"]["result"], "success")
-        self.assertEqual(needs["phase1-v17-resource-witness"]["result"], "skipped")
+        self.assertEqual(needs["phase1-v17-resource-witness"]["result"], "success")
 
         needs["connect-slice8-benchmarks"]["result"] = "failure"
         self.assertTrue(
@@ -92,9 +92,30 @@ class ReleaseGateTests(unittest.TestCase):
             )
         )
 
+        needs["connect-slice8-benchmarks"]["result"] = "success"
+        needs["connect-slice9-conformance"]["result"] = "failure"
+        self.assertTrue(
+            any(
+                "connect-slice9-conformance" in issue
+                for issue in validate_gate("release_candidate", ref, needs, MANIFEST)
+            )
+        )
+
+        needs["connect-slice9-conformance"]["result"] = "success"
+        needs["phase1-v17-resource-witness"]["result"] = "failure"
+        self.assertTrue(
+            any(
+                "phase1-v17-resource-witness" in issue
+                for issue in validate_gate("release_candidate", ref, needs, MANIFEST)
+            )
+        )
+
         prior_ref = "refs/heads/codex/release-4.17"
         prior_needs = self._needs("release_candidate", prior_ref)
         self.assertEqual(prior_needs["connect-slice8-benchmarks"]["result"], "skipped")
+        self.assertEqual(
+            prior_needs["connect-slice9-conformance"]["result"], "skipped"
+        )
         self.assertEqual(
             validate_gate("release_candidate", prior_ref, prior_needs, MANIFEST), []
         )
@@ -117,6 +138,49 @@ class ReleaseGateTests(unittest.TestCase):
 
 
 class ReleasePublicationConditionTests(unittest.TestCase):
+    def test_418_candidate_inventory_requires_every_slice9_prerequisite(self) -> None:
+        workflow = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+        source = workflow.read_text(encoding="utf-8")
+
+        def job_body(job_id: str) -> str:
+            match = re.search(
+                rf"(?ms)^  {re.escape(job_id)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+                source,
+            )
+            self.assertIsNotNone(match, f"missing workflow job {job_id}")
+            return match.group("body")
+
+        candidate = job_body("verify-candidate-distributions")
+        candidate_needs = re.search(
+            r"(?ms)^    needs:\s*(?P<needs>.*?)(?=^    [A-Za-z0-9_-]+:|\Z)",
+            candidate,
+        )
+        candidate_condition = re.search(
+            r"(?ms)^    if:\s*(?P<condition>.*?)(?=^    [A-Za-z0-9_-]+:|\Z)",
+            candidate,
+        )
+        self.assertIsNotNone(candidate_needs)
+        self.assertIsNotNone(candidate_condition)
+        for job_id in (
+            "phase1-v17-resource-witness",
+            "connect-slice8-benchmarks",
+            "connect-slice9-conformance",
+        ):
+            self.assertIn(f"- {job_id}", candidate_needs.group("needs"))
+            self.assertIn(
+                f"needs.{job_id}.result == 'success'",
+                candidate_condition.group("condition"),
+            )
+
+        validation_gate = job_body("release-validation-gate")
+        for job_id in (
+            "phase1-v17-resource-witness",
+            "connect-slice8-benchmarks",
+            "connect-slice9-conformance",
+            "verify-candidate-distributions",
+        ):
+            self.assertIn(f"- {job_id}", validation_gate)
+
     def test_publish_and_public_verification_jobs_survive_allowed_skips(self) -> None:
         workflow = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
         source = workflow.read_text(encoding="utf-8")

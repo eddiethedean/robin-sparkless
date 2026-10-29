@@ -21,21 +21,28 @@ native `SELECT 1` witness and a `stopped` record after shutdown. Send
 shutdown; diagnostics remain on stderr. Do not use this pipe protocol as an SQL
 transport.
 
-The default `http` feature serves the existing bounded SQL allowlist, in-memory service
-catalog, positional JSON results, and same-instance mutation identity records. The optional
-`connect` feature generates the Apache Spark 4.0.5 public gRPC service and provides a bounded
-adapter on the same `Server` instance (`connect_service` / `serve_connect_until`). The implemented
-4.18 subset translates Range, Filter, Project, Limit, and global `count(1)` plans; it serves scalar
-schema and bounded DDL analysis without collecting rows; and it exposes the captured 4.0.5 config
-profile with idempotent same-value sets and explicit rejection of unsupported changes. `ExecutePlan`
-validates and analyzes supported plans, then returns an explicit slice-4 error until Arrow result
-streaming is enabled. Local relations, artifact-backed relations, replay/lifecycle RPC behavior, and
-other plan or analysis variants remain unsupported. The `serve` and `control` commands bind HTTP
-and Connect independently; Connect defaults to `127.0.0.1:15002`, while port `0` selects an
-ephemeral port. `control` readiness reports both actual endpoints, instance identity, control
-protocol version 2, and capability protocol version 1. `--disable-connect` keeps the same packaged
-binary in HTTP-only mode; `--disable-http` selects Connect-only mode when the Connect feature is
-compiled. Connect readiness is published only after both requested sockets bind.
+The default `http` feature serves the bounded SQL allowlist, in-memory service catalog, positional
+JSON results, and same-instance mutation identity records. The optional `connect` feature compiles
+the Apache Spark 4.0.5 public gRPC service and serves the Sparkless range/filter/project/limit/count
+subset through the same native `Server` instance. Supported Connect plans include bounded scalar
+and schema-bearing local relations, checked analysis/configuration calls, and independently
+decodable bounded Arrow result batches. Operation reattachment, release, interruption, stale
+identity rejection, and bounded result retention follow the documented lifecycle limits.
+
+The 4.18 packaged server binary enables both `http` and `connect`. The `serve` and `control`
+commands bind the listeners independently; Connect defaults to `127.0.0.1:15002`, while port `0`
+selects an ephemeral port. `control` readiness reports the actual endpoints, server identity,
+control protocol version 2, and capabilities protocol version 1. `--disable-connect` runs the same
+binary in HTTP-only mode; `--disable-http` selects Connect-only mode. Readiness is published only
+after each requested socket binds.
+
+Spark Connect SQL commands, writes, artifacts, UDFs, Structured Streaming, unlisted plan types,
+and types outside the published support matrix remain unsupported and return errors. The 4.18
+server does not advertise or certify the optional MiniLake proxy route. Connect user IDs identify
+sessions; they are not authentication credentials. Bind remote listeners only behind an explicit
+deployment trust boundary. Saved catalog objects and operation records are in memory and are lost on
+restart. CPU and intermediate memory limits remain cooperative rather than hard per-query
+isolation. See the full [Spark Connect support matrix](../../docs/SPARK_CONNECT.md).
 
 Build the features independently:
 
@@ -52,12 +59,9 @@ The Connect-only feature build starts only gRPC:
 
 The Connect proto sources are vendored under `proto/spark/connect` from Apache Spark tag
 `v4.0.5` and generated during a Connect-feature build; see `proto/README.md` and the
-[4.18 protocol research](../../docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md).
-Connect user IDs partition session identity and are not authentication credentials. The
-HTTP reserves session IDs beginning with `connect:` and operation IDs beginning with
-`connect-operation:` to keep its registry namespace separate from Connect. The in-memory catalog
-and operation records are lost on restart. Native CPU and intermediate-memory limits remain
-cooperative rather than hard per-query isolation.
+[4.18 protocol research](../../docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md). The HTTP
+service reserves session IDs beginning with `connect:` and operation IDs beginning with
+`connect-operation:` to keep its registry namespace separate from Connect.
 
 Build the JVM-free native image from the workspace root with:
 

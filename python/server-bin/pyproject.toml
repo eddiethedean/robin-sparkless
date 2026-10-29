@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sparkless-server-bin"
-version = "4.17.0"
+version = "4.18.0"
 description = "Platform-specific native HTTP and Spark Connect server executable for sparkless"
 readme = "README.md"
 requires-python = ">=3.11"

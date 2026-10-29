@@ -62,6 +62,8 @@ nav:
     - Persistence guide: PERSISTENCE_GUIDE.md
     - UDF guide: UDF_GUIDE.md
     - Execution cancellation: EXECUTION_CANCELLATION.md
+  - Server:
+    - Spark Connect: SPARK_CONNECT.md
   - Reference:
     - PySpark differences: PYSPARK_DIFFERENCES.md
     - Parity status: PARITY_STATUS.md
