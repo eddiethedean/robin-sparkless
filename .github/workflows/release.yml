@@ -369,6 +369,7 @@ jobs:
         run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
         env:
           CARGO_BUILD_JOBS: 1
+          RUSTUP_TOOLCHAIN: 1.93.1
       - name: Build and verify manylinux wheel
         run: |
           set -euo pipefail
