@@ -7,6 +7,7 @@ from pathlib import Path
 from verify_rust_consumer_graph import (
     audit_decision,
     consumer_manifest,
+    release_exception_policy_path,
     verify_consumer_features,
 )
 
@@ -117,6 +118,32 @@ class ReleaseExceptionTest(unittest.TestCase):
         ]:
             with self.assertRaises(ValueError):
                 self.decide(report)
+
+    def test_418_policy_accepts_only_the_approved_release_window(self):
+        root = Path(__file__).resolve().parents[1]
+        policy = tomllib.loads(
+            release_exception_policy_path(root, "4.18.0").read_text()
+        )
+        decision = audit_decision(
+            self.report, 1, policy, "4.18.0", date(2026, 10, 29)
+        )
+        self.assertEqual(decision["status"], "accepted_exception")
+        self.assertEqual(decision["expires_on"], "2026-11-26")
+        with self.assertRaises(ValueError):
+            audit_decision(self.report, 1, policy, "4.17.0", date(2026, 10, 29))
+        with self.assertRaises(ValueError):
+            audit_decision(self.report, 1, policy, "4.18.0", date(2026, 11, 27))
+
+    def test_exception_policy_is_scoped_to_release_series(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(
+            release_exception_policy_path(root, "4.17.0").name,
+            "zstd-4.17-exceptions.toml",
+        )
+        self.assertEqual(
+            release_exception_policy_path(root, "4.18.0").name,
+            "zstd-4.18-exceptions.toml",
+        )
 
     def test_fixed_upstream_graph_needs_no_exception_even_after_expiry(self):
         report = {"vulnerabilities": {"found": False, "count": 0, "list": []}}

@@ -97,6 +97,14 @@ def verify_consumer_features(metadata: dict) -> None:
         raise ValueError("the zstd exception does not cover the seekable feature")
 
 
+def release_exception_policy_path(root: Path, release: str) -> Path:
+    """Return the exception policy scoped to this release series."""
+    series = ".".join(release.split(".")[:2])
+    return root / "security" / "{}-exceptions.toml".format(
+        "zstd-{}".format(series)
+    )
+
+
 def verify(
     root: Path,
     output: Path,
@@ -145,9 +153,9 @@ def verify(
         output.write_bytes(result.stdout)
         policy = None
         if not strict and patch_config is None:
-            policy = tomllib.loads(
-                (root / "security/zstd-4.17-exceptions.toml").read_text()
-            )
+            policy_path = release_exception_policy_path(root, release)
+            if policy_path.is_file():
+                policy = tomllib.loads(policy_path.read_text())
         decision_path = output.with_suffix(".exceptions.json")
         try:
             verify_consumer_features(metadata)

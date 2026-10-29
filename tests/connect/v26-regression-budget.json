@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "approval": {
+    "approved_by": "Repository release approver",
+    "approved_at": "2026-10-29",
+    "baseline_run": "https://github.com/eddiethedean/robin-sparkless/actions/runs/40889456825 (run-20261029T144348Z-2541)",
+    "baseline_source_revision": "0e75c3d83b4e56f4ee9d034322358028f7a9b30e",
+    "baseline_cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "baseline_logical_cpu_count": 4,
+    "baseline_rows": 1000000,
+    "baseline_iterations_per_client": 5
+  },
+  "cohorts": {
+    "1": {
+      "baseline": {
+        "operations_per_second": 2.809218073572046,
+        "latency_p95_ms": 656.7843950001588,
+        "server_peak_rss_bytes": 76386304
+      },
+      "limits": {
+        "minimum_operations_per_second_ratio": 0.8,
+        "maximum_latency_p95_ratio": 1.25,
+        "maximum_server_peak_rss_ratio": 1.15
+      }
+    },
+    "2": {
+      "baseline": {
+        "operations_per_second": 5.235041181505156,
+        "latency_p95_ms": 702.9691269999603,
+        "server_peak_rss_bytes": 87633920
+      },
+      "limits": {
+        "minimum_operations_per_second_ratio": 0.8,
+        "maximum_latency_p95_ratio": 1.25,
+        "maximum_server_peak_rss_ratio": 1.15
+      }
+    },
+    "4": {
+      "baseline": {
+        "operations_per_second": 5.054475772003182,
+        "latency_p95_ms": 1120.771952000041,
+        "server_peak_rss_bytes": 100954112
+      },
+      "limits": {
+        "minimum_operations_per_second_ratio": 0.8,
+        "maximum_latency_p95_ratio": 1.25,
+        "maximum_server_peak_rss_ratio": 1.15
+      }
+    },
+    "8": {
+      "baseline": {
+        "operations_per_second": 5.8977474118986075,
+        "latency_p95_ms": 2056.9961339999736,
+        "server_peak_rss_bytes": 101879808
+      },
+      "limits": {
+        "minimum_operations_per_second_ratio": 0.8,
+        "maximum_latency_p95_ratio": 1.25,
+        "maximum_server_peak_rss_ratio": 1.15
+      }
+    }
+  }
+}

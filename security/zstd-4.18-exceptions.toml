@@ -1,0 +1,24 @@
+# Maintainer-authorized temporary risk acceptance, not a claim of remediation.
+# Only verify_rust_consumer_graph.py reads this; Cargo audit/deny stay strict.
+schema_version = 1
+release = "4.18.0"
+approved_on = 2026-10-29
+expires_on = 2026-11-26
+tracking = "https://github.com/eddiethedean/robin-sparkless/pull/1727"
+approved_by = "Repository release approver"
+rationale = "The repository release approver authorized a time-bounded exception for 4.18.0 on 2026-10-29, expiring 2026-11-26. Wheels, native binaries, containers and source builds use fixed zstd 0.14.3 / zstd-safe 8.2.0 via our four vendored dependency patches. Unpatched crates.io consumers retain real context-reuse exposure; the consumer patch configuration and security note disclose this risk. Remove this exception when the resolved upstream registry graph is fixed, or re-review before expiry."
+
+[[exceptions]]
+advisory = "RUSTSEC-2026-0391"
+package = "zstd"
+version = "0.13.3"
+
+[[exceptions]]
+advisory = "RUSTSEC-2026-0403"
+package = "zstd-safe"
+version = "7.3.0"
+
+[[exceptions]]
+advisory = "RUSTSEC-2026-0398"
+package = "zstd-safe"
+version = "7.3.0"

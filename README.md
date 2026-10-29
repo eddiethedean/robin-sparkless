@@ -93,10 +93,10 @@ robin-sparkless = "4"
 
 Optional features: `sql`, `delta`, `jdbc`, `sqlite`, `jdbc_mysql`. See [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
-**4.17.0 Rust security notice:** ordinary crates.io builds retain a temporary
-zstd exception. Apply our pinned Cargo patches when reading untrusted compressed
-input; official Python wheels and prebuilt servers use the fixed implementation.
-See the [exposure, expiry, and patch instructions](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/security/zstd-4.17-exception.md).
+**4.18.0 Rust security notice:** ordinary crates.io builds retain a temporary
+zstd exception through 2026-11-26. Apply our pinned Cargo patches when
+reading untrusted compressed input; official Python wheels and prebuilt servers use the fixed implementation.
+See the [exposure, expiry, and patch instructions](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/security/zstd-4.18-exception.md).
 
 ---
 
