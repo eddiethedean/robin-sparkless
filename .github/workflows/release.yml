@@ -141,6 +141,8 @@ jobs:
         with:
           toolchain: 1.93.1
       - name: Package source distributions
+        env:
+          RUSTUP_TOOLCHAIN: 1.93.1
         run: |
           python -m pip install build 'maturin>=1.4,<2'
           python -m build --sdist --outdir dist python
