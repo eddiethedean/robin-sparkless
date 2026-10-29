@@ -1816,7 +1816,7 @@ jobs:
             image: quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851
             python-version: "3.11"
             python-bin: /opt/python/cp311-cp311/bin/python
-            platform-tag: manylinux_2_17_x86_64.manylinux2014_x86_64
+            platform-tag: manylinux2014_x86_64.manylinux_2_17_x86_64
             machine: x86_64
           - target: manylinux-x86_64
             artifact: sparkless-dist-manylinux-x86_64
@@ -1824,7 +1824,7 @@ jobs:
             image: quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851
             python-version: "3.14"
             python-bin: /opt/python/cp314-cp314/bin/python
-            platform-tag: manylinux_2_17_x86_64.manylinux2014_x86_64
+            platform-tag: manylinux2014_x86_64.manylinux_2_17_x86_64
             machine: x86_64
           - target: manylinux-aarch64
             artifact: sparkless-dist-manylinux-aarch64
