@@ -16,7 +16,14 @@ struct ServerProcess {
 impl ServerProcess {
     fn start() -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_sparkless-server"))
-            .args(["control", "--host", "127.0.0.1", "--port", "0"])
+            .args([
+                "control",
+                "--disable-connect",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "0",
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

@@ -49,9 +49,10 @@ def _load_budget(path: Path) -> dict[str, Any]:
     approval = budget.get("approval")
     if not isinstance(approval, dict):
         raise BudgetError("V26 budget requires an approval record")
-    if not isinstance(approval.get("approved_by"), str) or not approval[
-        "approved_by"
-    ].strip():
+    if (
+        not isinstance(approval.get("approved_by"), str)
+        or not approval["approved_by"].strip()
+    ):
         raise BudgetError("V26 budget approval.approved_by must name an approver")
     approved_at = approval.get("approved_at", "")
     if not isinstance(approved_at, str) or not re.fullmatch(
@@ -61,20 +62,26 @@ def _load_budget(path: Path) -> dict[str, Any]:
     try:
         date.fromisoformat(approved_at)
     except ValueError as error:
-        raise BudgetError("V26 budget approval.approved_at must be YYYY-MM-DD") from error
+        raise BudgetError(
+            "V26 budget approval.approved_at must be YYYY-MM-DD"
+        ) from error
     for field in ("baseline_run", "baseline_source_revision", "baseline_cpu_model"):
         if not isinstance(approval.get(field), str) or not approval[field].strip():
             raise BudgetError(f"V26 budget approval.{field} is required")
-    if not isinstance(approval.get("baseline_logical_cpu_count"), int) or isinstance(
-        approval["baseline_logical_cpu_count"], bool
-    ) or approval["baseline_logical_cpu_count"] < 1:
+    if (
+        not isinstance(approval.get("baseline_logical_cpu_count"), int)
+        or isinstance(approval["baseline_logical_cpu_count"], bool)
+        or approval["baseline_logical_cpu_count"] < 1
+    ):
         raise BudgetError(
             "V26 budget approval.baseline_logical_cpu_count must be a positive integer"
         )
     for field in ("baseline_rows", "baseline_iterations_per_client"):
-        if not isinstance(approval.get(field), int) or isinstance(
-            approval[field], bool
-        ) or approval[field] < 1:
+        if (
+            not isinstance(approval.get(field), int)
+            or isinstance(approval[field], bool)
+            or approval[field] < 1
+        ):
             raise BudgetError(f"V26 budget approval.{field} must be a positive integer")
 
     cohorts = budget.get("cohorts")
@@ -120,9 +127,11 @@ def verify_budget(report_dir: Path, budget_path: Path) -> list[str]:
         report = json.loads(reports[0].read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise BudgetError(f"could not read V26 report {reports[0]}: {error}") from error
-    if not isinstance(report, dict) or report.get("schema_version") != 1 or report.get(
-        "slice"
-    ) != "418-08-local-v26":
+    if (
+        not isinstance(report, dict)
+        or report.get("schema_version") != 1
+        or report.get("slice") != "418-08-local-v26"
+    ):
         raise BudgetError("candidate report is not a supported V26 measurement")
 
     environment = report.get("environment")
@@ -133,9 +142,7 @@ def verify_budget(report_dir: Path, budget_path: Path) -> list[str]:
         raise BudgetError(
             "candidate CPU model does not match the approved V26 baseline"
         )
-    if environment.get("logical_cpu_count") != approval[
-        "baseline_logical_cpu_count"
-    ]:
+    if environment.get("logical_cpu_count") != approval["baseline_logical_cpu_count"]:
         raise BudgetError(
             "candidate logical CPU count does not match the approved V26 baseline"
         )
@@ -153,19 +160,16 @@ def verify_budget(report_dir: Path, budget_path: Path) -> list[str]:
         raise BudgetError(
             "candidate row count does not match the approved V26 baseline"
         )
-    if settings.get("iterations_per_client") != approval[
-        "baseline_iterations_per_client"
-    ]:
-        raise BudgetError(
-            "candidate iterations do not match the approved V26 baseline"
-        )
+    if (
+        settings.get("iterations_per_client")
+        != approval["baseline_iterations_per_client"]
+    ):
+        raise BudgetError("candidate iterations do not match the approved V26 baseline")
     observed = report.get("cohorts")
     if not isinstance(observed, list) or len(observed) != len(CONCURRENCIES):
         raise BudgetError("candidate report must contain all four V26 cohorts")
     by_concurrency = {
-        item.get("concurrency"): item
-        for item in observed
-        if isinstance(item, dict)
+        item.get("concurrency"): item for item in observed if isinstance(item, dict)
     }
     if set(by_concurrency) != set(CONCURRENCIES):
         raise BudgetError("candidate report has duplicate or missing V26 cohorts")

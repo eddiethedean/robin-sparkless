@@ -744,8 +744,8 @@ class AsyncSparklessServer:
                 record, require_spark_connect=self.connect_port is not None
             )
         except BaseException as error:
-            cleanup = asyncio.create_task(self._cleanup_failed_start())
-            connect_unavailable = await _await_cleanup(cleanup)
+            failed_start_cleanup = asyncio.create_task(self._cleanup_failed_start())
+            connect_unavailable = await _await_cleanup(failed_start_cleanup)
             if connect_unavailable and isinstance(error, Exception):
                 raise UnsupportedSparkConnectError(
                     "server binary does not provide Spark Connect"

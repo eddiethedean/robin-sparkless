@@ -51,6 +51,13 @@ PYPI_PLATFORMS_BY_VERSION = {
         },
         "sparkless": PYPI_PLATFORMS["sparkless"],
     },
+    "4.18.0": {
+        "sparkless-server-bin": {
+            "manylinux_2_28_x86_64",
+            "macosx_14_0_arm64",
+        },
+        "sparkless": PYPI_PLATFORMS["sparkless"],
+    },
 }
 CRATES = (
     "spark-sql-parser",
@@ -157,6 +164,8 @@ def validate_pypi_release(
         inventory_version = "4.16.1"
     elif version.startswith("4.17."):
         inventory_version = "4.17.0"
+    elif version.startswith("4.18."):
+        inventory_version = "4.18.0"
     else:
         inventory_version = version
     try:

@@ -112,6 +112,12 @@ The 4.18 candidate workflow now reruns the applicable V17 witness, runs the pinn
 
 This wires V33 but does not pass it: no exact 4.18 candidate workflow run has completed. V26 still lacks an approved numeric regression budget, and the MiniLake V25 route is not advertised as supported in this release. The downstream Rust consumer audit is a separate required release gate; the current zstd risk acceptance is scoped to 4.17.0, so 4.18 needs a clean unpatched consumer graph or a fresh maintainer decision before that gate can pass.
 
+### 418-10 local V34 publication verification — 2026-10-29 UTC
+
+The 4.18 stable-tag workflow now runs the existing coordinated Rust/PyPI/GHCR publication path and then gates completion on V34. The public verifier recognizes the exact 4.18.0 wheel inventory, checks PyPI file hashes against the V33-verified downloads and all five crates.io releases, verifies the GHCR tag resolves to the published digest, and smoke-tests HTTP plus Spark Connect from the pulled public image. Fresh `sparkless[server]==4.18.0` installation exercises the owned launcher and PySpark client. The exact-version crates.io server install runs the V18–V23 client/oracle/retry/release suite through the production CLI, with its report retained as a V34 artifact. Recovery requires the source V17/V18–V23/V26 evidence and reruns the public Rust conformance, Python launcher, and container Connect checks.
+
+This is workflow implementation only. No 4.18.0 tag has published packages, and no V34 run or public artifact evidence exists yet. The V26 budget and the 4.18 Rust consumer audit remain upstream release blockers.
+
 ## zstd compatibility evidence for 4.17
 
 Current integration is based on `codex/release-4.17` commit `e3f85cb447392bba185f11dd87a32c56cd8658e1`, with the working-tree changes below tested on 2026-10-26, macOS arm64 / Rust 1.93.1. The branch's four vendored Polars/Parquet consumers depend directly on zstd 0.14.3, zstd-safe 8.2.0, and zstd-sys 2.1.2. The earlier 0.13 compatibility adapter is superseded; its [prototype evidence](../../history/zstd-013-prototype-evidence.md) is historical. No zstd advisory exception was added to this candidate.

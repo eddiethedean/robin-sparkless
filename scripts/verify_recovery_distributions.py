@@ -15,8 +15,13 @@ from verify_release_distributions import verify_distributions
 def verify_recovery_distributions(
     version: str, server_bin_directory: Path, sparkless_directory: Path
 ) -> None:
+    inventory_version = version
+    if version.startswith("4.17."):
+        inventory_version = "4.17.0"
+    elif version.startswith("4.18."):
+        inventory_version = "4.18.0"
     try:
-        expected = PYPI_PLATFORMS_BY_VERSION[version]
+        expected = PYPI_PLATFORMS_BY_VERSION[inventory_version]
     except KeyError as error:
         raise ValueError(
             "no recovery inventory is recorded for version {}".format(version)

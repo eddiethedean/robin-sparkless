@@ -32,7 +32,17 @@ def main() -> None:
                 before_epoch,
                 Decimal("-12345678901234567890.123456"),
             ),
-            (None, None, None, None, None, None, date(1969, 12, 31), before_epoch, None),
+            (
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                date(1969, 12, 31),
+                before_epoch,
+                None,
+            ),
         ]
         local = spark.createDataFrame(rows, schema)
         decoded = local.collect()
@@ -85,7 +95,9 @@ def main() -> None:
         assert len(spark.range(20_000).collect()) == 20_000
         print("multi-batch range passed", flush=True)
 
-        duplicate = spark.range(3).select(col("id").alias("x"), col("id").alias("x")).collect()
+        duplicate = (
+            spark.range(3).select(col("id").alias("x"), col("id").alias("x")).collect()
+        )
         assert [tuple(row) for row in duplicate] == [(0, 0), (1, 1), (2, 2)]
         duplicate_arrow = (
             spark.range(3).select(col("id").alias("x"), col("id").alias("x")).toArrow()

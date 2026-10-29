@@ -113,9 +113,7 @@ class ReleaseGateTests(unittest.TestCase):
         prior_ref = "refs/heads/codex/release-4.17"
         prior_needs = self._needs("release_candidate", prior_ref)
         self.assertEqual(prior_needs["connect-slice8-benchmarks"]["result"], "skipped")
-        self.assertEqual(
-            prior_needs["connect-slice9-conformance"]["result"], "skipped"
-        )
+        self.assertEqual(prior_needs["connect-slice9-conformance"]["result"], "skipped")
         self.assertEqual(
             validate_gate("release_candidate", prior_ref, prior_needs, MANIFEST), []
         )

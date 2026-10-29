@@ -162,6 +162,7 @@ fn serve_mode_drains_on_sigterm() {
     let child = Command::new(env!("CARGO_BIN_EXE_sparkless-server"))
         .args([
             "serve",
+            "--disable-connect",
             "--host",
             "127.0.0.1",
             "--port",
@@ -177,7 +178,7 @@ fn serve_mode_drains_on_sigterm() {
     // This process starts a full native engine, and the control-mode test in this
     // integration binary also starts an engine concurrently. Give slower CI runners
     // time to initialize before treating a missing listener as a signal regression.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(90);
     loop {
         if let Some(status) = child.0.try_wait().expect("poll server status") {
             panic!("server exited before becoming ready: {status}");

@@ -852,7 +852,7 @@ jobs:
     name: Recover release publication from a verified tag run
     if: needs.release-mode.outputs.mode == 'pypi_recovery'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 180
     needs: [release-mode]
     environment:
       name: pypi
@@ -866,7 +866,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
-      - name: Validate the completed tagged source run and V31 artifacts
+      - name: Validate the completed tagged source run and candidate artifacts
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
@@ -895,7 +895,37 @@ jobs:
             --source-workflow "$RUNNER_TEMP/recovery-source-release.yml" \
             --repository "$GITHUB_REPOSITORY" \
             --workflow-id "$workflow_id" >> "$GITHUB_OUTPUT"
-      - name: Download the exact V31-verified distributions
+      - name: Install the locked Connect client for 4.18 recovery
+        if: startsWith(steps.source.outputs.version, '4.18.')
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/connect-client"
+          python3 -m venv "$RUNNER_TEMP/connect-oracle"
+          "$RUNNER_TEMP/connect-client/bin/python" -m pip install --require-hashes -r tests/connect/client-py311.lock
+          "$RUNNER_TEMP/connect-oracle/bin/python" -m pip install --require-hashes -r tests/connect/oracle-py311.lock
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+        if: startsWith(steps.source.outputs.version, '4.18.')
+        with:
+          toolchain: 1.93.1
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        if: startsWith(steps.source.outputs.version, '4.18.')
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Download and verify the V34 recovery Spark 4.0.5 oracle
+        if: startsWith(steps.source.outputs.version, '4.18.')
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz"
+          curl --fail --location --silent --show-error --retry 3 \
+            https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz \
+            --output "$archive"
+          printf '%s  %s\n' \
+            4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b \
+            "$archive" | sha512sum --check --status
+          mkdir -p "$RUNNER_TEMP/spark-4.0.5"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/spark-4.0.5" --strip-components=1
+      - name: Download the exact V31/V33-verified distributions
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           run-id: ${{ inputs.pypi_recovery_run_id }}
@@ -908,7 +938,7 @@ jobs:
           github-token: ${{ github.token }}
           name: verified-sparkless-candidate
           path: dist/sparkless
-      - name: Download the exact V31-verified server container image
+      - name: Download the exact candidate server container image
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           run-id: ${{ inputs.pypi_recovery_run_id }}
@@ -991,6 +1021,49 @@ jobs:
             --version "$RELEASE_VERSION" \
             --server-bin-directory dist/server-bin \
             --sparkless-directory dist/sparkless
+      - name: Install the recovered 4.18 Connect-enabled Rust crate
+        if: startsWith(steps.source.outputs.version, '4.18.')
+        env:
+          CARGO_BUILD_JOBS: 1
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          cargo install --locked --version "$RELEASE_VERSION" --no-default-features \
+            --features http,connect --root "$RUNNER_TEMP/public-rust" sparkless-server
+          actual="$("$RUNNER_TEMP/public-rust/bin/sparkless-server" --version)"
+          if [[ "$actual" != "sparkless-server $RELEASE_VERSION" ]]; then
+            echo "installed binary reported '$actual'; expected sparkless-server $RELEASE_VERSION"
+            exit 1
+          fi
+      - name: Verify the recovered Rust server with the public Connect client
+        if: startsWith(steps.source.outputs.version, '4.18.')
+        env:
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+        run: >-
+          python3 scripts/verify_server_bin_wheel.py
+          --binary "$RUNNER_TEMP/public-rust/bin/sparkless-server"
+          --version "$RELEASE_VERSION"
+          --connect --connect-client
+          --client-python "$RUNNER_TEMP/connect-client/bin/python"
+      - name: Run V18-V23 conformance against the recovered public Rust crate
+        if: startsWith(steps.source.outputs.version, '4.18.')
+        run: |
+          set -euo pipefail
+          python3 tests/connect/run_slice6_conformance.py \
+            --server-bin "$RUNNER_TEMP/public-rust/bin/sparkless-server" \
+            --server-cli-mode serve-cli \
+            --client-python "$RUNNER_TEMP/connect-client/bin/python" \
+            --oracle-python "$RUNNER_TEMP/connect-oracle/bin/python" \
+            --oracle-home "$RUNNER_TEMP/spark-4.0.5" \
+            --oracle-archive "$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz" \
+            --output target/connect-v34-recovery
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && startsWith(steps.source.outputs.version, '4.18.')
+        with:
+          name: v34-recovery-public-connect-conformance
+          path: target/connect-v34-recovery/
+          if-no-files-found: warn
+          retention-days: 90
       - name: Verify a fresh exact-version server-extra install
         env:
           RELEASE_VERSION: ${{ steps.source.outputs.version }}
@@ -1001,6 +1074,10 @@ jobs:
           "$RUNNER_TEMP/sparkless-recovery/bin/python" -m pip check
           if [[ "$RELEASE_VERSION" == "4.16.1" ]]; then
             "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION" --protocol legacy-4.16
+          elif [[ "$RELEASE_VERSION" == 4.18.* ]]; then
+            "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py \
+              "$RELEASE_VERSION" --mutations --connect-client \
+              --client-python "$RUNNER_TEMP/connect-client/bin/python"
           else
             "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION" --protocol legacy-4.17
           fi
@@ -1013,21 +1090,30 @@ jobs:
         run: |
           set -euo pipefail
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          target="ghcr.io/eddiethedean/sparkless-server:${RELEASE_VERSION}"
+          tag="v${RELEASE_VERSION}"
+          target="ghcr.io/eddiethedean/sparkless-server:${tag}"
           if docker manifest inspect "$target" >/dev/null 2>&1; then
-            echo "container tag ${RELEASE_VERSION} already exists; refusing to overwrite it"
-            exit 1
+            docker pull "$target"
+            candidate_id="$(docker image inspect --format '{{.Id}}' "sparkless-server:candidate-${SOURCE_SHA}")"
+            published_id="$(docker image inspect --format '{{.Id}}' "$target")"
+            if [[ "$candidate_id" != "$published_id" ]]; then
+              echo "container tag ${tag} already exists with image ${published_id}; candidate is ${candidate_id}"
+              exit 1
+            fi
+            digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$target")"
+            echo "Verified existing GHCR image ${target} at ${digest}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            docker tag "sparkless-server:candidate-${SOURCE_SHA}" "$target"
+            docker push "$target"
+            digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
           fi
-          docker tag "sparkless-server:candidate-${SOURCE_SHA}" "$target"
-          docker push "$target"
-          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
           digest="${digest##*@}"
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "container publish returned an invalid digest: $digest"
             exit 1
           fi
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "Published verified GHCR image ${target} at ${digest}" >> "$GITHUB_STEP_SUMMARY"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Published or verified GHCR image ${target} at ${digest}" >> "$GITHUB_STEP_SUMMARY"
       - name: Pull and smoke-test the recovered public container
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1036,7 +1122,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          image="ghcr.io/eddiethedean/sparkless-server:${RELEASE_VERSION}"
+          image="ghcr.io/eddiethedean/sparkless-server:v${RELEASE_VERSION}"
           docker pull "$image"
           actual="$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")"
           actual_digest="${actual##*@}"
@@ -1045,13 +1131,22 @@ jobs:
             exit 1
           fi
           name="sparkless-server-recovery-smoke-${GITHUB_RUN_ID}"
-          docker run -d --name "$name" -p 127.0.0.1:18099:8099 "$image"
+          ports=(-p 127.0.0.1:18099:8099)
+          if [[ "$RELEASE_VERSION" == 4.18.* ]]; then
+            ports+=(-p 127.0.0.1::15002)
+          fi
+          docker run -d --name "$name" "${ports[@]}" "$image"
           cleanup() {
             docker logs "$name" || true
             docker rm -f "$name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
           python3 scripts/verify_server_http.py http://127.0.0.1:18099 --mutations
+          if [[ "$RELEASE_VERSION" == 4.18.* ]]; then
+            connect_port="$(docker port "$name" 15002/tcp | sed 's/.*://')"
+            SPARKLESS_CONNECT_URL="sc://127.0.0.1:${connect_port}" \
+              "$RUNNER_TEMP/connect-client/bin/python" tests/connect/smoke_public_client.py
+          fi
           docker stop --time 10 "$name"
           exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
           if [[ "$exit_code" != 0 ]]; then
@@ -1063,7 +1158,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.source.outputs.version }}
           SOURCE_RUN_ID: ${{ inputs.pypi_recovery_run_id }}
           SOURCE_EVIDENCE_POLICY: ${{ steps.source.outputs.source_evidence_policy }}
-        run: echo "Recovered and verified the PyPI distributions and GHCR image for $RELEASE_VERSION from tag workflow run $SOURCE_RUN_ID using evidence policy $SOURCE_EVIDENCE_POLICY. The source V31 inventory, PyPI hashes, crates.io versions, fresh server-extra install, and public container smoke passed." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Recovered and verified the PyPI distributions and GHCR image for $RELEASE_VERSION from tag workflow run $SOURCE_RUN_ID using evidence policy $SOURCE_EVIDENCE_POLICY. Candidate inventory, PyPI hashes, crates.io versions, fresh server-extra install, and public container smoke passed." >> "$GITHUB_STEP_SUMMARY"
 
   publish-server-container:
     name: Publish verified native server container
@@ -2173,7 +2268,7 @@ jobs:
             --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" --workflow "$RELEASE_WORKFLOW" \
             --mode "$RELEASE_MODE"
-      - name: Preserve the exact verified distributions for publication and V32
+      - name: Preserve the exact verified distributions for publication and V32/V34
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: verified-sparkless-candidate
@@ -2292,7 +2387,7 @@ jobs:
           skip-existing: true
 
   verify-public-release:
-    name: Verify public release inventory and fresh installs (V32)
+    name: Verify public release inventory and fresh installs (V32/V34)
     if: >-
       ${{
         always() &&
@@ -2303,10 +2398,11 @@ jobs:
         needs.publish-server-bin.result == 'success' &&
         needs.publish-server-container.result == 'success' &&
         needs.publish-sparkless.result == 'success' &&
-        startsWith(github.ref, 'refs/tags/v4.17.')
+        (startsWith(github.ref, 'refs/tags/v4.17.') ||
+         startsWith(github.ref, 'refs/tags/v4.18.'))
       }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     permissions:
       contents: read
       packages: read
@@ -2322,19 +2418,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
         with:
           toolchain: 1.93.1
-      - name: Install and run the published Rust server crate
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          cargo install --locked --version "$version" --root "$RUNNER_TEMP/public-rust" sparkless-server
-          actual="$("$RUNNER_TEMP/public-rust/bin/sparkless-server" --version)"
-          expected="sparkless-server ${version}"
-          if [[ "$actual" != "$expected" ]]; then
-            echo "installed binary reported '$actual'; expected '$expected'"
-            exit 1
-          fi
-          echo "$actual"
-          python3 scripts/verify_server_bin_wheel.py --binary "$RUNNER_TEMP/public-rust/bin/sparkless-server" --version "$version"
       - name: Download the exact verified server binary distributions
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -2355,11 +2438,60 @@ jobs:
             --version "$version" \
             --server-bin-directory public-distributions/server-bin \
             --sparkless-directory public-distributions/sparkless
+      - name: Install the published Rust server crate
+        env:
+          CARGO_BUILD_JOBS: 1
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$version" == 4.18.* ]]; then
+            cargo install --locked --version "$version" --no-default-features \
+              --features http,connect --root "$RUNNER_TEMP/public-rust" sparkless-server
+          else
+            cargo install --locked --version "$version" --root "$RUNNER_TEMP/public-rust" sparkless-server
+          fi
+          actual="$("$RUNNER_TEMP/public-rust/bin/sparkless-server" --version)"
+          expected="sparkless-server ${version}"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "installed binary reported '$actual'; expected '$expected'"
+            exit 1
+          fi
+          echo "$actual"
+          if [[ "$version" != 4.18.* ]]; then
+            python3 scripts/verify_server_bin_wheel.py \
+              --binary "$RUNNER_TEMP/public-rust/bin/sparkless-server" --version "$version"
+          fi
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.14"
+          python-version: "3.11"
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        if: startsWith(github.ref, 'refs/tags/v4.18.')
+        with:
+          distribution: temurin
+          java-version: "17"
       - name: Install uv
         run: python -m pip install uv
+      - name: Install locked Spark Connect clients for V34
+        if: startsWith(github.ref, 'refs/tags/v4.18.')
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/connect-client"
+          python3 -m venv "$RUNNER_TEMP/connect-oracle"
+          "$RUNNER_TEMP/connect-client/bin/python" -m pip install --require-hashes -r tests/connect/client-py311.lock
+          "$RUNNER_TEMP/connect-oracle/bin/python" -m pip install --require-hashes -r tests/connect/oracle-py311.lock
+      - name: Download and verify the V34 Spark 4.0.5 reference server
+        if: startsWith(github.ref, 'refs/tags/v4.18.')
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz"
+          curl --fail --location --silent --show-error --retry 3 \
+            https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz \
+            --output "$archive"
+          printf '%s  %s\n' \
+            4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b \
+            "$archive" | sha512sum --check --status
+          mkdir -p "$RUNNER_TEMP/spark-4.0.5"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/spark-4.0.5" --strip-components=1
       - name: Verify the published server extra and HTTP mutation contract
         run: |
           set -euo pipefail
@@ -2370,9 +2502,40 @@ jobs:
           uv pip check --python "$venv/bin/python"
           if [[ "$version" == "4.16.1" ]]; then
             "$venv/bin/python" "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" "$version" --protocol legacy-4.16
+          elif [[ "$version" == 4.18.* ]]; then
+            "$venv/bin/python" "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" \
+              "$version" --mutations --connect-client \
+              --client-python "$RUNNER_TEMP/connect-client/bin/python"
           else
             "$venv/bin/python" "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" "$version" --mutations
           fi
+      - name: Verify the published Rust server supports public Connect clients
+        if: startsWith(github.ref, 'refs/tags/v4.18.')
+        run: >-
+          python3 scripts/verify_server_bin_wheel.py
+          --binary "$RUNNER_TEMP/public-rust/bin/sparkless-server"
+          --version "${GITHUB_REF_NAME#v}"
+          --connect --connect-client
+          --client-python "$RUNNER_TEMP/connect-client/bin/python"
+      - name: Run V18-V23 conformance against the published Rust crate
+        if: startsWith(github.ref, 'refs/tags/v4.18.')
+        run: |
+          set -euo pipefail
+          python3 tests/connect/run_slice6_conformance.py \
+            --server-bin "$RUNNER_TEMP/public-rust/bin/sparkless-server" \
+            --server-cli-mode serve-cli \
+            --client-python "$RUNNER_TEMP/connect-client/bin/python" \
+            --oracle-python "$RUNNER_TEMP/connect-oracle/bin/python" \
+            --oracle-home "$RUNNER_TEMP/spark-4.0.5" \
+            --oracle-archive "$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz" \
+            --output target/connect-v34
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && startsWith(github.ref, 'refs/tags/v4.18.')
+        with:
+          name: v34-public-connect-conformance
+          path: target/connect-v34/
+          if-no-files-found: warn
+          retention-days: 90
       - name: Pull and verify the published container digest
         env:
           GH_TOKEN: ${{ github.token }}
@@ -2390,19 +2553,34 @@ jobs:
             exit 1
           fi
           name="sparkless-server-public-smoke-${GITHUB_RUN_ID}"
-          docker run -d --name "$name" -p 127.0.0.1:18099:8099 "$image"
+          ports=(-p 127.0.0.1:18099:8099)
+          if [[ "$GITHUB_REF_NAME" == v4.18.* ]]; then
+            ports+=(-p 127.0.0.1::15002)
+          fi
+          docker run -d --name "$name" "${ports[@]}" "$image"
           cleanup() {
             docker logs "$name" || true
             docker rm -f "$name" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
           python3 scripts/verify_server_http.py http://127.0.0.1:18099 --mutations
+          if [[ "$GITHUB_REF_NAME" == v4.18.* ]]; then
+            connect_port="$(docker port "$name" 15002/tcp | sed 's/.*://')"
+            SPARKLESS_CONNECT_URL="sc://127.0.0.1:${connect_port}" \
+              "$RUNNER_TEMP/connect-client/bin/python" tests/connect/smoke_public_client.py
+          fi
           docker stop --time 10 "$name"
           exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
           if [[ "$exit_code" != 0 ]]; then
             echo "published container exited with status $exit_code after graceful stop"
             exit 1
           fi
-      - name: Record V32 public artifact evidence
+      - name: Record V32 and V34 public artifact evidence
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-server-container.outputs.image_digest }}
         run: |
-          echo "Verified published Rust server, fresh Python server extra, and GHCR image digest ${{ needs.publish-server-container.outputs.image_digest }} for ${GITHUB_REF_NAME}." >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$GITHUB_REF_NAME" == v4.18.* ]]; then
+            echo "V34 passed: exact PyPI and crates.io inventories, fresh sparkless[server] Connect client, published Rust crate V18-V23 conformance, and GHCR HTTP/Connect smoke. Published image digest: $IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "V32 passed: published Rust server, fresh Python server extra, and GHCR image digest $IMAGE_DIGEST for ${GITHUB_REF_NAME}." >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -11,7 +11,10 @@ from typing import Any
 
 
 RELEASE_WORKFLOW = ".github/workflows/release.yml"
-VERIFIED_CANDIDATE_JOB = "Verify complete candidate PyPI inventory (V31)"
+VERIFIED_CANDIDATE_JOBS = {
+    "Verify complete candidate PyPI inventory (V31)",
+    "Verify complete candidate distribution inventory (V31/V33)",
+}
 PUBLISHED_CRATES_JOB = "Build docs and publish to crates.io"
 SOURCE_EVIDENCE_ARTIFACT = "release-sdist-source-witness-v1"
 SOURCE_EVIDENCE_MARKER = (
@@ -21,6 +24,15 @@ REQUIRED_ARTIFACTS = {
     "verified-server-bin-candidate",
     "verified-sparkless-candidate",
     "sparkless-server-container-image",
+}
+V34_REQUIRED_JOBS = {
+    "Phase 1 V17 range and memory witness",
+    "Spark Connect Slice 8 concurrency benchmark (V26 measurement)",
+    "Spark Connect integrated client and oracle conformance (V18-V23)",
+}
+V34_REQUIRED_ARTIFACTS = {
+    "spark-connect-slice8-v26-measurements",
+    "v33-spark-connect-conformance",
 }
 
 
@@ -64,11 +76,15 @@ def validate_recovery_source_details(
     if match is None:
         raise ValueError("source run must target a stable version tag")
 
+    source_jobs = jobs.get("jobs", [])
     if not any(
-        job.get("name") == VERIFIED_CANDIDATE_JOB and job.get("conclusion") == "success"
-        for job in jobs.get("jobs", [])
+        job.get("name") in VERIFIED_CANDIDATE_JOBS
+        and job.get("conclusion") == "success"
+        for job in source_jobs
     ):
-        raise ValueError("source run did not pass the complete V31 inventory gate")
+        raise ValueError(
+            "source run did not pass the complete V31 inventory gate (V31/V33)"
+        )
     if not any(
         job.get("name") == PUBLISHED_CRATES_JOB and job.get("conclusion") == "success"
         for job in jobs.get("jobs", [])
@@ -82,12 +98,27 @@ def validate_recovery_source_details(
     ]
     available_artifacts = {artifact.get("name") for artifact in live_artifacts}
     missing_artifacts = REQUIRED_ARTIFACTS - available_artifacts
+    version = match.group(1)
+    if version.startswith("4.18."):
+        missing_artifacts |= V34_REQUIRED_ARTIFACTS - available_artifacts
     if missing_artifacts:
         raise ValueError(
             "source run is missing unexpired verified artifact(s): {}".format(
                 ", ".join(sorted(missing_artifacts))
             )
         )
+
+    if version.startswith("4.18."):
+        successful_names = {
+            job.get("name") for job in source_jobs if job.get("conclusion") == "success"
+        }
+        missing_jobs = V34_REQUIRED_JOBS - successful_names
+        if missing_jobs:
+            raise ValueError(
+                "4.18 source run did not pass V34 prerequisites: {}".format(
+                    ", ".join(sorted(missing_jobs))
+                )
+            )
     uses_source_manifest = (
         source_workflow is not None and SOURCE_EVIDENCE_MARKER in source_workflow
     )
@@ -113,7 +144,7 @@ def validate_recovery_source_details(
     if not isinstance(workflow_name, str) or not workflow_name:
         raise ValueError("source run is missing its workflow name")
     return {
-        "version": match.group(1),
+        "version": version,
         "source_sha": source_sha,
         "source_run_id": str(run_id),
         "source_run_attempt": str(run_attempt),

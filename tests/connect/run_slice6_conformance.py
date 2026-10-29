@@ -42,7 +42,9 @@ def wait_for_port(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None and not allow_launcher_exit:
-            raise RuntimeError(f"process exited {process.returncode} before {address} was ready; see {logfile}")
+            raise RuntimeError(
+                f"process exited {process.returncode} before {address} was ready; see {logfile}"
+            )
         try:
             with socket.create_connection((host, int(port_text)), timeout=0.25):
                 return
@@ -69,7 +71,9 @@ def wait_for_clean_exit(process: subprocess.Popen, name: str, timeout: float) ->
     except subprocess.TimeoutExpired as error:
         process.kill()
         process.wait(timeout=10)
-        raise RuntimeError(f"{name} did not shut down cleanly and required a forced kill") from error
+        raise RuntimeError(
+            f"{name} did not shut down cleanly and required a forced kill"
+        ) from error
     if return_code != 0:
         raise RuntimeError(f"{name} exited with status {return_code}")
 
@@ -84,7 +88,9 @@ def stop_process(process: subprocess.Popen, name: str, timeout: float) -> None:
     except subprocess.TimeoutExpired as error:
         process.kill()
         process.wait(timeout=10)
-        raise RuntimeError(f"{name} did not stop after SIGTERM and required a forced kill") from error
+        raise RuntimeError(
+            f"{name} did not stop after SIGTERM and required a forced kill"
+        ) from error
 
 
 def wait_for_process_group_exit(process: subprocess.Popen, timeout: float) -> None:
@@ -98,7 +104,11 @@ def wait_for_process_group_exit(process: subprocess.Popen, timeout: float) -> No
         running = False
         for line in completed.stdout.splitlines():
             fields = line.split()
-            if len(fields) == 2 and int(fields[0]) == process.pid and not fields[1].startswith("Z"):
+            if (
+                len(fields) == 2
+                and int(fields[0]) == process.pid
+                and not fields[1].startswith("Z")
+            ):
                 running = True
                 break
         if not running:
@@ -124,16 +134,24 @@ def stop_process_group(process: subprocess.Popen, name: str, timeout: float) -> 
         except ProcessLookupError:
             pass
         wait_for_process_group_exit(process, 10)
-        raise RuntimeError(f"{name} process group did not stop after SIGTERM and required a forced kill") from error
+        raise RuntimeError(
+            f"{name} process group did not stop after SIGTERM and required a forced kill"
+        ) from error
 
 
-def distribution_versions(python: Path, env: dict[str, str], *names: str) -> dict[str, str]:
+def distribution_versions(
+    python: Path, env: dict[str, str], *names: str
+) -> dict[str, str]:
     script = (
         "import importlib.metadata as m, json, sys; "
         "print(json.dumps({name: m.version(name) for name in sys.argv[1:]}))"
     )
     try:
-        return json.loads(subprocess.check_output([str(python), "-c", script, *names], text=True, env=env))
+        return json.loads(
+            subprocess.check_output(
+                [str(python), "-c", script, *names], text=True, env=env
+            )
+        )
     except subprocess.CalledProcessError as error:
         raise RuntimeError(
             f"could not read required Python distributions {', '.join(names)} from {python}; "
@@ -152,7 +170,11 @@ def health(http_url: str) -> bool:
 
 def http_witness(http_url: str, sequence: int) -> None:
     body = json.dumps(
-        {"session": f"slice6-http-{sequence}", "code": "SELECT 1 AS result", "kind": "sql"}
+        {
+            "session": f"slice6-http-{sequence}",
+            "code": "SELECT 1 AS result",
+            "kind": "sql",
+        }
     ).encode()
     request = urllib.request.Request(
         f"{http_url}/statements",
@@ -167,7 +189,9 @@ def http_witness(http_url: str, sequence: int) -> None:
     assert result["data"] == [[1]], payload
 
 
-def run_logged(command: list[str], log_path: Path, env: dict[str, str], timeout: float = 180) -> None:
+def run_logged(
+    command: list[str], log_path: Path, env: dict[str, str], timeout: float = 180
+) -> None:
     with log_path.open("w", encoding="utf-8") as log:
         completed = subprocess.run(
             command,
@@ -179,7 +203,9 @@ def run_logged(command: list[str], log_path: Path, env: dict[str, str], timeout:
             check=False,
         )
     if completed.returncode:
-        raise RuntimeError(f"command failed ({completed.returncode}): {' '.join(command)}; see {log_path}")
+        raise RuntimeError(
+            f"command failed ({completed.returncode}): {' '.join(command)}; see {log_path}"
+        )
 
 
 def count_trace(log_path: Path, event: str, value: str | None = None) -> int:
@@ -188,7 +214,9 @@ def count_trace(log_path: Path, event: str, value: str | None = None) -> int:
     needle = f"event={event}"
     if value:
         needle += f" {value}"
-    return sum(needle in line for line in log_path.read_text(encoding="utf-8").splitlines())
+    return sum(
+        needle in line for line in log_path.read_text(encoding="utf-8").splitlines()
+    )
 
 
 def sha512(path: Path) -> str:
@@ -231,8 +259,16 @@ def main() -> None:
     parser.add_argument("--oracle-python", type=Path, default=DEFAULT_ORACLE_CLIENT)
     parser.add_argument("--oracle-archive", type=Path, default=DEFAULT_ORACLE_ARCHIVE)
     parser.add_argument("--server-bin", type=Path)
+    parser.add_argument(
+        "--server-cli-mode",
+        choices=("integration-example", "serve-cli"),
+        default="integration-example",
+        help="launch the integration example arguments or production serve CLI",
+    )
     parser.add_argument("--oracle-home", type=Path)
-    parser.add_argument("--reference-url", help="Compare against an already-running Spark 4.0.5 server")
+    parser.add_argument(
+        "--reference-url", help="Compare against an already-running Spark 4.0.5 server"
+    )
     parser.add_argument("--output", type=Path, default=ROOT / "target/connect-slice6")
     parser.add_argument("--skip-concurrent", action="store_true")
     args = parser.parse_args()
@@ -240,7 +276,9 @@ def main() -> None:
     # Keep the virtualenv entry path: resolving its symlink escapes the environment.
     client_python = args.client_python.absolute()
     if not client_python.is_file():
-        raise FileNotFoundError(f"locked pyspark-client interpreter not found: {client_python}")
+        raise FileNotFoundError(
+            f"locked pyspark-client interpreter not found: {client_python}"
+        )
     oracle_python = args.oracle_python.absolute()
     if args.reference_url and not oracle_python.is_file():
         oracle_python = client_python
@@ -256,49 +294,77 @@ def main() -> None:
     ):
         client_env.pop(key, None)
     client_env["TZ"] = "UTC"
-    client_distributions = distribution_versions(client_python, client_env, "pyspark-client")
+    client_distributions = distribution_versions(
+        client_python, client_env, "pyspark-client"
+    )
     client_version = client_distributions["pyspark-client"]
     if client_version != "4.0.5":
-        raise AssertionError(f"standalone client distribution must be pyspark-client 4.0.5, got {client_version}")
+        raise AssertionError(
+            f"standalone client distribution must be pyspark-client 4.0.5, got {client_version}"
+        )
     try:
         distribution_versions(client_python, client_env, "pyspark")
     except RuntimeError:
         pass
     else:
-        raise AssertionError("standalone client environment must not contain the full pyspark distribution")
+        raise AssertionError(
+            "standalone client environment must not contain the full pyspark distribution"
+        )
 
     reference_home = args.oracle_home.resolve() if args.oracle_home else None
     if reference_home:
         archive = args.oracle_archive.resolve()
         if not archive.is_file():
-            raise FileNotFoundError(f"pinned Spark 4.0.5 oracle archive not found: {archive}")
+            raise FileNotFoundError(
+                f"pinned Spark 4.0.5 oracle archive not found: {archive}"
+            )
         if sha512(archive) != ORACLE_ARCHIVE_SHA512:
-            raise AssertionError(f"Spark reference archive SHA-512 does not match the pinned distribution: {archive}")
+            raise AssertionError(
+                f"Spark reference archive SHA-512 does not match the pinned distribution: {archive}"
+            )
         release_file = reference_home / "RELEASE"
-        if not release_file.is_file() or not release_file.read_text(encoding="utf-8").startswith(
-            "Spark 4.0.5 (git revision b472a3aa3c4"
-        ):
-            raise AssertionError(f"reference home is not the pinned Apache Spark 4.0.5 build: {reference_home}")
+        if not release_file.is_file() or not release_file.read_text(
+            encoding="utf-8"
+        ).startswith("Spark 4.0.5 (git revision b472a3aa3c4"):
+            raise AssertionError(
+                f"reference home is not the pinned Apache Spark 4.0.5 build: {reference_home}"
+            )
     if reference_home or args.reference_url:
         if not oracle_python.is_file():
-            raise FileNotFoundError(f"separate pyspark[connect]==4.0.5 environment not found: {oracle_python}")
+            raise FileNotFoundError(
+                f"separate pyspark[connect]==4.0.5 environment not found: {oracle_python}"
+            )
         oracle_env = client_env.copy()
-        oracle_distribution = "pyspark-client" if args.reference_url and oracle_python == client_python else "pyspark"
-        oracle_distributions = distribution_versions(oracle_python, oracle_env, oracle_distribution)
+        oracle_distribution = (
+            "pyspark-client"
+            if args.reference_url and oracle_python == client_python
+            else "pyspark"
+        )
+        oracle_distributions = distribution_versions(
+            oracle_python, oracle_env, oracle_distribution
+        )
         oracle_client_version = oracle_distributions[oracle_distribution]
         if oracle_client_version != "4.0.5":
-            raise AssertionError(f"oracle client must be {oracle_distribution} 4.0.5, got {oracle_client_version}")
+            raise AssertionError(
+                f"oracle client must be {oracle_distribution} 4.0.5, got {oracle_client_version}"
+            )
     else:
         oracle_client_version = None
         oracle_distribution = None
 
     output_root = args.output.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    run_dir = output_root / datetime.now(UTC).strftime(f"run-%Y%m%dT%H%M%SZ-{os.getpid()}")
+    run_dir = output_root / datetime.now(UTC).strftime(
+        f"run-%Y%m%dT%H%M%SZ-{os.getpid()}"
+    )
     run_dir.mkdir(parents=True, exist_ok=False)
     evidence_log = run_dir / "native-server.log"
 
-    server_bin = args.server_bin.resolve() if args.server_bin else ROOT / "target/release/examples/connect-integration-server"
+    server_bin = (
+        args.server_bin.resolve()
+        if args.server_bin
+        else ROOT / "target/release/examples/connect-integration-server"
+    )
     build_command = [
         "cargo",
         "build",
@@ -313,9 +379,13 @@ def main() -> None:
         "http,connect",
     ]
     if not args.server_bin:
-        run_logged(build_command, run_dir / "native-build.log", os.environ.copy(), timeout=900)
+        run_logged(
+            build_command, run_dir / "native-build.log", os.environ.copy(), timeout=900
+        )
     if not server_bin.is_file():
-        raise FileNotFoundError(f"native integration server binary not found: {server_bin}")
+        raise FileNotFoundError(
+            f"native integration server binary not found: {server_bin}"
+        )
 
     http_port, connect_port = free_port(), free_port()
     while connect_port == http_port:
@@ -344,8 +414,25 @@ def main() -> None:
         }
     )
     server_log = evidence_log.open("w", encoding="utf-8")
+    if args.server_cli_mode == "serve-cli":
+        http_host, http_port = http_address.rsplit(":", 1)
+        connect_host, connect_port = connect_address.rsplit(":", 1)
+        server_command = [
+            str(server_bin),
+            "serve",
+            "--host",
+            http_host,
+            "--port",
+            http_port,
+            "--connect-host",
+            connect_host,
+            "--connect-port",
+            connect_port,
+        ]
+    else:
+        server_command = [str(server_bin), http_address, connect_address]
     native_server = subprocess.Popen(
-        [str(server_bin), http_address, connect_address],
+        server_command,
         cwd=ROOT,
         env=server_env,
         stdout=server_log,
@@ -359,15 +446,25 @@ def main() -> None:
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline and not health(http_url):
             if native_server.poll() is not None:
-                raise RuntimeError(f"native server exited {native_server.returncode}; see {evidence_log}")
+                raise RuntimeError(
+                    f"native server exited {native_server.returncode}; see {evidence_log}"
+                )
             time.sleep(0.1)
         if not health(http_url):
-            raise TimeoutError(f"native HTTP health did not become ready; see {evidence_log}")
+            raise TimeoutError(
+                f"native HTTP health did not become ready; see {evidence_log}"
+            )
         wait_for_port(connect_address, native_server, evidence_log)
         descendants = native_descendants(native_server.pid)
-        forbidden = [(pid, command) for pid, command in descendants if any(word in command.lower() for word in ("python", "java"))]
+        forbidden = [
+            (pid, command)
+            for pid, command in descendants
+            if any(word in command.lower() for word in ("python", "java"))
+        ]
         if forbidden:
-            raise AssertionError(f"native server started a Python/JVM child process: {forbidden}")
+            raise AssertionError(
+                f"native server started a Python/JVM child process: {forbidden}"
+            )
 
         client_run_env = client_env | {"SPARKLESS_CONNECT_URL": connect_url}
         run_logged(
@@ -386,7 +483,14 @@ def main() -> None:
         proxy_log = (run_dir / "fault-proxy.log").open("w", encoding="utf-8")
         proxy_env = client_run_env.copy()
         proxy = subprocess.Popen(
-            [str(client_python), "tests/connect/fault_proxy.py", "--listen", proxy_address, "--upstream", connect_address],
+            [
+                str(client_python),
+                "tests/connect/fault_proxy.py",
+                "--listen",
+                proxy_address,
+                "--upstream",
+                connect_address,
+            ],
             cwd=ROOT,
             env=proxy_env,
             stdout=proxy_log,
@@ -398,19 +502,32 @@ def main() -> None:
             producer_before = count_trace(evidence_log, "producer_started")
             reattach_before = count_trace(evidence_log, "rpc", "method=ReattachExecute")
             run_logged(
-                [str(client_python), "tests/connect/slice6_retry_client.py", f"sc://{proxy_address}"],
+                [
+                    str(client_python),
+                    "tests/connect/slice6_retry_client.py",
+                    f"sc://{proxy_address}",
+                ],
                 run_dir / "default-retry-client.log",
-                client_run_env,
+                client_run_env | {"SPARKLESS_CONNECT_URL": f"sc://{proxy_address}"},
                 timeout=240,
             )
             if count_trace(evidence_log, "producer_started") - producer_before != 1:
-                raise AssertionError("default client recovery started more than one native producer")
-            if count_trace(evidence_log, "rpc", "method=ReattachExecute") <= reattach_before:
-                raise AssertionError("default client did not use ReattachExecute after the injected loss")
+                raise AssertionError(
+                    "default client recovery started more than one native producer"
+                )
+            if (
+                count_trace(evidence_log, "rpc", "method=ReattachExecute")
+                <= reattach_before
+            ):
+                raise AssertionError(
+                    "default client did not use ReattachExecute after the injected loss"
+                )
             proxy_log.flush()
             proxy_text = (run_dir / "fault-proxy.log").read_text(encoding="utf-8")
             if "injected UNAVAILABLE" not in proxy_text:
-                raise AssertionError("the fault proxy did not drop an ExecutePlan stream")
+                raise AssertionError(
+                    "the fault proxy did not drop an ExecutePlan stream"
+                )
         finally:
             proxy.terminate()
             try:
@@ -427,7 +544,10 @@ def main() -> None:
             client_run_env,
             timeout=360,
         )
-        if count_trace(evidence_log, "rpc", "method=FetchErrorDetails") <= error_rpc_before:
+        if (
+            count_trace(evidence_log, "rpc", "method=FetchErrorDetails")
+            <= error_rpc_before
+        ):
             raise AssertionError("public client did not fetch enriched error details")
 
         if args.reference_url:
@@ -435,7 +555,9 @@ def main() -> None:
         elif reference_home:
             start_script = reference_home / "sbin/start-connect-server.sh"
             if not start_script.is_file():
-                raise FileNotFoundError(f"Apache Spark Connect startup script not found: {start_script}")
+                raise FileNotFoundError(
+                    f"Apache Spark Connect startup script not found: {start_script}"
+                )
             reference_port = free_port()
             ref_url = f"sc://127.0.0.1:{reference_port}"
             reference_log = run_dir / "reference-spark.log"
@@ -489,7 +611,14 @@ def main() -> None:
 
         native_result = run_dir / "native-workload.json"
         run_logged(
-            [str(client_python), "tests/connect/slice6_public_workload.py", "--url", connect_url, "--output", str(native_result)],
+            [
+                str(client_python),
+                "tests/connect/slice6_public_workload.py",
+                "--url",
+                connect_url,
+                "--output",
+                str(native_result),
+            ],
             run_dir / "native-workload.log",
             client_run_env,
             timeout=300,
@@ -508,20 +637,37 @@ def main() -> None:
             )
         ]
         if not arrow_rows:
-            raise AssertionError("native result trace did not contain Arrow response evidence")
+            raise AssertionError(
+                "native result trace did not contain Arrow response evidence"
+            )
         if max(size for size, _, _ in arrow_rows) > 1024 * 1024:
-            raise AssertionError("native Arrow response exceeded the public response-byte limit")
+            raise AssertionError(
+                "native Arrow response exceeded the public response-byte limit"
+            )
         if max(size for size, _, _ in arrow_rows) < 900_000:
-            raise AssertionError("byte-splitting workload did not approach the configured response-byte limit")
+            raise AssertionError(
+                "byte-splitting workload did not approach the configured response-byte limit"
+            )
         if max(rows for _, rows, _ in arrow_rows) > 16_384:
-            raise AssertionError("native Arrow response exceeded the public response row limit")
+            raise AssertionError(
+                "native Arrow response exceeded the public response row limit"
+            )
 
         comparison = "skipped"
         if ref_url:
             oracle_result = run_dir / "reference-workload.json"
-            reference_python = oracle_python if oracle_python.is_file() else client_python
+            reference_python = (
+                oracle_python if oracle_python.is_file() else client_python
+            )
             run_logged(
-                [str(reference_python), "tests/connect/slice6_public_workload.py", "--url", ref_url, "--output", str(oracle_result)],
+                [
+                    str(reference_python),
+                    "tests/connect/slice6_public_workload.py",
+                    "--url",
+                    ref_url,
+                    "--output",
+                    str(oracle_result),
+                ],
                 run_dir / "reference-workload.log",
                 client_env,
                 timeout=240,
@@ -566,7 +712,9 @@ def main() -> None:
                 )
                 workers.append((process, log, ready_file, log_path))
             deadline = time.monotonic() + 90
-            while time.monotonic() < deadline and not all(item[2].exists() for item in workers):
+            while time.monotonic() < deadline and not all(
+                item[2].exists() for item in workers
+            ):
                 if any(item[0].poll() is not None for item in workers):
                     break
                 time.sleep(0.05)
@@ -580,7 +728,9 @@ def main() -> None:
                             process.kill()
                             process.wait(timeout=5)
                     log.close()
-                raise RuntimeError("concurrent public clients did not all initialize; inspect worker logs")
+                raise RuntimeError(
+                    "concurrent public clients did not all initialize; inspect worker logs"
+                )
             barrier.write_text("go\n", encoding="utf-8")
             next_http_at = 0.0
             http_sequence = 0
@@ -588,7 +738,9 @@ def main() -> None:
             try:
                 while any(item[0].poll() is None for item in workers):
                     if time.monotonic() >= deadline:
-                        raise TimeoutError("concurrent public clients did not finish within four minutes")
+                        raise TimeoutError(
+                            "concurrent public clients did not finish within four minutes"
+                        )
                     if health(http_url):
                         health_count += 1
                     now = time.monotonic()
@@ -614,7 +766,9 @@ def main() -> None:
                     if not log.closed:
                         log.close()
             if health_count < 10 or http_count < 3:
-                raise AssertionError(f"insufficient concurrent health/HTTP progress: health={health_count}, HTTP={http_count}")
+                raise AssertionError(
+                    f"insufficient concurrent health/HTTP progress: health={health_count}, HTTP={http_count}"
+                )
             for _, _, _, log_path in workers:
                 text = log_path.read_text(encoding="utf-8")
                 if text.count("passed") < 4:
@@ -630,8 +784,13 @@ def main() -> None:
 
         server_log.flush()
         server_log_text = evidence_log.read_text(encoding="utf-8")
-        if "panicked at" in server_log_text or "not yet implemented: unimplemented: AnonymousScan" in server_log_text:
-            raise AssertionError("native Connect execution triggered a Polars panic; inspect native-server.log")
+        if (
+            "panicked at" in server_log_text
+            or "not yet implemented: unimplemented: AnonymousScan" in server_log_text
+        ):
+            raise AssertionError(
+                "native Connect execution triggered a Polars panic; inspect native-server.log"
+            )
         producer_count = count_trace(evidence_log, "producer_started")
         summary = {
             "slice": "418-06",
@@ -640,6 +799,7 @@ def main() -> None:
             "client_python": str(client_python),
             "client_version": client_version,
             "server_binary": str(server_bin),
+            "server_cli_mode": args.server_cli_mode,
             "server_response_timeout_ms": 300_000,
             "http_url": http_url,
             "connect_url": connect_url,
@@ -659,7 +819,9 @@ def main() -> None:
             "error_detail_rpc_observed": True,
             "native_server_python_or_jvm_children": descendants,
         }
-        (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        (run_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        )
         print(json.dumps(summary, indent=2))
     finally:
         try:

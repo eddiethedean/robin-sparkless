@@ -42,7 +42,10 @@ def table_witness(dataframe):
         ],
         "rows": [normalize(tuple(row)) for row in dataframe.collect()],
         "arrow_rows": [
-            [normalize(arrow.column(index)[row].as_py()) for index in range(arrow.num_columns)]
+            [
+                normalize(arrow.column(index)[row].as_py())
+                for index in range(arrow.num_columns)
+            ]
             for row in range(arrow.num_rows)
         ],
     }
@@ -60,7 +63,9 @@ def byte_sized_batch_witness(spark):
     ).hexdigest()
     column_hashes = [
         hashlib.sha256(
-            b"".join(struct.pack("<q", value) for value in arrow.column(index).to_pylist())
+            b"".join(
+                struct.pack("<q", value) for value in arrow.column(index).to_pylist()
+            )
         ).hexdigest()
         for index in range(column_count)
     ]
@@ -81,18 +86,25 @@ def byte_sized_batch_witness(spark):
             for field in arrow.schema
         ],
         "column_sha256": column_hashes,
-        "first_last": [arrow.column(0)[0].as_py(), arrow.column(0)[row_count - 1].as_py()],
+        "first_last": [
+            arrow.column(0)[0].as_py(),
+            arrow.column(0)[row_count - 1].as_py(),
+        ],
     }
 
 
 def near_response_limit_local_relation_witness(spark):
     values = ("a" * 300_000, "b" * 300_000, "c" * 300_000)
-    dataframe = spark.createDataFrame([values], "first STRING, second STRING, third STRING")
+    dataframe = spark.createDataFrame(
+        [values], "first STRING, second STRING, third STRING"
+    )
     arrow = dataframe.toArrow()
     expected_hashes = [hashlib.sha256(value.encode()).hexdigest() for value in values]
     actual_values = [arrow.column(index)[0].as_py() for index in range(3)]
     assert [len(value) for value in actual_values] == [300_000] * 3
-    actual_hashes = [hashlib.sha256(value.encode()).hexdigest() for value in actual_values]
+    actual_hashes = [
+        hashlib.sha256(value.encode()).hexdigest() for value in actual_values
+    ]
     assert actual_hashes == expected_hashes
     return {
         "schema": [
@@ -133,7 +145,17 @@ def main() -> None:
                 before_epoch,
                 Decimal("-12345678901234567890.123456"),
             ),
-            (None, None, None, None, None, None, date(1969, 12, 31), before_epoch, None),
+            (
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                date(1969, 12, 31),
+                before_epoch,
+                None,
+            ),
         ]
         typed_schema = (
             "flag BOOLEAN, small SMALLINT, number INT, wide BIGINT, score DOUBLE, "
@@ -146,9 +168,7 @@ def main() -> None:
             "global_count_schema": table_witness(
                 spark.range(10).filter("id > 5").agg(count(lit(1)))
             ),
-            "empty_global_count": table_witness(
-                spark.range(0).agg(count(lit(1)))
-            ),
+            "empty_global_count": table_witness(spark.range(0).agg(count(lit(1)))),
             "projection_limit": table_witness(
                 spark.range(10).select(col("id").alias("value")).limit(3)
             ),
@@ -169,7 +189,9 @@ def main() -> None:
                 spark.range(3).select(col("id").alias("x"), col("id").alias("x"))
             ),
             "byte_sized_batches": byte_sized_batch_witness(spark),
-            "near_response_limit_local_relation": near_response_limit_local_relation_witness(spark),
+            "near_response_limit_local_relation": near_response_limit_local_relation_witness(
+                spark
+            ),
         }
         with open(args.output, "w", encoding="utf-8") as output:
             json.dump(results, output, ensure_ascii=False, sort_keys=True, indent=2)

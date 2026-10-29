@@ -24,7 +24,9 @@ def main() -> None:
         deadline = time.monotonic() + 30
         while not os.path.exists(args.barrier_file):
             if time.monotonic() >= deadline:
-                raise TimeoutError("timed out waiting for the concurrent-client barrier")
+                raise TimeoutError(
+                    "timed out waiting for the concurrent-client barrier"
+                )
             time.sleep(0.01)
 
         for index in range(args.queries):
