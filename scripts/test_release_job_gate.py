@@ -77,6 +77,28 @@ class ReleaseGateTests(unittest.TestCase):
             )
         )
 
+    def test_slice8_measurement_is_required_only_for_418_candidates(self) -> None:
+        ref = "refs/heads/codex/release-4.18"
+        needs = self._needs("release_candidate", ref)
+        self.assertEqual(validate_gate("release_candidate", ref, needs, MANIFEST), [])
+        self.assertEqual(needs["connect-slice8-benchmarks"]["result"], "success")
+        self.assertEqual(needs["phase1-v17-resource-witness"]["result"], "skipped")
+
+        needs["connect-slice8-benchmarks"]["result"] = "failure"
+        self.assertTrue(
+            any(
+                "connect-slice8-benchmarks" in issue
+                for issue in validate_gate("release_candidate", ref, needs, MANIFEST)
+            )
+        )
+
+        prior_ref = "refs/heads/codex/release-4.17"
+        prior_needs = self._needs("release_candidate", prior_ref)
+        self.assertEqual(prior_needs["connect-slice8-benchmarks"]["result"], "skipped")
+        self.assertEqual(
+            validate_gate("release_candidate", prior_ref, prior_needs, MANIFEST), []
+        )
+
     def test_manual_validation_uses_only_manual_python_cells(self) -> None:
         ref = "refs/heads/main"
         needs = self._needs("manual_validation", ref)

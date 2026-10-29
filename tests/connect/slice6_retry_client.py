@@ -1,12 +1,19 @@
 """Exercise Spark's stock reattach behavior through the fault-injection proxy."""
 
 import sys
+import os
 
 from pyspark.sql.connect.session import SparkSession
 
 
 def main() -> None:
-    connect_url = sys.argv[1]
+    connect_url = os.environ.get("SPARKLESS_CONNECT_URL")
+    if connect_url is None:
+        if len(sys.argv) != 2:
+            raise ValueError(
+                "pass the Connect URL as the only argument or in SPARKLESS_CONNECT_URL"
+            )
+        connect_url = sys.argv[1]
     spark = SparkSession.builder.remote(connect_url).getOrCreate()
     try:
         values = [row.id for row in spark.range(50_000).collect()]

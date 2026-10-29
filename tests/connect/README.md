@@ -95,6 +95,46 @@ Use `--reference-url sc://host:port` to compare against an existing Spark 4.0.5 
 Oracle interpreter is unavailable, the runner uses the validated standalone client for that
 comparison. It leaves the externally managed server running.
 
+## Slice 8 benchmark and proxy route
+
+The optimized combined-server benchmark starts a fresh native process and measures correctness,
+cold startup, filtered counts, multi-batch Arrow collection, p50/p95 latency, client/server RSS,
+server CPU time, slow-reader behavior, health and HTTP progress, replay after a mid-stream drop, and
+graceful shutdown. It synchronizes independent JVM-free public clients at 1, 2, 4, and 8 processes;
+client warmups are excluded from timed cohorts. The default 1,000,000-row count and five iterations
+are intentionally fixed for comparable local runs. Supply the pinned standalone-client interpreter:
+
+```sh
+python3 tests/connect/run_slice8_benchmarks.py \
+  --client-python /tmp/sparkless-connect-client-py311/bin/python \
+  --build --concurrency 1,2,4,8 --iterations 5 --rows 1000000
+```
+
+Each run writes `benchmark.json`, native trace, and fault-proxy logs under
+`target/connect-slice8/run-*/`. The report records machine/software versions, source revision and
+dirty-source digest, server binary SHA-256, raw invocation, client/server CPU and RSS measurements,
+and cleanup outcome. Measurements are evidence only until numeric regression budgets are selected;
+this runner does not claim a speedup or close formal V26 on its own.
+
+The V25 route runner is separate and requires a reachable authenticated emulator route plus its
+immutable source revision. Set `SPARKLESS_PROXY_TOKEN` through the environment or secret manager; the
+value is never written into the report or process arguments:
+
+```sh
+SPARKLESS_PROXY_URL=sc://proxy.example:15002 \
+SPARKLESS_PROXY_REVISION=<40-to-64-character-source-commit> \
+SPARKLESS_PROXY_TOKEN="$SPARKLESS_PROXY_TOKEN" \
+python3 tests/connect/run_slice8_proxy_route.py \
+  --client-python /tmp/sparkless-connect-client-py311/bin/python
+```
+
+The route witness checks invalid-token rejection, independent public sessions, stable backend session
+affinity, stale-identity rejection, a multi-batch Arrow result, config RPC status and returned
+metadata/trailers, session release isolation, interruption of a live result, enriched client errors,
+and default-client reattachment after a deliberately injected disconnect. It reports but cannot
+infer proxy-specific cluster target selection or shut down an externally owned proxy. An unavailable
+route or missing pinned revision fails explicitly; standalone tests do not count as proxy evidence.
+
 The interpreter-specific dependency snapshots are hash-locked for CPython 3.11:
 
 - `client-requirements.in` and `client-py311.lock` install only the standalone client package.

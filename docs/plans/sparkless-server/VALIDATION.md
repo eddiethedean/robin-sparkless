@@ -2,7 +2,7 @@
 
 [Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
 
-**Status: 4.17.0 public release verification is complete; 4.18.0 remains planned.** The Spark 4.0.5 client/protocol contract and reproducible client-request corpus are recorded, and Slice 418-06 has local integrated interoperability evidence, but no formal Phase 2 server interoperability gate is passed. Targeted or partial integrated checks do not establish release-gate conformance; every gate remains pending until its complete scenario and required artifact are recorded.
+**Status: 4.17.0 public release verification is complete; 4.18.0 remains planned.** The Spark 4.0.5 client/protocol contract and reproducible client-request corpus are recorded. Slices 418-06 and 418-08 have local interoperability and benchmark evidence, but no formal Phase 2 server interoperability gate is passed. Targeted or partial integrated checks do not establish release-gate conformance; every gate remains pending until its complete scenario and required artifact are recorded.
 
 The 4.16 prerequisite accepted for 4.17 is **4.16.1**. [Release run 40159241607](https://github.com/eddiethedean/robin-sparkless/actions/runs/40159241607) published and verified that version. The older 4.16.0 recovery failure below is historical and is not being used as the 4.17 prerequisite.
 
@@ -43,7 +43,7 @@ The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Ru
 | V23 | 2 / SS-09, SS-10 | Multiple real client processes | Independent results and forward progress without server-side Python/JVM; clean cancellation/shutdown |
 | V24 | 2 / SS-06 | Packaged sync/async launcher readiness | Actual HTTP/gRPC endpoints and server/capability identity agree; the pinned public client works; restart, port collision, failed readiness, graceful listener drain, and typed HTTP-only behavior pass on advertised platforms |
 | V25 | Optional route certification / SS-11 | Separately advertised third-party proxy or adapter after standalone conformance | Independent values/schema/lifecycle/auth evidence per route; external changes and acceptance never block standalone development or release |
-| V26 | Release / SS-11 | 1/2/4/8+ client benchmarks | Correct outputs, reproducible commands, throughput/latency/RSS/CPU and hardware/version evidence |
+| V26 | Release / SS-11 | 1/2/4/8+ client benchmarks | Correct outputs, reproducible commands, throughput/latency/RSS/CPU, hardware/version evidence, and agreed numeric regression budgets |
 | V27 | 5 / SS-12 | Optional Python worker Jobs/notebooks and failures | Isolation, redaction, quotas, process-tree cleanup; disabled core remains Python-free |
 | V28 | 6 / SS-13 | Native Delta/UC writes and independent reads | Schema/decimal/transaction/recovery validation; explicit unsupported/conflict outcomes |
 | V29 | 0B / SS-02, SS-06, SS-11 | Complete 4.16.0 candidate inventory and isolated consumer installs | Parser/server/binary-extra and existing packages align; archives/wheels install without checkout paths or inherited root Cargo patches; experimental gRPC absent from normal artifacts |
@@ -87,6 +87,14 @@ python3 tests/connect/run_slice6_conformance.py \
 ```
 
 The default retry path used `ReattachExecute` after an injected disconnect and kept one native producer. Public errors covered an unsupported expression, oversized local scalar/schema, and total result-byte exhaustion. The trace contained 180 bounded Arrow responses (maximum 900,999 bytes and 16,384 rows). Four concurrent public client processes completed while health returned 17 responses and HTTP served three statements; no Python/JVM child was started by the native server. This local suite does not close the formal gates: broader V18/V19 coverage, the V21 race matrix, V22 replay/resource/RSS accounting, V17 numeric measurement budgets, and V24–V26 remain pending.
+
+### 418-08 local measurement and route-harness run — 2026-10-29 UTC
+
+The [benchmark report](../../../target/connect-slice8/run-20261029T015413Z-30351/benchmark.json) was produced on macOS 26.5.2 with an Apple M4 Pro (12 logical CPUs, 24 GiB), CPython 3.11.15, `pyspark-client==4.0.5`, `grpcio==1.85.0`, `protobuf==7.36.2`, `pyarrow==26.0.0`, and Rust/Cargo 1.93.1. The native binary reports version 4.17.0 and has SHA-256 `654eecacf4dbc4f1ec6e8e5a5ad37bb4af36ec8e5a0432fa7a415b898cbfb5c3`. The report records source commit `b2cc06dbd4a71b909c4c6b8298c2ef50a3564e37`, 19 dirty paths, and dirty-source digest `f8625fe923e731bde20d4da49e013ed3e4bc1b3358867f9468d62cc57572f645`, so this is working-tree evidence rather than an immutable 4.18 candidate result.
+
+The default run used one million rows per filtered count, 20,000-row Arrow collection, five iterations per client, and the 1/2/4/8-process cohorts. All 150 timed operations returned correct results. At eight clients the aggregate operation p50/p95 was 629/966 ms, the server sampled 74,891,264 bytes peak RSS and 11.95 CPU seconds, and health/HTTP probes completed 10/7 times without errors. The 200,000-row slow reader completed while 37 health and eight HTTP probes progressed. A stock-client injected disconnect produced exactly one native producer and one `ReattachExecute`; the local fault proxy and native server both shut down cleanly, with the native server acknowledging control protocol v2 and exiting 0.
+
+The same run exercised the local fault-proxy workload: two independent public sessions retained distinct backend session identities, 20,000 Arrow rows streamed with `int64` physical type, the stale server identity failed with `FAILED_PRECONDITION`, releasing one session left the other usable, and interruption stopped a live result after the first 16,384-row batch. This validates the local harness and proxy implementation only. The pinned MiniLake checkout still has no Connect/gRPC route, so no V25 proxy certification occurred; cluster target selection is not tested. V26 remains measurement-only until numeric regression budgets and an immutable clean candidate run are recorded.
 
 ### 418-01 contract-freeze verification
 

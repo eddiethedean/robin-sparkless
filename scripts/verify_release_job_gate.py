@@ -68,22 +68,28 @@ def _required_jobs(
     shared = set(manifest["shared_release_jobs"])
     candidate = set(manifest["candidate_jobs"])
     manual = set(manifest["manual_release_jobs"])
+    line_jobs = {
+        line: set(details["required"]) | set(details["must_skip_otherwise"])
+        for line, details in manifest["release_line_specific"].items()
+    }
     optional: set[str] = set()
 
     if mode in {"release_candidate", "stable_tag"}:
         required = shared | candidate
-        if not _is_417_ref(ref):
-            specific = manifest["release_line_specific"]["4.17"]
-            v17 = set(specific["must_skip_otherwise"])
-            required -= v17
-            optional |= v17
+        active_line = _release_line_for_ref(ref)
+        for line, jobs in line_jobs.items():
+            if line == active_line:
+                required |= set(manifest["release_line_specific"][line]["required"])
+            else:
+                required -= jobs
+                optional |= jobs
         return required, optional | manual
 
     if mode in {"manual_validation", "manual_rust_publish"}:
-        return shared | manual, candidate
+        return shared | manual, candidate | set().union(*line_jobs.values())
 
     if mode == "pypi_recovery":
-        return set(), shared | candidate | manual
+        return set(), shared | candidate | manual | set().union(*line_jobs.values())
 
     raise ValueError("unsupported mode in acceptance gate: {}".format(mode))
 
@@ -92,6 +98,16 @@ def _is_417_ref(ref: str) -> bool:
     return ref.startswith("refs/heads/codex/release-4.17") or ref.startswith(
         "refs/tags/v4.17."
     )
+
+
+def _release_line_for_ref(ref: str) -> str | None:
+    if _is_417_ref(ref):
+        return "4.17"
+    if ref.startswith("refs/heads/codex/release-4.18") or ref.startswith(
+        "refs/tags/v4.18."
+    ):
+        return "4.18"
+    return None
 
 
 def validate_gate(
@@ -103,6 +119,12 @@ def validate_gate(
         set(manifest["shared_release_jobs"])
         | set(manifest["candidate_jobs"])
         | set(manifest["manual_release_jobs"])
+        | set().union(
+            *(
+                set(details["required"]) | set(details["must_skip_otherwise"])
+                for details in manifest["release_line_specific"].values()
+            )
+        )
     )
     if set(needs) != expected | {"release-mode"}:
         missing = sorted((expected | {"release-mode"}) - set(needs))

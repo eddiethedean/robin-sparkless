@@ -1,6 +1,7 @@
 """Check public-client error behavior for unsupported plans and output boundaries."""
 
 import sys
+import os
 
 from pyspark.sql.connect.session import SparkSession
 from pyspark.sql.functions import col
@@ -13,14 +14,26 @@ def expect_failure(label: str, action, markers: tuple[str, ...]) -> None:
     except Exception as error:
         message = str(error).lower()
         if not any(marker in message for marker in markers):
-            raise AssertionError(f"{label} failed without an expected diagnostic: {error}") from error
-        print(f"{label} returned a visible client error: {type(error).__name__}", flush=True)
+            raise AssertionError(
+                f"{label} failed without an expected diagnostic: {error}"
+            ) from error
+        print(
+            f"{label} returned a visible client error: {type(error).__name__}",
+            flush=True,
+        )
     else:
         raise AssertionError(f"{label} unexpectedly succeeded")
 
 
 def main() -> None:
-    spark = SparkSession.builder.remote(sys.argv[1]).getOrCreate()
+    connect_url = os.environ.get("SPARKLESS_CONNECT_URL")
+    if connect_url is None:
+        if len(sys.argv) != 2:
+            raise ValueError(
+                "pass the Connect URL as the only argument or in SPARKLESS_CONNECT_URL"
+            )
+        connect_url = sys.argv[1]
+    spark = SparkSession.builder.remote(connect_url).getOrCreate()
     try:
         expect_failure(
             "unsupported multiplication expression",

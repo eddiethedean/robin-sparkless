@@ -65,6 +65,14 @@
       "must_skip_otherwise": [
         "phase1-v17-resource-witness"
       ]
+    },
+    "4.18": {
+      "required": [
+        "connect-slice8-benchmarks"
+      ],
+      "must_skip_otherwise": [
+        "connect-slice8-benchmarks"
+      ]
     }
   }
 }
