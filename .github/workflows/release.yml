@@ -397,11 +397,13 @@ jobs:
       }}
     needs: [release-metadata]
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       CARGO_BUILD_JOBS: 1
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
         with:
           toolchain: 1.93.1
@@ -425,6 +427,15 @@ jobs:
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Install hash-locked public Connect client
         run: python -m pip install --require-hashes -r tests/connect/client-py311.lock
+      - name: Measure the pinned V26 baseline on this hosted runner
+        run: |
+          BASELINE_REVISION="$(python3 -c 'import json; print(json.load(open("tests/connect/v26-regression-budget.json"))["approval"]["baseline_source_revision"])')"
+          git worktree add --detach "$RUNNER_TEMP/v26-baseline" "$BASELINE_REVISION"
+          cd "$RUNNER_TEMP/v26-baseline"
+          python3 tests/connect/run_slice8_benchmarks.py \
+            --client-python "$(python -c 'import sys; print(sys.executable)')" \
+            --build --concurrency 1,2,4,8 --iterations 5 --rows 1000000 \
+            --output "$GITHUB_WORKSPACE/target/connect-slice8-baseline"
       - name: Run synchronized 1/2/4/8-client benchmark and replay witnesses
         run: >-
           python3 tests/connect/run_slice8_benchmarks.py
@@ -433,16 +444,22 @@ jobs:
           --concurrency 1,2,4,8
           --iterations 5
           --rows 1000000
+      - name: Remove temporary baseline worktree
+        if: always()
+        run: git worktree remove --force "$RUNNER_TEMP/v26-baseline"
       - name: Enforce the approved V26 regression budget
         run: >-
           python3 scripts/verify_connect_v26_budget.py
           --reports target/connect-slice8
+          --baseline-reports target/connect-slice8-baseline
           --budget tests/connect/v26-regression-budget.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: spark-connect-slice8-v26-measurements
-          path: target/connect-slice8/
+          path: |
+            target/connect-slice8/
+            target/connect-slice8-baseline/
           if-no-files-found: warn
           retention-days: 90
 
