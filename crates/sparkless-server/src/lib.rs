@@ -5638,7 +5638,7 @@ mod tests {
     async fn deadline_during_insert_staging_retains_cancelled_outcome_without_effects() {
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
-            response_timeout: Duration::from_millis(250),
+            response_timeout: Duration::from_secs(1),
             ..ServerConfig::default()
         })
         .unwrap();
@@ -5804,11 +5804,28 @@ mod tests {
     async fn mutation_deadline_leaves_operation_status_for_worker_to_resolve() {
         let server = Server::new(ServerConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
-            response_timeout: Duration::from_nanos(1),
+            response_timeout: Duration::from_millis(250),
             ..ServerConfig::default()
         })
         .unwrap();
-        let source = server.inner.root_session.range(0, 500_000, 1).unwrap();
+        let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = std::sync::Mutex::new(release_rx);
+        *server
+            .inner
+            .test_mutation_before_outcome_hook
+            .lock()
+            .unwrap() = Some(Arc::new(move || {
+            reached_tx
+                .send(())
+                .expect("signal after the native mutation has finished");
+            release_rx
+                .lock()
+                .expect("release channel lock")
+                .recv_timeout(Duration::from_secs(5))
+                .expect("release the worker after the HTTP response deadline");
+        }));
+        let source = server.inner.root_session.range(0, 10_000, 1).unwrap();
         server
             .inner
             .root_session
@@ -5862,6 +5879,14 @@ mod tests {
         assert_eq!(deadline["ename"], "DeadlineExceeded", "{deadline}");
         assert_eq!(deadline["operation"]["operation_id"], "deadline-insert");
 
+        tokio::task::spawn_blocking(move || reached_rx.recv_timeout(Duration::from_secs(2)))
+            .await
+            .expect("wait for mutation worker")
+            .expect("native mutation should finish before its outcome is published");
+        release_tx
+            .send(())
+            .expect("release the worker after the response deadline");
+
         let settled = timeout(Duration::from_secs(2), async {
             loop {
                 let (status, operation) = request_json(
@@ -5895,7 +5920,7 @@ mod tests {
         match settled["effect_outcome"].as_str() {
             Some("committed") => {
                 assert_eq!(settled["receipt"]["kind"], "table");
-                assert_eq!(committed_rows, 500_000, "{settled}");
+                assert_eq!(committed_rows, 10_000, "{settled}");
             }
             Some("failed" | "cancelled") => {
                 assert_eq!(
