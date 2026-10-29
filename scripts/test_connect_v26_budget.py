@@ -52,10 +52,16 @@ class V26PairedBudgetTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.candidate_dir = self.root / "candidate"
         self.baseline_dir = self.root / "baseline"
-        self.candidate_run = self.candidate_dir / "run-candidate"
-        self.baseline_run = self.baseline_dir / "run-baseline"
-        self.candidate_run.mkdir(parents=True)
-        self.baseline_run.mkdir(parents=True)
+        self.candidate_runs = [
+            self.candidate_dir / f"replicate-{index}" / "run-candidate"
+            for index in range(1, 4)
+        ]
+        self.baseline_runs = [
+            self.baseline_dir / f"replicate-{index}" / "run-baseline"
+            for index in range(1, 4)
+        ]
+        for run_dir in self.candidate_runs + self.baseline_runs:
+            run_dir.mkdir(parents=True)
         self.budget_path = self.root / "budget.json"
         limits = {
             "minimum_operations_per_second_ratio": 0.8,
@@ -72,6 +78,7 @@ class V26PairedBudgetTests(unittest.TestCase):
                 "baseline_logical_cpu_count": 4,
                 "baseline_rows": 1_000_000,
                 "baseline_iterations_per_client": 5,
+                "measurement_replicates": 3,
             },
             "cohorts": {
                 str(concurrency): {"baseline": METRICS, "limits": limits}
@@ -85,19 +92,21 @@ class V26PairedBudgetTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def _write_reports(self, baseline_cpu: str, candidate_cpu: str) -> None:
-        (self.baseline_run / "benchmark.json").write_text(
-            json.dumps(_report(BASELINE_SHA, baseline_cpu)), encoding="utf-8"
-        )
-        (self.candidate_run / "benchmark.json").write_text(
-            json.dumps(_report("b" * 40, candidate_cpu, scale=0.8)),
-            encoding="utf-8",
-        )
+        for run_dir in self.baseline_runs:
+            (run_dir / "benchmark.json").write_text(
+                json.dumps(_report(BASELINE_SHA, baseline_cpu)), encoding="utf-8"
+            )
+        for run_dir in self.candidate_runs:
+            (run_dir / "benchmark.json").write_text(
+                json.dumps(_report("b" * 40, candidate_cpu, scale=0.8)),
+                encoding="utf-8",
+            )
 
     def test_same_job_cpu_uses_paired_baseline_and_approved_limits(self) -> None:
         self.assertEqual(
             verify_budget(self.candidate_dir, self.budget_path, self.baseline_dir),
             [
-                "V26 approved regression budget passed for 4 cohorts against the matched hosted baseline"
+                "V26 approved regression budget passed for 4 cohorts against the matched hosted baseline using medians"
             ],
         )
 
@@ -107,9 +116,10 @@ class V26PairedBudgetTests(unittest.TestCase):
             verify_budget(self.candidate_dir, self.budget_path, self.baseline_dir)
 
     def test_paired_report_must_use_approved_baseline_revision(self) -> None:
-        baseline = json.loads((self.baseline_run / "benchmark.json").read_text())
+        baseline_path = self.baseline_runs[0] / "benchmark.json"
+        baseline = json.loads(baseline_path.read_text())
         baseline["source_revision"] = "c" * 40
-        (self.baseline_run / "benchmark.json").write_text(json.dumps(baseline))
+        baseline_path.write_text(json.dumps(baseline))
         with self.assertRaisesRegex(BudgetError, "approved source revision"):
             verify_budget(self.candidate_dir, self.budget_path, self.baseline_dir)
 

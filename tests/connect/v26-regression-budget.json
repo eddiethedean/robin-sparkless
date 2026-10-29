@@ -8,7 +8,8 @@
     "baseline_cpu_model": "AMD EPYC 7763 64-Core Processor",
     "baseline_logical_cpu_count": 4,
     "baseline_rows": 1000000,
-    "baseline_iterations_per_client": 5
+    "baseline_iterations_per_client": 5,
+    "measurement_replicates": 3
   },
   "cohorts": {
     "1": {

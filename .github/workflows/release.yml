@@ -427,23 +427,34 @@ jobs:
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Install hash-locked public Connect client
         run: python -m pip install --require-hashes -r tests/connect/client-py311.lock
-      - name: Measure the pinned V26 baseline on this hosted runner
+      - name: Build the pinned V26 baseline on this hosted runner
         run: |
           BASELINE_REVISION="$(python3 -c 'import json; print(json.load(open("tests/connect/v26-regression-budget.json"))["approval"]["baseline_source_revision"])')"
           git worktree add --detach "$RUNNER_TEMP/v26-baseline" "$BASELINE_REVISION"
-          cd "$RUNNER_TEMP/v26-baseline"
-          python3 tests/connect/run_slice8_benchmarks.py \
-            --client-python "$(python -c 'import sys; print(sys.executable)')" \
-            --build --concurrency 1,2,4,8 --iterations 5 --rows 1000000 \
-            --output "$GITHUB_WORKSPACE/target/connect-slice8-baseline"
-      - name: Run synchronized 1/2/4/8-client benchmark and replay witnesses
-        run: >-
-          python3 tests/connect/run_slice8_benchmarks.py
-          --client-python "$(python -c 'import sys; print(sys.executable)')"
-          --build
-          --concurrency 1,2,4,8
-          --iterations 5
-          --rows 1000000
+          (cd "$RUNNER_TEMP/v26-baseline" && cargo build --locked --release -p sparkless-server --no-default-features --features http,connect)
+      - name: Build the V26 candidate on this hosted runner
+        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
+      - name: Run three paired 1/2/4/8-client V26 measurements
+        run: |
+          set -euo pipefail
+          for replicate in 1 2 3; do
+            baseline_output="$GITHUB_WORKSPACE/target/connect-slice8-baseline/replicate-$replicate"
+            candidate_output="$GITHUB_WORKSPACE/target/connect-slice8/replicate-$replicate"
+            mkdir -p "$baseline_output" "$candidate_output"
+            (
+              cd "$RUNNER_TEMP/v26-baseline"
+              python3 tests/connect/run_slice8_benchmarks.py \
+                --client-python "$(python -c 'import sys; print(sys.executable)')" \
+                --server-bin "$RUNNER_TEMP/v26-baseline/target/release/sparkless-server" \
+                --concurrency 1,2,4,8 --iterations 5 --rows 1000000 \
+                --output "$baseline_output"
+            )
+            python3 tests/connect/run_slice8_benchmarks.py \
+              --client-python "$(python -c 'import sys; print(sys.executable)')" \
+              --server-bin "$GITHUB_WORKSPACE/target/release/sparkless-server" \
+              --concurrency 1,2,4,8 --iterations 5 --rows 1000000 \
+              --output "$candidate_output"
+          done
       - name: Remove temporary baseline worktree
         if: always()
         run: git worktree remove --force "$RUNNER_TEMP/v26-baseline"
