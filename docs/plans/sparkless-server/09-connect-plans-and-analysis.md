@@ -15,7 +15,7 @@ search:
 
 Translate a documented subset of actual Connect relations/expressions into native operations.
 
-The [4.18 implementation plan](RELEASE_4_18.md) refines this work into 418-01–418-03, integrated with Arrow/replay slices 418-04–418-06. Its [Apache source review](CONNECT_PROTOCOL_RESEARCH.md) pins Spark 4.0.5 and distinguishes public protocol behavior from the Sparkless subset. The actual client encoders and config/lifecycle requests are captured in the 418-01 fixtures; server conformance remains open, and Connect SQL commands, writes, grouped aggregates, artifact-backed inputs, and additional nodes are explicitly gated.
+The [4.18 implementation plan](RELEASE_4_18.md) refines this work into 418-01–418-03, integrated with Arrow/replay slices 418-04–418-06. Its [Apache source review](CONNECT_PROTOCOL_RESEARCH.md) pins Spark 4.0.5 and distinguishes public protocol behavior from the Sparkless subset. The actual client encoders and config/lifecycle requests are captured in the 418-01 fixtures; the 4.18 candidate conformance gates passed as recorded in the [cut evidence](RELEASE_4_18.md#4180-cut-evidence). Connect SQL commands, writes, grouped aggregates, artifact-backed inputs, and additional nodes remain outside the advertised subset.
 
 ## Dependencies and delivery slices
 

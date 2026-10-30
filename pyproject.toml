@@ -9,6 +9,13 @@ markers = [
     "performance: performance benchmark",
 ]
 
+[tool.ruff]
+target-version = "py311"
+include = ["*.py", "*.pyi", "*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ruff.lint.per-file-ignores]
 # Tests often import get_spark_imports() first so the right backend is loaded, then other imports.
 "tests/**" = ["E402"]

@@ -100,9 +100,7 @@ def verify_consumer_features(metadata: dict) -> None:
 def release_exception_policy_path(root: Path, release: str) -> Path:
     """Return the exception policy scoped to this release series."""
     series = ".".join(release.split(".")[:2])
-    return root / "security" / "{}-exceptions.toml".format(
-        "zstd-{}".format(series)
-    )
+    return root / "security" / "{}-exceptions.toml".format("zstd-{}".format(series))
 
 
 def verify(

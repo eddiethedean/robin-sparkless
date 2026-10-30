@@ -10,7 +10,7 @@ search:
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Validation](VALIDATION.md)
 
-**Status:** The standalone D02–D04/D07–D11 contract and Python 3.11 minimum are frozen for 4.17 below; final candidate and distribution evidence remain open. D05's coordinated package versions remain resolved. The 4.18 Connect client/protocol baseline is frozen below; server interoperability remains open. Spark Connect is pinned to the 4.0.5 maintenance line for 4.18; this does not change the separate project release version.
+**Status as of 2026-10-30:** 4.17.0 public verification is complete. The 4.18 Spark Connect baseline is frozen, and candidate interoperability, the approved V26 budget, and the coordinated candidate inventory passed; see the [4.18 cut evidence](RELEASE_4_18.md#4180-cut-evidence). V25 is not advertised. No 4.18.0 tag or publication has been made, and V34 remains post-publication work. D05's coordinated package versions remain resolved; Spark Connect is pinned to Spark 4.0.5 independently of the project release version.
 
 Do not replace an unresolved value with a guessed version or silently treat a recommendation as implemented. Record resolution date, owner, exact immutable revisions, rationale, impacted plans, and validation evidence here.
 
@@ -79,7 +79,7 @@ The [4.18 plan](RELEASE_4_18.md) divides Phase 2 into slices 418-01–418-10. Sl
 
 The 418-01 client corpus and reproducible commands are in [`tests/connect`](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/connect/README.md). They record client requests, not successful server responses. Before freezing final D07 error behavior, resolve release-cursor behavior against Spark 4.0.5. Keep safe cleanup regardless of error representation. Do not claim unlimited/durable retry protection from bounded tombstones, or advertise Structured Streaming from Arrow result streaming.
 
-Slice 418-08 adds a reproducible V26 measurement runner and a separate opt-in V25 route runner. The 4.18 release workflow runs the V26 measurement command on 4.18 candidate branches/tags and preserves its artifacts. Local fault-proxy coverage exercises sessions, metadata/status, stale identities, streaming, cancellation, and retry; it does not certify MiniLake routing. V25 remains pending the external gRPC proxy, and V26 remains a measurement-only record until regression budgets and the full candidate evidence are approved.
+Slice 418-08 adds a reproducible V26 measurement runner and a separate opt-in V25 route runner. The 4.18 candidate workflow passed the approved V26 budget and preserved its candidate evidence; see the [cut record](RELEASE_4_18.md#4180-cut-evidence). Local fault-proxy coverage does not certify MiniLake routing, so V25 remains unadvertised. V34 still requires fresh checks after public publication.
 
 ## Decisions required by milestones
 

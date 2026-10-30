@@ -1,4 +1,5 @@
 """Run with SPARKLESS_TEST_MODE=sparkless or pyspark; see the examples README."""
+
 import os
 
 
@@ -11,8 +12,14 @@ def test_backend_identity(spark, spark_imports):
         actual = actual._session
     assert isinstance(actual, spark_imports.SparkSession)
     module = type(actual).__module__
-    assert module.startswith("pyspark") if expected == "pyspark" else not module.startswith("pyspark")
-    assert spark_imports.SparkSession.__module__.startswith("pyspark") == (expected == "pyspark")
+    assert (
+        module.startswith("pyspark")
+        if expected == "pyspark"
+        else not module.startswith("pyspark")
+    )
+    assert spark_imports.SparkSession.__module__.startswith("pyspark") == (
+        expected == "pyspark"
+    )
     if expected == "pyspark":
         assert actual.sparkContext._jvm.java.lang.System.getProperty("java.version")
     print(f"backend={expected}; session={module}.{type(actual).__name__}")

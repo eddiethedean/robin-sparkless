@@ -10,7 +10,9 @@ search:
 
 [Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
 
-**Status: 4.17.0 public release verification is complete; 4.18.0 remains planned.** The Spark 4.0.5 client/protocol contract and reproducible client-request corpus are recorded. Slices 418-06 and 418-08 have local interoperability and benchmark evidence, but no formal Phase 2 server interoperability gate is passed. Targeted or partial integrated checks do not establish release-gate conformance; every gate remains pending until its complete scenario and required artifact are recorded.
+**Status as of 2026-10-30:** 4.17.0 public release verification is complete. The 4.18.0 candidate branch passed both [CI run 40996635814](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996635814) and [Release run 40996636369](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996636369) on exact head `525ffe564585a4349890aa36a458f8530ea7ee7c`. See the [current 4.18 cut evidence](RELEASE_4_18.md#4180-cut-evidence) and [retained candidate artifacts](../../RELEASE_EVIDENCE.md). No 4.18.0 tag or publication has been made; V34 remains post-publication work.
+
+This file preserves historical gate definitions and point-in-time validation notes. Statements below that say 4.18 gates were pending describe the planning state when written and are superseded for current cut status by the evidence linked above.
 
 The 4.16 prerequisite accepted for 4.17 is **4.16.1**. [Release run 40159241607](https://github.com/eddiethedean/robin-sparkless/actions/runs/40159241607) published and verified that version. The older 4.16.0 recovery failure below is historical and is not being used as the 4.17 prerequisite.
 
@@ -18,7 +20,7 @@ The public 4.16.0 registries currently contain the expected PyPI inventories (ni
 
 For each gate record the native commit, client/reference versions and digests, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep direct HTTP and standalone Connect results separate. Optional external route evidence is supplemental; older component records below describe their historical scope and do not add current release prerequisites.
 
-## Latest full readiness review
+## Historical 4.17 readiness review (2026-10-27)
 
 The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Rust metadata API, admitted SQL parsing, functional candidate/public verification changes, and the maintainer-approved Python 3.11 minimum. The release remains **HOLD** until the published Rust consumer graph is fixed and the final candidate's complete V15–V18/V31 evidence passes. The [original review](READINESS_4_17.md) and older component results below remain historical evidence.
 

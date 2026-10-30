@@ -124,9 +124,7 @@ class ReleaseExceptionTest(unittest.TestCase):
         policy = tomllib.loads(
             release_exception_policy_path(root, "4.18.0").read_text()
         )
-        decision = audit_decision(
-            self.report, 1, policy, "4.18.0", date(2026, 10, 29)
-        )
+        decision = audit_decision(self.report, 1, policy, "4.18.0", date(2026, 10, 29))
         self.assertEqual(decision["status"], "accepted_exception")
         self.assertEqual(decision["expires_on"], "2026-11-26")
         with self.assertRaises(ValueError):
