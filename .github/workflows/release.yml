@@ -87,12 +87,12 @@ jobs:
             manylinux: auto
             args: --zig --compatibility musllinux_1_2
           - name: macos-x86_64
-            runner: macos-14
+            runner: macos-15
             target: x86_64-apple-darwin
             manylinux: 'off'
             args: ''
           - name: macos-aarch64
-            runner: macos-14
+            runner: macos-15
             target: aarch64-apple-darwin
             manylinux: 'off'
             args: ''
@@ -302,7 +302,7 @@ jobs:
             platform-tag: macosx_10_12_x86_64
             machine: x86_64
           - target: macos-aarch64
-            runner: macos-14
+            runner: macos-15
             architecture: arm64
             platform-tag: macosx_11_0_arm64
             machine: aarch64
@@ -391,7 +391,7 @@ jobs:
   server-bin-macos-arm64:
     name: Server binary wheel (macOS arm64)
     needs: [release-metadata]
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -522,7 +522,7 @@ jobs:
           - runner: ubuntu-24.04
             sparkless: manylinux-x86_64
             server: manylinux-2-28-x86_64
-          - runner: macos-14
+          - runner: macos-15
             sparkless: macos-aarch64
             server: macosx-14-0-arm64
     steps:
