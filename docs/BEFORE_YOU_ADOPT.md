@@ -19,9 +19,17 @@ Sparkless is a strong fit for **local PySpark-style development and testing** wi
 | Topic | Sparkless behavior |
 |-------|-------------------|
 | **Python UDFs** | Not supported at the Python layer. Prefer built-in `functions` or engine Rust UDFs. |
-| **Parity gaps** | 200+ fixtures validated; some APIs differ or are stubs. See [Parity status](PARITY_STATUS.md). |
-| **PySpark version** | Targets PySpark **3.2–3.5** semantics by default; PySpark 4 profile is opt-in ([PySpark compat profiles](PYSPARK_COMPAT_PROFILES.md)). |
-| **Cluster features** | Streaming, MLlib, RDD cluster operations, and many Spark SQL catalog/ACL features are limited or stubbed. |
+| **Parity gaps** | Some APIs differ, are unsupported, or accept options without implementing their Spark behavior. See [Parity status](PARITY_STATUS.md). |
+| **PySpark version** | Defaults to a **3.5-like** local compatibility profile; the 4.0 profile is opt-in. Profiles do not establish complete version parity ([PySpark compat profiles](PYSPARK_COMPAT_PROFILES.md)). |
+| **Cluster features** | Distributed execution, RDD execution, MLlib, and Structured Streaming are unsupported; some compatibility methods are stubs. |
+
+## Native server and Spark Connect
+
+The 4.18 server provides HTTP and a supported subset of the Spark 4.0.5 Connect
+protocol. Its remote API and logical types are narrower than the in-process
+Python API. See [Spark Connect](SPARK_CONNECT.md) for supported operations,
+platforms, resource budgets, and network trust boundaries. Arrow response
+streaming does not provide Structured Streaming.
 
 ## Production and security
 

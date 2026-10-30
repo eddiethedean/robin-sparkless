@@ -9,29 +9,54 @@ This guide is for the **Sparkless v4** Python package: a PySpark-like API backed
 ### From PyPI (recommended)
 
 ```bash
-pip install "sparkless>=4,<5"
+python -m pip install "sparkless>=4,<5"
 ```
 
-Requires **Python 3.11+**. Prebuilt wheels: Linux (glibc and musl), macOS (arm64 and x86_64), Windows (x86_64 and arm64). See [Supported platforms](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md#supported-platforms) in the package README.
+Requires **Python 3.11+**. Local execution uses a native extension and needs
+neither Java, PySpark, nor the Polars Python package.
 
-Optional extras:
+### Supported platforms
+
+The release workflow builds `cp311-abi3` extension wheels for Python 3.11–3.14:
+
+| Platform | Architectures |
+| --- | --- |
+| Linux, glibc or musl | x86_64, ARM64 |
+| macOS | Intel, Apple Silicon |
+| Windows | x86_64, ARM64 |
+
+Check the [PyPI file inventory](https://pypi.org/project/sparkless/#files) for
+your release. A platform without a matching wheel requires a source build.
+The optional native server has a smaller platform set: Linux x86_64 with glibc
+2.28+ and macOS 14+ on Apple Silicon. See [Spark Connect](SPARK_CONNECT.md).
+
+### Optional extras
+
+| Extra | Dependencies and purpose |
+| --- | --- |
+| `sparkless[dev]` | Development/tests: pytest, pandas, PyArrow, Polars, pytest-xdist, and other test tools |
+| `sparkless[pyspark]` | PySpark 3.5 and its Delta integration; requires a compatible Java runtime |
+| `sparkless[pyspark4]` | PySpark 4 and its Delta integration; requires a compatible Java runtime |
+| `sparkless[server]` | The exactly matching `sparkless-server-bin` distribution |
+| `sparkless[jdbc]` | Database integration test tools, testcontainers, and database drivers |
+
+For example:
 
 ```bash
-pip install "sparkless[dev]"     # pytest, pandas, hypothesis, pytest-xdist
-pip install "sparkless[pyspark]" # run tests with real PySpark (requires Java)
+python -m pip install "sparkless[dev]>=4,<5"
 ```
+
+Use separate environments for `pyspark` and `pyspark4`; they require different
+Spark versions. The `jdbc` extra supplies test dependencies rather than enabling
+every native database backend. Backend support and options depend on the build
+and connection configuration.
 
 ### From source (contributors)
 
-Clone [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) and install from the repo:
-
-```bash
-pip install ./python
-# Or editable install (rebuilds native extension on changes):
-cd python && maturin develop
-```
-
-See [CONTRIBUTING.md](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md) for the full dev workflow.
+Use the [contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup)
+to create the repository-root uv environment, install development dependencies,
+and build the native extension with Maturin. Rebuild after changing Rust or PyO3
+code; an editable Python install alone does not rebuild the native library.
 
 ## Quick Start
 
@@ -52,7 +77,7 @@ df = spark.createDataFrame(data)
 
 # Operations work like PySpark
 result = df.filter(F.col("age") > 25).select("name")
-print(result.collect())  # [Row(name='Bob')]
+print(result.collect())
 
 df.show()
 spark.stop()
@@ -60,7 +85,8 @@ spark.stop()
 
 ### PySpark-style import swap
 
-Sparkless v4 matches PySpark APIs for tests and local workflows (not a full Spark cluster replacement — see [Before you adopt](BEFORE_YOU_ADOPT.md)):
+For supported DataFrame code, change your imports to use Sparkless. Validate
+behavior against PySpark; see [Before you adopt](BEFORE_YOU_ADOPT.md).
 
 ```python
 # Before (PySpark)
@@ -70,7 +96,9 @@ from pyspark.sql import SparkSession
 from sparkless.sql import SparkSession
 ```
 
-Use `SparkSession.builder.app_name("...").get_or_create()` or `SparkSession("AppName")`; the rest of your PySpark-style code can stay the same.
+Create a session with `SparkSession.builder.app_name("...").get_or_create()`.
+Check the [known differences](PYSPARK_DIFFERENCES.md) before assuming API or
+behavioral equivalence.
 
 ## Core Features
 
@@ -98,7 +126,8 @@ dept_avg = df.groupBy("dept").avg("salary")
 ### Window Functions
 
 ```python
-from sparkless.sql import Window, functions as F
+from sparkless.sql import functions as F
+from sparkless.sql.window import Window
 
 window_spec = Window.partitionBy("dept").orderBy(F.desc("salary"))
 ranked = df.withColumn("rank", F.row_number().over(window_spec))
@@ -125,7 +154,7 @@ The `sparkless.testing` module provides a unified framework for writing tests th
 Add to your `conftest.py`:
 
 ```python
-pytest_plugins = ["sparkless.testing"]
+pytest_plugins = ["sparkless.testing.plugin"]
 ```
 
 ### Unit Test Example
@@ -138,7 +167,7 @@ def test_data_transformation(spark, spark_imports):
     data = [{"value": 10}, {"value": 20}, {"value": 30}]
     df = spark.createDataFrame(data)
 
-    result = df.filter(F.col("value") > 15)
+    result = df.filter(F.col("value") > 15).orderBy("value")
 
     assert result.count() == 2
     rows = result.collect()
@@ -164,20 +193,51 @@ SPARKLESS_TEST_MODE=pyspark pytest tests -v
 
 For the complete guide, see [Testing Guide](TESTING_GUIDE.md).
 
+## Read and write files
+
+The in-process API supports CSV, JSON, Parquet, and Delta Lake. This example
+writes Parquet and reads it back without leaving files behind:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from sparkless.sql import SparkSession
+
+spark = SparkSession.builder.app_name("files").get_or_create()
+try:
+    with TemporaryDirectory() as directory:
+        path = str(Path(directory) / "orders.parquet")
+        orders = spark.createDataFrame([(1, 120), (2, 80)], ["id", "amount"])
+        orders.write.mode("overwrite").parquet(path)
+        assert spark.read.parquet(path).count() == 2
+finally:
+    spark.stop()
+```
+
+For writer options, saved-table persistence, and database-specific behavior,
+see [PySpark differences](PYSPARK_DIFFERENCES.md). Arrow table and bounded batch
+exports are covered in the [Python API reference](PYTHON_API_REFERENCE.md#arrow-export).
+
+## Native server and Spark Connect
+
+The `server` extra installs a native executable. `SparklessServer` and
+`AsyncSparklessServer` own its startup, readiness, and shutdown. Follow the
+[Spark Connect guide](SPARK_CONNECT.md) for the pinned 4.18 client example,
+HTTP-only operation, supported platforms, and the exact remote API/type limits.
+The remote contract is narrower than the in-process Python API on this page.
+
 ## Performance
 
-Sparkless v4 uses the Rust engine (Polars in Rust). There is no JVM and no Polars Python dependency at runtime.
-
-| Operation         | PySpark | Sparkless v4 |
-| ----------------- | ------- | ------------- |
-| Session creation  | 30–45s  | &lt; 1s       |
-| Simple query      | 2–5s    | &lt; 0.1s     |
-| Full test suite   | 5–10 min| 1–2 min       |
+Workload size, query plans, startup costs, and the host machine affect runtime.
+Measure representative workloads in your own environment; this guide does not
+promise a fixed speedup over Spark. `collect()` materializes the complete result
+in Python, and bounded Arrow batches do not bound total query memory.
 
 ## Next Steps
 
 - [Testing Guide](TESTING_GUIDE.md) — Full guide to `sparkless.testing` (dual-mode testing, fixtures, comparison utilities)
-- [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) — Installation, Sparkless 3 vs 4.x, API overview, backend
+- [Python API reference](PYTHON_API_REFERENCE.md) — API overview and Arrow export
+- [Spark Connect](SPARK_CONNECT.md) — Native server and remote API contract
 - [PySpark differences](PYSPARK_DIFFERENCES.md) — Known divergences and caveats
 - [Migration (PySpark / Sparkless 3)](python_migration.md) — Switching from PySpark or Sparkless 3.x
 - [Parity status](PARITY_STATUS.md) — Coverage and fixture status

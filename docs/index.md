@@ -25,9 +25,16 @@ Install Python package: `pip install "sparkless>=4,<5"`
 - [Testing guide](TESTING_GUIDE.md) — Dual-mode pytest with `sparkless.testing`
 - [Migration](python_migration.md) — From PySpark or Sparkless 3.x
 - [FAQ](FAQ.md) · [Troubleshooting (Python)](TROUBLESHOOTING_PYTHON.md)
-- [Python API reference (starter)](PYTHON_API_REFERENCE.md)
+- [Python API reference](PYTHON_API_REFERENCE.md)
 - [Execution cancellation](EXECUTION_CANCELLATION.md) — cancel active DataFrame actions and understand safe-point behavior
 - [PySpark differences](PYSPARK_DIFFERENCES.md) · [Parity status](PARITY_STATUS.md)
+
+## Native server
+
+The optional `sparkless[server]` extra installs a managed native server. See
+[Spark Connect](SPARK_CONNECT.md) for the 4.18 client example, HTTP-only mode,
+platform support, and the supported remote API subset. In-process Python
+features are not automatically available through Connect.
 
 ## Rust (robin-sparkless)
 

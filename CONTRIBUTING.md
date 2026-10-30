@@ -66,13 +66,15 @@ to `uv pip install` to avoid the hardlink fallback warning.
 
 ## Checks before opening a PR
 
-Run the full suite locally (allow 10–20 minutes on first build):
+Run Rust checks/tests and Python lint/type checks:
 
 ```bash
 make check-full
 ```
 
-This runs: `cargo fmt`, clippy, audit, deny, Rust tests (all features), ruff, and mypy.
+This runs: `cargo fmt`, Clippy, audit, deny, Rust tests (all features), Ruff, and mypy.
+Run Python tests separately using the commands below. First builds can take
+substantial time; the duration depends on the selected features and host.
 
 Faster subsets:
 
