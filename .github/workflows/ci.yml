@@ -492,6 +492,7 @@ jobs:
       - name: Execute outside-checkout examples and assert backend identity
         env:
           DOCS_ORACLE: ${{ matrix.oracle }}
+          SPARKLESS_PYSPARK_COMPAT: ${{ matrix.oracle == '4.0.5' && '4.0' || '3.5' }}
           _JAVA_OPTIONS: -Xmx2g
         run: |
           if [[ -z "$DOCS_ORACLE" ]]; then

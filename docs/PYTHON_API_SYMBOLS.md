@@ -1041,15 +1041,15 @@ No runtime docstring. See the API contracts and support matrix before relying on
 
 ## RuntimeConfig
 
-### `get(self, /, key, default=None)`
+### `get(key, default=None)`
 
 PySpark: spark.conf.get(key, default=None) returns value or default as string.
 
-### `is_case_sensitive(self, /)`
+### `is_case_sensitive()`
 
 No runtime docstring. See the API contracts and support matrix before relying on this symbol.
 
-### `set(self, /, key, value)`
+### `set(key, value)`
 
 PySpark: spark.conf.set(key, value).
 

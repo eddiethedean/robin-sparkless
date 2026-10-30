@@ -236,9 +236,9 @@
     "take": "(self, /, n)"
   },
   "RuntimeConfig": {
-    "get": "(self, /, key, default=None)",
-    "is_case_sensitive": "(self, /)",
-    "set": "(self, /, key, value)"
+    "get": "(key, default=None)",
+    "is_case_sensitive": "()",
+    "set": "(key, value)"
   },
   "SessionBuilder": {
     "appName": "(self, /, name)",

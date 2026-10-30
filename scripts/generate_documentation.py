@@ -72,7 +72,7 @@ def api(check: bool) -> None:
     session = sparkless.SparkSession.builder.app_name('documentation-inventory').get_or_create()
     try:
         sections += [('SessionBuilder', type(sparkless.SparkSession.builder)),
-                     ('Catalog', type(session.catalog)), ('RuntimeConfig', type(session.conf)),
+                     ('Catalog', type(session.catalog)), ('RuntimeConfig', session.conf),
                      ('LocalRDD', type(session.range(0).rdd)),
                      ('CancellationHandle', type(session.cancellation_handle()))]
     finally:
