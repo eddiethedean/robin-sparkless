@@ -1,98 +1,70 @@
-# Migration Guide (Python — Sparkless v4)
+# Migrate to Sparkless 4
 
-This page helps you switch to **Sparkless v4** (Rust backend) from **PySpark** or from **Sparkless 3.x** (Polars Python backend).
+Start with the [version/install guide](INSTALLATION.md) and [support matrix](SUPPORT_MATRIX.md).
+Sparkless 4 uses a Rust/Polars native extension; Sparkless 3 used the Polars Python
+package. The familiar namespace remains, but that does not guarantee identical
+behavior for every old pipeline.
 
-## Sparkless 3.x → v4
+## From PySpark
 
-| Aspect        | Sparkless 3.x              | Sparkless v4                    |
-| ------------- | -------------------------- | --------------------------------- |
-| **Backend**   | Polars **Python** package   | **Rust** crate (robin-sparkless)  |
-| **Install**   | `pip install sparkless` (3.x) | `pip install "sparkless>=4,<5"` (PyPI) |
-| **Import**    | `from sparkless.sql import SparkSession` | Same |
-| **API**       | PySpark-like               | Same PySpark-like API             |
-| **Runtime**  | Polars + Python            | Native extension + Rust; no Polars Python |
-
-**What to do:**
-
-1. Install Sparkless v4 from **PyPI**: `pip install "sparkless>=4,<5"`. Contributors can use `pip install ./python` from the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) repo.
-2. Keep your existing `from sparkless.sql import SparkSession, functions as F` and DataFrame code.
-3. Use `SparkSession.builder.app_name("...").get_or_create()` if you already do; v4 supports the same builder API.
-4. See [PySpark differences](PYSPARK_DIFFERENCES.md) for any behavioral differences from PySpark (and thus from Sparkless 3.x where it matches PySpark).
-
-No code changes are required for typical tests and pipelines; the main difference is the execution engine (Rust instead of Polars Python).
-
-## Targeting PySpark 4 (opt-in, 4.9.0+)
-
-Sparkless **4.9.0** ships PySpark 4 semantics as an **opt-in profile**. The default remains PySpark 3.5-like (`compat=3.5`, ANSI off).
+For supported local transformations, change imports:
 
 ```python
-from sparkless.sql import SparkSession
-
-spark = SparkSession.builder.app_name("app").get_or_create()
-spark.conf.set("sparkless.pyspark.compat", "4.0")  # enables ANSI + 4.0 map/collect rules
-```
-
-Or set the environment variable before session creation:
-
-```bash
-export SPARKLESS_PYSPARK_COMPAT=4.0
-```
-
-See [PYSPARK_COMPAT_PROFILES.md](PYSPARK_COMPAT_PROFILES.md) for bundled config keys and [PYSPARK_4_PARITY_PLAN.md](PYSPARK_4_PARITY_PLAN.md) for the full roadmap.
-
-### Dual-oracle testing (PySpark 3.5 + 4.1)
-
-| Oracle | Requirements | Env |
-|--------|--------------|-----|
-| PySpark 3.5 (default CI) | `tests/requirements-pyspark.txt` | `SPARKLESS_TEST_MODE=pyspark` |
-| PySpark 4.1 (nightly) | `tests/requirements-pyspark4.txt`, Java 17, Python 3.11+ | `SPARKLESS_TEST_MODE=pyspark` + `SPARKLESS_PYSPARK_COMPAT=4.0` |
-
-Use `@pytest.mark.pyspark4_only` / `pyspark3_only` for profile-specific tests. The `spark` fixture applies `sparkless.pyspark.compat` automatically when running against the sparkless backend.
-
-## PySpark → Sparkless v4
-
-### Quick swap
-
-```python
-# Before (PySpark)
-from pyspark.sql import SparkSession, functions as F
-
-# After (Sparkless v4)
+# Existing application:
+# from pyspark.sql import SparkSession, functions as F
 from sparkless.sql import SparkSession, functions as F
+
+spark = SparkSession.builder.appName("migration").getOrCreate()
+try:
+    df = spark.createDataFrame([(1,), (2,)], ["id"])
+    assert [r["id"] for r in df.filter(F.col("id") > 1).collect()] == [2]
+finally:
+    spark.stop()
 ```
 
-Use `SparkSession.builder.app_name("MyApp").get_or_create()` or `SparkSession("MyApp")`. Your DataFrame operations, `F.col`, `filter`, `select`, `groupBy`, `join`, and SQL (`spark.sql`, `createOrReplaceTempView`) work the same way.
+`appName`/`getOrCreate` work in both engines. Sparkless additionally provides
+`app_name`/`get_or_create`; those snake-case spellings are not PySpark builder
+methods. Keep backend imports behind your application's adapter or use the
+packaged testing fixtures; do not hardcode Sparkless imports in a purported
+PySpark validation run.
 
-### Common patterns
+## From Sparkless 3
 
-- **Session:** `SparkSession.builder.app_name("App").get_or_create()` — the Sparkless spelling; PySpark uses `appName` / `getOrCreate` (also accepted by Sparkless).
-- **DataFrames:** `createDataFrame(data)`, `createDataFrame(data, schema)`, `read_csv`, `read_parquet`, `read_json`, `read_delta` (when enabled).
-- **Expressions:** `F.col("x")`, `F.lit(...)`, `F.when(...).otherwise(...)`, and built-in functions in `sparkless.sql.functions`.
-- **SQL:** `df.createOrReplaceTempView("name")`, `spark.sql("SELECT ...")` (when the `sql` feature is enabled in the Rust build).
+1. Use a clean Python 3.11+ environment and install the exact intended 4.x release.
+2. Keep public `sparkless.sql` imports; remove legacy checkout-only
+   `robin_sparkless` imports and direct Polars-Python assumptions.
+3. Use properties `spark.catalog`, `spark.read`, `df.write`; Python builder is
+   `SparkSession.builder`, not `builder()`.
+4. Check schemas, null/empty inputs, ordering, numeric widths, timestamps/decimals,
+   file round trips, and error behavior. Replace unsupported options explicitly.
+5. Run the same transformation assertions on real Spark before upgrading CI.
 
-### What’s different or unsupported
+Local scalar `F.udf` works with an explicit DataType return object in documented
+contexts. Public pandas/vectorized/grouped UDFs and remote Python execution are
+unsupported. Local RDD helpers are bounded in-process operations; they provide
+no distributed RDD semantics. Reader `schema(...)` is absent from the checked
+installed surface. See [all current differences](PYSPARK_DIFFERENCES.md).
 
-See [PySpark differences](PYSPARK_DIFFERENCES.md) for the full list. Summary:
+## Select a compatibility profile
 
-- **RDD, streaming, mapInPandas:** Not supported; use `collect()` or local patterns.
-- **Some SQL/DDL:** Only a subset of statements (SELECT, temp views, saved tables, etc.); see PYSPARK_DIFFERENCES.
-- **Joins:** Prefer explicit key names; validate condition joins, null behavior, aliases and non-equality materialization limits against your Spark oracle.
-- **UDFs:** Typed scalar `F.udf` works locally; public pandas/vectorized and remote UDFs are unsupported. See [UDF contexts](UDF_GUIDE.md).
+Default local profile is 3.5. To request the documented Spark 4 behavior bundle,
+set `SPARKLESS_PYSPARK_COMPAT=4.0` before session creation, or set
+`spark.conf.set("sparkless.pyspark.compat", "4.0")`. This does not install or
+select an oracle. See [profile keys and effects](PYSPARK_COMPAT_PROFILES.md).
 
-### Testing both backends
-
-You can run the same test suite against PySpark or Sparkless v4:
+Use separate environments for Spark 3.5 and Spark 4.0.5; install the matching
+PySpark extra and Java (17 for Spark 4). Register
+`pytest_plugins = ["sparkless.testing.plugin"]` in your `conftest.py`, then run:
 
 ```bash
-# Sparkless v4 (default in this repo)
-pytest tests -v
-
-# Real PySpark (requires Java + pyspark)
-SPARKLESS_TEST_MODE=pyspark pytest tests -v
+SPARKLESS_TEST_MODE=sparkless python -m pytest tests -v
+SPARKLESS_TEST_MODE=pyspark python -m pytest tests -v
 ```
 
-## See also
+The selector is `SPARKLESS_TEST_MODE`. Older `SPARKLESS_TEST_BACKEND` examples do
+not select the backend. Run the [identity example](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/test_dual_mode_example.py)
+which verifies the actual session/imports and live JVM. Use profile-specific
+markers only for intentionally different semantics, not to hide regressions.
 
-- [Getting started (Python)](python_getting_started.md)
-- [PySpark differences](PYSPARK_DIFFERENCES.md)
-- [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) — Sparkless 3 vs 4.x, installation, API overview
+Next: [testing guide](TESTING_GUIDE.md), [pipeline tutorial](PIPELINE_TUTORIAL.md),
+[API contracts](PYTHON_API_REFERENCE.md), and [troubleshooting](TROUBLESHOOTING_PYTHON.md).

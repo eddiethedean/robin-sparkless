@@ -35,7 +35,7 @@ def main() -> None:
         if args.backend == 'sparkless':
             for name in ['basic_usage.py', 'sql_and_temp_views.py']:
                 subprocess.run([sys.executable, str(work/name)], cwd=work, env=env, check=True)
-            pages = ['README.md', 'python/README.md', 'docs/UDF_GUIDE.md', 'docs/PYTHON_API_REFERENCE.md']
+            pages = ['README.md', 'python/README.md', 'docs/UDF_GUIDE.md', 'docs/PYTHON_API_REFERENCE.md', 'docs/EXECUTION_CANCELLATION.md', 'docs/python_migration.md']
             for page in pages:
                 text = (ROOT/page).read_text()
                 for index, block in enumerate(re.findall(r'^```python\n(.*?)^```', text, re.S | re.M)):

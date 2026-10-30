@@ -23,7 +23,7 @@ Sparkless is a strong fit for **local PySpark-style development and testing** wi
 | **Python UDFs** | Typed scalar UDFs work locally in documented contexts; public pandas/vectorized and remote UDFs are unsupported. |
 | **Parity gaps** | Some APIs differ, are unsupported, or accept options without implementing their Spark behavior. See [Parity status](PARITY_STATUS.md). |
 | **PySpark version** | Defaults to a **3.5-like** local compatibility profile; the 4.0 profile is opt-in. Profiles do not establish complete version parity ([PySpark compat profiles](PYSPARK_COMPAT_PROFILES.md)). |
-| **Cluster features** | Distributed execution, RDD execution, MLlib, and Structured Streaming are unsupported; some compatibility methods are stubs. |
+| **Cluster features** | Distributed execution, distributed RDDs, MLlib, and Structured Streaming are unsupported; some compatibility methods are stubs. |
 
 ## Native server and Spark Connect
 
