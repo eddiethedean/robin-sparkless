@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-17: Connect sources, artifacts, caching, and checkpoints
 
 > **Status: planned; owner unassigned.** Phase: 8; target 4.24.0; connectors and storage access explicitly enabled.

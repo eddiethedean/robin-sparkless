@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Phase 15: Function Gap List (PYSPARK_FUNCTION_MATRIX vs Robin-Sparkless)
 
 Source: [PYSPARK_FUNCTION_MATRIX](https://github.com/eddiethedean/sparkless/blob/main/PYSPARK_FUNCTION_MATRIX.md). Sparkless implements 403 functions; robin-sparkless targets parity.

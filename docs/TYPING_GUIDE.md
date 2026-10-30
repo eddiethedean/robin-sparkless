@@ -25,7 +25,7 @@ Type checking is performed with **mypy** and **pyright**.
     `--check-untyped-defs` on `python/sparkless/sparkless`.
 - **pyright**:
   - Configured via `[tool.pyright]` in `python/pyproject.toml` with
-    `pythonVersion = "3.8"` and `typeCheckingMode = "basic"`.
+    `pythonVersion = "3.11"` and `typeCheckingMode = "basic"`.
   - Tests and `upstream_sparkless` are excluded.
 
 ### Python version and syntax
@@ -73,7 +73,7 @@ Type checking is performed with **mypy** and **pyright**.
 - When adding or changing public APIs:
   - Prefer explicit parameter and return types over `Any`.
   - Use shared aliases (e.g. `ColumnOrName`) rather than repeating unions.
-  - Keep annotations 3.8‑compatible (`from __future__ import annotations`
+  - Keep annotations 3.11‑compatible (`from __future__ import annotations`
     plus modern syntax, or `typing.List` / `typing.Dict`).
 - For new modules:
   - Add `from __future__ import annotations` at the top.

@@ -65,7 +65,7 @@ Use `SparkSession.builder.app_name("MyApp").get_or_create()` or `SparkSession("M
 
 ### Common patterns
 
-- **Session:** `SparkSession.builder.app_name("App").get_or_create()` — same as PySpark.
+- **Session:** `SparkSession.builder.app_name("App").get_or_create()` — the Sparkless spelling; PySpark uses `appName` / `getOrCreate` (also accepted by Sparkless).
 - **DataFrames:** `createDataFrame(data)`, `createDataFrame(data, schema)`, `read_csv`, `read_parquet`, `read_json`, `read_delta` (when enabled).
 - **Expressions:** `F.col("x")`, `F.lit(...)`, `F.when(...).otherwise(...)`, and built-in functions in `sparkless.sql.functions`.
 - **SQL:** `df.createOrReplaceTempView("name")`, `spark.sql("SELECT ...")` (when the `sql` feature is enabled in the Rust build).
@@ -76,8 +76,8 @@ See [PySpark differences](PYSPARK_DIFFERENCES.md) for the full list. Summary:
 
 - **RDD, streaming, mapInPandas:** Not supported; use `collect()` or local patterns.
 - **Some SQL/DDL:** Only a subset of statements (SELECT, temp views, saved tables, etc.); see PYSPARK_DIFFERENCES.
-- **Join on expression:** Use column-name joins; expression joins (e.g. `df1.a == df2.b` in the join API) are not supported.
-- **UDFs:** Python callable UDFs are not yet exposed; use built-in functions. Rust UDFs can be registered in the engine.
+- **Joins:** Prefer explicit key names; validate condition joins, null behavior, aliases and non-equality materialization limits against your Spark oracle.
+- **UDFs:** Typed scalar `F.udf` works locally; public pandas/vectorized and remote UDFs are unsupported. See [UDF contexts](UDF_GUIDE.md).
 
 ### Testing both backends
 
@@ -88,7 +88,7 @@ You can run the same test suite against PySpark or Sparkless v4:
 pytest tests -v
 
 # Real PySpark (requires Java + pyspark)
-SPARKLESS_TEST_BACKEND=pyspark pytest tests -v
+SPARKLESS_TEST_MODE=pyspark pytest tests -v
 ```
 
 ## See also

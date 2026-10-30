@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Sparkless 3.28.0 API Snapshot
 
 **Generated:** By installing `sparkless==3.28.0` and introspecting `sparkless.sql.functions.F.Functions` and DataFrame methods.

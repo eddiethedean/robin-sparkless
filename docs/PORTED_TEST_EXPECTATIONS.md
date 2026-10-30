@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Ported Test Expectations
 
 Expected outputs for the ported Sparkless parity tests in `tests/dataframe/test_dataframe_parity.py`. Ground truth is PySpark; these were derived from Sparkless expected_outputs / PySpark behavior.

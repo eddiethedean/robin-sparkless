@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Sparkless → Robin-Sparkless Integration Analysis
 
 This document analyzes the historical [Sparkless](https://github.com/eddiethedean/sparkless) Python project (v3.x: Polars-Python backend) and how **robin-sparkless** (Rust) can replace backend logic. It covers architecture, structural learnings, and test conversion strategy.

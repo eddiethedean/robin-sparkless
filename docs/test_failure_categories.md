@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Test failure categories
 
 > **Historical only (February 2026).** The main suite is green as of May–June 2026 (**3115 passed, 64 skipped, 0 failed**). For current status use [TEST_FAILURE_CHECKLIST.md](TEST_FAILURE_CHECKLIST.md).

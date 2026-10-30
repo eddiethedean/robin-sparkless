@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # PySpark Version Notes (Python Tests in PySpark Mode)
 
 When running Python tests with `MOCK_SPARK_TEST_BACKEND=pyspark`, we use **PySpark 3.5.x** and **delta-spark 3.x** (see `tests/requirements-pyspark.txt`). This file clarifies which test failures are due to **PySpark version** vs **API differences** (Sparkless extensions vs PySpark).

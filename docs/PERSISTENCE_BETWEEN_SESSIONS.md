@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Persistence Between Sessions: Design
 
 **Status: Implemented** (Feb 2026). Both Option A (global temp views) and Option B (disk-backed saveAsTable) are implemented.

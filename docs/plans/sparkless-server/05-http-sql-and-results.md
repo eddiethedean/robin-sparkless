@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-05: Read-only HTTP SQL and typed results
 
 > **Status: planned; owner unassigned.** Phase: 0B.

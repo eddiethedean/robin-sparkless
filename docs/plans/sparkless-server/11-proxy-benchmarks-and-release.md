@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-11: Standalone conformance, benchmarks, and release
 
 > **Status: release evidence in progress.** Phase: 0B release foundations; Phase 2 Connect and concurrent-client release.
@@ -54,6 +62,6 @@ Resolve or explicitly defer D01, D03, D05, D08 in the [decision register](DECISI
 
 Optional proxy configuration is owned by that integration; standalone clients use the supported Spark Connect connection contract.
 
-For Slice 418-08, run `tests/connect/run_slice8_benchmarks.py` with the pinned standalone client to collect startup, correctness, latency, throughput, memory, CPU, health/HTTP progress, slow-reader, reconnect, and graceful-shutdown evidence. It records measurements without asserting a speedup or inventing numeric regression budgets. Run `tests/connect/run_slice8_proxy_route.py` separately with `SPARKLESS_PROXY_URL`, the proxy's immutable source revision, and a secret token to test an available route. The report marks cluster target selection and externally owned proxy shutdown as uncovered unless the integration supplies its own routing witness and lifecycle controls. See [Slice 8 instructions](../../../tests/connect/README.md#slice-8-benchmark-and-proxy-route).
+For Slice 418-08, run `tests/connect/run_slice8_benchmarks.py` with the pinned standalone client to collect startup, correctness, latency, throughput, memory, CPU, health/HTTP progress, slow-reader, reconnect, and graceful-shutdown evidence. It records measurements without asserting a speedup or inventing numeric regression budgets. Run `tests/connect/run_slice8_proxy_route.py` separately with `SPARKLESS_PROXY_URL`, the proxy's immutable source revision, and a secret token to test an available route. The report marks cluster target selection and externally owned proxy shutdown as uncovered unless the integration supplies its own routing witness and lifecycle controls. See [Slice 8 instructions](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/connect/README.md#slice-8-benchmark-and-proxy-route).
 
 The release workflow now includes the in-repository native server integration suite, Rust archives checked for matching versions and absence of local dependency paths/root patches, candidate server-binary wheel builds and fresh-install lifecycle checks, an offline `sparkless[server]` install through the public launcher, manylinux audit, and a non-root native container HTTP-SQL/graceful-shutdown gate. Tag publication waits for those checks, then publishes Rust crates, server wheels and image, and the Python extension in sequence. For 4.17 tags, V32 installs the public Rust/Python packages, runs standalone HTTP catalog, typed-value, replay, and retained-status checks against the packaged binary, and verifies the public container digest and behavior. A local macOS arm64 wheel and native container have been built for focused verification; these are not integrated-candidate or public-artifact evidence. Keep V15–V18, V31, V32, and the required native/direct-HTTP matrices open until their required revisions and outcomes are recorded in [VALIDATION.md](VALIDATION.md).

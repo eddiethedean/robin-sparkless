@@ -59,7 +59,7 @@ cargo run --locked --example demo
 
 `create_dataframe` accepts the `(i64, i64, String)` rows used above. For other
 schemas, use `create_dataframe_from_rows` with explicit schema information;
-see the [Rust API](https://docs.rs/robin-sparkless).
+see the [Rust API](RUST_API_REFERENCE.md).
 
 Transformations extend a lazy plan. Actions such as `collect`, `show`, `count`,
 and writes execute it. Collecting materializes data in the calling process.
@@ -85,7 +85,7 @@ let rows = adults.collect_rows()?;
 Treat that block as an alternative to the Column helper imports in the complete
 example. Crate-root `col` returns `ExprIr`; `functions::col` returns `Column`.
 For embedding and backend-independent code, prefer `ExprIr`. See the
-[embedding guide](EMBEDDING.md) and [API reference](https://docs.rs/robin-sparkless).
+[embedding guide](EMBEDDING.md) and [API reference](RUST_API_REFERENCE.md).
 
 ## Optional features
 

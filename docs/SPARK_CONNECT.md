@@ -1,5 +1,7 @@
 # Spark Connect server
 
+See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SUPPORT_MATRIX.md) before selecting features.
+
 The 4.18.0 native server distribution adds an optional Spark Connect endpoint that speaks the
 Apache Spark 4.0.5 protocol. It runs Rust/Polars execution without a Python worker or JVM in the
 server process. This page describes the 4.18 capability contract; the complete candidate and

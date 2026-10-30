@@ -1,5 +1,7 @@
 # Getting Started (Python — Sparkless v4)
 
+See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SUPPORT_MATRIX.md) before selecting features.
+
 This guide is for the **Sparkless v4** Python package: a PySpark-like API backed by the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust engine. Sparkless 3.x uses the Polars **Python** package; 4.x uses the **Rust** crate (no Polars Python at runtime).
 
 ## Installation
@@ -216,7 +218,7 @@ finally:
 
 For writer options, saved-table persistence, and database-specific behavior,
 see [PySpark differences](PYSPARK_DIFFERENCES.md). Arrow table and bounded batch
-exports are covered in the [Python API reference](PYTHON_API_REFERENCE.md#arrow-export).
+exports are covered in the [Python API reference](PYTHON_API_REFERENCE.md#actions-and-arrow).
 
 ## Native server and Spark Connect
 

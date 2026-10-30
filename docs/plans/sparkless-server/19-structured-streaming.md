@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-19: Optional single-node Structured Streaming through Connect
 
 > **Status: planned; owner unassigned.** Phase: 10; target 4.26.0; optional capability.

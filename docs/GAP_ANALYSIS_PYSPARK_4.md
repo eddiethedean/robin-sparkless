@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Gap analysis: PySpark 3.5 vs 4.1 (Sparkless 4.9.0)
 
 **Status:** Living document for the 4.9.0 release.  

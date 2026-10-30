@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # sparkless-server implementation plans
 
 **Status: planned.** These documents describe proposed work for [issue #1726](https://github.com/eddiethedean/robin-sparkless/issues/1726). They do not announce a working server, launcher, or protocol compatibility. Prepared on 2026-10-23.

@@ -143,3 +143,9 @@ Maintainers: see [docs/RELEASING.md](docs/RELEASING.md). Do not tag until versio
 
 - [FAQ](docs/FAQ.md)
 - [GitHub Issues](https://github.com/eddiethedean/robin-sparkless/issues)
+
+## Documentation checks
+
+Follow the [documentation maintenance and release checklist](docs/DOCUMENTATION.md).
+Keep public examples runnable from an installed wheel, assert actual test backend
+identity, and run the strict docs job before declaring a release candidate ready.

@@ -1,78 +1,60 @@
-# Troubleshooting (Python)
+# Troubleshooting Python
 
-Common issues when installing or running **Sparkless** (`pip install sparkless`).
-
-## Installation
-
-### `ImportError: No module named 'sparkless._native'`
-
-The native extension failed to load. Try:
-
-1. Reinstall: `pip install --force-reinstall "sparkless>=4,<5"`
-2. Ensure Python version is **3.11+** and matches the wheel ABI (e.g. cp311 on Python 3.11).
-3. On Linux **musl** (Alpine): use the musl wheel or build from source with `maturin develop`.
-
-### No wheel for my platform
-
-Build from source (requires Rust toolchain):
+Start by recording the exact interpreter, distribution, and native module:
 
 ```bash
-git clone https://github.com/eddiethedean/robin-sparkless.git
-cd robin-sparkless/python
-pip install maturin
-maturin develop
+python -m pip show sparkless
+python -c "import sys, sparkless; print(sys.executable, sys.version); print(sparkless.__version__, sparkless.__file__)"
+python -c "import sparkless._native as native; print(native.__file__)"
 ```
 
-See [Supported platforms](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md#supported-platforms) in the package README.
+## Installation or native import fails
 
-### `maturin develop` fails
+Use `python -m pip`, so installation targets the interpreter you actually run.
+Upgrade pip, check Python 3.11+, and match your OS, architecture, libc, and wheel
+floor against [Installation](INSTALLATION.md). A `cp311-abi3` wheel supports the
+stable ABI on supported Python versions 3.11–3.14. Alpine requires musl wheels;
+a glibc wheel cannot substitute. Reinstall the **same intended version** with
+`python -m pip install --force-reinstall 'sparkless==VERSION'` after replacing VERSION.
+Do not downgrade to an unrelated minor release as a generic remedy.
 
-- Install Rust via [rustup](https://rustup.rs/) and use the repo-pinned toolchain (`rust-toolchain.toml`).
-- On macOS: Xcode command-line tools may be required.
-- Run from `python/` directory, not repo root.
+When no wheel matches, follow the complete [contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup).
+It creates a virtual environment, installs dependencies, and builds with the
+pinned Rust toolchain. Native compilation also needs a C/C++ linker (Xcode command
+line tools on macOS, MSVC build tools on Windows, compiler/build tools on Linux).
+Rebuild after Rust changes. `maturin develop` outside an environment is insufficient.
 
-## Runtime
+## An API differs from PySpark
 
-### Behavior differs from PySpark
+Check the [surface contract](SUPPORT_MATRIX.md) and reproduce on real PySpark
+using `SPARKLESS_TEST_MODE=pyspark` and the installed testing plugin. Include
+nulls, empty inputs, and explicit schemas. Typed scalar UDFs are supported locally;
+pandas/vectorized/remote UDFs are not. See [UDF guide](UDF_GUIDE.md).
 
-Expected for some APIs. Check [PySpark differences](PYSPARK_DIFFERENCES.md) and [Parity status](PARITY_STATUS.md). Run the same test with `SPARKLESS_TEST_MODE=pyspark` to compare.
+For SQL failures, reduce the statement to the documented subset. For database
+failures, verify compiled features **before** credentials/network reachability;
+installing `sparkless[jdbc]` does not add native drivers to an existing wheel.
 
-### Python UDF fails or is unsupported
+## Backend, multiprocessing, or CI differs
 
-Python `@udf` / pandas UDFs are **not supported**. Use built-in `functions` or engine Rust UDFs ([UDF guide](UDF_GUIDE.md)).
+The selector is `SPARKLESS_TEST_MODE`, not `SPARKLESS_TEST_BACKEND`. Run the
+backend-identity example in [Testing](TESTING_GUIDE.md). Spark3.5 needs a compatible
+Java runtime; Spark4 needs Java17+. Pin the engine, Python dependencies, and Java
+version consistently. Use separate environments for Spark3 and Spark4.
 
-### `spark.sql()` errors on DDL/DML
+With fork-based workers, configure multiprocessing before Polars use as described
+in [configuration](CONFIGURATION.md). Prefer the packaged pytest plugin. Shared
+sessions retain state: use unique view/table names, or disable shared sessions.
+Check working directory, fixture paths, timezone, and native module provenance
+before attributing a CI failure to the engine.
 
-Only a subset of Spark SQL is implemented. See [PySpark differences — SQL](PYSPARK_DIFFERENCES.md).
+## Resource exhaustion or service failure
 
-### JDBC connection failures
+`collect`, `toPandas`, `toArrow`, and Python UDFs materialize data. Restrict input,
+project early, and use bounded Arrow batches where appropriate. Batch byte limits
+are not process-memory isolation. A timeout does not prove a mutation failed:
+query its operation identity on the same instance. See [operations](PRODUCTION.md).
 
-- Verify driver URL and credentials.
-- For hardened deployments: `SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL=false` requires `dbtable` (no arbitrary SQL). See [Production deployment](PRODUCTION.md).
-
-## Testing
-
-### `SPARKLESS_TEST_MODE=pyspark` fails
-
-Requires:
-
-```bash
-pip install "sparkless[pyspark]"
-# Java installed (JAVA_HOME set)
-SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
-```
-
-### Tests pass locally but fail in CI
-
-- Pin `sparkless` version: `pip install "sparkless>=4.13,<4.14"`
-- Ensure CI uses a supported platform (see [platform matrix](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md#supported-platforms)).
-- For multiprocessing: call `sparkless.configure_for_multiprocessing()` in worker processes if needed.
-
-### Slow first test run
-
-Native extension and session startup are one-time costs. Use `pytest-xdist` (`pytest -n auto`) for parallel runs.
-
-## Getting help
-
-- [FAQ](FAQ.md)
-- [GitHub Issues](https://github.com/eddiethedean/robin-sparkless/issues) — include Sparkless version, Python version, OS, and minimal repro.
+Report a minimal reproduction through [support](SUPPORT.md), including versions,
+platform, backend identity, expected result from Spark, and the complete error.
+Do not include secrets or sensitive input data.

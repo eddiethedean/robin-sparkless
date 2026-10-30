@@ -44,3 +44,5 @@ robin-sparkless-polars = { version = "4", features = ["sql", "delta"] }
 ## License
 
 MIT. See the [repository](https://github.com/eddiethedean/robin-sparkless) for details.
+
+Rust consumers: review the [4.18 zstd dependency notice](../../docs/security/zstd-4.18-exception.md) and its pinned mitigation; the unpatched graph exception expires 2026-11-26.

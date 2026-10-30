@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-12: Optional isolated Python Jobs, notebooks, and UDFs
 
 > **Status: planned; owner unassigned.** Phase: 5; target 4.21.0; optional and separately packaged.

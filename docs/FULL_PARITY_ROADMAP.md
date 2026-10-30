@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Full Parity Roadmap: Robin-Sparkless vs PySpark
 
 A phased plan to achieve full API and behavioral parity between robin-sparkless and Apache PySpark. Based on [GAP_ANALYSIS_PYSPARK_REPO.md](GAP_ANALYSIS_PYSPARK_REPO.md), [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md), and [ROADMAP.md](ROADMAP.md).

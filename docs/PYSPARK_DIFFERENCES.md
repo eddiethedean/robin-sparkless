@@ -1,202 +1,94 @@
-# PySpark vs Robin-Sparkless: Known Differences
+# Differences from PySpark — 4.18.0
 
-This document lists **intentional or known divergences** from PySpark semantics in robin-sparkless. Robin-sparkless aims for behavioral parity where practical; when perfect parity is impossible or deferred, we document it here.
-
-**Unimplemented API surface:** For a full list of functions and methods present in Sparkless 3.28.0 but not yet implemented in robin-sparkless, see [GAP_ANALYSIS_SPARKLESS_3.28.md](GAP_ANALYSIS_SPARKLESS_3.28.md). That list is **scoped to PySpark parity**: all listed items are standard PySpark APIs (or direct Sparkless equivalents); see [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md) for the canonical “missing vs PySpark” list with PySpark references.
+Sparkless implements a local PySpark-style API on Polars. It is not a full Spark
+runtime. This page describes the installed local API; [the support matrix](SUPPORT_MATRIX.md)
+separates Rust, HTTP and Connect. Validate your actual workload against your
+production Spark version; an import or passing fixture count is not parity proof.
 
 ## Compatibility profiles (3.5 vs 4.0)
 
-Sparkless 4.9.0+ supports **opt-in PySpark 4 semantics** via `sparkless.pyspark.compat`:
+The default local profile is 3.5; 4.0 is opt-in. Profiles change documented
+semantics, not the installed PySpark version. See [profile settings](PYSPARK_COMPAT_PROFILES.md).
+Live oracle examples use pinned 3.5.8 and 4.0.5 in docs CI. Historical expected-output
+fixtures have mixed provenance, including the loader's 3.2 default.
 
-| Area | `compat=3.5` (default) | `compat=4.0` (opt-in) |
-|------|------------------------|------------------------|
-| ANSI (`spark.sql.ansi.enabled`) | off — null on overflow/div0/invalid cast | on — throw on overflow/div0/invalid cast |
-| Map key normalization | disabled (`-0.0` keys preserved) | enabled (`-0.0` → `0.0`) |
-| Map/array schema inference | first non-null pair/element | merge all non-null pairs/elements |
+## Types, inference and ordering
 
-Individual keys can override profile defaults. See [PYSPARK_COMPAT_PROFILES.md](PYSPARK_COMPAT_PROFILES.md).
+Use explicit StructType schemas for null-only/empty/mixed inputs. Check integer
+widths, decimal precision/scale, timestamp/timezone and nested conversions at
+storage/Pandas/Arrow boundaries. Tuple schema shortcuts are Sparkless-specific;
+use public DataType objects for portable examples. `Row` supports named and
+positional access; do not rely on iteration yielding values.
 
-**Not yet profile-aware:** Full VARIANT semi-structured SQL (`variant_get`, pipe syntax, collations). JDBC Oracle/DB2 write paths use partial v4 mappings.
-
-**DayTimeInterval collect:** When schema uses `DayTimeIntervalType`, `compat=4.0` returns `datetime.timedelta` unless `PYSPARK_YM_INTERVAL_LEGACY=1` or `compat=3.5` (raw microseconds int).
-
-**YearMonthInterval collect:** When schema uses `YearMonthIntervalType`, `compat=4.0` returns `YearMonthInterval` objects unless `PYSPARK_YM_INTERVAL_LEGACY=1` or `compat=3.5`.
-
-**VARIANT (PySpark 4):** `VariantType`, `parse_json()`, and `cast(..., "variant")` are supported; VARIANT columns are stored as canonical JSON strings internally and deserialize to Python dict/list on `collect()` when the cached schema uses `VariantType`. Full JVM VARIANT binary encoding and semi-structured SQL operators are not implemented — see [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md).
-
-**JDBC 4.0 type matrix:** When `sparkless.pyspark.compat=4.0`, JDBC read/write uses PySpark 4 mappings per database unless legacy restore flags are set (`spark.sql.legacy.postgres.datetimeMapping.enabled`, `spark.sql.legacy.mysql.datetimeMapping.enabled`, etc.). See [PYSPARK_COMPAT_PROFILES.md](PYSPARK_COMPAT_PROFILES.md).
-
-## Array and list collect
-
-- **Collect**: List/array columns are serialized as JSON arrays in collect/to_json_rows (#846, #845). If Sparkless sees a string like `"['a', 'b']"` instead of `["a","b"]`, the source may be sending a stringified list; use JSON array in create_dataframe_from_rows or plan input.
-
-## Date and datetime
-
-- **create_dataframe_from_rows**: Schema types `date`, `timestamp`, `datetime`, `timestamp_ntz` are supported; values can be ISO date strings (`%Y-%m-%d`), ISO datetime strings, or (for timestamp) micros as number. Collect serializes Date as `"YYYY-MM-DD"` and Datetime as ISO strings (#841, #840, #839, #751, #849).
-
-## Ordering (orderBy)
-
-- **Default null ordering (#838)**: Robin follows Spark SQL default: ASC nulls first, DESC nulls last. Tests that expect nulls last for ascending sort should use `asc_nulls_last()` / `order_by_exprs([asc_nulls_last(&col("x"))])` or, when using the plan interpreter, pass `"nulls_last": [true]` in the orderBy payload.
-- **Sort column not in select (#1389)**: After `select(expr).alias("sq")`, `orderBy("x")` resolves `"x"` against the pre-select frame (PySpark parity); unresolved columns raise `AnalysisException`-style errors instead of silently no-oping.
-
-## Window functions
-
-- **percent_rank, cume_dist, ntile, nth_value**: The **API** is implemented (Rust and Python). Parity fixtures for these (`percent_rank_window`, `cume_dist_window`, `ntile_window`, `nth_value_window`) are **covered** via a multi-step workaround in the harness (computing in separate columns then combining). See [PARITY_STATUS.md](PARITY_STATUS.md).
-- **row_number, dense_rank, percent_rank, over() (#699, #755, #721, #718)**: Implemented in the Rust plan/expr layer; if the Sparkless adapter reports "not implemented", ensure it forwards window calls to the Robin backend. See [LOGICAL_PLAN_FORMAT.md](LOGICAL_PLAN_FORMAT.md) for plan format.
-- **to_timestamp, try_to_timestamp (#728)**: Implemented in plan/expr (`fn` `to_timestamp` / `try_to_timestamp` with args `[col, format?]`). Adapter should forward to Robin; see plan format.
-- **isnan (#720)**: Implemented in plan/expr (`fn` `isnan`, args `[col]`). Adapter should forward.
-- **array_distinct (#705)**: Implemented in plan/expr (`fn` `array_distinct`). Adapter should forward.
-- **posexplode (#703)**: Implemented in Rust (returns pos + value columns). Plan usage: use `explode` for single column or two `withColumn`/select exprs for pos and value if the plan format supports multi-column table functions; see LOGICAL_PLAN_FORMAT.md.
-- **struct / named_struct (#696)**: Implemented in plan/expr (`fn` `struct_` or `named_struct` with column refs). Adapter should forward.
-- **expr / Column in select (#700)**: Select payload accepts `{"name": "<out>", "expr": <expression tree>}`. Adapter should send Column-like expressions in this form.
-- **UDF (#690)**: Implemented in plan/expr (`{"udf": "<name>", "args": [...]}` or `{"fn": "call_udf", "args": [{"lit": "<name>"}, ...]}`). Python UDF in withColumn only; Rust UDF in filter/withColumn. Adapter should forward.
-
-## GroupBy
-
-- **Column/expr in group_by (#756)**: The plan interpreter accepts group_by elements as strings, `{"col":"name"}`, `{"name":"x"}`, or `{"expr": <expr>}` (Column-like). Use the expr form when the Sparkless adapter sends Column objects.
-- **Null keys and empty groups**: groupBy + aggregates are tested with fixtures `groupby_null_keys`, `groupby_single_group`, and `groupby_single_row_groups`. Behavior is aligned with PySpark for these cases (nulls in grouping keys produce one group per null; single-group and single-row groups behave as in PySpark). Any future divergence discovered will be listed here.
+Group/aggregate output and unordered inputs have no stable row order. Sort with
+tie-breakers when order matters. Compare row values **and** schema/nullability;
+a count-only assertion can miss incorrect values. Random seeds and expression
+implementations need not generate the same sequences as Spark.
 
 ## Join
 
-- **Unknown join type**: Invalid `how` values (e.g. typos like `"lef"`) raise `ValueError` instead of silently defaulting to inner join (June 2026).
-- **Join on expression (#704, #698)**: The **plan interpreter** does not support expression joins; use column names in the join key list. The **Python binding** may fall back to `crossJoin` + `filter` for some non-equi or expression-shaped joins (including some `array_contains` patterns); unsupported shapes should error rather than silently wrong results. Prefer explicit equi-join keys when possible.
+Named-key inner/outer/semi/anti joins and supported expression joins execute
+locally. Use aliases to disambiguate fields, and validate null keys, duplicate
+names and condition semantics against Spark. Non-equality joins can materialize
+a cross product and hit `SPARKLESS_MAX_CROSS_JOIN_ROWS`. No shuffle, partition
+placement, or distributed join strategy is implied by the API spelling.
 
-## SQL (optional `sql` feature)
+## SQL and catalogs
 
-- **UNION default**: Bare `UNION` (without `ALL` or `DISTINCT`) deduplicates rows like Spark/SQL default `UNION DISTINCT` (June 2026). Use `UNION ALL` to keep duplicates.
-- **INSERT … SELECT**: Column lists are honored; omitted target columns are filled with NULL. INSERT updates temp views or saved tables in the namespace where the target was resolved (June 2026).
-- **Scalar subqueries**: Must return exactly one row and one column; multi-row subqueries error (June 2026).
+Official Python builds enable SQL; Rust consumers opt into `sql`. Supported
+queries and bounded DDL/DML do not imply a Hive metastore, all Spark SQL syntax,
+DataFrameWriterV2, or a distributed catalog. Temp views are session scoped;
+process-global temp views and configured Parquet warehouses have separate
+lifetimes ([persistence](PERSISTENCE_GUIDE.md)). External providers have their own
+write/receipt/error contract ([catalog providers](EXTERNAL_CATALOGS.md)).
 
-- **Tables and views**: Three namespaces — **temp views** (session-scoped), **saved tables** (`saveAsTable`), and **global temp views** (`createOrReplaceGlobalTempView`, process-scoped). Resolution order for `table(name)`: (1) `global_temp.xyz` → global catalog, (2) temp view, (3) saved table, (4) warehouse (when `spark.sql.warehouse.dir` is set). Global temp views persist across sessions within the same process. Saved tables can optionally persist to disk when `spark.sql.warehouse.dir` is configured.
-- **Supported**: single `SELECT`, `FROM` (single table or JOIN), `WHERE`, `GROUP BY` + aggregates, `HAVING`, `ORDER BY`, `LIMIT`, and temporary views (`createOrReplaceTempView`, `table()`). Unsupported constructs produce clear errors.
-- **Parse errors (#706, #701)**: Queries that use unsupported statement types (e.g. DML, some DDL) may yield parser errors such as "Expected: end" or "only SELECT, CREATE SCHEMA/DATABASE, and DR...". Use supported statements only; see Unsupported below.
-- **Unsupported (tracked in #141)**: Some DDL (e.g. `CREATE TABLE`-style, `SET CURRENT DATABASE`), DML (`INSERT INTO`), subqueries in `FROM`, CTEs. **Supported:** `CREATE SCHEMA` / `CREATE DATABASE` (including `IF NOT EXISTS`), `DROP TABLE` / `DROP VIEW` / `DROP SCHEMA`; `UPDATE table SET col = expr [WHERE condition]` and `DELETE FROM table [WHERE condition]` (single table; table must exist in session catalog from saveAsTable or temp view).
+`spark.catalog` is a property. `listTables` returns names rather than Spark Table
+objects. `df.write` is a property; `saveAsTable(name, mode=None)` is the installed
+writer signature. Do not copy older binding-only `catalog()` / `write()` forms.
+HTTP supports only its allowlist; Connect SQL commands are unsupported.
 
-## Delta Lake (optional `delta` feature)
+## Readers and native features
 
-- **Supported**: Read by path/version, overwrite, and append. See [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) §7.2.
-- **read_delta(name_or_path)**: If the argument looks like a path (contains `/` or `\\`, or path exists), reads from Delta on disk. Otherwise treats it as a **table name** and returns the in-memory table (same resolution as `spark.table`: temp view first, then saved table). So you can `df.write_delta_table("t")` then `spark.read_delta("t")` without the delta feature.
-- **Unsupported (tracked in #152)**: Schema evolution (e.g. add columns, change types under Delta rules) and MERGE (upsert with whenMatchedUpdate/whenNotMatchedInsert). Implement when Delta usage requires them.
-- **Overwrite + `saveAsTable` truncate-in-batch-mode (#1502, #1522)**: Some Spark+Delta setups raise an analysis error for `df.write.format("delta").mode("overwrite").saveAsTable(existing_table)` (table does not support truncate in batch mode). In this repo’s current PySpark test environment (Spark + `delta-spark`), overwrite-to-table succeeds; sparkless implements overwrite by **writing a Delta table under the warehouse path and re-registering the table**, so it matches the “succeeds” behavior and fixes #1522.
+The installed Python DataFrameReader does not expose `schema(...)`; normalize
+column types or build from an explicit createDataFrame schema. Rust/internal
+reader capabilities do not establish the Python wrapper surface. Options are a
+subset of Spark's and can be unsupported or retained without a Spark effect.
+Delta is enabled in default Python builds. JDBC/SQLite need selected compiled
+features; the Python `jdbc` extra cannot add them to a wheel. See [installation](INSTALLATION.md).
 
-## Array
+## Python UDFs
 
-- **array_distinct order**: Implemented with first-occurrence order to match PySpark (via UDF; parity fixture enabled).
-- **getField negative index**: PySpark returns `null` for negative array indices in `Column.getField(int)`. Sparkless uses Polars negative indexing and returns the last element (e.g. `getField(-1)` on `[10,20,30]` → `30`). Use non-negative indices for portable code.
-- **explode, posexplode, array_distinct (#692, #703, #705)**: Implemented in plan/expr; adapter should forward to Robin backend. Add plan fixtures or see docs for plan format.
-
-## Control functions (assert_true, raise_error)
-
-- **assert_true(expr)**: Aligned with PySpark (Phase F): returns **null** when input is true; throws an exception when input is **false** or **null**. Error message uses `errMsg` when provided.
-- **raise_error(msg)**: In PySpark, `raise_error` produces an expression that always fails when evaluated. In robin-sparkless, `raise_error(msg)` is implemented as an expression that **always returns an error** with the user-provided message. The result type is an `Int64` expression that never materializes successfully.
-
-## DataFrame: cube, rollup, write, saveAsTable, and stubs
-
-- **DataFrame equivalence (#695)**: Assertions that two DataFrames are "equivalent" (e.g. `assert_dataframes_equal`, `.equals()`) can fail due to **column order**, **schema type naming** (e.g. IntegerType vs LongType; see schema Int32/Int64), or **row order**. When comparing with PySpark or across backends, normalize: ensure same column order (e.g. select in a fixed order), align types (Robin reports Int32→Integer, Int64→Long), and sort rows if order is not guaranteed.
-- **cube / rollup**: Implemented. `df.cube("a", "b").agg(...)` and `df.rollup("a", "b").agg(...)` run multiple grouping sets and union results (missing keys become null), matching PySpark semantics.
-- **write**: Implemented. `df.write().mode("overwrite"|"append").format("parquet"|"csv"|"json").save(path)` uses Polars IO. Append for JSON is supported (NDJSON/JsonLines).
-- **saveAsTable(name, format=None, mode=None, partitionBy=None, **options)**: Implemented. Registers the DataFrame in the session's **saved-tables** namespace. Mode semantics match PySpark: default `"error"` (throw if exists), `"overwrite"`, `"append"`, `"ignore"`. **In-memory by default**; when `spark.sql.warehouse.dir` is set, tables persist to disk at `{warehouse}/{name}/data.parquet` for cross-session and cross-process access. `format`, `partitionBy`, and `**options` are accepted for API compatibility but **ignored** for persistence (Parquet only).
-- **write_delta_table(name)**: Robin-sparkless convenience. Registers the DataFrame in the saved-tables namespace so `read_delta(name)` returns it. No PySpark direct equivalent (PySpark would use saveAsTable for a Delta catalog table).
-- **data**: Returns the same as `collect()` (list of row dicts). Best-effort local collection; no RDD.
-- **toLocalIterator**: Returns the same as `collect()` (an iterable of rows). Best-effort local iterator.
-- **rdd**: Stub; raises `NotImplementedError` ("RDD is not supported in Sparkless").
-- **foreach**, **foreachPartition**: Stub; raise `NotImplementedError`.
-- **mapInPandas**, **mapPartitions**: Stub; raise `NotImplementedError`.
-- **storageLevel**: Stub; returns `None` (DataFrame is lazy; no storage level).
-- **isStreaming**: Always returns `False`; streaming is not supported.
-- **withWatermark**: No-op; returns self. Streaming/watermark not supported.
-- **persist** / **unpersist**: No-op; return self. DataFrame execution is lazy by default (transformations extend the plan; only actions like `collect`, `show`, `count`, `write` materialize); persist/unpersist do not cache.
-
-## SparkSession.createDataFrame / create_dataframe
-
-- **PySpark** `createDataFrame(data, schema=None, samplingRatio=None, verifySchema=True)` accepts many input types: list of tuples (any length, types inferred or from schema), list of dicts, list of Row, RDD, pandas DataFrame; `schema` can be a list of column names (types inferred), a StructType, or a DDL string (e.g. `"name: string, age: int"`).
-- **Robin-sparkless (Python)** — **`createDataFrame(data, schema=None, sampling_ratio=None, verify_schema=True)`** is the main API (#372):
-  - **data**: List of dicts (keyed by column name) or list of list/tuple (row values in order).
-  - **schema**: `None` (infer names from first dict keys or `_1`, `_2`, … for list rows; infer types from first non-null per column), a **DDL string** (e.g. `"name: string, age: int"` or `"name string, age int"`; nested `struct<>`, `array<>`, `map<>` supported via spark-ddl-parser), a list of column name strings (types inferred), a StructType-like object with `.fields`, or a list of `(name, dtype_str)` e.g. `[("id", "bigint"), ("name", "string")]`. Supported dtypes: bigint, int, integer, long, double, float, string, boolean, date, timestamp, etc.
-  - **sampling_ratio**: Accepted for API compatibility; ignored for list data (PySpark uses it for RDD schema inference).
-  - **verify_schema**: Accepted (default True); data is validated when building the DataFrame.
-  - Use **`spark.createDataFrame(data, schema)`** for all cases (list of dicts, list of tuples with column names, DDL schema, or explicit schema).
-- **Robin-sparkless (Rust)** — **`create_dataframe(data, column_names)`** accepts only 3-tuples `(i64, i64, String)` and three column names. For arbitrary schemas use **`create_dataframe_from_rows(rows, schema)`** (Rust).
-- **Column name case (#786, #785)**: Column names from the schema are preserved as returned by `columns()` and in collect row keys. Pass the exact case you need (e.g. `NaMe`) in the schema so `'NaMe' in df.columns` succeeds.
-- **Duplicate field names in StructType (#1347)**: PySpark allows duplicate field names in a schema (e.g. two fields both named `id`). Robin-sparkless **rejects** them and raises an error: `create_dataframe_from_rows: duplicate column name '…' in schema`. Use unique field names when creating DataFrames with an explicit schema so tests and pipelines work under both.
-- **Invalid data type (#1346)**: When `data` is not a list, tuple, iterable of rows, RDD, or pandas DataFrame, robin-sparkless raises **SparklessError** (PySparkTypeError) with message `[CANNOT_ACCEPT_OBJECT_IN_TYPE] \`StructType\` can not accept object in type \`<type>\`.` to match PySpark. Tuples and generators of dict/tuple rows are accepted (#1542).
-- **Empty schema + empty rows (#1345, #1343)**: `createDataFrame([{}], StructType([]))` (or `[]` with empty schema) is supported: produces 1 row, 0 columns, matching PySpark.
-
-## SparkSession type / engine detection (#1344)
-
-- **`type(spark).__module__`**: Sparkless sets `SparkSession` and `SparkSessionBuilder` to `__module__ = "sparkless.sql.session"` (PyO3 `#[pyclass(module = "...")]`) so code that checks the session type for engine detection can use `"sparkless" in type(spark).__module__` or `type(spark).__module__ == "sparkless.sql.session"`. PySpark reports `pyspark.sql.session`.
+Typed scalar `F.udf` executes locally in withColumn/projection and checked scalar
+comparison filters. It collects input and runs Python row by row. Use explicit
+DataType return objects and handle nulls. Public pandas/vectorized/grouped UDFs,
+UDTFs, and remote Python UDF execution are unsupported. SQL UDF registration and
+arbitrary expression compositions are not promised by the scalar example.
+See [UDF contexts](UDF_GUIDE.md).
 
 ## JVM / runtime stubs { #jvm--runtime-stubs }
 
-The following JVM- or runtime-related functions are implemented as **stubs for API compatibility**, not full equivalents of PySpark behavior:
+There are no executors, Spark UI, JVM gateway, distributed scheduler, or Spark
+partitioning guarantees. Local `df.rdd` supports a bounded in-process subset,
+including count/map/flatMap/collect; this is not distributed RDD execution.
+Methods such as `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions`,
+`isStreaming` and `withWatermark` are absent from the checked installed DataFrame
+surface. Unsupported APIs can be absent, not merely methods raising NotImplementedError.
 
-- **broadcast(df)**: Returns the same `DataFrame` unchanged. It is a **no-op hint**; there is no optimizer that takes broadcast hints into account.
-- **spark_partition_id()**: Returns a **constant 0** for all rows, rather than the actual Spark partition id. This is sufficient for tests that only require the function to exist but does not model Spark's partitioning behavior.
-- **input_file_name()**: Returns an **empty string** for all rows. File path information is not tracked on a per-row basis.
-- **monotonically_increasing_id()**: Returns a **constant 0** for all rows, rather than a strictly increasing 64-bit id. This is a compatibility stub; code that relies on uniqueness should not use this stub.
-- **current_catalog() / current_database() / current_schema()**: SQL/Column helpers return constant strings (`\"spark_catalog\"`, `\"default\"`, `\"default\"` respectively). Session catalog APIs (`spark.catalog().currentDatabase()`, `setCurrentDatabase`) **do** track a current database name; those helpers are not wired into `F.current_database()` yet.
-- **current_user() / user()**: Return the constant string `\"unknown\"`. The actual OS or session user is not surfaced.
-
-## DataFrameReader.schema
-
-- **`spark.read.schema(...).csv/json`**: Supported for JSON [`StructType`] payloads and simple Spark-style DDL (`id LONG, name STRING`). Schema is applied to force column dtypes when reading CSV/JSON. Not applied for parquet/delta/jdbc — those paths error if a schema was set, so callers are not silently ignored.
-
-## Random functions (rand, randn)
-
-- **rand(seed)** / **randn(seed)**: In PySpark, these return a column with **one distinct value per row** and optional seeding. In robin-sparkless, when you add the column via **`with_column`** or **`with_columns`** (Rust or Python), the implementation generates a full-length random series so you get **one value per row** (PySpark-like). Optional `seed` (e.g. `rand(42)`) gives reproducible results. Use `df.with_column("r", rand(42))` or `df.with_columns({"r": rand(42)})`. If you use the expression in other contexts (e.g. `select(rand())` without length context), per-row semantics are not guaranteed.
-
-## Crypto (AES)
-
-- **aes_encrypt / aes_decrypt / try_aes_decrypt**: Implemented using **AES-128-GCM**. Output format is **hex(nonce || ciphertext)** where nonce is 12 bytes (random per encryption) and ciphertext includes the GCM tag. PySpark 3.5+ defaults to GCM; key is taken as UTF-8 string (first 16 bytes used). Robin uses AES-128-GCM only; mode/padding options (CBC, etc.) are not supported. Decryption returns null on failure (invalid hex, wrong key, or tampered data).
-
-## Phase 10 & Phase 8 – Implemented
-
-**All previously stubbed Phase 8 items are now implemented (February 2026):**
-
-- **String 6.4**: `mask`, `translate`, `substring_index`; **`soundex`, `levenshtein`, `crc32`, `xxhash64`** (via Expr::map / map_many UDFs with strsim, crc32fast, twox-hash, soundex crates).
-- **Array extensions**: `array_exists`, `array_forall`, `array_filter`, `array_transform`, `array_sum`, `array_mean`; **`array_flatten`, `array_repeat`** (via Expr::map UDFs).
-- **Map (6b)**: **`create_map`, `map_keys`, `map_values`, `map_entries`, `map_from_arrays`** (Map as List(Struct{key, value}); create_map via as_struct/concat_list; map_keys/map_values via list.eval + struct.field; map_from_arrays via UDF).
-- **JSON**: `get_json_object`, `from_json`, `to_json` (Polars extract_jsonpath / dtype-struct).
-- **Window fixtures**: percent_rank, cume_dist, ntile, nth_value covered via multi-step workaround.
-- **Phase 16 string/regex**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf` — all implemented.
-- **Phase 17 datetime/unix**: `unix_timestamp`, `to_unix_timestamp`, `from_unixtime`, `make_date`, `timestamp_seconds`, `timestamp_millis`, `timestamp_micros`, `unix_date`, `date_from_unix_date`, `pmod`, `factorial` — all implemented. Note: `unix_timestamp` and `from_unixtime` use chrono; assume session/local timezone. Results may differ from PySpark when session timezone differs from system timezone.
-- **Phase 22 datetime**: `curdate`, `now`, `localtimestamp`, `date_diff`, `dateadd`, `datepart`, `extract`, `unix_micros`, `unix_millis`, `unix_seconds`, `dayname`, `weekday`, `make_timestamp`, `make_interval`, `timestampadd`, `timestampdiff`, `from_utc_timestamp`, `to_utc_timestamp`, `convert_timezone`, `current_timezone`, `to_timestamp` — all implemented. Note: `from_utc_timestamp` and `to_utc_timestamp` treat timestamps as UTC micros; for UTC-stored data the functions are identity. Full display-timezone conversion is deferred.
-- **Phase 18 array/map/struct**: `array_append`, `array_prepend`, `array_insert`, `array_except`, `array_intersect`, `array_union`, `map_concat`, `map_from_entries`, `map_contains_key`, `get`, `struct`, `named_struct`, **`map_filter`**, **`map_zip_with`**, **`zip_with`** — all implemented. Uses Expr-based predicates/merge. Python: `map_filter_value_gt`, `zip_with_coalesce`, `map_zip_with_coalesce`.
-- **Phase 19 aggregates/try/misc**: **`any_value`**, **`bool_and`**, **`bool_or`**, **`every`/`some`**, **`count_if`**, **`max_by`**, **`min_by`**, **`percentile`**, **`product`**, **`collect_list`**, **`collect_set`**; **`try_divide`**, **`try_add`**, **`try_subtract`**, **`try_multiply`**, **`try_element_at`**; **`width_bucket`**, **`elt`**, **`bit_length`**, **`typeof`** — all implemented. `percentile_approx` deferred (complex).
-- **Phase 20 ordering/aggregates/numeric**: **`asc`**, **`asc_nulls_first`**, **`asc_nulls_last`**, **`desc`**, **`desc_nulls_first`**, **`desc_nulls_last`**; **`median`**, **`mode`**; **`stddev_pop`**, **`stddev_samp`**, **`var_pop`**, **`var_samp`**; **`try_sum`**, **`try_avg`**; **`bround`**, **`negate`**, **`negative`**, **`positive`**; **`cot`**, **`csc`**, **`sec`**; **`e`**, **`pi`**; **`covar_pop`**, **`covar_samp`**, **`corr`** (groupBy agg), **`kurtosis`**, **`skewness`**; **`approx_percentile`**, **`percentile_approx`** — all implemented.
-- **Phase 21 string/binary/type/array/map/struct**: **`btrim`**, **`locate`**, **`conv`**; **`hex`**, **`unhex`**, **`bin`**, **`getbit`**; **`decode`**, **`encode`**, **`to_binary`**, **`try_to_binary`**; **`to_char`**, **`to_varchar`**, **`to_number`**, **`try_to_number`**, **`try_to_timestamp`**; **`str_to_map`**; **`arrays_overlap`**, **`arrays_zip`**, **`explode_outer`**, **`posexplode_outer`**, **`array_agg`**; **`transform_keys`**, **`transform_values`** — all implemented. Deferred: `aggregate` (array fold). PyO3: `transform_keys` and `transform_values` require Expr and are Rust-only for now.
-- **Phase 23 JSON/URL/misc**: **`isin`**, **`isin_i64`**, **`isin_str`**; **`url_decode`**, **`url_encode`**; **`json_array_length`**, **`parse_url`**; **`hash`** (Murmur3 32-bit for PySpark parity); **`shift_left`**, **`shift_right`**, **`shift_right_unsigned`**; **`version`**; **`equal_null`**; **`stack`**; **`from_csv`**, **`to_csv`**, **`schema_of_csv`**, **`schema_of_json`**; **`get_json_object`**, **`json_tuple`** — all implemented. Deferred: `json_object_keys`.
-
-## Optional / deferred (XML, XPath, sentences, RDD, UDF, Catalog, Streaming, sketch, JVM stubs)
-
-See [DEFERRED_SCOPE.md](DEFERRED_SCOPE.md) for the full Phase H deferred scope with rationale and workarounds.
-
-The following are **not implemented** or are **stubs**; tracked in GitHub issues for parity:
-
-- **RDD / distributed (#142)**: RDD and distributed execution APIs — not supported; `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` raise `NotImplementedError`.
-- **UDF / UDTF (#143)**: Scalar UDFs **implemented**: `spark.udf().register()`, `call_udf`, Rust `register_udf`. Python UDFs run row-at-a-time (scalar) or batch-at-a-time (vectorized) and are evaluated eagerly at the UDF boundary. Column-wise vectorized UDFs are supported only in `withColumn` / `select` paths (not in filter/join or SQL WHERE/HAVING). **Grouped vectorized aggregation UDFs** are available via `pandas_udf(..., function_type="grouped_agg")` and can be used only in `groupBy().agg(...)` (one scalar per group, no mixing with built-in aggs in the same call). Full PySpark-style `pandas_udf` for other function types and `udtf` remain deferred. Python UDF in WHERE/HAVING not yet supported. See [UDF_GUIDE.md](UDF_GUIDE.md).
-- **Catalog / DataFrameWriterV2 (#144)**: `writeTo`, catalog tables, `CREATE TABLE`-style DDL — not implemented; use `df.write().format(...).save(path)` or `df.write().saveAsTable(name)` for in-memory tables. **Catalog**: `spark.catalog()` returns a Catalog with `dropTempView`, `listTables`, `tableExists`, `currentDatabase`, `currentCatalog`, **`dropTable(tableName)`** (in-memory saved tables only), etc. **listTables** returns a **list of names** (not Table objects). **table(name)** and **read_delta(name_or_path)** resolve in PySpark order: temp view first, then saved table. **Schema-qualified** names (e.g. `schema.table` or `test_schema.test_table`) are supported: use the same name in `saveAsTable(name)` and `table(name)` (#1024). `createTable`, `getDatabase`, `getFunction`, `getTable`, `registerFunction` raise `NotImplementedError`. `spark.conf()` returns RuntimeConfig (get/getAll; set raises NotImplementedError).
-- **Structured Streaming (#145)**: Not supported; `isStreaming` returns false, `withWatermark` is a no-op.
-- **XML / XPath (#146)**: `from_xml`, `to_xml`, `schema_of_xml`, `xpath*` — would require an XML parser and feature flag; deferred.
-- **Sketch aggregates (#147)**: Approximate aggregates (e.g. HyperLogLog, count-min sketch) — not implemented.
-- **sentences / NLP (#148)**: `sentences` and JVM/UDTF helpers — deferred; could be implemented as string split + list of lists.
-- **JVM / runtime stubs (#154)**: See section **JVM / runtime stubs** above — `broadcast`, `spark_partition_id`, `input_file_name`, `monotonically_increasing_id`, `current_catalog`, `current_user`, etc. are stubs for API compatibility.
-
-- **Wrong result value (#709, #707)**: If a Sparkless test fails with e.g. `assert False` or `assert 0 == 1`, the root cause may be filter predicate, aggregate (e.g. count), or collect/serialization. Reproduce in Robin (plan or session test) to fix; check filter expr, agg result column, and `any_value_to_json` for the affected type.
-
-See [ROADMAP.md](ROADMAP.md) and [FULL_BACKEND_ROADMAP.md](FULL_BACKEND_ROADMAP.md) for the full list.
+Compatibility functions can have limited behavior: `input_file_name()` returns
+empty strings; `spark_partition_id()` and `monotonically_increasing_id()` return
+constant 0 in the checked example. Do not depend on that ID function for uniqueness.
+Current user/catalog helpers are local values, not cluster authorization or tenant
+identities. Cache/persist/repartition/broadcast spellings do not establish Spark
+storage, shuffle or distributed execution behavior.
 
 ## Security hardening (optional)
 
-Robin-sparkless defaults to PySpark parity. For locked-down deployments, set environment variables before creating a `SparkSession`:
+Set hardening before session creation. `SPARKLESS_HARDENED=1` enables stricter
+defaults; `SPARKLESS_FILES_BASE` confines general file IO; setting
+`SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL=false` requires dbtable rather than arbitrary
+query/init/prepare SQL. These controls do not sandbox native or Python code.
+See [all configuration defaults](CONFIGURATION.md), [security](SECURITY.md), and
+[the server operations boundary](PRODUCTION.md).
 
-| Variable | Default | When set |
-|----------|---------|----------|
-| `SPARKLESS_HARDENED=1` | off | Enables hardened defaults (see below) |
-| `SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL` | `true` | Set `false` (or with `SPARKLESS_HARDENED=1`, omit unless `true`) to block JDBC `query`, `sessionInitStatement`, and `prepareQuery`; use `dbtable` only |
-| `SPARKLESS_FILES_BASE` | unset | When set, all general file read/write paths must resolve under this directory |
-| `SPARKLESS_MAX_RANGE_ROWS` | `10000000` | Caps `spark.range()` row count |
-| `SPARKLESS_MAX_CROSS_JOIN_ROWS` | `10000000` | Caps non-equality join materialization (cross join + filter) |
-| `SPARKLESS_RDD_MAX_ROWS` | `10000000` | Caps RDD `map` / `flatMap` / `reduce` materialization |
-
-Warehouse table paths and Delta parquet URIs are always confined to their table roots. Call `sparkless._configure_for_multiprocessing()` (or set `ROBIN_SPARKLESS_MULTIPROCESSING=1`) before Polars use when using `pytest-xdist` or fork-based multiprocessing.
+For unsupported/unknown combinations, use [deferred scope](DEFERRED_SCOPE.md)
+and add a [minimal oracle regression](TEST_CREATION_GUIDE.md) before adoption.

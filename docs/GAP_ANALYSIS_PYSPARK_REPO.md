@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Gap Analysis: Robin-Sparkless vs PySpark (from source)
 
 This document compares robin-sparkless with **Apache PySpark** using API surface extracted directly from the [PySpark source repository](https://github.com/apache/spark/tree/master/python/pyspark).

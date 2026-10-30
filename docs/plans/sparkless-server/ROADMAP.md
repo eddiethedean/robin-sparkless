@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # sparkless-server release roadmap: 4.16+
 
 **Status: planned.** Each minor release below publishes the complete first-party package set at the same version: **4.16 → 4.16.0, 4.17 → 4.17.0, 4.18 → 4.18.0**, and so forth. These are scope and acceptance milestones, not calendar commitments or announcements of available features.

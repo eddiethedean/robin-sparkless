@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # PySpark vs Robin-Sparkless: Signature Gap Analysis
 
 This document compares **signatures** (parameters, types, defaults) of the public Python API of robin-sparkless with **PySpark** to guide alignment.

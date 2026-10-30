@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-02: Rust crate, CLI, and native distribution
 
 > **Status: implementation in place; platform and release evidence open.** Phase: server crate and CLI in 0A; launcher, binary wheel, and image foundations in 0B.

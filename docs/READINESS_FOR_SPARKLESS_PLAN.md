@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Robin-Sparkless Readiness for Post-Refactor Merge
 
 While Sparkless implements the [refactor plan](SPARKLESS_REFACTOR_PLAN.md) (serializable logical plan and optional `materialize_from_plan`), we can prepare on the robin-sparkless side so that when the new contract lands, integration is a thin adapter rather than a large translation layer. This document lists **concrete steps we can take here** in parallel.

@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # PySpark mode test failures
 
 Recorded from running the full test suite with `MOCK_SPARK_TEST_BACKEND=pyspark` (PySpark as the reference backend instead of sparkless).

@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Isolating All Polars Code into robin-sparkless-polars
 
 This document describes how to put **all** Polars-using code into a single crate (`robin-sparkless-polars`) so that only one workspace crate depends on the `polars` library. The root crate becomes a thin facade with no direct Polars dependency.

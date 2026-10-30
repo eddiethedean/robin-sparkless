@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # Rust-native sparkless-server epic
 
 > **Status: planned.** Imported from [issue #1726](https://github.com/eddiethedean/robin-sparkless/issues/1726) on 2026-10-23; source issue updated 2026-10-23T13:23:06Z. These are requirements, not claims of implemented support.

@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-07: Session ownership, shared catalogs, and mutations
 
 > **Status: planned; owner unassigned.** Phase: Bounded read-only sessions in 0B; catalogs/writes in 1.

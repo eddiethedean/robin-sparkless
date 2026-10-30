@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # Decision register
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Validation](VALIDATION.md)
@@ -69,7 +77,7 @@ The [4.18 plan](RELEASE_4_18.md) divides Phase 2 into slices 418-01–418-10. Sl
 | D03, D05 | Proxy dependency tracked against MiniLake PR #1, which has no Connect/gRPC path; staged wheel targets remain macOS arm64 and manylinux x86_64, with a single-architecture container. | V25 needs the separate immutable MiniLake gRPC route; V26 needs full 1/2/4/8+ measurements and agreed numeric regression budgets. Standalone V18–V24 comes first; V33 candidate inventory and V34 public-artifact checks remain required. |
 | D06 | Frozen 2026-10-28 for Slice 418-07: bounded JSON-lines control protocol v2; independent capabilities protocol v1; readiness reports actual HTTP and optional `sc://` endpoints, server instance identity, and matching capability record. CLI uses `--connect-host`/`--connect-port`, defaulting to `127.0.0.1:15002`; Python launchers request port `0`, and `connect_port=None` sends `--disable-connect`. `--disable-http` and `--disable-connect` select either transport when both are compiled. The launcher verifies package/binary, control/capability, endpoint, protocol, and identity versions before exposing the URL. | Installed sync/async launcher, endpoint collision/readiness failure, restart/shutdown, HTTP-only and Connect-only feature builds, combined build, and public-client checks in V24. |
 
-The 418-01 client corpus and reproducible commands are in [`tests/connect`](../../../tests/connect/README.md). They record client requests, not successful server responses. Before freezing final D07 error behavior, resolve release-cursor behavior against Spark 4.0.5. Keep safe cleanup regardless of error representation. Do not claim unlimited/durable retry protection from bounded tombstones, or advertise Structured Streaming from Arrow result streaming.
+The 418-01 client corpus and reproducible commands are in [`tests/connect`](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/connect/README.md). They record client requests, not successful server responses. Before freezing final D07 error behavior, resolve release-cursor behavior against Spark 4.0.5. Keep safe cleanup regardless of error representation. Do not claim unlimited/durable retry protection from bounded tombstones, or advertise Structured Streaming from Arrow result streaming.
 
 Slice 418-08 adds a reproducible V26 measurement runner and a separate opt-in V25 route runner. The 4.18 release workflow runs the V26 measurement command on 4.18 candidate branches/tags and preserves its artifacts. Local fault-proxy coverage exercises sessions, metadata/status, stale identities, streaming, cancellation, and retry; it does not certify MiniLake routing. V25 remains pending the external gRPC proxy, and V26 remains a measurement-only record until regression budgets and the full candidate evidence are approved.
 

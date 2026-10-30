@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Plan: Bugs and Improvements
 
 A repeatable plan for finding **bugs** and **needed improvements** in robin-sparkless. Use this for periodic audits, before releases, or when onboarding.

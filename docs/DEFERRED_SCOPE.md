@@ -1,108 +1,30 @@
-# Phase H: Deferred / Optional Scope
+# Unsupported and unverified scope — 4.18.0
 
-This document lists APIs and features that are **explicitly out of scope** for robin-sparkless full parity. They are documented for clarity so users know the boundaries and can choose appropriate workarounds.
+The [support matrix](SUPPORT_MATRIX.md) is the release contract. Historical phase
+plans are not capability promises. “Unknown” means no reviewed behavior contract
+for that combination; it does not assert that an internal implementation cannot exist.
 
-See also: [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md), [ROBIN_SPARKLESS_MISSING.md](ROBIN_SPARKLESS_MISSING.md), [FULL_PARITY_ROADMAP.md](FULL_PARITY_ROADMAP.md).
+| Area | Current boundary | Alternative |
+| --- | --- | --- |
+| Distributed execution | No executor fleet, Spark scheduler, distributed RDD or fault tolerance | Test deployment behavior on real Spark |
+| Structured Streaming | No streaming engine; checked installed DataFrame lacks isStreaming/withWatermark | Batch pipeline or a streaming engine |
+| Python UDF variants | Local typed scalar UDF only in documented contexts; no public pandas/vectorized/grouped UDF or UDTF | Built-in expressions or real PySpark |
+| Remote Python execution | No HTTP/Connect Python worker or UDF contract | Local trusted-process code |
+| Catalog federation / WriterV2 | No full Hive/Spark metastore or writeTo contract | Documented local warehouse/external provider |
+| Connect general Spark surface | No SQL commands, joins, sorts/windows, general grouped agg, file sources, writes, artifacts or streaming | Published range/local/filter/project/limit/count subset or real Spark |
+| HTTP general SQL/IO | Bounded allowlist and in-memory catalog; no arbitrary filesystem/JDBC/Python execution | Local library or appropriate service |
+| Durable server recovery | No cross-restart catalog/operation journal or durable exactly-once guarantee | Application reconciliation and durable infrastructure |
+| Hard query isolation | No in-process hard CPU/intermediate-memory enforcement | Separate OS-limited processes |
+| XML/XPath, advanced sketches/NLP | No reviewed complete public compatibility contract | Preprocess externally or add explicit oracle tests |
+| Advanced Spark4 variants/collations/UDTF combinations | Unlisted combinations are unknown; type names alone do not prove semantics | Validate exact API/type/context against your oracle |
 
----
+Local `df.rdd` does implement a bounded in-process subset (including flatMap),
+which must not be confused with distributed execution. SQL builds implement a
+bounded CREATE TABLE/INSERT/database-DDL subset. Typed scalar Python UDFs work
+locally. Older pages denying all three were inaccurate for this release.
 
-## XML / XPath
-
-| APIs | Status | Rationale |
-|------|--------|-----------|
-| `from_xml`, `to_xml`, `schema_of_xml`, `xpath`, `xpath_boolean`, `xpath_double`, etc. | Not implemented | Would require an XML parser and feature flag. |
-
-**Workaround:** Preprocess XML externally or use JSON instead (`from_json`, `to_json`, `get_json_object` are supported).
-
-**Tracking:** GitHub issue #146
-
----
-
-## UDF / UDTF
-
-| APIs | Status | Rationale |
-|------|--------|-----------|
-| `spark.udf.register`, `call_udf`, `udf()` (decorator), Rust `register_udf` | **Implemented** | Scalar UDFs: Python UDFs (row-at-a-time) and Rust UDFs, plus column-wise vectorized Python UDFs via `vectorized=True`. Session-scoped registry; visible to DataFrame API, SQL, and plan interpreter. |
-| `pandas_udf` (vectorized) | **Partially implemented** | Minimal support for grouped aggregation UDFs via `pandas_udf(..., function_type="grouped_agg")` (one scalar per group, used only in `groupBy().agg(...)`). Other pandas_udf function types (scalar, map, grouped map, etc.) remain deferred; would require broader Polars↔Pandas batching and plan integration. |
-| `udtf` (table functions) | Not implemented | Returns multiple rows per input; out of scope. |
-
-**Implemented:** Python: `spark.udf().register(name, f, return_type=None, vectorized=False|True)`; `call_udf(name, *cols)`; `my_udf(col("x"))` via returned `UserDefinedFunction`; grouped vectorized aggregations via `pandas_udf(f, return_type, function_type="grouped_agg")` used in `group_by().agg([...])`. Rust: `session.register_udf(name, \|cols\| ...)`. SQL: `SELECT my_udf(col) FROM t`. Plan: `{"udf": "name", "args": [...]}` or `{"fn": "call_udf", "args": [{"lit": "name"}, ...]}`.
-
-**Limitations:** Python UDFs run eagerly (materialize at UDF boundary). Column-wise vectorized UDFs are supported only in `withColumn` / `select` paths. Grouped pandas UDFs are restricted to `groupBy().agg(...)`, cannot be mixed with built-ins in a single `agg` call, and are not available in SQL or other contexts. Python UDF in WHERE/HAVING not yet supported. See [docs/UDF_GUIDE.md](UDF_GUIDE.md).
-
-**Tracking:** GitHub issue #143 (pandas_udf, udtf remain deferred)
-
----
-
-## Streaming
-
-| APIs | Status | Rationale |
-|------|--------|-----------|
-| `withWatermark`, `session_window`, `isStreaming` | No-op / stub | Robin-sparkless has no streaming execution model; DataFrame is lazy until actions run. |
-
-**Current behavior:** `isStreaming` always returns `False`; `withWatermark` is a no-op that returns the DataFrame unchanged.
-
-**Workaround:** Use batch processing. For streaming-like workflows, process data in batches and write incrementally.
-
-**Tracking:** GitHub issue #145
-
----
-
-## Sketch aggregates
-
-| APIs | Status | Rationale |
-|------|--------|-----------|
-| HyperLogLog (HLL), count-min sketch, `hll_sketch_agg`, `hll_sketch_estimate`, etc. | Not implemented | Optional approximate aggregates; low priority for initial parity. |
-
-**Workaround:** Use exact aggregates (`count`, `count_distinct`) or `approx_count_distinct` where supported.
-
-**Tracking:** GitHub issue #147
-
----
-
-## RDD / distributed
-
-| APIs | Status | Rationale |
-|------|--------|-----------|
-| `rdd`, `foreach`, `foreachPartition`, `mapInPandas`, `mapPartitions` | Stub (raise `NotImplementedError`) | Robin-sparkless is single-process; no RDD or distributed execution. DataFrame is lazy (PySpark-like). |
-| `DataFrame.rdd.flatMap` and other RDD transformations | Not implemented | RDD API is out of scope; use DataFrame/DSL (e.g. `explode`, `array_contains`) instead. |
-
-**Workaround:** Use `collect()`, `toLocalIterator()`, or `to_pandas()` for local access. For row-wise processing, materialize with `collect()` and iterate in Python/Rust. For flatMap-like behavior, use `explode` on array columns.
-
-**Tracking:** GitHub issue #142, #848 (RDD flatMap)
-
----
-
-## VARIANT (PySpark 4 semi-structured)
-
-| APIs | Status | Rationale |
-|------|--------|-----------|
-| `VariantType`, `parse_json()`, `cast(..., "variant")` | **Implemented** | JSON string storage; `collect()` deserializes to dict/list when schema uses `VariantType`. |
-| `variant_get`, `schema_of_variant`, pipe syntax, collations, UDF `VariantVal` | Not implemented | No Polars native VARIANT; requires JVM semi-structured engine. |
-
-**Workaround:** Use `parse_json` + Python after `collect()` for nested access; use `from_json` when a fixed struct schema is known.
-
----
-
-## Catalog DDL
-
-| APIs | Status | Rationale |
-|------|--------|-----------|
-| `CREATE TABLE`, `CREATE DATABASE`, `DROP TABLE`, `INSERT INTO`, `writeTo` | Not implemented or stub | No persistent catalog; use file-based storage. |
-
-**Workaround:** Use `df.write().format("parquet"|"csv"|"json").mode("overwrite"|"append").save(path)` to write to paths. Temp views (`createOrReplaceTempView`, `spark.read.table`) are supported for in-session tables.
-
-**Tracking:** GitHub issue #144
-
----
-
-## Sparkless adapter "not implemented" codes (#764, #765)
-
-When the Sparkless adapter reports "2 is not implemented" or "4 is not implemented for the Robin backend", the number is an adapter-specific enum or method id. Robin does not define or interpret these codes. Fix or extend the Sparkless adapter to map the requested operation to a Robin plan/API that is supported (e.g. window functions, group_by with expr). See [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) for supported operations.
-
----
-
-## Related
-
-- **JVM / runtime stubs:** `broadcast`, `spark_partition_id`, `input_file_name`, `monotonically_increasing_id`, `current_catalog`, `current_user` — implemented as stubs for API compatibility; see [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md#jvm--runtime-stubs).
-- **sentences / NLP:** Deferred; could be implemented as string split + list of lists (#148).
+Use [differences](PYSPARK_DIFFERENCES.md) for concrete local deviations,
+[UDF contexts](UDF_GUIDE.md), [persistence](PERSISTENCE_GUIDE.md),
+[external catalogs](EXTERNAL_CATALOGS.md), and [transport contracts](SPARK_CONNECT.md).
+Report unlisted workload requirements through [support](SUPPORT.md) with a minimal
+reproduction and exact Spark version; a feature request is not a release commitment.

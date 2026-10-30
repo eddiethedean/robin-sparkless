@@ -19,6 +19,13 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 
+[project.urls]
+Homepage = "https://github.com/eddiethedean/robin-sparkless"
+Documentation = "https://robin-sparkless.readthedocs.io/"
+Repository = "https://github.com/eddiethedean/robin-sparkless"
+Issues = "https://github.com/eddiethedean/robin-sparkless/issues"
+Changelog = "https://github.com/eddiethedean/robin-sparkless/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 dev = [
     "pytest",
@@ -37,7 +44,7 @@ jdbc = [
     "pymssql",          # SQL Server
     "oracledb",         # Oracle
 ]
-# Run Python tests with real PySpark (SPARKLESS_TEST_BACKEND=pyspark or MOCK_SPARK_TEST_BACKEND=pyspark); requires Java.
+# Run Python tests with real PySpark (SPARKLESS_TEST_MODE=pyspark); requires Java.
 pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
 # PySpark 4.x oracle (Java 17, Python 3.11+)
 pyspark4 = ["pyspark>=4.0,<4.2", "delta-spark>=4.0,<5"]

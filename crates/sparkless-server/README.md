@@ -2,9 +2,9 @@
 
 Standalone native statement service for Robin Sparkless.
 
-**4.17.0 security notice:** plain `cargo install` retains a temporary zstd
+**4.18.0 security notice:** plain `cargo install` retains a temporary zstd
 dependency exception. Prebuilt server distributions use the fixed implementation;
-Rust users can apply the [pinned Cargo patch and security guidance](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/security/zstd-4.17-exception.md).
+Rust users can apply the [pinned Cargo patch and security guidance](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/security/zstd-4.18-exception.md).
 
 Run from the workspace with `cargo run -p sparkless-server -- serve`. It listens on
 `127.0.0.1:8099` by default; use `--host`/`--port` or `SPARKLESS_SERVER_HOST` /
@@ -53,7 +53,7 @@ cargo check -p sparkless-server --no-default-features --features http,connect
 ```
 
 Build the release profile with both listeners using
-`cargo run -p sparkless-server --no-default-features --features http,connect -- serve`.
+`cargo run --release -p sparkless-server --no-default-features --features http,connect -- serve`.
 The Connect-only feature build starts only gRPC:
 `cargo run -p sparkless-server --no-default-features --features connect -- serve`.
 

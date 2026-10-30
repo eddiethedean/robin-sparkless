@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Plan: Convert Robin Sparkless Backend to Full Lazy Execution
 
 > **Implementation status (v0.10.x):** This plan has been **implemented** as of #438. DataFrame now uses Polars `LazyFrame` internally. Transformations extend the lazy plan; only actions (`collect`, `show`, `count`, `write`, etc.) trigger materialization. Data sources return lazy DataFrames. This document remains as historical context and architecture reference.

@@ -107,3 +107,9 @@ Rust publication needs `CARGO_REGISTRY_TOKEN`. Both PyPI projects use Trusted
 Publishing with owner `eddiethedean`, repository `robin-sparkless`, workflow
 `release.yml`, and environment `pypi`. GHCR publication uses the workflow token's
 `packages: write` permission for `ghcr.io/eddiethedean/sparkless-server`.
+
+## Documentation checks
+
+Follow the [documentation maintenance and release checklist](DOCUMENTATION.md).
+Keep public examples runnable from an installed wheel, assert actual test backend
+identity, and run the strict docs job before declaring a release candidate ready.

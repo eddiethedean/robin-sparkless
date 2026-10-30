@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-13: Optional native Delta Lake and Unity Catalog
 
 > **Status: planned; owner unassigned.** Phase: 6; target 4.22.0; optional.

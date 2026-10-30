@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # createDataFrame: Missing Features vs PySpark
 
 Comparison of **robin-sparkless** `createDataFrame(data, schema=None, sampling_ratio=None, verify_schema=True)` with **PySpark** to identify gaps.

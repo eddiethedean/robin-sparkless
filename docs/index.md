@@ -1,5 +1,7 @@
 # Sparkless / Robin Sparkless
 
+See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SUPPORT_MATRIX.md) before selecting features.
+
 **PySpark-compatible DataFrames without the JVM.** The **`sparkless`** Python package is the primary adoption path for testing and local development. The **`robin-sparkless`** Rust crate powers it (and can be embedded directly).
 
 Install Python package: `pip install "sparkless>=4,<5"`
@@ -13,7 +15,7 @@ Install Python package: `pip install "sparkless>=4,<5"`
 | Persona | Start here |
 |---------|------------|
 | **Python user / tester** | [Getting started (Python)](python_getting_started.md) · [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) |
-| **Rust embedder** | [Quickstart](QUICKSTART.md) · [User guide](USER_GUIDE.md) · [docs.rs](https://docs.rs/robin-sparkless) |
+| **Rust embedder** | [Quickstart](QUICKSTART.md) · [User guide](USER_GUIDE.md) · [Rust reference fallback](RUST_API_REFERENCE.md) |
 | **Contributor** | [CONTRIBUTING.md](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md) |
 | **Enterprise / production** | [Before you adopt](BEFORE_YOU_ADOPT.md) · [Production deployment](PRODUCTION.md) |
 

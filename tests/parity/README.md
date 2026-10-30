@@ -1,68 +1,18 @@
-# PySpark Parity Tests
+# Pytest parity cases
 
-This directory contains all PySpark parity tests for Sparkless. Every test validates that Sparkless behaves identically to PySpark using pre-generated expected outputs.
+These tests compare Sparkless with checked-in expected outputs, using
+`tests.tools.parity_base.ParityTestBase`. Fixtures live in `tests/expected_outputs`;
+inspect each fixture's oracle provenance. The loader's historical default is
+PySpark 3.2, not a blanket Spark4 certification.
 
-## Structure
-
-```
-parity/
-├── dataframe/          # DataFrame operation parity tests
-├── functions/          # SQL function parity tests
-├── sql/               # SQL execution parity tests
-└── internal/          # Internal features with PySpark equivalents
-```
-
-## Running Tests
-
-### Run All Parity Tests
+From the repository root after contributor setup:
 
 ```bash
-# From project root
-pytest tests/parity/ -n 10
-
-# Or use the dedicated script
-./tests/run_parity_tests.sh
+.venv/bin/python -m pytest tests/parity --collect-only -q
+.venv/bin/python -m pytest tests/parity/dataframe/test_select.py -v
+.venv/bin/python -m pytest tests/parity -v
 ```
 
-### Run Specific Category
-
-```bash
-pytest tests/parity/dataframe/ -n 10
-pytest tests/parity/functions/ -n 10
-pytest tests/parity/sql/ -n 10
-```
-
-### Run Specific Test
-
-```bash
-pytest tests/parity/dataframe/test_select.py::TestSelectParity::test_basic_select
-```
-
-## Test Pattern
-
-All tests inherit from `ParityTestBase` and follow this pattern:
-
-```python
-from tests.fixtures.parity_base import ParityTestBase
-
-class TestFeatureParity(ParityTestBase):
-    def test_operation(self, spark):
-        expected = self.load_expected("category", "test_name")
-        df = spark.createDataFrame(expected["input_data"])
-        result = df.operation(...)
-        self.assert_parity(result, expected)
-```
-
-## Expected Outputs
-
-Expected outputs are pre-generated from PySpark and stored in `tests/expected_outputs/`.
-They are organized by category matching the test structure.
-
-## Adding New Tests
-
-See `tests/PARITY_TESTING_GUIDE.md` for detailed instructions on adding new parity tests.
-
-## Known Issues
-
-Some tests may be blocked by bugs. See `tests/BUG_LOG.md` for details.
-
+See [the current add-a-regression walkthrough](../../docs/TEST_CREATION_GUIDE.md)
+for the real module import, fixture workflow, and dual-backend checks.
+`tests/gen_pyspark_cases.py` writes the separate `tests/fixtures` corpus.

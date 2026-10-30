@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-10: Arrow streaming, replay, and Connect conformance
 
 > **Status: planned; owner unassigned.** Phase: 2, informed by 0A feasibility.

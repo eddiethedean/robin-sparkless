@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-15: Optional DuckDB execution backend for Spark Connect
 
 > **Status: planned; owner unassigned.** Phase: 4, after the supported Connect server and DuckDB data-source phase. Target release: 4.20.0; optional capability.
@@ -60,8 +68,8 @@ Use an in-repository fixture with a standard DuckDB client and Sparkless Connect
 
 ## Touchpoints
 
-- [Core engine interfaces](../../../crates/robin-sparkless-core/src/engine/mod.rs)
-- [Server runtime and construction](../../../crates/sparkless-server/src/lib.rs)
+- [Core engine interfaces](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/engine/mod.rs)
+- [Server runtime and construction](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server/src/lib.rs)
 - [Connect translation](09-connect-plans-and-analysis.md) and [lifecycle conformance](10-arrow-replay-and-connect-conformance.md)
 - [DuckDB source ownership and schema decisions](14-duckdb-data-source.md)
 
