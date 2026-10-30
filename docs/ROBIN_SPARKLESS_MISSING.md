@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # What Robin-Sparkless Does NOT Have (vs Sparkless 3.28.0)
 
 This list is **only** items that **Sparkless has** and **robin-sparkless does not** (or has only as a stub/no-op). Implemented equivalents (e.g. `signum` for `sign`, `avg` for `mean`, `trunc` for `date_trunc`) are not listed.

@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Sparkless Python Test Port Tracker
 
 This doc tracks which Sparkless Python tests have been **ported** to run against `robin_sparkless` in this repo, which were **skipped as duplicates** of existing fixtures, and which are **deferred** (unsupported API or low priority).

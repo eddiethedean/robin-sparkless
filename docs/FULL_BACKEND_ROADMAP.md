@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Full Sparkless Backend Roadmap
 
 This document plans the path for **robin-sparkless** to become a complete backend replacement for [Sparkless](https://github.com/eddiethedean/sparkless). Sparkless implements 403+ PySpark functions and 85+ DataFrame methods; robin-sparkless currently covers ~283 functions with 159 parity fixtures (Phases 11–24 + signature alignment). **Phase 25** ✅ **completed** (plan interpreter, expression interpreter extended to all scalar functions, logical plan schema, 3 plan fixtures, create_dataframe_from_rows). Next: Phase 26 (publish crate), Phase 27 (integration).

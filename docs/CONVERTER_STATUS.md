@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Sparkless → Robin-Sparkless Fixture Converter
 
 The script `tests/convert_sparkless_fixtures.py` converts Sparkless `expected_outputs` JSON to robin-sparkless fixture format. Use it when you have the [Sparkless](https://github.com/eddiethedean/sparkless) repo or a copy of its `tests/expected_outputs/` directory.

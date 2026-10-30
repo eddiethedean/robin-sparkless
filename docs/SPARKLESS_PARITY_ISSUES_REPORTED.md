@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Sparkless vs PySpark: Parity Issues Reported Upstream
 
 When comparing **Sparkless** (the Python PySpark drop-in at [github.com/eddiethedean/sparkless](https://github.com/eddiethedean/sparkless)) with PySpark, we found several parity issues and reported them on the Sparkless repo. This document lists those issues and the script used to find them.

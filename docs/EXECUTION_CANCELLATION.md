@@ -3,26 +3,30 @@
 SQL is planned lazily. Cancellation applies when a DataFrame action is running, such as
 `collect()`, `count()`, `show()`, `toPandas()`, `toArrow()`, or `write.saveAsTable()`.
 
-Plan the DataFrame on the SparkSession's owning thread, then pass a cancellation handle to a
-control thread. `SparkSession` itself remains thread-bound:
+Plan and execute on the session's owning thread. Pass a cancellation handle to
+a control thread when requesting cancellation from outside that thread. This
+complete example applies a soft five-second deadline; its small query can finish
+before the timer fires:
 
 ```python
+from threading import Timer
 import sparkless
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from sparkless.sql import SparkSession
 
-df = spark.sql("select ...")
+spark = SparkSession.builder.app_name("cancellation").get_or_create()
 cancellation = spark.cancellation_handle()
-
-with ThreadPoolExecutor(max_workers=2) as pool:
-    future = pool.submit(df.collect)
+deadline = Timer(5.0, cancellation.cancel_all_active_actions)
+try:
+    df = spark.range(100_000)
+    deadline.start()
     try:
-        rows = future.result(timeout=5)
-    except TimeoutError:
-        pool.submit(cancellation.cancel_all_active_actions).result()
-        try:
-            future.result()
-        except sparkless.SparklessCancelledError:
-            pass
+        rows = df.collect()
+    except sparkless.SparklessCancelledError:
+        rows = None  # The action reached a cancellation safe point.
+finally:
+    deadline.cancel()
+    deadline.join()
+    spark.stop()
 ```
 
 `DataFrame.cancel()` requests cancellation for actions started through that DataFrame

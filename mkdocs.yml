@@ -27,10 +27,18 @@ theme:
   features:
     - navigation.tabs
     - navigation.sections
-    - navigation.expand
     - navigation.top
     - search.suggest
     - search.highlight
+
+hooks:
+  - scripts/docs_hooks.py
+
+validation:
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
 
 plugins:
   - search
@@ -45,97 +53,55 @@ markdown_extensions:
       permalink: true
 
 nav:
-  - Home: index.md
-  - Python users:
-    - Getting started: python_getting_started.md
+  - Start here:
+    - Overview: index.md
+    - Installation and versions: INSTALLATION.md
     - Before you adopt: BEFORE_YOU_ADOPT.md
-    - Testing guide: TESTING_GUIDE.md
-    - Migration: python_migration.md
+    - Support matrix: SUPPORT_MATRIX.md
+    - Quick start (Python): python_getting_started.md
+    - File pipeline tutorial: PIPELINE_TUTORIAL.md
     - FAQ: FAQ.md
+  - Use Sparkless:
+    - Testing both engines: TESTING_GUIDE.md
+    - Migration: python_migration.md
+    - Persistence and tables: PERSISTENCE_GUIDE.md
+    - Scalar UDFs: UDF_GUIDE.md
+    - External catalogs: EXTERNAL_CATALOGS.md
     - Troubleshooting: TROUBLESHOOTING_PYTHON.md
-    - Execution cancellation: EXECUTION_CANCELLATION.md
-    - Python API reference: PYTHON_API_REFERENCE.md
-  - Rust users:
-    - Quickstart: QUICKSTART.md
-    - User guide: USER_GUIDE.md
-    - Embedding: EMBEDDING.md
-    - Persistence guide: PERSISTENCE_GUIDE.md
-    - UDF guide: UDF_GUIDE.md
-    - Execution cancellation: EXECUTION_CANCELLATION.md
-  - Server:
-    - Spark Connect: SPARK_CONNECT.md
   - Reference:
+    - Python API contracts: PYTHON_API_REFERENCE.md
+    - Python symbols and signatures: PYTHON_API_SYMBOLS.md
+    - Types and errors: TYPES_AND_ERRORS.md
+    - Configuration: CONFIGURATION.md
+    - Compatibility evidence: PARITY_STATUS.md
+    - Compatibility profiles: PYSPARK_COMPAT_PROFILES.md
     - PySpark differences: PYSPARK_DIFFERENCES.md
-    - Parity status: PARITY_STATUS.md
-    - Production deployment: PRODUCTION.md
-    - Product history: PRODUCT_HISTORY.md
     - Deferred scope: DEFERRED_SCOPE.md
-    - Rust API (docs.rs): https://docs.rs/robin-sparkless
-  - Contributing:
-    - Overview: https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md
-    - Releasing: RELEASING.md
-    - Test creation guide: TEST_CREATION_GUIDE.md
-  - Design & maintainer docs:
-    - Doc index: DOC_INDEX.md
-    - sparkless-server plans:
-      - Overview: plans/sparkless-server/README.md
-      - Release roadmap: plans/sparkless-server/ROADMAP.md
-      - 4.16 implementation: plans/sparkless-server/RELEASE_4_16.md
-      - 4.17 implementation: plans/sparkless-server/RELEASE_4_17.md
-      - Revised epic: plans/sparkless-server/EPIC.md
-      - Decisions: plans/sparkless-server/DECISIONS.md
-      - Validation: plans/sparkless-server/VALIDATION.md
-      - "01: Compatibility contracts and emulator results": plans/sparkless-server/01-compatibility-and-emulator.md
-      - "02: Rust crate, CLI, and native distribution": plans/sparkless-server/02-crate-cli-and-distribution.md
-      - "03: Early Spark Connect feasibility": plans/sparkless-server/03-connect-feasibility.md
-      - "04: Admission, operation lifecycle, and shutdown": plans/sparkless-server/04-runtime-and-operations.md
-      - "05: Read-only HTTP SQL and typed results": plans/sparkless-server/05-http-sql-and-results.md
-      - "06: Python launcher and binary packaging": plans/sparkless-server/06-python-launcher.md
-      - "07: Session ownership, shared catalogs, and mutations": plans/sparkless-server/07-sessions-catalogs-and-mutations.md
-      - "08: Logical types and lazy native execution": plans/sparkless-server/08-native-types-and-lazy-execution.md
-      - "09: Spark Connect plan translation and analysis": plans/sparkless-server/09-connect-plans-and-analysis.md
-      - "10: Arrow streaming, replay, and Connect conformance": plans/sparkless-server/10-arrow-replay-and-connect-conformance.md
-      - "11: Emulator gRPC integration, benchmarks, and release": plans/sparkless-server/11-proxy-benchmarks-and-release.md
-      - "12: Optional isolated Python Jobs and notebooks": plans/sparkless-server/12-optional-python-workers.md
-      - "13: Optional native Delta Lake and Unity Catalog": plans/sparkless-server/13-optional-delta-and-unity-catalog.md
-    - Roadmap: ROADMAP.md
-    - Robin-Sparkless missing: ROBIN_SPARKLESS_MISSING.md
-    - Sparkless integration analysis: SPARKLESS_INTEGRATION_ANALYSIS.md
-    - Full backend roadmap: FULL_BACKEND_ROADMAP.md
+    - Cancellation: EXECUTION_CANCELLATION.md
+    - Typing: TYPING_GUIDE.md
+  - Rust and extensions:
+    - Quick start: QUICKSTART.md
+    - User guide: USER_GUIDE.md
+    - Rust API fallback: RUST_API_REFERENCE.md
+    - Embedding: EMBEDDING.md
+    - Extension author guide: EXTENDING.md
+    - Product architecture: ARCHITECTURE.md
+    - Engine architecture: ENGINE_ARCHITECTURE.md
     - Logical plan format: LOGICAL_PLAN_FORMAT.md
-    - PySpark 4 parity plan: PYSPARK_4_PARITY_PLAN.md
-    - Gap analysis (Sparkless 3.28): GAP_ANALYSIS_SPARKLESS_3.28.md
-    - Phase 15 gap list: PHASE15_GAP_LIST.md
-    - Implementation status: IMPLEMENTATION_STATUS.md
-    - More maintainer docs:
-      - Sparkless refactor plan: SPARKLESS_REFACTOR_PLAN.md
-      - Readiness plan: READINESS_FOR_SPARKLESS_PLAN.md
-      - Converter status: CONVERTER_STATUS.md
-      - Sparkless parity status: SPARKLESS_PARITY_STATUS.md
-      - Signature gap analysis: SIGNATURE_GAP_ANALYSIS.md
-      - Signature alignment tasks: SIGNATURE_ALIGNMENT_TASKS.md
-      - Parity check (Sparkless 3.28): PARITY_CHECK_SPARKLESS_3.28.md
-      - Sparkless 3.28 API snapshot: SPARKLESS_3.28_API_SNAPSHOT.md
-      - Sparkless parity issues reported: SPARKLESS_PARITY_ISSUES_REPORTED.md
-      - Bugs and improvements plan: BUGS_AND_IMPROVEMENTS_PLAN.md
-      - Closed issues test coverage: CLOSED_ISSUES_TEST_COVERAGE.md
-      - CreateDataFrame gaps: CREATEDATAFRAME_GAPS.md
-      - DataFrame test guide: DATAFRAME_TEST_GUIDE.md
-      - Full parity roadmap: FULL_PARITY_ROADMAP.md
-      - Gap analysis (PySpark repo): GAP_ANALYSIS_PYSPARK_REPO.md
-      - Integration test guide: INTEGRATION_TEST_GUIDE.md
-      - Lazy backend plan: LAZY_BACKEND_PLAN.md
-      - Migration status: MIGRATION_STATUS.md
-      - Parity functions expectations: PARITY_FUNCTIONS_EXPECTATIONS.md
-      - Persistence between sessions: PERSISTENCE_BETWEEN_SESSIONS.md
-      - Polars crate isolation: POLARS_CRATE_ISOLATION.md
-      - Ported test expectations: PORTED_TEST_EXPECTATIONS.md
-      - PySpark mode test failures: PYSPARK_MODE_TEST_FAILURES.md
-      - PySpark test translation: PYSPARK_TEST_TRANSLATION.md
-      - PySpark version notes: PYSPARK_VERSION_NOTES.md
-      - Rust-first testing: RUST_FIRST_TESTING.md
-      - Sparkless Python test port: SPARKLESS_PYTHON_TEST_PORT.md
-      - Subcrate split plan: SUBCRATE_SPLIT_PLAN.md
-      - Test failure checklist: TEST_FAILURE_CHECKLIST.md
-      - Test failure categories: test_failure_categories.md
-      - TODO Spark DDL parser Rust: TODO_SPARK_DDL_PARSER_RUST.md
+    - Database integration tests: JDBC_TESTING.md
+  - Run a server:
+    - HTTP API: HTTP_API.md
+    - Spark Connect: SPARK_CONNECT.md
+    - Deployment and operations: PRODUCTION.md
+    - Performance and sizing: PERFORMANCE.md
+  - Project:
+    - Support and versions: SUPPORT.md
+    - Security policy: SECURITY.md
+    - 4.18 dependency exception: security/zstd-4.18-exception.md
+    - Contributing: https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md
+    - Add a regression: TEST_CREATION_GUIDE.md
+    - Documentation maintenance: DOCUMENTATION.md
+    - Release process: RELEASING.md
+    - Release evidence: RELEASE_EVIDENCE.md
+    - Documentation index: DOC_INDEX.md
+    - History and plans: ARCHIVE.md

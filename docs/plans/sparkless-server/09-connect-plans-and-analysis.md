@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-09: Spark Connect plan translation and analysis
 
 > **Status: planned; owner unassigned.** Phase: 2.
@@ -7,7 +15,7 @@
 
 Translate a documented subset of actual Connect relations/expressions into native operations.
 
-The [4.18 implementation plan](RELEASE_4_18.md) refines this work into 418-01–418-03, integrated with Arrow/replay slices 418-04–418-06. Its [Apache source review](CONNECT_PROTOCOL_RESEARCH.md) pins Spark 4.0.5 and distinguishes public protocol behavior from the Sparkless subset. The actual client encoders and config/lifecycle requests are captured in the 418-01 fixtures; server conformance remains open, and Connect SQL commands, writes, grouped aggregates, artifact-backed inputs, and additional nodes are explicitly gated.
+The [4.18 implementation plan](RELEASE_4_18.md) refines this work into 418-01–418-03, integrated with Arrow/replay slices 418-04–418-06. Its [Apache source review](CONNECT_PROTOCOL_RESEARCH.md) pins Spark 4.0.5 and distinguishes public protocol behavior from the Sparkless subset. The actual client encoders and config/lifecycle requests are captured in the 418-01 fixtures; the 4.18 candidate conformance gates passed as recorded in the [cut evidence](RELEASE_4_18.md#4180-cut-evidence). Connect SQL commands, writes, grouped aggregates, artifact-backed inputs, and additional nodes remain outside the advertised subset.
 
 ## Dependencies and delivery slices
 
@@ -52,3 +60,5 @@ Resolve or explicitly defer D01, D02, D04, D11 in the [decision register](DECISI
 The default Phase 2 translator targets the existing Polars backend. Plan/schema interfaces should permit the later [DuckDB execution backend](15-duckdb-connect-backend.md), but implementing it is Phase 4 work after the [Phase 3 source integration](14-duckdb-data-source.md). Neither DuckDB phase is a Phase 2 release prerequisite.
 
 SS-09 and SS-10 share an interface design and can develop against agreed fixtures; their release gates require both implementations.
+
+Follow-on [SS-16 / Phase 7](16-connect-api-types-and-analysis.md) assigns expanded default-backend operations, scalar/nested types, truthful analysis, and mutable session settings to 4.23. [SS-17 / Phase 8](17-connect-sources-artifacts-and-persistence.md) assigns public I/O/table paths, artifact-backed data, and caches/checkpoints to 4.24. These plans do not expand the frozen 4.18 contract before their implementation and acceptance evidence.

@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-04: Admission, operation lifecycle, and shutdown
 
 > **Status: planned; owner unassigned.** Phase: Minimum production controls in 0B; replay/mutation extensions in 1–2.

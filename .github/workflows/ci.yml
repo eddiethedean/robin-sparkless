@@ -40,6 +40,16 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP/actionlint" actionlint
           "$RUNNER_TEMP/actionlint/actionlint" .github/workflows/*.yml
 
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Check workflow helpers and Python types
+        run: |
+          python -m pip install pyyaml mypy
+          python -m unittest discover -s scripts -p 'test_*release*.py'
+          python -m unittest discover -s scripts -p 'test_verify_wheel_runtime.py'
+          (cd python && mypy sparkless)
+
   format:
     name: Format
     runs-on: ubuntu-latest
@@ -237,6 +247,31 @@ jobs:
       - name: Run default-feature core tests
         run: cargo test --locked -p robin-sparkless-core --lib --tests
 
+  server-tests:
+    name: Server HTTP and Spark Connect tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+        with:
+          toolchain: 1.93.1
+      - name: Cache cargo
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Run the combined server regression suite
+        run: cargo test --locked --release -p sparkless-server --no-default-features --features http,connect
+        env:
+          CARGO_BUILD_JOBS: 1
+
   python-build:
     name: Build one Linux CI wheel
     runs-on: ubuntu-latest
@@ -328,6 +363,7 @@ jobs:
   pyspark-smoke:
     name: PySpark smoke (manual)
     if: github.event_name == 'workflow_dispatch'
+    needs: [python-build]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -341,17 +377,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "11"
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          toolchain: 1.93.1
-          components: rustfmt, clippy
-      - name: Build sparkless
+          name: sparkless-ci-wheel-linux-x86_64
+          path: dist
+      - name: Install the CI wheel
         run: |
           python -m venv .venv
-          .venv/bin/pip install --upgrade pip maturin pytest
-          rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
-          cd python && ../.venv/bin/maturin develop --locked --release
+          .venv/bin/pip install dist/*.whl
       - name: Install PySpark and run smoke tests
         env:
           _JAVA_OPTIONS: -Xmx2g
@@ -372,6 +405,7 @@ jobs:
   python-full:
     name: Python full suite (manual)
     if: github.event_name == 'workflow_dispatch'
+    needs: [python-build]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -380,29 +414,16 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          toolchain: 1.93.1
-          components: rustfmt, clippy
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Build and run full pytest
+          name: sparkless-ci-wheel-linux-x86_64
+          path: dist
+      - name: Run the full suite against the CI wheel
         run: |
           python -m venv .venv
           mkdir -p pytest-results
-          .venv/bin/pip install --upgrade pip maturin pytest pytest-xdist hypothesis pytest-timeout
-          rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
-          cd python && ../.venv/bin/maturin develop --locked --release
-          ../.venv/bin/python -m pytest ../tests -n 4 -v --tb=short --durations=25 --junitxml=../pytest-results/full.xml
+          .venv/bin/pip install dist/*.whl pytest pytest-xdist hypothesis pytest-timeout
+          .venv/bin/python -m pytest tests -n 4 -v --tb=short --durations=25 --junitxml=pytest-results/full.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
@@ -410,11 +431,102 @@ jobs:
           path: pytest-results
           if-no-files-found: warn
 
+  documentation:
+    name: Documentation links and strict site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Check documentation and build with zero warnings
+        run: |
+          python -m pip install -r docs/requirements.txt
+          python scripts/check_documentation.py
+          python scripts/generate_documentation.py --check
+          mkdocs build --strict
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: documentation-site
+          path: site
+          if-no-files-found: error
+
+  documentation-examples:
+    name: Documentation examples (${{ matrix.backend }})
+    needs: [python-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: sparkless
+            oracle: ''
+          - backend: pyspark35
+            oracle: '3.5.8'
+          - backend: pyspark40
+            oracle: '4.0.5'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        if: matrix.oracle != ''
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-ci-wheel-linux-x86_64
+          path: dist
+      - name: Install the wheel and example dependencies
+        env:
+          DOCS_ORACLE: ${{ matrix.oracle }}
+        run: |
+          python -m pip install dist/*.whl pytest pyarrow pandas
+          if [[ -n "$DOCS_ORACLE" ]]; then
+            python -m pip install "pyspark==$DOCS_ORACLE"
+          fi
+      - name: Execute outside-checkout examples and assert backend identity
+        env:
+          DOCS_ORACLE: ${{ matrix.oracle }}
+          SPARKLESS_PYSPARK_COMPAT: ${{ matrix.oracle == '4.0.5' && '4.0' || '3.5' }}
+          _JAVA_OPTIONS: -Xmx2g
+        run: |
+          if [[ -z "$DOCS_ORACLE" ]]; then
+            python scripts/generate_documentation.py --api --check
+            python scripts/verify_documentation_examples.py --backend sparkless
+          else
+            python scripts/verify_documentation_examples.py --backend pyspark
+          fi
+
+  rust-documentation:
+    name: Pinned Rust API documentation fallback
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: 1.93.1
+      - name: Generate pinned-toolchain API reference
+        run: cargo doc --locked -p robin-sparkless --features sql --no-deps
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: rust-api-docs
+          path: target/doc
+          if-no-files-found: error
+
   ci-acceptance:
     name: CI acceptance gate
     if: always()
     needs:
       - workflow-lint
+      - documentation
+      - documentation-examples
+      - rust-documentation
       - format
       - clippy
       - audit
@@ -422,6 +534,7 @@ jobs:
       - test
       - test-delta
       - test-default-core
+      - server-tests
       - python-build
       - python
       - python-delta
@@ -430,12 +543,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Check the complete mode-specific CI job inventory
+      - name: Require successful CI jobs
         env:
           CI_EVENT_NAME: ${{ github.event_name }}
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python3 scripts/verify_ci_job_gate.py
+        run: |
+          jq -e 'to_entries | all(.[];
+            .value.result == "success" or
+            (env.CI_EVENT_NAME != "workflow_dispatch" and
+             (.key == "pyspark-smoke" or .key == "python-full") and
+             .value.result == "skipped"))' <<< "$NEEDS_JSON"

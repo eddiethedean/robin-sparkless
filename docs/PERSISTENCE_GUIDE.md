@@ -53,22 +53,22 @@ spark2.drop_global_temp_view("people");
 ### Python
 
 ```python
-import robin_sparkless as rs
+import sparkless as rs
 
-spark1 = rs.SparkSession.builder().app_name("session1").get_or_create()
+spark1 = rs.SparkSession.builder.app_name("session1").get_or_create()
 df = spark1.createDataFrame([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
 df.createOrReplaceGlobalTempView("people")
 
 # New session can access it
-spark2 = rs.SparkSession.builder().app_name("session2").get_or_create()
+spark2 = rs.SparkSession.builder.app_name("session2").get_or_create()
 spark2.table("global_temp.people").show()   # prints 2 rows (Alice, Bob)
 spark2.table("global_temp.people").collect() # [{'id': 1, 'age': 25, 'name': 'Alice'}, ...]
 
 # List global temp views
-spark2.catalog().listTables("global_temp")  # ["people"]
+spark2.catalog.listTables("global_temp")  # ["people"]
 
 # Drop
-spark2.catalog().dropGlobalTempView("people")
+spark2.catalog.dropGlobalTempView("people")
 ```
 
 ### SQL
@@ -107,7 +107,9 @@ let spark = SparkSession::builder()
 ```
 
 ```python
-spark = rs.SparkSession.builder() \
+from sparkless.sql import SparkSession
+
+spark = SparkSession.builder \
     .app_name("demo") \
     .config("spark.sql.warehouse.dir", "/tmp/my_warehouse") \
     .get_or_create()
@@ -148,19 +150,19 @@ assert_eq!(users.count()?, 2);
 ### Python
 
 ```python
-import robin_sparkless as rs
+import sparkless as rs
 
 warehouse = "/tmp/robin_warehouse"
-spark1 = rs.SparkSession.builder() \
+spark1 = rs.SparkSession.builder \
     .app_name("w1") \
     .config("spark.sql.warehouse.dir", warehouse) \
     .get_or_create()
 
 df = spark1.createDataFrame([(1, 25, "Alice"), (2, 30, "Bob")], ["id", "age", "name"])
-df.write().saveAsTable("users", mode="error")
+df.write.saveAsTable("users", mode="error")
 
 # New session reads from warehouse
-spark2 = rs.SparkSession.builder() \
+spark2 = rs.SparkSession.builder \
     .app_name("w2") \
     .config("spark.sql.warehouse.dir", warehouse) \
     .get_or_create()

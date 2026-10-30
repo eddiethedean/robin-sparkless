@@ -44,7 +44,7 @@ Sparkless **3.x** used Polars Python as the backend. Sparkless **4.x** uses the 
 
 ### Can I use Python UDFs (`@udf`, pandas UDFs)?
 
-**No** at the Python layer. Use built-in `functions` or engine-level Rust UDFs ([UDF guide](UDF_GUIDE.md)).
+Typed scalar `F.udf` works in the local Python API. Public pandas/vectorized UDFs and remote Python UDF execution are unsupported. See the checked example and context limits in the [UDF guide](UDF_GUIDE.md).
 
 ### Does `spark.sql()` work?
 
@@ -58,7 +58,7 @@ Use the `sparkless.testing` pytest plugin. See [Testing guide](TESTING_GUIDE.md)
 
 ### How complete is PySpark parity?
 
-200+ JSON parity fixtures plus a large pytest suite. Status: [Parity status](PARITY_STATUS.md). Known differences: [PySpark differences](PYSPARK_DIFFERENCES.md).
+There is no defensible full-API parity percentage. Use the versioned [support contract](SUPPORT_MATRIX.md) and generated [compatibility evidence](PARITY_STATUS.md), then test your own workload on both engines.
 
 ### Where do I report a parity bug?
 

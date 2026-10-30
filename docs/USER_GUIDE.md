@@ -32,15 +32,18 @@ Add to `Cargo.toml`:
 robin-sparkless = "4"
 ```
 
-Optional features:
+Optional features (one dependency entry; select only what you need):
 
 ```toml
-robin-sparkless = { version = "4", features = ["sql"] }        # spark.sql(), temp views
-robin-sparkless = { version = "4", features = ["delta"] }      # Delta Lake read/write
-robin-sparkless = { version = "4", features = ["jdbc"] }       # PostgreSQL read/write
-robin-sparkless = { version = "4", features = ["sqlite"] }     # SQLite read/write
-robin-sparkless = { version = "4", features = ["jdbc_mysql"] } # MySQL/MariaDB
+[dependencies]
+robin-sparkless = { version = "4", features = ["sql", "delta", "sqlite"] }
 ```
+
+See [installation and distribution features](INSTALLATION.md) for driver flags.
+**Rust consumer security:** apply the pinned patch described in the
+[4.18 zstd notice](security/zstd-4.18-exception.md); the unpatched consumer graph
+has an exception expiring **2026-11-26**. Official patched distributions have a
+separate dependency graph.
 
 ---
 
@@ -138,9 +141,8 @@ Read from and write to external databases using a PySpark-compatible JDBC API. S
 Add the feature in your `Cargo.toml`:
 
 ```toml
-robin-sparkless = { version = "4", features = ["jdbc"] }       # PostgreSQL
-robin-sparkless = { version = "4", features = ["sqlite"] }     # SQLite (file-based)
-robin-sparkless = { version = "4", features = ["jdbc_mysql"] } # MySQL
+[dependencies]
+robin-sparkless = { version = "4", features = ["jdbc", "sqlite", "jdbc_mysql"] }
 ```
 
 #### Python Example
@@ -215,26 +217,10 @@ Supports: `SELECT`, `FROM`, `JOIN`, `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT`. Bu
 
 ## User-Defined Functions
 
-Register custom functions and use them in DataFrames or SQL.
-
-**Python UDF**
-
-```python
-def double(x):
-    return x * 2 if x is not None else None
-
-my_udf = spark.udf().register("double", double, return_type="int")
-df2 = df.with_column("doubled", my_udf(rs.col("id")))
-```
-
-**SQL**
-
-```python
-spark.udf().register("double", double, return_type="int")
-result = spark.sql("SELECT id, double(id) AS doubled FROM people")
-```
-
-See [UDF Guide](UDF_GUIDE.md) for full details.
+The local Python interface uses `F.udf(callable, DataType())`, not the historical
+`builder()` / `spark.udf().register` forms. See the complete, tested
+[UDF guide](UDF_GUIDE.md) for imports, null handling, return types, and contexts.
+Rust native expression registration is a separate extension API.
 
 ---
 
@@ -242,7 +228,7 @@ See [UDF Guide](UDF_GUIDE.md) for full details.
 
 - **Temp views**: `df.createOrReplaceTempView("my_table")` — in-session only
 - **Global temp views**: `df.createOrReplaceGlobalTempView("global_table")` — visible across sessions
-- **Saved tables**: `df.write().saveAsTable("my_table", mode="overwrite")` — disk-backed when `spark.sql.warehouse.dir` is set
+- **Saved tables**: `df.write.saveAsTable("my_table", mode="overwrite")` — disk-backed when `spark.sql.warehouse.dir` is set
 
 See [Persistence Guide](PERSISTENCE_GUIDE.md) for more.
 

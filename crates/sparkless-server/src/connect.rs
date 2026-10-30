@@ -1764,6 +1764,7 @@ fn start_connect_producer(
             terminal,
         };
         let (session_guard, compute_permit, session_compute_permit) = planning_resources;
+        session.sync_thread_context();
         let translated = plan::translate_plan(&session, &plan).and_then(|translated| {
             let schema = plan::schema_to_proto(&translated.schema)?;
             Ok((translated, schema))
@@ -2120,6 +2121,7 @@ impl SparkConnectService for ConnectService {
         let planning = tokio::task::spawn_blocking(move || {
             let _admission = admission;
             let (_session_guard, _compute_permit, _session_compute_permit) = planning_resources;
+            session.0.session.sync_thread_context();
             let response = analysis::response(
                 &session_id,
                 &server_side_session_id,

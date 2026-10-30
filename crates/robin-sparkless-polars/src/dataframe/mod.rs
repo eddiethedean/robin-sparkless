@@ -308,6 +308,23 @@ fn projected_expression_nullability(
                 .collect::<Option<Vec<_>>>()?;
             Some(arguments.into_iter().any(|nullable| nullable))
         }
+        Expr::BinaryExpr { left, op, right } => {
+            use polars::prelude::Operator;
+            let left = projected_expression_nullability(left, schema, case_sensitive)?;
+            let right = projected_expression_nullability(right, schema, case_sensitive)?;
+            match op {
+                Operator::EqValidity | Operator::NotEqValidity => Some(false),
+                Operator::Eq
+                | Operator::NotEq
+                | Operator::Lt
+                | Operator::LtEq
+                | Operator::Gt
+                | Operator::GtEq
+                | Operator::And
+                | Operator::Or => Some(left || right),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -926,6 +943,7 @@ struct PolarsIpcBatchIterator {
     empty_schema: Arc<Schema>,
     current: Option<PlDataFrame>,
     current_offset: usize,
+    deferred_row: Option<PlDataFrame>,
     max_rows: usize,
     max_bytes: usize,
     logical_schema_json: Option<String>,
@@ -941,10 +959,14 @@ impl PolarsIpcBatchIterator {
         self.source.take();
         self.current.take();
         self.current_offset = 0;
+        self.deferred_row.take();
         self.closed = true;
     }
 
     fn next_source_row(&mut self) -> Option<Result<PlDataFrame, EngineError>> {
+        if let Some(row) = self.deferred_row.take() {
+            return Some(Ok(row));
+        }
         if self.current.is_none() {
             match self.source.as_mut().and_then(IpcBatchSource::next_batch) {
                 Some(Ok(batch)) => self.current = Some(batch),
@@ -1126,8 +1148,7 @@ impl Iterator for PolarsIpcBatchIterator {
 
             let row_bytes = row.estimated_size();
             if !rows.is_empty() && estimated_bytes.saturating_add(row_bytes) > self.max_bytes {
-                self.current = Some(row);
-                self.current_offset = 0;
+                self.deferred_row = Some(row);
                 break;
             }
             estimated_bytes = estimated_bytes.saturating_add(row_bytes);
@@ -1210,6 +1231,12 @@ impl Iterator for PolarsIpcBatchIterator {
             };
             if prefix_bytes.len() <= self.max_bytes {
                 let mut pending = combined.slice(prefix_rows as i64, rows.len() - prefix_rows);
+                if let Some(deferred_row) = self.deferred_row.take()
+                    && let Err(error) = pending.vstack_mut(&deferred_row)
+                {
+                    self.close();
+                    return Some(Err(polars_to_core_error(error)));
+                }
                 if let Some(remaining_pending) = self.current.take() {
                     let remaining_pending = remaining_pending.slice(
                         self.current_offset as i64,
@@ -3608,6 +3635,7 @@ impl DataFrame {
             empty_schema,
             current: None,
             current_offset: 0,
+            deferred_row: None,
             max_rows,
             max_bytes,
             logical_schema_json,
@@ -7569,6 +7597,113 @@ mod tests {
         let source = collected.column("source").unwrap().i64().unwrap();
         assert_eq!(next.into_no_null_iter().collect::<Vec<_>>(), vec![3, 4]);
         assert_eq!(source.into_no_null_iter().collect::<Vec<_>>(), vec![2, 3]);
+    }
+
+    #[test]
+    fn expression_ir_float_arithmetic_uses_float_kernels_in_ansi_mode() {
+        use robin_sparkless_core::{ExprIr, LiteralValue};
+
+        let _session = SparkSession::builder()
+            .config("spark.sql.ansi.enabled", "true")
+            .get_or_create();
+        let frame = DataFrame::from_polars(
+            polars::df!("x" => [Some(1.5f64), None, Some(f64::MAX)]).unwrap(),
+        );
+        let x = Box::new(ExprIr::Column("x".into()));
+        let two = Box::new(ExprIr::Lit(LiteralValue::I32(2)));
+        let expressions = [
+            ("add", ExprIr::Add(x.clone(), two.clone()), 3.5),
+            ("sub", ExprIr::Sub(x.clone(), two.clone()), -0.5),
+            ("mul", ExprIr::Mul(x.clone(), two.clone()), 3.0),
+            ("div", ExprIr::Div(x, two), 0.75),
+        ];
+        let projected = frame
+            .select_exprs(
+                expressions
+                    .iter()
+                    .map(|(name, expression, _)| {
+                        crate::expr_ir::expr_ir_to_expr(expression)
+                            .unwrap()
+                            .alias(*name)
+                    })
+                    .collect(),
+            )
+            .unwrap();
+        let collected = projected.collect().unwrap();
+        for (name, _, expected) in expressions {
+            assert_eq!(
+                projected.schema_or_collect().unwrap().get(name),
+                Some(&DataType::Float64)
+            );
+            let values = collected.column(name).unwrap().f64().unwrap();
+            assert_eq!(values.get(0), Some(expected));
+            assert_eq!(values.get(1), None);
+        }
+        assert!(
+            collected
+                .column("mul")
+                .unwrap()
+                .f64()
+                .unwrap()
+                .get(2)
+                .unwrap()
+                .is_infinite()
+        );
+    }
+
+    #[test]
+    fn expression_ir_decimal_literal_addition_retains_spark_precision() {
+        use robin_sparkless_core::{ExprIr, LiteralValue};
+
+        let _session = SparkSession::builder()
+            .config("spark.sql.ansi.enabled", "true")
+            .get_or_create();
+        for (precision, scale, coefficient, output_precision, output_scale, expected) in [
+            (5, 2, 120i128, 6, 2, 220i128),
+            (
+                38,
+                30,
+                123_456_789_012_345_678_901_234_567_890i128,
+                38,
+                29,
+                112_345_678_901_234_567_890_123_456_789i128,
+            ),
+        ] {
+            let decimal = Series::new("x".into(), [Some(coefficient), None])
+                .into_decimal(precision, scale)
+                .unwrap()
+                .into_series();
+            let frame = DataFrame::from_polars(
+                PlDataFrame::new_infer_height(vec![decimal.into()]).unwrap(),
+            );
+            let x = Box::new(ExprIr::Column("x".into()));
+            let one = Box::new(ExprIr::Lit(LiteralValue::I32(1)));
+            for expression in [
+                ExprIr::Add(x.clone(), one.clone()),
+                ExprIr::Add(one.clone(), x.clone()),
+            ] {
+                let projected = frame
+                    .select_exprs(vec![
+                        crate::expr_ir::expr_ir_to_expr(&expression)
+                            .unwrap()
+                            .alias("sum"),
+                    ])
+                    .unwrap();
+                let expected_type = DataType::Decimal(output_precision, output_scale);
+                assert_eq!(
+                    projected.schema_or_collect().unwrap().get("sum"),
+                    Some(&expected_type)
+                );
+                let collected = projected.collect().unwrap();
+                let values = collected.column("sum").unwrap();
+                assert_eq!(values.dtype(), &expected_type);
+                assert_eq!(
+                    values.get(0).unwrap(),
+                    AnyValue::Decimal(expected, output_precision, output_scale)
+                );
+                assert_eq!(values.get(1).unwrap(), AnyValue::Null);
+            }
+        }
     }
 
     #[test]

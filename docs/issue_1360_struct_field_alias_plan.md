@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Issue #1360: Struct field alias after getField (PySpark parity)
 
 **Goal:** `col("struct_col").getField("field_name").alias("y")` should produce an output column named `y` with the field value. Struct field resolution (names/case) and alias propagation should match PySpark.

@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # 4.17.0 release readiness review
 
 **Historical review at `a017821c`.** See the [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) for repaired findings and the current release hold. The observations below describe the original reviewed source.
@@ -10,7 +18,7 @@ The runtime regression results are strong, but six actionable findings and two r
 
 ### R1 — P1: published Rust consumers still receive vulnerable compression dependencies
 
-The fixed workspace depends on the root `[patch.crates-io]` entries in [Cargo.toml](../../../Cargo.toml#L57). The backend still requests registry Polars 0.53 in its [published dependencies](../../../crates/robin-sparkless-polars/Cargo.toml#L38). Packaging correctly removes root patches and local dependency paths, so a passing workspace audit does not establish downstream safety.
+The fixed workspace depends on the root `[patch.crates-io]` entries in [Cargo.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/Cargo.toml#L57). The backend still requests registry Polars 0.53 in its [published dependencies](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/Cargo.toml#L38). Packaging correctly removes root patches and local dependency paths, so a passing workspace audit does not establish downstream safety.
 
 Reproduction: copy the first-party workspace into a fresh directory, remove the root patch table, resolve with `cargo metadata --offline --all-features`, then run `cargo audit --no-fetch --file <consumer>/Cargo.lock --json` from the original checkout to apply its existing advisory policy. This reports three non-ignored vulnerabilities:
 
@@ -28,7 +36,7 @@ Closure: use fixed published upstream dependencies or a distributable fork graph
 
 ### R2 — P1: StructField breaks the 4.16.1 Rust source API in a minor release
 
-[StructField.metadata](../../../crates/robin-sparkless-core/src/schema.rs#L44) adds a required public field to a struct that previously supported three-field literals. Serde defaults preserve old JSON but cannot preserve Rust source compatibility.
+[StructField.metadata](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/schema.rs#L44) adds a required public field to a struct that previously supported three-field literals. Serde defaults preserve old JSON but cannot preserve Rust source compatibility.
 
 This exact consumer compiles against the `v4.16.1` core sources and fails against the candidate with `E0063: missing field metadata in initializer of StructField`:
 
@@ -48,7 +56,7 @@ Closure: preserve the existing public struct shape and introduce metadata throug
 
 ### R3 — P2: SQL parsing and AST validation bypass compute admission
 
-[handle_statements](../../../crates/sparkless-server/src/lib.rs#L861) calls `validate_statement`, including full SQL parsing and AST validation, synchronously on the Tokio worker before reserving admission or reaching `spawn_blocking`. Large rejected requests therefore consume runtime CPU even when the configured operation queue is full. Existing lazy-count health tests exercise execution after admission and do not cover this path.
+[handle_statements](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server/src/lib.rs#L861) calls `validate_statement`, including full SQL parsing and AST validation, synchronously on the Tokio worker before reserving admission or reaching `spawn_blocking`. Large rejected requests therefore consume runtime CPU even when the configured operation queue is full. Existing lazy-count health tests exercise execution after admission and do not cover this path.
 
 A local probe used 24 concurrent 156,906-byte SELECT statements ending in an unsupported function, below the default 256 KiB SQL limit. With one Tokio worker, one active operation, and one pending operation, every request returned `UnsupportedSql`; maximum health latency increased from 0.0105 seconds at baseline to 0.5331 seconds under load. This is one host observation, not a production latency bound or a claim that health stopped completely. The code placement independently demonstrates the admission gap.
 
@@ -56,19 +64,19 @@ Closure: run parsing/validation under bounded admission in a blocking compute co
 
 ### R4 — P1: candidate packaged installs do not exercise Phase 1 mutations
 
-The [server-extra candidate check](../../../.github/workflows/release.yml#L382) calls `verify_server_extra_install.py` without `--mutations`. It verifies readiness and SELECT 1. The native mutation suite and five verifier regression tests use a workspace-built binary; neither verifies the bytes installed from the candidate distribution. This review separately built a production-feature server wheel and installed the local wheel pair offline on Python 3.8/3.11; both passed the mutation verifier. That local witness does not add the missing CI gate or certify the complete advertised platform inventory. Native wheel smoke checks also stop after readiness/health. The first packaged mutation check in the release workflow is in [V32](../../../.github/workflows/release.yml#L1187), after publication.
+The [server-extra candidate check](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/release.yml#L382) calls `verify_server_extra_install.py` without `--mutations`. It verifies readiness and SELECT 1. The native mutation suite and five verifier regression tests use a workspace-built binary; neither verifies the bytes installed from the candidate distribution. This review separately built a production-feature server wheel and installed the local wheel pair offline on Python 3.8/3.11; both passed the mutation verifier. That local witness does not add the missing CI gate or certify the complete advertised platform inventory. Native wheel smoke checks also stop after readiness/health. The first packaged mutation check in the release workflow is in [V32](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/release.yml#L1187), after publication.
 
 Closure: run the existing `--mutations` checks against fresh candidate installs before publication and preserve that evidence for each advertised server wheel, with equivalent catalog/outcome checks for the candidate image. Retain the native race suite. V32 should repeat the checks on public bytes rather than serve as their first packaged witness.
 
 ### R5 — P2: V32 never functionally exercises the crates.io-installed server
 
-The [Rust public-install step](../../../.github/workflows/release.yml#L1139) installs the binary and compares `--version`, then proceeds to tests of the PyPI binary and container. Those artifacts use root patches; the Rust consumer graph does not. A correct version string cannot establish that the published Rust binary serves the promised SQL/schema/mutation contract.
+The [Rust public-install step](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/release.yml#L1139) installs the binary and compares `--version`, then proceeds to tests of the PyPI binary and container. Those artifacts use root patches; the Rust consumer graph does not. A correct version string cannot establish that the published Rust binary serves the promised SQL/schema/mutation contract.
 
 Closure: launch the exact `$RUNNER_TEMP/public-rust/bin/sparkless-server`, verify health, typed SQL and Phase 1 effects/replay/status, then stop it gracefully. Record that binary's version and execution evidence independently from the PyPI wheel and container.
 
 ### R6 — P1: the new source backend cannot load on supported Python 3.8
 
-The custom [PEP 517 backend](../../../python/_sparkless_build.py#L66) uses parenthesized multiple-context-manager statements at lines 66, 106, and 129. Running the actual installed CPython 3.8.20 interpreter against the reviewed file fails at line 67:
+The custom [PEP 517 backend](https://github.com/eddiethedean/robin-sparkless/blob/main/python/_sparkless_build.py#L66) uses parenthesized multiple-context-manager statements at lines 66, 106, and 129. Running the actual installed CPython 3.8.20 interpreter against the reviewed file fails at line 67:
 
 ```text
 SyntaxError: invalid syntax

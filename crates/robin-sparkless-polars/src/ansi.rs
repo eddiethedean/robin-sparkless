@@ -13,6 +13,8 @@ pub(crate) fn arithmetic_field(fields: &[Field]) -> PolarsResult<Field> {
         (DataType::Datetime(unit, time_zone), DataType::Duration(_)) => {
             DataType::Datetime(*unit, time_zone.clone())
         }
+        (DataType::Int8, DataType::Int8) => DataType::Int8,
+        (DataType::Int16, DataType::Int16) => DataType::Int16,
         (DataType::Int32, DataType::Int32) => DataType::Int32,
         (DataType::Int32 | DataType::Int64, DataType::Int32 | DataType::Int64) => DataType::Int64,
         (DataType::Float32, DataType::Float32) => DataType::Float32,

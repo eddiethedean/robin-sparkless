@@ -940,40 +940,49 @@ impl PySparkSessionBuilder {
     fn get_or_create(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Py<PySparkSession>> {
         // PySpark parity #1250: return existing singleton when builder config is compatible,
         // so test_multiple_sessions sees one session; #373: create new when builder has extra config.
-        let ty = py.get_type::<PySparkSession>();
-        if let Ok(singleton) = ty.getattr("_singleton_session") {
-            if !singleton.is_none() {
-                if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
-                    let sess_ref = sess.bind(py).cast::<PySparkSession>()?;
-                    let sess_guard = sess_ref.borrow();
-                    if !sess_guard.stopped.load(std::sync::atomic::Ordering::SeqCst)
-                        && sess_guard.builder_config_compatible(&slf.inner)
-                    {
-                        // Ensure thread UDF context is set when returning existing singleton
-                        // This fixes test isolation issues where context was cleared but singleton reused
-                        robin_sparkless::set_thread_udf_context_full(
-                            std::sync::Arc::new(sess_guard.inner.udf_registry().clone()),
-                            sess_guard.inner.is_case_sensitive(),
-                            sess_guard
-                                .inner
-                                .get_config()
-                                .get("spark.sql.session.timeZone")
-                                .cloned(),
-                            sess_guard.inner.runtime_config().clone(),
-                        );
-                        robin_sparkless::set_thread_decimal_allow_precision_loss(
-                            robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
-                                sess_guard.inner.get_config(),
-                            ),
-                        );
-                        // Reset builder to avoid config pollution between tests
-                        slf.inner = SparkSessionBuilder::new();
-                        ensure_thread_active_session(py, sess.clone_ref(py));
-                        return Ok(sess);
-                    }
-                }
+        let current_thread_session = thread_active_session(py);
+        if let Some(sess) = current_thread_session.as_ref() {
+            let sess_ref = sess.bind(py).cast::<PySparkSession>()?;
+            let sess_guard = sess_ref.borrow();
+            if !sess_guard.stopped.load(std::sync::atomic::Ordering::SeqCst)
+                && sess_guard.builder_config_compatible(&slf.inner)
+            {
+                // Restore this thread's UDF/config context when reusing its active session.
+                robin_sparkless::set_thread_udf_context_full(
+                    std::sync::Arc::new(sess_guard.inner.udf_registry().clone()),
+                    sess_guard.inner.is_case_sensitive(),
+                    sess_guard
+                        .inner
+                        .get_config()
+                        .get("spark.sql.session.timeZone")
+                        .cloned(),
+                    sess_guard.inner.runtime_config().clone(),
+                );
+                robin_sparkless::set_thread_decimal_allow_precision_loss(
+                    robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
+                        sess_guard.inner.get_config(),
+                    ),
+                );
+                // Reset builder to avoid config pollution between tests.
+                slf.inner = SparkSessionBuilder::new();
+                return Ok(sess.clone_ref(py));
             }
         }
+
+        // PySparkSession wraps a thread-affine Polars session. Never borrow the process-wide
+        // Python singleton from another thread: create a session local to this thread instead.
+        // Keep the compatibility singleton only when no other thread already owns one.
+        let ty = py.get_type::<PySparkSession>();
+        let singleton = ty
+            .getattr("_singleton_session")
+            .ok()
+            .and_then(|singleton| singleton.extract::<Py<PySparkSession>>().ok());
+        let register_as_singleton = singleton.as_ref().is_none_or(|global| {
+            current_thread_session
+                .as_ref()
+                .is_some_and(|current| global.as_ptr() == current.as_ptr())
+        });
+
         let session = slf.inner.clone().get_or_create();
         // Reset builder to avoid config pollution between tests
         slf.inner = SparkSessionBuilder::new();
@@ -983,13 +992,13 @@ impl PySparkSessionBuilder {
                 inner: session,
                 external_catalog_tables: Default::default(),
                 active_actions: std::sync::Arc::new(ActionRegistry::default()),
-                backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
+                backend_type: std::sync::Mutex::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
-                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
+                delta_map_view_paths: std::sync::Mutex::new(std::collections::HashMap::new()),
             },
         )?;
-        register_active_session(py, obj.clone_ref(py), true)?;
+        register_active_session(py, obj.clone_ref(py), register_as_singleton)?;
         Ok(obj)
     }
 
@@ -1030,7 +1039,12 @@ fn delta_map_paths_for_catalog_table(
             .cloned()
             .unwrap_or_default());
     }
-    if let Some(paths) = session.delta_map_view_paths.borrow().get(name) {
+    if let Some(paths) = session
+        .delta_map_view_paths
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(name)
+    {
         return Ok(paths.clone());
     }
     let exact_local = session.inner.saved_table_exists(name)
@@ -1781,18 +1795,18 @@ fn yield_to_python_control_threads(py: Python<'_>) {
     py.detach(std::thread::yield_now);
 }
 
-#[pyclass(module = "sparkless.sql.session", unsendable)]
+#[pyclass(module = "sparkless.sql.session")]
 struct PySparkSession {
     inner: SparkSession,
     external_catalog_tables: external_catalog::ResolvedTables,
     active_actions: std::sync::Arc<ActionRegistry>,
     /// Writable from Python so conftest/fixtures can set backend_type = "robin" (e.g. under pytest-xdist).
-    backend_type: RefCell<String>,
+    backend_type: std::sync::Mutex<String>,
     /// Set when `stop()` is called; prevents reusing this wrapper from `getOrCreate`.
     stopped: std::sync::atomic::AtomicBool,
     #[cfg(feature = "delta")]
     delta_map_view_paths:
-        RefCell<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+        std::sync::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
 }
 
 fn arrow_type_to_spark_type(arrow_type: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
@@ -2731,7 +2745,8 @@ impl PySparkSession {
                     .insert(name.to_string(), df.logical_map_paths.clone());
             } else {
                 self.delta_map_view_paths
-                    .borrow_mut()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .insert(name.to_string(), df.logical_map_paths.clone());
             }
         }
@@ -2746,9 +2761,10 @@ thread_local! {
     static PYTHON_UDF_EXECUTOR: RefCell<Option<Py<PyAny>>> = const { RefCell::new(None) };
 }
 
-/// Resolve the active session: thread-local stack first (PySpark), then non-stopped singleton.
-fn resolve_active_session(py: Python<'_>) -> Option<Py<PySparkSession>> {
-    let from_stack = THREAD_ACTIVE_SESSIONS.with(|cell| {
+/// Return this thread's active session. PySparkSession wraps a thread-affine native session, so a
+/// process-wide singleton cannot safely serve as another thread's active session.
+fn thread_active_session(py: Python<'_>) -> Option<Py<PySparkSession>> {
+    THREAD_ACTIVE_SESSIONS.with(|cell| {
         let mut v = cell.borrow_mut();
         v.retain(|s| {
             let bound = s.bind(py);
@@ -2761,24 +2777,12 @@ fn resolve_active_session(py: Python<'_>) -> Option<Py<PySparkSession>> {
             true
         });
         v.last().map(|s| s.clone_ref(py))
-    });
-    if from_stack.is_some() {
-        return from_stack;
-    }
-    let ty = py.get_type::<PySparkSession>();
-    if let Ok(singleton) = ty.getattr("_singleton_session") {
-        if !singleton.is_none() {
-            if let Ok(sess) = singleton.extract::<Py<PySparkSession>>() {
-                let bound = sess.bind(py);
-                if let Ok(s) = bound.cast::<PySparkSession>() {
-                    if !s.borrow().stopped.load(std::sync::atomic::Ordering::SeqCst) {
-                        return Some(sess);
-                    }
-                }
-            }
-        }
-    }
-    None
+    })
+}
+
+/// Resolve the active session using PySpark's thread-local active-session semantics.
+fn resolve_active_session(py: Python<'_>) -> Option<Py<PySparkSession>> {
+    thread_active_session(py)
 }
 
 fn register_active_session(
@@ -2798,32 +2802,21 @@ fn register_active_session(
         ty.setattr("_singleton_session", py.None())?;
     }
 
-    // Update global-ish list (best-effort; tests mutate it directly).
-    if let Ok(list_any) = ty.getattr("_active_sessions") {
-        if let Ok(list) = list_any.cast::<PyList>() {
-            let already = list.iter().any(|it| it.as_ptr() == ptr);
-            if !already {
-                list.append(session.clone_ref(py))?;
+    if set_singleton {
+        // Update the compatibility list only for the process-wide session. Per-thread session
+        // wrappers are intentionally kept out of it because they cannot be used from other threads.
+        if let Ok(list_any) = ty.getattr("_active_sessions") {
+            if let Ok(list) = list_any.cast::<PyList>() {
+                let already = list.iter().any(|it| it.as_ptr() == ptr);
+                if !already {
+                    list.append(session.clone_ref(py))?;
+                }
             }
         }
-    }
-
-    if set_singleton {
         ty.setattr("_singleton_session", session)?;
     }
 
     Ok(())
-}
-
-/// Push session onto the thread stack when missing (e.g. getOrCreate reuse on a new thread).
-fn ensure_thread_active_session(py: Python<'_>, session: Py<PySparkSession>) {
-    THREAD_ACTIVE_SESSIONS.with(|cell| {
-        let mut v = cell.borrow_mut();
-        let ptr = session.as_ptr();
-        if v.last().map(|s| s.as_ptr()) != Some(ptr) {
-            v.push(session.clone_ref(py));
-        }
-    });
 }
 
 fn require_active_session(py: Python<'_>) -> PyResult<Py<PySparkSession>> {
@@ -2938,10 +2931,10 @@ impl PySparkSession {
                 inner: session,
                 external_catalog_tables: Default::default(),
                 active_actions: std::sync::Arc::new(ActionRegistry::default()),
-                backend_type: RefCell::new(DEFAULT_BACKEND_TYPE.to_string()),
+                backend_type: std::sync::Mutex::new(DEFAULT_BACKEND_TYPE.to_string()),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
-                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
+                delta_map_view_paths: std::sync::Mutex::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -2960,12 +2953,17 @@ impl PySparkSession {
 
     #[getter]
     fn backend_type(&self) -> String {
-        self.backend_type.borrow().clone()
+        self.backend_type
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     #[setter]
     fn set_backend_type(slf: PyRefMut<Self>, value: String) -> PyResult<()> {
-        *slf.backend_type.borrow_mut() = value;
+        *slf.backend_type
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = value;
         Ok(())
     }
 
@@ -3003,17 +3001,21 @@ impl PySparkSession {
                 session.get_config(),
             ),
         );
-        let backend_type = slf.backend_type.borrow().clone();
+        let backend_type = slf
+            .backend_type
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let obj = Py::new(
             py,
             PySparkSession {
                 inner: session,
                 external_catalog_tables: Default::default(),
                 active_actions: std::sync::Arc::new(ActionRegistry::default()),
-                backend_type: RefCell::new(backend_type),
+                backend_type: std::sync::Mutex::new(backend_type),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(feature = "delta")]
-                delta_map_view_paths: RefCell::new(std::collections::HashMap::new()),
+                delta_map_view_paths: std::sync::Mutex::new(std::collections::HashMap::new()),
             },
         )?;
         register_active_session(py, obj.clone_ref(py), true)?;
@@ -3094,7 +3096,10 @@ impl PySparkSession {
     fn drop_temp_view(&self, name: &str) -> bool {
         let dropped = self.inner.drop_temp_view(name);
         #[cfg(feature = "delta")]
-        self.delta_map_view_paths.borrow_mut().remove(name);
+        self.delta_map_view_paths
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
         dropped
     }
 
@@ -3707,7 +3712,11 @@ impl PyCatalog {
             .borrow();
         let dropped = session.inner.drop_temp_view(name);
         #[cfg(feature = "delta")]
-        session.delta_map_view_paths.borrow_mut().remove(name);
+        session
+            .delta_map_view_paths
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
         Ok(dropped)
     }
 

@@ -1,215 +1,125 @@
-# Quick Start Guide
+# Rust quickstart
 
-Robin-sparkless is a PySpark-like DataFrame library in Rust with Polars as the execution engine.
+`robin-sparkless` is the Rust DataFrame engine behind the Sparkless Python
+package. It executes locally on Polars and does not require Python or a JVM.
+Python users should start with [the Python guide](python_getting_started.md).
 
-## Build and run the demo
+## Install
 
-### Prerequisites
+The 4.18.0 crates require Rust 1.93 or newer. Repository builds use the pinned
+[rust-toolchain.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/rust-toolchain.toml).
 
-- Rust (use the repo-pinned toolchain via `rust-toolchain.toml`)
-
-### Build
-
-```bash
-cargo build
-cargo run --example demo
-```
-
-The [demo example](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/demo.rs) matches the README quick start: `create_dataframe`, filter, show.
-
-**Delta Lake** (optional `delta` feature): Build with `--features delta`. Use `spark.read_delta(path)`, `read_delta_version`, and `df.write_delta`. With the `sql` feature, `read_delta(name_or_path)` resolves table names like `table(name)`.
-
-### Add as a dependency
-
-In your own crate:
+Add the engine to your application's `Cargo.toml`:
 
 ```toml
 [dependencies]
 robin-sparkless = "4"
 ```
 
-## Basic Usage
+**4.18.0 compression security:** Cargo does not inherit a dependency's workspace
+patches. Ordinary crates.io builds retain zstd advisory exposure under a
+maintainer-approved exception that expires after 2026-11-26 UTC. Apply the
+[pinned consumer patch configuration](security/zstd-4.18-exception.md#apply-our-patch-in-a-rust-consumer)
+when handling untrusted compressed input. The linked notice explains the
+exposure, exact patches, lockfile update, and verification commands. Official
+Python/server wheels and repository builds use the fixed graph.
 
-**DataFrame uses lazy evaluation**: transformations (filter, select, join, etc.) extend the plan; only actions (`collect`, `show`, `count`, `write`) trigger execution. This enables Polars query optimization across the full pipeline.
+## Create and filter a DataFrame
 
-You can use either the **ExprIr API** (engine-agnostic; from the crate root) or the **Column API** (Polars-backed; from `prelude` or `robin_sparkless::functions`). For new code and embeddings, prefer ExprIr: `col`, `lit_i64`, `gt`, etc. from the root build `ExprIr`; use `filter_expr_ir`, `select_expr_ir`, `collect_rows`, `agg_expr_ir`, and `*_engine()` methods.
-
-### Using ExprIr (engine-agnostic)
+This example uses the Column API from `robin_sparkless::functions`:
 
 ```rust
-use robin_sparkless::{col, lit_i64, gt, SparkSession, DataFrame};
+use robin_sparkless::SparkSession;
+use robin_sparkless::functions::{col, lit_i64};
 
-fn main() -> Result<(), robin_sparkless::EngineError> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let spark = SparkSession::builder().app_name("demo").get_or_create();
-    let df = spark.create_dataframe_engine(
-        vec![(1, 25, "Alice".to_string()), (2, 30, "Bob".to_string()), (3, 35, "Charlie".to_string())],
+    let df = spark.create_dataframe(
+        vec![
+            (1, 25, "Alice".to_string()),
+            (2, 30, "Bob".to_string()),
+            (3, 35, "Charlie".to_string()),
+        ],
         vec!["id", "age", "name"],
     )?;
-    let adults = df.filter_expr_ir(&gt(col("age"), lit_i64(18)))?;
-    adults.show(Some(10)).map_err(robin_sparkless::to_engine_error)?;
-    Ok(())
-}
-```
 
-### Using Column (Polars)
-
-Use the **prelude** so `col` and `lit_i64` return `Column` (not ExprIr):
-
-```rust
-use polars::prelude::*;
-use robin_sparkless::prelude::*;
-
-fn main() -> polars::prelude::PolarsResult<()> {
-    // Build a Polars DataFrame
-    let polars_df = df!(
-        "id" => &[1, 2, 3],
-        "age" => &[25, 30, 35],
-        "name" => &["Alice", "Bob", "Charlie"],
-    )?;
-
-    // Wrap it (stored as lazy internally; no materialization until an action)
-    let df = DataFrame::from_polars(polars_df);
-
-    // Introspect
-    println!("{:?}", df.columns()?);
-
-    // Filter using col() and lit_i64 (Expr for filter: use .into_expr() on Column)
-    let adults = df.filter(col("age").gt(lit_i64(18).into_expr()).into_expr())?;
-
+    let adults = df.filter(col("age").gt(lit_i64(26).into_expr()).into_expr())?;
     adults.show(Some(10))?;
-
     Ok(())
 }
 ```
 
-Example output:
+The same runnable example lives in
+[`examples/demo.rs`](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/demo.rs).
+From a repository checkout:
 
-```
-["id", "age", "name"]
-shape: (3, 3)
-┌─────┬─────┬─────────┐
-│ id  ┆ age ┆ name    │
-│ --- ┆ --- ┆ ---     │
-│ i32 ┆ i32 ┆ str     │
-╞═════╪═════╪═════════╡
-│ 1   ┆ 25  ┆ Alice   │
-│ 2   ┆ 30  ┆ Bob     │
-│ 3   ┆ 35  ┆ Charlie │
-└─────┴─────┴─────────┘
+```bash
+cargo run --locked --example demo
 ```
 
-### Joins
+`create_dataframe` accepts the `(i64, i64, String)` rows used above. For other
+schemas, use `create_dataframe_from_rows` with explicit schema information;
+see the [Rust API](RUST_API_REFERENCE.md).
+
+Transformations extend a lazy plan. Actions such as `collect`, `show`, `count`,
+and writes execute it. Collecting materializes data in the calling process.
+
+## Choose an expression API
+
+There are two expression surfaces; use the matching methods and imports:
+
+| Surface | Imports | DataFrame methods |
+| --- | --- | --- |
+| Engine-independent `ExprIr` | `robin_sparkless::engine` or crate-root helpers | `filter_expr_ir`, `select_expr_ir`, `collect_rows`, `*_engine` methods |
+| Polars-backed `Column` | `robin_sparkless::functions` or `prelude` | `filter`, `with_column`, and Polars-expression methods |
+
+For example, inside the function above, the engine-independent equivalent is:
 
 ```rust
-use robin_sparkless::{DataFrame, JoinType};
+use robin_sparkless::engine::{col, gt, lit_i64};
 
-let joined = left_df.join(&right_df, vec!["dept_id"], JoinType::Inner)?;
+let adults = df.filter_expr_ir(&gt(col("age"), lit_i64(26)))?;
+let rows = adults.collect_rows()?;
 ```
 
-Supported join types: `Inner`, `Left`, `Right`, `Outer`.
+Treat that block as an alternative to the Column helper imports in the complete
+example. Crate-root `col` returns `ExprIr`; `functions::col` returns `Column`.
+For embedding and backend-independent code, prefer `ExprIr`. See the
+[embedding guide](EMBEDDING.md) and [API reference](RUST_API_REFERENCE.md).
 
-### Window Functions
+## Optional features
 
-```rust
-use robin_sparkless::{col, DataFrame};
+The facade has no default Cargo features. Enable capabilities explicitly, for
+example:
 
-// with_column(name, &Column) — use Column from col(), window methods, etc.
-// row_number, rank, dense_rank over partition
-let df_with_rn = df.with_column("rn", &col("salary").row_number(true).over(&["dept"]))?;
-
-// lag and lead
-let df_with_lag = df.with_column("prev_salary", &col("salary").lag(1).over(&["dept"]))?;
+```toml
+[dependencies]
+robin-sparkless = { version = "4", features = ["sql", "delta"] }
 ```
 
-Supported window functions: `row_number()`, `rank()`, `dense_rank()`, `lag(n)`, `lead(n)` — each used with `.over(&["col1", "col2"])` for partitioning. Aggregations (e.g. `sum(col("x")).over(&["dept"])`) are also supported. Use **`with_column(name, &Column)`** for any `Column` (e.g. from `col()`, `rand(42)`); use **`with_column_expr(name, expr)`** when you have a raw Polars `Expr`.
+| Feature | Capability |
+| --- | --- |
+| `sql` | SQL queries, views, and table resolution |
+| `delta` | Delta Lake reads and writes |
+| `jdbc` | PostgreSQL database access |
+| `sqlite` | SQLite database access |
+| `jdbc_mysql`, `jdbc_mariadb`, `jdbc_mssql`, `jdbc_oracle`, `jdbc_db2` | Other database backends |
 
-### String Functions
+Backend options and supported behavior vary. See the [user guide](USER_GUIDE.md),
+[persistence guide](PERSISTENCE_GUIDE.md), [database testing guide](JDBC_TESTING.md),
+and [known PySpark differences](PYSPARK_DIFFERENCES.md). Rust feature support
+does not imply the same operation is enabled through [Spark Connect](SPARK_CONNECT.md).
 
-```rust
-use robin_sparkless::{col, concat, concat_ws, DataFrame};
+## Development and validation
 
-// Column methods: use with_column(name, &Column)
-let df = df.with_column("name_upper", &col("name").upper())?;
-let df = df.with_column("prefix", &col("name").substr(1, Some(3)))?;
+Follow [CONTRIBUTING.md](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md)
+for the toolchain, Python environment, and build workflow.
 
-// concat/concat_ws return expressions — use with_column_expr when you have an Expr
-let df = df.with_column_expr("full", concat(&[&col("first"), &col("last")]).into_expr())?;
-let df = df.with_column_expr("joined", concat_ws("-", &[&col("a"), &col("b")]).into_expr())?;
-```
+- `cargo test --locked --workspace` runs default-feature Rust tests.
+- `make check-full` runs Rust checks/tests plus Python lint and types.
+- `make test-parity-phases` runs the Python parity fixture suite; the historical
+  phase-specific Make targets are aliases for that same suite.
 
-You can also combine string/regex functions with **select expressions** using
-`DataFrame::select_exprs`:
-
-```rust
-use robin_sparkless::{col, regexp_extract_all, DataFrame};
-
-let expr = regexp_extract_all(&col("s"), r"\\d+").alias("m").into_expr();
-let df2 = df.select_exprs(vec![expr])?;
-```
-
-### Random (rand, randn)
-
-Use **`with_column`** or **`with_columns`** so each row gets a distinct value (PySpark-like). Optional seed gives reproducible results.
-
-```rust
-use robin_sparkless::{rand, randn, DataFrame};
-
-let df = df.with_column("r", &rand(Some(42)))?;   // uniform [0, 1), one value per row
-let df = df.with_column("z", &randn(Some(42)))?;  // standard normal, one value per row
-```
-
-Additional string: `length`, `trim`, `ltrim`, `rtrim`, `btrim`, `locate`, `conv`, `regexp_extract`, `regexp_replace`, `regexp_extract_all`, `regexp_like`, `split`, `initcap`, `mask`, `translate`, `substring_index` (Phase 10); **Phase 16**: `regexp_count`, `regexp_instr`, `regexp_substr`, `split_part`, `find_in_set`, `format_string`, `printf`; **Phase 21**: `btrim`, `locate`, `conv`. DataFrame methods (Phase 12): `sample`, `random_split`, `first`, `head`, `tail`, `take`, `is_empty`, `to_json`, `to_pandas`, `explain`, `print_schema`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (cov/corr), `na()` (fill/drop), `freq_items`, `approx_quantile`, `crosstab`, `melt`, `sample_by`, etc.
-
-### Datetime
-
-For date/datetime columns: `year()`, `month()`, `day()`, `to_date()` (cast to date), `date_format(format)` (chrono strftime, e.g. `"%Y-%m-%d"`), `hour()`, `minute()`, `second()`, `date_add(n)`, `date_sub(n)`, `datediff(end, start)`, `last_day()`, `trunc(format)`. **Phase 14**: `quarter()`, `weekofyear()`/`week()`, `dayofweek()` (1=Sun..7=Sat), `dayofyear()`, `add_months(n)`, `months_between(end, start)`, `next_day(day_of_week)` (e.g. `"Mon"`, `"Tue"`). **Phase 17**: `unix_timestamp()`, `unix_timestamp(col, format)`, `from_unixtime(col, format)`, `make_date(year, month, day)`, `timestamp_seconds(col)`, `timestamp_millis(col)`, `timestamp_micros(col)`, `unix_date(col)`, `date_from_unix_date(col)`. **Phase 22**: `curdate()`, `now()`, `localtimestamp()`, `date_diff(end, start)`, `dateadd(col, n)`, `datepart(col, field)`, `extract(col, field)`, `date_part(col, field)`, `unix_micros(col)`, `unix_millis(col)`, `unix_seconds(col)`, `dayname(col)`, `weekday(col)` (Mon=0..Sun=6), `make_timestamp(y, m, d, h, mi, s)`, `make_interval`, `timestampadd(unit, amount, ts)`, `timestampdiff(unit, start, end)`, `days(n)`, `hours(n)`, `minutes(n)`, `months(n)`, `years(n)`, `from_utc_timestamp(col, tz)`, `to_utc_timestamp(col, tz)`, `convert_timezone`, `current_timezone()`, `to_timestamp(col)`.
-
-### Math and type (Phase 14)
-
-Math (radians): `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2(y, x)`, `degrees()`, `radians()`, `signum()` (plus existing `sqrt`, `pow`, `exp`, `log`). **Phase 17**: `pmod(dividend, divisor)`, `factorial(n)`. **Phase 20**: `bround(column, scale)`, `negate`, `positive`, `cot`, `csc`, `sec`, `e`, `pi`. Type: `cast(column, type_name)` (strict; use type names like `"int"`, `"long"`, `"double"`, `"string"`, `"date"`, `"timestamp"`), `try_cast(column, type_name)` (null on failure), `isnan(column)`; conditional: `greatest(columns...)`, `least(columns...)`. **Phase 21**: `to_char(column)`, `to_varchar(column)`, `to_number(column)`, `try_to_number(column)`, `try_to_timestamp(column)`. Binary: `hex(column)`, `unhex(column)`, `bin(column)`, `getbit(column, pos)`.
-
-### Parity
-
-Behavior is validated against PySpark on **159 parity fixtures** (~283+ functions); see [PARITY_STATUS.md](PARITY_STATUS.md). Known differences are in [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md). CI (GitHub Actions) runs format, clippy, audit, deny, Rust tests, and parity tests on every push/PR.
-
-For roadmap and Sparkless integration phases (Phases 12–22 completed; Phases 23–24 remaining), see [ROADMAP.md](ROADMAP.md).
-
-## Troubleshooting
-
-### Common errors
-
-- **Column 'X' not found** — The DataFrame has no column with that name (case-sensitive if `spark.sql.caseSensitive` is true). The error message lists available columns; check spelling and case.
-
-- **create_dataframe: expected 3 column names** — Rust `create_dataframe` accepts only `(i64, i64, String)` rows and exactly three column names. In Python, use `spark.createDataFrame(data, schema=None)` for any schema: list of dicts (infer), list of tuples with column names, or schema as list of `(name, dtype_str)`.
-
-- **Type coercion: cannot find common type** — A comparison or arithmetic involved incompatible types (e.g. string vs numeric). Cast one side with `.cast()` or use compatible types.
-
-- **read_csv(path): ...** — The path may not exist, not be readable, or the file may not be valid CSV. Ensure the path is correct and the file has a header row if using default options.
-
-### Optional features (Rust)
-
-- **SQL** (`--features sql`): `SparkSession::sql(query)` with temp views and tables. Use `create_or_replace_temp_view` and `table(name)`; or `df.write().saveAsTable(name, mode="error"|"overwrite"|"append"|"ignore")` for saved tables. Global temp views (`createOrReplaceGlobalTempView`) persist across sessions; disk-backed `saveAsTable` via `spark.sql.warehouse.dir` persists across restarts. See [PERSISTENCE_GUIDE.md](PERSISTENCE_GUIDE.md). Resolution: `table(name)` uses temp view → saved table → warehouse. Catalog: `listTables()`, `tableExists()`, `dropTempView(name)`, `dropTable(name)`. Supports single SELECT, FROM/JOIN, WHERE, GROUP BY, ORDER BY, LIMIT.
-- **Delta Lake** (`--features delta`): `read_delta(path)`, `read_delta_with_version(path, version)` (time travel), `write_delta(path, overwrite)` on DataFrame. With `sql`, `read_delta(name_or_path)` accepts a table name (in-memory); `df.write_delta_table(name)` registers a DataFrame for `read_delta(name)`. Requires `deltalake` + tokio for path-based I/O.
-- **JDBC** (`--features jdbc`, `--features sqlite`, `--features jdbc_mysql`, etc.): Read/write external databases using PySpark-compatible API. Supported backends: PostgreSQL (`jdbc`), SQLite (`sqlite`), MySQL (`jdbc_mysql`), MariaDB (`jdbc_mariadb`), SQL Server (`jdbc_mssql`), Oracle (`jdbc_oracle`), DB2 (`jdbc_db2`). Use `spark.read().jdbc(url, table, &props)` and `df.write().jdbc(url, table, &props, mode)`. Supports PySpark options: `sessionInitStatement`, `queryTimeout`, `prepareQuery`, `batchsize`, `truncate`, `cascadeTruncate`, and all save modes (`Append`, `Overwrite`, `ErrorIfExists`, `Ignore`). See [JDBC_TESTING.md](JDBC_TESTING.md).
-
-### Benchmarks
-
-Run `cargo bench` to compare robin-sparkless vs plain Polars on filter → select → groupBy pipelines. The goal is to stay within about 2x of Polars for supported operations.
-
-### Test commands (Rust-only)
-
-Common commands when working on robin-sparkless:
-
-- `make test` – run the Rust test suite (`cargo test`).
-- `make check-full` – full Rust check suite (format check, Clippy, `cargo audit`, `cargo deny`, tests); this is what CI runs.
-- `make test-parity-phase-a` … `make test-parity-phase-g` – run PySpark parity fixtures for a specific phase (see `docs/PARITY_STATUS.md`).
-- `make test-parity-phases` – run all parity phases (A–G).
-- `make sparkless-parity` – when `SPARKLESS_EXPECTED_OUTPUTS` is set and PySpark/Java are available, convert Sparkless fixtures, regenerate expected from PySpark, and run the Rust parity tests.
-
----
-
-## Appendix: Sparkless Python integration
-
-Robin-sparkless powers **Sparkless v4** on PyPI (`pip install "sparkless>=4,<5"`). Python users typically do not embed the Rust crate directly — see [Python getting started](python_getting_started.md).
-
-For architecture mapping, fixture conversion, and historical integration analysis, see [SPARKLESS_INTEGRATION_ANALYSIS.md](SPARKLESS_INTEGRATION_ANALYSIS.md) and [Product history](PRODUCT_HISTORY.md).
+CI runs feature-specific Rust lanes and Python tests against a built wheel.
+See [the release guide](RELEASING.md) for package validation and publication
+requirements, and [parity status](PARITY_STATUS.md) for compatibility coverage.

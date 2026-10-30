@@ -5,522 +5,344 @@ env:
 
 on:
   push:
-    # Release-candidate branches run the full validation matrix, never publish.
-    branches:
-      - 'codex/release-*'
-    tags:
-      - 'v*'
+    branches: ['codex/release-*']
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       publish_rust:
-        description: Publish Rust crates to crates.io after validation
-        required: false
+        description: Publish Rust crates from main after validation (otherwise a dry run)
         type: boolean
         default: false
-      pypi_recovery_run_id:
-        description: Completed tagged release run ID whose verified PyPI and GHCR publications need recovery
-        required: false
-        type: string
-        default: ''
 
 permissions:
   contents: read
 
+# Superseded candidates may be cancelled; publication runs must finish.
 concurrency:
-  group: release-${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/release-') && github.ref || format('{0}-{1}', github.event_name, github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/codex/release-') }}
+  group: release-${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
 
 jobs:
-  release-mode:
-    name: Classify release mode
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      mode: ${{ steps.classify.outputs.mode }}
-      source_sha: ${{ steps.classify.outputs.source_sha }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - id: classify
-        name: Reject unsupported or conflicting publication inputs
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_REF: ${{ github.ref }}
-          GITHUB_SHA: ${{ github.sha }}
-          INPUT_PUBLISH_RUST: ${{ inputs.publish_rust }}
-          INPUT_PYPI_RECOVERY_RUN_ID: ${{ inputs.pypi_recovery_run_id }}
-        run: python3 scripts/verify_release_job_gate.py classify --output "$GITHUB_OUTPUT"
-
   release-metadata:
     name: Release metadata
-    if: needs.release-mode.outputs.mode != 'pypi_recovery'
     runs-on: ubuntu-latest
-    needs: [release-mode]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      publish_python: ${{ steps.context.outputs.publish_python }}
+      publish_rust: ${{ steps.context.outputs.publish_rust }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
-      - name: Check manifests, lockfile, Python version, changelog, and tag
-        run: |
-          python -m unittest discover -s scripts -p 'test_*release*.py'
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            python scripts/check_release_versions.py --tag "$GITHUB_REF_NAME"
-          else
-            python scripts/check_release_versions.py
-          fi
-
-  workflow-lint:
-    name: Workflow lint
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install pinned actionlint
-        run: |
-          set -euo pipefail
-          version=1.7.12
-          checksum=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
-          archive="$RUNNER_TEMP/actionlint.tar.gz"
-          curl --fail --location --silent --show-error --retry 3 \
-            "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz" \
-            --output "$archive"
-          echo "$checksum  $archive" | sha256sum --check --status
-          mkdir -p "$RUNNER_TEMP/actionlint"
-          tar -xzf "$archive" -C "$RUNNER_TEMP/actionlint" actionlint
-          "$RUNNER_TEMP/actionlint/actionlint" .github/workflows/*.yml
-
-  cargo-download-cache:
-    name: Seed bounded Cargo download cache
-    needs: [release-metadata]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Cache registry and git downloads only
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Fetch the complete locked workspace dependency graph
-        run: cargo fetch --locked
-
-  verify-416-prerequisite:
-    name: Verify corrected 4.16 prerequisite
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/codex/release-') || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    needs: [release-metadata]
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Verify public 4.16.1 inventories and crates
-        if: startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v4.17.')
-        run: python3 scripts/verify_public_release_416.py --version 4.16.1
-      - name: Set up Python for the public server-extra witness
-        if: startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v4.17.')
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Install and exercise the corrected public server extra
-        if: startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v4.17.')
-        run: |
-          set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/sparkless-4161"
-          "$RUNNER_TEMP/sparkless-4161/bin/python" -m pip install 'sparkless[server]==4.16.1'
-          "$RUNNER_TEMP/sparkless-4161/bin/python" -m pip check
-          "$RUNNER_TEMP/sparkless-4161/bin/python" scripts/verify_server_extra_install.py 4.16.1 --protocol legacy-4.16
-      - name: No 4.16.1 prerequisite applies to this release candidate
-        if: startsWith(github.ref, 'refs/heads/codex/release-') && !startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v') && !startsWith(github.ref, 'refs/tags/v4.17.')
-        run: echo "4.16.1 is a prerequisite only for the 4.17 release line."
-
-  rust-package-archives:
-    name: Package distributable Rust crates
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Package every publishable Rust crate
-        run: cargo package --locked --workspace --exclude sparkless-native --no-verify
-      - name: Verify package manifests have no local dependency paths or patch tables
-        run: python3 scripts/verify_rust_package_archives.py
-
-  rust-consumer-security:
-    name: Audit downstream Rust consumers without workspace patches
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Restore pinned cargo-audit executable
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: ~/.cache/sparkless/security-tools/cargo-audit-0.22.1
-          key: security-tool-cargo-audit-0.22.1-${{ runner.os }}-${{ runner.arch }}
-      - name: Verify or install cargo-audit 0.22.1
-        run: |
-          set -euo pipefail
-          tool="$HOME/.cache/sparkless/security-tools/cargo-audit-0.22.1/cargo-audit"
-          if [[ ! -x "$tool" ]] || ! "$tool" --version | grep -Fq 'cargo-audit 0.22.1'; then
-            cargo install cargo-audit --locked --version 0.22.1 --root "$RUNNER_TEMP/cargo-audit-root"
-            mkdir -p "$(dirname "$tool")"
-            install "$RUNNER_TEMP/cargo-audit-root/bin/cargo-audit" "$tool"
-          fi
-          dirname "$tool" >> "$GITHUB_PATH"
-      - name: Resolve and audit the graph consumers receive
-        run: |
-          python3 scripts/verify_rust_consumer_graph.py --output "$RUNNER_TEMP/rust-consumer-audit.json"
-          cat "$RUNNER_TEMP/rust-consumer-audit.exceptions.json" >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify the published consumer patch configuration without exceptions
-        run: python3 scripts/verify_rust_consumer_graph.py --patch-config security/zstd-4.17-patches.toml --strict --output "$RUNNER_TEMP/rust-consumer-patched-audit.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: rust-consumer-audit
-          path: ${{ runner.temp }}/rust-consumer-*.json
-          if-no-files-found: error
-
-  # --- Rust ---
-  format:
-    name: Format
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-          components: rustfmt
-      - name: Check format
-        run: cargo fmt --check
-
-  clippy:
-    name: Clippy
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y unixodbc-dev
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-          components: clippy
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Clippy
-        run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
-
-  audit:
-    name: Audit
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Restore pinned cargo-audit executable
-        id: audit-cache
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: ~/.cache/sparkless/security-tools/cargo-audit-0.22.1
-          key: security-tool-cargo-audit-0.22.1-${{ runner.os }}-${{ runner.arch }}
-      - name: Verify or install cargo-audit 0.22.1
-        run: |
-          set -euo pipefail
-          tool="$HOME/.cache/sparkless/security-tools/cargo-audit-0.22.1/cargo-audit"
-          if [[ ! -x "$tool" ]] || ! "$tool" --version | grep -Fq 'cargo-audit 0.22.1'; then
-            cargo install cargo-audit --locked --version 0.22.1 --root "$RUNNER_TEMP/cargo-audit-root"
-            mkdir -p "$(dirname "$tool")"
-            install "$RUNNER_TEMP/cargo-audit-root/bin/cargo-audit" "$tool"
-          fi
-          echo "CARGO_AUDIT_TOOL=$tool" >> "$GITHUB_ENV"
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Audit
-        run: '"$CARGO_AUDIT_TOOL" audit'
-
-  deny:
-    name: Deny
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Restore pinned cargo-deny executable
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: ~/.cache/sparkless/security-tools/cargo-deny-0.19.0
-          key: security-tool-cargo-deny-0.19.0-${{ runner.os }}-${{ runner.arch }}
-      - name: Verify or install cargo-deny 0.19.0
-        run: |
-          set -euo pipefail
-          tool="$HOME/.cache/sparkless/security-tools/cargo-deny-0.19.0/cargo-deny"
-          if [[ ! -x "$tool" ]] || ! "$tool" --version | grep -Fq 'cargo-deny 0.19.0'; then
-            cargo install cargo-deny --locked --version 0.19.0 --root "$RUNNER_TEMP/cargo-deny-root"
-            mkdir -p "$(dirname "$tool")"
-            install "$RUNNER_TEMP/cargo-deny-root/bin/cargo-deny" "$tool"
-          fi
-          echo "CARGO_DENY_TOOL=$tool" >> "$GITHUB_ENV"
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Deny
-        run: '"$CARGO_DENY_TOOL" check advisories bans sources'
-
-  test:
-    name: Rust tests
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y unixodbc-dev
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Run Rust tests
-        # Skip doctests/examples: linking merged targets with sql+delta can OOM on
-        # ubuntu-latest (ld bus error). Examples are exercised under --features sql in CI.
-        run: cargo test --locked --workspace --features sql,delta --lib --tests
-        timeout-minutes: 25
+          python-version: '3.11'
+      - name: Validate release context and matching versions
+        id: context
         env:
-          CARGO_BUILD_JOBS: 1
+          PUBLISH_RUST: ${{ inputs.publish_rust }}
+        run: python scripts/release_context.py
+      - name: Require successful CI for the publication commit
+        if: steps.context.outputs.publish_rust == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run list --workflow ci.yml --commit "$GITHUB_SHA" --status success \
+            --json event,headSha,url > "$RUNNER_TEMP/release-ci.json"
+          jq -e --arg sha "$GITHUB_SHA" \
+            'any(.[]; .headSha == $sha and (.event == "push" or .event == "workflow_dispatch"))' \
+            "$RUNNER_TEMP/release-ci.json" || {
+            echo 'Run CI successfully on this exact commit before publishing, then rerun this job.'
+            exit 1
+          }
 
-  phase1-server-integration:
-    name: Phase 1 standalone server integration
+  build-wheels:
+    name: Python wheel (${{ matrix.name }})
     needs: [release-metadata]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: manylinux-x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            manylinux: '2_17'
+            args: --zig
+          - name: manylinux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: '2_28'
+            args: --zig
+          - name: musllinux-x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            manylinux: auto
+            args: --zig --compatibility musllinux_1_2
+          - name: musllinux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            manylinux: auto
+            args: --zig --compatibility musllinux_1_2
+          - name: macos-x86_64
+            runner: macos-14
+            target: x86_64-apple-darwin
+            manylinux: 'off'
+            args: ''
+          - name: macos-aarch64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            manylinux: 'off'
+            args: ''
+          - name: windows-x86_64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            manylinux: 'off'
+            args: ''
+          - name: windows-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            manylinux: 'off'
+            args: ''
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Run native server unit, control, and HTTP integration tests
-        run: cargo test --locked --release -p sparkless-server
-      - name: Run the complete Spark Connect feature regression suite
-        run: >-
-          cargo test --locked --release -p sparkless-server
-          --no-default-features --features http,connect
-      - name: Verify Spark Connect shutdown waits for released producers
-        run: >-
-          cargo test --locked --release -p sparkless-server
-          --no-default-features --features http,connect --lib
-          connect::tests::shutdown_cancels_work_and_waits_for_released_operation_leases
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
-      - name: Verify standalone HTTP release checks
-        run: python -m unittest discover -s scripts -p 'test_verify_server_http.py'
+          python-version: '3.11'
+          architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+      - name: Build abi3 publication wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          target: ${{ matrix.target }}
+          command: build
+          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --out dist ${{ matrix.args }}
+          manylinux: ${{ matrix.manylinux }}
+          container: 'off'
+          rust-toolchain: 1.93.1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sparkless-dist-${{ matrix.name }}
+          path: dist/*.whl
+          if-no-files-found: error
 
-  connect-slice8-benchmarks:
-    name: Spark Connect Slice 8 concurrency benchmark (V26 measurement)
-    if: >-
-      ${{
-        github.event_name == 'push' &&
-        (startsWith(github.ref, 'refs/heads/codex/release-4.18') ||
-         startsWith(github.ref, 'refs/tags/v4.18.'))
-      }}
+  source-dist:
+    name: Python source and Rust packages
     needs: [release-metadata]
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      CARGO_BUILD_JOBS: 1
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
+          python-version: '3.11'
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install hash-locked public Connect client
-        run: python -m pip install --require-hashes -r tests/connect/client-py311.lock
-      - name: Run synchronized 1/2/4/8-client benchmark and replay witnesses
-        run: >-
-          python3 tests/connect/run_slice8_benchmarks.py
-          --client-python "$(python -c 'import sys; print(sys.executable)')"
-          --build
-          --concurrency 1,2,4,8
-          --iterations 5
-          --rows 1000000
-      - name: Enforce the approved V26 regression budget
-        run: >-
-          python3 scripts/verify_connect_v26_budget.py
-          --reports target/connect-slice8
-          --budget tests/connect/v26-regression-budget.json
+          toolchain: 1.93.1
+      - name: Package source distributions
+        env:
+          RUSTUP_TOOLCHAIN: 1.93.1
+        run: |
+          python -m pip install build 'maturin>=1.4,<2'
+          python -m build --sdist --outdir dist python
+          cargo package --locked --workspace --exclude sparkless-native --no-verify
+          python scripts/verify_rust_package_archives.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sparkless-dist-source
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  python-tests:
+    name: Python publication wheel tests
+    needs: [build-wheels]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-dist-manylinux-x86_64
+          path: dist
+      - name: Install the exact publication wheel
+        run: python -m pip install dist/*.whl
+      - name: Install test tools and check wheel dependencies
+        run: |
+          mkdir -p pytest-results
+          python -m pip install pytest pytest-xdist hypothesis pytest-timeout
+          python -m pip check
+          python scripts/test_installed_package_version.py
+      - name: Run ordinary and parity Python suites
+        run: |
+          python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/ordinary.xml
+          python -m pytest tests/parity/ -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/parity.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: spark-connect-slice8-v26-measurements
-          path: target/connect-slice8/
+          name: release-pytest-results-manylinux-x86_64-py3.11
+          path: pytest-results
           if-no-files-found: warn
-          retention-days: 90
 
-  connect-slice9-conformance:
-    name: Spark Connect integrated client and oracle conformance (V18-V23)
-    if: >-
-      ${{
-        github.event_name == 'push' &&
-        (startsWith(github.ref, 'refs/heads/codex/release-4.18') ||
-         startsWith(github.ref, 'refs/tags/v4.18.'))
-      }}
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    env:
-      CARGO_BUILD_JOBS: 1
+  wheel-smoke-linux:
+    name: Wheel smoke (${{ matrix.target }}, Python ${{ matrix.python-version }})
+    needs: [build-wheels]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: manylinux-x86_64
+            artifact: sparkless-dist-manylinux-x86_64
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851
+            python-version: "3.11"
+            python-bin: /opt/python/cp311-cp311/bin/python
+            platform-tag: manylinux2014_x86_64.manylinux_2_17_x86_64
+            machine: x86_64
+          - target: manylinux-x86_64
+            artifact: sparkless-dist-manylinux-x86_64
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851
+            python-version: "3.14"
+            python-bin: /opt/python/cp314-cp314/bin/python
+            platform-tag: manylinux2014_x86_64.manylinux_2_17_x86_64
+            machine: x86_64
+          - target: manylinux-aarch64
+            artifact: sparkless-dist-manylinux-aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:a3e02308c822fb6ce0d12248b0c941817ba5e1a1bc9e7bb5929f29c50eaa40a9
+            python-version: "3.11"
+            python-bin: /opt/python/cp311-cp311/bin/python
+            platform-tag: manylinux_2_28_aarch64
+            machine: aarch64
+          - target: manylinux-aarch64
+            artifact: sparkless-dist-manylinux-aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:a3e02308c822fb6ce0d12248b0c941817ba5e1a1bc9e7bb5929f29c50eaa40a9
+            python-version: "3.14"
+            python-bin: /opt/python/cp314-cp314/bin/python
+            platform-tag: manylinux_2_28_aarch64
+            machine: aarch64
+          - target: musllinux-x86_64
+            artifact: sparkless-dist-musllinux-x86_64
+            runner: ubuntu-24.04
+            image: python:3.11-alpine3.22@sha256:a4fc589b32e824f3f02ed9d7e7be19518aa47e105b80416336af9f202275a489
+            python-version: "3.11"
+            python-bin: python
+            platform-tag: musllinux_1_2_x86_64
+            machine: x86_64
+          - target: musllinux-x86_64
+            artifact: sparkless-dist-musllinux-x86_64
+            runner: ubuntu-24.04
+            image: python:3.14-alpine3.22@sha256:6b91e66ab2a880ce9ca5a1b91c70f45963ff71ff68268df056336e1a657d5efd
+            python-version: "3.14"
+            python-bin: python
+            platform-tag: musllinux_1_2_x86_64
+            machine: x86_64
+          - target: musllinux-aarch64
+            artifact: sparkless-dist-musllinux-aarch64
+            runner: ubuntu-24.04-arm
+            image: python:3.11-alpine3.22@sha256:a4fc589b32e824f3f02ed9d7e7be19518aa47e105b80416336af9f202275a489
+            python-version: "3.11"
+            python-bin: python
+            platform-tag: musllinux_1_2_aarch64
+            machine: aarch64
+          - target: musllinux-aarch64
+            artifact: sparkless-dist-musllinux-aarch64
+            runner: ubuntu-24.04-arm
+            image: python:3.14-alpine3.22@sha256:6b91e66ab2a880ce9ca5a1b91c70f45963ff71ff68268df056336e1a657d5efd
+            python-version: "3.14"
+            python-bin: python
+            platform-tag: musllinux_1_2_aarch64
+            machine: aarch64
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          toolchain: 1.93.1
+          name: ${{ matrix.artifact }}
+          path: dist
+      - name: Install and run the witness inside the pinned native runtime image
+        env:
+          IMAGE: ${{ matrix.image }}
+          PYTHON_BIN: ${{ matrix.python-bin }}
+          PLATFORM_TAG: ${{ matrix.platform-tag }}
+          MACHINE: ${{ matrix.machine }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/work" --workdir /work \
+            --env PYTHON_BIN --env PLATFORM_TAG --env MACHINE \
+            "$IMAGE" /bin/sh -ec '
+              "$PYTHON_BIN" -m pip install /work/dist/*.whl
+              "$PYTHON_BIN" -m pip check
+              "$PYTHON_BIN" /work/scripts/verify_wheel_runtime.py \
+                --wheel /work/dist/*.whl --platform-tag "$PLATFORM_TAG" --machine "$MACHINE"
+            '
+
+  wheel-smoke-native:
+    name: Wheel smoke (${{ matrix.target }}, Python ${{ matrix.python-version }})
+    needs: [build-wheels]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.14']
+        target: [macos-x86_64, macos-aarch64, windows-x86_64, windows-arm64]
+        include:
+          - target: macos-x86_64
+            runner: macos-15-intel
+            architecture: x64
+            platform-tag: macosx_10_12_x86_64
+            machine: x86_64
+          - target: macos-aarch64
+            runner: macos-14
+            architecture: arm64
+            platform-tag: macosx_11_0_arm64
+            machine: aarch64
+          - target: windows-x86_64
+            runner: windows-2022
+            architecture: x64
+            platform-tag: win_amd64
+            machine: x86_64
+          - target: windows-arm64
+            runner: windows-11-arm
+            architecture: arm64
+            platform-tag: win_arm64
+            machine: aarch64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.architecture }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          distribution: temurin
-          java-version: "17"
-      - name: Restore Cargo registry downloads
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install locked standalone and reference clients
+          name: sparkless-dist-${{ matrix.target }}
+          path: dist
+      - name: Install and exercise the publication wheel
+        env:
+          PLATFORM_TAG: ${{ matrix.platform-tag }}
+          MACHINE: ${{ matrix.machine }}
         run: |
-          set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/connect-client"
-          python3 -m venv "$RUNNER_TEMP/connect-oracle"
-          "$RUNNER_TEMP/connect-client/bin/python" -m pip install --require-hashes -r tests/connect/client-py311.lock
-          "$RUNNER_TEMP/connect-oracle/bin/python" -m pip install --require-hashes -r tests/connect/oracle-py311.lock
-      - name: Download and verify Apache Spark 4.0.5 reference server
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz"
-          curl --fail --location --silent --show-error --retry 3 \
-            https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz \
-            --output "$archive"
-          printf '%s  %s\n' \
-            4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b \
-            "$archive" | sha512sum --check --status
-          mkdir -p "$RUNNER_TEMP/spark-4.0.5"
-          tar -xzf "$archive" -C "$RUNNER_TEMP/spark-4.0.5" --strip-components=1
-      - name: Build combined native server and run V18-V23 conformance
-        run: |
-          set -euo pipefail
-          cargo build --locked --release -p sparkless-server --example connect-integration-server --no-default-features --features http,connect
-          python3 tests/connect/run_slice6_conformance.py \
-            --server-bin target/release/examples/connect-integration-server \
-            --client-python "$RUNNER_TEMP/connect-client/bin/python" \
-            --oracle-python "$RUNNER_TEMP/connect-oracle/bin/python" \
-            --oracle-home "$RUNNER_TEMP/spark-4.0.5" \
-            --oracle-archive "$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz" \
-            --output target/connect-slice9
-      - name: Preserve V18-V23 candidate conformance evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: v33-spark-connect-conformance
-          path: target/connect-slice9/
-          if-no-files-found: error
-          retention-days: 90
+          python -m pip install dist/*.whl
+          python -m pip check
+          python scripts/verify_wheel_runtime.py --wheel dist/*.whl \
+            --platform-tag "$PLATFORM_TAG" --machine "$MACHINE"
 
   server-bin-manylinux-x86_64:
     name: Server binary wheel (manylinux 2.28 x86_64)
-    needs: [release-mode, release-metadata, workflow-lint, format]
+    needs: [release-metadata]
     runs-on: ubuntu-latest
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
     container:
       image: quay.io/pypa/manylinux_2_28_x86_64
     timeout-minutes: 60
@@ -531,7 +353,7 @@ jobs:
         with:
           toolchain: 1.93.1
       - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         continue-on-error: true
         with:
           path: |
@@ -543,18 +365,11 @@ jobs:
       - name: Install pinned public Connect client
         run: |
           /opt/python/cp311-cp311/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
-      - name: Verify isolated and combined transport builds
-        run: |
-          set -euo pipefail
-          PY=/opt/python/cp311-cp311/bin/python
-          version="$("$PY" -c 'import tomllib; print(tomllib.load(open("crates/sparkless-server/Cargo.toml", "rb"))["package"]["version"])')"
-          cargo build --locked --release -p sparkless-server --no-default-features --features http
-          "$PY" scripts/verify_server_bin_wheel.py --binary target/release/sparkless-server --version "$version"
-          cargo build --locked --release -p sparkless-server --no-default-features --features connect
-          "$PY" scripts/verify_server_bin_wheel.py --binary target/release/sparkless-server --version "$version" --connect-only --connect-client --client-python "$PY"
-          cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
+      - name: Build the combined server once
+        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
         env:
           CARGO_BUILD_JOBS: 1
+          RUSTUP_TOOLCHAIN: 1.93.1
       - name: Build and verify manylinux wheel
         run: |
           set -euo pipefail
@@ -567,25 +382,16 @@ jobs:
           wheel=(dist/*.whl)
           "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64 --connect --connect-client --client-python "$PY"
           auditwheel show "${wheel[0]}"
-          "$PY" scripts/verify_release_artifacts.py record-server-wheel \
-            --wheel "${wheel[0]}" --target server-bin-linux-x86_64 \
-            --output dist/evidence/server-bin-linux-x86_64.json
       - name: Upload manylinux server wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sparkless-server-bin-manylinux-2-28-x86_64
           path: dist/*.whl
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-server-bin-evidence-linux-x86_64
-          path: dist/evidence/server-bin-linux-x86_64.json
-          if-no-files-found: error
+
   server-bin-macos-arm64:
     name: Server binary wheel (macOS arm64)
-    needs: [release-mode, release-metadata, workflow-lint, format]
+    needs: [release-metadata]
     runs-on: macos-14
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -597,7 +403,7 @@ jobs:
         with:
           toolchain: 1.93.1
       - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         continue-on-error: true
         with:
           path: |
@@ -623,71 +429,16 @@ jobs:
             "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
           wheel=(dist/*.whl)
           "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64 --connect --connect-client --client-python "$SPARKLESS_WHEEL_PYTHON"
-          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_release_artifacts.py record-server-wheel \
-            --wheel "${wheel[0]}" --target server-bin-macos-aarch64 \
-            --output dist/evidence/server-bin-macos-aarch64.json
       - name: Upload macOS server wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sparkless-server-bin-macosx-14-0-arm64
           path: dist/*.whl
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-server-bin-evidence-macos-aarch64
-          path: dist/evidence/server-bin-macos-aarch64.json
-          if-no-files-found: error
-  server-extra-consumer:
-    name: Fresh sparkless server-extra consumer install
-    if: >-
-      ${{
-        always() && needs.release-mode.result == 'success' &&
-        needs.server-bin-manylinux-x86_64.result == 'success' &&
-        (
-          (needs.release-mode.outputs.mode == 'manual_validation' || needs.release-mode.outputs.mode == 'manual_rust_publish') && needs.python-tests.result == 'success' ||
-          (needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag') && needs.python-canonical-linux.result == 'success'
-        )
-      }}
-    needs: [release-mode, python-tests, python-canonical-linux, server-bin-manylinux-x86_64]
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Download candidate Sparkless wheel
-        if: needs.release-mode.outputs.mode == 'manual_validation' || needs.release-mode.outputs.mode == 'manual_rust_publish'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-wheel-ubuntu-latest
-          path: dist/sparkless
-      - name: Download exact release candidate Sparkless wheel
-        if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-dist-manylinux-x86_64
-          path: dist/sparkless
-      - name: Download candidate server binary wheel
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-server-bin-manylinux-2-28-x86_64
-          path: dist/server-bin
-      - name: Install and exercise the exact server extra offline
-        run: |
-          set -euo pipefail
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
-          python3 -m venv .venv
-          .venv/bin/python -m pip install --no-index --find-links dist/sparkless --find-links dist/server-bin "sparkless[server]==${version}"
-          .venv/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
-          .venv/bin/python -m pip check
-          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations --connect-client --client-python .venv/bin/python
 
   server-container:
     name: Native server container build and smoke
-    needs: [release-mode, release-metadata, workflow-lint, format]
+    needs: [server-bin-manylinux-x86_64]
     runs-on: ubuntu-24.04
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -698,8 +449,17 @@ jobs:
         id: image
         run: |
           echo "image=sparkless-server:candidate-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-      - name: Build native server image
-        run: docker build --pull -f crates/sparkless-server/Dockerfile -t "${{ steps.image.outputs.image }}" .
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-server-bin-manylinux-2-28-x86_64
+          path: server-wheel
+      - name: Build image from the tested server executable
+        run: |
+          python -m pip install --target "$RUNNER_TEMP/server-image" server-wheel/*.whl
+          cp "$RUNNER_TEMP/server-image/sparkless_server_bin/sparkless-server" "$RUNNER_TEMP/server-image/sparkless-server"
+          chmod +x "$RUNNER_TEMP/server-image/sparkless-server"
+          docker build -f crates/sparkless-server/Dockerfile.release \
+            -t "${{ steps.image.outputs.image }}" "$RUNNER_TEMP/server-image"
       - name: Verify non-root runtime user
         env:
           IMAGE: ${{ steps.image.outputs.image }}
@@ -741,10 +501,6 @@ jobs:
           mkdir -p dist
           docker save --output dist/sparkless-server.tar "$IMAGE"
           (cd dist && sha256sum sparkless-server.tar > sparkless-server.tar.sha256)
-          image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
-          python3 scripts/verify_release_artifacts.py record-container \
-            --archive dist/sparkless-server.tar --image "$IMAGE" --image-id "$image_id" \
-            --output dist/sparkless-server-container-evidence.json
       - name: Upload verified native image
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -752,20 +508,132 @@ jobs:
           path: |
             dist/sparkless-server.tar
             dist/sparkless-server.tar.sha256
-            dist/sparkless-server-container-evidence.json
-          retention-days: 1
+          retention-days: 7
+
+  server-extra-consumer:
+    name: Server extra (${{ matrix.runner }})
+    needs: [build-wheels, server-bin-manylinux-x86_64, server-bin-macos-arm64]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            sparkless: manylinux-x86_64
+            server: manylinux-2-28-x86_64
+          - runner: macos-14
+            sparkless: macos-aarch64
+            server: macosx-14-0-arm64
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-dist-${{ matrix.sparkless }}
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-server-bin-${{ matrix.server }}
+          path: dist
+      - name: Install and exercise the matching server extra
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python -m venv .venv
+          .venv/bin/python -m pip install --no-index --find-links dist "sparkless[server]==${version}"
+          .venv/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+          .venv/bin/python -m pip check
+          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations --connect-client --client-python .venv/bin/python
+
+  release-validation-gate:
+    name: Release validation acceptance gate
+    if: always()
+    needs:
+      - release-metadata
+      - build-wheels
+      - source-dist
+      - python-tests
+      - wheel-smoke-linux
+      - wheel-smoke-native
+      - server-bin-manylinux-x86_64
+      - server-bin-macos-arm64
+      - server-extra-consumer
+      - server-container
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # All dependencies are mandatory. A skip, failure or cancellation blocks publishing.
+      - name: Require all release jobs to succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          test -n "$RESULTS"
+          for result in ${RESULTS//,/ }; do
+            test "$result" = success || exit 1
+          done
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: sparkless-dist-*
+          path: dist/sparkless
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: sparkless-server-bin-*
+          path: dist/server-bin
+          merge-multiple: true
+      - name: Verify complete wheel and source distribution inventory
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python3 scripts/verify_release_distributions.py \
+            --directory dist/sparkless \
+            --project sparkless \
+            --version "$version" \
+            --wheels 8 \
+            --sdists 1 \
+            --platform macosx_10_12_x86_64 \
+            --platform macosx_11_0_arm64 \
+            --platform manylinux2014_x86_64.manylinux_2_17_x86_64 \
+            --platform manylinux_2_28_aarch64 \
+            --platform musllinux_1_2_aarch64 \
+            --platform musllinux_1_2_x86_64 \
+            --platform win_amd64 \
+            --platform win_arm64
+          python3 scripts/verify_release_distributions.py \
+            --directory dist/server-bin \
+            --project sparkless-server-bin \
+            --version "$version" \
+            --wheels 2 \
+            --sdists 0 \
+            --platform manylinux_2_28_x86_64 \
+            --platform macosx_14_0_arm64
+      - name: Check candidate distributions
+        run: |
+          python3 -m pip install twine
+          python3 -m twine check dist/sparkless/* dist/server-bin/*
+      - name: Preserve checked distributions for publication
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-sparkless-candidate
+          path: dist/sparkless/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-server-bin-candidate
+          path: dist/server-bin/*
+          if-no-files-found: error
 
   publish:
-    name: Build docs and publish to crates.io
-    if: >-
-      ${{
-        always() &&
-        needs.release-mode.result == 'success' &&
-        needs.release-validation-gate.result == 'success' &&
-        (needs.release-mode.outputs.mode == 'stable_tag' || needs.release-mode.outputs.mode == 'manual_rust_publish')
-      }}
+    name: Publish Rust crates
+    if: needs.release-metadata.outputs.publish_rust == 'true'
     runs-on: ubuntu-latest
-    needs: [release-mode, release-validation-gate]
+    needs: [release-metadata, release-validation-gate]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install Rust
@@ -773,7 +641,7 @@ jobs:
         with:
           toolchain: 1.93.1
       - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         continue-on-error: true
         with:
           path: |
@@ -782,8 +650,6 @@ jobs:
           key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Build docs
-        run: cargo doc --locked --workspace --no-deps
       - name: "Publish to crates.io (dependency order: spark-sql-parser, core, polars, main, server)"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -793,7 +659,7 @@ jobs:
             local out
             local code
             set +e
-            out=$(cargo publish --locked -p "$crate" --token "$CARGO_REGISTRY_TOKEN" 2>&1)
+            out=$(cargo publish --locked --no-verify -p "$crate" --token "$CARGO_REGISTRY_TOKEN" 2>&1)
             code=$?
             set -e
             printf '%s\n' "$out"
@@ -817,20 +683,9 @@ jobs:
 
   publish-server-bin:
     name: Publish server binary wheels to PyPI
-    if: >-
-      ${{
-        always() &&
-        needs.release-validation-gate.result == 'success' &&
-        needs.release-validation-gate.outputs.mode == 'stable_tag' &&
-        needs.publish.result == 'success' &&
-        needs.verify-candidate-distributions.result == 'success' &&
-        needs.server-container.result == 'success' &&
-        needs.server-extra-consumer.result == 'success' &&
-        needs.server-bin-manylinux-x86_64.result == 'success' &&
-        needs.server-bin-macos-arm64.result == 'success'
-      }}
+    if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
-    needs: [release-validation-gate, publish, verify-candidate-distributions, server-container, server-extra-consumer, server-bin-manylinux-x86_64, server-bin-macos-arm64]
+    needs: [release-metadata, release-validation-gate, publish]
     environment:
       name: pypi
     permissions:
@@ -848,334 +703,14 @@ jobs:
           packages-dir: dist/
           skip-existing: true
 
-  recover-pypi-publication:
-    name: Recover release publication from a verified tag run
-    if: needs.release-mode.outputs.mode == 'pypi_recovery'
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    needs: [release-mode]
-    environment:
-      name: pypi
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-      packages: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.11'
-      - name: Validate the completed tagged source run and candidate artifacts
-        id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ inputs.pypi_recovery_run_id }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
-            echo "pypi_recovery_run_id must be a numeric GitHub Actions run ID"
-            exit 1
-          fi
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > "$RUNNER_TEMP/recovery-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/recovery-jobs.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/recovery-artifacts.json"
-          source_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["head_sha"])' "$RUNNER_TEMP/recovery-run.json")"
-          if [[ ! "$source_sha" =~ ^[0-9a-f]{40,64}$ ]]; then
-            echo "source run has no immutable head SHA"
-            exit 1
-          fi
-          gh api "repos/$GITHUB_REPOSITORY/contents/.github/workflows/release.yml?ref=$source_sha" --jq .content \
-            | base64 --decode > "$RUNNER_TEMP/recovery-source-release.yml"
-          workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml" --jq .id)"
-          python3 scripts/verify_pypi_recovery_source.py \
-            --run-json "$RUNNER_TEMP/recovery-run.json" \
-            --jobs-json "$RUNNER_TEMP/recovery-jobs.json" \
-            --artifacts-json "$RUNNER_TEMP/recovery-artifacts.json" \
-            --source-workflow "$RUNNER_TEMP/recovery-source-release.yml" \
-            --repository "$GITHUB_REPOSITORY" \
-            --workflow-id "$workflow_id" >> "$GITHUB_OUTPUT"
-      - name: Install the locked Connect client for 4.18 recovery
-        if: startsWith(steps.source.outputs.version, '4.18.')
-        run: |
-          set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/connect-client"
-          python3 -m venv "$RUNNER_TEMP/connect-oracle"
-          "$RUNNER_TEMP/connect-client/bin/python" -m pip install --require-hashes -r tests/connect/client-py311.lock
-          "$RUNNER_TEMP/connect-oracle/bin/python" -m pip install --require-hashes -r tests/connect/oracle-py311.lock
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        if: startsWith(steps.source.outputs.version, '4.18.')
-        with:
-          toolchain: 1.93.1
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        if: startsWith(steps.source.outputs.version, '4.18.')
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Download and verify the V34 recovery Spark 4.0.5 oracle
-        if: startsWith(steps.source.outputs.version, '4.18.')
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz"
-          curl --fail --location --silent --show-error --retry 3 \
-            https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz \
-            --output "$archive"
-          printf '%s  %s\n' \
-            4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b \
-            "$archive" | sha512sum --check --status
-          mkdir -p "$RUNNER_TEMP/spark-4.0.5"
-          tar -xzf "$archive" -C "$RUNNER_TEMP/spark-4.0.5" --strip-components=1
-      - name: Download the exact V31/V33-verified distributions
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          run-id: ${{ inputs.pypi_recovery_run_id }}
-          github-token: ${{ github.token }}
-          name: verified-server-bin-candidate
-          path: dist/server-bin
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          run-id: ${{ inputs.pypi_recovery_run_id }}
-          github-token: ${{ github.token }}
-          name: verified-sparkless-candidate
-          path: dist/sparkless
-      - name: Download the exact candidate server container image
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          run-id: ${{ inputs.pypi_recovery_run_id }}
-          github-token: ${{ github.token }}
-          name: sparkless-server-container-image
-          path: dist/server-container
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: steps.source.outputs.source_evidence_policy == 'manifest_v1'
-        with:
-          run-id: ${{ inputs.pypi_recovery_run_id }}
-          github-token: ${{ github.token }}
-          name: release-sdist-source-witness-v1
-          path: dist/source-witness
-      - name: Verify source-run manifest v1 and original derived wheel bytes
-        if: steps.source.outputs.source_evidence_policy == 'manifest_v1'
-        env:
-          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
-          SOURCE_RUN_ID: ${{ steps.source.outputs.source_run_id }}
-          SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.source_run_attempt }}
-          SOURCE_WORKFLOW: ${{ steps.source.outputs.source_workflow }}
-        run: |
-          set -euo pipefail
-          python3 scripts/verify_release_source_evidence.py verify \
-            --evidence dist/source-witness/source-witness.json \
-            --sdist-dir dist/sparkless --wheel-dir dist/source-witness \
-            --source-sha "$SOURCE_SHA" --run-id "$SOURCE_RUN_ID" \
-            --run-attempt "$SOURCE_RUN_ATTEMPT" --workflow "$SOURCE_WORKFLOW" \
-            --mode stable_tag
-      - name: Verify and load the exact source-run container bytes
-        env:
-          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
-          SOURCE_RUN_ID: ${{ steps.source.outputs.source_run_id }}
-          SOURCE_RUN_ATTEMPT: ${{ steps.source.outputs.source_run_attempt }}
-          SOURCE_WORKFLOW: ${{ steps.source.outputs.source_workflow }}
-        run: |
-          set -euo pipefail
-          (cd dist/server-container && sha256sum --check sparkless-server.tar.sha256)
-          python3 scripts/verify_release_artifacts.py verify-container \
-            --evidence dist/server-container/sparkless-server-container-evidence.json \
-            --archive dist/server-container/sparkless-server.tar \
-            --source-sha "$SOURCE_SHA" --run-id "$SOURCE_RUN_ID" \
-            --run-attempt "$SOURCE_RUN_ATTEMPT" --workflow "$SOURCE_WORKFLOW" \
-            --mode stable_tag
-          docker load --input dist/server-container/sparkless-server.tar
-          image="sparkless-server:candidate-${SOURCE_SHA}"
-          actual_image_id="$(docker image inspect --format '{{.Id}}' "$image")"
-          expected_image_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image_id"])' dist/server-container/sparkless-server-container-evidence.json)"
-          if [[ "$actual_image_id" != "$expected_image_id" ]]; then
-            echo "loaded image ID $actual_image_id does not match verified evidence $expected_image_id"
-            exit 1
-          fi
-      - name: Recheck the exact source-run distributions
-        env:
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-        run: |
-          set -euo pipefail
-          version="$RELEASE_VERSION"
-          python3 scripts/verify_recovery_distributions.py \
-            --version "$version" \
-            --server-bin-directory dist/server-bin \
-            --sparkless-directory dist/sparkless
-          python3 -m pip install twine
-          python3 -m twine check dist/server-bin/* dist/sparkless/*
-      - name: Recover server binary wheels on PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          packages-dir: dist/server-bin/
-          skip-existing: true
-      - name: Recover sparkless distributions on PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          packages-dir: dist/sparkless/
-          skip-existing: true
-      - name: Verify public PyPI and crates.io artifacts against the verified inputs
-        env:
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-        run: |
-          set -euo pipefail
-          python3 scripts/verify_public_release_416.py \
-            --version "$RELEASE_VERSION" \
-            --server-bin-directory dist/server-bin \
-            --sparkless-directory dist/sparkless
-      - name: Install the recovered 4.18 Connect-enabled Rust crate
-        if: startsWith(steps.source.outputs.version, '4.18.')
-        env:
-          CARGO_BUILD_JOBS: 1
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-        run: |
-          set -euo pipefail
-          cargo install --locked --version "$RELEASE_VERSION" --no-default-features \
-            --features http,connect --root "$RUNNER_TEMP/public-rust" sparkless-server
-          actual="$("$RUNNER_TEMP/public-rust/bin/sparkless-server" --version)"
-          if [[ "$actual" != "sparkless-server $RELEASE_VERSION" ]]; then
-            echo "installed binary reported '$actual'; expected sparkless-server $RELEASE_VERSION"
-            exit 1
-          fi
-      - name: Verify the recovered Rust server with the public Connect client
-        if: startsWith(steps.source.outputs.version, '4.18.')
-        env:
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-        run: >-
-          python3 scripts/verify_server_bin_wheel.py
-          --binary "$RUNNER_TEMP/public-rust/bin/sparkless-server"
-          --version "$RELEASE_VERSION"
-          --connect --connect-client
-          --client-python "$RUNNER_TEMP/connect-client/bin/python"
-      - name: Run V18-V23 conformance against the recovered public Rust crate
-        if: startsWith(steps.source.outputs.version, '4.18.')
-        run: |
-          set -euo pipefail
-          python3 tests/connect/run_slice6_conformance.py \
-            --server-bin "$RUNNER_TEMP/public-rust/bin/sparkless-server" \
-            --server-cli-mode serve-cli \
-            --client-python "$RUNNER_TEMP/connect-client/bin/python" \
-            --oracle-python "$RUNNER_TEMP/connect-oracle/bin/python" \
-            --oracle-home "$RUNNER_TEMP/spark-4.0.5" \
-            --oracle-archive "$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz" \
-            --output target/connect-v34-recovery
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always() && startsWith(steps.source.outputs.version, '4.18.')
-        with:
-          name: v34-recovery-public-connect-conformance
-          path: target/connect-v34-recovery/
-          if-no-files-found: warn
-          retention-days: 90
-      - name: Verify a fresh exact-version server-extra install
-        env:
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-        run: |
-          set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/sparkless-recovery"
-          "$RUNNER_TEMP/sparkless-recovery/bin/python" -m pip install "sparkless[server]==$RELEASE_VERSION"
-          "$RUNNER_TEMP/sparkless-recovery/bin/python" -m pip check
-          if [[ "$RELEASE_VERSION" == "4.16.1" ]]; then
-            "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION" --protocol legacy-4.16
-          elif [[ "$RELEASE_VERSION" == 4.18.* ]]; then
-            "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py \
-              "$RELEASE_VERSION" --mutations --connect-client \
-              --client-python "$RUNNER_TEMP/connect-client/bin/python"
-          else
-            "$RUNNER_TEMP/sparkless-recovery/bin/python" scripts/verify_server_extra_install.py "$RELEASE_VERSION" --protocol legacy-4.17
-          fi
-      - name: Publish the verified server container to GHCR
-        id: publish-container
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-        run: |
-          set -euo pipefail
-          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          tag="v${RELEASE_VERSION}"
-          target="ghcr.io/eddiethedean/sparkless-server:${tag}"
-          if docker manifest inspect "$target" >/dev/null 2>&1; then
-            docker pull "$target"
-            candidate_id="$(docker image inspect --format '{{.Id}}' "sparkless-server:candidate-${SOURCE_SHA}")"
-            published_id="$(docker image inspect --format '{{.Id}}' "$target")"
-            if [[ "$candidate_id" != "$published_id" ]]; then
-              echo "container tag ${tag} already exists with image ${published_id}; candidate is ${candidate_id}"
-              exit 1
-            fi
-            digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$target")"
-            echo "Verified existing GHCR image ${target} at ${digest}" >> "$GITHUB_STEP_SUMMARY"
-          else
-            docker tag "sparkless-server:candidate-${SOURCE_SHA}" "$target"
-            docker push "$target"
-            digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
-          fi
-          digest="${digest##*@}"
-          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "container publish returned an invalid digest: $digest"
-            exit 1
-          fi
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-          echo "Published or verified GHCR image ${target} at ${digest}" >> "$GITHUB_STEP_SUMMARY"
-      - name: Pull and smoke-test the recovered public container
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-          EXPECTED_IMAGE_DIGEST: ${{ steps.publish-container.outputs.digest }}
-        run: |
-          set -euo pipefail
-          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          image="ghcr.io/eddiethedean/sparkless-server:v${RELEASE_VERSION}"
-          docker pull "$image"
-          actual="$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")"
-          actual_digest="${actual##*@}"
-          if [[ -z "$EXPECTED_IMAGE_DIGEST" || "$actual_digest" != "$EXPECTED_IMAGE_DIGEST" ]]; then
-            echo "pulled image digest $actual_digest does not match published digest $EXPECTED_IMAGE_DIGEST"
-            exit 1
-          fi
-          name="sparkless-server-recovery-smoke-${GITHUB_RUN_ID}"
-          ports=(-p 127.0.0.1:18099:8099)
-          if [[ "$RELEASE_VERSION" == 4.18.* ]]; then
-            ports+=(-p 127.0.0.1::15002)
-          fi
-          docker run -d --name "$name" "${ports[@]}" "$image"
-          cleanup() {
-            docker logs "$name" || true
-            docker rm -f "$name" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          python3 scripts/verify_server_http.py http://127.0.0.1:18099 --mutations
-          if [[ "$RELEASE_VERSION" == 4.18.* ]]; then
-            connect_port="$(docker port "$name" 15002/tcp | sed 's/.*://')"
-            SPARKLESS_CONNECT_URL="sc://127.0.0.1:${connect_port}" \
-              "$RUNNER_TEMP/connect-client/bin/python" tests/connect/smoke_public_client.py
-          fi
-          docker stop --time 10 "$name"
-          exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
-          if [[ "$exit_code" != 0 ]]; then
-            echo "recovered image exited with status $exit_code after graceful stop"
-            exit 1
-          fi
-      - name: Record the recovery scope
-        env:
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-          SOURCE_RUN_ID: ${{ inputs.pypi_recovery_run_id }}
-          SOURCE_EVIDENCE_POLICY: ${{ steps.source.outputs.source_evidence_policy }}
-        run: echo "Recovered and verified the PyPI distributions and GHCR image for $RELEASE_VERSION from tag workflow run $SOURCE_RUN_ID using evidence policy $SOURCE_EVIDENCE_POLICY. Candidate inventory, PyPI hashes, crates.io versions, fresh server-extra install, and public container smoke passed." >> "$GITHUB_STEP_SUMMARY"
-
   publish-server-container:
     name: Publish verified native server container
-    if: >-
-      ${{
-        always() &&
-        needs.release-validation-gate.result == 'success' &&
-        needs.release-validation-gate.outputs.mode == 'stable_tag' &&
-        needs.publish.result == 'success' &&
-        needs.publish-server-bin.result == 'success' &&
-        needs.server-container.result == 'success'
-      }}
+    if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    needs: [release-validation-gate, publish, publish-server-bin, server-container]
+    needs: [release-metadata, release-validation-gate, publish]
     outputs:
       image_digest: ${{ steps.publish.outputs.digest }}
     steps:
@@ -1183,7 +718,7 @@ jobs:
         with:
           name: sparkless-server-container-image
           path: dist
-      - name: Verify and load the V31-verified image bytes
+      - name: Verify and load the tested image
         run: |
           set -euo pipefail
           (cd dist && sha256sum --check sparkless-server.tar.sha256)
@@ -1192,12 +727,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Refuse to overwrite a published container tag
-        run: |
-          if docker manifest inspect "ghcr.io/eddiethedean/sparkless-server:${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            echo "container tag ${GITHUB_REF_NAME} already exists; refusing to overwrite it"
-            exit 1
-          fi
       - name: Publish verified image and record digest
         id: publish
         run: |
@@ -1205,1177 +734,36 @@ jobs:
           source="sparkless-server:candidate-${GITHUB_SHA}"
           target="ghcr.io/eddiethedean/sparkless-server:${GITHUB_REF_NAME}"
           docker tag "$source" "$target"
-          docker push "$target"
+          if docker manifest inspect "$target" > "$RUNNER_TEMP/published-image.json" 2>/dev/null; then
+            existing="$(jq -r '.config.digest' "$RUNNER_TEMP/published-image.json")"
+            candidate="$(docker image inspect --format '{{.Id}}' "$source")"
+            if [[ "$existing" != "$candidate" ]]; then
+              echo 'Container tag already exists with different contents; refusing to overwrite it.'
+              exit 1
+            fi
+            docker pull "$target"
+          else
+            docker push "$target"
+          fi
           digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
           echo "digest=${digest##*@}" >> "$GITHUB_OUTPUT"
           echo "Published and smoke-tested $digest" >> "$GITHUB_STEP_SUMMARY"
 
-  # --- Python (lint + tests, then PyPI publish for 3.11+) ---
-  python-lint:
-    name: Python (mypy)
-    needs: [release-metadata]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Install mypy
-        run: pip install mypy
-      - name: Mypy
-        run: cd python && mypy sparkless
-
-  python-build:
-    name: Python build extension - ${{ matrix.os }}
-    if: needs.release-mode.outputs.mode == 'manual_validation' || needs.release-mode.outputs.mode == 'manual_rust_publish'
-    needs: [release-mode, release-metadata, workflow-lint, format]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            runner: ubuntu-24.04
-          - os: windows-latest
-            runner: windows-2022
-          - os: macos-latest
-            runner: macos-14
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-          components: clippy, rustfmt
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install maturin
-        run: pip install maturin
-      - name: Work around rustup proxy conflicts (maturin)
-        run: |
-          rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
-          rustup component remove rustfmt clippy --toolchain 1.93.1 2>/dev/null || true
-          rustup component add rustfmt clippy --toolchain 1.93.1
-      - name: Clear cached wheels
-        run: python -c "from pathlib import Path; [wheel.unlink() for wheel in Path('target/wheels').glob('sparkless-*.whl')]"
-      - name: Build wheel (abi3, Python 3.11+)
-        run: cd python && maturin build --locked --release -i 3.11
-      - name: Upload wheel artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-wheel-${{ matrix.os }}
-          path: target/wheels/*.whl
-
-  python-tests:
-    name: Python tests - ${{ matrix.os }} py${{ matrix.python-version }}
-    if: needs.release-mode.outputs.mode == 'manual_validation' || needs.release-mode.outputs.mode == 'manual_rust_publish'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
-    needs: [release-mode, python-build]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-        include:
-          - os: ubuntu-latest
-            runner: ubuntu-24.04
-          - os: windows-latest
-            runner: windows-2022
-          - os: macos-latest
-            runner: macos-14
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Create venv
-        run: python -m venv .venv
-      - name: Set Python path
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            echo "PY=$GITHUB_WORKSPACE/.venv/Scripts/python" >> "$GITHUB_ENV"
-          else
-            echo "PY=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
-          fi
-      - name: Download built wheel
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-wheel-${{ matrix.os }}
-          path: dist
-      - name: Install wheel and test deps
-        run: |
-          mkdir -p pytest-results
-          $PY -m pip install dist/*.whl
-          $PY -m pip install pytest pytest-xdist hypothesis pytest-timeout
-      - name: Smoke test
-        run: |
-          $PY scripts/test_installed_package_version.py
-          $PY -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
-      - name: Run Python tests (same subset as CI)
-        run: |
-          $PY -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/ordinary.xml
-          $PY -m pytest tests/parity/ -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/parity.xml
-        timeout-minutes: 20
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: release-manual-pytest-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: pytest-results
-          if-no-files-found: warn
-
-  # Build every PyPI artifact on a release-candidate branch. The centralized
-  # publish jobs below use OIDC only after the inventory has been verified.
-  build-pypi-manylinux-x86_64:
-    name: Build PyPI manylinux x86_64 + sdist
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
-    runs-on: ubuntu-24.04
-    needs: [release-mode, release-metadata, workflow-lint, format]
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Build wheel (maturin)
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          target: x86_64-unknown-linux-gnu
-          command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --zig --out dist
-          manylinux: "2_17"
-          container: off
-          rust-toolchain: 1.93.1
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Build complete source distribution on the minimum supported Python
-        run: |
-          python -m pip install build "maturin>=1.4,<2"
-          python -m build --sdist --outdir dist python
-      - name: Verify isolated source build from the exact sdist (evidence schema v1)
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
-        run: |
-          set -euo pipefail
-          sdist=(dist/sparkless-*.tar.gz)
-          python scripts/verify_release_source.py "${sdist[0]}" \
-            --wheel-output-dir "$RUNNER_TEMP/sdist-derived-wheel"
-          mkdir -p source-witness
-          derived_wheel=("$RUNNER_TEMP"/sdist-derived-wheel/*.whl)
-          cp "${derived_wheel[0]}" source-witness/
-          python scripts/verify_release_source_evidence.py record \
-            --sdist "${sdist[0]}" --wheel "source-witness/$(basename "${derived_wheel[0]}")" \
-            --output source-witness/source-witness.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-dist-manylinux-x86_64
-          path: dist/*
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-sdist-source-witness-v1
-          path: source-witness/*
-          if-no-files-found: error
-
-  build-pypi-manylinux-aarch64:
-    name: Build PyPI manylinux aarch64
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
-    runs-on: ubuntu-24.04-arm
-    needs: [release-metadata, workflow-lint, format]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Build wheel (maturin)
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          target: aarch64-unknown-linux-gnu
-          command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --zig --out dist
-          manylinux: "2_28"
-          container: off
-          rust-toolchain: 1.93.1
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-dist-manylinux-aarch64
-          path: dist/*.whl
-          if-no-files-found: error
-
-  build-pypi-mac:
-    name: Build PyPI macOS ${{ matrix.target }}
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
-    runs-on: macos-14
-    needs: [release-metadata, workflow-lint, format]
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-apple-darwin, aarch64-apple-darwin]
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Build wheel (maturin)
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          target: ${{ matrix.target }}
-          command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --out dist
-          rust-toolchain: 1.93.1
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-dist-${{ matrix.target }}
-          path: dist/*.whl
-          if-no-files-found: error
-
-  build-pypi-musllinux-x86_64:
-    name: Build PyPI musllinux x86_64
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
-    runs-on: ubuntu-24.04
-    needs: [release-metadata, workflow-lint, format]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Build wheel (maturin)
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          target: x86_64-unknown-linux-musl
-          command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --zig --compatibility musllinux_1_2 --out dist
-          rust-toolchain: 1.93.1
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-dist-musllinux-x86_64
-          path: dist/*.whl
-          if-no-files-found: error
-
-  build-pypi-musllinux-aarch64:
-    name: Build PyPI musllinux aarch64
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
-    runs-on: ubuntu-24.04-arm
-    needs: [release-metadata, workflow-lint, format]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Build wheel (maturin)
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          target: aarch64-unknown-linux-musl
-          command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --zig --compatibility musllinux_1_2 --out dist
-          rust-toolchain: 1.93.1
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-dist-musllinux-aarch64
-          path: dist/*.whl
-          if-no-files-found: error
-
-  build-pypi-windows-x86_64:
-    name: Build PyPI Windows x86_64
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
-    runs-on: windows-2022
-    needs: [release-metadata, workflow-lint, format]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Build wheel (maturin)
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          target: x86_64-pc-windows-msvc
-          command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --out dist
-          rust-toolchain: 1.93.1
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-dist-windows-x86_64
-          path: dist/*.whl
-          if-no-files-found: error
-
-  build-pypi-windows-arm64:
-    name: Build PyPI Windows aarch64
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-'))
-    runs-on: windows-11-arm
-    needs: [release-metadata, workflow-lint, format]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Set up native ARM64 CPython 3.11
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-          architecture: arm64
-      - name: Build wheel (maturin)
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          target: aarch64-pc-windows-msvc
-          command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --out dist
-          rust-toolchain: 1.93.1
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-dist-windows-arm64
-          path: dist/*.whl
-          if-no-files-found: error
-
-  python-canonical-linux:
-    name: Canonical Linux wheel tests - py${{ matrix.python-version }}
-    if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
-    needs: [release-mode, build-pypi-manylinux-x86_64]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: ${{ matrix.python-version }}
-          architecture: x64
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-dist-manylinux-x86_64
-          path: dist
-      - name: Capture the publication wheel and its pre-install digest
-        id: wheel
-        run: |
-          set -euo pipefail
-          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-          test -n "$wheel"
-          echo "path=$wheel" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(sha256sum "$wheel" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Install the exact publication wheel
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-        run: python -m pip install "$WHEEL"
-      - name: Install test tools and check wheel dependencies
-        run: |
-          mkdir -p pytest-results
-          python -m pip install pytest pytest-xdist hypothesis pytest-timeout
-          python -m pip check
-          python scripts/test_installed_package_version.py
-      - name: Run ordinary and parity Python suites
-        run: |
-          python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/ordinary.xml
-          python -m pytest tests/parity/ -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/parity.xml
-      - name: Record exact-wheel suite evidence
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-          WHEEL_SHA256: ${{ steps.wheel.outputs.sha256 }}
-        run: python scripts/record_release_wheel_evidence.py --wheel "$WHEEL" --expected-sha256 "$WHEEL_SHA256" --suite broad-python --target manylinux-x86_64 --output "evidence/manylinux-x86_64-py${{ matrix.python-version }}.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-wheel-evidence-manylinux-x86_64-py${{ matrix.python-version }}
-          path: evidence/*.json
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: release-pytest-results-manylinux-x86_64-py${{ matrix.python-version }}
-          path: pytest-results
-          if-no-files-found: warn
-
-  python-canonical-macos:
-    name: Canonical macOS arm64 wheel tests - py${{ matrix.python-version }}
-    if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
-    needs: [release-mode, build-pypi-mac]
-    runs-on: macos-14
-    timeout-minutes: 35
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: ${{ matrix.python-version }}
-          architecture: arm64
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-dist-aarch64-apple-darwin
-          path: dist
-      - name: Capture the publication wheel and its pre-install digest
-        id: wheel
-        run: |
-          set -euo pipefail
-          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-          test -n "$wheel"
-          echo "path=$wheel" >> "$GITHUB_OUTPUT"
-          sha256="$(python -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$wheel")"
-          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
-      - name: Install the exact publication wheel
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-        run: python -m pip install "$WHEEL"
-      - name: Install test tools and check wheel dependencies
-        run: |
-          mkdir -p pytest-results
-          python -m pip install pytest pytest-xdist hypothesis pytest-timeout
-          python -m pip check
-          python scripts/test_installed_package_version.py
-      - name: Run ordinary and parity Python suites
-        run: |
-          python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/ordinary.xml
-          python -m pytest tests/parity/ -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/parity.xml
-      - name: Record exact-wheel suite evidence
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-          WHEEL_SHA256: ${{ steps.wheel.outputs.sha256 }}
-        run: python scripts/record_release_wheel_evidence.py --wheel "$WHEEL" --expected-sha256 "$WHEEL_SHA256" --suite broad-python --target macos-aarch64 --output "evidence/macos-aarch64-py${{ matrix.python-version }}.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-wheel-evidence-macos-aarch64-py${{ matrix.python-version }}
-          path: evidence/*.json
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: release-pytest-results-macos-aarch64-py${{ matrix.python-version }}
-          path: pytest-results
-          if-no-files-found: warn
-
-  python-canonical-windows:
-    name: Canonical Windows x64 wheel tests - py${{ matrix.python-version }}
-    if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
-    needs: [release-mode, build-pypi-windows-x86_64]
-    runs-on: windows-2022
-    timeout-minutes: 35
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: ${{ matrix.python-version }}
-          architecture: x64
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-dist-windows-x86_64
-          path: dist
-      - name: Capture the publication wheel and its pre-install digest
-        id: wheel
-        run: |
-          set -euo pipefail
-          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-          test -n "$wheel"
-          echo "path=$wheel" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(sha256sum "$wheel" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Install the exact publication wheel
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-        run: python -m pip install "$WHEEL"
-      - name: Install test tools and check wheel dependencies
-        run: |
-          mkdir -p pytest-results
-          python -m pip install pytest pytest-xdist hypothesis pytest-timeout
-          python -m pip check
-          python scripts/test_installed_package_version.py
-      - name: Run ordinary and parity Python suites
-        run: |
-          python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/ordinary.xml
-          python -m pytest tests/parity/ -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/parity.xml
-      - name: Record exact-wheel suite evidence
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-          WHEEL_SHA256: ${{ steps.wheel.outputs.sha256 }}
-        run: python scripts/record_release_wheel_evidence.py --wheel "$WHEEL" --expected-sha256 "$WHEEL_SHA256" --suite broad-python --target windows-x86_64 --output "evidence/windows-x86_64-py${{ matrix.python-version }}.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-wheel-evidence-windows-x86_64-py${{ matrix.python-version }}
-          path: evidence/*.json
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: release-pytest-results-windows-x86_64-py${{ matrix.python-version }}
-          path: pytest-results
-          if-no-files-found: warn
-
-  python-delta-canonical:
-    name: Canonical Linux wheel serial Delta suite
-    if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
-    needs: [release-mode, build-pypi-manylinux-x86_64]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-          architecture: x64
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-dist-manylinux-x86_64
-          path: dist
-      - name: Capture the publication wheel and its pre-install digest
-        id: wheel
-        run: |
-          set -euo pipefail
-          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-          test -n "$wheel"
-          echo "path=$wheel" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(sha256sum "$wheel" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Install the exact publication wheel and test tools
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-        run: |
-          mkdir -p pytest-results
-          python -m pip install "$WHEEL" pytest pytest-timeout
-          python -m pip check
-          python scripts/test_installed_package_version.py
-      - name: Run the serial Delta selection
-        env:
-          SPARKLESS_ENABLE_DELTA: "1"
-        run: python -m pytest tests -m delta -v --tb=short --timeout 300 --durations=25 --junitxml=pytest-results/delta.xml
-      - name: Record exact-wheel suite evidence
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-          WHEEL_SHA256: ${{ steps.wheel.outputs.sha256 }}
-        run: python scripts/record_release_wheel_evidence.py --wheel "$WHEEL" --expected-sha256 "$WHEEL_SHA256" --suite serial-delta --target manylinux-x86_64 --output evidence/manylinux-x86_64-py3.11-delta.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-wheel-evidence-manylinux-x86_64-delta
-          path: evidence/*.json
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: release-pytest-results-manylinux-x86_64-delta
-          path: pytest-results
-          if-no-files-found: warn
-
-  python-wheel-linux-runtime:
-    name: Native Linux wheel witness - ${{ matrix.target }} py${{ matrix.python-version }}
-    if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
-    needs: [release-mode, build-pypi-manylinux-x86_64, build-pypi-manylinux-aarch64, build-pypi-musllinux-x86_64, build-pypi-musllinux-aarch64]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: manylinux-x86_64
-            artifact: sparkless-dist-manylinux-x86_64
-            runner: ubuntu-24.04
-            image: quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851
-            python-version: "3.11"
-            python-bin: /opt/python/cp311-cp311/bin/python
-            platform-tag: manylinux_2_17_x86_64.manylinux2014_x86_64
-            machine: x86_64
-          - target: manylinux-x86_64
-            artifact: sparkless-dist-manylinux-x86_64
-            runner: ubuntu-24.04
-            image: quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851
-            python-version: "3.14"
-            python-bin: /opt/python/cp314-cp314/bin/python
-            platform-tag: manylinux_2_17_x86_64.manylinux2014_x86_64
-            machine: x86_64
-          - target: manylinux-aarch64
-            artifact: sparkless-dist-manylinux-aarch64
-            runner: ubuntu-24.04-arm
-            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:a3e02308c822fb6ce0d12248b0c941817ba5e1a1bc9e7bb5929f29c50eaa40a9
-            python-version: "3.11"
-            python-bin: /opt/python/cp311-cp311/bin/python
-            platform-tag: manylinux_2_28_aarch64
-            machine: aarch64
-          - target: manylinux-aarch64
-            artifact: sparkless-dist-manylinux-aarch64
-            runner: ubuntu-24.04-arm
-            image: quay.io/pypa/manylinux_2_28_aarch64@sha256:a3e02308c822fb6ce0d12248b0c941817ba5e1a1bc9e7bb5929f29c50eaa40a9
-            python-version: "3.14"
-            python-bin: /opt/python/cp314-cp314/bin/python
-            platform-tag: manylinux_2_28_aarch64
-            machine: aarch64
-          - target: musllinux-x86_64
-            artifact: sparkless-dist-musllinux-x86_64
-            runner: ubuntu-24.04
-            image: python:3.11-alpine3.22@sha256:a4fc589b32e824f3f02ed9d7e7be19518aa47e105b80416336af9f202275a489
-            python-version: "3.11"
-            python-bin: python
-            platform-tag: musllinux_1_2_x86_64
-            machine: x86_64
-          - target: musllinux-x86_64
-            artifact: sparkless-dist-musllinux-x86_64
-            runner: ubuntu-24.04
-            image: python:3.14-alpine3.22@sha256:6b91e66ab2a880ce9ca5a1b91c70f45963ff71ff68268df056336e1a657d5efd
-            python-version: "3.14"
-            python-bin: python
-            platform-tag: musllinux_1_2_x86_64
-            machine: x86_64
-          - target: musllinux-aarch64
-            artifact: sparkless-dist-musllinux-aarch64
-            runner: ubuntu-24.04-arm
-            image: python:3.11-alpine3.22@sha256:a4fc589b32e824f3f02ed9d7e7be19518aa47e105b80416336af9f202275a489
-            python-version: "3.11"
-            python-bin: python
-            platform-tag: musllinux_1_2_aarch64
-            machine: aarch64
-          - target: musllinux-aarch64
-            artifact: sparkless-dist-musllinux-aarch64
-            runner: ubuntu-24.04-arm
-            image: python:3.14-alpine3.22@sha256:6b91e66ab2a880ce9ca5a1b91c70f45963ff71ff68268df056336e1a657d5efd
-            python-version: "3.14"
-            python-bin: python
-            platform-tag: musllinux_1_2_aarch64
-            machine: aarch64
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: ${{ matrix.artifact }}
-          path: dist
-      - name: Capture the publication wheel and its pre-install digest
-        id: wheel
-        run: |
-          set -euo pipefail
-          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-          test -n "$wheel"
-          echo "path=$wheel" >> "$GITHUB_OUTPUT"
-          echo "sha256=$(sha256sum "$wheel" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Install and run the witness inside the pinned native runtime image
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-          WHEEL_SHA256: ${{ steps.wheel.outputs.sha256 }}
-          IMAGE: ${{ matrix.image }}
-          PYTHON_BIN: ${{ matrix.python-bin }}
-          PLATFORM_TAG: ${{ matrix.platform-tag }}
-          TARGET: ${{ matrix.target }}
-          MACHINE: ${{ matrix.machine }}
-        run: |
-          set -euo pipefail
-          mkdir -p evidence
-          wheel_name="$(basename "$WHEEL")"
-          evidence_name="${TARGET}-py${{ matrix.python-version }}.json"
-          docker run --rm \
-            --volume "$GITHUB_WORKSPACE:/work" --workdir /work \
-            --env WHEEL_PATH="/work/dist/$wheel_name" \
-            --env EXPECTED_SHA256="$WHEEL_SHA256" \
-            --env PYTHON_BIN --env PLATFORM_TAG --env TARGET --env MACHINE \
-            --env GITHUB_SHA="$GITHUB_SHA" --env GITHUB_WORKFLOW="$GITHUB_WORKFLOW" \
-            --env GITHUB_RUN_ID="$GITHUB_RUN_ID" --env GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
-            --env RELEASE_MODE="$RELEASE_MODE" \
-            "$IMAGE" /bin/sh -ec '
-              "$PYTHON_BIN" -m pip install "$WHEEL_PATH"
-              "$PYTHON_BIN" -m pip check
-              "$PYTHON_BIN" /work/scripts/verify_wheel_runtime.py \
-                --wheel "$WHEEL_PATH" --platform-tag "$PLATFORM_TAG" \
-                --machine "$MACHINE" --expected-sha256 "$EXPECTED_SHA256" \
-                --target "$TARGET" --output "/work/evidence/'"$evidence_name"'"
-            '
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-wheel-evidence-${{ matrix.target }}-runtime-py${{ matrix.python-version }}
-          path: evidence/*.json
-          if-no-files-found: error
-
-  python-wheel-native-runtime:
-    name: Native non-Linux wheel witness - ${{ matrix.target }} py${{ matrix.python-version }}
-    if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
-    needs: [release-mode, build-pypi-mac, build-pypi-windows-arm64]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    env:
-      RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: macos-x86_64
-            artifact: sparkless-dist-x86_64-apple-darwin
-            runner: macos-15-intel
-            architecture: x64
-            python-version: "3.11"
-            platform-tag: macosx_10_12_x86_64
-            machine: x86_64
-          - target: macos-x86_64
-            artifact: sparkless-dist-x86_64-apple-darwin
-            runner: macos-15-intel
-            architecture: x64
-            python-version: "3.14"
-            platform-tag: macosx_10_12_x86_64
-            machine: x86_64
-          - target: windows-arm64
-            artifact: sparkless-dist-windows-arm64
-            runner: windows-11-arm
-            architecture: arm64
-            python-version: "3.11"
-            platform-tag: win_arm64
-            machine: aarch64
-          - target: windows-arm64
-            artifact: sparkless-dist-windows-arm64
-            runner: windows-11-arm
-            architecture: arm64
-            python-version: "3.14"
-            platform-tag: win_arm64
-            machine: aarch64
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: ${{ matrix.python-version }}
-          architecture: ${{ matrix.architecture }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: ${{ matrix.artifact }}
-          path: dist
-      - name: Capture the publication wheel and its pre-install digest
-        id: wheel
-        run: |
-          set -euo pipefail
-          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
-          test -n "$wheel"
-          echo "path=$wheel" >> "$GITHUB_OUTPUT"
-          sha256="$(python -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$wheel")"
-          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
-      - name: Install the exact publication wheel and check dependencies
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-        run: |
-          python -m pip install "$WHEEL"
-          python -m pip check
-      - name: Exercise SQL, Parquet and Delta on the native host
-        env:
-          WHEEL: ${{ steps.wheel.outputs.path }}
-          WHEEL_SHA256: ${{ steps.wheel.outputs.sha256 }}
-          PLATFORM_TAG: ${{ matrix.platform-tag }}
-          MACHINE: ${{ matrix.machine }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          python scripts/verify_wheel_runtime.py \
-            --wheel "$WHEEL" --platform-tag "$PLATFORM_TAG" --machine "$MACHINE" \
-            --expected-sha256 "$WHEEL_SHA256" --target "$TARGET" \
-            --output "evidence/${TARGET}-py${{ matrix.python-version }}.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-wheel-evidence-${{ matrix.target }}-runtime-py${{ matrix.python-version }}
-          path: evidence/*.json
-          if-no-files-found: error
-
-  server-extra-consumer-macos:
-    name: Fresh native macOS server-extra consumer install
-    if: needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag'
-    needs: [release-mode, python-canonical-macos, server-bin-macos-arm64]
-    runs-on: macos-14
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-          architecture: arm64
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-dist-aarch64-apple-darwin
-          path: dist/sparkless
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-server-bin-macosx-14-0-arm64
-          path: dist/server-bin
-      - name: Install and exercise the exact server extra offline
-        run: |
-          set -euo pipefail
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
-          python3 -m venv .venv
-          .venv/bin/python -m pip install --no-index --find-links dist/sparkless --find-links dist/server-bin "sparkless[server]==${version}"
-          .venv/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
-          .venv/bin/python -m pip check
-          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations --connect-client --client-python .venv/bin/python
-
-  phase1-v17-resource-witness:
-    name: Phase 1 V17 range and memory witness
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v4.17.') || startsWith(github.ref, 'refs/heads/codex/release-4.18') || startsWith(github.ref, 'refs/tags/v4.18.'))
-    runs-on: ubuntu-latest
-    needs: [release-metadata, workflow-lint, format]
-    timeout-minutes: 60
-    env:
-      CARGO_BUILD_JOBS: 1
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install native build dependencies
-        run: sudo apt-get update && sudo apt-get install -y unixodbc-dev
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Cache cargo
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Measure isolated range, catalog, and sustained HTTP workloads
-        run: python3 scripts/verify_v17_memory.py --output "$RUNNER_TEMP/v17-resource-witness.json"
-      - name: Preserve V17 resource evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: v17-resource-witness
-          path: |
-            ${{ runner.temp }}/v17-resource-witness.json
-            ${{ runner.temp }}/v17-logs
-          if-no-files-found: warn
-          retention-days: 90
-
-  verify-candidate-distributions:
-    name: Verify complete candidate distribution inventory (V31/V33)
-    if: >-
-      ${{
-        always() &&
-        needs.release-mode.result == 'success' &&
-        (needs.release-mode.outputs.mode == 'release_candidate' || needs.release-mode.outputs.mode == 'stable_tag') &&
-        github.event_name == 'push' &&
-        (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/codex/release-')) &&
-        !contains(needs.*.result, 'failure') &&
-        !contains(needs.*.result, 'cancelled') &&
-        needs.python-canonical-linux.result == 'success' &&
-        needs.python-canonical-macos.result == 'success' &&
-        needs.python-canonical-windows.result == 'success' &&
-        needs.python-delta-canonical.result == 'success' &&
-        needs.python-wheel-linux-runtime.result == 'success' &&
-        needs.python-wheel-native-runtime.result == 'success' &&
-        needs.server-extra-consumer-macos.result == 'success' &&
-        (
-          (
-            startsWith(github.ref, 'refs/tags/v4.17.') ||
-            startsWith(github.ref, 'refs/heads/codex/release-4.17') ||
-            startsWith(github.ref, 'refs/tags/v4.18.') ||
-            startsWith(github.ref, 'refs/heads/codex/release-4.18')
-          ) && needs.phase1-v17-resource-witness.result == 'success' ||
-          (
-            !startsWith(github.ref, 'refs/tags/v4.17.') &&
-            !startsWith(github.ref, 'refs/heads/codex/release-4.17') &&
-            !startsWith(github.ref, 'refs/tags/v4.18.') &&
-            !startsWith(github.ref, 'refs/heads/codex/release-4.18')
-          )
-        ) &&
-        (
-          (
-            startsWith(github.ref, 'refs/tags/v4.18.') ||
-            startsWith(github.ref, 'refs/heads/codex/release-4.18')
-          ) &&
-            needs.connect-slice8-benchmarks.result == 'success' &&
-            needs.connect-slice9-conformance.result == 'success' ||
-          (
-            !startsWith(github.ref, 'refs/tags/v4.18.') &&
-            !startsWith(github.ref, 'refs/heads/codex/release-4.18')
-          )
-        )
-      }}
-    runs-on: ubuntu-latest
-    needs:
-      - release-mode
-      - release-metadata
-      - workflow-lint
-      - rust-package-archives
-      - rust-consumer-security
-      - format
-      - verify-416-prerequisite
-      - clippy
-      - audit
-      - deny
-      - test
-      - phase1-v17-resource-witness
-      - connect-slice8-benchmarks
-      - connect-slice9-conformance
-      - phase1-server-integration
-      - python-lint
-      - python-tests
-      - python-canonical-linux
-      - python-canonical-macos
-      - python-canonical-windows
-      - python-delta-canonical
-      - python-wheel-linux-runtime
-      - python-wheel-native-runtime
-      - server-bin-manylinux-x86_64
-      - server-bin-macos-arm64
-      - server-extra-consumer
-      - server-extra-consumer-macos
-      - server-container
-      - build-pypi-manylinux-x86_64
-      - build-pypi-manylinux-aarch64
-      - build-pypi-mac
-      - build-pypi-musllinux-x86_64
-      - build-pypi-musllinux-aarch64
-      - build-pypi-windows-x86_64
-      - build-pypi-windows-arm64
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Download V17 resource evidence for this 4.17/4.18 candidate
-        if: startsWith(github.ref, 'refs/tags/v4.17.') || startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v4.18.') || startsWith(github.ref, 'refs/heads/codex/release-4.18')
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: v17-resource-witness
-          path: dist/evidence
-      - name: Verify V17 evidence belongs to this candidate and meets its budgets
-        if: startsWith(github.ref, 'refs/tags/v4.17.') || startsWith(github.ref, 'refs/heads/codex/release-4.17') || startsWith(github.ref, 'refs/tags/v4.18.') || startsWith(github.ref, 'refs/heads/codex/release-4.18')
-        run: python3 scripts/verify_v17_memory.py --verify-report dist/evidence/v17-resource-witness.json --expected-sha "$GITHUB_SHA"
-      - name: Download all candidate sparkless distributions
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: sparkless-dist-*
-          path: dist/sparkless
-          merge-multiple: true
-      - name: Download tested server binary wheels
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-server-bin-manylinux-2-28-x86_64
-          path: dist/server-bin
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-server-bin-macosx-14-0-arm64
-          path: dist/server-bin
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: release-server-bin-evidence-*
-          path: dist/evidence/server-bin
-          merge-multiple: true
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: release-sdist-source-witness-v1
-          path: dist/source-witness
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-server-container-image
-          path: dist/server-container
-      - name: Verify complete wheel and source distribution inventory
-        run: |
-          set -euo pipefail
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/sparkless \
-            --project sparkless \
-            --version "$version" \
-            --wheels 8 \
-            --sdists 1 \
-            --platform macosx_10_12_x86_64 \
-            --platform macosx_11_0_arm64 \
-            --platform manylinux_2_17_x86_64.manylinux2014_x86_64 \
-            --platform manylinux_2_28_aarch64 \
-            --platform musllinux_1_2_aarch64 \
-            --platform musllinux_1_2_x86_64 \
-            --platform win_amd64 \
-            --platform win_arm64
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/server-bin \
-            --project sparkless-server-bin \
-            --version "$version" \
-            --wheels 2 \
-            --sdists 0 \
-            --platform manylinux_2_28_x86_64 \
-            --platform macosx_14_0_arm64
-      - name: Check candidate distributions
-        run: |
-          python3 -m pip install twine
-          python3 -m twine check dist/sparkless/* dist/server-bin/*
-      - name: Download exact-wheel test evidence from every runtime cell
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: release-wheel-evidence-*
-          path: dist/evidence/wheels
-          merge-multiple: false
-      - name: Verify suite, runner, source, and exact artifact digest inventory
-        env:
-          RELEASE_WORKFLOW: ${{ github.workflow }}
-          RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-        run: |
-          python3 scripts/verify_release_wheel_evidence.py \
-            --evidence-dir dist/evidence/wheels \
-            --wheel-dir dist/sparkless \
-            --source-sha "$GITHUB_SHA" \
-            --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --workflow "$RELEASE_WORKFLOW" \
-            --mode "$RELEASE_MODE"
-      - name: Verify tested server wheels and native container bytes
-        env:
-          RELEASE_WORKFLOW: ${{ github.workflow }}
-          RELEASE_MODE: ${{ needs.release-mode.outputs.mode }}
-        run: |
-          set -euo pipefail
-          python3 scripts/verify_release_artifacts.py verify-server-wheels \
-            --evidence-dir dist/evidence/server-bin --wheel-dir dist/server-bin \
-            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" --workflow "$RELEASE_WORKFLOW" \
-            --mode "$RELEASE_MODE"
-          (
-            cd dist/server-container
-            sha256sum --check sparkless-server.tar.sha256
-          )
-          python3 scripts/verify_release_artifacts.py verify-container \
-            --evidence dist/server-container/sparkless-server-container-evidence.json \
-            --archive dist/server-container/sparkless-server.tar \
-            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" --workflow "$RELEASE_WORKFLOW" \
-            --mode "$RELEASE_MODE"
-          python3 scripts/verify_release_source_evidence.py verify \
-            --evidence dist/source-witness/source-witness.json \
-            --sdist-dir dist/sparkless --wheel-dir dist/source-witness \
-            --source-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
-            --run-attempt "$GITHUB_RUN_ATTEMPT" --workflow "$RELEASE_WORKFLOW" \
-            --mode "$RELEASE_MODE"
-      - name: Preserve the exact verified distributions for publication and V32/V34
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: verified-sparkless-candidate
-          path: dist/sparkless/*
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: verified-server-bin-candidate
-          path: dist/server-bin/*
-          if-no-files-found: error
-
-  release-validation-gate:
-    name: Release validation acceptance gate
-    if: >-
-      ${{
-        always() &&
-        needs.release-mode.result == 'success' &&
-        needs.release-mode.outputs.mode != 'pypi_recovery'
-      }}
-    needs:
-      - release-mode
-      - release-metadata
-      - workflow-lint
-      - rust-package-archives
-      - rust-consumer-security
-      - format
-      - clippy
-      - audit
-      - deny
-      - test
-      - phase1-server-integration
-      - python-lint
-      - python-build
-      - python-tests
-      - python-canonical-linux
-      - python-canonical-macos
-      - python-canonical-windows
-      - python-delta-canonical
-      - python-wheel-linux-runtime
-      - python-wheel-native-runtime
-      - server-bin-manylinux-x86_64
-      - server-bin-macos-arm64
-      - server-extra-consumer
-      - server-extra-consumer-macos
-      - server-container
-      - verify-416-prerequisite
-      - build-pypi-manylinux-x86_64
-      - build-pypi-manylinux-aarch64
-      - build-pypi-mac
-      - build-pypi-musllinux-x86_64
-      - build-pypi-musllinux-aarch64
-      - build-pypi-windows-x86_64
-      - build-pypi-windows-arm64
-      - phase1-v17-resource-witness
-      - connect-slice8-benchmarks
-      - connect-slice9-conformance
-      - verify-candidate-distributions
-    outputs:
-      mode: ${{ needs.release-mode.outputs.mode }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Check the complete mode-specific release job inventory
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_REF: ${{ github.ref }}
-          GITHUB_SHA: ${{ github.sha }}
-          INPUT_PUBLISH_RUST: ${{ inputs.publish_rust }}
-          INPUT_PYPI_RECOVERY_RUN_ID: ${{ inputs.pypi_recovery_run_id }}
-          MODE: ${{ needs.release-mode.outputs.mode }}
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: |
-          set -euo pipefail
-          printf '%s' "$NEEDS_JSON" > "$RUNNER_TEMP/release-needs.json"
-          python3 scripts/verify_release_job_gate.py gate \
-            --mode "$MODE" \
-            --needs-json "$RUNNER_TEMP/release-needs.json"
-
   publish-sparkless:
     name: Publish sparkless distributions to PyPI
-    if: >-
-      ${{
-        always() &&
-        needs.release-validation-gate.result == 'success' &&
-        needs.release-validation-gate.outputs.mode == 'stable_tag' &&
-        needs.publish.result == 'success' &&
-        needs.publish-server-bin.result == 'success' &&
-        needs.publish-server-container.result == 'success' &&
-        needs.verify-candidate-distributions.result == 'success'
-      }}
+    if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
-    needs:
-      - release-validation-gate
-      - publish
-      - publish-server-bin
-      - publish-server-container
-      - verify-candidate-distributions
+    needs: [release-metadata, release-validation-gate, publish-server-bin, publish-server-container]
     environment:
       name: pypi
     permissions:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-sparkless-candidate
@@ -2385,202 +773,11 @@ jobs:
         with:
           packages-dir: dist/
           skip-existing: true
-
-  verify-public-release:
-    name: Verify public release inventory and fresh installs (V32/V34)
-    if: >-
-      ${{
-        always() &&
-        needs.release-validation-gate.result == 'success' &&
-        needs.release-validation-gate.outputs.mode == 'stable_tag' &&
-        needs.verify-candidate-distributions.result == 'success' &&
-        needs.publish.result == 'success' &&
-        needs.publish-server-bin.result == 'success' &&
-        needs.publish-server-container.result == 'success' &&
-        needs.publish-sparkless.result == 'success' &&
-        (startsWith(github.ref, 'refs/tags/v4.17.') ||
-         startsWith(github.ref, 'refs/tags/v4.18.'))
-      }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    permissions:
-      contents: read
-      packages: read
-    needs:
-      - release-validation-gate
-      - verify-candidate-distributions
-      - publish
-      - publish-server-bin
-      - publish-server-container
-      - publish-sparkless
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Download the exact verified server binary distributions
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-server-bin-candidate
-          path: public-distributions/server-bin
-      - name: Download the exact verified sparkless distributions
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: verified-sparkless-candidate
-          path: public-distributions/sparkless
-      - name: Verify public package inventory, build hashes, and crates.io versions
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
+          path: public-server-bin
+      - name: Verify public package inventory and hashes
         run: |
-          set -euo pipefail
-          version="${RELEASE_VERSION#v}"
-          python3 scripts/verify_public_release_416.py \
-            --version "$version" \
-            --server-bin-directory public-distributions/server-bin \
-            --sparkless-directory public-distributions/sparkless
-      - name: Install the published Rust server crate
-        env:
-          CARGO_BUILD_JOBS: 1
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          if [[ "$version" == 4.18.* ]]; then
-            cargo install --locked --version "$version" --no-default-features \
-              --features http,connect --root "$RUNNER_TEMP/public-rust" sparkless-server
-          else
-            cargo install --locked --version "$version" --root "$RUNNER_TEMP/public-rust" sparkless-server
-          fi
-          actual="$("$RUNNER_TEMP/public-rust/bin/sparkless-server" --version)"
-          expected="sparkless-server ${version}"
-          if [[ "$actual" != "$expected" ]]; then
-            echo "installed binary reported '$actual'; expected '$expected'"
-            exit 1
-          fi
-          echo "$actual"
-          if [[ "$version" != 4.18.* ]]; then
-            python3 scripts/verify_server_bin_wheel.py \
-              --binary "$RUNNER_TEMP/public-rust/bin/sparkless-server" --version "$version"
-          fi
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
-        if: startsWith(github.ref, 'refs/tags/v4.18.')
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install uv
-        run: python -m pip install uv
-      - name: Install locked Spark Connect clients for V34
-        if: startsWith(github.ref, 'refs/tags/v4.18.')
-        run: |
-          set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/connect-client"
-          python3 -m venv "$RUNNER_TEMP/connect-oracle"
-          "$RUNNER_TEMP/connect-client/bin/python" -m pip install --require-hashes -r tests/connect/client-py311.lock
-          "$RUNNER_TEMP/connect-oracle/bin/python" -m pip install --require-hashes -r tests/connect/oracle-py311.lock
-      - name: Download and verify the V34 Spark 4.0.5 reference server
-        if: startsWith(github.ref, 'refs/tags/v4.18.')
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz"
-          curl --fail --location --silent --show-error --retry 3 \
-            https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz \
-            --output "$archive"
-          printf '%s  %s\n' \
-            4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b \
-            "$archive" | sha512sum --check --status
-          mkdir -p "$RUNNER_TEMP/spark-4.0.5"
-          tar -xzf "$archive" -C "$RUNNER_TEMP/spark-4.0.5" --strip-components=1
-      - name: Verify the published server extra and HTTP mutation contract
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          venv="$RUNNER_TEMP/sparkless-public"
-          python3 -m venv "$venv"
-          uv pip install --python "$venv/bin/python" "sparkless[server]==${version}"
-          uv pip check --python "$venv/bin/python"
-          if [[ "$version" == "4.16.1" ]]; then
-            "$venv/bin/python" "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" "$version" --protocol legacy-4.16
-          elif [[ "$version" == 4.18.* ]]; then
-            "$venv/bin/python" "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" \
-              "$version" --mutations --connect-client \
-              --client-python "$RUNNER_TEMP/connect-client/bin/python"
-          else
-            "$venv/bin/python" "${GITHUB_WORKSPACE}/scripts/verify_server_extra_install.py" "$version" --mutations
-          fi
-      - name: Verify the published Rust server supports public Connect clients
-        if: startsWith(github.ref, 'refs/tags/v4.18.')
-        run: >-
-          python3 scripts/verify_server_bin_wheel.py
-          --binary "$RUNNER_TEMP/public-rust/bin/sparkless-server"
-          --version "${GITHUB_REF_NAME#v}"
-          --connect --connect-client
-          --client-python "$RUNNER_TEMP/connect-client/bin/python"
-      - name: Run V18-V23 conformance against the published Rust crate
-        if: startsWith(github.ref, 'refs/tags/v4.18.')
-        run: |
-          set -euo pipefail
-          python3 tests/connect/run_slice6_conformance.py \
-            --server-bin "$RUNNER_TEMP/public-rust/bin/sparkless-server" \
-            --server-cli-mode serve-cli \
-            --client-python "$RUNNER_TEMP/connect-client/bin/python" \
-            --oracle-python "$RUNNER_TEMP/connect-oracle/bin/python" \
-            --oracle-home "$RUNNER_TEMP/spark-4.0.5" \
-            --oracle-archive "$RUNNER_TEMP/spark-4.0.5-bin-hadoop3-connect.tgz" \
-            --output target/connect-v34
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always() && startsWith(github.ref, 'refs/tags/v4.18.')
-        with:
-          name: v34-public-connect-conformance
-          path: target/connect-v34/
-          if-no-files-found: warn
-          retention-days: 90
-      - name: Pull and verify the published container digest
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_IMAGE_DIGEST: ${{ needs.publish-server-container.outputs.image_digest }}
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          image="ghcr.io/eddiethedean/sparkless-server:${tag}"
-          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker pull "$image"
-          actual="$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")"
-          actual_digest="${actual##*@}"
-          if [[ -z "$EXPECTED_IMAGE_DIGEST" || "$actual_digest" != "$EXPECTED_IMAGE_DIGEST" ]]; then
-            echo "published image digest $actual_digest does not match pushed digest $EXPECTED_IMAGE_DIGEST"
-            exit 1
-          fi
-          name="sparkless-server-public-smoke-${GITHUB_RUN_ID}"
-          ports=(-p 127.0.0.1:18099:8099)
-          if [[ "$GITHUB_REF_NAME" == v4.18.* ]]; then
-            ports+=(-p 127.0.0.1::15002)
-          fi
-          docker run -d --name "$name" "${ports[@]}" "$image"
-          cleanup() {
-            docker logs "$name" || true
-            docker rm -f "$name" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          python3 scripts/verify_server_http.py http://127.0.0.1:18099 --mutations
-          if [[ "$GITHUB_REF_NAME" == v4.18.* ]]; then
-            connect_port="$(docker port "$name" 15002/tcp | sed 's/.*://')"
-            SPARKLESS_CONNECT_URL="sc://127.0.0.1:${connect_port}" \
-              "$RUNNER_TEMP/connect-client/bin/python" tests/connect/smoke_public_client.py
-          fi
-          docker stop --time 10 "$name"
-          exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
-          if [[ "$exit_code" != 0 ]]; then
-            echo "published container exited with status $exit_code after graceful stop"
-            exit 1
-          fi
-      - name: Record V32 and V34 public artifact evidence
-        env:
-          IMAGE_DIGEST: ${{ needs.publish-server-container.outputs.image_digest }}
-        run: |
-          if [[ "$GITHUB_REF_NAME" == v4.18.* ]]; then
-            echo "V34 passed: exact PyPI and crates.io inventories, fresh sparkless[server] Connect client, published Rust crate V18-V23 conformance, and GHCR HTTP/Connect smoke. Published image digest: $IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "V32 passed: published Rust server, fresh Python server extra, and GHCR image digest $IMAGE_DIGEST for ${GITHUB_REF_NAME}." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          python scripts/verify_public_release_416.py --version "${GITHUB_REF_NAME#v}" \
+            --sparkless-directory dist --server-bin-directory public-server-bin

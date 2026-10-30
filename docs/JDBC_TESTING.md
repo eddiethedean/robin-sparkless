@@ -1,5 +1,11 @@
 # JDBC and SQLite Testing
 
+> **4.18 build prerequisite:** official Python wheels do not enable JDBC/SQLite.
+> The `jdbc` extra installs test tools, not native features. Follow the
+> [native feature build recipe](INSTALLATION.md#platforms-and-build-features)
+> before these tests. SQLite needs no external service **after** its native feature
+> is compiled; unavailable backends otherwise skip their tests.
+
 This document describes how to run JDBC tests for all supported database backends.
 
 ## Supported Backends

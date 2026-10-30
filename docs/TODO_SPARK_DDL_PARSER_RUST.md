@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Spark DDL Parser (Rust) – Integrated
 
 **Status: Done.** Robin-sparkless now uses the [spark-ddl-parser](https://crates.io/crates/spark-ddl-parser) crate from crates.io for DDL schema parsing in `createDataFrame(data, schema="...")`. The hand-rolled `split_ddl_top_level` logic has been replaced.

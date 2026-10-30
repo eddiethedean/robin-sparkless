@@ -158,6 +158,7 @@ fn translate_relation(
                     "filter conditions require a captured comparison expression",
                 ));
             }
+            validate_comparison_types(&input.schema, &expr)?;
             let expr = resolve_logical_columns(&input, expr)?;
             let schema = input.schema.clone();
             let dataframe = input
@@ -194,7 +195,10 @@ fn translate_relation(
                 .collect::<Result<Vec<_>, _>>()?;
             let expressions = expressions
                 .into_iter()
-                .map(|expression| resolve_logical_columns(&input, expression))
+                .map(|expression| {
+                    validate_comparison_types(&input.schema, &expression)?;
+                    resolve_logical_columns(&input, expression)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             let dataframe = input
                 .dataframe
@@ -330,7 +334,7 @@ fn public_expression_name(
                     .name
                     .eq_ignore_ascii_case(&attribute.unparsed_identifier)
             });
-            let Some(public_field) = fields.next() else {
+            if fields.next().is_none() {
                 return Err(Status::failed_precondition(format!(
                     "Connect projection column {:?} disappeared from its input schema",
                     attribute.unparsed_identifier
@@ -342,7 +346,7 @@ fn public_expression_name(
                     attribute.unparsed_identifier
                 )));
             }
-            Ok(public_field.name.clone())
+            Ok(attribute.unparsed_identifier.clone())
         }
         Some(ExprType::Literal(literal)) => match literal.literal_type.as_ref() {
             Some(LiteralType::Integer(value)) => Ok(value.to_string()),
@@ -439,6 +443,133 @@ fn resolve_logical_columns(
         })
     }
     visit(expression, input)
+}
+
+fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> Result<(), Status> {
+    fn expression_type(input_schema: &StructType, expression: &ExprIr) -> Result<DataType, Status> {
+        match expression {
+            ExprIr::Column(name) => {
+                let matches = input_schema
+                    .logical_fields()
+                    .iter()
+                    .filter(|field| field.name.eq_ignore_ascii_case(name))
+                    .collect::<Vec<_>>();
+                match matches.as_slice() {
+                    [field] => Ok(field.data_type.clone()),
+                    [] => Err(Status::invalid_argument(format!(
+                        "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
+                    ))),
+                    _ => Err(Status::invalid_argument(format!(
+                        "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
+                    ))),
+                }
+            }
+            ExprIr::Lit(LiteralValue::I32(_)) => Ok(DataType::Integer),
+            ExprIr::Lit(LiteralValue::I64(_)) => Ok(DataType::Long),
+            ExprIr::Lit(LiteralValue::F64(_)) => Ok(DataType::Double),
+            ExprIr::Lit(LiteralValue::Str(_)) => Ok(DataType::String),
+            ExprIr::Lit(LiteralValue::Bool(_)) => Ok(DataType::Boolean),
+            ExprIr::Lit(LiteralValue::Null) => Err(unsupported(
+                "untyped null comparison operands are outside the 4.18 subset",
+            )),
+            ExprIr::Add(left, right) => {
+                let left = expression_type(input_schema, left)?;
+                let right = expression_type(input_schema, right)?;
+                if !is_connect_numeric_type(&left) || !is_connect_numeric_type(&right) {
+                    return Err(Status::invalid_argument(format!(
+                        "CONNECT_PLAN_ANALYSIS_FAILED: arithmetic requires numeric operands, found {left:?} and {right:?}"
+                    )));
+                }
+                Ok(connect_common_numeric_type(&left, &right))
+            }
+            ExprIr::Ge(left, right) | ExprIr::Gt(left, right) => {
+                let left_type = expression_type(input_schema, left)?;
+                let right_type = expression_type(input_schema, right)?;
+                if compatible_comparison_types(&left_type, &right_type, left, right) {
+                    Ok(DataType::Boolean)
+                } else {
+                    Err(Status::invalid_argument(format!(
+                        "CONNECT_PLAN_ANALYSIS_FAILED: comparison requires compatible operand types, found {left_type:?} and {right_type:?}"
+                    )))
+                }
+            }
+            ExprIr::Call { name, args } if name == "alias" => {
+                let [value, ExprIr::Lit(LiteralValue::Str(_))] = args.as_slice() else {
+                    return Err(unsupported("malformed projection alias expression"));
+                };
+                expression_type(input_schema, value)
+            }
+            _ => Err(unsupported(
+                "comparison operand type cannot be analyzed in the 4.18 subset",
+            )),
+        }
+    }
+
+    expression_type(input_schema, expression).map(|_| ())
+}
+
+fn compatible_comparison_types(
+    left_type: &DataType,
+    right_type: &DataType,
+    left: &ExprIr,
+    right: &ExprIr,
+) -> bool {
+    let numeric_pair = is_connect_numeric_type(left_type) && is_connect_numeric_type(right_type);
+    let string_numeric_literal = (matches!(left_type, DataType::String)
+        && is_connect_numeric_type(right_type)
+        && matches!(left, ExprIr::Column(_))
+        && matches!(
+            right,
+            ExprIr::Lit(LiteralValue::I32(_) | LiteralValue::I64(_))
+        ))
+        || (matches!(right_type, DataType::String)
+            && is_connect_numeric_type(left_type)
+            && matches!(right, ExprIr::Column(_))
+            && matches!(
+                left,
+                ExprIr::Lit(LiteralValue::I32(_) | LiteralValue::I64(_))
+            ));
+    numeric_pair || string_numeric_literal || same_orderable_connect_type(left_type, right_type)
+}
+
+fn is_connect_numeric_type(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Byte
+            | DataType::Short
+            | DataType::Integer
+            | DataType::Long
+            | DataType::Float
+            | DataType::Double
+            | DataType::Decimal(..)
+    )
+}
+
+fn connect_common_numeric_type(left: &DataType, right: &DataType) -> DataType {
+    match (left, right) {
+        (DataType::Double, _) | (_, DataType::Double) => DataType::Double,
+        (DataType::Float, _) | (_, DataType::Float) => DataType::Float,
+        (DataType::Long, _) | (_, DataType::Long) => DataType::Long,
+        (DataType::Integer, _) | (_, DataType::Integer) => DataType::Integer,
+        (DataType::Short, _) | (_, DataType::Short) => DataType::Short,
+        (DataType::Byte, DataType::Byte) => DataType::Byte,
+        (DataType::Decimal(precision, scale), _) | (_, DataType::Decimal(precision, scale)) => {
+            DataType::Decimal(*precision, *scale)
+        }
+        _ => left.clone(),
+    }
+}
+
+fn same_orderable_connect_type(left: &DataType, right: &DataType) -> bool {
+    matches!(
+        (left, right),
+        (DataType::String, DataType::String)
+            | (DataType::Boolean, DataType::Boolean)
+            | (DataType::Date, DataType::Date)
+            | (DataType::Timestamp, DataType::Timestamp)
+            | (DataType::TimestampNtz, DataType::TimestampNtz)
+            | (DataType::Decimal(..), DataType::Decimal(..))
+    )
 }
 
 fn schema_width_error() -> Status {
@@ -1774,5 +1905,60 @@ mod tests {
                 "unexpectedly accepted {expression:?}"
             );
         }
+    }
+
+    #[test]
+    fn comparison_analysis_checks_aliases_and_preserves_string_numeric_coercion() {
+        let schema = StructType::from_logical_fields(vec![
+            LogicalField::new("flag".into(), DataType::Boolean, true),
+            LogicalField::new("text".into(), DataType::String, true),
+        ]);
+        let invalid = ExprIr::Ge(
+            Box::new(ExprIr::Column("flag".into())),
+            Box::new(ExprIr::Lit(LiteralValue::I32(1))),
+        );
+        let aliased = robin_sparkless::alias(invalid, "result");
+        assert_eq!(
+            validate_comparison_types(&schema, &aliased)
+                .unwrap_err()
+                .code(),
+            Code::InvalidArgument
+        );
+
+        let nested_invalid = ExprIr::Ge(
+            Box::new(aliased),
+            Box::new(ExprIr::Lit(LiteralValue::I32(0))),
+        );
+        assert_eq!(
+            validate_comparison_types(&schema, &nested_invalid)
+                .unwrap_err()
+                .code(),
+            Code::InvalidArgument
+        );
+
+        let numeric_string = ExprIr::Ge(
+            Box::new(ExprIr::Column("text".into())),
+            Box::new(ExprIr::Lit(LiteralValue::I32(1))),
+        );
+        assert!(validate_comparison_types(&schema, &numeric_string).is_ok());
+    }
+
+    #[test]
+    fn public_projection_name_keeps_the_requested_column_case() {
+        let expression = proto::Expression {
+            common: None,
+            expr_type: Some(ExprType::UnresolvedAttribute(
+                expression::UnresolvedAttribute {
+                    unparsed_identifier: "ID".into(),
+                    ..Default::default()
+                },
+            )),
+        };
+        let schema = StructType::from_logical_fields(vec![LogicalField::new(
+            "id".into(),
+            DataType::Long,
+            false,
+        )]);
+        assert_eq!(public_expression_name(&expression, &schema).unwrap(), "ID");
     }
 }

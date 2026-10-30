@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../SUPPORT_MATRIX.md) for release behavior.
+
 This was checked before integration with the newer `codex/release-4.17` implementation. The prototype is superseded by the four direct Polars/Parquet dependency patches; it is not current candidate evidence.
 
 # Historical zstd 0.13 compatibility prototype
@@ -51,4 +59,4 @@ abandoned-decoder and partial-Polars-Parquet-page regressions with registry zstd
 than an unused-API assumption. Full release gates remain open: root Cargo patches
 do not propagate into downstream Rust builds, and fresh distributable dependency,
 supported-platform, V31 candidate and V32 public-install evidence is still
-required. Track closure in the [4.17 blocker table](RELEASE_4_17.md#remaining-417-release-blockers).
+required. Track closure in the [4.17 blocker table](../plans/sparkless-server/RELEASE_4_17.md).

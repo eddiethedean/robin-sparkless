@@ -1,47 +1,16 @@
-# Robin Sparkless Documentation
+# Documentation paths
 
-> **Maintainer index.** User-facing docs are in the MkDocs nav (Python users, Rust users, Reference). This page lists all documents including historical planning artifacts.
+Start with [installation/version selection](INSTALLATION.md), then choose a path:
 
-This page is the **legacy doc index**. The full documentation is built with [MkDocs](https://www.mkdocs.org/) and published on [Read the Docs](https://robin-sparkless.readthedocs.io/). To build locally: `pip install -r docs/requirements.txt` then `mkdocs serve`.
+| Reader | Read next |
+| --- | --- |
+| First-time visitor | [Purpose and adoption limits](BEFORE_YOU_ADOPT.md), [support matrix](SUPPORT_MATRIX.md) |
+| New Python user | [Quick start](python_getting_started.md), [file pipeline](PIPELINE_TUTORIAL.md), [testing](TESTING_GUIDE.md) |
+| Experienced developer | [API contracts](PYTHON_API_REFERENCE.md), [symbols](PYTHON_API_SYMBOLS.md), [types/errors](TYPES_AND_ERRORS.md), [differences](PYSPARK_DIFFERENCES.md) |
+| Rust consumer | [Quick start](QUICKSTART.md), [Rust reference fallback](RUST_API_REFERENCE.md), [security notice](security/zstd-4.18-exception.md) |
+| Extension author | [Architecture](ARCHITECTURE.md), [extensions](EXTENDING.md), [external catalogs](EXTERNAL_CATALOGS.md) |
+| Operator/evaluator | [HTTP](HTTP_API.md), [Connect](SPARK_CONNECT.md), [runbook](PRODUCTION.md), [sizing](PERFORMANCE.md), [support](SUPPORT.md), [security](SECURITY.md) |
+| Contributor | [Regression walkthrough](TEST_CREATION_GUIDE.md), [documentation checks](DOCUMENTATION.md), [release process](RELEASING.md) |
 
-## Python (Sparkless v4)
-
-Documentation for the Python package mirrors the [Sparkless](https://sparkless.readthedocs.io/) readthedocs structure:
-
-| Document | Description |
-|----------|-------------|
-| [Python getting started](python_getting_started.md) | Installation, quick start, core features (DataFrame, SQL, windows), testing, lazy evaluation, next steps |
-| [**Testing Guide**](TESTING_GUIDE.md) | `sparkless.testing` module: dual-mode testing (sparkless + PySpark), fixtures, markers, DataFrame comparison utilities, CI configuration |
-| [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) | Why Sparkless v4, Sparkless 3 vs 4.x, installation, API overview, backend, known limitations |
-| [Migration (PySpark / Sparkless 3)](python_migration.md) | Switching from PySpark or Sparkless 3.x; Sparkless 3 vs 4.x table |
-| [PySpark differences](PYSPARK_DIFFERENCES.md) | Known divergences and caveats (applies to both Rust and Python usage) |
-| [PySpark 4 parity plan](PYSPARK_4_PARITY_PLAN.md) | Roadmap for PySpark 4 parity while keeping PySpark 3.2–3.5 compatibility |
-
-## Rust and general
-
-| Document | Description |
-|----------|-------------|
-| [QUICKSTART](QUICKSTART.md) | Build, install, basic usage, optional features (SQL, Delta, JDBC), troubleshooting, benchmarks |
-| [JDBC_TESTING](JDBC_TESTING.md) | JDBC setup for all backends (PostgreSQL, SQLite, MySQL, MariaDB, SQL Server, Oracle, DB2), Docker Compose, env vars, PySpark-compatible options |
-| [EMBEDDING](EMBEDDING.md) | Embedding and bindings: prelude::embed, *_engine() API, schema helpers, traits; minimal FFI surface |
-| [ROADMAP](ROADMAP.md) | Development roadmap and Sparkless integration phases |
-| [sparkless-server plans](plans/sparkless-server/README.md) | Issue #1726: native HTTP/Connect service epic, workstreams, decisions, and release gates (planned) |
-| [RELEASING](RELEASING.md) | How to cut a release (version bump, tag, crates.io publish) |
-| [CHANGELOG](https://github.com/eddiethedean/robin-sparkless/blob/main/CHANGELOG.md) | Version history and release notes |
-| [PARITY_STATUS](PARITY_STATUS.md) | PySpark parity coverage matrix (212+ JSON fixtures; plan fixtures; phases A–G) |
-| [PYSPARK_DIFFERENCES](PYSPARK_DIFFERENCES.md) | Known divergences from PySpark (window, SQL, Delta, rand/randn semantics; DataFrame cube/rollup/write/saveAsTable and stubs; in-memory tables and catalog; Phase 8 + gap closure) |
-| [ROBIN_SPARKLESS_MISSING](ROBIN_SPARKLESS_MISSING.md) | What Sparkless has and robin-sparkless does not (or stub only); XML/XPath/sentences deferred |
-| [SIGNATURE_GAP_ANALYSIS](SIGNATURE_GAP_ANALYSIS.md) | PySpark vs robin-sparkless signature gap analysis (params, types, defaults) and recommendations |
-| [SIGNATURE_ALIGNMENT_TASKS](SIGNATURE_ALIGNMENT_TASKS.md) | Checklist to align Python param names to PySpark (historical, for the previous Python bindings) |
-| [CONVERTER_STATUS](CONVERTER_STATUS.md) | Sparkless → robin-sparkless fixture converter |
-| [SPARKLESS_PARITY_STATUS](SPARKLESS_PARITY_STATUS.md) | Phase 5: pass/fail and failure reasons for converted fixtures |
-| [FULL_BACKEND_ROADMAP](FULL_BACKEND_ROADMAP.md) | Phased plan to full Sparkless backend replacement (Phases 12–25 + gap closure; ~295+ functions, 159 fixtures, plan interpreter; Phase 26 crate publish, Phase 27 Sparkless integration) |
-| [GAP_ANALYSIS_SPARKLESS_3.28](GAP_ANALYSIS_SPARKLESS_3.28.md) | Full gap analysis vs Sparkless 3.28.0 (installed API comparison) |
-| [PARITY_CHECK_SPARKLESS_3.28](PARITY_CHECK_SPARKLESS_3.28.md) | Double-check parity: implemented vs gap (Feb 2026) |
-| [PHASE15_GAP_LIST](PHASE15_GAP_LIST.md) | Function gap list (PYSPARK_FUNCTION_MATRIX vs robin-sparkless) |
-| [SPARKLESS_INTEGRATION_ANALYSIS](SPARKLESS_INTEGRATION_ANALYSIS.md) | Sparkless backend replacement strategy, architecture, test conversion |
-| [SPARKLESS_REFACTOR_PLAN](SPARKLESS_REFACTOR_PLAN.md) | Refactor plan for Sparkless (serializable logical plan) to prepare for robin backend |
-| [READINESS_FOR_SPARKLESS_PLAN](READINESS_FOR_SPARKLESS_PLAN.md) | What robin-sparkless can do in parallel (plan interpreter, fixtures, API) before merge |
-| [LOGICAL_PLAN_FORMAT](LOGICAL_PLAN_FORMAT.md) | Backend plan format (op list + payload shapes + expression tree) consumed by execute_plan; full expression support (all scalar functions in filter/select/withColumn) |
-| [TEST_CREATION_GUIDE](TEST_CREATION_GUIDE.md) | How to add parity tests and convert Sparkless fixtures |
-| [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md) | Polars migration status, build & test status |
+[Archived plans and historical evidence](ARCHIVE.md) are retained for traceability;
+they are not current product contracts and are excluded from ordinary site search.

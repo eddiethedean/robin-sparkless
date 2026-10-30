@@ -57,6 +57,21 @@ class VerifyReleaseDistributionsTest(unittest.TestCase):
         )
         self.assertEqual(len(files), 2)
 
+    def test_accepts_canonical_manylinux2014_dual_platform_tag(self):
+        self.make_wheel(
+            "sparkless-4.18.0-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+            version="4.18.0",
+            requires_python=">=3.11",
+        )
+        verify_distributions(
+            self.directory,
+            "sparkless",
+            "4.18.0",
+            wheel_count=1,
+            sdist_count=0,
+            platforms={"manylinux2014_x86_64.manylinux_2_17_x86_64"},
+        )
+
     def test_rejects_wheel_with_mismatched_metadata(self):
         self.make_wheel("sparkless-4.16.0-cp38-abi3-win_amd64.whl", version="4.15.3")
         with self.assertRaisesRegex(ValueError, "has version 4.15.3"):

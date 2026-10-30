@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-14: DuckDB data source for Sparkless execution
 
 > **Status: planned; owner unassigned.** Phase: 3, after supported Spark Connect. Target release: 4.19.0; optional capability.
@@ -53,10 +61,10 @@ The native Sparkless process must remain Python/JVM-free. A shared-process appro
 
 ## Touchpoints and references
 
-- [External catalog contract](../../../crates/robin-sparkless-core/src/engine/external_catalog.rs)
-- [Backend interfaces](../../../crates/robin-sparkless-core/src/engine/mod.rs)
-- [Polars sessions](../../../crates/robin-sparkless-polars/src/session/mod.rs)
-- [Server runtime](../../../crates/sparkless-server/src/lib.rs)
+- [External catalog contract](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/engine/external_catalog.rs)
+- [Backend interfaces](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/engine/mod.rs)
+- [Polars sessions](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/src/session/mod.rs)
+- [Server runtime](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server/src/lib.rs)
 - [DuckDB concurrency](https://duckdb.org/docs/stable/connect/concurrency): verify the selected version's embedded/service ownership rules; documentation is not a compatibility pin.
 
 Python workers, distributed query execution, application-specific integration protocols, durable source caches, and a DuckDB execution backend are outside this phase.

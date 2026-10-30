@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Plan: Splitting robin-sparkless into Sub-crates
 
 This document outlines the split of `robin-sparkless` into multiple workspace crates. The main goal is **faster iterative compilation**: avoid recompiling Polars when changing only a subset of the codebase.

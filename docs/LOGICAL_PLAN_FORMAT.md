@@ -188,7 +188,7 @@ Column names in expressions and op payloads are resolved **case-insensitively** 
 Backends such as Sparkless can discover which plan operations robin-sparkless supports by calling:
 
 ```python
-import robin_sparkless as rs
+import sparkless as rs
 ops = rs.supported_plan_operations()  # tuple[str, ...]
 # e.g. "filter" in ops
 ```

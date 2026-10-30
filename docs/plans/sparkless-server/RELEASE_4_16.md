@@ -1,6 +1,14 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # 4.16.0 implementation and release plan
 
-**Status: the 4.16.0 artifact set is partially published, but the release is incomplete. V29 and V30 have not passed.** The annotated tag exists and its original release run passed its recorded pre-publication checks, but initially failed to publish `sparkless-server-bin` to PyPI. The guarded [recovery workflow](../../../.github/workflows/recover-4.16.0.yml) later published the PyPI files, crates.io crates, and GHCR image. The final [recovery run](https://github.com/eddiethedean/robin-sparkless/actions/runs/40143218104) failed its fresh public `sparkless[server]==4.16.0` install check: the immutable `sparkless-server-bin` wheel does not export the `executable_path` API required by the launcher. No GitHub Release record was created.
+**Status: the 4.16.0 artifact set is partially published, but the release is incomplete. V29 and V30 have not passed.** The annotated tag exists and its original release run passed its recorded pre-publication checks, but initially failed to publish `sparkless-server-bin` to PyPI. The guarded [recovery workflow](https://github.com/eddiethedean/robin-sparkless/blob/main/.github/workflows/recover-4.16.0.yml) later published the PyPI files, crates.io crates, and GHCR image. The final [recovery run](https://github.com/eddiethedean/robin-sparkless/actions/runs/40143218104) failed its fresh public `sparkless[server]==4.16.0` install check: the immutable `sparkless-server-bin` wheel does not export the `executable_path` API required by the launcher. No GitHub Release record was created.
 
 The public PyPI inventory currently contains nine `sparkless==4.16.0` files and four `sparkless-server-bin==4.16.0` wheels; all five first-party crates and `ghcr.io/eddiethedean/sparkless-server:4.16.0` are also published. Public inventory checks pass, but the server-extra install fails on the missing launcher API. PyPI files and registry versions are immutable, so correcting that package requires a new coordinated patch version under the [release policy](ROADMAP.md#coordinated-version-and-publication-policy), such as 4.16.1. Until a corrected 4.16-line release passes its candidate and public-install gates, the 4.16 prerequisite for 4.17 is unmet. The current workspace manifests still report 4.15.3.
 

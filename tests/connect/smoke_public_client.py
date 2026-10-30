@@ -10,6 +10,8 @@ from pyspark.sql.functions import col
 
 def main() -> None:
     connect_url = os.environ.get("SPARKLESS_CONNECT_URL", "sc://127.0.0.1:15002")
+    if ";user_id=" not in connect_url:
+        connect_url = connect_url.rstrip("/") + "/;user_id=sparkless-public-smoke"
     spark = SparkSession.builder.remote(connect_url).getOrCreate()
     try:
         assert spark.range(10).filter("id > 5").count() == 4

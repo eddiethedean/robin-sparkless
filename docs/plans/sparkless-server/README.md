@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # sparkless-server implementation plans
 
 **Status: planned.** These documents describe proposed work for [issue #1726](https://github.com/eddiethedean/robin-sparkless/issues/1726). They do not announce a working server, launcher, or protocol compatibility. Prepared on 2026-10-23.
@@ -12,6 +20,7 @@ Build a single-node Rust service in `crates/sparkless-server/` that calls Robin'
 - [4.18 implementation plan](RELEASE_4_18.md): public Connect subset, physical Arrow encoding, bounded replay/lifecycle, standalone then proxy conformance, and candidate/publication gates.
 - [Spark Connect public-contract research](CONNECT_PROTOCOL_RESEARCH.md): Apache Spark 4.0.5 source review, 4.0.0 source comparison, pinned client fixtures, retry/config/IPC requirements, and product scope versus public protocol behavior.
 - [DuckDB data source](14-duckdb-data-source.md) and [DuckDB Connect backend](15-duckdb-connect-backend.md): separate Phases 3/4 after supported Connect, targeted at 4.19/4.20.
+- [Expanded Connect API/types](16-connect-api-types-and-analysis.md), [I/O/artifacts/cache](17-connect-sources-artifacts-and-persistence.md), [durable recovery](18-durable-connect-recovery.md), and [Structured Streaming](19-structured-streaming.md): Phases 7–10, targeted at 4.23–4.26; planned scope, not current support.
 - [Full revised epic](EPIC.md): baseline architecture, contracts, limitations, and phase gates.
 - [Decision register](DECISIONS.md): unresolved choices, required milestones, and evidence to record.
 - [Validation matrix](VALIDATION.md): concrete release evidence required for each milestone.
@@ -35,10 +44,14 @@ All workstreams are **planned**, with owners unassigned and implementation issue
 | SS-09 | [Spark Connect plan translation and analysis](09-connect-plans-and-analysis.md) | 2 |
 | SS-10 | [Arrow streaming, replay, and Connect conformance](10-arrow-replay-and-connect-conformance.md) | 2, informed by 0A feasibility |
 | SS-11 | [Standalone conformance, benchmarks, and release](11-proxy-benchmarks-and-release.md) | 0B release foundations; Phase 2 Connect and concurrent-client release |
-| SS-12 | [Optional isolated Python Jobs and notebooks](12-optional-python-workers.md) | 5; optional and separately packaged |
+| SS-12 | [Optional isolated Python Jobs, notebooks, and UDFs](12-optional-python-workers.md) | 5; optional and separately packaged |
 | SS-13 | [Optional native Delta Lake and Unity Catalog](13-optional-delta-and-unity-catalog.md) | 6; optional |
 | SS-14 | [DuckDB data source for Polars execution](14-duckdb-data-source.md) | 3; optional, after supported Connect |
 | SS-15 | [DuckDB execution backend for Connect](15-duckdb-connect-backend.md) | 4; optional, after the DuckDB source phase |
+| SS-16 | [Expanded Connect DataFrame API, types, and analysis](16-connect-api-types-and-analysis.md) | 7; default Polars API and explicit backend matrices |
+| SS-17 | [Connect sources, artifacts, caching, and checkpoints](17-connect-sources-artifacts-and-persistence.md) | 8; connectors/storage explicitly enabled |
+| SS-18 | [Durable Connect sessions, outcomes, and replay](18-durable-connect-recovery.md) | 9; optional persistent recovery mode |
+| SS-19 | [Single-node Structured Streaming](19-structured-streaming.md) | 10; optional, after API/I/O/recovery prerequisites |
 
 ## Milestone dependency order
 
@@ -50,8 +63,12 @@ All workstreams are **planned**, with owners unassigned and implementation issue
 | 2 | SS-09 plans/config/analysis and SS-10 Arrow/replay jointly; SS-06 gRPC endpoint exposure; SS-11 standalone release checks | Standalone unmodified JVM-free client conformance; optional proxy certification is supplemental |
 | 3, optional | SS-14 after supported Connect; D14 source/ownership contract | V35/V36 typed DuckDB-to-Polars scans, snapshots, bounded resources, and independent writer/reader sharing |
 | 4, optional | SS-15 after SS-14; D15 execution/backend contract | V37/V38 DuckDB computation, transaction outcomes, Connect lifecycle, and shared managed-table writes |
-| 5, optional | SS-12 and its runtime/catalog/release prerequisites | V27 isolated Python workers; core remains Python-free |
+| 5, optional | SS-12 and its runtime/catalog/release prerequisites | V27 isolated Jobs/notebooks and scalar/Pandas UDFs; core remains Python-free |
 | 6, optional | SS-13 and native catalog/type/release prerequisites | V28 independent Delta/UC readers validate transactions; no dependency on Python workers |
+| 7 | SS-16 and native schema/Connect foundations | V39/V40 DataFrame/type/analysis/config conformance, lifecycle and resource checks |
+| 8 | SS-17 after required SS-16 surface; each connector independently enabled | V41–V43 file/JDBC I/O, real artifact transfers, cache/checkpoint lifetimes and bounds |
+| 9, optional | SS-18 and certified persistent backend/sink ownership | V44/V45 transactional receipts, crash/restart replay and eligible session recovery |
+| 10, optional | SS-19 using SS-16–18 and each enabled source/sink | V46/V47 streaming semantics, state/checkpoint/commit recovery and long-running bounds |
 
 SS-03 uses a bounded prototype of execution lifecycle concepts; it does not wait for the complete Phase 2 implementation. Its findings guide SS-09/10. Those workstreams share an interface contract and must pass together; neither claims compatibility alone.
 
@@ -66,6 +83,7 @@ SS-07 and SS-08 have explicit early slices: session ownership and scalar schema 
 5. Pass the full 0B matrix, including direct HTTP typed results and packaged consumers, before calling the HTTP MVP complete.
 6. Expand shared catalogs/types and then production Connect lifecycle/plan coverage.
 7. After supported Connect, deliver the DuckDB source phase, then the separate DuckDB execution backend phase. Python workers and native Delta/UC follow under the revised release map. Workstream IDs SS-12–SS-15 are identifiers, not phase order.
+8. Expand the default Connect API/types, then I/O/artifacts/cache, durable recovery, and optional Structured Streaming under SS-16–19. Keep optional component dependencies scoped to their enabled APIs; RDD/SparkContext and distributed executors remain outside the single-node roadmap.
 
 ## Tracking conventions
 

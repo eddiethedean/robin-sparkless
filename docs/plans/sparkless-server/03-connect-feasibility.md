@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-03: Early Spark Connect feasibility
 
 > **Status: planned; owner unassigned.** Phase: 0A only; experimental endpoint.

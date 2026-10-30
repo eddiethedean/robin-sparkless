@@ -1,4 +1,12 @@
-# SS-12: Optional isolated Python Jobs and notebooks
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
+# SS-12: Optional isolated Python Jobs, notebooks, and UDFs
 
 > **Status: planned; owner unassigned.** Phase: 5; target 4.21.0; optional and separately packaged.
 > [Index](README.md) · [Epic contract](EPIC.md#acceptance-and-release-gates) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
@@ -6,6 +14,8 @@
 ## Outcome
 
 Design out-of-process Python execution without introducing a Python dependency into native SQL/Connect deployments.
+
+Phase 5 now explicitly includes scalar Python UDFs and scalar/grouped/iterator Pandas UDF APIs through Connect. Freeze the exact forms and type matrix under D12; workers support only enabled input/output types, with later SS-16 type expansion gated independently. Jobs/notebook execution and UDF execution require separate positive/negative evidence before either is advertised.
 
 ## Dependencies and delivery slices
 
@@ -27,11 +37,16 @@ Plan numbers are workstream identifiers, not a strict execution order. Only the 
 
 6. Test real emulator Job/notebook routes, failures, secret redaction, parallel isolation, and disabled-feature behavior.
 
+7. Implement public-client UDF registration/serialization and declared Pandas/Arrow execution forms through a versioned worker RPC. Specify function/environment distribution, determinism, null/decimal/time semantics, row/group/batch boundaries, type mismatch errors, and bounded code/result transport. Do not depend on general AddArtifacts support scheduled for Phase 8; freeze and bound the selected client's required UDF payload path explicitly.
+
+8. Test UDF results and schemas against the pinned Spark reference, worker crash/retry/cancel behavior, oversized groups/results, session isolation, and cleanup. Retry must not imply exactly-once external side effects from arbitrary user code. No Python imports or callbacks execute inside the native server.
+
 ## Acceptance criteria
 
 - [ ] Core images and builds remain Python-free when the feature is disabled.
 - [ ] Unsupported kind=python remains explicit until the full worker capability is enabled.
 - [ ] Enabled workers have tested resource isolation, process cleanup, and truthful run/mutation outcomes.
+- [ ] V27 separately certifies the declared scalar/Pandas UDF API and type matrix, bounded Arrow/group execution, errors/cancellation, and disabled-feature failures through the unmodified client.
 
 ## Decisions and implementation touchpoints
 

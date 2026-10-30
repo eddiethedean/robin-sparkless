@@ -3714,6 +3714,36 @@ fn binary_series_i32(
     Ok((ca_a, ca_b))
 }
 
+fn try_narrow_integral_op(
+    a: &Series,
+    b: &Series,
+    name: &str,
+    op_name: &str,
+    f: impl Fn(i64, i64) -> Option<i64>,
+) -> PolarsResult<Option<Series>> {
+    let result_type = match (a.dtype(), b.dtype()) {
+        (DataType::Int8, DataType::Int8) => DataType::Int8,
+        (DataType::Int16, DataType::Int16) => DataType::Int16,
+        _ => return Ok(None),
+    };
+    let (a, b) = (a.cast(&DataType::Int32)?, b.cast(&DataType::Int32)?);
+    let (ca_a, ca_b) = binary_series_i32(&a, &b, op_name)?;
+    let values = ca_a.into_iter().zip(&ca_b).map(|(left, right)| {
+        left.zip(right).and_then(|(left, right)| {
+            f(left as i64, right as i64).and_then(|value| match &result_type {
+                DataType::Int8 => i8::try_from(value).ok().map(i32::from),
+                DataType::Int16 => i16::try_from(value).ok().map(i32::from),
+                _ => unreachable!("matched a narrow integral result type"),
+            })
+        })
+    });
+    Ok(Some(
+        Int32Chunked::from_iter_options(name.into(), values)
+            .into_series()
+            .cast(&result_type)?,
+    ))
+}
+
 /// Helper: get two series as Float64Chunked with shared error context.
 fn binary_series_f64(
     a: &Series,
@@ -4052,6 +4082,11 @@ pub fn apply_try_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_add")?;
+    if let Some(out) = try_narrow_integral_op(&a_s, &b_s, name.as_str(), "try_add", |a, b| {
+        a.checked_add(b)
+    })? {
+        return Ok(Some(Column::new(name, out)));
+    }
     if matches!(
         (a_s.dtype(), b_s.dtype()),
         (DataType::Datetime(_, _), DataType::Duration(_))
@@ -4139,6 +4174,11 @@ pub fn apply_try_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_subtract")?;
+    if let Some(out) = try_narrow_integral_op(&a_s, &b_s, name.as_str(), "try_subtract", |a, b| {
+        a.checked_sub(b)
+    })? {
+        return Ok(Some(Column::new(name, out)));
+    }
     if matches!(
         (a_s.dtype(), b_s.dtype()),
         (DataType::Datetime(_, _), DataType::Duration(_))
@@ -4226,6 +4266,11 @@ pub fn apply_try_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "try_multiply")?;
+    if let Some(out) = try_narrow_integral_op(&a_s, &b_s, name.as_str(), "try_multiply", |a, b| {
+        a.checked_mul(b)
+    })? {
+        return Ok(Some(Column::new(name, out)));
+    }
     if matches!(
         (a_s.dtype(), b_s.dtype()),
         (DataType::Float32, DataType::Float32)
@@ -4309,6 +4354,7 @@ pub(crate) fn apply_ansi_divide_with_precision_loss(
     let name = columns[0].field().into_owned().name;
     let a_s = std::mem::take(&mut columns[0]).take_materialized_series();
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
+    let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, "ansi_divide")?;
     let (ca_a, ca_b) = binary_series_f64(&a_s, &b_s, "ansi_divide")?;
     for ob in ca_b.iter().flatten() {
         if ob == 0.0 {
@@ -4343,6 +4389,33 @@ fn ansi_checked_i64_op(
     let b_s = std::mem::take(&mut columns[1]).take_materialized_series();
     let (a_s, b_s) = broadcast_binary_inputs(a_s, b_s, op_name)?;
     let out = if matches!(
+        (a_s.dtype(), b_s.dtype()),
+        (DataType::Int8, DataType::Int8) | (DataType::Int16, DataType::Int16)
+    ) {
+        let result_type = a_s.dtype().clone();
+        let (a_s, b_s) = (a_s.cast(&DataType::Int32)?, b_s.cast(&DataType::Int32)?);
+        let (ca_a, ca_b) = binary_series_i32(&a_s, &b_s, op_name)?;
+        let mut values = Vec::with_capacity(ca_a.len());
+        for (oa, ob) in ca_a.into_iter().zip(&ca_b) {
+            match (oa, ob) {
+                (Some(a), Some(b)) => {
+                    let value = f(a as i64, b as i64).and_then(|value| match &result_type {
+                        DataType::Int8 => i8::try_from(value).ok().map(i32::from),
+                        DataType::Int16 => i16::try_from(value).ok().map(i32::from),
+                        _ => unreachable!("matched a narrow integral result type"),
+                    });
+                    match value {
+                        Some(value) => values.push(Some(value)),
+                        None => return Err(PolarsError::ComputeError(err_msg.to_string().into())),
+                    }
+                }
+                _ => values.push(None),
+            }
+        }
+        Int32Chunked::from_iter_options(name.as_str().into(), values.into_iter())
+            .into_series()
+            .cast(&result_type)?
+    } else if matches!(
         (a_s.dtype(), b_s.dtype()),
         (DataType::Int32, DataType::Int32)
     ) {
@@ -4385,6 +4458,9 @@ fn ansi_checked_i64_op(
 
 /// ANSI add: error on integer overflow.
 pub fn apply_ansi_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.iter().any(|column| column.dtype().is_float()) {
+        return apply_try_add(columns);
+    }
     ansi_checked_i64_op(
         columns,
         "ansi_add",
@@ -4395,6 +4471,9 @@ pub fn apply_ansi_add(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
 
 /// ANSI subtract: error on integer overflow.
 pub fn apply_ansi_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.iter().any(|column| column.dtype().is_float()) {
+        return apply_try_subtract(columns);
+    }
     ansi_checked_i64_op(
         columns,
         "ansi_subtract",
@@ -4405,6 +4484,9 @@ pub fn apply_ansi_subtract(columns: &mut [Column]) -> PolarsResult<Option<Column
 
 /// ANSI multiply: error on integer overflow.
 pub fn apply_ansi_multiply(columns: &mut [Column]) -> PolarsResult<Option<Column>> {
+    if columns.iter().any(|column| column.dtype().is_float()) {
+        return apply_try_multiply(columns);
+    }
     ansi_checked_i64_op(
         columns,
         "ansi_multiply",
@@ -7140,5 +7222,48 @@ mod tests_parse_timestamp {
         let out = super::normalize_map_key_series(s, false).unwrap();
         assert_eq!(out.f64().unwrap().get(0), Some(0.0));
         clear_thread_udf_context();
+    }
+}
+
+#[cfg(test)]
+mod tests_narrow_integer_arithmetic {
+    use super::*;
+
+    fn narrow_columns(left: i16, right: i16) -> Vec<Column> {
+        vec![
+            Series::new("left".into(), [left]).into_column(),
+            Series::new("right".into(), [right]).into_column(),
+        ]
+    }
+
+    #[test]
+    fn short_addition_preserves_the_result_schema_and_values() {
+        let (left, right) =
+            crate::column::expr_ir_arithmetic_types(&DataType::Int16, &DataType::Int16).unwrap();
+        let fields = [
+            Field::new("left".into(), left),
+            Field::new("right".into(), right),
+        ];
+        assert_eq!(
+            crate::ansi::arithmetic_field(&fields).unwrap().dtype(),
+            &DataType::Int16
+        );
+
+        let mut columns = narrow_columns(12, 30);
+        let result = apply_ansi_add(&mut columns).unwrap().unwrap();
+        assert_eq!(result.dtype(), &DataType::Int16);
+        assert_eq!(result.i16().unwrap().get(0), Some(42));
+    }
+
+    #[test]
+    fn short_addition_checks_ansi_overflow_and_nulls_try_overflow() {
+        let mut ansi_columns = narrow_columns(i16::MAX, 1);
+        let error = apply_ansi_add(&mut ansi_columns).unwrap_err().to_string();
+        assert!(error.contains("ARITHMETIC_OVERFLOW"), "{error}");
+
+        let mut try_columns = narrow_columns(i16::MAX, 1);
+        let result = apply_try_add(&mut try_columns).unwrap().unwrap();
+        assert_eq!(result.dtype(), &DataType::Int16);
+        assert_eq!(result.i16().unwrap().get(0), None);
     }
 }

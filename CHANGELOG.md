@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.18.0] - 2026-10-29
 
+Release candidate; publication is tracked separately from CI validation. See [release evidence](docs/RELEASE_EVIDENCE.md).
+
 ### Added
 
 - **Native Spark Connect server** — the coordinated native server distribution includes the optional Spark Connect 4.0.5 transport, checked plan execution, bounded Arrow streaming, operation recovery, and owned launcher lifecycle. The capability matrix and unsupported operations are documented in [Spark Connect support](docs/SPARK_CONNECT.md).
 - **Connect candidate verification** — the 4.18 candidate workflow runs the pinned client against the Spark 4.0.5 reference, exercises the packaged server binaries, checks the full distribution inventory, and preserves source-bound V33 evidence.
+- **Rust consumer security policy** — the unpatched 4.18.0 Cargo graph retains three disclosed zstd advisory findings under a maintainer-approved exception through 2026-11-26; official artifacts and the documented consumer patch graph remain fixed and independently audited. [Scope and residual risk](docs/security/zstd-4.18-exception.md).
 
 ## [4.17.0] - 2026-10-27
 
@@ -794,7 +797,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Regex:** `regexp_extract`, `regexp_replace`
   - **Math:** `floor`, `round`, `exp`
   - **Hash/other:** `levenshtein`, `crc32`, `xxhash64`
-  New tests: `tests/python/test_missing_bindings_parity.py`. Parity cross-check doc: [docs/RUST_PYTHON_PARITY_CROSSCHECK.md](docs/RUST_PYTHON_PARITY_CROSSCHECK.md).
+  New tests: `tests/python/test_missing_bindings_parity.py`. Parity cross-check doc: [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md).
 
 ## [0.7.1] - 2026-02-12
 
@@ -871,7 +874,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Plan interpreter**: Logical plan format extended with `python_grouped_udf` aggregation nodes in `groupBy` payloads; the interpreter currently rejects these with a clear `PlanError::InvalidPlan` until grouped UDF execution is wired through `execute_plan`.
   - **SQL**: Unknown functions in SELECT and WHERE continue to resolve to the UDF registry; built-ins `UPPER`/`LOWER` supported; `SelectItem::ExprWithAlias` for `SELECT expr AS alias`.
   - **Thread-local session**: `call_udf` resolves UDFs from the session set by `get_or_create()`.
-  - **Docs**: [UDF_GUIDE.md](docs/UDF_GUIDE.md), [PYTHON_API.md](docs/PYTHON_API.md), [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md), [DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md), [ROBIN_SPARKLESS_MISSING.md](docs/ROBIN_SPARKLESS_MISSING.md), [FULL_PARITY_ROADMAP.md](docs/FULL_PARITY_ROADMAP.md), and top-level READMEs updated to describe UDF support and grouped vectorized `pandas_udf(..., function_type="grouped_agg")`. `udtf` and non-aggregating `pandas_udf` variants remain deferred.
+  - **Docs**: [UDF_GUIDE.md](docs/UDF_GUIDE.md), [PYTHON_API.md](docs/PYTHON_API_REFERENCE.md), [PYSPARK_DIFFERENCES.md](docs/PYSPARK_DIFFERENCES.md), [DEFERRED_SCOPE.md](docs/DEFERRED_SCOPE.md), [ROBIN_SPARKLESS_MISSING.md](docs/ROBIN_SPARKLESS_MISSING.md), [FULL_PARITY_ROADMAP.md](docs/FULL_PARITY_ROADMAP.md), and top-level READMEs updated to describe UDF support and grouped vectorized `pandas_udf(..., function_type="grouped_agg")`. `udtf` and non-aggregating `pandas_udf` variants remain deferred.
 
 ### Changed
 
@@ -911,7 +914,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **#178 – pytest-xdist / forked worker crashes** — Polars (used by robin-sparkless) is multithreaded and not fork-safe. Added `configure_for_multiprocessing()` to limit Polars to a single thread, reducing worker crashes ("node down: Not properly terminated") when using pytest-xdist (`pytest -n N`) or multiprocessing with fork. Call it early (e.g. in `conftest.py`) or set `ROBIN_SPARKLESS_MULTIPROCESSING=1` before running. See [docs/PYTHON_API.md](docs/PYTHON_API.md#multiprocessing-and-pytest-xdist).
+- **#178 – pytest-xdist / forked worker crashes** — Polars (used by robin-sparkless) is multithreaded and not fork-safe. Added `configure_for_multiprocessing()` to limit Polars to a single thread, reducing worker crashes ("node down: Not properly terminated") when using pytest-xdist (`pytest -n N`) or multiprocessing with fork. Call it early (e.g. in `conftest.py`) or set `ROBIN_SPARKLESS_MULTIPROCESSING=1` before running. See [docs/PYTHON_API_REFERENCE.md](docs/TESTING_GUIDE.md).
 - **Parity fixtures**: PySpark-expected values as source of truth; Robin matches behavior.
   - `current_date`/`curdate` mock returns Date type (not timestamp).
   - `octet_length` parity handler and Int32 return type.
@@ -1048,7 +1051,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - DataFrame: `filter`, `select`, `with_column`, `order_by`, `group_by`, `join`, `union`, `union_by_name`, `distinct`, `drop`, `dropna`, `fillna`, `limit`, `with_column_renamed`, `count`, `show`, `collect` (list of dicts).
   - Column/expressions: `col`, `lit`, `when().then().otherwise()`, `coalesce`, `sum`, `avg`, `min`, `max`, `count`; methods `gt`, `ge`, `lt`, `le`, `eq`, `ne`, `and_`, `or_`, `alias`, `is_null`, `is_not_null`, `upper`, `lower`, `substr`.
   - GroupedData: `count()`, `sum(column)`, `avg(column)`, `min(column)`, `max(column)`, `agg(exprs)`.
-  - Build: `maturin develop --features pyo3`; API contract in [docs/PYTHON_API.md](docs/PYTHON_API.md). Python smoke tests in `tests/python/`; `make test` runs Rust + Python tests.
+  - Build: `maturin develop --features pyo3`; API contract in [docs/PYTHON_API_REFERENCE.md](docs/PYTHON_API_REFERENCE.md). Python smoke tests in `tests/python/`; `make test` runs Rust + Python tests.
 
 - **Phase 5 – Test Conversion** ✅
   - Parity test discovers `tests/fixtures/*.json` and `tests/fixtures/converted/*.json`; optional `skip: true` / `skip_reason`.
@@ -1108,7 +1111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Rust**: Implemented `freq_items`, `approx_quantile`, `crosstab`, `melt` (full implementations); `sample_by` (stratified sampling); Spark no-ops: `hint`, `is_local`, `input_files`, `same_semantics`, `semantic_hash`, `observe`, `with_watermark`. DataFrame methods count ~35 → ~55+.
   - **PyO3**: Exposed `random_split`, `summary`, `to_df`, `select_expr`, `col_regex`, `with_columns`, `with_columns_renamed`, `stat()` (returns `DataFrameStat` with `cov`/`corr`), `na()` (returns `DataFrameNa` with `fill`/`drop`), `to_pandas` (same as collect; for use with `pandas.DataFrame.from_records`). Registered `PyDataFrameStat` and `PyDataFrameNa` in the module.
   - **Parity**: Fixtures `first_row`, `head_n`, `offset_n` for first/head/offset operations.
-  - **Docs**: [PYTHON_API.md](docs/PYTHON_API.md), [PARITY_STATUS.md](docs/PARITY_STATUS.md), [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md), [ROADMAP.md](docs/ROADMAP.md), [FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md), README, and docs index updated for Phase 12.
+  - **Docs**: [PYTHON_API.md](docs/PYTHON_API_REFERENCE.md), [PARITY_STATUS.md](docs/PARITY_STATUS.md), [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md), [ROADMAP.md](docs/ROADMAP.md), [FULL_BACKEND_ROADMAP.md](docs/FULL_BACKEND_ROADMAP.md), README, and docs index updated for Phase 12.
 
 - **Phase 13 – Functions batch 1 (string, binary, collection)** ✅ (partial)
   - **Rust**: String — `ascii`, `format_number`, `overlay`, `position`, `char`, `chr`; Base64 — `base64`, `unbase64` (base64 crate); Binary — `sha1`, `sha2(bit_length)`, `md5` (sha1, sha2, md5 crates; string in → hex out); Collection — `array_compact`. UDFs in `udfs.rs` for ascii, format_number, char, base64, unbase64, sha1, sha2, md5.

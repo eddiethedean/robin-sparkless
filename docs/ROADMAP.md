@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Roadmap: PySpark Semantics in a Rust Crate (No JVM)
 
 > **Historical maintainer doc.** Sparkless v4 integration is complete; this roadmap tracks engine phases and parity history. For current status see [Parity status](PARITY_STATUS.md). For adoption see [Before you adopt](BEFORE_YOU_ADOPT.md).

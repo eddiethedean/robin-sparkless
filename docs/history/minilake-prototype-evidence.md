@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../SUPPORT_MATRIX.md) for release behavior.
+
 # Historical MiniLake HTTP prototype evidence
 
 Archived 2026-10-25. These extracts preserve earlier component-test records and revisions. They are superseded as planning and release requirements: MiniLake work is managed separately by the project owner and does not gate Sparkless development, CI, or releases. Recorded component results do not establish a passing Sparkless release gate.
@@ -52,7 +60,7 @@ Archived 2026-10-25. These extracts preserve earlier component-test records and 
 ```text
 The public 4.16.0 registries currently contain the expected PyPI inventories (nine `sparkless` files and four `sparkless-server-bin` wheels), all five first-party crates, and the GHCR image. The guarded [4.16.0 recovery run](https://github.com/eddiethedean/robin-sparkless/actions/runs/40143218104) failed its final fresh-install gate because the published server-binary package lacks `executable_path`; V29/V30 remain incomplete and no GitHub Release record exists. A successful [main-branch workflow dispatch](https://github.com/eddiethedean/robin-sparkless/actions/runs/40102266143) passed the current native, Python, SDK/MiniLake, wheel, and container jobs, but it did not validate a coordinated 4.17.0 candidate or run publication/V32 jobs.
 
-**MiniLake scope update:** the [Connect decision](MINILAKE_CONNECT.md) supersedes earlier MiniLake HTTP upstream-acceptance prerequisites. Phase 1 requires the full native/direct-HTTP outcome matrix; historical fork SDK evidence is supplemental. MiniLake interoperability through a generic Connect backend is Phase 2 evidence. Existing pinned fork workflow checks remain internal regressions, without requiring an upstream merge. No gate is marked passed by this scope change.
+**MiniLake scope update:** the [Connect decision](../plans/sparkless-server/03-connect-feasibility.md) supersedes earlier MiniLake HTTP upstream-acceptance prerequisites. Phase 1 requires the full native/direct-HTTP outcome matrix; historical fork SDK evidence is supplemental. MiniLake interoperability through a generic Connect backend is Phase 2 evidence. Existing pinned fork workflow checks remain internal regressions, without requiring an upstream merge. No gate is marked passed by this scope change.
 
 | Gate | Phase / owner | Required scenario | Assertion / evidence |
 | --- | --- | --- | --- |

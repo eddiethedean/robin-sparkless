@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # PySpark Test Translation
 
 This document describes the pipeline for extracting Apache PySpark SQL tests and producing robin-sparkless parity fixtures and pytest stubs.

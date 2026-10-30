@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Sparkless Refactor Plan: Backend Readiness for Robin-Sparkless
 
 This document is a **refactor plan for the Sparkless project**. The goal is to leave Sparkless **functionally the same** (same API, same behavior, same tests) while **preparing the codebase** so that a future **robin-sparkless** engine can be added as a backend with minimal glue code. It is intended for Sparkless maintainers and contributors.

@@ -1,8 +1,16 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # Decision register
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Validation](VALIDATION.md)
 
-**Status:** The standalone D02–D04/D07–D11 contract and Python 3.11 minimum are frozen for 4.17 below; final candidate and distribution evidence remain open. D05's coordinated package versions remain resolved. The 4.18 Connect client/protocol baseline is frozen below; server interoperability remains open. Spark Connect is pinned to the 4.0.5 maintenance line for 4.18; this does not change the separate project release version.
+**Status as of 2026-10-30:** 4.17.0 public verification is complete. The 4.18 Spark Connect baseline is frozen, and candidate interoperability, the approved V26 budget, and the coordinated candidate inventory passed; see the [4.18 cut evidence](RELEASE_4_18.md#4180-cut-evidence). V25 is not advertised. No 4.18.0 tag or publication has been made, and V34 remains post-publication work. D05's coordinated package versions remain resolved; Spark Connect is pinned to Spark 4.0.5 independently of the project release version.
 
 Do not replace an unresolved value with a guessed version or silently treat a recommendation as implemented. Record resolution date, owner, exact immutable revisions, rationale, impacted plans, and validation evidence here.
 
@@ -69,9 +77,9 @@ The [4.18 plan](RELEASE_4_18.md) divides Phase 2 into slices 418-01–418-10. Sl
 | D03, D05 | Proxy dependency tracked against MiniLake PR #1, which has no Connect/gRPC path; staged wheel targets remain macOS arm64 and manylinux x86_64, with a single-architecture container. | V25 needs the separate immutable MiniLake gRPC route; V26 needs full 1/2/4/8+ measurements and agreed numeric regression budgets. Standalone V18–V24 comes first; V33 candidate inventory and V34 public-artifact checks remain required. |
 | D06 | Frozen 2026-10-28 for Slice 418-07: bounded JSON-lines control protocol v2; independent capabilities protocol v1; readiness reports actual HTTP and optional `sc://` endpoints, server instance identity, and matching capability record. CLI uses `--connect-host`/`--connect-port`, defaulting to `127.0.0.1:15002`; Python launchers request port `0`, and `connect_port=None` sends `--disable-connect`. `--disable-http` and `--disable-connect` select either transport when both are compiled. The launcher verifies package/binary, control/capability, endpoint, protocol, and identity versions before exposing the URL. | Installed sync/async launcher, endpoint collision/readiness failure, restart/shutdown, HTTP-only and Connect-only feature builds, combined build, and public-client checks in V24. |
 
-The 418-01 client corpus and reproducible commands are in [`tests/connect`](../../../tests/connect/README.md). They record client requests, not successful server responses. Before freezing final D07 error behavior, resolve release-cursor behavior against Spark 4.0.5. Keep safe cleanup regardless of error representation. Do not claim unlimited/durable retry protection from bounded tombstones, or advertise Structured Streaming from Arrow result streaming.
+The 418-01 client corpus and reproducible commands are in [`tests/connect`](https://github.com/eddiethedean/robin-sparkless/blob/main/tests/connect/README.md). They record client requests, not successful server responses. Before freezing final D07 error behavior, resolve release-cursor behavior against Spark 4.0.5. Keep safe cleanup regardless of error representation. Do not claim unlimited/durable retry protection from bounded tombstones, or advertise Structured Streaming from Arrow result streaming.
 
-Slice 418-08 adds a reproducible V26 measurement runner and a separate opt-in V25 route runner. The 4.18 release workflow runs the V26 measurement command on 4.18 candidate branches/tags and preserves its artifacts. Local fault-proxy coverage exercises sessions, metadata/status, stale identities, streaming, cancellation, and retry; it does not certify MiniLake routing. V25 remains pending the external gRPC proxy, and V26 remains a measurement-only record until regression budgets and the full candidate evidence are approved.
+Slice 418-08 adds a reproducible V26 measurement runner and a separate opt-in V25 route runner. The 4.18 candidate workflow passed the approved V26 budget and preserved its candidate evidence; see the [cut record](RELEASE_4_18.md#4180-cut-evidence). Local fault-proxy coverage does not certify MiniLake routing, so V25 remains unadvertised. V34 still requires fresh checks after public publication.
 
 ## Decisions required by milestones
 
@@ -88,12 +96,18 @@ Slice 418-08 adds a reproducible V26 measurement runner and a separate opt-in V2
 | D09 | Catalog lifetime and persistence | Session slice in 0B; shared catalog in 1 | SS-07, SS-13 | Reserved session lifetime, catalog scope, temp-view isolation, storage/metadata ownership, visibility, restart durability and recovery |
 | D10 | Mutation outcomes and retries | Before enabling writes in 1 | SS-07 | Operation/idempotency identity, duplicate handling, catalog locking/snapshots, commit receipts, unknown outcome and restart limits; external adapter extension |
 | D11 | Logical schema and Arrow boundary | Minimal scalar path in 0B; native schema/type repairs in 1; full enabled matrix before 2 | SS-08, SS-09, SS-10 | Metadata preservation, schema migration/propagation rules, physical/logical mapping, IPC implementation/version, empty batches, byte limits, local relation decode expansion/artifact threshold |
-| D12 | Python worker security and packaging | Before Phase 5 implementation | SS-12 | Explicit opt-in scope, worker API, code trust, OS isolation, quotas, credentials, environment, results, and process-tree ownership |
+| D12 | Python worker security, packaging, and UDF contract | Before Phase 5 implementation | SS-12 | Explicit Jobs/notebook and scalar/Pandas UDF forms/types; unmodified-client payload and worker RPC; code trust, environment distribution, OS isolation, quotas, credentials, Arrow/group semantics, cancellation/retry/side-effect limits, and process-tree ownership |
 | D13 | Native Delta/UC compatibility | Before Phase 6 implementation | SS-13 | Library/storage/catalog versions, credentials policy, supported operations, conflict/transaction semantics and independent reader |
 | D14 | DuckDB source contract and database ownership | Before Phase 3 implementation | SS-14, SS-04, SS-07, SS-08 | Exact native library/service/driver versions; standalone read-only and live-owner modes; table names/identity; multi-table transaction snapshots; Arrow schemas/batch limits; safe pushdown; source cancellation/replay; numeric resource budgets; explicit source-write rejection |
 | D15 | DuckDB execution backend and Connect semantics | Before Phase 4 implementation | SS-15, SS-09, SS-10, SS-14 | Explicit engine selection and backend interface; Spark SQL/DataFrame/reference matrix; analysis/result schema agreement; transaction and receipt ownership; durable data versus replay/instance lifetime; cancellation/reattach; optional packaging/platforms; live shared-table visibility |
+| D16 | Expanded Connect API, types, analysis, and configuration | Before Phase 7 implementation | SS-16, SS-08–10 | Per-backend relation/function/window/set matrix; BYTE/FLOAT/BINARY/NTZ and nested Arrow mappings; reference/client pins; honest native explain/analysis; mutable setting whitelist and semantic snapshots; spill/memory/disk limits |
+| D17 | Connect sources/sinks, artifacts, caches, and checkpoints | Before Phase 8 implementation | SS-17, SS-04, SS-07, SS-10 | File/JDBC API/option/type matrix; source/sink atomicity; path/network/credentials policy; optional JVM connector process and driver packaging; artifact integrity/staging/decoded limits; cache invalidation/storage levels/checkpoint lifetimes and disk quotas |
+| D18 | Durable operation and session recovery | Before Phase 9 implementation | SS-18, SS-04, SS-07, SS-10 | Persistent store/format/migration; backend-specific atomic data/receipt ownership; fencing and identity continuity; eligible session state and allow_reconnect; durable response cursors/retention/cleanup; corruption and crash-unknown behavior; per-sink retry guarantees |
+| D19 | Single-node Structured Streaming contract | Before Phase 10 implementation | SS-19, SS-16–18 | Public client/proto matrix; source/sink/operator/output/trigger combinations; event time/watermarks/state; query identity; atomic offsets/state/sink commits and per-sink guarantees; checkpoint restart; backpressure/state/disk budgets and cleanup |
 
 ## Required compatibility record
+
+The 2026-10-29 roadmap extension assigns the previously unscheduled Connect features to SS-16–19 (Phases 7–10 / 4.23–4.26) and adds UDFs to SS-12/D12 (Phase 5 / 4.21). D16–D19 are open decisions for those phases, not completed designs or permission to expand the frozen 4.18 surface. Each optional backend/worker/connector must pass its own matrix; no RDD/SparkContext or distributed-execution capability is added.
 
 Populate the following together at the 0A gate; file locations may be chosen during implementation.
 

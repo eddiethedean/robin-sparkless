@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # 4.17.0 implementation and release plan
 
 **Status: 4.17.0 released and public artifact verification completed (2026-10-28).** Tag [`v4.17.0`](https://github.com/eddiethedean/robin-sparkless/tree/v4.17.0) points to merge commit [`b4ea4677`](https://github.com/eddiethedean/robin-sparkless/commit/b4ea4677fd9dc20d77b800ee0231495d82a5f62f). The original tag workflow [run 40686843095](https://github.com/eddiethedean/robin-sparkless/actions/runs/40686843095) completed successfully, but its downstream publication and V32 jobs were skipped. [PR #1728](https://github.com/eddiethedean/robin-sparkless/pull/1728) repaired publication/recovery job conditions, and [PR #1729](https://github.com/eddiethedean/robin-sparkless/pull/1729) corrected PyPI inventory handling for publish-attestation sidecars. Guarded recovery [run 40707379801](https://github.com/eddiethedean/robin-sparkless/actions/runs/40707379801) then succeeded using the verified tag-run V31 artifacts. It verified the exact PyPI inventories and SHA-256 hashes, all five coordinated crates.io versions, a fresh `sparkless[server]==4.17.0` install and runtime checks, and the published GHCR image. The public image digest is `sha256:1fdec8ebdd4a10bf05c1df56cb32fb116365f3cdc330056acf72313259ea3344`. The original V32 job remains skipped; separately, the crates.io `sparkless-server` 4.17.0 binary was installed with Rust 1.93.1 and passed the version, HTTP SQL, mutation, replay, status, and shutdown verifier. The 4.17.0-only zstd exception remains documented and expires after 2026-11-26 UTC; see the [security scope](../../security/zstd-4.17-exception.md).

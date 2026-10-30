@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](SUPPORT_MATRIX.md) for release behavior.
+
 # Signature alignment tasks: Robin-Sparkless → PySpark
 
 Checklist derived from [SIGNATURE_GAP_ANALYSIS.md](SIGNATURE_GAP_ANALYSIS.md) / `signature_comparison.json`. Goal: make Python parameter names and optional args match PySpark so existing PySpark call sites work unchanged.

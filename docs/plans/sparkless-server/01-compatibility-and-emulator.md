@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-01: Compatibility contracts and typed results
 
 > **Status: planned; owner unassigned.** Phase: 0A, with direct HTTP gate in 0B.
@@ -29,5 +37,5 @@ The contract inventory has no implementation prerequisite; real HTTP validation 
 
 Resolve D01–D04 in the [decision register](DECISIONS.md) and record actual evidence in [VALIDATION.md](VALIDATION.md).
 
-- [python/pyproject.toml](../../../python/pyproject.toml)
-- [Runtime configuration](../../../crates/robin-sparkless-core/src/runtime_config.rs)
+- [python/pyproject.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/python/pyproject.toml)
+- [Runtime configuration](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/runtime_config.rs)

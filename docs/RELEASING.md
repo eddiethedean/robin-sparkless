@@ -1,52 +1,38 @@
 # Releasing robin-sparkless
 
-Use this guide with the [server release roadmap](plans/sparkless-server/ROADMAP.md), [4.16 implementation plan](plans/sparkless-server/RELEASE_4_16.md), [4.17 implementation plan](plans/sparkless-server/RELEASE_4_17.md), and [4.18 implementation plan](plans/sparkless-server/RELEASE_4_18.md). A green source build is only one part of a release: the candidate workflow must verify the coordinated package inventory, public SDK integration, binary wheels, and native container before a release tag is ready.
+Normal CI owns formatting, Clippy, dependency audits, Rust feature tests, server
+HTTP/Connect regression tests, Python typing, ordinary/parity tests, and the serial
+Delta suite. Release builds the distributions, checks the actual packages, and
+publishes them. Publication requires a successful **CI** workflow run for the exact
+release commit, from a push or manual dispatch. Pull-request runs validate a merge
+commit and do not satisfy this publication check.
 
-For 4.18, the workflow still needs the planned Connect candidate and public-artifact gates, including standalone default-client conformance followed by separately pinned emulator gRPC certification. The existing 4.17 HTTP/SDK publication jobs do not implement those checks. Follow the 4.18 plan before tagging or advertising supported Connect; source research alone does not pass interoperability gates.
+## Prepare the release
 
-## Release inventory and version policy
+All first-party packages share one stable `X.Y.Z` version:
 
-For coordinated releases beginning with **4.16.0**, all first-party packages use the exact same stable semantic version:
+- Rust: `spark-sql-parser`, `robin-sparkless-core`, `robin-sparkless-polars`,
+  `robin-sparkless`, and `sparkless-server`.
+- Python: `sparkless` and `sparkless-server-bin`. The `sparkless[server]` extra pins
+  the matching server package exactly.
 
-- Rust crates: `spark-sql-parser`, `robin-sparkless-core`, `robin-sparkless-polars`, `robin-sparkless`, and `sparkless-server`.
-- Python packages: `sparkless` and `sparkless-server-bin`; the `sparkless[server]` extra pins the matching binary package exactly.
-- Rust lockfile entries, internal dependency requirements, `sparkless.__version__`, and the release tag (`vX.Y.Z`) must agree.
+Update manifests, internal dependency requirements, `Cargo.lock`,
+`python/sparkless/sparkless/__init__.py`, and the dated changelog entry together.
+Then check metadata and workflow helpers (Python 3.11+, with PyYAML installed):
 
-Before the coordinated 4.16 line, `spark-sql-parser` may have its legacy independent version. For 4.16+ the parser is part of the same release graph; the checker rejects stale parser manifest, dependency, or lockfile versions. Run the checker against candidate branches without a tag as well as against the final tag.
+```bash
+python3 -m pip install pyyaml
+python3 scripts/check_release_versions.py
+python3 scripts/check_release_versions.py --tag vX.Y.Z
+python3 -m unittest discover -s scripts -p 'test_*release*.py'
+```
 
-The release workflow currently stages server binary wheels for `macosx_14_0_arm64` and `manylinux_2_28_x86_64`, plus a `linux/amd64` native container. These are the only supported server-extra and server-container targets until additional platform artifacts pass the same install and lifecycle checks. The ordinary `sparkless` Python extension has its separate existing platform matrix.
+Push `codex/release-X.Y.Z` for a non-publishing candidate run. Manual **Release**
+dispatches also build and validate the same artifacts without publishing by default.
+There is one validation path for branches, tags, and manual runs.
 
-## Before creating a candidate
-
-1. Bump the first-party manifests and internal dependency versions to `X.Y.Z`. Update `Cargo.lock`, `python/sparkless/sparkless/__init__.py`, `python/pyproject.toml`, and `python/server-bin/pyproject.toml` together. Do not unintentionally upgrade third-party dependencies during a patch release.
-2. Add a dated `[X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` and update install examples or capability documentation affected by the release.
-3. Run the metadata checker and its tests:
-
-   ```bash
-   python3 -m unittest discover -s scripts -p 'test_*release*.py'
-   python3 scripts/check_release_versions.py
-   python3 scripts/check_release_versions.py --tag vX.Y.Z
-   ```
-
-4. Run the repository checks, including formatting, strict Clippy, Rust tests, Python lint/tests, and the in-repository native server unit, control-protocol, and live HTTP integration suites (`cargo test --locked --release -p sparkless-server`). External MiniLake tests are not part of CI or the release checks. Follow the phase plan for the exact V-gate scenarios; a focused component test does not substitute for the integrated gate.
-5. Create or update `codex/release-X.Y.Z`, include the complete reviewed changes, and push it. The Release workflow performs non-publishing validation on `codex/release-*` branches. Review the full run, including packaged Rust crate archives, all eight `sparkless` platform wheels plus its sdist, both supported server-binary wheels, the exact offline `sparkless[server]` install and query, and the native container SQL/graceful-shutdown smoke. V31 checks package names, versions, metadata, and platform tags, then preserves those exact verified distributions as workflow artifacts. Candidate jobs do not publish them.
-
-Release 4.17 requires Python 3.11+ for both Python distributions. All extension wheels use `cp311-abi3`; candidate metadata checks reject older ABI tags or a lower `Requires-Python` value. Python 3.8–3.10 are no longer supported or shipped. The historical 4.16 recovery workflow retains its original interpreter pins.
-
-## Required credentials and permissions
-
-GitHub Actions needs `CARGO_REGISTRY_TOKEN` for crates.io. PyPI publishing uses Trusted Publishing (OIDC), so no `PYPI_API_TOKEN` secret is required. In **each** existing PyPI project (`sparkless` and `sparkless-server-bin`), add a GitHub Actions publisher with owner `eddiethedean`, repository `robin-sparkless`, workflow filename `release.yml`, and environment `pypi`. These are two project-level registrations with the same publisher identity. The historical `recover-4.16.0.yml` workflow has a separate identity, but it cannot repair the immutable 4.16.0 files and is not used for future releases. A corrective 4.16.1 and 4.17.0 publish through `release.yml`. The server image publication job uses the workflow token with `packages: write` permission to publish to `ghcr.io/eddiethedean/sparkless-server`. Release tags are never overwritten; the container job also refuses to replace an existing image tag. Manual workflow dispatch defaults `publish_rust` to false and does not publish binary wheels, Python wheels, or a container.
-
-## Tag and publication sequence
-
-After the integrated candidate branch passes, use the release-line policy below before creating and pushing the tag.
-
-- For the next planned release line, merge the candidate to `main`, verify the release commit is on `main`, then tag that commit.
-- For a corrective patch to an already published line (for example, 4.16.1 correcting 4.16.0), keep the candidate based on that release line and tag the verified candidate commit directly. Do not merge newer development into the patch tag; selectively backport maintenance-only workflow or verifier fixes to `main` separately.
-
-This distinction keeps maintenance package contents aligned with the published release while allowing `main` to continue the next release line.
-
-For a next-line release, the sequence is:
+For a new release line, merge the reviewed candidate to `main`, wait for CI on the
+merge commit, and tag that commit:
 
 ```bash
 git switch main
@@ -55,35 +41,75 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The tag workflow reruns every validation before the first publication. Its dependency order is:
+For a maintenance release, tag the tested maintenance commit directly. First run
+**CI** manually on that branch and wait for success on the exact commit being tagged.
+If a tag was pushed before CI completed, rerun its failed release jobs after CI passes.
 
-1. Package the publishable Rust crates and verify the archives have matching versions, no local dependency paths, and no root patch table. Build and install-test `sparkless-server-bin` wheels on native macOS arm64 and manylinux x86_64 runners; run `auditwheel show` for the Linux wheel. Build the complete `sparkless` matrix and sdist, then validate the exact distribution inventory. Install the matching candidate `sparkless` and binary wheels from local artifacts, with package-index access disabled, then start the server through the public Python launcher and verify SQL, exact values/schema, mutations, replay, and retained status. Audit a separately resolved Rust consumer graph with all root patches removed; an unaccepted consumer finding blocks publication. For 4.17.0 only, the [documented zstd exception](security/zstd-4.17-exception.md) accepts three exact registry tuples through 2026-11-26 UTC while preserving the raw findings and decision report. Official artifact graphs and the supplied consumer patch configuration must still be fixed; the latter audits strictly without exceptions.
-2. Build the `linux/amd64` native image. Verify its non-root runtime user, readiness, SQL, shared-catalog mutations/replay/status, and graceful stop. Save the verified image as a workflow artifact. No package or image is published while these gates are running.
-3. Publish Rust crates in dependency order: `spark-sql-parser`, `robin-sparkless-core`, `robin-sparkless-polars`, `robin-sparkless`, then `sparkless-server`. This job waits for V31.
-4. Publish the tested `sparkless-server-bin` wheels to PyPI with OIDC and the tested `vX.Y.Z` image to GHCR, refusing to overwrite an existing container tag.
-5. Publish the exact verified `sparkless` Python extension wheels and source distribution to PyPI with OIDC, after the Rust crates, server binary wheels, and image are published.
-6. For 4.17 tags, run V32 after every publication job succeeds. It installs the Rust server crate from crates.io under the disclosed 4.17.0 consumer exception and functionally exercises that exact executable, verifies every PyPI filename and SHA-256 against the V31 distributions, installs `sparkless[server]` in a clean consumer environment and runs standalone HTTP catalog, typed-value, identity/replay, and retained-status checks, then pulls, digest-checks, queries, and gracefully stops the GHCR image.
+## What release checks
 
-The workflow skips a crates.io version only when the registry reports it was already uploaded. The PyPI publishing action skips existing files to allow a run to resume after a partial upload; V32 still requires the public set and digests to match the verified candidate exactly. Never edit or overwrite a published package. If published contents need correction, publish a new coordinated patch version.
+The release workflow retains all eight `cp311-abi3` extension wheel targets:
+Linux glibc and musl on x86_64/ARM64, macOS Intel/ARM64, and Windows x64/ARM64.
+It builds one Python sdist and checks the publishable Rust package archives.
 
-## Verify the released artifacts
+The broad Python suite runs once against the Linux publication wheel. Focused
+native smoke tests run SQL, nested/nullable values, Parquet, and Delta on **every**
+wheel with Python 3.11 and 3.14. Linux checks use the declared glibc baseline or
+musl runtime. Both supported server wheels (`manylinux_2_28_x86_64` and
+`macosx_14_0_arm64`) run HTTP/Connect lifecycle checks and fresh offline
+`sparkless[server]` installs.
 
-The 4.17 tag workflow runs V32 automatically after all publication jobs succeed. It verifies exact public package versions and file hashes against V31, installs the published Rust server crate, installs `sparkless[server]` in a fresh environment and runs `scripts/verify_server_extra_install.py X.Y.Z --mutations` against the packaged binary, and pulls the GHCR tag to compare its immutable digest with the publish result before repeating HTTP SQL and shutdown checks. External MiniLake tests are not part of these checks. Review its evidence and record the final artifact URLs and hashes in the phase validation matrix. Add platform-specific public installs if the advertised server-extra matrix expands.
+The Linux server is compiled once. The release container copies the executable
+from that tested wheel, then checks its non-root user, HTTP mutations, public
+Connect client, and graceful shutdown. The source-build Dockerfile remains
+available for local development.
 
-Record artifact URLs, wheel tags and hashes, image digest, source commit, tool versions, commands, and observed results in the phase validation matrix. A local wheel or image smoke is useful development evidence, but it does not pass the candidate inventory gate or replace a fresh public-artifact check.
+One acceptance job requires every validation job to succeed, checks package
+names, versions, ABI/platform inventory and Twine metadata, and stages the exact
+checked distributions. Failed, cancelled, or skipped required jobs block all
+publishers. There is no separate job inventory manifest or evidence aggregation
+layer.
 
-## Manual Rust publication
+## Publication and retries
 
-Manual publication is an exception for maintainers handling a clearly scoped Rust-only recovery. Preserve the same version inventory and dependency order:
+Stable tag pushes publish Rust crates in dependency order, then the server wheels
+and container in parallel, then `sparkless`. The final job checks public PyPI file
+names/hashes and crates.io versions. Publishers download the checked artifacts;
+they do not rebuild wheels or containers. Rust publication uses `--no-verify`
+because the same commit has already passed CI and package-archive checks.
 
-```bash
-cargo publish --locked -p spark-sql-parser --token <CRATES_IO_TOKEN>
-cargo publish --locked -p robin-sparkless-core --token <CRATES_IO_TOKEN>
-cargo publish --locked -p robin-sparkless-polars --token <CRATES_IO_TOKEN>
-cargo publish --locked -p robin-sparkless --token <CRATES_IO_TOKEN>
-cargo publish --locked -p sparkless-server --token <CRATES_IO_TOKEN>
-```
+For interrupted publication, use **Re-run failed jobs** on the original tagged run
+while its artifacts are retained. Crates.io skips only an already-uploaded version;
+PyPI skips existing files and the public inventory check verifies their hashes.
+The container publisher accepts an existing tag only when its image config digest
+matches the tested candidate. It refuses to overwrite different contents. The
+container artifact is retained for seven days; distribution artifacts use GitHub's
+default retention. Publish corrected contents under a new coordinated patch version.
 
-Manual crate publication does not publish or verify the Python packages or native image and does not complete the release gates.
+Manual **Release** dispatch with `publish_rust: true` remains available on `main`
+only, with the same validation and CI prerequisite. It publishes only Rust crates.
+The former cross-run `pypi_recovery_run_id` input has been retired in favor of
+rerunning the original run. `recover-4.16.0.yml` is historical and is not the recovery
+path for current releases.
 
-Build the Python source distribution through the project PEP 517 backend (`python -m build --sdist --outdir dist python`). Direct `maturin sdist` omits root Cargo patch directories. Run `python scripts/verify_release_source.py dist/sparkless-X.Y.Z.tar.gz` to check an isolated locked source build and the fixed compression dependency graph before accepting it for V31.
+## Optional diagnostics
+
+Run **Release diagnostics** manually on the commit you want to investigate. It
+contains the paired V26 concurrency benchmark, Spark 4.0.5 oracle conformance,
+range/catalog/HTTP memory measurements, downstream consumer audits, and isolated
+sdist-to-wheel build. These checks retain their reports and failure behavior, but
+do not delay routine candidates or publication. The release plans under
+`docs/plans/sparkless-server/` describe the historical V-gate scenarios; this guide
+and the workflows define the current release process.
+
+## Credentials
+
+Rust publication needs `CARGO_REGISTRY_TOKEN`. Both PyPI projects use Trusted
+Publishing with owner `eddiethedean`, repository `robin-sparkless`, workflow
+`release.yml`, and environment `pypi`. GHCR publication uses the workflow token's
+`packages: write` permission for `ghcr.io/eddiethedean/sparkless-server`.
+
+## Documentation checks
+
+Follow the [documentation maintenance and release checklist](DOCUMENTATION.md).
+Keep public examples runnable from an installed wheel, assert actual test backend
+identity, and run the strict docs job before declaring a release candidate ready.

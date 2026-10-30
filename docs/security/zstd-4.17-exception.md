@@ -1,9 +1,17 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../SUPPORT_MATRIX.md) for release behavior.
+
 # Sparkless 4.17.0 compression patch and temporary Rust consumer exception
 
 On 2026-10-27 the release maintainer authorized a noted security exception for
 **4.17.0 only, expiring after 2026-11-26 (UTC)**. This accepts residual risk in
 ordinary crates.io Rust builds; it does not make the vulnerable versions safe.
-The policy is [machine-readable](../../security/zstd-4.17-exceptions.toml).
+The policy is [machine-readable](https://github.com/eddiethedean/robin-sparkless/blob/main/security/zstd-4.17-exceptions.toml).
 Tracking: [release PR #1727](https://github.com/eddiethedean/robin-sparkless/pull/1727).
 
 ## Which distributions are fixed
@@ -40,7 +48,7 @@ recorded in [historical evidence](../history/zstd-013-prototype-evidence.md).
 
 ## Apply our patch in a Rust consumer
 
-Download [security/zstd-4.17-patches.toml](../../security/zstd-4.17-patches.toml)
+Download [security/zstd-4.17-patches.toml](https://github.com/eddiethedean/robin-sparkless/blob/main/security/zstd-4.17-patches.toml)
 from this release. It points Cargo at the four patched packages in immutable
 commit `49d92c1f7c33f3b66f0d6b0ec1f7314f757b6f8c`. These package manifests use the
 fixed upstream zstd implementations; this is an actual code/dependency fix.

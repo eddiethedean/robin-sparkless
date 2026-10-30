@@ -1,5 +1,7 @@
 # Sparkless / Robin Sparkless
 
+See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SUPPORT_MATRIX.md) before selecting features.
+
 **PySpark-compatible DataFrames without the JVM.** The **`sparkless`** Python package is the primary adoption path for testing and local development. The **`robin-sparkless`** Rust crate powers it (and can be embedded directly).
 
 Install Python package: `pip install "sparkless>=4,<5"`
@@ -13,7 +15,7 @@ Install Python package: `pip install "sparkless>=4,<5"`
 | Persona | Start here |
 |---------|------------|
 | **Python user / tester** | [Getting started (Python)](python_getting_started.md) · [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) |
-| **Rust embedder** | [Quickstart](QUICKSTART.md) · [User guide](USER_GUIDE.md) · [docs.rs](https://docs.rs/robin-sparkless) |
+| **Rust embedder** | [Quickstart](QUICKSTART.md) · [User guide](USER_GUIDE.md) · [Rust reference fallback](RUST_API_REFERENCE.md) |
 | **Contributor** | [CONTRIBUTING.md](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md) |
 | **Enterprise / production** | [Before you adopt](BEFORE_YOU_ADOPT.md) · [Production deployment](PRODUCTION.md) |
 
@@ -25,9 +27,16 @@ Install Python package: `pip install "sparkless>=4,<5"`
 - [Testing guide](TESTING_GUIDE.md) — Dual-mode pytest with `sparkless.testing`
 - [Migration](python_migration.md) — From PySpark or Sparkless 3.x
 - [FAQ](FAQ.md) · [Troubleshooting (Python)](TROUBLESHOOTING_PYTHON.md)
-- [Python API reference (starter)](PYTHON_API_REFERENCE.md)
+- [Python API reference](PYTHON_API_REFERENCE.md)
 - [Execution cancellation](EXECUTION_CANCELLATION.md) — cancel active DataFrame actions and understand safe-point behavior
 - [PySpark differences](PYSPARK_DIFFERENCES.md) · [Parity status](PARITY_STATUS.md)
+
+## Native server
+
+The optional `sparkless[server]` extra installs a managed native server. See
+[Spark Connect](SPARK_CONNECT.md) for the 4.18 client example, HTTP-only mode,
+platform support, and the supported remote API subset. In-process Python
+features are not automatically available through Connect.
 
 ## Rust (robin-sparkless)
 

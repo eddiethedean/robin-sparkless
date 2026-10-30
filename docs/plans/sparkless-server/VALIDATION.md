@@ -1,8 +1,18 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # Validation and release evidence
 
 [Plan index](README.md) · [Epic gates](EPIC.md#acceptance-and-release-gates) · [Decision register](DECISIONS.md)
 
-**Status: 4.17.0 public release verification is complete; 4.18.0 remains planned.** The Spark 4.0.5 client/protocol contract and reproducible client-request corpus are recorded. Slices 418-06 and 418-08 have local interoperability and benchmark evidence, but no formal Phase 2 server interoperability gate is passed. Targeted or partial integrated checks do not establish release-gate conformance; every gate remains pending until its complete scenario and required artifact are recorded.
+**Status as of 2026-10-30:** 4.17.0 public release verification is complete. The 4.18.0 candidate branch passed both [CI run 40996635814](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996635814) and [Release run 40996636369](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996636369) on exact head `525ffe564585a4349890aa36a458f8530ea7ee7c`. See the [current 4.18 cut evidence](RELEASE_4_18.md#4180-cut-evidence) and [retained candidate artifacts](../../RELEASE_EVIDENCE.md). No 4.18.0 tag or publication has been made; V34 remains post-publication work.
+
+This file preserves historical gate definitions and point-in-time validation notes. Statements below that say 4.18 gates were pending describe the planning state when written and are superseded for current cut status by the evidence linked above.
 
 The 4.16 prerequisite accepted for 4.17 is **4.16.1**. [Release run 40159241607](https://github.com/eddiethedean/robin-sparkless/actions/runs/40159241607) published and verified that version. The older 4.16.0 recovery failure below is historical and is not being used as the 4.17 prerequisite.
 
@@ -10,7 +20,7 @@ The public 4.16.0 registries currently contain the expected PyPI inventories (ni
 
 For each gate record the native commit, client/reference versions and digests, command, environment/hardware, result artifact, and known limitations. Compare schemas as well as values. Keep direct HTTP and standalone Connect results separate. Optional external route evidence is supplemental; older component records below describe their historical scope and do not add current release prerequisites.
 
-## Latest full readiness review
+## Historical 4.17 readiness review (2026-10-27)
 
 The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Rust metadata API, admitted SQL parsing, functional candidate/public verification changes, and the maintainer-approved Python 3.11 minimum. The release remains **HOLD** until the published Rust consumer graph is fixed and the final candidate's complete V15–V18/V31 evidence passes. The [original review](READINESS_4_17.md) and older component results below remain historical evidence.
 
@@ -44,7 +54,7 @@ The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Ru
 | V24 | 2 / SS-06 | Packaged sync/async launcher readiness | Actual HTTP/gRPC endpoints and server/capability identity agree; the pinned public client works; restart, port collision, failed readiness, graceful listener drain, and typed HTTP-only behavior pass on advertised platforms |
 | V25 | Optional route certification / SS-11 | Separately advertised third-party proxy or adapter after standalone conformance | Independent values/schema/lifecycle/auth evidence per route; external changes and acceptance never block standalone development or release |
 | V26 | Release / SS-11 | 1/2/4/8+ client benchmarks | Correct outputs, reproducible commands, throughput/latency/RSS/CPU, hardware/version evidence, and agreed numeric regression budgets |
-| V27 | 5 / SS-12 | Optional Python worker Jobs/notebooks and failures | Isolation, redaction, quotas, process-tree cleanup; disabled core remains Python-free |
+| V27 | 5 / SS-12 | Optional Python Jobs/notebooks, scalar/Pandas UDF forms, and failures | Separate declared API/type/reference checks; Arrow/group limits, worker crash/retry/cancel and side-effect guarantees; isolation, redaction, quotas, process-tree cleanup; disabled core remains Python-free |
 | V28 | 6 / SS-13 | Native Delta/UC writes and independent reads | Schema/decimal/transaction/recovery validation; explicit unsupported/conflict outcomes |
 | V29 | 0B / SS-02, SS-06, SS-11 | Complete 4.16.0 candidate inventory and isolated consumer installs | Parser/server/binary-extra and existing packages align; archives/wheels install without checkout paths or inherited root Cargo patches; experimental gRPC absent from normal artifacts |
 | V30 | 4.16 release completion / SS-11 | Public registry/binary/container verification after publication | Fresh exact-version installs and functional witnesses pass; hashes/digests, binary metadata and every inventory item match 4.16.0 |
@@ -56,6 +66,15 @@ The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Ru
 | V36 | 3 / SS-14 | DuckDB ownership, snapshots, independent DuckDB writer, source failures and resource pressure | Standalone plus supported shared owner; stable multi-table snapshots under concurrent changes; truthful lock/loss errors; bounded RSS/queues and health progress; cancellation/reattach/close retain producer ownership; no export/sync or snapshot reread on replay |
 | V37 | 4 / SS-15 | DuckDB execution backend through unmodified Connect, analysis/Arrow and reference semantics | Actual DuckDB computation for the declared SQL/DataFrame/type/configuration matrix; Spark semantic/schema agreement; explicit unsupported errors without engine fallback; default Polars regressions and fresh optional/default package installs |
 | V38 | 4 / SS-15 | DuckDB transactional outcomes, Connect lifecycle, independent DuckDB client reads/writes and multiple clients | Atomic documented effects/receipts, duplicate/conflict/commit/disconnect/deadline/cancel/restart matrix; no reexecution on replay; durable data versus operation lifetime explicit; one database owner and common catalog; measured resource bounds and health progress |
+| V39 | 7 / SS-16 | Expanded Connect expressions, joins/grouping/sort/windows/set operations and scalar/nested types | Pinned unmodified-client/reference values and schemas, null/ANSI/case/overflow/time semantics, set multiplicity/window boundaries, typed empty input/output, explicit unsupported cases per backend |
+| V40 | 7 / SS-16 | Truthful public analysis, mutable configuration, expensive-operator resources and lifecycle | Honest native explain output; analysis/result agreement; session config isolation and operation snapshots; measured memory/spill/disk/queue bounds, concurrent health progress, cancellation/replay and earlier backend regressions |
+| V41 | 8 / SS-17 | CSV/JSON/Parquet and optional JDBC read/write, table/view paths and independent readers | Exact schemas/values/options/modes, malformed input and schema changes, source/path/credential policy, commit/cancel/disconnect/partial-write behavior, optional connector isolation/crash/cleanup and enabled/disabled installs |
+| V42 | 8 / SS-17 | Artifact upload/status and real cached-local-relation threshold crossing | Stock client defaults; chunk/digest/status behavior, rejected content, duplicate/partial transfers, staging/decoded/retained quotas, session isolation, expiry/cancel/disconnect and orphan cleanup |
+| V43 | 8 / SS-17 | Cache/persist/unpersist, storage status, and DataFrame checkpoints | Observable reuse and correct recomputation/invalidation; declared storage levels/lifetimes, source change and restart behavior, memory/disk eviction/quotas, access isolation and cleanup |
+| V44 | 9 / SS-18 | Durable data/receipt commit and crash/outcome matrix per backend/sink | Faults at every commit/receipt/ack boundary; transactionally bound outcomes or explicit crash-unknown retry rejection; fencing, duplicate/conflicting IDs and no second effect; no generic exactly-once claim |
+| V45 | 9 / SS-18 | Eligible session reconnect and durable response replay across restart | Pinned-client allow_reconnect and identity/cursors; no producer rerun after partial delivery/release; tombstones/expiry/quotas/corruption/store loss/upgrades, source snapshot ownership and bounded recovery/GC |
+| V46 | 10 / SS-19 | Structured Streaming public APIs, micro-batches, query management, event-time/state matrix | Client/reference source/operator/sink/trigger/output conformance, progress/await/stop, empty/late/out-of-order/duplicate data, watermarks/windows, schema changes and concurrent query isolation |
+| V47 | 10 / SS-19 | Streaming checkpoint/offset/state/sink recovery and sustained load | Crash-boundary recovery with explicit per-sink delivery guarantees; checkpoint corruption, source/sink loss, backpressure/state/disk bounds, retry/disconnect/stop/shutdown, health progress and default/optional installs |
 
 ## 4.16 execution order
 
@@ -77,7 +96,7 @@ Follow [418-01 through 418-10](RELEASE_4_18.md#ordered-delivery-slices). The [4.
 
 ### 418-06 local integrated evidence — 2026-10-29 UTC
 
-On macOS arm64, the integrated Slice 6 runner passed with the locked `pyspark-client==4.0.5` and the hash-pinned Apache Spark 4.0.5 Connect reference. The native and reference public workloads matched exactly across values, DataFrame schemas, and Arrow schemas. The report is [`target/connect-slice6/run-20261028T235953Z-19165/summary.json`](../../../target/connect-slice6/run-20261028T235953Z-19165/summary.json), generated by:
+On macOS arm64, the integrated Slice 6 runner passed with the locked `pyspark-client==4.0.5` and the hash-pinned Apache Spark 4.0.5 Connect reference. The native and reference public workloads matched exactly across values, DataFrame schemas, and Arrow schemas. The report is [`target/connect-slice6/run-20261028T235953Z-19165/summary.json`](../../RELEASE_EVIDENCE.md), generated by:
 
 ```sh
 python3 tests/connect/run_slice6_conformance.py \
@@ -90,7 +109,7 @@ The default retry path used `ReattachExecute` after an injected disconnect and k
 
 ### 418-08 local measurement and route-harness run — 2026-10-29 UTC
 
-The [benchmark report](../../../target/connect-slice8/run-20261029T015413Z-30351/benchmark.json) was produced on macOS 26.5.2 with an Apple M4 Pro (12 logical CPUs, 24 GiB), CPython 3.11.15, `pyspark-client==4.0.5`, `grpcio==1.85.0`, `protobuf==7.36.2`, `pyarrow==26.0.0`, and Rust/Cargo 1.93.1. The native binary reports version 4.17.0 and has SHA-256 `654eecacf4dbc4f1ec6e8e5a5ad37bb4af36ec8e5a0432fa7a415b898cbfb5c3`. The report records source commit `b2cc06dbd4a71b909c4c6b8298c2ef50a3564e37`, 19 dirty paths, and dirty-source digest `f8625fe923e731bde20d4da49e013ed3e4bc1b3358867f9468d62cc57572f645`, so this is working-tree evidence rather than an immutable 4.18 candidate result.
+The [benchmark report](../../RELEASE_EVIDENCE.md) was produced on macOS 26.5.2 with an Apple M4 Pro (12 logical CPUs, 24 GiB), CPython 3.11.15, `pyspark-client==4.0.5`, `grpcio==1.85.0`, `protobuf==7.36.2`, `pyarrow==26.0.0`, and Rust/Cargo 1.93.1. The native binary reports version 4.17.0 and has SHA-256 `654eecacf4dbc4f1ec6e8e5a5ad37bb4af36ec8e5a0432fa7a415b898cbfb5c3`. The report records source commit `b2cc06dbd4a71b909c4c6b8298c2ef50a3564e37`, 19 dirty paths, and dirty-source digest `f8625fe923e731bde20d4da49e013ed3e4bc1b3358867f9468d62cc57572f645`, so this is working-tree evidence rather than an immutable 4.18 candidate result.
 
 The default run used one million rows per filtered count, 20,000-row Arrow collection, five iterations per client, and the 1/2/4/8-process cohorts. All 150 timed operations returned correct results. At eight clients the aggregate operation p50/p95 was 629/966 ms, the server sampled 74,891,264 bytes peak RSS and 11.95 CPU seconds, and health/HTTP probes completed 10/7 times without errors. The 200,000-row slow reader completed while 37 health and eight HTTP probes progressed. A stock-client injected disconnect produced exactly one native producer and one `ReattachExecute`; the local fault proxy and native server both shut down cleanly, with the native server acknowledging control protocol v2 and exiting 0.
 
@@ -128,7 +147,7 @@ Current integration is based on `codex/release-4.17` commit `e3f85cb447392bba185
 - Strict workspace/all-feature/all-target Clippy, formatting, cached `cargo audit --no-fetch --json`, and offline `cargo deny` advisories/bans/sources checks pass. Audit reports zero non-ignored vulnerabilities and no warnings.
 - A source archive built through `python/_sparkless_build.py` now includes all four local Cargo patch directories and the backend itself. Maturin alone omitted these directories. The backend prunes the omitted workspace members' unused lock entries during packaging. `scripts/verify_release_source.py ... --offline` extracts the archive into a fresh directory, resolves the fixed compression graph with `cargo metadata --locked`, checks that every local dependency comes from that extraction, and passes the default Python/Delta `cargo check --locked --release`. Only the target build cache is shared. CI builds through this backend and runs the same source check before preserving the distributions.
 
-These results close the local source-archive omission and add native regression evidence. They do not repair published Rust manifests: consumers do not inherit the root patches. Fixed distributable Rust dependencies, review of the complete Phase 1 matrices, and a new supported-platform V31 run are still required; V32 runs after publication. See the [current blocker table](RELEASE_4_17.md#remaining-417-release-blockers).
+These results close the local source-archive omission and add native regression evidence. They do not repair published Rust manifests: consumers do not inherit the root patches. Fixed distributable Rust dependencies, review of the complete Phase 1 matrices, and a new supported-platform V31 run are still required; V32 runs after publication. See the [current blocker table](RELEASE_4_17.md).
 
 ## DuckDB phase execution order
 
@@ -137,6 +156,20 @@ Complete the supported Phase 2 Connect server before [SS-14 / Phase 3 / 4.19](14
 Only then deliver [SS-15 / Phase 4 / 4.20](15-duckdb-connect-backend.md). Resolve D15, then V37 proves the separate DuckDB query execution/semantic matrix and V38 proves database writes, truthful transaction outcomes, backend Connect lifecycle, and bidirectional shared-table interoperability. Rerun applicable V19–V24 per backend and supplemental V25 for each separately advertised third-party route. Source scans do not prove DuckDB execution compatibility.
 
 For both phases record exact native DuckDB/library/service/client/reference versions, ownership mode, source snapshots, semantic settings, numeric workload/resource limits, enabled features, and artifact hashes. Include source/service memory in end-to-end measurements. Run previous capability regressions, native enabled/disabled builds, isolated installs, and fresh public artifact checks at each coordinated release. These are planned gates; no evidence is passed by creating the documents. V27/V28 retain their identities while moving to Phases 5/6.
+
+## Later Connect phase execution order
+
+The 2026-10-29 scope extension adds scalar/Pandas UDF coverage to Phase 5 V27, with Jobs/notebook and each UDF API advertised only after separate complete evidence. Later type extensions must rerun the worker matrix when enabled.
+
+For [SS-16 / Phase 7 / 4.23](16-connect-api-types-and-analysis.md), resolve D16 and complete V39/V40 on the default Polars backend and every additionally advertised backend. DuckDB-only conformance does not establish Polars support. Optional Python workers/Delta/UC are not prerequisites for native API/type tests.
+
+For [SS-17 / Phase 8 / 4.24](17-connect-sources-artifacts-and-persistence.md), resolve D17 and complete V41–V43 for file I/O, optional actual JDBC, artifacts, cache, and checkpoints. Certify each enabled connector independently, including any separately packaged process. A DataFrame checkpoint is not proof of operation or streaming recovery.
+
+For [SS-18 / Phase 9 / 4.25](18-durable-connect-recovery.md), resolve D18 and complete V44/V45 per persistent backend/sink before enabling automatic cross-restart retries, session recovery, or replay. Retain prior ephemeral-mode failure guarantees. Persistent data and same-instance deduplication cannot substitute for the crash/receipt matrix.
+
+For [SS-19 / Phase 10 / 4.26](19-structured-streaming.md), resolve D19 and complete V46/V47 using the enabled API/I/O/recovery contracts. UDF/JDBC/Delta streaming combinations need separate evidence and must not become hidden dependencies of the native file/rate subset.
+
+Each phase must rerun applicable earlier native/HTTP/Connect/lifecycle/resource gates and V26 budgets, certify its full coordinated candidate inventory and isolated installs, and verify fresh exact-version public artifacts after publication. V39–V47 are planned requirements; adding rows does not pass gates or implement CI jobs. RDD/SparkContext and distributed execution remain outside scope.
 
 ### Recovering a partial PyPI upload
 

@@ -11,14 +11,26 @@ The `sparkless.testing` module provides a unified framework for writing tests th
 
 ## Quick Start
 
+Install the package and pytest in your test environment:
+
+```bash
+python -m pip install "sparkless>=4,<5" pytest
+```
+
+For the PySpark run, install `"sparkless[pyspark]>=4,<5"` and a compatible Java
+runtime. This extra selects PySpark 3.5; use `pyspark4` in a separate environment
+for PySpark 4. See [installation and extras](python_getting_started.md#optional-extras).
+
 ### 1. Add the pytest plugin to your `conftest.py`
 
 ```python
 # conftest.py
-pytest_plugins = ["sparkless.testing"]
+pytest_plugins = ["sparkless.testing.plugin"]
 ```
 
-This automatically registers fixtures (`spark`, `spark_mode`, `spark_imports`, etc.) and pytest markers.
+Use the `.plugin` entry point to register both fixtures (`spark`, `spark_mode`,
+`spark_imports`, etc.) and marker/collection hooks. Loading only
+`"sparkless.testing"` exposes the fixtures but does not activate those hooks.
 
 ### 2. Write a test using the `spark` fixture
 
@@ -45,36 +57,41 @@ SPARKLESS_TEST_MODE=pyspark pytest tests/
 
 ---
 
-## Maintainer gate (full suite)
+## Maintainer checks and CI
 
-CI runs a **fast subset** by default (`pytest tests -m "not delta and not integration"`). Before merging substantial engine or Python binding changes, run the full suite locally:
+For repository changes, follow [CONTRIBUTING.md](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup)
+to create the uv environment and build the native extension. Run from the
+repository root:
 
 ```bash
-cd python && maturin develop --release
-pytest tests -n 10 -v --tb=short
+make check-full
+uv run --no-project --python .venv/bin/python python -m pytest tests/ -v
 make test-parity-phases
 ```
 
-Optional: trigger the **Full Python tests** or **PySpark smoke** workflow in GitHub Actions (`workflow_dispatch`) for release-build verification on CI runners.
+`make check-full` runs Rust checks/tests and Python lint/types; the separate
+pytest command runs Python tests. Rebuild the native extension after Rust or
+PyO3 changes before relying on local Python results.
 
----
+The **CI** workflow builds one Linux wheel for its Python jobs. Normal runs test
+ordinary cases, parity fixtures, and a separate serial Delta lane. Manual CI
+runs also enable the full Python suite and PySpark smoke jobs. These are jobs in
+CI rather than separate workflows. Release tests the publication wheel and
+runs focused runtime smoke checks across supported wheel targets. See
+[the release guide](RELEASING.md) for the current publication prerequisites.
 
 ## Expected skips
 
-As of May 2026, `pytest tests -n 12` reports **64 skipped** tests. These are intentional, not suite failures:
+Skip counts vary with the selected backend, profile, dependencies, and markers.
+Inspect each reason with `python -m pytest -rs`; do not treat a historical skip
+count as a release target.
 
-| Category | Examples | Reason |
-|----------|----------|--------|
-| **Delta / integration** | `-m delta`, `-m integration` | Not in default CI subset; run `python-delta` job or `SPARKLESS_ENABLE_DELTA=1 pytest -m delta -n 0` |
-| **JDBC / Docker** | `tests/sql/test_jdbc_sqlite.py` | Requires Docker JDBC fixture |
-| **PySpark-only / pyspark4_only** | Some parity window tests | Oracle or JVM-only behavior |
-| **Deferred / env** | SQL feature flags, regex lookaround, CTAS with Hive (#1508) | Documented in test `skip` reason |
-
-CI default: `pytest tests -m "not delta and not integration" -n 4` and `pytest tests/parity/` after `maturin develop --release`.
-
-Before release, maintainers should run `make check-full` (Rust `--all-features`, ruff, mypy, and full Python suite locally).
-
----
+| Category | What to check |
+| --- | --- |
+| Delta | The serial lane uses `SPARKLESS_ENABLE_DELTA=1` and `-m delta` |
+| Database/integration | Required database drivers, services, Docker, or fixtures are available |
+| Backend/profile | `sparkless_only`, `pyspark_only`, `pyspark3_only`, and `pyspark4_only` match the selected run |
+| Deferred functionality | The skip reason names the unsupported feature or environment requirement |
 
 ## Environment Variable
 
@@ -189,16 +206,15 @@ def test_pyspark_specific_feature(spark):
     pass
 ```
 
-### `@pytest.mark.backend("sparkless")` / `@pytest.mark.backend("pyspark")`
+### Compatibility-profile markers
 
-Force a specific backend for a test (overrides environment variable).
+`@pytest.mark.pyspark3_only` and `@pytest.mark.pyspark4_only` select tests by
+`SPARKLESS_PYSPARK_COMPAT` (`3.5` by default, or `4.0`). They do not install or
+switch the PySpark runtime. Use a matching environment for the reference run.
+The plugin does not implement a `backend` marker that overrides the selected
+backend; use `SPARKLESS_TEST_MODE` and the supported skip markers instead.
 
-```python
-@pytest.mark.backend("pyspark")
-def test_always_pyspark(spark):
-    # This test always uses PySpark
-    pass
-```
+See [compatibility profiles](PYSPARK_COMPAT_PROFILES.md) for semantic settings.
 
 ---
 
@@ -269,8 +285,8 @@ from sparkless.testing import assert_dataframes_equal
 def test_transform(spark):
     input_df = spark.createDataFrame([{"x": 1}, {"x": 2}])
     
-    result = input_df.select(input_df.x * 2)
-    expected = spark.createDataFrame([{"(x * 2)": 2}, {"(x * 2)": 4}])
+    result = input_df.select((input_df.x * 2).alias("doubled"))
+    expected = spark.createDataFrame([{"doubled": 2}, {"doubled": 4}])
     
     assert_dataframes_equal(result, expected)
 ```
@@ -448,7 +464,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -e ./python[test]
+      - run: python -m pip install "sparkless>=4,<5" pytest
       - run: pytest tests/ -v
 
   test-pyspark:
@@ -461,8 +477,8 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: "temurin"
-          java-version: "11"
-      - run: pip install -e ./python[test,pyspark]
+          java-version: "17"
+      - run: python -m pip install "sparkless[pyspark]>=4,<5" pytest
       - run: SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
 ```
 
@@ -579,37 +595,39 @@ def test_with_tables(spark, table_prefix):
 
 ### PySpark session creation fails
 
-Ensure Java is installed and `JAVA_HOME` is set:
+Use a Java version compatible with the PySpark version installed in your test
+environment, and set `JAVA_HOME` to that JDK. The repository's manual CI smoke
+job configures Java 11; the PySpark 4 oracle workflow configures Java 17.
 
 ```bash
-# macOS
-brew install openjdk@11
-export JAVA_HOME=/opt/homebrew/opt/openjdk@11
-
-# Ubuntu
-sudo apt install openjdk-11-jdk
-export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+java -version
+python -m pip show pyspark
 ```
+
+Check the selected runtime and environment before comparing results across
+engines. The standalone Connect client does not require a local Spark JVM;
+see [Spark Connect](SPARK_CONNECT.md).
 
 ### Import errors for sparkless.testing
 
-Ensure sparkless is installed:
+Install the package in the same environment as pytest:
 
 ```bash
-pip install -e ./python
+python -m pip install "sparkless>=4,<5" pytest
 ```
+
+For repository development, use the [contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup) and rebuild the native extension after Rust changes.
 
 ### Tests pass in sparkless but fail in PySpark
 
 This indicates a parity issue. Check [PYSPARK_DIFFERENCES.md](PYSPARK_DIFFERENCES.md) for known divergences, or file an issue if you've found a new one.
 
-### Slow PySpark tests
+### Session reuse
 
-PySpark session creation is slow (~5-10s). Use shared sessions when possible:
-
-```bash
-SPARKLESS_SHARED_SESSION=1 SPARKLESS_TEST_MODE=pyspark pytest tests/
-```
+`SPARKLESS_SHARED_SESSION=1` enables shared sessions only for local Sparkless
+runs outside pytest-xdist workers and outside Delta tests. The fixture disables
+sharing for PySpark. Use `isolated_session` for tests that must not share state,
+and `table_prefix` to avoid catalog-name collisions.
 
 ---
 

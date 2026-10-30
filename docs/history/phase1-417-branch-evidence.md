@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../SUPPORT_MATRIX.md) for release behavior.
+
 # Supplemental Phase 1 branch evidence
 
 These records preserve the earlier 4.17 branch evidence. External route acceptance is supplemental and does not gate standalone releases.

@@ -1,3 +1,11 @@
+---
+search:
+  exclude: true
+---
+
+> **Archive / historical record:** this page describes a past snapshot or a plan.
+> Use the [current support contract](../../SUPPORT_MATRIX.md) for release behavior.
+
 # SS-08: Logical types and lazy native execution
 
 > **Status: planned; owner unassigned.** Phase: Scalar/schema fixes in 0B; expanded types/lazy paths in 1–2.
