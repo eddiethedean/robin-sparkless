@@ -719,7 +719,7 @@ jobs:
               return 0
             fi
             # cargo uses exit 101 for many failures; only skip true duplicates.
-            if printf '%s\n' "$out" | grep -Eqi 'already uploaded'; then
+            if printf '%s\n' "$out" | grep -Fqi -e 'already uploaded' -e 'already exists on crates.io index'; then
               echo "$crate version already on crates.io, skipping"
               return 0
             fi
