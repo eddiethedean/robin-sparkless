@@ -139,6 +139,14 @@ async start/stop/context management. Startup/protocol/ownership failures raise
 Neither launcher implements a general SQL client: use [HTTP](HTTP_API.md) or the
 supported [Connect client](SPARK_CONNECT.md).
 
+`SparklessConnect(*, server_options=None)` is in `sparkless.server` and requires
+the optional `sparkless[connect]` extra. It starts a new `SparklessServer`, creates
+a new public `pyspark-client` session, and returns that session from a `with` block.
+`server_options` is copied and forwarded to `SparklessServer`; cleanup stops the
+session and then shuts down/reaps its server. The helper imports the Connect client
+when entering, so base and server-only installs do not require it. See
+[Spark Connect](SPARK_CONNECT.md) for the usage example and lifecycle details.
+
 ## Errors and compatibility
 
 Catch specific public exceptions at application boundaries, and preserve their

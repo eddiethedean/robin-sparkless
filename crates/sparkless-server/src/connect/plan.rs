@@ -1,4 +1,4 @@
-//! Checked translation for the Spark Connect relation and expression subset frozen in 4.18-01.
+//! Checked translation for the Spark Connect relation and expression subset extended in 4.19.
 
 use crate::connect_proto as proto;
 use proto::data_type::{self, Kind as DataTypeKind};
@@ -9,7 +9,7 @@ use robin_sparkless::{
     DataType, EngineError, ExprIr, LiteralValue, LogicalField, SparkSession, StructType,
 };
 use spark_sql_parser::ast::{BinaryOperator, Expr as SqlExpr, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use tonic::{Code, Status};
 
 const MAX_PLAN_DEPTH: usize = 64;
@@ -27,6 +27,7 @@ struct TranslatedRelation {
     dataframe: robin_sparkless::DataFrame,
     schema: StructType,
     plan_ids: HashSet<i64>,
+    plan_columns: HashMap<i64, HashMap<String, String>>,
     deferred_count_input: Option<robin_sparkless::DataFrame>,
 }
 
@@ -45,7 +46,7 @@ pub(super) fn translate_plan(
         Some(PlanOp::Root(relation)) => translate_relation(session, relation, 1)?,
         Some(PlanOp::Command(_)) => {
             return Err(unsupported(
-                "Connect commands and SQL execution are outside the 4.18 subset",
+                "Connect commands and SQL execution are outside the 4.19 subset",
             ));
         }
         None => return Err(Status::invalid_argument("Plan.op_type is required")),
@@ -69,6 +70,7 @@ fn translate_relation(
     }
     let common = relation.common.as_ref();
     let mut deferred_count_input = None;
+    let mut plan_columns = HashMap::new();
     let (dataframe, schema, mut plan_ids) = match relation.rel_type.as_ref() {
         Some(RelType::Range(range)) => {
             if let Some(partitions) = range.num_partitions
@@ -136,13 +138,70 @@ fn translate_relation(
                 "CachedLocalRelation requires the unsupported AddArtifacts transfer path",
             ));
         }
+        Some(RelType::Read(read)) => {
+            if read.is_streaming {
+                return Err(unsupported(
+                    "streaming table reads are outside the 4.19 source subset",
+                ));
+            }
+            let Some(proto::read::ReadType::NamedTable(named_table)) = read.read_type.as_ref()
+            else {
+                return Err(unsupported(
+                    "only configured named-table reads are supported; file data sources are disabled",
+                ));
+            };
+            if !named_table.options.is_empty() {
+                return Err(unsupported(
+                    "named-table options are not enabled for configured source catalogs",
+                ));
+            }
+            if !is_qualified_identifier(&named_table.unparsed_identifier) {
+                return Err(unsupported(
+                    "named-table reads require a simple qualified table identifier",
+                ));
+            }
+            let dataframe = session
+                .table(&named_table.unparsed_identifier)
+                .map_err(|error| engine_failure(EngineError::User(error.to_string())))?;
+            let schema = dataframe.schema_engine().map_err(engine_failure)?;
+            (dataframe, schema, HashSet::new())
+        }
+        Some(RelType::SubqueryAlias(alias)) => {
+            if !is_simple_identifier(&alias.alias)
+                || alias.qualifier.len() > 1
+                || alias
+                    .qualifier
+                    .iter()
+                    .any(|part| !is_simple_identifier(part))
+            {
+                return Err(unsupported("subquery aliases require a simple identifier"));
+            }
+            let input = translate_child(
+                session,
+                alias.input.as_deref(),
+                "SubqueryAlias.input",
+                depth,
+            )?;
+            if input.deferred_count_input.is_some() {
+                return Err(unsupported(
+                    "aliases over a global aggregate are unsupported",
+                ));
+            }
+            plan_columns = input.plan_columns;
+            (
+                input.dataframe.alias(&alias.alias),
+                input.schema,
+                input.plan_ids,
+            )
+        }
         Some(RelType::Filter(filter)) => {
             let input = translate_child(session, filter.input.as_deref(), "Filter.input", depth)?;
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
-                    "filters over a global aggregate are outside the 4.18 subset",
+                    "filters over a global aggregate are outside the 4.19 subset",
                 ));
             }
+            plan_columns = input.plan_columns.clone();
             let condition = filter
                 .condition
                 .as_ref()
@@ -151,7 +210,12 @@ fn translate_relation(
                 Some(ExprType::ExpressionString(expression)) => {
                     parse_filter_string(&expression.expression)?
                 }
-                other => translate_expression(other, &input.plan_ids, ExpressionUse::Filter)?,
+                other => translate_expression(
+                    other,
+                    &input.plan_ids,
+                    ExpressionUse::Filter,
+                    Some(&input),
+                )?,
             };
             if !matches!(expr, ExprIr::Ge(_, _) | ExprIr::Gt(_, _)) {
                 return Err(unsupported(
@@ -171,7 +235,7 @@ fn translate_relation(
             let input = translate_child(session, project.input.as_deref(), "Project.input", depth)?;
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
-                    "projections over a global aggregate are outside the 4.18 subset",
+                    "projections over a global aggregate are outside the 4.19 subset",
                 ));
             }
             if project.expressions.is_empty() {
@@ -190,6 +254,7 @@ fn translate_relation(
                         expression.expr_type.as_ref(),
                         &input.plan_ids,
                         ExpressionUse::Project,
+                        Some(&input),
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -211,18 +276,118 @@ fn translate_relation(
             let input = translate_child(session, limit.input.as_deref(), "Limit.input", depth)?;
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
-                    "limits over a global aggregate are outside the 4.18 subset",
+                    "limits over a global aggregate are outside the 4.19 subset",
                 ));
             }
             if limit.limit < 0 {
                 return Err(Status::invalid_argument("Limit.limit must be nonnegative"));
             }
+            plan_columns = input.plan_columns.clone();
             let limit_value = usize::try_from(limit.limit)
                 .map_err(|_| Status::invalid_argument("Limit.limit is out of range"))?;
             let dataframe = input.dataframe.limit(limit_value).map_err(|error| {
                 Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
             })?;
             (dataframe, input.schema, input.plan_ids)
+        }
+        Some(RelType::Join(join)) => {
+            if join.join_data_type.is_some() {
+                return Err(unsupported(
+                    "JoinWith struct output is outside the 4.19 subset",
+                ));
+            }
+            let left = translate_child(session, join.left.as_deref(), "Join.left", depth)?;
+            let right = translate_child(session, join.right.as_deref(), "Join.right", depth)?;
+            if left.deferred_count_input.is_some() || right.deferred_count_input.is_some() {
+                return Err(unsupported("joins over a global aggregate are unsupported"));
+            }
+            let join_type = proto::join::JoinType::try_from(join.join_type)
+                .map_err(|_| Status::invalid_argument("Join.join_type is unknown"))?;
+            let how = match join_type {
+                proto::join::JoinType::Inner => Some(robin_sparkless::JoinType::Inner),
+                proto::join::JoinType::LeftOuter => Some(robin_sparkless::JoinType::Left),
+                proto::join::JoinType::RightOuter => Some(robin_sparkless::JoinType::Right),
+                proto::join::JoinType::FullOuter => Some(robin_sparkless::JoinType::Outer),
+                proto::join::JoinType::LeftAnti => Some(robin_sparkless::JoinType::LeftAnti),
+                proto::join::JoinType::LeftSemi => Some(robin_sparkless::JoinType::LeftSemi),
+                proto::join::JoinType::Cross => None,
+                proto::join::JoinType::Unspecified => {
+                    return Err(Status::invalid_argument("Join.join_type is required"));
+                }
+            };
+            let dataframe = if !join.using_columns.is_empty() {
+                if join.join_condition.is_some() || how.is_none() {
+                    return Err(Status::invalid_argument(
+                        "Join.using_columns cannot be combined with a condition or CROSS join",
+                    ));
+                }
+                let left_keys = join
+                    .using_columns
+                    .iter()
+                    .map(|name| resolve_join_key(&left, name))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let right_keys = join
+                    .using_columns
+                    .iter()
+                    .map(|name| resolve_join_key(&right, name))
+                    .collect::<Result<Vec<_>, _>>()?;
+                validate_connect_join_key_types(&left, &right, &left_keys, &right_keys)?;
+                let left_refs = left_keys.iter().map(String::as_str).collect();
+                let right_refs = right_keys.iter().map(String::as_str).collect();
+                left.dataframe
+                    .join_with_keys(&right.dataframe, left_refs, right_refs, how.unwrap(), false)
+                    .map_err(|error| {
+                        Status::failed_precondition(format!(
+                            "CONNECT_PLAN_ANALYSIS_FAILED: {error}"
+                        ))
+                    })?
+            } else if how.is_none() {
+                if join.join_condition.is_some() {
+                    return Err(unsupported(
+                        "conditioned CROSS joins are outside the 4.19 subset",
+                    ));
+                }
+                left.dataframe
+                    .cross_join(&right.dataframe)
+                    .map_err(|error| {
+                        Status::failed_precondition(format!(
+                            "CONNECT_PLAN_ANALYSIS_FAILED: {error}"
+                        ))
+                    })?
+            } else {
+                let condition = join.join_condition.as_ref().ok_or_else(|| {
+                    Status::invalid_argument("Join requires a condition or using_columns")
+                })?;
+                let keys = extract_connect_join_keys(
+                    condition,
+                    &left.plan_ids,
+                    &right.plan_ids,
+                    &left,
+                    &right,
+                )?;
+                let (left_keys, right_keys): (Vec<_>, Vec<_>) = keys.into_iter().unzip();
+                validate_connect_join_key_types(&left, &right, &left_keys, &right_keys)?;
+                let left_refs = left_keys.iter().map(String::as_str).collect();
+                let right_refs = right_keys.iter().map(String::as_str).collect();
+                left.dataframe
+                    .join_with_keys(&right.dataframe, left_refs, right_refs, how.unwrap(), true)
+                    .map_err(|error| {
+                        Status::failed_precondition(format!(
+                            "CONNECT_PLAN_ANALYSIS_FAILED: {error}"
+                        ))
+                    })?
+            };
+            let schema = dataframe.schema_engine().map_err(engine_failure)?;
+            plan_columns = joined_plan_columns(&left, &right, &dataframe, &join.using_columns)?;
+            let mut ids = left.plan_ids;
+            for id in right.plan_ids {
+                if !ids.insert(id) {
+                    return Err(Status::invalid_argument(format!(
+                        "duplicate Connect plan_id {id} across join inputs"
+                    )));
+                }
+            }
+            (dataframe, schema, ids)
         }
         Some(RelType::Aggregate(aggregate)) => {
             let input = translate_child(
@@ -234,45 +399,153 @@ fn translate_relation(
             let group_type = proto::aggregate::GroupType::try_from(aggregate.group_type)
                 .map_err(|_| Status::invalid_argument("Aggregate.group_type is unknown"))?;
             if group_type != proto::aggregate::GroupType::Groupby
-                || !aggregate.grouping_expressions.is_empty()
                 || aggregate.pivot.is_some()
                 || !aggregate.grouping_sets.is_empty()
             {
                 return Err(unsupported(
-                    "only a global GROUP_TYPE_GROUPBY count(1) aggregate is supported",
+                    "only GROUP_TYPE_GROUPBY without pivot or grouping sets is supported",
                 ));
             }
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
-                    "nested global aggregates are outside the 4.18 subset",
+                    "nested global aggregates are outside the 4.19 subset",
                 ));
             }
-            if aggregate.aggregate_expressions.len() != 1 {
+            if aggregate.aggregate_expressions.is_empty()
+                || aggregate.aggregate_expressions.len() > super::MAX_CONNECT_SCHEMA_FIELDS
+            {
                 return Err(unsupported(
-                    "only one global count(1) aggregate expression is supported",
+                    "aggregate expression count is outside the supported schema width",
                 ));
             }
-            let expression = &aggregate.aggregate_expressions[0];
-            let expr = translate_expression(
-                expression.expr_type.as_ref(),
-                &input.plan_ids,
-                ExpressionUse::Aggregate,
-            )?;
-            let dataframe = input
-                .dataframe
-                .select_expr_ir(&[expr])
-                .map_err(engine_failure)?;
-            deferred_count_input = Some(input.dataframe);
-            let schema = StructType::from_logical_fields(vec![LogicalField::new(
-                "count(1)".to_string(),
-                DataType::Long,
-                false,
-            )]);
-            (dataframe, schema, input.plan_ids)
+            let expressions = aggregate
+                .aggregate_expressions
+                .iter()
+                .map(|expression| {
+                    translate_expression(
+                        expression.expr_type.as_ref(),
+                        &input.plan_ids,
+                        ExpressionUse::Aggregate,
+                        Some(&input),
+                    )
+                    .and_then(|expression| resolve_logical_columns(&input, expression))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let physical_schema = input.dataframe.schema_engine().map_err(engine_failure)?;
+            validate_connect_aggregate_types(&physical_schema, &expressions)?;
+            if aggregate.grouping_expressions.is_empty() {
+                if expressions.len() != 1 || !is_global_count_rows(&expressions[0]) {
+                    return Err(unsupported(
+                        "only global count(1) is supported without grouping expressions",
+                    ));
+                }
+                let dataframe = input
+                    .dataframe
+                    .select_expr_ir(&expressions)
+                    .map_err(engine_failure)?;
+                deferred_count_input = Some(input.dataframe);
+                let schema = StructType::from_logical_fields(vec![LogicalField::new(
+                    aggregate_output_name(&aggregate.aggregate_expressions[0], &input.schema)?,
+                    DataType::Long,
+                    false,
+                )]);
+                (dataframe, schema, input.plan_ids)
+            } else {
+                let grouping_names = aggregate
+                    .grouping_expressions
+                    .iter()
+                    .map(|expression| {
+                        let ExprIr::Column(name) = translate_expression(
+                            expression.expr_type.as_ref(),
+                            &input.plan_ids,
+                            ExpressionUse::Project,
+                            Some(&input),
+                        )?
+                        else {
+                            return Err(unsupported(
+                                "grouping expressions must be simple column references",
+                            ));
+                        };
+                        let ExprIr::Column(name) =
+                            resolve_logical_columns(&input, ExprIr::Column(name))?
+                        else {
+                            unreachable!();
+                        };
+                        Ok(name)
+                    })
+                    .collect::<Result<Vec<_>, Status>>()?;
+                let group_refs = grouping_names.iter().map(String::as_str).collect();
+                let grouped = input
+                    .dataframe
+                    .group_by_engine(group_refs)
+                    .map_err(engine_failure)?;
+                let dataframe = grouped.agg_expr_ir(&expressions).map_err(engine_failure)?;
+                let native_schema = dataframe.schema_engine().map_err(engine_failure)?;
+                let mut output_names = aggregate
+                    .grouping_expressions
+                    .iter()
+                    .map(|expression| public_expression_name(expression, &input.schema))
+                    .collect::<Result<Vec<_>, _>>()?;
+                output_names.extend(
+                    aggregate
+                        .aggregate_expressions
+                        .iter()
+                        .map(|expression| aggregate_output_name(expression, &input.schema))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+                if native_schema.logical_fields().len() != output_names.len() {
+                    return Err(Status::failed_precondition(
+                        "Connect grouped aggregate schema width does not match its expressions",
+                    ));
+                }
+                let mut fields = native_schema.logical_fields().to_vec();
+                for (index, name) in output_names
+                    .iter()
+                    .take(aggregate.grouping_expressions.len())
+                    .enumerate()
+                {
+                    let source_fields = input
+                        .schema
+                        .logical_fields()
+                        .iter()
+                        .filter(|field| field.name.eq_ignore_ascii_case(name))
+                        .collect::<Vec<_>>();
+                    let [source] = source_fields.as_slice() else {
+                        return Err(Status::invalid_argument(format!(
+                            "CONNECT_PLAN_ANALYSIS_FAILED: grouping column {name:?} is unresolved or ambiguous"
+                        )));
+                    };
+                    fields[index].name = name.clone();
+                    fields[index].nullable = source.nullable;
+                    fields[index].metadata = source.metadata.clone();
+                }
+                for (offset, expression) in aggregate.aggregate_expressions.iter().enumerate() {
+                    let index = aggregate.grouping_expressions.len() + offset;
+                    fields[index].name = output_names[index].clone();
+                    fields[index].metadata.clear();
+                    match aggregate_function_name(expression)? {
+                        "count" => {
+                            fields[index].data_type = DataType::Long;
+                            fields[index].nullable = false;
+                        }
+                        "sum" => {
+                            fields[index].data_type = DataType::Long;
+                            fields[index].nullable = true;
+                        }
+                        name => {
+                            return Err(unsupported(format!(
+                                "aggregate function {name:?} is not enabled"
+                            )));
+                        }
+                    }
+                }
+                let schema = StructType::from_logical_fields(fields);
+                (dataframe, schema, input.plan_ids)
+            }
         }
         Some(_) => {
             return Err(unsupported(
-                "relation type is not enabled in the 4.18 subset",
+                "relation type is not enabled in the 4.19 subset",
             ));
         }
         None => return Err(Status::invalid_argument("Relation.rel_type is required")),
@@ -285,11 +558,15 @@ fn translate_relation(
             "duplicate Connect plan_id {plan_id}"
         )));
     }
+    if let Some(plan_id) = common.and_then(|common| common.plan_id) {
+        plan_columns.insert(plan_id, relation_column_bindings(&dataframe, &schema)?);
+    }
     validate_schema_width(&schema)?;
     Ok(TranslatedRelation {
         dataframe,
         schema,
         plan_ids,
+        plan_columns,
         deferred_count_input,
     })
 }
@@ -329,24 +606,31 @@ fn public_expression_name(
             Ok(alias.name[0].clone())
         }
         Some(ExprType::UnresolvedAttribute(attribute)) => {
-            let mut fields = input_schema.logical_fields().iter().filter(|candidate| {
-                candidate
-                    .name
-                    .eq_ignore_ascii_case(&attribute.unparsed_identifier)
-            });
+            let name = attribute
+                .unparsed_identifier
+                .rsplit('.')
+                .next()
+                .expect("non-empty validated identifier");
+            if !is_simple_join_identifier(&attribute.unparsed_identifier) {
+                return Err(unsupported("projection columns must be simple identifiers"));
+            }
+            let mut fields = input_schema
+                .logical_fields()
+                .iter()
+                .filter(|candidate| candidate.name.eq_ignore_ascii_case(name));
             if fields.next().is_none() {
                 return Err(Status::failed_precondition(format!(
                     "Connect projection column {:?} disappeared from its input schema",
-                    attribute.unparsed_identifier
+                    name
                 )));
             };
             if fields.next().is_some() {
                 return Err(Status::invalid_argument(format!(
                     "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {:?}",
-                    attribute.unparsed_identifier
+                    name
                 )));
             }
-            Ok(attribute.unparsed_identifier.clone())
+            Ok(name.to_string())
         }
         Some(ExprType::Literal(literal)) => match literal.literal_type.as_ref() {
             Some(LiteralType::Integer(value)) => Ok(value.to_string()),
@@ -383,7 +667,15 @@ fn resolve_logical_columns(
     expression: ExprIr,
 ) -> Result<ExprIr, Status> {
     fn resolve(name: &str, input: &TranslatedRelation) -> Result<String, Status> {
-        let matches = input
+        let physical_schema = input.dataframe.schema_engine().map_err(engine_failure)?;
+        let physical_matches = physical_schema
+            .logical_fields()
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| field.name.eq_ignore_ascii_case(name))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let logical_matches = input
             .schema
             .logical_fields()
             .iter()
@@ -391,6 +683,14 @@ fn resolve_logical_columns(
             .filter(|(_, field)| field.name.eq_ignore_ascii_case(name))
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
+        // Public logical names take precedence over generated physical suffixes such as
+        // `x_1`; this keeps an explicit alias `X_1` from binding to a duplicate `x` column.
+        // Internal physical names remain resolvable when they do not have a logical match.
+        let matches = if logical_matches.is_empty() {
+            &physical_matches
+        } else {
+            &logical_matches
+        };
         let index = match matches.as_slice() {
             [index] => *index,
             [] => {
@@ -404,18 +704,19 @@ fn resolve_logical_columns(
                 )));
             }
         };
-        input
-            .dataframe
-            .schema_engine()
-            .map_err(engine_failure)?
-            .logical_fields()
-            .get(index)
-            .map(|field| field.name.clone())
-            .ok_or_else(|| {
-                Status::failed_precondition(
-                    "Connect logical schema does not match its physical dataframe",
-                )
-            })
+        let physical_columns = input.dataframe.columns().map_err(|error| {
+            Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+        })?;
+        if physical_columns.len() != physical_schema.logical_fields().len() {
+            return Err(Status::failed_precondition(
+                "Connect logical schema does not match its physical dataframe",
+            ));
+        }
+        physical_columns.get(index).cloned().ok_or_else(|| {
+            Status::failed_precondition(
+                "Connect logical schema does not match its physical dataframe",
+            )
+        })
     }
     fn visit(expression: ExprIr, input: &TranslatedRelation) -> Result<ExprIr, Status> {
         Ok(match expression {
@@ -445,6 +746,411 @@ fn resolve_logical_columns(
     visit(expression, input)
 }
 
+fn relation_column_bindings(
+    dataframe: &robin_sparkless::DataFrame,
+    schema: &StructType,
+) -> Result<HashMap<String, String>, Status> {
+    let columns = dataframe.columns().map_err(|error| {
+        Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+    })?;
+    if columns.len() != schema.logical_fields().len() {
+        return Err(Status::failed_precondition(
+            "Connect relation schema width does not match its dataframe columns",
+        ));
+    }
+    Ok(schema
+        .logical_fields()
+        .iter()
+        .zip(columns)
+        .map(|(field, physical_name)| (field.name.clone(), physical_name))
+        .collect())
+}
+
+fn joined_plan_columns(
+    left: &TranslatedRelation,
+    right: &TranslatedRelation,
+    output: &robin_sparkless::DataFrame,
+    using_columns: &[String],
+) -> Result<HashMap<i64, HashMap<String, String>>, Status> {
+    let left_names = left.dataframe.columns().map_err(|error| {
+        Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+    })?;
+    let output_names = output.columns().map_err(|error| {
+        Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+    })?;
+    let contains = |names: &[String], name: &str| {
+        names
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(name))
+    };
+    let output_name = |name: &str, is_right: bool| -> Option<String> {
+        if is_right && contains(&left_names, name) {
+            let base = format!("{name}_right");
+            if contains(&output_names, &base) {
+                return output_names
+                    .iter()
+                    .find(|candidate| candidate.eq_ignore_ascii_case(&base))
+                    .cloned();
+            }
+            for suffix in 1..=output_names.len() {
+                let candidate = format!("{base}_{suffix}");
+                if contains(&output_names, &candidate) {
+                    return output_names
+                        .iter()
+                        .find(|name| name.eq_ignore_ascii_case(&candidate))
+                        .cloned();
+                }
+            }
+            return None;
+        }
+        output_names
+            .iter()
+            .find(|candidate| candidate.eq_ignore_ascii_case(name))
+            .cloned()
+    };
+    let mut coalesced_right_keys = HashMap::new();
+    for key in using_columns {
+        let left_key = resolve_join_key(left, key)?;
+        let right_key = resolve_join_key(right, key)?;
+        coalesced_right_keys.insert(right_key, left_key);
+    }
+    let mut result = HashMap::new();
+    for (is_right, relation) in [(false, left), (true, right)] {
+        for (plan_id, bindings) in &relation.plan_columns {
+            let mut remapped = HashMap::new();
+            for (source_name, current_name) in bindings {
+                let joined_name = if is_right {
+                    coalesced_right_keys
+                        .get(current_name)
+                        .cloned()
+                        .or_else(|| output_name(current_name, true))
+                } else {
+                    output_name(current_name, false)
+                };
+                if let Some(joined_name) = joined_name {
+                    remapped.insert(source_name.clone(), joined_name);
+                }
+            }
+            result.insert(*plan_id, remapped);
+        }
+    }
+    Ok(result)
+}
+
+fn resolve_join_key(input: &TranslatedRelation, name: &str) -> Result<String, Status> {
+    let parts = name.split('.').collect::<Vec<_>>();
+    let column = match parts.as_slice() {
+        [column] if is_simple_identifier(column) => *column,
+        [qualifier, column]
+            if is_simple_identifier(qualifier)
+                && is_simple_identifier(column)
+                && input
+                    .dataframe
+                    .get_alias()
+                    .is_some_and(|alias| alias.eq_ignore_ascii_case(qualifier)) =>
+        {
+            *column
+        }
+        _ => {
+            return Err(unsupported(
+                "join keys must be simple or alias-qualified identifiers",
+            ));
+        }
+    };
+    match resolve_logical_columns(input, ExprIr::Column(column.to_string()))? {
+        ExprIr::Column(name) => Ok(name),
+        _ => unreachable!(),
+    }
+}
+
+fn validate_connect_join_key_types(
+    left: &TranslatedRelation,
+    right: &TranslatedRelation,
+    left_keys: &[String],
+    right_keys: &[String],
+) -> Result<(), Status> {
+    if left_keys.is_empty() || left_keys.len() != right_keys.len() {
+        return Err(unsupported("joins require matching non-empty key lists"));
+    }
+    let left_schema = left.dataframe.schema_engine().map_err(engine_failure)?;
+    let right_schema = right.dataframe.schema_engine().map_err(engine_failure)?;
+    for (left_key, right_key) in left_keys.iter().zip(right_keys) {
+        let field_type = |schema: &StructType, name: &str| {
+            schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name.eq_ignore_ascii_case(name))
+                .map(|field| field.data_type.clone())
+                .ok_or_else(|| {
+                    Status::failed_precondition(format!(
+                        "Connect join key {name:?} disappeared from its input schema"
+                    ))
+                })
+        };
+        let left_type = field_type(&left_schema, left_key)?;
+        let right_type = field_type(&right_schema, right_key)?;
+        if !matches!(
+            (left_type.clone(), right_type.clone()),
+            (DataType::Integer, DataType::Integer) | (DataType::Long, DataType::Long)
+        ) {
+            return Err(unsupported(format!(
+                "4.19 Connect equi-join keys require matching INT or BIGINT types; found {left_type:?} and {right_type:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn is_simple_join_identifier(identifier: &str) -> bool {
+    let mut parts = identifier.split('.');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(column), None, None) => is_simple_identifier(column),
+        (Some(qualifier), Some(column), None) => {
+            is_simple_identifier(qualifier) && is_simple_identifier(column)
+        }
+        _ => false,
+    }
+}
+
+fn connect_join_attribute(
+    expression: &proto::Expression,
+) -> Result<&proto::expression::UnresolvedAttribute, Status> {
+    match expression.expr_type.as_ref() {
+        Some(ExprType::UnresolvedAttribute(attribute))
+            if !attribute.is_metadata_column.unwrap_or(false)
+                && is_simple_join_identifier(&attribute.unparsed_identifier) =>
+        {
+            Ok(attribute)
+        }
+        _ => Err(unsupported(
+            "join conditions support equality between simple column references",
+        )),
+    }
+}
+
+fn extract_connect_join_keys(
+    expression: &proto::Expression,
+    left_plan_ids: &HashSet<i64>,
+    right_plan_ids: &HashSet<i64>,
+    left: &TranslatedRelation,
+    right: &TranslatedRelation,
+) -> Result<Vec<(String, String)>, Status> {
+    fn visit(
+        expression: &proto::Expression,
+        left_plan_ids: &HashSet<i64>,
+        right_plan_ids: &HashSet<i64>,
+        left: &TranslatedRelation,
+        right: &TranslatedRelation,
+        keys: &mut Vec<(String, String)>,
+    ) -> Result<(), Status> {
+        match expression.expr_type.as_ref() {
+            Some(ExprType::UnresolvedFunction(function))
+                if function.function_name.eq_ignore_ascii_case("and")
+                    && function.arguments.len() == 2 =>
+            {
+                visit(
+                    &function.arguments[0],
+                    left_plan_ids,
+                    right_plan_ids,
+                    left,
+                    right,
+                    keys,
+                )?;
+                visit(
+                    &function.arguments[1],
+                    left_plan_ids,
+                    right_plan_ids,
+                    left,
+                    right,
+                    keys,
+                )
+            }
+            Some(ExprType::UnresolvedFunction(function))
+                if matches!(function.function_name.as_str(), "=" | "==")
+                    && function.arguments.len() == 2 =>
+            {
+                if function.is_distinct
+                    || function.is_user_defined_function
+                    || function.is_internal.unwrap_or(false)
+                {
+                    return Err(unsupported("join condition functions must be built-in"));
+                }
+                let first = connect_join_attribute(&function.arguments[0])?;
+                let second = connect_join_attribute(&function.arguments[1])?;
+                let first_id = first.plan_id.ok_or_else(|| {
+                    unsupported("join condition columns must identify their input plan")
+                })?;
+                let second_id = second.plan_id.ok_or_else(|| {
+                    unsupported("join condition columns must identify their input plan")
+                })?;
+                let first_is_left = left_plan_ids.contains(&first_id);
+                let first_is_right = right_plan_ids.contains(&first_id);
+                let second_is_left = left_plan_ids.contains(&second_id);
+                let second_is_right = right_plan_ids.contains(&second_id);
+                let pair = if first_is_left && !first_is_right && second_is_right && !second_is_left
+                {
+                    (
+                        resolve_join_key(left, &first.unparsed_identifier)?,
+                        resolve_join_key(right, &second.unparsed_identifier)?,
+                    )
+                } else if first_is_right && !first_is_left && second_is_left && !second_is_right {
+                    (
+                        resolve_join_key(left, &second.unparsed_identifier)?,
+                        resolve_join_key(right, &first.unparsed_identifier)?,
+                    )
+                } else {
+                    return Err(unsupported(
+                        "join equality must reference one column from each input",
+                    ));
+                };
+                keys.push(pair);
+                Ok(())
+            }
+            _ => Err(unsupported(
+                "join conditions support equi-joins combined with AND only",
+            )),
+        }
+    }
+
+    let mut keys = Vec::new();
+    visit(
+        expression,
+        left_plan_ids,
+        right_plan_ids,
+        left,
+        right,
+        &mut keys,
+    )?;
+    if keys.is_empty() {
+        return Err(unsupported("join condition contains no equality keys"));
+    }
+    Ok(keys)
+}
+
+fn aggregate_output_name(
+    expression: &proto::Expression,
+    input_schema: &StructType,
+) -> Result<String, Status> {
+    match expression.expr_type.as_ref() {
+        Some(ExprType::Alias(alias)) => {
+            if alias.name.len() != 1
+                || alias.name[0].is_empty()
+                || alias
+                    .metadata
+                    .as_deref()
+                    .is_some_and(|metadata| metadata != "{}")
+            {
+                return Err(unsupported(
+                    "aggregate aliases require one name and empty metadata",
+                ));
+            }
+            Ok(alias.name[0].clone())
+        }
+        Some(ExprType::UnresolvedFunction(function)) => {
+            let [argument] = function.arguments.as_slice() else {
+                return Err(unsupported("aggregate functions require one argument"));
+            };
+            let argument_name = match argument.expr_type.as_ref() {
+                Some(ExprType::Literal(literal))
+                    if matches!(
+                        literal.literal_type.as_ref(),
+                        Some(LiteralType::Integer(1) | LiteralType::Long(1))
+                    ) =>
+                {
+                    "1".to_string()
+                }
+                Some(ExprType::UnresolvedAttribute(attribute)) => {
+                    let _ = public_expression_name(argument, input_schema)?;
+                    attribute.unparsed_identifier.clone()
+                }
+                _ => {
+                    return Err(unsupported(
+                        "aggregate arguments must be a column or literal 1",
+                    ));
+                }
+            };
+            match function.function_name.as_str() {
+                "count" => Ok(format!("count({argument_name})")),
+                "sum" if argument_name != "1" => Ok(format!("sum({argument_name})")),
+                "sum" => Err(unsupported("sum does not accept a literal argument")),
+                _ => Err(unsupported(format!(
+                    "aggregate output name for {:?} is unsupported",
+                    function.function_name
+                ))),
+            }
+        }
+        _ => Err(unsupported("aggregate output expression is unsupported")),
+    }
+}
+
+fn aggregate_function_name(expression: &proto::Expression) -> Result<&str, Status> {
+    match expression.expr_type.as_ref() {
+        Some(ExprType::Alias(alias)) => {
+            let expression = alias
+                .expr
+                .as_deref()
+                .ok_or_else(|| Status::invalid_argument("Alias.expr is required"))?;
+            aggregate_function_name(expression)
+        }
+        Some(ExprType::UnresolvedFunction(function)) => Ok(function.function_name.as_str()),
+        _ => Err(unsupported(
+            "aggregate expression must be a function or alias",
+        )),
+    }
+}
+
+fn validate_connect_aggregate_types(
+    input_schema: &StructType,
+    expressions: &[ExprIr],
+) -> Result<(), Status> {
+    for expression in expressions {
+        let expression = match expression {
+            ExprIr::Call { name, args } if name == "alias" => {
+                let [value, ExprIr::Lit(LiteralValue::Str(_))] = args.as_slice() else {
+                    return Err(unsupported("malformed aggregate alias expression"));
+                };
+                value
+            }
+            expression => expression,
+        };
+        if let ExprIr::Call { name, args } = expression
+            && name == "sum"
+        {
+            let [ExprIr::Column(column)] = args.as_slice() else {
+                return Err(unsupported("sum requires one column reference"));
+            };
+            let fields = input_schema
+                .logical_fields()
+                .iter()
+                .filter(|field| field.name.eq_ignore_ascii_case(column))
+                .collect::<Vec<_>>();
+            let [field] = fields.as_slice() else {
+                return Err(Status::invalid_argument(format!(
+                    "CONNECT_PLAN_ANALYSIS_FAILED: sum column {column:?} is unresolved or ambiguous"
+                )));
+            };
+            if !matches!(&field.data_type, DataType::Integer | DataType::Long) {
+                return Err(unsupported(format!(
+                    "4.19 Connect sum supports INT and BIGINT columns; found {:?}",
+                    field.data_type
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_global_count_rows(expression: &ExprIr) -> bool {
+    match expression {
+        ExprIr::Call { name, args } if name == "count_rows" => args.is_empty(),
+        ExprIr::Call { name, args } if name == "alias" => {
+            matches!(args.as_slice(), [inner, ExprIr::Lit(LiteralValue::Str(_))]
+                if is_global_count_rows(inner))
+        }
+        _ => false,
+    }
+}
+
 fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> Result<(), Status> {
     fn expression_type(input_schema: &StructType, expression: &ExprIr) -> Result<DataType, Status> {
         match expression {
@@ -470,7 +1176,7 @@ fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> 
             ExprIr::Lit(LiteralValue::Str(_)) => Ok(DataType::String),
             ExprIr::Lit(LiteralValue::Bool(_)) => Ok(DataType::Boolean),
             ExprIr::Lit(LiteralValue::Null) => Err(unsupported(
-                "untyped null comparison operands are outside the 4.18 subset",
+                "untyped null comparison operands are outside the 4.19 subset",
             )),
             ExprIr::Add(left, right) => {
                 let left = expression_type(input_schema, left)?;
@@ -500,7 +1206,7 @@ fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> 
                 expression_type(input_schema, value)
             }
             _ => Err(unsupported(
-                "comparison operand type cannot be analyzed in the 4.18 subset",
+                "comparison operand type cannot be analyzed in the 4.19 subset",
             )),
         }
     }
@@ -604,6 +1310,7 @@ fn translate_expression(
     expr_type: Option<&ExprType>,
     input_plan_ids: &HashSet<i64>,
     usage: ExpressionUse,
+    input: Option<&TranslatedRelation>,
 ) -> Result<ExprIr, Status> {
     match expr_type {
         Some(ExprType::Literal(literal)) => match literal.literal_type.as_ref() {
@@ -616,7 +1323,7 @@ fn translate_expression(
         },
         Some(ExprType::UnresolvedAttribute(attribute)) => {
             if attribute.unparsed_identifier.is_empty()
-                || !is_simple_identifier(&attribute.unparsed_identifier)
+                || !is_simple_join_identifier(&attribute.unparsed_identifier)
                 || attribute.is_metadata_column.unwrap_or(false)
             {
                 return Err(unsupported(
@@ -624,7 +1331,22 @@ fn translate_expression(
                 ));
             }
             validate_expression_plan_id(attribute.plan_id, input_plan_ids)?;
-            Ok(ExprIr::Column(attribute.unparsed_identifier.clone()))
+            let identifier = attribute
+                .unparsed_identifier
+                .rsplit('.')
+                .next()
+                .expect("non-empty validated identifier");
+            let resolved = attribute
+                .plan_id
+                .and_then(|plan_id| input.and_then(|input| input.plan_columns.get(&plan_id)))
+                .and_then(|columns| {
+                    columns
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(identifier))
+                        .map(|(_, output_name)| output_name.clone())
+                })
+                .unwrap_or_else(|| identifier.to_string());
+            Ok(ExprIr::Column(resolved))
         }
         Some(ExprType::UnresolvedFunction(function)) => {
             if function.is_distinct
@@ -641,33 +1363,73 @@ fn translate_expression(
                 function.arguments.as_slice(),
             ) {
                 (ExpressionUse::Project, "+", [left, right]) => {
-                    let left =
-                        translate_expression(left.expr_type.as_ref(), input_plan_ids, usage)?;
-                    let right =
-                        translate_expression(right.expr_type.as_ref(), input_plan_ids, usage)?;
+                    let left = translate_expression(
+                        left.expr_type.as_ref(),
+                        input_plan_ids,
+                        usage,
+                        input,
+                    )?;
+                    let right = translate_expression(
+                        right.expr_type.as_ref(),
+                        input_plan_ids,
+                        usage,
+                        input,
+                    )?;
                     Ok(ExprIr::Add(Box::new(left), Box::new(right)))
                 }
                 (ExpressionUse::Project | ExpressionUse::Filter, ">=", [left, right]) => {
-                    let left =
-                        translate_expression(left.expr_type.as_ref(), input_plan_ids, usage)?;
-                    let right =
-                        translate_expression(right.expr_type.as_ref(), input_plan_ids, usage)?;
+                    let left = translate_expression(
+                        left.expr_type.as_ref(),
+                        input_plan_ids,
+                        usage,
+                        input,
+                    )?;
+                    let right = translate_expression(
+                        right.expr_type.as_ref(),
+                        input_plan_ids,
+                        usage,
+                        input,
+                    )?;
                     Ok(ExprIr::Ge(Box::new(left), Box::new(right)))
                 }
                 (ExpressionUse::Aggregate, "count", [argument]) => {
-                    let argument =
-                        translate_expression(argument.expr_type.as_ref(), input_plan_ids, usage)?;
-                    if !matches!(
-                        argument,
-                        ExprIr::Lit(LiteralValue::I32(1) | LiteralValue::I64(1))
-                    ) {
-                        return Err(unsupported("only global count(1) is supported"));
+                    let argument = translate_expression(
+                        argument.expr_type.as_ref(),
+                        input_plan_ids,
+                        usage,
+                        input,
+                    )?;
+                    match argument {
+                        ExprIr::Lit(LiteralValue::I32(1) | LiteralValue::I64(1)) => {
+                            let row_count = ExprIr::Call {
+                                name: "count_rows".to_string(),
+                                args: Vec::new(),
+                            };
+                            Ok(robin_sparkless::alias(row_count, "count(1)"))
+                        }
+                        column @ ExprIr::Column(_) => Ok(ExprIr::Call {
+                            name: "count".to_string(),
+                            args: vec![column],
+                        }),
+                        _ => Err(unsupported(
+                            "count supports a column or the literal 1 in the 4.19 subset",
+                        )),
                     }
-                    let row_count = ExprIr::Call {
-                        name: "count_rows".to_string(),
-                        args: Vec::new(),
-                    };
-                    Ok(robin_sparkless::alias(row_count, "count(1)"))
+                }
+                (ExpressionUse::Aggregate, "sum", [argument]) => {
+                    let argument = translate_expression(
+                        argument.expr_type.as_ref(),
+                        input_plan_ids,
+                        usage,
+                        input,
+                    )?;
+                    match argument {
+                        column @ ExprIr::Column(_) => Ok(ExprIr::Call {
+                            name: "sum".to_string(),
+                            args: vec![column],
+                        }),
+                        _ => Err(unsupported("sum requires a simple column reference")),
+                    }
                 }
                 _ => Err(unsupported(format!(
                     "Connect function {:?} with this arity or context is unsupported",
@@ -675,7 +1437,9 @@ fn translate_expression(
                 ))),
             }
         }
-        Some(ExprType::Alias(alias)) if matches!(usage, ExpressionUse::Project) => {
+        Some(ExprType::Alias(alias))
+            if matches!(usage, ExpressionUse::Project | ExpressionUse::Aggregate) =>
+        {
             if alias.name.len() != 1
                 || alias.name[0].is_empty()
                 || alias
@@ -691,18 +1455,15 @@ fn translate_expression(
                 .expr
                 .as_deref()
                 .ok_or_else(|| Status::invalid_argument("Alias.expr is required"))?;
-            let expression = translate_expression(
-                expression.expr_type.as_ref(),
-                input_plan_ids,
-                ExpressionUse::Project,
-            )?;
+            let expression =
+                translate_expression(expression.expr_type.as_ref(), input_plan_ids, usage, input)?;
             Ok(robin_sparkless::alias(expression, &alias.name[0]))
         }
         Some(ExprType::ExpressionString(_)) => Err(unsupported(
             "expression_string is supported only as a checked Filter condition",
         )),
         Some(_) => Err(unsupported(
-            "Connect expression type is not enabled in the 4.18 subset",
+            "Connect expression type is not enabled in the 4.19 subset",
         )),
         None => Err(Status::invalid_argument("Expression.expr_type is required")),
     }
@@ -1216,7 +1977,7 @@ fn data_type_to_proto(data_type: &DataType) -> Result<proto::DataType, Status> {
         }),
         _ => {
             return Err(unsupported(format!(
-                "Connect schema type {data_type:?} is not enabled in the 4.18 schema subset"
+                "Connect schema type {data_type:?} is not enabled in the 4.19 schema subset"
             )));
         }
     };
@@ -1236,6 +1997,16 @@ fn unsupported(message: impl Into<String>) -> Status {
     Status::unimplemented(format!("UNSUPPORTED_CONNECT_PLAN: {}", message.into()))
 }
 
+fn is_qualified_identifier(identifier: &str) -> bool {
+    !identifier.is_empty()
+        && identifier.split('.').all(|part| {
+            !part.is_empty()
+                && part.chars().enumerate().all(|(index, ch)| {
+                    ch == '_' || ch.is_ascii_alphanumeric() && (index > 0 || !ch.is_ascii_digit())
+                })
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1247,6 +2018,259 @@ mod tests {
             .config("spark.sql.ansi.enabled", "true")
             .config("spark.sql.caseSensitive", "false")
             .get_or_create()
+    }
+
+    fn connect_expression(expr_type: ExprType) -> proto::Expression {
+        proto::Expression {
+            common: None,
+            expr_type: Some(expr_type),
+        }
+    }
+
+    fn connect_attribute(name: &str, plan_id: Option<i64>) -> proto::Expression {
+        connect_expression(ExprType::UnresolvedAttribute(
+            expression::UnresolvedAttribute {
+                unparsed_identifier: name.into(),
+                plan_id,
+                is_metadata_column: Some(false),
+            },
+        ))
+    }
+
+    #[allow(deprecated)]
+    fn named_table_relation(name: &str, plan_id: Option<i64>) -> proto::Relation {
+        proto::Relation {
+            common: plan_id.map(|plan_id| proto::RelationCommon {
+                source_info: String::new(),
+                plan_id: Some(plan_id),
+                origin: None,
+            }),
+            rel_type: Some(RelType::Read(proto::Read {
+                read_type: Some(proto::read::ReadType::NamedTable(proto::read::NamedTable {
+                    unparsed_identifier: name.into(),
+                    options: Default::default(),
+                })),
+                is_streaming: false,
+            })),
+        }
+    }
+
+    #[allow(deprecated)]
+    fn alias_relation(input: proto::Relation, alias: &str, plan_id: i64) -> proto::Relation {
+        proto::Relation {
+            common: Some(proto::RelationCommon {
+                source_info: String::new(),
+                plan_id: Some(plan_id),
+                origin: None,
+            }),
+            rel_type: Some(RelType::SubqueryAlias(Box::new(proto::SubqueryAlias {
+                input: Some(Box::new(input)),
+                alias: alias.into(),
+                qualifier: Vec::new(),
+            }))),
+        }
+    }
+
+    #[test]
+    fn configured_named_table_relations_resolve_registered_tables_and_reject_options() {
+        let session = session();
+        let table = session.range(0, 3, 1).unwrap();
+        session.register_table("source_table", table);
+        let relation = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Read(proto::Read {
+                read_type: Some(proto::read::ReadType::NamedTable(proto::read::NamedTable {
+                    unparsed_identifier: "source_table".into(),
+                    options: Default::default(),
+                })),
+                is_streaming: false,
+            })),
+        };
+        let translated = translate_relation(&session, &relation, 1).unwrap();
+        assert_eq!(translated.schema.logical_fields()[0].name, "id");
+
+        let mut with_options = relation.clone();
+        let Some(RelType::Read(read)) = with_options.rel_type.as_mut() else {
+            unreachable!();
+        };
+        let Some(proto::read::ReadType::NamedTable(named)) = read.read_type.as_mut() else {
+            unreachable!();
+        };
+        named.options.insert("path".into(), "untrusted".into());
+        let error = match translate_relation(&session, &with_options, 1) {
+            Err(error) => error,
+            Ok(_) => panic!("named table with source options must be rejected"),
+        };
+        assert_eq!(error.code(), Code::Unimplemented);
+    }
+
+    #[test]
+    fn named_table_identifiers_reject_unquoted_sql_fragments() {
+        assert!(is_qualified_identifier("catalog.schema.table_2"));
+        assert!(!is_qualified_identifier("catalog..table"));
+        assert!(!is_qualified_identifier("table; DROP TABLE x"));
+        assert!(!is_qualified_identifier("2starts_with_digit"));
+    }
+
+    #[test]
+    fn configured_named_table_join_translates_and_collects_typed_rows() {
+        let session = session();
+        let left = session
+            .create_dataframe(
+                vec![
+                    (1, 10, "left".to_string()),
+                    (2, 20, "unmatched".to_string()),
+                ],
+                vec!["id", "score", "label"],
+            )
+            .unwrap();
+        let right = session
+            .create_dataframe(
+                vec![(1, 100, "right".to_string())],
+                vec!["other_id", "amount", "label"],
+            )
+            .unwrap();
+        session.register_table("left_source", left);
+        session.register_table("right_source", right);
+        let condition = connect_expression(ExprType::UnresolvedFunction(
+            expression::UnresolvedFunction {
+                function_name: "==".into(),
+                arguments: vec![
+                    connect_attribute("l.id", Some(111)),
+                    connect_attribute("r.other_id", Some(222)),
+                ],
+                is_distinct: false,
+                is_user_defined_function: false,
+                is_internal: Some(false),
+            },
+        ));
+        let relation = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Join(Box::new(proto::Join {
+                left: Some(Box::new(alias_relation(
+                    named_table_relation("left_source", Some(101)),
+                    "l",
+                    111,
+                ))),
+                right: Some(Box::new(alias_relation(
+                    named_table_relation("right_source", Some(202)),
+                    "r",
+                    222,
+                ))),
+                join_condition: Some(condition),
+                join_type: proto::join::JoinType::Inner as i32,
+                using_columns: Vec::new(),
+                join_data_type: None,
+            }))),
+        };
+
+        let translated = translate_relation(&session, &relation, 1).unwrap();
+        assert_eq!(translated.schema.logical_fields().len(), 6);
+        let rows = translated.dataframe.collect_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], serde_json::json!(1));
+        assert_eq!(rows[0]["other_id"], serde_json::json!(1));
+        assert_eq!(rows[0]["amount"], serde_json::json!(100));
+
+        let right_label = connect_expression(ExprType::UnresolvedAttribute(
+            expression::UnresolvedAttribute {
+                unparsed_identifier: "r.label".into(),
+                plan_id: Some(222),
+                is_metadata_column: Some(false),
+            },
+        ));
+        let projection = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Project(Box::new(proto::Project {
+                input: Some(Box::new(relation)),
+                expressions: vec![connect_expression(ExprType::Alias(Box::new(
+                    expression::Alias {
+                        expr: Some(Box::new(right_label)),
+                        name: vec!["right_label".into()],
+                        metadata: Some("{}".into()),
+                    },
+                )))],
+            }))),
+        };
+        let projected = translate_relation(&session, &projection, 1).unwrap();
+        assert_eq!(projected.schema.logical_fields()[0].name, "right_label");
+        let rows = projected.dataframe.collect_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["right_label"], serde_json::json!("right"));
+    }
+
+    #[test]
+    fn grouped_connect_count_and_sum_preserve_schema_and_values() {
+        let session = session();
+        let table = session
+            .create_dataframe(
+                vec![
+                    (1, 10, "a".to_string()),
+                    (1, 20, "b".to_string()),
+                    (2, 30, "c".to_string()),
+                ],
+                vec!["bucket", "amount", "label"],
+            )
+            .unwrap();
+        session.register_table("aggregate_source", table);
+        let sum = connect_expression(ExprType::UnresolvedFunction(
+            expression::UnresolvedFunction {
+                function_name: "sum".into(),
+                arguments: vec![connect_attribute("amount", None)],
+                is_distinct: false,
+                is_user_defined_function: false,
+                is_internal: Some(false),
+            },
+        ));
+        let sum = connect_expression(ExprType::Alias(Box::new(expression::Alias {
+            expr: Some(Box::new(sum)),
+            name: vec!["total".into()],
+            metadata: Some("{}".into()),
+        })));
+        let count = connect_expression(ExprType::UnresolvedFunction(
+            expression::UnresolvedFunction {
+                function_name: "count".into(),
+                arguments: vec![connect_expression(ExprType::Literal(expression::Literal {
+                    literal_type: Some(LiteralType::Integer(1)),
+                }))],
+                is_distinct: false,
+                is_user_defined_function: false,
+                is_internal: Some(false),
+            },
+        ));
+        let relation = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Aggregate(Box::new(proto::Aggregate {
+                input: Some(Box::new(named_table_relation("aggregate_source", None))),
+                group_type: proto::aggregate::GroupType::Groupby as i32,
+                grouping_expressions: vec![connect_attribute("bucket", None)],
+                aggregate_expressions: vec![sum, count],
+                pivot: None,
+                grouping_sets: Vec::new(),
+            }))),
+        };
+
+        let translated = translate_relation(&session, &relation, 1).unwrap();
+        let names = translated
+            .schema
+            .logical_fields()
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["bucket", "total", "count(1)"]);
+        let fields = translated.schema.logical_fields();
+        assert!(matches!(fields[1].data_type, DataType::Long));
+        assert!(fields[1].nullable);
+        assert!(matches!(fields[2].data_type, DataType::Long));
+        assert!(!fields[2].nullable);
+        let rows = translated.dataframe.collect_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        let one = rows
+            .iter()
+            .find(|row| row["bucket"] == serde_json::json!(1))
+            .unwrap();
+        assert_eq!(one["total"], serde_json::json!(30));
+        assert_eq!(one["count(1)"], serde_json::json!(2));
     }
 
     fn decode_plan(bytes: &[u8]) -> proto::ExecutePlanRequest {

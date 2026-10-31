@@ -41,6 +41,27 @@ server binary also supports `--disable-connect` and `--disable-http`. Readiness 
 endpoint only after its socket is bound and includes the server instance identity and versioned
 capability record. The launcher does not import PySpark, download a binary, or compile a server.
 
+For a convenience context that owns both a fresh server and an independent Connect session,
+install the optional Connect extra:
+
+```sh
+python -m pip install "sparkless[connect]==4.19.0"
+```
+
+Then use `SparklessConnect`; it returns the actual `pyspark-client` session and always attempts to
+stop that session before shutting down the server:
+
+```python
+from sparkless.server import SparklessConnect
+
+with SparklessConnect() as spark:
+    assert spark.range(10).filter("id > 5").count() == 4
+```
+
+The helper imports the optional client only when entering the context. It can be reused after
+successful cleanup, and a server-shutdown failure keeps ownership attached so cleanup can be
+retried. Same-instance nesting and use after fork raise `SparklessServerError`.
+
 For a manually managed server, compile the `connect` Cargo feature and use `--connect-host` and
 `--connect-port`. The CLI defaults to `127.0.0.1:15002`; port `0` asks the OS for an available
 port. Keep listeners on loopback unless deployment configuration supplies an explicit network

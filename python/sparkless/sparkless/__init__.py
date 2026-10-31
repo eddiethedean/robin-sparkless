@@ -407,6 +407,7 @@ def __getattr__(name: str) -> object:
     if name in (
         "SparklessServer",
         "AsyncSparklessServer",
+        "SparklessConnect",
         "SparklessServerError",
         "UnsupportedServerPlatformError",
         "UnsupportedSparkConnectError",
@@ -511,6 +512,7 @@ __all__: List[str] = [
     "SparklessExternalCatalogError",
     "SparklessServer",
     "AsyncSparklessServer",
+    "SparklessConnect",
     "SparklessServerError",
     "UnsupportedServerPlatformError",
     "UnsupportedSparkConnectError",

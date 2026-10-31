@@ -32,6 +32,7 @@ use polars::prelude::{
     LazyFrame, LiteralValue, NULL, NamedFrom, Operator, PlSmallStr, PolarsError, Schema,
     SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
+use polars_plan::prelude::DynLiteralValue;
 use robin_sparkless_core::engine::{
     ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, ExternalCatalogProvider,
     ExternalTableDescriptor, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
@@ -182,6 +183,7 @@ const DEFAULT_CASE_SENSITIVE: bool = false;
 const DEFAULT_EXTERNAL_ARROW_BATCH_ROWS: usize = 10_000;
 const DEFAULT_EXTERNAL_ARROW_BATCH_BYTES: usize = 64 * 1024 * 1024;
 const RANGE_EXECUTION_BATCH_ROWS: usize = 16_384;
+const IPC_SOURCE_BATCH_ROWS: usize = 256;
 
 /// Positional result fields, rows, and their declared logical schema.
 pub type PositionalJsonResult = (Vec<String>, Vec<Vec<JsonValue>>, StructType);
@@ -812,6 +814,9 @@ fn conservative_union_logical_type(output_physical: &DataType) -> Option<Logical
 }
 
 fn integer_literal(value: &LiteralValue) -> Option<i64> {
+    if let LiteralValue::Dyn(DynLiteralValue::Int(value)) = value {
+        return i64::try_from(*value).ok();
+    }
     let LiteralValue::Scalar(value) = value else {
         return None;
     };
@@ -943,7 +948,7 @@ struct PolarsIpcBatchIterator {
     empty_schema: Arc<Schema>,
     current: Option<PlDataFrame>,
     current_offset: usize,
-    deferred_row: Option<PlDataFrame>,
+    deferred_batch: Option<PlDataFrame>,
     max_rows: usize,
     max_bytes: usize,
     logical_schema_json: Option<String>,
@@ -952,36 +957,70 @@ struct PolarsIpcBatchIterator {
     deferred_error: Option<EngineError>,
     emitted_empty: bool,
     closed: bool,
+    trace_enabled: bool,
+    trace_emitted: bool,
+    source_batches: u64,
+    source_rows: u64,
+    output_batches: u64,
+    serialization_time: std::time::Duration,
+    combine_time: std::time::Duration,
 }
 
 impl PolarsIpcBatchIterator {
+    fn emit_trace(&mut self) {
+        if !self.trace_enabled || self.trace_emitted {
+            return;
+        }
+        self.trace_emitted = true;
+        eprintln!(
+            "sparkless_arrow_trace event=complete source_batches={} source_rows={} output_batches={} serialization_ms={:.3} combine_ms={:.3}",
+            self.source_batches,
+            self.source_rows,
+            self.output_batches,
+            self.serialization_time.as_secs_f64() * 1_000.0,
+            self.combine_time.as_secs_f64() * 1_000.0,
+        );
+    }
+
     fn close(&mut self) {
+        self.emit_trace();
         self.source.take();
         self.current.take();
         self.current_offset = 0;
-        self.deferred_row.take();
+        self.deferred_batch.take();
         self.closed = true;
     }
 
-    fn next_source_row(&mut self) -> Option<Result<PlDataFrame, EngineError>> {
-        if let Some(row) = self.deferred_row.take() {
-            return Some(Ok(row));
+    fn next_source_batch(&mut self, max_rows: usize) -> Option<Result<PlDataFrame, EngineError>> {
+        if let Some(batch) = self.deferred_batch.take() {
+            let rows = max_rows.min(batch.height());
+            if rows < batch.height() {
+                self.deferred_batch = Some(batch.slice(rows as i64, batch.height() - rows));
+            }
+            return Some(Ok(batch.slice(0, rows)));
         }
         if self.current.is_none() {
             match self.source.as_mut().and_then(IpcBatchSource::next_batch) {
-                Some(Ok(batch)) => self.current = Some(batch),
+                Some(Ok(batch)) => {
+                    self.source_batches = self.source_batches.saturating_add(1);
+                    self.source_rows = self
+                        .source_rows
+                        .saturating_add(batch.height().try_into().unwrap_or(u64::MAX));
+                    self.current = Some(batch);
+                }
                 Some(Err(error)) => return Some(Err(error)),
                 None => return None,
             }
         }
         let current = self.current.as_ref().expect("source batch was set");
-        let row = current.slice(self.current_offset as i64, 1);
-        self.current_offset += 1;
+        let rows = max_rows.min(current.height() - self.current_offset);
+        let batch = current.slice(self.current_offset as i64, rows);
+        self.current_offset += rows;
         if self.current_offset >= current.height() {
             self.current.take();
             self.current_offset = 0;
         }
-        Some(Ok(row))
+        Some(Ok(batch))
     }
 
     fn combine_rows(rows: &[PlDataFrame]) -> Result<PlDataFrame, polars::prelude::PolarsError> {
@@ -992,27 +1031,40 @@ impl PolarsIpcBatchIterator {
         Ok(combined)
     }
 
-    fn serialize_batch(&self, batch: &mut PlDataFrame) -> Result<Vec<u8>, EngineError> {
+    fn serialize_batch(&mut self, batch: &mut PlDataFrame) -> Result<Vec<u8>, EngineError> {
+        let started = self.trace_enabled.then(std::time::Instant::now);
         batch.rechunk_mut();
         let mut cursor = std::io::Cursor::new(Vec::new());
-        {
-            use polars::io::ipc::IpcStreamWriter;
-            use polars::prelude::SerWriter;
-            let mut writer = IpcStreamWriter::new(&mut cursor);
-            if self.connect_output_schema.is_none()
-                && let Some(schema) = &self.logical_schema_json
+        let result = (|| {
             {
-                let mut metadata = polars_arrow::datatypes::Metadata::new();
-                metadata.insert("sparkless.logical_schema.v1".into(), schema.clone().into());
-                writer.set_custom_schema_metadata(Arc::new(metadata));
+                use polars::io::ipc::IpcStreamWriter;
+                use polars::prelude::SerWriter;
+                let mut writer = IpcStreamWriter::new(&mut cursor);
+                if self.connect_output_schema.is_none()
+                    && let Some(schema) = &self.logical_schema_json
+                {
+                    let mut metadata = polars_arrow::datatypes::Metadata::new();
+                    metadata.insert("sparkless.logical_schema.v1".into(), schema.clone().into());
+                    writer.set_custom_schema_metadata(Arc::new(metadata));
+                }
+                writer.finish(batch).map_err(polars_to_core_error)?;
             }
-            writer.finish(batch).map_err(polars_to_core_error)?;
+            let bytes = cursor.into_inner();
+            match &self.connect_output_schema {
+                Some(schema) => rewrite_connect_arrow_stream_schema(&bytes, schema),
+                None => Ok(bytes),
+            }
+        })();
+        if let Some(started) = started {
+            self.serialization_time += started.elapsed();
         }
-        let bytes = cursor.into_inner();
-        match &self.connect_output_schema {
-            Some(schema) => rewrite_connect_arrow_stream_schema(&bytes, schema),
-            None => Ok(bytes),
-        }
+        result
+    }
+}
+
+impl Drop for PolarsIpcBatchIterator {
+    fn drop(&mut self) {
+        self.emit_trace();
     }
 }
 
@@ -1108,6 +1160,7 @@ impl Iterator for PolarsIpcBatchIterator {
             return None;
         }
         let mut rows = Vec::new();
+        let mut row_count = 0usize;
         let mut estimated_bytes = 0usize;
         let mut source_ended = false;
         loop {
@@ -1125,8 +1178,9 @@ impl Iterator for PolarsIpcBatchIterator {
                 self.close();
                 return Some(Err(error));
             }
-            let row = match self.next_source_row() {
-                Some(Ok(row)) if row.height() > 0 => row,
+            let remaining_rows = self.max_rows.saturating_sub(row_count).max(1);
+            let batch = match self.next_source_batch(remaining_rows) {
+                Some(Ok(batch)) if batch.height() > 0 => batch,
                 Some(Ok(_)) => continue,
                 Some(Err(error)) => {
                     if !rows.is_empty() {
@@ -1146,14 +1200,15 @@ impl Iterator for PolarsIpcBatchIterator {
                 return Some(Err(error));
             }
 
-            let row_bytes = row.estimated_size();
-            if !rows.is_empty() && estimated_bytes.saturating_add(row_bytes) > self.max_bytes {
-                self.deferred_row = Some(row);
+            let batch_bytes = batch.estimated_size();
+            if !rows.is_empty() && estimated_bytes.saturating_add(batch_bytes) > self.max_bytes {
+                self.deferred_batch = Some(batch);
                 break;
             }
-            estimated_bytes = estimated_bytes.saturating_add(row_bytes);
-            rows.push(row);
-            if rows.len() >= self.max_rows || estimated_bytes >= self.max_bytes {
+            estimated_bytes = estimated_bytes.saturating_add(batch_bytes);
+            row_count = row_count.saturating_add(batch.height());
+            rows.push(batch);
+            if row_count >= self.max_rows || estimated_bytes >= self.max_bytes {
                 break;
             }
         }
@@ -1170,14 +1225,16 @@ impl Iterator for PolarsIpcBatchIterator {
                             return Some(Err(error));
                         }
                     };
-                    self.close();
                     if bytes.len() > self.max_bytes {
+                        self.close();
                         return Some(Err(EngineError::User(format!(
                             "an empty Arrow IPC schema requires {} bytes, exceeding max_bytes={}",
                             bytes.len(),
                             self.max_bytes
                         ))));
                     }
+                    self.output_batches = self.output_batches.saturating_add(1);
+                    self.close();
                     return Some(Ok(ArrowIpcStream {
                         bytes,
                         row_count: 0,
@@ -1187,6 +1244,7 @@ impl Iterator for PolarsIpcBatchIterator {
             }
             return None;
         }
+        let combine_started = self.trace_enabled.then(std::time::Instant::now);
         let mut combined = match Self::combine_rows(&rows) {
             Ok(combined) => combined,
             Err(error) => {
@@ -1194,6 +1252,9 @@ impl Iterator for PolarsIpcBatchIterator {
                 return Some(Err(polars_to_core_error(error)));
             }
         };
+        if let Some(started) = combine_started {
+            self.combine_time += started.elapsed();
+        }
         let bytes = match self.serialize_batch(&mut combined) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -1202,16 +1263,17 @@ impl Iterator for PolarsIpcBatchIterator {
             }
         };
         if bytes.len() <= self.max_bytes {
+            self.output_batches = self.output_batches.saturating_add(1);
             if source_ended {
                 self.close();
             }
             return Some(Ok(ArrowIpcStream {
                 bytes,
-                row_count: rows.len() as u64,
+                row_count: combined.height() as u64,
             }));
         }
 
-        if rows.len() == 1 {
+        if combined.height() == 1 {
             let actual_bytes = bytes.len();
             self.close();
             return Some(Err(EngineError::User(format!(
@@ -1219,7 +1281,7 @@ impl Iterator for PolarsIpcBatchIterator {
                 self.max_bytes
             ))));
         }
-        let mut prefix_rows = rows.len() / 2;
+        let mut prefix_rows = combined.height() / 2;
         while prefix_rows > 0 {
             let mut prefix = combined.slice(0, prefix_rows);
             let prefix_bytes = match self.serialize_batch(&mut prefix) {
@@ -1230,9 +1292,10 @@ impl Iterator for PolarsIpcBatchIterator {
                 }
             };
             if prefix_bytes.len() <= self.max_bytes {
-                let mut pending = combined.slice(prefix_rows as i64, rows.len() - prefix_rows);
-                if let Some(deferred_row) = self.deferred_row.take()
-                    && let Err(error) = pending.vstack_mut(&deferred_row)
+                let mut pending =
+                    combined.slice(prefix_rows as i64, combined.height() - prefix_rows);
+                if let Some(deferred_batch) = self.deferred_batch.take()
+                    && let Err(error) = pending.vstack_mut(&deferred_batch)
                 {
                     self.close();
                     return Some(Err(polars_to_core_error(error)));
@@ -1249,6 +1312,7 @@ impl Iterator for PolarsIpcBatchIterator {
                 }
                 self.current = Some(pending);
                 self.current_offset = 0;
+                self.output_batches = self.output_batches.saturating_add(1);
                 return Some(Ok(ArrowIpcStream {
                     bytes: prefix_bytes,
                     row_count: prefix_rows as u64,
@@ -3603,24 +3667,27 @@ impl DataFrame {
             ));
         }
         let empty_schema = self.schema_or_collect().map_err(polars_to_core_error)?;
-        // Row-sized source pulls keep in-flight memory independent of max_rows/max_bytes.
-        // Range plans use the native operation pipeline with a one-row source chunk so a
-        // small byte limit is checked before a larger chunk is retained.
+        // Keep source pulls bounded while avoiding a native plan execution and frame assembly
+        // for every source row. Output IPC batches are still independently split against the
+        // caller's exact byte and row caps below.
         let source = if let Some(range) = &self.range_cardinality {
             IpcBatchSource::Range(RangeBatchProducer::new(
                 range.clone(),
                 self.case_sensitive,
                 Some(token.clone()),
-                1,
+                IPC_SOURCE_BATCH_ROWS,
             ))
         } else if let DataFrameInner::Eager(frame) = &self.inner {
             IpcBatchSource::Eager {
                 frame: Arc::clone(frame),
                 next_row: 0,
-                max_rows,
+                max_rows: max_rows.min(IPC_SOURCE_BATCH_ROWS),
             }
         } else {
-            IpcBatchSource::Polars(self.collect_batches(1).map_err(polars_to_core_error)?)
+            IpcBatchSource::Polars(
+                self.collect_batches(IPC_SOURCE_BATCH_ROWS)
+                    .map_err(polars_to_core_error)?,
+            )
         };
         let logical_schema_json = self
             .logical_schema
@@ -3635,7 +3702,7 @@ impl DataFrame {
             empty_schema,
             current: None,
             current_offset: 0,
-            deferred_row: None,
+            deferred_batch: None,
             max_rows,
             max_bytes,
             logical_schema_json,
@@ -3644,6 +3711,14 @@ impl DataFrame {
             deferred_error: None,
             emitted_empty: false,
             closed: false,
+            trace_enabled: std::env::var_os("SPARKLESS_ARROW_TRACE").as_deref()
+                == Some(std::ffi::OsStr::new("1")),
+            trace_emitted: false,
+            source_batches: 0,
+            source_rows: 0,
+            output_batches: 0,
+            serialization_time: std::time::Duration::ZERO,
+            combine_time: std::time::Duration::ZERO,
         }))
     }
 
@@ -7164,6 +7239,59 @@ mod tests {
     };
 
     #[test]
+    fn dynamic_integer_range_filters_keep_exact_count_hints() {
+        let session = SparkSession::builder()
+            .app_name("dynamic-integer-range-count")
+            .get_or_create();
+        let range = session.range(0, 10_000_000, 1).unwrap();
+
+        let strict = range.filter(col("id").gt(5_i64)).unwrap();
+        assert_eq!(strict.row_count_hint, Some(9_999_994));
+        assert_eq!(strict.count().unwrap(), 9_999_994);
+
+        let inclusive = range.filter(col("id").lt_eq(5_i64)).unwrap();
+        assert_eq!(inclusive.row_count_hint, Some(6));
+        assert_eq!(inclusive.count().unwrap(), 6);
+
+        let reversed = range.filter(lit(5_i64).lt(col("id"))).unwrap();
+        assert_eq!(reversed.row_count_hint, Some(9_999_994));
+        assert_eq!(reversed.count().unwrap(), 9_999_994);
+    }
+
+    #[test]
+    fn dynamic_range_counts_cover_reverse_empty_and_fractional_fallbacks() {
+        let session = SparkSession::builder()
+            .app_name("dynamic-range-count-boundaries")
+            .get_or_create();
+        let reverse = session.range(10, -1, -2).unwrap();
+        let reverse_filtered = reverse.filter(col("id").gt_eq(4_i64)).unwrap();
+        assert_eq!(reverse_filtered.row_count_hint, Some(4));
+        assert_eq!(reverse_filtered.count().unwrap(), 4);
+
+        let empty = session.range(0, 0, 1).unwrap();
+        let empty_filtered = empty.filter(col("id").gt(1_i64)).unwrap();
+        assert_eq!(empty_filtered.row_count_hint, Some(0));
+        assert_eq!(empty_filtered.count().unwrap(), 0);
+
+        let fractional = reverse.filter(col("id").gt(3.5_f64)).unwrap();
+        assert_eq!(fractional.row_count_hint, None);
+        assert_eq!(fractional.count().unwrap(), 4);
+    }
+
+    #[test]
+    fn integer_literal_recognizes_dynamic_values_with_checked_i64_bounds() {
+        let literal = |expression: Expr| match expression {
+            Expr::Literal(value) => value,
+            other => panic!("expected a literal expression, got {other:?}"),
+        };
+        assert_eq!(integer_literal(&literal(lit(42_i64))), Some(42));
+        assert_eq!(integer_literal(&literal(lit(i64::MIN))), Some(i64::MIN));
+        assert_eq!(integer_literal(&literal(lit(i64::MAX))), Some(i64::MAX));
+        assert_eq!(integer_literal(&literal(lit(u64::MAX))), None);
+        assert_eq!(integer_literal(&literal(lit(1.0_f64))), None);
+    }
+
+    #[test]
     fn with_columns_updates_replaced_column_nullability() {
         use polars::prelude::{DataType as PolarsDataType, NULL, lit};
         use robin_sparkless_core::DataType as LogicalDataType;
@@ -7822,6 +7950,46 @@ mod tests {
         let values = second_rows.column("doubled").unwrap().i64().unwrap();
         assert_eq!(values.into_no_null_iter().collect::<Vec<_>>(), vec![86]);
         assert!(batches.next().is_none());
+    }
+
+    #[test]
+    fn arrow_ipc_batches_split_vectorized_source_chunks_by_row_and_byte_budgets() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::SerReader;
+
+        let session = SparkSession::builder()
+            .app_name("vectorized-range-ipc-budgets")
+            .get_or_create();
+        let frame = session.range(0, 600, 1).unwrap();
+        let mut batches = frame
+            .to_arrow_ipc_batches_with_cancellation(100, 1024, &CancellationToken::new())
+            .unwrap();
+        let mut expected = 0i64;
+        let mut batch_count = 0usize;
+
+        for stream in &mut batches {
+            let stream = stream.unwrap();
+            assert!(stream.bytes.len() <= 1024);
+            assert!(stream.row_count <= 100);
+            let rows = IpcStreamReader::new(std::io::Cursor::new(stream.bytes))
+                .finish()
+                .unwrap();
+            assert_eq!(stream.row_count, rows.height() as u64);
+            for value in rows
+                .column("id")
+                .unwrap()
+                .i64()
+                .unwrap()
+                .into_no_null_iter()
+            {
+                assert_eq!(value, expected);
+                expected += 1;
+            }
+            batch_count += 1;
+        }
+
+        assert_eq!(expected, 600);
+        assert!(batch_count >= 6);
     }
 
     #[test]

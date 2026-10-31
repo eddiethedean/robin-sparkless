@@ -1387,6 +1387,16 @@ struct ConnectResponseSender {
     deadline: Instant,
     cancellation: robin_sparkless_core::engine::CancellationToken,
     terminal: ConnectTerminal,
+    trace_enabled: bool,
+    operation_id: String,
+    planning_wait: Duration,
+    planning_time: Duration,
+    arrow_next_time: Duration,
+    replay_accounting_time: Duration,
+    blocked_send_time: Duration,
+    response_count: u64,
+    response_rows: u64,
+    response_bytes: u64,
 }
 
 struct ConnectQueuedResponse {
@@ -1396,7 +1406,7 @@ struct ConnectQueuedResponse {
 
 impl ConnectResponseSender {
     fn send(
-        &self,
+        &mut self,
         item: Result<connect_proto::ExecutePlanResponse, Status>,
         operation: &crate::ConnectOperationLease,
     ) -> bool {
@@ -1407,6 +1417,7 @@ impl ConnectResponseSender {
                 return false;
             }
         };
+        let replay_started = self.trace_enabled.then(Instant::now);
         let completes_operation = matches!(
             response.response_type.as_ref(),
             Some(connect_proto::execute_plan_response::ResponseType::ResultComplete(_))
@@ -1423,6 +1434,12 @@ impl ConnectResponseSender {
             return false;
         }
         let sender_bytes = response.encoded_len();
+        let response_rows = match response.response_type.as_ref() {
+            Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(batch)) => {
+                batch.row_count.try_into().unwrap_or(0)
+            }
+            _ => 0,
+        };
         let reservation_id = match operation.replay.reserve_sender_buffer(sender_bytes) {
             Ok(id) => id,
             Err(status) => {
@@ -1437,6 +1454,9 @@ impl ConnectResponseSender {
         } else {
             operation.replay.append(response.clone())
         };
+        if let Some(started) = replay_started {
+            self.replay_accounting_time += started.elapsed();
+        }
         if let Err(status) = appended {
             operation.replay.release_sender_buffer(reservation_id);
             operation.reject("CONNECT_REPLAY_CAPACITY", status.message());
@@ -1449,6 +1469,7 @@ impl ConnectResponseSender {
             self.terminal.finish(Ok(()));
         }
         let send_started = now;
+        let mut blocked_send_time = Duration::ZERO;
         loop {
             let now = Instant::now();
             if now >= self.deadline {
@@ -1460,6 +1481,7 @@ impl ConnectResponseSender {
                     );
                     self.cancellation.cancel();
                 }
+                self.blocked_send_time += blocked_send_time;
                 return false;
             }
             if now.duration_since(send_started) >= Duration::from_secs(5) {
@@ -1471,28 +1493,66 @@ impl ConnectResponseSender {
                     operation.reject("CONNECT_REPLAY_STALL", status.message());
                     self.cancellation.cancel();
                 }
+                self.blocked_send_time += blocked_send_time;
                 return false;
             }
             match self.sender.try_send(ConnectQueuedResponse {
                 response,
                 reservation_id,
             }) {
-                Ok(()) => return true,
+                Ok(()) => {
+                    self.record_sent_response(sender_bytes, response_rows, blocked_send_time);
+                    return true;
+                }
                 Err(tokio::sync::mpsc::error::TrySendError::Closed(queued)) => {
                     operation
                         .replay
                         .release_sender_buffer(queued.reservation_id);
                     if operation.replay.reattachable {
+                        self.record_sent_response(sender_bytes, response_rows, blocked_send_time);
                         return true;
                     }
                     self.cancellation.cancel();
+                    self.blocked_send_time += blocked_send_time;
                     return false;
                 }
                 Err(tokio::sync::mpsc::error::TrySendError::Full(returned)) => {
                     response = returned.response;
                 }
             }
+            let sleep_started = self.trace_enabled.then(Instant::now);
             std::thread::sleep((self.deadline - now).min(Duration::from_millis(10)));
+            if let Some(started) = sleep_started {
+                blocked_send_time += started.elapsed();
+            }
+        }
+    }
+
+    fn record_sent_response(&mut self, bytes: usize, rows: u64, blocked_send_time: Duration) {
+        self.blocked_send_time += blocked_send_time;
+        self.response_count = self.response_count.saturating_add(1);
+        self.response_bytes = self
+            .response_bytes
+            .saturating_add(bytes.try_into().unwrap_or(u64::MAX));
+        self.response_rows = self.response_rows.saturating_add(rows);
+    }
+}
+
+impl Drop for ConnectResponseSender {
+    fn drop(&mut self) {
+        if self.trace_enabled {
+            eprintln!(
+                "connect_trace event=producer_phases operation_id={} admission_wait_ms={:.3} planning_ms={:.3} arrow_next_ms={:.3} replay_accounting_ms={:.3} blocked_send_ms={:.3} responses={} rows={} response_bytes={}",
+                self.operation_id,
+                self.planning_wait.as_secs_f64() * 1_000.0,
+                self.planning_time.as_secs_f64() * 1_000.0,
+                self.arrow_next_time.as_secs_f64() * 1_000.0,
+                self.replay_accounting_time.as_secs_f64() * 1_000.0,
+                self.blocked_send_time.as_secs_f64() * 1_000.0,
+                self.response_count,
+                self.response_rows,
+                self.response_bytes,
+            );
         }
     }
 }
@@ -1692,6 +1752,7 @@ fn start_connect_producer(
     cancellation: robin_sparkless_core::engine::CancellationToken,
     sender: tokio::sync::mpsc::Sender<ConnectQueuedResponse>,
     deadline: Instant,
+    planning_wait: Duration,
 ) -> tokio::sync::oneshot::Receiver<ConnectOutcome> {
     let producer_sequence = CONNECT_PRODUCER_STARTS.fetch_add(1, Ordering::Relaxed) + 1;
     if std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref() == Some(std::ffi::OsStr::new("1")) {
@@ -1757,18 +1818,33 @@ fn start_connect_producer(
             sender: Some(finished_tx),
             replay,
         };
-        let sender = ConnectResponseSender {
+        let mut sender = ConnectResponseSender {
             sender,
             deadline,
             cancellation: cancellation.clone(),
             terminal,
+            trace_enabled: std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref()
+                == Some(std::ffi::OsStr::new("1")),
+            operation_id: operation_id.clone(),
+            planning_wait,
+            planning_time: Duration::ZERO,
+            arrow_next_time: Duration::ZERO,
+            replay_accounting_time: Duration::ZERO,
+            blocked_send_time: Duration::ZERO,
+            response_count: 0,
+            response_rows: 0,
+            response_bytes: 0,
         };
         let (session_guard, compute_permit, session_compute_permit) = planning_resources;
         session.sync_thread_context();
+        let planning_started = sender.trace_enabled.then(Instant::now);
         let translated = plan::translate_plan(&session, &plan).and_then(|translated| {
             let schema = plan::schema_to_proto(&translated.schema)?;
             Ok((translated, schema))
         });
+        if let Some(started) = planning_started {
+            sender.planning_time += started.elapsed();
+        }
         drop(session_guard);
         let _session_compute_permit = session_compute_permit;
         let (translated, schema) = match translated {
@@ -1840,7 +1916,12 @@ fn start_connect_producer(
                 cancellation.cancel();
                 return;
             }
-            let Some(batch) = batches.next() else {
+            let arrow_started = sender.trace_enabled.then(Instant::now);
+            let next_batch = batches.next();
+            if let Some(started) = arrow_started {
+                sender.arrow_next_time += started.elapsed();
+            }
+            let Some(batch) = next_batch else {
                 break;
             };
             let batch = match batch {
@@ -2045,6 +2126,7 @@ impl SparkConnectService for ConnectService {
         let operation_replay = Arc::clone(&operation.replay);
         let cancellation = operation_replay.cancellation();
         let stream_session = operation._session.clone();
+        let planning_started = Instant::now();
         let planning_resources = match self
             .acquire_planning_resources(&operation._session, deadline, cancellation.clone())
             .await
@@ -2056,6 +2138,7 @@ impl SparkConnectService for ConnectService {
                 return Err(status);
             }
         };
+        let planning_wait = planning_started.elapsed();
         let session = operation._session.0.session.clone();
         let server_side_session_id = operation._session.0.server_side_session_id.clone();
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
@@ -2071,6 +2154,7 @@ impl SparkConnectService for ConnectService {
             cancellation.clone(),
             sender,
             deadline,
+            planning_wait,
         );
         let stream = ConnectExecutionStream {
             receiver,
@@ -2350,14 +2434,17 @@ impl SparkConnectService for ConnectService {
                 "ReleaseExecuteRequest.release must be specified",
             ));
         };
+        let release_all = matches!(
+            &release,
+            connect_proto::release_execute_request::Release::ReleaseAll(_)
+        );
+        let operation_key = crate::connect_operation_key(&identity, &request.operation_id);
         if let Some(operation) = operation.as_ref() {
-            if !operation.reattachable {
-                return Err(Status::failed_precondition(
-                    "INVALID_HANDLE.OPERATION_NOT_REATTACHABLE: operation cannot be released through ReleaseExecute",
-                ));
-            }
             match release {
                 connect_proto::release_execute_request::Release::ReleaseAll(_) => {
+                    // A client can acknowledge completion even when it did not request
+                    // reattachment. ReleaseAll frees both replay and idempotency history;
+                    // only prefix releases require a reattachable stream.
                     let mut producer_done = operation.producer_done();
                     operation.release_all();
                     if !*producer_done.borrow() {
@@ -2383,15 +2470,27 @@ impl SparkConnectService for ConnectService {
                     }
                 }
                 connect_proto::release_execute_request::Release::ReleaseUntil(until) => {
+                    if !operation.reattachable {
+                        return Err(Status::failed_precondition(
+                            "INVALID_HANDLE.OPERATION_NOT_REATTACHABLE: operation cannot release response prefixes",
+                        ));
+                    }
                     validate_uuid("response_id", &until.response_id)?;
                     operation.release_until(&until.response_id);
                 }
             }
         }
+        if release_all {
+            self.server.inner.release_operation_record(
+                &operation_key,
+                &session.0.id,
+                session.0.generation,
+            );
+        }
         Ok(Response::new(connect_proto::ReleaseExecuteResponse {
             session_id: identity.client_session_id,
             server_side_session_id: session.0.server_side_session_id.clone(),
-            operation_id: operation.map(|operation| operation.operation_id.clone()),
+            operation_id: Some(request.operation_id),
         }))
     }
 
@@ -3107,6 +3206,89 @@ mod tests {
                 .load(Ordering::Acquire),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn release_all_clears_history_for_nonreattachable_operations() {
+        let mut config = ServerConfig::default();
+        config.max_mutation_records = 1;
+        let service = ConnectService {
+            server: Server::new(config).unwrap(),
+        };
+        let mut execute = execute_request(connect_proto::Relation {
+            rel_type: Some(connect_proto::relation::RelType::Range(
+                connect_proto::Range {
+                    end: 10,
+                    step: 1,
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        });
+        execute.request_options =
+            vec![connect_proto::execute_plan_request::RequestOption {
+            request_option: Some(
+                connect_proto::execute_plan_request::request_option::RequestOption::ReattachOptions(
+                    connect_proto::ReattachOptions { reattachable: false },
+                ),
+            ),
+        }];
+
+        collect_execute_responses(&service, execute.clone())
+            .await
+            .expect("non-reattachable query completes");
+        {
+            let registry = service.server.inner.operation_records.lock().unwrap();
+            assert_eq!(registry.records.len(), 1);
+            assert!(registry.bytes > 0);
+        }
+        let identity = session_identity(
+            execute.user_context.clone(),
+            execute.session_id.clone(),
+            execute.client_observed_server_side_session_id.clone(),
+        )
+        .unwrap();
+        let operation_key =
+            crate::connect_operation_key(&identity, execute.operation_id.as_deref().unwrap());
+        // The periodic replay sweep may discard a completed non-reattachable stream before
+        // the client sends ReleaseAll; idempotency history must still be released by key.
+        service
+            .server
+            .inner
+            .connect_operations
+            .lock()
+            .unwrap()
+            .remove(&operation_key);
+
+        let released = service
+            .release_execute(Request::new(release_request(
+                &execute,
+                connect_proto::release_execute_request::Release::ReleaseAll(
+                    connect_proto::release_execute_request::ReleaseAll {},
+                ),
+            )))
+            .await
+            .expect("ReleaseAll is valid for a completed non-reattachable query");
+        assert_eq!(released.into_inner().operation_id, execute.operation_id);
+        {
+            let registry = service.server.inner.operation_records.lock().unwrap();
+            assert!(registry.records.is_empty());
+            assert_eq!(registry.bytes, 0);
+        }
+
+        execute.operation_id = Some(Uuid::new_v4().to_string());
+        collect_execute_responses(&service, execute.clone())
+            .await
+            .expect("freed operation history admits a subsequent query");
+        service
+            .release_execute(Request::new(release_request(
+                &execute,
+                connect_proto::release_execute_request::Release::ReleaseAll(
+                    connect_proto::release_execute_request::ReleaseAll {},
+                ),
+            )))
+            .await
+            .expect("second query history is also released");
     }
 
     #[tokio::test]

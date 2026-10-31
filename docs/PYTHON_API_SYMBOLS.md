@@ -1729,6 +1729,10 @@ An asyncio owner for one ``sparkless-server`` child process.
 
 A synchronous owner for one ``sparkless-server`` child process.
 
+### `SparklessConnect(*, server_options: 'Optional[Mapping[str, Any]]' = None) -> 'None'`
+
+Owns a SparklessServer and an independent public Spark Connect session for a ``with`` block.
+
 ### `SparklessServerError(native signature unavailable)`
 
 Raised when the owned native service cannot satisfy its contract.

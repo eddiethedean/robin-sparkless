@@ -5,7 +5,7 @@ search:
 
 # 4.19.0 implementation and release plan
 
-**Status: planned; refined 2026-10-31.** This plan schedules optional DuckDB table sources, the `SparklessConnect` context manager, and performance issues [#1736](https://github.com/eddiethedean/robin-sparkless/issues/1736), [#1737](https://github.com/eddiethedean/robin-sparkless/issues/1737), and [#1738](https://github.com/eddiethedean/robin-sparkless/issues/1738). No slice or benchmark is complete by virtue of this document. Current release behavior remains defined by the [support matrix](../../SUPPORT_MATRIX.md).
+**Status: implementation in progress; refined 2026-10-31.** This plan schedules optional DuckDB table sources, the `SparklessConnect` context manager, and performance issues [#1736](https://github.com/eddiethedean/robin-sparkless/issues/1736), [#1737](https://github.com/eddiethedean/robin-sparkless/issues/1737), and [#1738](https://github.com/eddiethedean/robin-sparkless/issues/1738). Implementation and measurement are underway; acceptance remains open. See the [current evidence record](RELEASE_4_19_EVIDENCE.md). Current release behavior remains defined by the [support matrix](../../SUPPORT_MATRIX.md).
 
 [Roadmap](ROADMAP.md) · [Epic](EPIC.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md) · [Release procedure](../../RELEASING.md)
 

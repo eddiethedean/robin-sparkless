@@ -348,6 +348,7 @@ struct OperationRecord {
     semantic_fingerprint: Option<[u8; 32]>,
     session: String,
     session_generation: u64,
+    reserved_bytes: usize,
     execution_state: &'static str,
     effect_outcome: &'static str,
     receipt: Option<JsonValue>,
@@ -1320,6 +1321,7 @@ impl ServerInner {
             semantic_fingerprint: None,
             session: session.to_string(),
             session_generation: generation,
+            reserved_bytes: estimated_record_bytes,
             execution_state: "running",
             effect_outcome: "pending",
             receipt: None,
@@ -1436,6 +1438,26 @@ impl ServerInner {
 
     fn operation(&self, id: &str) -> Option<Arc<Mutex<OperationRecord>>> {
         self.operation_records.lock().ok()?.records.get(id).cloned()
+    }
+
+    #[cfg(feature = "connect")]
+    fn release_operation_record(&self, id: &str, session: &str, generation: u64) {
+        let Ok(mut registry) = self.operation_records.lock() else {
+            return;
+        };
+        let Some(record) = registry.records.get(id) else {
+            return;
+        };
+        let Ok(record_state) = record.lock() else {
+            return;
+        };
+        if record_state.session != session || record_state.session_generation != generation {
+            return;
+        }
+        let reserved_bytes = record_state.reserved_bytes;
+        drop(record_state);
+        registry.records.remove(id);
+        registry.bytes = registry.bytes.saturating_sub(reserved_bytes);
     }
 
     fn lookup_operation(

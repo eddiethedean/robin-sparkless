@@ -208,7 +208,7 @@ fn agg_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, EngineE
             let input = crate::column::Column::from_expr(expr_ir_to_expr(a)?, None);
             Some(crate::functions::sum(&input).expr().clone())
         }
-        ("count", [a]) => Some(expr_ir_to_expr(a)?.count()),
+        ("count", [a]) => Some(expr_ir_to_expr(a)?.count().cast(DataType::Int64)),
         ("min", [a]) => Some(expr_ir_to_expr(a)?.min()),
         ("max", [a]) => Some(expr_ir_to_expr(a)?.max()),
         ("mean" | "avg", [a]) => {

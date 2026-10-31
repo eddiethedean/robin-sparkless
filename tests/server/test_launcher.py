@@ -9,11 +9,163 @@ import sparkless
 import sparkless.server as server_module
 from sparkless.server import (
     AsyncSparklessServer,
+    SparklessConnect,
     SparklessServer,
     SparklessServerError,
     UnsupportedSparkConnectError,
     _validate_ready,
 )
+
+
+def _install_fake_pyspark_client(monkeypatch, session):
+    class Builder:
+        def remote(self, url):
+            assert url == "sc://127.0.0.1:45679"
+            return self
+
+        def create(self):
+            return session
+
+    pyspark = ModuleType("pyspark")
+    sql = ModuleType("pyspark.sql")
+    sql.SparkSession = type("SparkSession", (), {"builder": Builder()})
+    pyspark.sql = sql
+    monkeypatch.setitem(sys.modules, "pyspark", pyspark)
+    monkeypatch.setitem(sys.modules, "pyspark.sql", sql)
+
+
+def test_sparkless_connect_owns_session_and_server(monkeypatch):
+    class FakeSession:
+        stopped = False
+
+        def stop(self):
+            self.stopped = True
+
+    class FakeServer:
+        def __init__(self, **options):
+            assert options == {"executable_path": "/tmp/sparkless"}
+            self.stopped = False
+
+        def start(self):
+            return self
+
+        @property
+        def spark_connect_url(self):
+            return "sc://127.0.0.1:45679"
+
+        def stop(self):
+            self.stopped = True
+
+    session = FakeSession()
+    _install_fake_pyspark_client(monkeypatch, session)
+    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    owner = SparklessConnect(server_options={"executable_path": "/tmp/sparkless"})
+
+    with owner as actual:
+        assert actual is session
+        with pytest.raises(SparklessServerError, match="nested entry"):
+            owner.__enter__()
+
+    assert session.stopped
+    assert owner._session is None
+    assert owner._server is None
+    assert not owner._active
+
+
+def test_sparkless_connect_preserves_body_error_and_stops_server_after_session_error(monkeypatch):
+    class FakeSession:
+        stop_calls = 0
+
+        def stop(self):
+            self.stop_calls += 1
+            if self.stop_calls == 1:
+                raise RuntimeError("session stop failed")
+
+    class FakeServer:
+        stopped = False
+
+        def __init__(self, **options):
+            pass
+
+        def start(self):
+            return self
+
+        @property
+        def spark_connect_url(self):
+            return "sc://127.0.0.1:45679"
+
+        def stop(self):
+            self.stopped = True
+
+    session = FakeSession()
+    _install_fake_pyspark_client(monkeypatch, session)
+    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    owner = SparklessConnect()
+    with pytest.raises(ValueError, match="body failed") as error:
+        with owner:
+            raise ValueError("body failed")
+    assert any("session stop failed" in note for note in error.value.__notes__)
+    assert owner._server is None
+    assert owner._session is session
+    assert owner._active
+    assert owner.__exit__(None, None, None) is False
+    assert owner._session is None
+    assert not owner._active
+
+
+def test_sparkless_connect_rejects_disabled_endpoint_before_starting():
+    with pytest.raises(ValueError, match="requires the Spark Connect endpoint"):
+        SparklessConnect(server_options={"connect_port": None})
+
+
+def test_sparkless_connect_rejects_use_after_fork(monkeypatch):
+    owner = SparklessConnect()
+    owner._owner_pid = server_module.os.getpid() + 1
+    monkeypatch.setattr(server_module.os, "getpid", lambda: owner._owner_pid + 1)
+    with pytest.raises(SparklessServerError, match="ownership changed after fork"):
+        owner.__enter__()
+
+
+def test_sparkless_connect_retains_ownership_until_server_shutdown_succeeds(monkeypatch):
+    class FakeSession:
+        stop_calls = 0
+
+        def stop(self):
+            self.stop_calls += 1
+
+    class FakeServer:
+        stop_calls = 0
+
+        def __init__(self, **options):
+            pass
+
+        def start(self):
+            return self
+
+        @property
+        def spark_connect_url(self):
+            return "sc://127.0.0.1:45679"
+
+        def stop(self):
+            self.stop_calls += 1
+            if self.stop_calls == 1:
+                raise RuntimeError("server shutdown failed")
+
+    session = FakeSession()
+    _install_fake_pyspark_client(monkeypatch, session)
+    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    owner = SparklessConnect()
+    owner.__enter__()
+
+    with pytest.raises(RuntimeError, match="server shutdown failed"):
+        owner.__exit__(None, None, None)
+
+    assert owner._active
+    assert owner._server is not None
+    assert session.stop_calls == 1
+    owner.__exit__(None, None, None)
+    assert not owner._active
+    assert owner._server is None
 
 
 def _write_fake_server(path, *, delay=0.0, stderr_bytes=0, version=None):
