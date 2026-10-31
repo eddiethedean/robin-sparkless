@@ -38,7 +38,7 @@ All workstreams are **planned**, with owners unassigned and implementation issue
 | SS-03 | [Early Spark Connect feasibility](03-connect-feasibility.md) | 0A only; experimental endpoint |
 | SS-04 | [Admission, operation lifecycle, and shutdown](04-runtime-and-operations.md) | Minimum production controls in 0B; replay/mutation extensions in 1–2 |
 | SS-05 | [Read-only HTTP SQL and typed results](05-http-sql-and-results.md) | 0B |
-| SS-06 | [Python launcher and binary packaging](06-python-launcher.md) | 0B; supported Spark Connect URL in 2 |
+| SS-06 | [Python launcher and binary packaging](06-python-launcher.md) | 0B; supported Spark Connect URL in 2; optional `SparklessConnect` context manager in 3 / 4.19 |
 | SS-07 | [Session ownership, shared catalogs, and mutations](07-sessions-catalogs-and-mutations.md) | Bounded read-only sessions in 0B; catalogs/writes in 1 |
 | SS-08 | [Logical types and lazy native execution](08-native-types-and-lazy-execution.md) | Scalar/schema fixes in 0B; expanded types/lazy paths in 1–2 |
 | SS-09 | [Spark Connect plan translation and analysis](09-connect-plans-and-analysis.md) | 2 |

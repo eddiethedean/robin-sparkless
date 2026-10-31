@@ -44,7 +44,7 @@ This policy supersedes the earlier exception allowing `spark-sql-parser` to rema
 | **4.16** | **4.16.0** | 0A + 0B | Native read-only HTTP SQL service, exact typed HTTP results, bounded runtime, sync/async launcher, and complete package distribution |
 | **4.17** | **4.17.0** | 1 | Shared catalog ownership, controlled mutations, richer logical schemas, and lazy native execution improvements |
 | **4.18** | **4.18.0** | 2 | Supported JVM-free Spark Connect, typed Arrow streaming, replay/release lifecycle, and standalone unmodified-client conformance |
-| **4.19** | **4.19.0** | 3, optional capability | DuckDB data source: typed Arrow table scans feeding the existing Polars engine |
+| **4.19** | **4.19.0** | 3, optional capability | DuckDB data source: typed Arrow table scans feeding the existing Polars engine; optional `SparklessConnect` context manager |
 | **4.20** | **4.20.0** | 4, optional capability | DuckDB execution backend exposed through Sparkless's supported Connect server |
 | **4.21** | **4.21.0** | 5, optional capability | Isolated Python Jobs/notebooks and scalar/Pandas UDF workers |
 | **4.22** | **4.22.0** | 6, optional capability | Native Delta Lake / Unity Catalog interoperability |
@@ -176,11 +176,13 @@ Primary plans: [SS-09](09-connect-plans-and-analysis.md), [SS-10](10-arrow-repla
 - [ ] All packages/artifacts are published and verified at **4.18.0**.
 - [ ] **V34** verifies fresh exact-version public installs, artifact hashes/digests, both supported transports, proxy route, and launcher/reconnect/release behavior after publication.
 
-## 4.19.0 — Optional DuckDB data source
+## 4.19.0 — Optional DuckDB data source and SparklessConnect
 
 Complete **Phase 3**, after the supported Phase 2 Connect server. DuckDB supplies table data through native Arrow batches; the existing Polars backend performs the Sparkless query. This is a read-only source capability, not a new execution engine or a DuckDB write path.
 
-Primary plan: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordered slices 419-01–419-05.
+Primary plans: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordered slices 419-01–419-05, and [SS-06: SparklessConnect](06-python-launcher.md#4190--optional-sparklessconnect-context-manager), with slices 419-06–419-08.
+
+Add an optional `SparklessConnect` context manager that starts `SparklessServer`, yields a real pyspark-connect `SparkSession`, and stops the session and server on exit. Package pyspark-connect as an optional dependency through the proposed `sparkless[connect]` extra; the helper is independent of DuckDB.
 
 - Freeze **D14**: DuckDB library/driver pins, database ownership, names, source snapshots, schema mappings, Arrow batches, and measured resource budgets.
 - Extend the engine-neutral external catalog contract with bounded scan/lifetime handling; current Delta descriptors and Arrow write streams are not sufficient by themselves.
@@ -190,6 +192,7 @@ Primary plan: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordere
 ### Release gate
 
 - [ ] Phase 2 is complete; existing native/HTTP/Connect surfaces still pass.
+- [ ] SS-06 slices **419-06–419-08** pass: real Connect session, optional dependency isolation, normal/error cleanup, session ownership, and fresh packaged-install checks.
 - [ ] **V35** proves real DuckDB scans, enabled Sparkless computations through Polars, exact schemas/values, and unsupported-type/write rejection.
 - [ ] **V36** proves multi-table snapshots, concurrent source changes, cancellation/disconnect/reattach, ownership cleanup, source failures, and numeric memory/queue limits. Independent DuckDB writer visibility uses one database owner.
 - [ ] Native enabled/disabled builds and fresh packaged installs pass on advertised platforms; default dependencies remain lightweight and Python/JVM-free.
