@@ -1,49 +1,36 @@
 # Installation and versions
 
-Documentation contract: **4.18.1 Python packaging candidate**, using the
-**4.18.0 native engine and server**. The 4.18.0 release is partially published:
-Linux/macOS extension wheels, server wheels, Rust crates and the container are
-public, while Windows extension wheels and the source archive are missing after
-PyPI's project storage limit blocked the final upload. **4.17.0** remains the last
-fully published coordinated release. See [release evidence](RELEASE_EVIDENCE.md)
-for the exact tag, commit and workflow outcome.
+Documentation contract: **4.18.1 is published**, using the **4.18.0 native
+engine and server**. The API, engine, and optional server binary are separate
+PyPI projects. See [release evidence](RELEASE_EVIDENCE.md) for the exact tag,
+commit, public inventories, and workflow results.
 
-## Published stable package
+## Install the published API
 
 ```bash
 python3.11 -m venv .venv
 # POSIX; Windows: .venv\Scripts\activate
 . .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install "sparkless==4.17.0"
+python -m pip install "sparkless==4.18.1"
 python -c "import sparkless; print(sparkless.__version__)"
 ```
 
-Use the [4.17 source documentation](https://github.com/eddiethedean/robin-sparkless/tree/v4.17.0/docs)
-for stable behavior. `/en/latest/` follows development and can describe unreleased
-features. After the packaging recovery is published, install the exact API version (`==4.18.1`) and
-use its tagged source docs. Local Python needs no Java or Rust when a wheel matches.
+Use the [4.18.1 source documentation](https://github.com/eddiethedean/robin-sparkless/tree/v4.18.1/docs)
+for the published behavior. `/en/latest/` follows development and can describe
+unreleased features. A matching wheel needs no local Java or Rust toolchain.
 
-## Candidate artifacts from GitHub CI
+## Published package components
 
-Install GitHub CLI and authenticate for artifact downloads. Pick a successful
-**Release** validation run on the exact candidate commit, inspect its artifacts,
-and download the checked API and native component bundles:
+| Component | PyPI distribution | Version |
+| --- | --- | --- |
+| Python API | [`sparkless`](https://pypi.org/project/sparkless/4.18.1/) | 4.18.1 |
+| Native engine | [`sparkless-native`](https://pypi.org/project/sparkless-native/4.18.0/) | 4.18.0 |
+| Optional HTTP/Connect server | [`sparkless-server-bin`](https://pypi.org/project/sparkless-server-bin/4.18.0/) | 4.18.0 |
 
-```bash
-gh run list --repo eddiethedean/robin-sparkless --workflow release.yml --limit 5
-gh run view RUN_ID --repo eddiethedean/robin-sparkless
-gh api repos/eddiethedean/robin-sparkless/actions/runs/RUN_ID/artifacts --jq '.artifacts[].name'
-gh run download RUN_ID --repo eddiethedean/robin-sparkless --name verified-sparkless-candidate --dir candidate
-gh run download RUN_ID --repo eddiethedean/robin-sparkless --name verified-native-candidate --dir candidate
-python -m pip install --no-index --find-links candidate "sparkless==4.18.1"
-```
-
-Replace `RUN_ID` with a successful validation run on the reviewed candidate. Add
-its `verified-server-bin-candidate` bundle before installing the `server` extra
-offline. The API pins the engine and server component versions exactly. Artifacts expire;
-if absent, use the [canonical contributor build](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup)
-on the exact commit. A successful validation run does not imply publication.
+Install the optional server with `python -m pip install "sparkless[server]==4.18.1"`.
+The exact engine and server pins are declared by the API package. The public
+inventories and hashes were checked by the successful [tagged Release run](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256).
 
 ## Platforms and build features
 

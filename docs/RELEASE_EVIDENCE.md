@@ -1,31 +1,45 @@
 # Release evidence — 4.18 Python packaging recovery
 
-## Current 4.18.1 candidate
+## 4.18.1 publication outcome — 2026-10-31
 
-The Python packaging recovery separates the universal `sparkless==4.18.1` API
-from `sparkless-native==4.18.0`. The server extra pins the already published
-`sparkless-server-bin==4.18.0`; the five Rust crates also remain at 4.18.0.
-The release tag follows the API version. Exact dependency pins and separate
-inventories keep the component versions explicit.
+Tag [`v4.18.1`](https://github.com/eddiethedean/robin-sparkless/tree/v4.18.1)
+points to commit [`0ad225677ec47b20c9c6225fa9f4b73b00e54aba`](https://github.com/eddiethedean/robin-sparkless/commit/0ad225677ec47b20c9c6225fa9f4b73b00e54aba).
+[CI run 41168209494](https://github.com/eddiethedean/robin-sparkless/actions/runs/41168209494)
+and the tag-triggered [Release run 41170498256](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256)
+passed on that exact SHA. The release acceptance gate, all platform builds and
+smokes, and post-publication file/hash verification succeeded.
 
-The native project contains the platform wheels and native source archive. The
-API contains one `py3-none-any` wheel and one small Python source archive; it does
-not bundle a native binary. This stops large extension wheels accumulating in the
-nearly full `sparkless` PyPI project and permits Python-only patches to reuse
-published component versions. Each PyPI project still has its own storage quota.
+The initial tag run 41162761208 stopped before Python publication because Cargo
+reported already-published 4.18.0 crates as “already exists on crates.io index.”
+[PR #1734](https://github.com/eddiethedean/robin-sparkless/pull/1734) taught the
+publisher to recognize that duplicate response while still failing other Cargo
+errors. Since that first attempt had not uploaded Python packages, the existing
+`v4.18.1` tag was moved to the corrected, merged, CI-verified commit above before
+the successful release rerun.
 
-This candidate requires exact-commit CI and Release validation before tagging.
-The new `sparkless-native` PyPI project also needs a pending Trusted Publisher for
-`eddiethedean/robin-sparkless`, workflow `release.yml`, environment `pypi`.
-[RELEASING](RELEASING.md) defines the build, reuse and publication checks.
+| Component | Published state |
+| --- | --- |
+| [`sparkless==4.18.1`](https://pypi.org/project/sparkless/4.18.1/) | Universal wheel and source archive published; public filenames and SHA-256 hashes verified |
+| [`sparkless-native==4.18.0`](https://pypi.org/project/sparkless-native/4.18.0/) | Native wheel matrix and source archive published; public inventory verified |
+| [`sparkless-server-bin==4.18.0`](https://pypi.org/project/sparkless-server-bin/4.18.0/) | Existing supported wheels reused; public filenames and SHA-256 hashes verified |
+| Five first-party crates, 4.18.0 | Already present on crates.io; duplicate skips and final version verification passed |
+| `ghcr.io/eddiethedean/sparkless-server:v4.18.1` | Published and smoke-tested; digest `sha256:0eece842823e308c727fa793472b992d5f05fa76bc34213bf040f8b3956e3736` |
 
-PyPI's default limits are 100 MiB per file and 10 GiB per project. The locally
-built API wheel and source archive total 131,862 bytes (69,492 and 62,370 bytes);
-the API project therefore adds about 129 KiB to its roughly 9.99 GiB current
-inventory. The local macOS ARM64 native wheel is 44,091,761 bytes and its source
-archive is 2,991,226 bytes. The new native project has room for all eight wheels;
-the release gate checks each actual platform artifact and the combined project
-inventory before publication.
+The exact-SHA size preflight passed PyPI's 100 MiB per-file and 10 GiB per-project
+default limits:
+
+| PyPI project | Current storage | Added | Projected storage |
+| --- | ---: | ---: | ---: |
+| `sparkless` | 9.987 GiB | 0.13 MiB | 9.987 GiB |
+| `sparkless-native` | 0.000 GiB | 324.61 MiB | 0.317 GiB |
+| `sparkless-server-bin` | 0.283 GiB | 0.00 MiB | 0.283 GiB |
+
+The 4.18.1 API package is a small universal distribution that pins the separate
+4.18.0 native engine and optional server binary. The 4.18.0 release remains
+partially published as originally recorded below; no historical files were
+removed. See [the 4.18.1 PyPI page](https://pypi.org/project/sparkless/4.18.1/)
+and [release workflow](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256)
+for the public record.
 
 ## 4.18.0 publication outcome — 2026-10-30
 
@@ -67,10 +81,11 @@ packaging recovery uses a new API patch version.
 | Same source, cross-platform release validation | `3e604079bfd0cc824ce94c88acd93ce6f84be84f` | [Release40990790490](https://github.com/eddiethedean/robin-sparkless/actions/runs/40990790490), passed |
 | Previous full candidate validation | `e61b924a` | [CI40986568452](https://github.com/eddiethedean/robin-sparkless/actions/runs/40986568452), [Release40986569038](https://github.com/eddiethedean/robin-sparkless/actions/runs/40986569038), passed |
 
-The exact candidate-head runs above cover the source revision shown. Any later
-source change needs new CI and Release validation on that exact commit before it
-is tagged. Source-bound diagnostics from earlier commits may be reused only with
-an explicit source-scope comparison. GitHub artifacts have retention limits;
+The rows above are historical pre-release snapshots; the exact-SHA CI and Release
+runs in the publication outcome establish the 4.18.1 cut. Any later source change
+needs new CI and Release validation on that exact commit before it is tagged.
+Source-bound diagnostics from earlier commits may be reused only with an explicit
+source-scope comparison. GitHub artifacts have retention limits;
 workflow metadata and source remain inspectable, but an expired artifact is not
 downloadable evidence.
 
