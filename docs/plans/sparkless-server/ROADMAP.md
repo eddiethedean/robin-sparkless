@@ -44,7 +44,7 @@ This policy supersedes the earlier exception allowing `spark-sql-parser` to rema
 | **4.16** | **4.16.0** | 0A + 0B | Native read-only HTTP SQL service, exact typed HTTP results, bounded runtime, sync/async launcher, and complete package distribution |
 | **4.17** | **4.17.0** | 1 | Shared catalog ownership, controlled mutations, richer logical schemas, and lazy native execution improvements |
 | **4.18** | **4.18.0** | 2 | Supported JVM-free Spark Connect, typed Arrow streaming, replay/release lifecycle, and standalone unmodified-client conformance |
-| **4.19** | **4.19.0** | 3, optional capability | DuckDB data source: typed Arrow table scans feeding the existing Polars engine; optional `SparklessConnect` context manager |
+| **4.19** | **4.19.0** | 3, optional capability; Connect/engine performance | DuckDB data source: typed Arrow table scans feeding the existing Polars engine; optional `SparklessConnect` context manager; Arrow export, range-count, and mixed-job scheduling improvements (#1736–#1738) |
 | **4.20** | **4.20.0** | 4, optional capability | DuckDB execution backend exposed through Sparkless's supported Connect server |
 | **4.21** | **4.21.0** | 5, optional capability | Isolated Python Jobs/notebooks and scalar/Pandas UDF workers |
 | **4.22** | **4.22.0** | 6, optional capability | Native Delta Lake / Unity Catalog interoperability |
@@ -180,27 +180,43 @@ Primary plans: [SS-09](09-connect-plans-and-analysis.md), [SS-10](10-arrow-repla
 - [ ] All packages/artifacts are published and verified at **4.18.0**.
 - [ ] **V34** verifies fresh exact-version public installs, artifact hashes/digests, both supported transports, proxy route, and launcher/reconnect/release behavior after publication.
 
-## 4.19.0 — Optional DuckDB data source and SparklessConnect
+## 4.19.0 — Optional DuckDB data source, SparklessConnect, and performance
 
 Complete **Phase 3**, after the supported Phase 2 Connect server. DuckDB supplies table data through native Arrow batches; the existing Polars backend performs the Sparkless query. This is a read-only source capability, not a new execution engine or a DuckDB write path.
 
 Primary plans: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordered slices 419-01–419-05, and [SS-06: SparklessConnect](06-python-launcher.md#4190-optional-sparklessconnect-context-manager), with slices 419-06–419-08.
 
+The [4.19 implementation plan](RELEASE_4_19.md) defines dependencies across all eleven slices, the minimum Connect table/join/aggregate additions, source snapshot ownership, helper lifecycle, benchmark protocol, and integrated acceptance. Begin with the performance baseline and D14 feasibility; helper and range-count work are independent of DuckDB. Measure exporter/count improvements together before evaluating scheduling changes. Slice IDs are stable identifiers, not numeric execution order.
+
 Add an optional `SparklessConnect` context manager that starts `SparklessServer`, yields a real `SparkSession` from pyspark-client, and stops the session and server on exit. Package pyspark-client as an optional dependency through the proposed `sparkless[connect]` extra; the helper is independent of DuckDB.
+
+**Scope extension (2026-10-31):** include the three newest open issues, #1736–#1738, as performance work on the existing default Polars/Connect paths. These improvements are independent of enabling DuckDB.
 
 - Freeze **D14**: DuckDB library/driver pins, database ownership, names, source snapshots, schema mappings, Arrow batches, and measured resource budgets.
 - Extend the engine-neutral external catalog contract with bounded scan/lifetime handling; current Delta descriptors and Arrow write streams are not sufficient by themselves.
 - Support configured named tables, exact typed/empty results, and the declared filters/projections/joins/aggregates through unmodified Connect clients. Source writes fail explicitly.
 - Select and prove standalone read-only access and a live shared-owner path for independently written DuckDB tables. Sharing database files between independent writable processes is not a supported shortcut; no export or synchronization is required in the selected live-owner mode.
 
+### Connect and engine performance slices
+
+| Slice | Issue | Required outcome |
+| --- | --- | --- |
+| **419-09** | [#1736: bounded columnar Arrow export](https://github.com/eddiethedean/robin-sparkless/issues/1736) | Replace row-sized source pulls and one-row frame assembly with bounded columnar export for range and local-relation paths. Preserve IPC schemas, empty results, early LIMIT, byte/replay caps, and cancellation. Benchmark 1k/10k/100k collections, empty filters, wide columns, and variable-width strings; target at least 2× faster 100k-row range collection against the same-machine released baseline. |
+| **419-10** | [#1737: exact range-count fast paths](https://github.com/eddiethedean/robin-sparkless/issues/1737) | Recognize dynamic and typed integer literals through the public core-IR/Connect path with checked conversions and conservative fallback. Prove eligible counts avoid materialization while preserving Spark results, errors, overflow, and cancellation; target near-flat 1k/1M/10M latency and at least 2× faster 10M filtered count. |
+| **419-11** | [#1738: mixed-job scheduling and backpressure](https://github.com/eddiethedean/robin-sparkless/issues/1738) | Profile and remeasure after 419-09; distinguish admission, compute, encoding, replay, and blocked-send costs. Demonstrate repeatable throughput improvements at 1/4/8/16 clients with small/large jobs and slow readers while preserving short-query latency, bounded resources, session isolation, and replay/cancellation correctness. |
+
+Follow the [shared performance protocol](RELEASE_4_19.md#performance-protocol-and-completion-criteria): correctness-checked paired runs, three fresh server pairs, at least 20 warm observations per small workload, and sustained measurements for tails. Gate repeatable small-job median increases above max(5%, 1 ms) and p95 increases above max(10%, 2 ms). Select the scheduling throughput floor from the measured post-export/count baseline before scheduler implementation. Preserve raw timing/resource samples and use identical clients with one shared server per engine for Spark comparisons. Performance targets require measured evidence before claiming improvement.
+
 ### Release gate
 
 - [ ] Phase 2 is complete; existing native/HTTP/Connect surfaces still pass.
+- [ ] The [4.19 minimum public-client matrix](RELEASE_4_19.md#minimum-public-client-matrix) passes, including the new named-table, inner equijoin, and grouped count/sum paths; analysis never scans rows and execution schemas match the selected statement snapshot.
 - [ ] SS-06 slices **419-06–419-08** pass: real Connect session, optional dependency isolation, normal/error cleanup, session ownership, and fresh packaged-install checks.
+- [ ] Performance slices **419-09–419-11** close [#1736](https://github.com/eddiethedean/robin-sparkless/issues/1736), [#1737](https://github.com/eddiethedean/robin-sparkless/issues/1737), and [#1738](https://github.com/eddiethedean/robin-sparkless/issues/1738) with their correctness/resource acceptance and paired benchmarks, including the shared small-job regression guardrails.
 - [ ] **V35** proves real DuckDB scans, enabled Sparkless computations through Polars, exact schemas/values, and unsupported-type/write rejection.
 - [ ] **V36** proves multi-table snapshots, concurrent source changes, cancellation/disconnect/reattach, ownership cleanup, source failures, and numeric memory/queue limits. Independent DuckDB writer visibility uses one database owner.
 - [ ] Native enabled/disabled builds and fresh packaged installs pass on advertised platforms; default dependencies remain lightweight and Python/JVM-free.
-- [ ] All first-party packages/artifacts publish and pass fresh public verification at coordinated **4.19.0** after the complete phase exits pass. A standalone DuckDB file scan does not certify live shared-owner access.
+- [ ] The [current release procedure](../../RELEASING.md) governs API/native/server versions, exact-commit CI, candidate validation, and publication; plan changed API and engine/server components at **4.19.0** with exact dependency pins. The [integrated candidate and fresh public checks](RELEASE_4_19.md#integration-and-release-acceptance) pass. A standalone DuckDB file scan does not certify live shared-owner access.
 
 ## 4.20.0 — Optional DuckDB execution backend for Connect
 

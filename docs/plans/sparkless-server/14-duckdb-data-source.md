@@ -34,6 +34,8 @@ The native Sparkless process must remain Python/JVM-free. A shared-process appro
 
 ## Ordered delivery
 
+The [4.19 implementation plan](RELEASE_4_19.md#delivery-order-and-dependencies) integrates these slices with SparklessConnect and performance work. Agree the source/output byte-budget interface with 419-09 before 419-03; 419-04 must add actual Connect named-table, inner equijoin, and grouped count/sum translation rather than assume existing native operations are remotely available. The [minimum public-client matrix](RELEASE_4_19.md#minimum-public-client-matrix) defines the required subset.
+
 | Slice | Deliverable | Exit evidence |
 | --- | --- | --- |
 | 419-01 | Freeze D14 and prove standalone plus live-owner access feasibility | Exact versions, connection ownership, lock behavior, transaction/snapshot lifetime, failure policy |
@@ -44,8 +46,8 @@ The native Sparkless process must remain Python/JVM-free. A shared-process appro
 
 ## Required semantics
 
-- Resolve table metadata and begin a stable source snapshot together. Schema analysis and execution must not silently read incompatible versions. Hold the source transaction/lease until the actual producer stops, including after a response timeout or disconnect.
-- Define one statement's snapshot across multiple DuckDB tables. Treat replacement/drop and concurrent append/update as controlled races. Cross-engine joins need an explicit statement-snapshot policy; reject combinations for which the promised consistency cannot be maintained.
+- Analysis reads metadata without table-row materialization and releases its own snapshot; a separate later execution resolves metadata and all tables under its own statement snapshot. Reanalyze at execution and keep result descriptors and Arrow schemas consistent; reject incompatible changes explicitly. Hold execution source transactions/leases until the actual producer stops, including after a response timeout or disconnect.
+- Define one statement's snapshot across multiple DuckDB tables under the same owner. Treat replacement/drop and concurrent append/update as controlled races. The required inner equijoin uses one owner. Cross-owner and DuckDB-to-managed-table joins remain unsupported until D14 adds a statement consistency policy and separate evidence.
 - Freeze exact integer widths, BIGINT boundaries, decimal precision/scale, nullability, timestamps/time zones, and empty-result schemas. Unsupported DuckDB types fail before a misleading success. Nested types require separate enabled-type evidence.
 - Start with conservative scans. Add projection/filter pushdown only where it preserves Sparkless semantics, especially casts, null comparison, decimal arithmetic, and collations. A DuckDB scan predicate must not change the result relative to Polars evaluation.
 - Keep source transaction identity in the operation/plan lifetime. Reattachment replays retained results rather than rereading a newer snapshot. On source loss, fail truthfully; do not reconnect and silently rerun against changed data.
@@ -57,7 +59,7 @@ The native Sparkless process must remain Python/JVM-free. A shared-process appro
 - **V35:** a pinned unmodified Connect client reads real DuckDB tables, computes the advertised transformation corpus through Polars, preserves values/schema, and receives explicit errors for unsupported types and source writes. Test empty tables and joins as well as scalar smoke queries.
 - **V36:** controlled concurrent source writes/replacements demonstrate snapshots; cancellation, disconnect, reattach, source loss, and shutdown preserve ownership. Increasing source sizes demonstrate numeric allocation/RSS/queue budgets recorded in D14. An independent DuckDB writer and a Connect reader share one database owner and observe the declared commit visibility without export or synchronization.
 - Record source/library/client revisions, schemas, commands, source sizes, platforms, latency/RSS, and limits. If live sharing fails feasibility, keep its gate open and revise advertised scope explicitly instead of claiming live shared-table support from a standalone scan.
-- Keep the feature optional and verify a default installation without DuckDB dependencies. Package/install the enabled native binary and image on each advertised platform. Apply the coordinated 4.19.0 publication policy only after all phase exits and previous regressions pass.
+- Keep the feature optional and verify a default installation without DuckDB dependencies. Package/install the enabled native binary and image on each advertised platform. Follow the [4.19 integrated acceptance](RELEASE_4_19.md#integration-and-release-acceptance) and [current release procedure](../../RELEASING.md) for component versions, exact dependency pins, package checks, and publication.
 
 ## Touchpoints and references
 

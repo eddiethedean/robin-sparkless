@@ -18,6 +18,7 @@ Build a single-node Rust service in `crates/sparkless-server/` that calls Robin'
 - [4.16 implementation plan](RELEASE_4_16.md): ordered delivery slices, SQL/type boundary, proposed limits, lifecycle/control design, and package/release checks.
 - [4.17 implementation plan](RELEASE_4_17.md): shared catalog/snapshot ownership, controlled mutation identities and outcomes, logical schemas, lazy execution, and coordinated release checks.
 - [4.18 implementation plan](RELEASE_4_18.md): public Connect subset, physical Arrow encoding, bounded replay/lifecycle, standalone then proxy conformance, and candidate/publication gates.
+- [4.19 implementation plan](RELEASE_4_19.md): source ownership and minimum table/join/aggregate translation, owned SparklessConnect lifecycle, performance slices #1736–#1738, dependency order, paired benchmark protocol, and integrated release acceptance.
 - [Spark Connect public-contract research](CONNECT_PROTOCOL_RESEARCH.md): Apache Spark 4.0.5 source review, 4.0.0 source comparison, pinned client fixtures, retry/config/IPC requirements, and product scope versus public protocol behavior.
 - [DuckDB data source](14-duckdb-data-source.md) and [DuckDB Connect backend](15-duckdb-connect-backend.md): separate Phases 3/4 after supported Connect, targeted at 4.19/4.20.
 - [Expanded Connect API/types](16-connect-api-types-and-analysis.md), [I/O/artifacts/cache](17-connect-sources-artifacts-and-persistence.md), [durable recovery](18-durable-connect-recovery.md), and [Structured Streaming](19-structured-streaming.md): Phases 7–10, targeted at 4.23–4.26; planned scope, not current support.
@@ -25,7 +26,7 @@ Build a single-node Rust service in `crates/sparkless-server/` that calls Robin'
 - [Decision register](DECISIONS.md): unresolved choices, required milestones, and evidence to record.
 - [Validation matrix](VALIDATION.md): concrete release evidence required for each milestone.
 
-The epic is the baseline requirements document. The release roadmap assigns those phases to versions and fixes the coordinated package-version policy for 4.16+. Workstream plans refine delivery without relaxing its gates. If a decision changes a requirement, update the epic, affected plans, and validation rows in the same change; synchronize the GitHub issue deliberately rather than allowing two competing specifications.
+The epic is the baseline requirements document. The release roadmap assigns those phases to versions; the [current release procedure](../../RELEASING.md) governs component versions, distribution checks, publication, and optional diagnostics, superseding older coordinated-version prose. Workstream plans refine delivery without relaxing their acceptance criteria. If a decision changes a requirement, update the epic, affected plans, and validation rows in the same change; synchronize the GitHub issue deliberately rather than allowing two competing specifications.
 
 - [Versioned server compatibility packages](21-versioned-connect-packages.md): Phases 11–14, first certify the completed 4.0 baseline, then separate 3.5, 4.1 and 4.2 server profiles.
 

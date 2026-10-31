@@ -12,14 +12,14 @@ search:
 
 ## Current release roadmap: Sparkless Server 4.16+
 
-The current product release plan adds the native Sparkless Server to the existing Sparkless and robin-sparkless packages. These milestones are planned scope, not calendar commitments. The [Sparkless Server release roadmap](plans/sparkless-server/ROADMAP.md) is the detailed source for phase scope, dependencies, and release gates. Implementation plans cover the [4.16 HTTP release](plans/sparkless-server/RELEASE_4_16.md), [4.17 catalogs and native execution](plans/sparkless-server/RELEASE_4_17.md), and [4.18 Spark Connect, Arrow, and replay](plans/sparkless-server/RELEASE_4_18.md). The 4.18 scope is informed by [Apache public-contract research](plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md).
+The current product release plan adds the native Sparkless Server to the existing Sparkless and robin-sparkless packages. These milestones are planned scope, not calendar commitments. The [Sparkless Server release roadmap](plans/sparkless-server/ROADMAP.md) is the detailed source for phase scope, dependencies, and release gates. Implementation plans cover the [4.16 HTTP release](plans/sparkless-server/RELEASE_4_16.md), [4.17 catalogs and native execution](plans/sparkless-server/RELEASE_4_17.md), [4.18 Spark Connect, Arrow, and replay](plans/sparkless-server/RELEASE_4_18.md), and [4.19 DuckDB sources, SparklessConnect, and performance](plans/sparkless-server/RELEASE_4_19.md). The 4.18 scope is informed by [Apache public-contract research](plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md).
 
 | Release | Shared version | Planned scope |
 | --- | --- | --- |
 | **4.16** | **4.16.0** | Read-only native HTTP SQL service, exact SDK results, bounded runtime, sync/async launcher, and unified package distribution |
 | **4.17** | **4.17.0** | Shared catalog ownership, controlled mutations, richer logical schemas, and lazy native execution improvements |
 | **4.18** | **4.18.0** | Supported JVM-free Spark Connect, typed Arrow streaming, replay/release lifecycle, and separately verified emulator route |
-| **4.19** | **4.19.0** | Optional DuckDB data source and SparklessConnect context manager |
+| **4.19** | **4.19.0** | Optional DuckDB data source, SparklessConnect context manager, and Connect/engine performance improvements ([#1736](https://github.com/eddiethedean/robin-sparkless/issues/1736), [#1737](https://github.com/eddiethedean/robin-sparkless/issues/1737), [#1738](https://github.com/eddiethedean/robin-sparkless/issues/1738)) |
 | **4.20** | **4.20.0** | Optional DuckDB execution backend for Connect |
 | **4.21** | **4.21.0** | Optional isolated Python workers and declared UDF forms |
 | **4.22** | **4.22.0** | Optional native Delta Lake / Unity Catalog interoperability |
