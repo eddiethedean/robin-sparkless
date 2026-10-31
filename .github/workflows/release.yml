@@ -122,6 +122,7 @@ jobs:
           container: 'off'
           rust-toolchain: 1.93.1
       - name: Reuse an existing native component before testing
+        shell: bash
         run: |
           version="$(python -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
           python scripts/reuse_pypi_distributions.py --directory dist --project sparkless-native --version "$version"
