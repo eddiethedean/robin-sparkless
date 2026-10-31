@@ -182,7 +182,7 @@ Complete **Phase 3**, after the supported Phase 2 Connect server. DuckDB supplie
 
 Primary plans: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordered slices 419-01–419-05, and [SS-06: SparklessConnect](06-python-launcher.md#4190-optional-sparklessconnect-context-manager), with slices 419-06–419-08.
 
-Add an optional `SparklessConnect` context manager that starts `SparklessServer`, yields a real pyspark-connect `SparkSession`, and stops the session and server on exit. Package pyspark-connect as an optional dependency through the proposed `sparkless[connect]` extra; the helper is independent of DuckDB.
+Add an optional `SparklessConnect` context manager that starts `SparklessServer`, yields a real `SparkSession` from pyspark-client, and stops the session and server on exit. Package pyspark-client as an optional dependency through the proposed `sparkless[connect]` extra; the helper is independent of DuckDB.
 
 - Freeze **D14**: DuckDB library/driver pins, database ownership, names, source snapshots, schema mappings, Arrow batches, and measured resource budgets.
 - Extend the engine-neutral external catalog contract with bounded scan/lifetime handling; current Delta descriptors and Arrow write streams are not sufficient by themselves.

@@ -59,7 +59,7 @@ Async subprocess lifecycle does not make the synchronous PySpark DataFrame API a
 
 ## 4.19.0 — Optional SparklessConnect context manager
 
-Add `from sparkless.server import SparklessConnect` so existing pyspark-connect code can obtain a real PySpark Connect `SparkSession` backed by an owned `SparklessServer`:
+Add `from sparkless.server import SparklessConnect` so existing pyspark-client code can obtain a real PySpark Connect `SparkSession` backed by an owned `SparklessServer`:
 
 ```python
 from sparkless.server import SparklessConnect
@@ -68,12 +68,12 @@ with SparklessConnect() as spark:
     assert spark.range(10).filter("id > 5").count() == 4
 ```
 
-`__enter__` starts `SparklessServer`, waits for its supported Connect endpoint, creates a session using pyspark-connect, and returns that actual session. It must not return a Sparkless session, proxy, or wrapper. `__exit__` calls `spark.stop()` before stopping/reaping the server, on both normal and exceptional exits. This supplies an explicit session cleanup context manager without requiring the selected released pyspark-connect client to provide one.
+`__enter__` starts `SparklessServer`, waits for its supported Connect endpoint, creates a session using pyspark-client, and returns that actual session. It must not return a Sparkless session, proxy, or wrapper. `__exit__` calls `spark.stop()` before stopping/reaping the server, on both normal and exceptional exits. This supplies an explicit session cleanup context manager without requiring the selected released pyspark-client package to provide one.
 
 ### Delivery slices
 
-- **419-06 — API and optional packaging:** define constructor options for forwarding server configuration, including executable override and startup/shutdown limits; expose the public import; add a proposed `sparkless[connect]` extra including `pyspark-connect` and the matching server binary dependency. Select and test a client version range and its Python requirements against the supported Connect contract. Keep both dependencies optional; default installs and `sparkless[server]` must not require pyspark-connect. Import PySpark lazily on context entry and report a missing dependency with an actionable install command.
+- **419-06 — API and optional packaging:** define constructor options for forwarding server configuration, including executable override and startup/shutdown limits; expose the public import; add a proposed `sparkless[connect]` extra including `pyspark-client` and the matching server binary dependency. Select and test a client version range and its Python requirements against the supported Connect contract. Keep both dependencies optional; default installs and `sparkless[server]` must not require pyspark-client. Import PySpark lazily on context entry and report a missing dependency with an actionable install command.
 - **419-07 — Owned lifecycle:** use an independently owned Connect session rather than reusing/stopping an unrelated global session; choose the client construction API accordingly. Clean up the server if session construction fails. Always attempt server shutdown even if `spark.stop()` fails; preserve a body/startup exception and expose cleanup failures without masking it. Specify repeated use and reject same-instance nested entry; separate instances must be safe to nest. Manual session stop inside the block must still allow safe exit. Async support is separate future scope.
-- **419-08 — Acceptance and documentation:** test real packaged pyspark-connect sessions against SparklessServer, including `range`, a transformation, and an action; verify the returned object's PySpark Connect type. Cover normal exit, body exception, missing dependency, server startup failure, session creation failure, stop failure, manual stop, repeated use, and nested independent contexts. Assert no owned process/session remains and unrelated sessions remain usable. Document installation, the example above, ownership, cleanup errors, and supported client/Python versions. Verify fresh installs with and without the extra and no import-time PySpark import or server startup.
+- **419-08 — Acceptance and documentation:** test real packaged pyspark-client sessions against SparklessServer, including `range`, a transformation, and an action; verify the returned object's PySpark Connect type. Cover normal exit, body exception, missing dependency, server startup failure, session creation failure, stop failure, manual stop, repeated use, and nested independent contexts. Assert no owned process/session remains and unrelated sessions remain usable. Document installation, the example above, ownership, cleanup errors, and supported client/Python versions. Verify fresh installs with and without the extra and no import-time PySpark import or server startup.
 
 These slices join the coordinated 4.19.0 release gate alongside SS-14; they do not require DuckDB and do not extend the earlier 4.18 release gate.
