@@ -4,8 +4,8 @@ See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SU
 
 The 4.18.0 native server distribution adds an optional Spark Connect endpoint that speaks the
 Apache Spark 4.0.5 protocol. It runs Rust/Polars execution without a Python worker or JVM in the
-server process. This page describes the 4.18 capability contract; the complete candidate and
-public-artifact gates remain the release authority.
+server process. This page describes the 4.18 capability contract. The published inventories and
+exact-SHA validation are recorded in [release evidence](RELEASE_EVIDENCE.md).
 
 ## Start an owned server
 
@@ -15,9 +15,9 @@ Install the native server extra and the standalone public client in the client e
 python -m pip install "sparkless[server]==4.18.1" "pyspark-client==4.0.5"
 ```
 
-These commands target the 4.18.1 API with the 4.18.0 native/server components.
-Until the packaging recovery is published, use the matching [candidate artifacts](INSTALLATION.md#candidate-artifacts-from-github-ci). The packaged
-server wheels support Linux x86_64 with glibc 2.28+ and macOS 14+ on Apple Silicon;
+These commands install the published 4.18.1 API with its 4.18.0 native/server
+components. The packaged server wheels support Linux x86_64 with glibc 2.28+
+and macOS 14+ on Apple Silicon;
 this is a smaller platform set than the in-process Python extension.
 
 The launcher owns a native server process, waits for its readiness record, and allocates loopback

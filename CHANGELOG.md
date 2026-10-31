@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [4.18.1] - 2026-10-30
+## [4.18.1] - 2026-10-31
 
-Python packaging candidate; publication is tracked in [release evidence](docs/RELEASE_EVIDENCE.md).
+Published from tag [`v4.18.1`](https://github.com/eddiethedean/robin-sparkless/tree/v4.18.1) at commit [`0ad225677ec47b20c9c6225fa9f4b73b00e54aba`](https://github.com/eddiethedean/robin-sparkless/commit/0ad225677ec47b20c9c6225fa9f4b73b00e54aba). Exact-commit [CI run 41168209494](https://github.com/eddiethedean/robin-sparkless/actions/runs/41168209494) and [Release run 41170498256](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256) passed, including final PyPI inventory and hash verification. See [release evidence](docs/RELEASE_EVIDENCE.md).
 
 ### Changed
 
