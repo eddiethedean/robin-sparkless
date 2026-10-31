@@ -10,7 +10,7 @@ search:
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Validation](VALIDATION.md)
 
-**Status as of 2026-10-30:** 4.17.0 public verification is complete. The 4.18 Spark Connect baseline is frozen, and candidate interoperability, the approved V26 budget, and the coordinated candidate inventory passed; see the [4.18 cut evidence](RELEASE_4_18.md#4180-cut-evidence). V25 is not advertised. No 4.18.0 tag or publication has been made, and V34 remains post-publication work. D05's coordinated package versions remain resolved; Spark Connect is pinned to Spark 4.0.5 independently of the project release version.
+**Status as of 2026-10-30:** 4.17.0 public verification is complete. The 4.18 Spark Connect baseline is frozen, and candidate interoperability, the approved V26 budget, and the coordinated candidate inventory passed; see the [4.18 cut evidence](RELEASE_4_18.md#4180-cut-evidence). V25 is not advertised. The 4.18.0 tag exists and publication partially succeeded; PyPI storage blocked the final extension files. V34 remains incomplete; see [release evidence](../../RELEASE_EVIDENCE.md). D05's coordinated package versions remain resolved; Spark Connect is pinned to Spark 4.0.5 independently of the project release version.
 
 Do not replace an unresolved value with a guessed version or silently treat a recommendation as implemented. Record resolution date, owner, exact immutable revisions, rationale, impacted plans, and validation evidence here.
 

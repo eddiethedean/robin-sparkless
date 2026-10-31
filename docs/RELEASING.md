@@ -9,16 +9,18 @@ commit and do not satisfy this publication check.
 
 ## Prepare the release
 
-All first-party packages share one stable `X.Y.Z` version:
+The Rust facade/core/Polars/parser/server crates and `sparkless-native` share the
+engine version. The Python API has its own version and pins `sparkless-native`
+exactly. Its optional server extra pins `sparkless-server-bin` to the matching
+engine version. A Python-only patch can retain the tested engine/server versions.
+Change a component version whenever its published contents need to change.
 
-- Rust: `spark-sql-parser`, `robin-sparkless-core`, `robin-sparkless-polars`,
-  `robin-sparkless`, and `sparkless-server`.
-- Python: `sparkless` and `sparkless-server-bin`. The `sparkless[server]` extra pins
-  the matching server package exactly.
-
-Update manifests, internal dependency requirements, `Cargo.lock`,
-`python/sparkless/sparkless/__init__.py`, and the dated changelog entry together.
-Then check metadata and workflow helpers (Python 3.11+, with PyYAML installed):
+For an engine change, update Cargo manifests, internal requirements, `Cargo.lock`,
+`python/native/pyproject.toml`, the native package version, and server metadata.
+For an API change, update `python/pyproject.toml`,
+`python/sparkless/sparkless/__init__.py`, dependency pins as needed, documentation
+metadata, and the dated changelog entry. The stable release tag matches the API
+version. Then check metadata and workflow helpers (Python 3.11+, with PyYAML installed):
 
 ```bash
 python3 -m pip install pyyaml
@@ -47,9 +49,16 @@ If a tag was pushed before CI completed, rerun its failed release jobs after CI 
 
 ## What release checks
 
-The release workflow retains all eight `cp311-abi3` extension wheel targets:
+The release workflow builds a small universal `sparkless` API wheel/source archive
+and all eight `sparkless-native` `cp311-abi3` extension wheel targets:
 Linux glibc and musl on x86_64/ARM64, macOS Intel/ARM64, and Windows x64/ARM64.
-It builds one Python sdist and checks the publishable Rust package archives.
+The native source archive includes the fixed Cargo dependency graph. The workflow
+also checks the publishable Rust package archives. The API wheel must contain no
+native binaries, stay below 1 MiB, and pin the exact compatible native version.
+Before staging distributions, the release gate checks each file against PyPI's
+100 MiB default and adds the candidate sizes to each project's current published
+inventory, enforcing PyPI's 10 GiB default project limit ([PyPI storage limits](https://docs.pypi.org/project-management/storage-limits/)).
+This catches cumulative quota exhaustion before any publisher runs.
 
 The broad Python suite runs once against the Linux publication wheel. Focused
 native smoke tests run SQL, nested/nullable values, Parquet, and Delta on **every**
@@ -71,9 +80,11 @@ layer.
 
 ## Publication and retries
 
-Stable tag pushes publish Rust crates in dependency order, then the server wheels
-and container in parallel, then `sparkless`. The final job checks public PyPI file
-names/hashes and crates.io versions. Publishers download the checked artifacts;
+Stable tag pushes publish Rust crates in dependency order, then the native engine,
+server wheels and container in parallel, then the small `sparkless` API. The final job checks all three public PyPI inventories and hashes and the engine
+versions on crates.io. For reused component versions, each build job downloads
+matching published files by SHA-256 before running its smoke checks; validation
+and publication therefore consume the immutable published bytes. Publishers download the checked artifacts;
 they do not rebuild wheels or containers. Rust publication uses `--no-verify`
 because the same commit has already passed CI and package-archive checks.
 
@@ -103,9 +114,11 @@ and the workflows define the current release process.
 
 ## Credentials
 
-Rust publication needs `CARGO_REGISTRY_TOKEN`. Both PyPI projects use Trusted
+Rust publication needs `CARGO_REGISTRY_TOKEN`. All three PyPI projects use Trusted
 Publishing with owner `eddiethedean`, repository `robin-sparkless`, workflow
-`release.yml`, and environment `pypi`. GHCR publication uses the workflow token's
+`release.yml`, and environment `pypi`. Before the first native upload, register
+`sparkless-native` as a [pending publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
+on the PyPI account publishing page. GHCR publication uses the workflow token's
 `packages: write` permission for `ghcr.io/eddiethedean/sparkless-server`.
 
 ## Documentation checks

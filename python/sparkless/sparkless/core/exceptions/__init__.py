@@ -30,9 +30,9 @@ try:
     SparklessExternalCatalogError = _SECE
 except ImportError:
     try:
-        from sparkless._native import SparklessCancelledError as _SCE
-        from sparkless._native import SparklessError as _SparklessError
-        from sparkless._native import SparklessExternalCatalogError as _SECE
+        from sparkless_native._native import SparklessCancelledError as _SCE
+        from sparkless_native._native import SparklessError as _SparklessError
+        from sparkless_native._native import SparklessExternalCatalogError as _SECE
 
         SparklessError = _SparklessError
         SparklessCancelledError = _SCE

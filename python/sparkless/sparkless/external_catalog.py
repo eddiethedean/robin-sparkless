@@ -78,7 +78,7 @@ class ExternalTableDescriptor:
 
     def validate(self) -> None:
         """Run the native descriptor validator without reading storage."""
-        from sparkless._native import _validate_external_table_descriptor
+        from sparkless_native._native import _validate_external_table_descriptor
 
         _validate_external_table_descriptor(self)
 
@@ -114,7 +114,7 @@ class ExternalTableWriteResult:
 
     def validate_against(self, previous: ExternalTableDescriptor) -> None:
         """Run the native identity and committed-version receipt checks."""
-        from sparkless._native import _validate_external_table_write_result
+        from sparkless_native._native import _validate_external_table_write_result
 
         _validate_external_table_write_result(self, previous)
 

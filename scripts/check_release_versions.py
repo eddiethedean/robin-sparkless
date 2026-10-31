@@ -18,8 +18,10 @@ def validate_versions(
     python_version: str,
     changelog: str,
     tag: str | None = None,
+    release_version: str | None = None,
 ) -> list[str]:
     version = package_versions["robin-sparkless"]
+    api_version = release_version or version
     errors = []
     if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version):
         errors.append(f"release version is not a stable semantic version: {version}")
@@ -35,19 +37,23 @@ def validate_versions(
             errors.append(
                 f"{name}: dependency version {actual} does not match {version}"
             )
-    if python_version != version:
+    if python_version != api_version:
         errors.append(
-            f"sparkless.__version__: {python_version} does not match {version}"
+            f"sparkless.__version__: {python_version} does not match {api_version}"
         )
-    if tag is not None and tag != f"v{version}":
-        errors.append(f"tag {tag} does not match v{version}")
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", api_version):
+        errors.append(
+            f"Python release version is not a stable semantic version: {api_version}"
+        )
+    if tag is not None and tag != f"v{api_version}":
+        errors.append(f"tag {tag} does not match v{api_version}")
     section = re.search(
-        rf"^## \[{re.escape(version)}\] - (\d{{4}}-\d{{2}}-\d{{2}})$",
+        rf"^## \[{re.escape(api_version)}\] - (\d{{4}}-\d{{2}}-\d{{2}})$",
         changelog,
         re.MULTILINE,
     )
     if section is None:
-        errors.append(f"CHANGELOG.md has no dated [{version}] release section")
+        errors.append(f"CHANGELOG.md has no dated [{api_version}] release section")
     else:
         try:
             date.fromisoformat(section.group(1))
@@ -66,7 +72,7 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
     core = read_toml(root / "crates/robin-sparkless-core/Cargo.toml")
     polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
     server = read_toml(root / "crates/sparkless-server/Cargo.toml")
-    native = read_toml(root / "python/Cargo.toml")
+    native = read_toml(root / "python/native/Cargo.toml")
     project = read_toml(root / "python/pyproject.toml")["project"]
     packages = {
         manifest["package"]["name"]: manifest["package"]["version"]
@@ -76,13 +82,10 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
     if _is_coordinated_release(expected):
         parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
         packages[parser["package"]["name"]] = parser["package"]["version"]
-    packages["sparkless"] = project["version"]
     lock_versions = {
         package["name"]: package["version"]
         for package in read_toml(root / "Cargo.lock")["package"]
     }
-    # The Python distribution shares its version with the native lockfile entry.
-    lock_versions["sparkless"] = lock_versions.get("sparkless-native", "")
     dependencies = {
         "facade/core": facade["dependencies"]["robin-sparkless-core"]["version"],
         "facade/polars": facade["dependencies"]["robin-sparkless-polars"]["version"],
@@ -116,7 +119,13 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         python_version,
         (root / "CHANGELOG.md").read_text(),
         tag,
+        release_version=project["version"],
     )
+    engine = read_toml(root / "python/native/pyproject.toml")["project"]
+    if engine["version"] != native["package"]["version"]:
+        errors.append("sparkless-native: Python and Cargo versions differ")
+    if f"sparkless-native=={engine['version']}" not in project.get("dependencies", []):
+        errors.append("sparkless must pin the exact sparkless-native version")
     errors.extend(validate_server_inventory(root, tag))
     if tuple(map(int, expected.split(".")[:2])) >= (4, 17):
         if project.get("requires-python") != ">=3.11":

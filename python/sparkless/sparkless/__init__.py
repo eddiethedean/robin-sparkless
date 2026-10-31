@@ -16,11 +16,18 @@ Rust/Polars with no JVM dependency.
 
 from __future__ import annotations
 
+import sys as _sys
 from typing import Dict, List, Sequence, Tuple, Union, cast as _cast
 
-from sparkless._native import PyColumn as _ColumnType
+# Register the engine before imports so upgrades from old editable installs also
+# bypass any stale extension left in this source directory.
+import sparkless_native._native as _native
 
-__version__ = "4.18.0"
+_sys.modules[__name__ + "._native"] = _native
+
+from sparkless_native._native import PyColumn as _ColumnType  # noqa: E402
+
+__version__ = "4.18.1"
 
 
 _mod = __import__(
@@ -585,6 +592,6 @@ sql = _SQLModule()
 
 def _configure_for_multiprocessing() -> None:
     """Configure thread pools for safe use with multiprocessing (pytest-xdist)."""
-    from sparkless._native import configure_for_multiprocessing
+    from sparkless_native._native import configure_for_multiprocessing
 
     configure_for_multiprocessing()

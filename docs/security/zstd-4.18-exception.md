@@ -6,6 +6,9 @@ ordinary crates.io Rust builds; it does not make the vulnerable versions safe.
 The policy is [machine-readable](https://github.com/eddiethedean/robin-sparkless/blob/main/security/zstd-4.18-exceptions.toml).
 Tracking: [release PR #1727](https://github.com/eddiethedean/robin-sparkless/pull/1727).
 
+The 4.18.1 Python packaging patch pins the same 4.18.0 engine/server components.
+It does not introduce a new Rust crate version or extend this exception.
+
 ## Which distributions are fixed
 
 The repository's four vendored dependency patches require `zstd 0.14.3`,

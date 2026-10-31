@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import textwrap
+from types import ModuleType
 
 import pytest
 
@@ -15,7 +16,7 @@ from sparkless.server import (
 )
 
 
-def _write_fake_server(path, *, delay=0.0, stderr_bytes=0):
+def _write_fake_server(path, *, delay=0.0, stderr_bytes=0, version=None):
     source = textwrap.dedent(
         """\
         #!{python}
@@ -66,7 +67,9 @@ def _write_fake_server(path, *, delay=0.0, stderr_bytes=0):
         python=sys.executable,
         delay=delay,
         stderr_bytes=stderr_bytes,
-        version=sparkless.__version__,
+        version=version
+        or server_module._installed_server_binary_version()
+        or sparkless.__version__,
     )
     path.write_text(source)
     path.chmod(0o755)
@@ -127,6 +130,25 @@ def test_same_sync_context_owner_rejects_nested_entry(tmp_path, monkeypatch):
     with server:
         with pytest.raises(SparklessServerError, match="nested entry"):
             server.__enter__()
+
+
+def test_packaged_server_version_can_differ_from_api_patch(tmp_path, monkeypatch):
+    executable = _write_fake_server(tmp_path / "sparkless-server", version="4.18.0")
+    package = ModuleType("sparkless_server_bin")
+    package.executable_path = lambda: executable
+    monkeypatch.setitem(sys.modules, "sparkless_server_bin", package)
+    monkeypatch.setattr(
+        server_module, "_installed_server_binary_version", lambda: "4.18.0"
+    )
+    _use_python_fake_server(monkeypatch)
+
+    server = SparklessServer(startup_timeout=2)
+    server.start()
+    try:
+        assert sparkless.__version__ != "4.18.0"
+        assert server._ready_record["server_version"] == "4.18.0"
+    finally:
+        server.stop()
 
 
 def test_launcher_rejects_wrong_control_protocol(tmp_path):

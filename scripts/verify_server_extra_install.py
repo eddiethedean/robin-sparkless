@@ -35,13 +35,14 @@ def verify(
     )
     from sparkless_server_bin import executable_path
 
-    for distribution in ("sparkless", "sparkless-server-bin"):
+    for distribution, expected in (
+        ("sparkless", expected_version),
+        ("sparkless-server-bin", _engine_version()),
+    ):
         actual = importlib.metadata.version(distribution)
-        if actual != expected_version:
+        if actual != expected:
             raise RuntimeError(
-                "{} version {} does not match {}".format(
-                    distribution, actual, expected_version
-                )
+                "{} version {} does not match {}".format(distribution, actual, expected)
             )
     if sparkless.__version__ != expected_version:
         raise RuntimeError("sparkless.__version__ does not match installed metadata")
@@ -179,6 +180,14 @@ def verify(
             await async_http_only.stop()
 
     asyncio.run(verify_async_launchers())
+
+
+def _engine_version() -> str:
+    """The API pins its independently versioned native/server components exactly."""
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    return tomllib.loads((root / "Cargo.toml").read_text())["package"]["version"]
 
 
 def _verify_legacy_server_extra(expected_version: str, mutations: bool) -> None:

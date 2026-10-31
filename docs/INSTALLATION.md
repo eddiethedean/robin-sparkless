@@ -1,10 +1,12 @@
 # Installation and versions
 
-Documentation contract: **4.18.0 candidate**. At the 2026-10-29 review, public
-PyPI and crates.io both served **4.17.0**. Installing an unversioned package does
-not install this candidate. Check `python -m pip show sparkless` before following
-a version-specific guide. This snapshot stays historical after publication;
-[PyPI files](https://pypi.org/project/sparkless/#files) are the artifact authority.
+Documentation contract: **4.18.1 Python packaging candidate**, using the
+**4.18.0 native engine and server**. The 4.18.0 release is partially published:
+Linux/macOS extension wheels, server wheels, Rust crates and the container are
+public, while Windows extension wheels and the source archive are missing after
+PyPI's project storage limit blocked the final upload. **4.17.0** remains the last
+fully published coordinated release. See [release evidence](RELEASE_EVIDENCE.md)
+for the exact tag, commit and workflow outcome.
 
 ## Published stable package
 
@@ -19,32 +21,33 @@ python -c "import sparkless; print(sparkless.__version__)"
 
 Use the [4.17 source documentation](https://github.com/eddiethedean/robin-sparkless/tree/v4.17.0/docs)
 for stable behavior. `/en/latest/` follows development and can describe unreleased
-features. After publication, install the exact desired version (`==4.18.0`) and
+features. After the packaging recovery is published, install the exact API version (`==4.18.1`) and
 use its tagged source docs. Local Python needs no Java or Rust when a wheel matches.
 
 ## Candidate artifacts from GitHub CI
 
 Install GitHub CLI and authenticate for artifact downloads. Pick a successful
 **Release** validation run on the exact candidate commit, inspect its artifacts,
-and download only your platform's wheel archive:
+and download the checked API and native component bundles:
 
 ```bash
 gh run list --repo eddiethedean/robin-sparkless --workflow release.yml --limit 5
 gh run view RUN_ID --repo eddiethedean/robin-sparkless
 gh api repos/eddiethedean/robin-sparkless/actions/runs/RUN_ID/artifacts --jq '.artifacts[].name'
-gh run download RUN_ID --repo eddiethedean/robin-sparkless --name ARTIFACT_NAME --dir candidate
-python -m pip install --no-index --find-links candidate "sparkless==4.18.0"
+gh run download RUN_ID --repo eddiethedean/robin-sparkless --name verified-sparkless-candidate --dir candidate
+gh run download RUN_ID --repo eddiethedean/robin-sparkless --name verified-native-candidate --dir candidate
+python -m pip install --no-index --find-links candidate "sparkless==4.18.1"
 ```
 
-Replace `RUN_ID` and `ARTIFACT_NAME` with values from that run. Install the matching
-`sparkless-server-bin==4.18.0` artifact too before using server launchers; the
-`server` extra cannot resolve an unpublished dependency from PyPI. Artifacts expire;
+Replace `RUN_ID` with a successful validation run on the reviewed candidate. Add
+its `verified-server-bin-candidate` bundle before installing the `server` extra
+offline. The API pins the engine and server component versions exactly. Artifacts expire;
 if absent, use the [canonical contributor build](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup)
 on the exact commit. A successful validation run does not imply publication.
 
 ## Platforms and build features
 
-Extension wheels use **cp311-abi3**, compatible with supported CPython 3.11–3.14,
+The API wheel is universal; the separate `sparkless-native` extension wheels use **cp311-abi3**, compatible with supported CPython 3.11–3.14,
 not only CPython 3.11. Wheels cover Linux glibc 2.17+ on x86_64, glibc 2.28+ on ARM64,
 and musl 1.2+ on both architectures,
 macOS Intel/Apple Silicon, and Windows x86_64/ARM64. Use wheel filenames for exact
@@ -67,7 +70,7 @@ exact matching binary package. Keep the two PySpark extras in separate environme
 After canonical source setup, a SQLite/Postgres-enabled development extension:
 
 ```bash
-(cd python && ../.venv/bin/python -m maturin develop --uv --locked --release --features sqlite,jdbc)
+(cd python/native && ../../.venv/bin/python -m maturin develop --uv --locked --release --features sqlite,jdbc)
 ```
 
 This retains default Delta and mandatory SQL. A database extra alone cannot

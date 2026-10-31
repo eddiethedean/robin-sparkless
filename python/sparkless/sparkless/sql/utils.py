@@ -3,7 +3,7 @@ from typing import Type
 
 SparklessError: Type[BaseException]
 try:
-    from sparkless._native import SparklessError as _SE
+    from sparkless_native._native import SparklessError as _SE
 
     SparklessError = _SE
 except ImportError:

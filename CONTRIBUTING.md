@@ -27,24 +27,26 @@ cd robin-sparkless
 # Create the contributor environment at the repository root
 uv venv --python 3.11 .venv
 
-# Install build tools and the dev extra without building the package yet
-uv pip install --python .venv/bin/python \
-  -r python/pyproject.toml --extra dev "maturin>=1.4,<2"
+# Install contributor tools before building the native engine
+uv pip install --python .venv/bin/python "maturin>=1.4,<2"
+uv pip install --python .venv/bin/python pytest pandas pytest-xdist hypothesis pytest-timeout polars pyarrow
 
-# Build and install the native extension with editable Python sources
+# Build the engine, then install the Python API with editable sources
 (
-  cd python
-  uv run --no-project --python ../.venv/bin/python \
+  cd python/native
+  uv run --no-project --python ../../.venv/bin/python \
     python -m maturin develop --uv --locked --release
 )
+uv pip install --python .venv/bin/python --no-deps -e 'python[dev]'
 ```
 
 Run these Bash examples from the repository root. No environment activation is required.
 On Windows, use Git Bash and replace `.venv/bin/python` with `.venv/Scripts/python.exe`
-(and adjust the relative path inside `python/` accordingly).
+(and adjust the relative path inside `python/native/` accordingly).
 
 Use `uv pip` to select dependencies and `uv run --no-project` to run commands in this
-environment. The package metadata is in `python/pyproject.toml`; the root
+environment. API metadata is in `python/pyproject.toml` and native metadata is in
+`python/native/pyproject.toml`; the root
 `pyproject.toml` contains test and lint configuration. Project-wide `uv sync` / `uv run`
 resolution currently fails because the `pyspark` and `pyspark4` extras require incompatible
 Spark versions. `--no-project` skips that automatic project resolution and synchronization.
@@ -58,10 +60,10 @@ uv run --no-project --python .venv/bin/python python -c \
   "import sparkless, sparkless._native; print(sparkless.__file__); print(sparkless._native.__file__)"
 ```
 
-To build a wheel, replace `maturin develop --uv` in the build command with `maturin build`.
-Maturin prints the wheel path under `target/wheels/`. To test that wheel, install that exact
-path with `uv pip install --python .venv/bin/python --reinstall PATH_TO_WHEEL`, then use
-the test commands below. If uv's cache is on a different filesystem, add `--link-mode=copy`
+To build distribution wheels, build the engine with `maturin build --release --manifest-path python/native/Cargo.toml`
+and the universal API with `python -m build --wheel python`. Install both wheels
+from `target/wheels/` and `python/dist/` in a fresh environment, then use the test
+commands below. If uv's cache is on a different filesystem, add `--link-mode=copy`
 to `uv pip install` to avoid the hardlink fallback warning.
 
 ## Checks before opening a PR

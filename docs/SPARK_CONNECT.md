@@ -12,11 +12,11 @@ public-artifact gates remain the release authority.
 Install the native server extra and the standalone public client in the client environment:
 
 ```sh
-python -m pip install "sparkless[server]==4.18.0" "pyspark-client==4.0.5"
+python -m pip install "sparkless[server]==4.18.1" "pyspark-client==4.0.5"
 ```
 
-These commands target the 4.18.0 distribution. Before publication, install the
-matching candidate wheels instead of downloading 4.18.0 from PyPI. The packaged
+These commands target the 4.18.1 API with the 4.18.0 native/server components.
+Until the packaging recovery is published, use the matching [candidate artifacts](INSTALLATION.md#candidate-artifacts-from-github-ci). The packaged
 server wheels support Linux x86_64 with glibc 2.28+ and macOS 14+ on Apple Silicon;
 this is a smaller platform set than the in-process Python extension.
 

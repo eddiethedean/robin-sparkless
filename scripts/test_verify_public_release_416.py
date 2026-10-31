@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from verify_public_release_416 import (
     PYPI_PLATFORMS_BY_VERSION,
+    SPLIT_PYPI_PLATFORMS,
     preserve_existing_pypi_files,
     validate_crate_release,
     validate_pypi_release,
@@ -15,9 +16,18 @@ from verify_public_release_416 import (
 
 
 def release_metadata(project, version="4.16.0"):
-    suffixes = sorted(PYPI_PLATFORMS_BY_VERSION[version][project])
+    split = project == "sparkless-native" or version == "4.18.1"
+    suffixes = sorted(
+        (SPLIT_PYPI_PLATFORMS if split else PYPI_PLATFORMS_BY_VERSION[version])[project]
+    )
     wheel_project = project.replace("-", "_")
-    wheel_python_abi = "py3-none" if project == "sparkless-server-bin" else "cp38-abi3"
+    wheel_python_abi = (
+        "py3-none"
+        if project == "sparkless-server-bin" or (split and project == "sparkless")
+        else "cp311-abi3"
+        if split
+        else "cp38-abi3"
+    )
     urls = [
         {
             "filename": "{}-{}-{}-{}.whl".format(
@@ -27,10 +37,10 @@ def release_metadata(project, version="4.16.0"):
         }
         for platform in suffixes
     ]
-    if project == "sparkless":
+    if project in {"sparkless", "sparkless-native"}:
         urls.append(
             {
-                "filename": "sparkless-{}.tar.gz".format(version),
+                "filename": "{}-{}.tar.gz".format(wheel_project, version),
                 "digests": {"sha256": "b" * 64},
             }
         )
@@ -38,6 +48,35 @@ def release_metadata(project, version="4.16.0"):
 
 
 class VerifyPublicRelease416Test(unittest.TestCase):
+    def test_split_api_and_native_inventories_have_independent_versions(self):
+        validate_pypi_release(
+            release_metadata("sparkless", "4.18.1"), "sparkless", "4.18.1"
+        )
+        validate_pypi_release(
+            release_metadata("sparkless-native", "4.18.0"), "sparkless-native", "4.18.0"
+        )
+
+    def test_component_job_can_preserve_only_its_own_platform(self):
+        metadata = release_metadata("sparkless-server-bin", "4.18.0")
+        contents = b"immutable published component"
+        entry = metadata["urls"][0]
+        entry["digests"]["sha256"] = hashlib.sha256(contents).hexdigest()
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            wheel = directory / entry["filename"]
+            wheel.write_bytes(b"rebuilt bytes")
+            with (
+                patch("verify_public_release_416._fetch_json", return_value=metadata),
+                patch(
+                    "verify_public_release_416._fetch_distribution",
+                    return_value=contents,
+                ),
+            ):
+                preserve_existing_pypi_files(
+                    directory, "sparkless-server-bin", "4.18.0", allow_subset=True
+                )
+            self.assertEqual(wheel.read_bytes(), contents)
+
     def test_accepts_complete_server_binary_inventory(self):
         validate_pypi_release(
             release_metadata("sparkless-server-bin"), "sparkless-server-bin"

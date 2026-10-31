@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.18.1] - 2026-10-30
+
+Python packaging candidate; publication is tracked in [release evidence](docs/RELEASE_EVIDENCE.md).
+
+### Changed
+
+- **Separate Python API and native engine** — `sparkless` is a small universal wheel that pins `sparkless-native==4.18.0`. Native wheels and their source archive publish under the new engine project; the optional server extra continues to pin `sparkless-server-bin==4.18.0`. Existing Python imports are preserved, and Python-only patches can reuse the tested engine and server releases.
+- **Publication order and storage** — validate the API, engine and server inventories separately, publish the native dependency before the API, and limit the API wheel to 1 MiB. Published component files are reused by hash before smoke tests.
+
 ## [4.18.0] - 2026-10-29
 
-Release candidate; publication is tracked separately from CI validation. See [release evidence](docs/RELEASE_EVIDENCE.md).
+Tagged on 2026-10-30; publication is incomplete. Rust crates, server wheels and the container published, but the `sparkless` project reached PyPI's cumulative 10 GiB storage limit after six extension wheels. Windows x64/ARM64 wheels and the source archive did not upload. See [release evidence](docs/RELEASE_EVIDENCE.md).
 
 ### Added
 

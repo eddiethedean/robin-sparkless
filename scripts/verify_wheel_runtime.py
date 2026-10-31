@@ -87,7 +87,7 @@ def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> Non
             (
                 name
                 for name in archive.namelist()
-                if name.startswith("sparkless/_native")
+                if name.startswith("sparkless_native/_native")
                 and (name.endswith(".so") or name.endswith(".pyd"))
             ),
             None,
@@ -227,6 +227,7 @@ def _exercise_runtime(root: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wheel", type=Path, required=True)
+    parser.add_argument("--api-wheel", type=Path, required=True)
     parser.add_argument("--platform-tag", required=True)
     parser.add_argument("--machine", choices=("x86_64", "aarch64"), required=True)
     args = parser.parse_args()
@@ -235,8 +236,20 @@ def main() -> int:
         digest, _actual_machine = _check_wheel(
             args.wheel, args.platform_tag, args.machine
         )
-        if importlib.metadata.version("sparkless") != args.wheel.name.split("-")[1]:
+        if (
+            importlib.metadata.version("sparkless-native")
+            != args.wheel.name.split("-")[1]
+        ):
+            raise ValueError("installed native engine version does not match the wheel")
+        if importlib.metadata.version("sparkless") != args.api_wheel.name.split("-")[1]:
             raise ValueError("installed Sparkless version does not match the wheel")
+        import sparkless._native
+        import sparkless_native._native
+
+        if sparkless._native is not sparkless_native._native:
+            raise ValueError(
+                "legacy native import does not resolve to the engine module"
+            )
 
         with tempfile.TemporaryDirectory(
             prefix="sparkless-wheel-witness-"

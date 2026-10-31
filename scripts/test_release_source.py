@@ -21,7 +21,7 @@ class SourceDistributionTest(unittest.TestCase):
         self.root = Path(self.temporary.name)
         spec = importlib.util.spec_from_file_location(
             "sparkless_build_test",
-            Path(__file__).resolve().parents[1] / "python/_sparkless_build.py",
+            Path(__file__).resolve().parents[1] / "python/native/_sparkless_build.py",
         )
         self.backend = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {"maturin": types.SimpleNamespace()}):
@@ -101,9 +101,12 @@ class SourceDistributionTest(unittest.TestCase):
                 (
                     "source/pyproject.toml",
                     '[build-system]\nbuild-backend="_sparkless_build"\n'
-                    '[tool.maturin]\nmanifest-path="python/Cargo.toml"\n',
+                    '[tool.maturin]\nmanifest-path="python/native/Cargo.toml"\n',
                 ),
-                ("source/python/Cargo.toml", "[package]\nname='sparkless-native'\n"),
+                (
+                    "source/python/native/Cargo.toml",
+                    "[package]\nname='sparkless-native'\n",
+                ),
             ):
                 data = content.encode()
                 member = tarfile.TarInfo(name)

@@ -4,7 +4,11 @@ from pathlib import Path
 import tarfile
 import zipfile
 
-from verify_release_distributions import verify_distributions
+from verify_release_distributions import (
+    PYPI_FILE_LIMIT_BYTES,
+    PYPI_PROJECT_LIMIT_BYTES,
+    verify_distributions,
+)
 
 
 class VerifyReleaseDistributionsTest(unittest.TestCase):
@@ -14,7 +18,12 @@ class VerifyReleaseDistributionsTest(unittest.TestCase):
         self.directory = Path(self.temporary.name)
 
     def make_wheel(
-        self, filename, project="sparkless", version="4.16.0", requires_python=None
+        self,
+        filename,
+        project="sparkless",
+        version="4.16.0",
+        requires_python=None,
+        dependency=None,
     ):
         path = self.directory / filename
         metadata = "Metadata-Version: 2.1\nName: {}\nVersion: {}\n\n".format(
@@ -24,6 +33,8 @@ class VerifyReleaseDistributionsTest(unittest.TestCase):
             metadata = (
                 metadata.rstrip() + "\nRequires-Python: " + requires_python + "\n\n"
             )
+        if dependency:
+            metadata = metadata.rstrip() + "\nRequires-Dist: " + dependency + "\n\n"
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr(
                 "{}-{}.dist-info/METADATA".format(project, version), metadata
@@ -132,6 +143,54 @@ class VerifyReleaseDistributionsTest(unittest.TestCase):
             requires_python=">=3.11",
         )
         verify_distributions(self.directory, "sparkless", "4.17.0", 1, 0)
+
+    def test_split_api_requires_universal_wheel_and_exact_native_dependency(self):
+        wheel = self.make_wheel(
+            "sparkless-4.18.1-py3-none-any.whl",
+            version="4.18.1",
+            requires_python=">=3.11",
+            dependency="sparkless-native==4.18.0",
+        )
+        arguments = (self.directory, "sparkless", "4.18.1", 1, 0, {"any"})
+        verify_distributions(
+            *arguments, required_dependencies={"sparkless-native==4.18.0"}
+        )
+        with self.assertRaisesRegex(ValueError, "exact component"):
+            verify_distributions(
+                *arguments, required_dependencies={"sparkless-native==4.17.0"}
+            )
+        with zipfile.ZipFile(wheel, "a") as archive:
+            archive.writestr("sparkless/_native.abi3.so", b"stale extension")
+        with self.assertRaisesRegex(ValueError, "must not bundle native"):
+            verify_distributions(*arguments)
+
+    def test_native_distribution_retains_abi_floor(self):
+        self.make_wheel(
+            "sparkless_native-4.18.0-cp38-abi3-win_arm64.whl",
+            project="sparkless-native",
+            version="4.18.0",
+            requires_python=">=3.11",
+        )
+        with self.assertRaisesRegex(ValueError, "cp311-abi3"):
+            verify_distributions(self.directory, "sparkless-native", "4.18.0", 1, 0)
+
+    def test_rejects_a_distribution_over_the_pypi_file_limit(self):
+        oversized = self.directory / "oversized.whl"
+        with oversized.open("wb") as distribution:
+            distribution.truncate(PYPI_FILE_LIMIT_BYTES + 1)
+
+        with self.assertRaisesRegex(ValueError, "100 MiB per-file limit"):
+            verify_distributions(self.directory, "sparkless", "4.18.1", 0, 0)
+
+    def test_rejects_candidate_inventory_over_the_pypi_project_limit(self):
+        count = PYPI_PROJECT_LIMIT_BYTES // PYPI_FILE_LIMIT_BYTES + 1
+        for index in range(count):
+            oversized_inventory_file = self.directory / f"candidate-{index}.whl"
+            with oversized_inventory_file.open("wb") as distribution:
+                distribution.truncate(PYPI_FILE_LIMIT_BYTES)
+
+        with self.assertRaisesRegex(ValueError, "10 GiB project limit"):
+            verify_distributions(self.directory, "sparkless-native", "4.18.0", count, 0)
 
 
 if __name__ == "__main__":

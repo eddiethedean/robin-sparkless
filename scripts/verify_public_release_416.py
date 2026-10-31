@@ -59,6 +59,14 @@ PYPI_PLATFORMS_BY_VERSION = {
         "sparkless": PYPI_PLATFORMS["sparkless"],
     },
 }
+SPLIT_PYPI_PLATFORMS = {
+    "sparkless": {"any"},
+    "sparkless-native": (
+        PYPI_PLATFORMS["sparkless"] - {"manylinux_2_17_x86_64.manylinux2014_x86_64"}
+        | {"manylinux2014_x86_64.manylinux_2_17_x86_64"}
+    ),
+    "sparkless-server-bin": PYPI_PLATFORMS_BY_VERSION["4.18.0"]["sparkless-server-bin"],
+}
 CRATES = (
     "spark-sql-parser",
     "robin-sparkless-core",
@@ -87,7 +95,10 @@ def _fetch_distribution(url: str) -> bytes:
 
 
 def preserve_existing_pypi_files(
-    local_directory: Path, project: str, version: str = VERSION
+    local_directory: Path,
+    project: str,
+    version: str = VERSION,
+    allow_subset: bool = False,
 ) -> list[str]:
     """Replace candidate files already on PyPI with the immutable published bytes."""
     url = "https://pypi.org/pypi/{}/{}/json".format(project, version)
@@ -110,6 +121,8 @@ def preserve_existing_pypi_files(
     preserved = []
     for entry in data.get("urls", []):
         filename = entry.get("filename", "")
+        if allow_subset and filename not in candidates:
+            continue
         if Path(filename).name != filename or filename not in candidates:
             raise ValueError(
                 "published PyPI file is not present in the verified candidate: {}".format(
@@ -169,7 +182,12 @@ def validate_pypi_release(
     else:
         inventory_version = version
     try:
-        expected_platforms = PYPI_PLATFORMS_BY_VERSION[inventory_version][project]
+        if project == "sparkless-native" or (
+            project == "sparkless" and tuple(map(int, version.split("."))) >= (4, 18, 1)
+        ):
+            expected_platforms = SPLIT_PYPI_PLATFORMS[project]
+        else:
+            expected_platforms = PYPI_PLATFORMS_BY_VERSION[inventory_version][project]
     except KeyError as error:
         raise ValueError(
             "no PyPI platform inventory is recorded for {} {}".format(project, version)
@@ -198,7 +216,7 @@ def validate_pypi_release(
                 project, sorted(expected_platforms), sorted(wheel_platforms)
             )
         )
-    expected_sdists = 1 if project == "sparkless" else 0
+    expected_sdists = 1 if project in {"sparkless", "sparkless-native"} else 0
     if sdist_count != expected_sdists:
         raise ValueError(
             "{} has {} source distributions, expected {}".format(
@@ -262,29 +280,42 @@ def verify_public_release(
     server_bin_directory: Path | None,
     sparkless_directory: Path | None,
     version: str = VERSION,
+    native_directory: Path | None = None,
+    engine_version: str | None = None,
 ) -> None:
-    for project in ("sparkless-server-bin", "sparkless"):
-        url = "https://pypi.org/pypi/{}/{}/json".format(project, version)
+    component_version = engine_version or version
+    projects = ["sparkless-server-bin", "sparkless"]
+    if native_directory is not None:
+        projects.insert(1, "sparkless-native")
+    for project in projects:
+        project_version = version if project == "sparkless" else component_version
+        url = "https://pypi.org/pypi/{}/{}/json".format(project, project_version)
         local_directory = {
             "sparkless-server-bin": server_bin_directory,
             "sparkless": sparkless_directory,
+            "sparkless-native": native_directory,
         }[project]
 
-        def check_pypi(project=project, url=url, local_directory=local_directory):
+        def check_pypi(
+            project=project,
+            url=url,
+            local_directory=local_directory,
+            project_version=project_version,
+        ):
             validate_pypi_release(
                 _fetch_json(url),
                 project,
-                version=version,
+                version=project_version,
                 local_directory=local_directory,
             )
 
         _retry(check_pypi)
 
     for crate in CRATES:
-        url = "https://crates.io/api/v1/crates/{}/{}".format(crate, version)
+        url = "https://crates.io/api/v1/crates/{}/{}".format(crate, component_version)
 
         def check_crate(url=url, crate=crate):
-            validate_crate_release(_fetch_json(url), crate, version=version)
+            validate_crate_release(_fetch_json(url), crate, version=component_version)
 
         _retry(check_crate)
 
@@ -294,12 +325,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", default=VERSION)
     parser.add_argument("--server-bin-directory", type=Path)
     parser.add_argument("--sparkless-directory", type=Path)
+    parser.add_argument("--native-directory", type=Path)
+    parser.add_argument("--engine-version")
     args = parser.parse_args(argv)
     if (args.server_bin_directory is None) != (args.sparkless_directory is None):
         parser.error("both local distribution directories must be provided together")
     try:
         verify_public_release(
-            args.server_bin_directory, args.sparkless_directory, args.version
+            args.server_bin_directory,
+            args.sparkless_directory,
+            args.version,
+            args.native_directory,
+            args.engine_version,
         )
     except (OSError, RuntimeError, ValueError, urllib.error.URLError) as error:
         print("public release verification failed: {}".format(error))

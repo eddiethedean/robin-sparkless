@@ -1,0 +1,27 @@
+[project]
+name = "sparkless-native"
+version = "4.18.0"
+description = "Native Rust/Polars execution engine for Sparkless."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/eddiethedean/robin-sparkless"
+Documentation = "https://robin-sparkless.readthedocs.io/"
+Repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[build-system]
+requires = ["maturin>=1.4,<2"]
+build-backend = "_sparkless_build"
+backend-path = ["."]
+
+[tool.maturin]
+module-name = "sparkless_native._native"
+python-source = "."
+manifest-path = "Cargo.toml"
