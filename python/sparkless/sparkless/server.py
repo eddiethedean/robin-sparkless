@@ -21,8 +21,6 @@ from importlib.metadata import PackageNotFoundError, version as distribution_ver
 from typing import Any, Callable, Deque, Dict, Optional, Tuple, cast
 from urllib.parse import urlsplit
 
-from . import __version__
-
 CONTROL_PROTOCOL_VERSION = 2
 CAPABILITIES_PROTOCOL_VERSION = 1
 SPARK_CONNECT_PROTOCOL_VERSION = "4.0.5"
@@ -58,17 +56,10 @@ def _resolve_executable(explicit: Optional[str]) -> str:
             "the native server binary is not installed; install sparkless[server] "
             "for this platform or pass executable_path explicitly"
         ) from error
-    try:
-        binary_package_version = distribution_version("sparkless-server-bin")
-    except PackageNotFoundError as error:
+    binary_package_version = _installed_server_binary_version()
+    if binary_package_version is None:
         raise UnsupportedServerPlatformError(
             "sparkless-server-bin is not installed as a package"
-        ) from error
-    if binary_package_version != __version__:
-        raise SparklessServerError(
-            "sparkless-server-bin version {} does not match sparkless {}".format(
-                binary_package_version, __version__
-            )
         )
     try:
         executable_path = cast(
@@ -82,6 +73,14 @@ def _resolve_executable(explicit: Optional[str]) -> str:
             "the installed server binary package has no executable for this platform"
         )
     return path
+
+
+def _installed_server_binary_version() -> Optional[str]:
+    """Return the separately versioned packaged server binary version, if present."""
+    try:
+        return distribution_version("sparkless-server-bin")
+    except PackageNotFoundError:
+        return None
 
 
 def _command(executable: str, host: str, port: int) -> Tuple[str, ...]:
@@ -171,9 +170,18 @@ def _validate_ready(
         raise SparklessServerError(
             "server capabilities protocol version is unsupported"
         )
-    if record.get("server_version") != __version__:
+    server_version = record.get("server_version")
+    if not isinstance(server_version, str) or not server_version:
+        raise SparklessServerError("server readiness record has no server version")
+    expected_server_version = _installed_server_binary_version()
+    if (
+        expected_server_version is not None
+        and server_version != expected_server_version
+    ):
         raise SparklessServerError(
-            "server binary version does not match the installed sparkless package"
+            "server binary version {} does not match installed sparkless-server-bin {}".format(
+                server_version, expected_server_version
+            )
         )
     instance_id = record.get("server_instance_id")
     if not isinstance(instance_id, str) or not instance_id:
