@@ -356,6 +356,8 @@ The [4.18 implementation plan](RELEASE_4_18.md) refines this phase into 418-01�
 - **Phase 9 / SS-18 / 4.25:** optional durable receipts, eligible session recovery including `allow_reconnect=true`, and response replay across restart. D18 and V44/V45 require transactional/fenced crash recovery; persistent data alone does not establish exactly-once effects or durable replay.
 - **Phase 10 / SS-19 / 4.26:** optional native micro-batch Structured Streaming with public query management, selected sources/sinks, event-time watermarks/stateful windows, and coordinated checkpoints. D19 and V46/V47 require reference results, per-sink delivery guarantees, crash recovery, and bounded long-running state/disk resources.
 
+- **Phases 11–14 / SS-21 / 4.27–4.30:** after completing all planned server features, certify `sparkless-connect40`, followed by separate phases for `sparkless-connect35`, `sparkless-connect41` and `sparkless-connect42`. Each package pins a tested upstream patch and matching Sparkless launcher/server and selects a certified server compatibility profile. [SS-21](21-versioned-connect-packages.md) defines D20 and V48–V55, full version-delta audits, semantic/protocol implementations and coordinated packaging gates.
+
 Each new phase preserves earlier enabled capabilities and passes coordinated candidate/public installation checks. Optional Python/JDBC/Delta/DuckDB components are dependencies only for the APIs selecting them. Full Spark compatibility, RDD/SparkContext, distributed execution/failover, and continuous streaming are not implied by this extension.
 
 ### Common release checks

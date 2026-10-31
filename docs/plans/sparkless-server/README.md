@@ -27,6 +27,8 @@ Build a single-node Rust service in `crates/sparkless-server/` that calls Robin'
 
 The epic is the baseline requirements document. The release roadmap assigns those phases to versions and fixes the coordinated package-version policy for 4.16+. Workstream plans refine delivery without relaxing its gates. If a decision changes a requirement, update the epic, affected plans, and validation rows in the same change; synchronize the GitHub issue deliberately rather than allowing two competing specifications.
 
+- [Versioned server compatibility packages](21-versioned-connect-packages.md): Phases 11–14, first certify the completed 4.0 baseline, then separate 3.5, 4.1 and 4.2 server profiles.
+
 ## Workstreams
 
 All workstreams are **planned**, with owners unassigned and implementation issue/PR links not yet allocated. SS identifiers are local plan IDs, not GitHub issue numbers.
@@ -54,6 +56,8 @@ All workstreams are **planned**, with owners unassigned and implementation issue
 | SS-19 | [Single-node Structured Streaming](19-structured-streaming.md) | 10; optional, after API/I/O/recovery prerequisites |
 | SS-20 | [Connect feature scope across Phases 4–10](20-connect-feature-scope.md) | Proposed feature-level matrix and phase decision checklist; aligns SS-12–19 before implementation |
 
+| SS-21 | [Versioned server compatibility packages](21-versioned-connect-packages.md) | 11–14; `connect40` after all planned features, then `connect35`, `connect41`, `connect42` |
+
 ## Milestone dependency order
 
 | Milestone | Required work | Exit evidence |
@@ -70,6 +74,7 @@ All workstreams are **planned**, with owners unassigned and implementation issue
 | 8 | SS-17 after required SS-16 surface; each connector independently enabled | V41–V43 file/JDBC I/O, real artifact transfers, cache/checkpoint lifetimes and bounds |
 | 9, optional | SS-18 and certified persistent backend/sink ownership | V44/V45 transactional receipts, crash/restart replay and eligible session recovery |
 | 10, optional | SS-19 using SS-16–18 and each enabled source/sink | V46/V47 streaming semantics, state/checkpoint/commit recovery and long-running bounds |
+| 11–14 | SS-21; Phase 11 requires complete Phases 3–10, then one upstream version per phase | V48–V55 server-profile conformance, exact pins, candidate/public installs, and earlier-profile regressions |
 
 SS-03 uses a bounded prototype of execution lifecycle concepts; it does not wait for the complete Phase 2 implementation. Its findings guide SS-09/10. Those workstreams share an interface contract and must pass together; neither claims compatibility alone.
 

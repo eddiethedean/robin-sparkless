@@ -19,9 +19,19 @@ The current product release plan adds the native Sparkless Server to the existin
 | **4.16** | **4.16.0** | Read-only native HTTP SQL service, exact SDK results, bounded runtime, sync/async launcher, and unified package distribution |
 | **4.17** | **4.17.0** | Shared catalog ownership, controlled mutations, richer logical schemas, and lazy native execution improvements |
 | **4.18** | **4.18.0** | Supported JVM-free Spark Connect, typed Arrow streaming, replay/release lifecycle, and separately verified emulator route |
-| **4.19** | **4.19.0** | Optional isolated Python workers for the declared Jobs/notebook subset |
-| **4.20** | **4.20.0** | Optional native Delta Lake / Unity Catalog interoperability |
-| **4.21+** | **4.N.0** | Follow-on conformance, type/operation support, and measured performance work to be defined |
+| **4.19** | **4.19.0** | Optional DuckDB data source and SparklessConnect context manager |
+| **4.20** | **4.20.0** | Optional DuckDB execution backend for Connect |
+| **4.21** | **4.21.0** | Optional isolated Python workers and declared UDF forms |
+| **4.22** | **4.22.0** | Optional native Delta Lake / Unity Catalog interoperability |
+| **4.23** | **4.23.0** | Expanded Connect DataFrame API, types, analysis and settings |
+| **4.24** | **4.24.0** | Connect I/O, artifacts, cache and batch checkpoints |
+| **4.25** | **4.25.0** | Optional durable Connect recovery |
+| **4.26** | **4.26.0** | Optional single-node Structured Streaming |
+| **4.27** | **4.27.0** | Phase 11: certify all planned PySpark 4.0 server features and publish `sparkless-connect40` |
+| **4.28** | **4.28.0** | Phase 12: Spark 3.5 server compatibility and `sparkless-connect35` |
+| **4.29** | **4.29.0** | Phase 13: Spark 4.1 server compatibility and `sparkless-connect41` |
+| **4.30** | **4.30.0** | Phase 14: Spark 4.2 server compatibility and `sparkless-connect42` |
+| **4.31+** | **4.N.0** | Further conformance and performance work to be defined |
 
 Starting with 4.16.0, every first-party package in the release inventory is published at the same version, including packages unchanged in that release. This includes `spark-sql-parser`, which moves from its independent 0.x version to **4.16.0**. Coordinated patch releases follow the same rule. The 4.16 release supports HTTP only; Spark Connect is not supported until its 4.18 gates pass. Optional worker and Delta/Unity Catalog capabilities remain opt-in.
 

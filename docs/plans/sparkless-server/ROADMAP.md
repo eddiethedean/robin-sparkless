@@ -52,7 +52,11 @@ This policy supersedes the earlier exception allowing `spark-sql-parser` to rema
 | **4.24** | **4.24.0** | 8, connectors opt-in | Connect CSV/JSON/Parquet and optional JDBC I/O, artifacts, caching, and DataFrame checkpoints |
 | **4.25** | **4.25.0** | 9, optional capability | Durable operation outcomes, replay, and eligible session recovery across restart |
 | **4.26** | **4.26.0** | 10, optional capability | Single-node Structured Streaming, state/checkpoints, and verified sink recovery |
-| **4.27+** | **4.N.0** for release 4.N | Follow-on scope to be defined | Further conformance, operations/connectors, and measured performance improvements |
+| **4.27** | **4.27.0** | 11 | `sparkless-connect40`: certify the complete planned PySpark 4.0 server feature baseline after Phases 3–10 |
+| **4.28** | **4.28.0** | 12 | `sparkless-connect35`: separate Spark 3.5 server compatibility profile and package |
+| **4.29** | **4.29.0** | 13 | `sparkless-connect41`: Spark 4.1 server feature deltas, profile and package |
+| **4.30** | **4.30.0** | 14 | `sparkless-connect42`: Spark 4.2 server feature deltas, profile and package |
+| **4.31+** | **4.N.0** for release 4.N | Follow-on scope to be defined | Further conformance and measured performance improvements |
 
 All rows are planned. Release scope is cumulative: each release retains and regression-tests previously shipped capabilities. Later scope cannot bypass an unfinished prerequisite. If an optional phase is deferred or reordered, explicitly revise this release map and its gates before assigning different work to that version. The two DuckDB phases are explicitly sequenced after supported Connect: source integration first, execution backend second. Python workers and Delta/UC move to Phases 5/6; neither has an inherent technical dependency on DuckDB, and Delta/UC does not require Python workers. Reordering requires an explicit roadmap revision, not an incidental dependency in the implementation.
 
@@ -280,6 +284,12 @@ Complete **Phase 10 / [SS-19](19-structured-streaming.md)** using the enabled AP
 - Implement micro-batches, query progress/await/stop, event-time watermarks, deduplication, and declared stateful windowed aggregates.
 - Pass **V46/V47** against the pinned reference, including late data, restart/crash recovery, per-sink delivery guarantees, backpressure, bounded long-running state/disk use, and cancellation/shutdown.
 - Verify optional/default packages and coordinated **4.26.0** candidate/public artifacts. Continuous processing, distributed execution, and arbitrary connectors are outside the initial streaming scope.
+
+## 4.27.0–4.30.0 — One server compatibility phase per Spark version
+
+Follow [SS-21: versioned compatibility packages](21-versioned-connect-packages.md). Complete all planned server features in Phases 3–10 before Phase 11 certifies `sparkless-connect40` at 4.27.0. Then deliver one phase each for `sparkless-connect35` (Phase 12 / 4.28), `sparkless-connect41` (Phase 13 / 4.29), and `sparkless-connect42` (Phase 14 / 4.30). The owner confirmed 3.5, 4.0, 4.1 and 4.2 as the upstream targets; 3.6–3.9 are not released Spark lines.
+
+Each package pins a tested upstream client patch and the exact matching Sparkless launcher/native binary, selecting an explicit server semantic/protocol profile. Complete the applicable feature matrix and differential/fault tests before certification. Shared code and earlier profiles must retain their behavior. Resolve **D20** for each line, then pass **V48/V49**, **V50/V51**, **V52/V53**, and **V54/V55**, respectively, including coordinated candidate and fresh public installs. Optional workers/backends/connectors stay opt-in; universal Apache Spark parity remains outside scope.
 
 ## Publication checklist for every release
 

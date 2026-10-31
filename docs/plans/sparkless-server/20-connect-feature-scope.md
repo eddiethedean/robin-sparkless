@@ -42,6 +42,10 @@ The Phase 4 DuckDB SQL list and Phase 7 Polars Connect list are intentionally no
 
 For every phase, the acceptance corpus must include representative pipelines, empty inputs, nulls, duplicate labels/rows, boundary and overflow values, unsupported descendant rejection before effects, session isolation, cancellation, replay, and resource limits. A successful happy-path example cannot enable neighboring operators or types.
 
+## Compatibility-package completion milestone
+
+After Phases 3–10 finish their resolved matrices, [SS-21](21-versioned-connect-packages.md) certifies the complete planned 4.0 server baseline and publishes `sparkless-connect40` in Phase 11 / 4.27. Separate Phases 12–14 then target `sparkless-connect35`, `sparkless-connect41` and `sparkless-connect42`, with a server feature/semantic audit for each version. The early Phase 3 SparklessConnect helper remains independently useful; it does not imply certification of the completed server baseline.
+
 ## Reference links
 
 - [Spark 4.0.5 PySpark DataFrame API](https://spark.apache.org/docs/4.0.5/api/python/reference/pyspark.sql/dataframe.html)
