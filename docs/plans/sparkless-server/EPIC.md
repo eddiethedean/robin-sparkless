@@ -276,7 +276,7 @@ with SparklessServer() as server:
 
 Before Phase 2 is enabled, `spark_connect_url` raises a descriptive unsupported error. Endpoint properties also reject use when the owned process is not ready/running. Async lifecycle does not make the PySpark DataFrame API asynchronous.
 
-Phase 3 / 4.19 adds optional `SparklessConnect`: `with SparklessConnect() as spark:` returns a real pyspark-connect `SparkSession` backed by an owned `SparklessServer`, then stops the session before shutting down the server, including exceptional exits. The proposed `sparkless[connect]` extra keeps pyspark-connect optional. See [SS-06 slices 419-06–419-08](06-python-launcher.md#4190--optional-sparklessconnect-context-manager) for ownership, failure cleanup, packaging, and acceptance gates. This helper is independent of DuckDB.
+Phase 3 / 4.19 adds optional `SparklessConnect`: `with SparklessConnect() as spark:` returns a real pyspark-connect `SparkSession` backed by an owned `SparklessServer`, then stops the session before shutting down the server, including exceptional exits. The proposed `sparkless[connect]` extra keeps pyspark-connect optional. See [SS-06 slices 419-06–419-08](06-python-launcher.md#4190-optional-sparklessconnect-context-manager) for ownership, failure cleanup, packaging, and acceptance gates. This helper is independent of DuckDB.
 
 ### Discovery and distribution
 

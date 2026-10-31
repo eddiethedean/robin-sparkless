@@ -180,7 +180,7 @@ Primary plans: [SS-09](09-connect-plans-and-analysis.md), [SS-10](10-arrow-repla
 
 Complete **Phase 3**, after the supported Phase 2 Connect server. DuckDB supplies table data through native Arrow batches; the existing Polars backend performs the Sparkless query. This is a read-only source capability, not a new execution engine or a DuckDB write path.
 
-Primary plans: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordered slices 419-01–419-05, and [SS-06: SparklessConnect](06-python-launcher.md#4190--optional-sparklessconnect-context-manager), with slices 419-06–419-08.
+Primary plans: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordered slices 419-01–419-05, and [SS-06: SparklessConnect](06-python-launcher.md#4190-optional-sparklessconnect-context-manager), with slices 419-06–419-08.
 
 Add an optional `SparklessConnect` context manager that starts `SparklessServer`, yields a real pyspark-connect `SparkSession`, and stops the session and server on exit. Package pyspark-connect as an optional dependency through the proposed `sparkless[connect]` extra; the helper is independent of DuckDB.
 
