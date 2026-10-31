@@ -19,8 +19,8 @@ jdbc_db2 = ["robin-sparkless/jdbc_db2"]
 sqlite = ["robin-sparkless/sqlite"]
 
 [dependencies]
-robin-sparkless = { path = "..", features = ["sql"] }
-robin-sparkless-core = { path = "../crates/robin-sparkless-core" }
+robin-sparkless = { path = "../..", features = ["sql"] }
+robin-sparkless-core = { path = "../../crates/robin-sparkless-core" }
 polars = { version = "0.53", default-features = false, features = ["dtype-struct"] }
 polars-plan = { version = "0.53", default-features = false }
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py311", "generate-import-lib"] }

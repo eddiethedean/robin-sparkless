@@ -38,7 +38,7 @@ Improves Sparkless v4 performance on the window-like **groupBy + join + orderBy*
 
 ## How to run the benchmark
 
-From repo root (with sparkless installed, e.g. `maturin develop` in `python/` or `pip install -e python/`):
+From repo root (with the native engine and API installed; see [contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup)):
 
 ```bash
 make bench-window

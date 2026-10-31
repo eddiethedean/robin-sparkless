@@ -116,7 +116,7 @@ def _lock_sdist(archive_path):
                 "--format-version",
                 "1",
                 "--manifest-path",
-                str(root / "python/Cargo.toml"),
+                str(root / "python/native/Cargo.toml"),
             ],
             cwd=root,
             stdout=subprocess.DEVNULL,

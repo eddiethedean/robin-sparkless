@@ -99,6 +99,33 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertNotIn("always()", publisher["if"])
                 self.assertIn("outputs.publish_", publisher["if"])
 
+    def test_split_native_engine_is_verified_and_published_before_the_api(self):
+        jobs = workflow("release.yml")["jobs"]
+        self.assertIn("publish-native", jobs["publish-sparkless"]["needs"])
+        self.assertIn("release-validation-gate", jobs["publish-native"]["needs"])
+        gate_steps = jobs["release-validation-gate"]["steps"]
+        downloads = [step.get("with", {}).get("name") for step in gate_steps]
+        self.assertIn("sparkless-api-dist", downloads)
+        self.assertIn("verified-native-candidate", downloads)
+        verification = next(
+            step["run"]
+            for step in gate_steps
+            if step.get("name")
+            == "Verify complete wheel and source distribution inventory"
+        )
+        self.assertIn("--project sparkless-native", verification)
+        self.assertIn('--requires "sparkless-native==$engine_version"', verification)
+        storage_check = next(
+            step["run"]
+            for step in gate_steps
+            if step.get("name") == "Check current PyPI storage before publishing"
+        )
+        self.assertIn("--distribution sparkless=dist/sparkless", storage_check)
+        self.assertIn("--distribution sparkless-native=dist/native", storage_check)
+        self.assertIn(
+            "--distribution sparkless-server-bin=dist/server-bin", storage_check
+        )
+
     def test_release_gate_rejects_failed_cancelled_and_skipped_jobs(self):
         gate = workflow("release.yml")["jobs"]["release-validation-gate"]
         script = gate["steps"][0]["run"]

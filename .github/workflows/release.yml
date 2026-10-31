@@ -117,13 +117,17 @@ jobs:
         with:
           target: ${{ matrix.target }}
           command: build
-          args: --locked --release --manifest-path python/Cargo.toml -i 3.11 --out dist ${{ matrix.args }}
+          args: --locked --release --manifest-path python/native/Cargo.toml -i 3.11 --out dist ${{ matrix.args }}
           manylinux: ${{ matrix.manylinux }}
           container: 'off'
           rust-toolchain: 1.93.1
+      - name: Reuse an existing native component before testing
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
+          python scripts/reuse_pypi_distributions.py --directory dist --project sparkless-native --version "$version"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: sparkless-dist-${{ matrix.name }}
+          name: sparkless-native-dist-${{ matrix.name }}
           path: dist/*.whl
           if-no-files-found: error
 
@@ -145,18 +149,26 @@ jobs:
           RUSTUP_TOOLCHAIN: 1.93.1
         run: |
           python -m pip install build 'maturin>=1.4,<2'
-          python -m build --sdist --outdir dist python
+          python -m build --sdist --outdir dist/native python/native
+          python -m build --outdir dist/api python
+          native_version="$(python -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
+          python scripts/reuse_pypi_distributions.py --directory dist/native --project sparkless-native --version "$native_version"
           cargo package --locked --workspace --exclude sparkless-native --no-verify
           python scripts/verify_rust_package_archives.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: sparkless-dist-source
-          path: dist/*.tar.gz
+          name: sparkless-native-dist-source
+          path: dist/native/*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sparkless-api-dist
+          path: dist/api/*
           if-no-files-found: error
 
   python-tests:
     name: Python publication wheel tests
-    needs: [build-wheels]
+    needs: [build-wheels, source-dist]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -167,7 +179,11 @@ jobs:
           architecture: x64
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: sparkless-dist-manylinux-x86_64
+          name: sparkless-native-dist-manylinux-x86_64
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-api-dist
           path: dist
       - name: Install the exact publication wheel
         run: python -m pip install dist/*.whl
@@ -190,7 +206,7 @@ jobs:
 
   wheel-smoke-linux:
     name: Wheel smoke (${{ matrix.target }}, Python ${{ matrix.python-version }})
-    needs: [build-wheels]
+    needs: [build-wheels, source-dist]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -198,7 +214,7 @@ jobs:
       matrix:
         include:
           - target: manylinux-x86_64
-            artifact: sparkless-dist-manylinux-x86_64
+            artifact: sparkless-native-dist-manylinux-x86_64
             runner: ubuntu-24.04
             image: quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851
             python-version: "3.11"
@@ -206,7 +222,7 @@ jobs:
             platform-tag: manylinux2014_x86_64.manylinux_2_17_x86_64
             machine: x86_64
           - target: manylinux-x86_64
-            artifact: sparkless-dist-manylinux-x86_64
+            artifact: sparkless-native-dist-manylinux-x86_64
             runner: ubuntu-24.04
             image: quay.io/pypa/manylinux2014_x86_64@sha256:296069bc05d85275248f168f6e3b34ba8aa06181b67e40cd7447c64d56d3a851
             python-version: "3.14"
@@ -214,7 +230,7 @@ jobs:
             platform-tag: manylinux2014_x86_64.manylinux_2_17_x86_64
             machine: x86_64
           - target: manylinux-aarch64
-            artifact: sparkless-dist-manylinux-aarch64
+            artifact: sparkless-native-dist-manylinux-aarch64
             runner: ubuntu-24.04-arm
             image: quay.io/pypa/manylinux_2_28_aarch64@sha256:a3e02308c822fb6ce0d12248b0c941817ba5e1a1bc9e7bb5929f29c50eaa40a9
             python-version: "3.11"
@@ -222,7 +238,7 @@ jobs:
             platform-tag: manylinux_2_28_aarch64
             machine: aarch64
           - target: manylinux-aarch64
-            artifact: sparkless-dist-manylinux-aarch64
+            artifact: sparkless-native-dist-manylinux-aarch64
             runner: ubuntu-24.04-arm
             image: quay.io/pypa/manylinux_2_28_aarch64@sha256:a3e02308c822fb6ce0d12248b0c941817ba5e1a1bc9e7bb5929f29c50eaa40a9
             python-version: "3.14"
@@ -230,7 +246,7 @@ jobs:
             platform-tag: manylinux_2_28_aarch64
             machine: aarch64
           - target: musllinux-x86_64
-            artifact: sparkless-dist-musllinux-x86_64
+            artifact: sparkless-native-dist-musllinux-x86_64
             runner: ubuntu-24.04
             image: python:3.11-alpine3.22@sha256:a4fc589b32e824f3f02ed9d7e7be19518aa47e105b80416336af9f202275a489
             python-version: "3.11"
@@ -238,7 +254,7 @@ jobs:
             platform-tag: musllinux_1_2_x86_64
             machine: x86_64
           - target: musllinux-x86_64
-            artifact: sparkless-dist-musllinux-x86_64
+            artifact: sparkless-native-dist-musllinux-x86_64
             runner: ubuntu-24.04
             image: python:3.14-alpine3.22@sha256:6b91e66ab2a880ce9ca5a1b91c70f45963ff71ff68268df056336e1a657d5efd
             python-version: "3.14"
@@ -246,7 +262,7 @@ jobs:
             platform-tag: musllinux_1_2_x86_64
             machine: x86_64
           - target: musllinux-aarch64
-            artifact: sparkless-dist-musllinux-aarch64
+            artifact: sparkless-native-dist-musllinux-aarch64
             runner: ubuntu-24.04-arm
             image: python:3.11-alpine3.22@sha256:a4fc589b32e824f3f02ed9d7e7be19518aa47e105b80416336af9f202275a489
             python-version: "3.11"
@@ -254,7 +270,7 @@ jobs:
             platform-tag: musllinux_1_2_aarch64
             machine: aarch64
           - target: musllinux-aarch64
-            artifact: sparkless-dist-musllinux-aarch64
+            artifact: sparkless-native-dist-musllinux-aarch64
             runner: ubuntu-24.04-arm
             image: python:3.14-alpine3.22@sha256:6b91e66ab2a880ce9ca5a1b91c70f45963ff71ff68268df056336e1a657d5efd
             python-version: "3.14"
@@ -266,6 +282,10 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ${{ matrix.artifact }}
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-api-dist
           path: dist
       - name: Install and run the witness inside the pinned native runtime image
         env:
@@ -282,12 +302,12 @@ jobs:
               "$PYTHON_BIN" -m pip install /work/dist/*.whl
               "$PYTHON_BIN" -m pip check
               "$PYTHON_BIN" /work/scripts/verify_wheel_runtime.py \
-                --wheel /work/dist/*.whl --platform-tag "$PLATFORM_TAG" --machine "$MACHINE"
+                --wheel /work/dist/sparkless_native-*.whl --api-wheel /work/dist/sparkless-*.whl --platform-tag "$PLATFORM_TAG" --machine "$MACHINE"
             '
 
   wheel-smoke-native:
     name: Wheel smoke (${{ matrix.target }}, Python ${{ matrix.python-version }})
-    needs: [build-wheels]
+    needs: [build-wheels, source-dist]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -327,7 +347,11 @@ jobs:
           architecture: ${{ matrix.architecture }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: sparkless-dist-${{ matrix.target }}
+          name: sparkless-native-dist-${{ matrix.target }}
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-api-dist
           path: dist
       - name: Install and exercise the publication wheel
         env:
@@ -336,7 +360,7 @@ jobs:
         run: |
           python -m pip install dist/*.whl
           python -m pip check
-          python scripts/verify_wheel_runtime.py --wheel dist/*.whl \
+          python scripts/verify_wheel_runtime.py --wheel dist/sparkless_native-*.whl --api-wheel dist/sparkless-*.whl \
             --platform-tag "$PLATFORM_TAG" --machine "$MACHINE"
 
   server-bin-manylinux-x86_64:
@@ -379,6 +403,8 @@ jobs:
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
             "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
+          version="$("$PY" -c 'import tomllib; print(tomllib.load(open("python/server-bin/pyproject.toml", "rb"))["project"]["version"])')"
+          "$PY" scripts/reuse_pypi_distributions.py --directory dist --project sparkless-server-bin --version "$version"
           wheel=(dist/*.whl)
           "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64 --connect --connect-client --client-python "$PY"
           auditwheel show "${wheel[0]}"
@@ -427,6 +453,8 @@ jobs:
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
             "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
+          version="$("$SPARKLESS_WHEEL_PYTHON" -c 'import tomllib; print(tomllib.load(open("python/server-bin/pyproject.toml", "rb"))["project"]["version"])')"
+          "$SPARKLESS_WHEEL_PYTHON" scripts/reuse_pypi_distributions.py --directory dist --project sparkless-server-bin --version "$version"
           wheel=(dist/*.whl)
           "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64 --connect --connect-client --client-python "$SPARKLESS_WHEEL_PYTHON"
       - name: Upload macOS server wheel
@@ -512,7 +540,7 @@ jobs:
 
   server-extra-consumer:
     name: Server extra (${{ matrix.runner }})
-    needs: [build-wheels, server-bin-manylinux-x86_64, server-bin-macos-arm64]
+    needs: [build-wheels, source-dist, server-bin-manylinux-x86_64, server-bin-macos-arm64]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     strategy:
@@ -532,7 +560,11 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: sparkless-dist-${{ matrix.sparkless }}
+          name: sparkless-native-dist-${{ matrix.sparkless }}
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-api-dist
           path: dist
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -579,9 +611,13 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: sparkless-dist-*
-          path: dist/sparkless
+          pattern: sparkless-native-dist-*
+          path: dist/native
           merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-api-dist
+          path: dist/sparkless
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: sparkless-server-bin-*
@@ -591,10 +627,14 @@ jobs:
         run: |
           set -euo pipefail
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          engine_version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
           python3 scripts/verify_release_distributions.py \
-            --directory dist/sparkless \
-            --project sparkless \
-            --version "$version" \
+            --directory dist/sparkless --project sparkless --version "$version" \
+            --wheels 1 --sdists 1 --platform any --requires "sparkless-native==$engine_version"
+          python3 scripts/verify_release_distributions.py \
+            --directory dist/native \
+            --project sparkless-native \
+            --version "$engine_version" \
             --wheels 8 \
             --sdists 1 \
             --platform macosx_10_12_x86_64 \
@@ -608,7 +648,7 @@ jobs:
           python3 scripts/verify_release_distributions.py \
             --directory dist/server-bin \
             --project sparkless-server-bin \
-            --version "$version" \
+            --version "$engine_version" \
             --wheels 2 \
             --sdists 0 \
             --platform manylinux_2_28_x86_64 \
@@ -616,12 +656,23 @@ jobs:
       - name: Check candidate distributions
         run: |
           python3 -m pip install twine
-          python3 -m twine check dist/sparkless/* dist/server-bin/*
+          python3 -m twine check dist/sparkless/* dist/native/* dist/server-bin/*
+      - name: Check current PyPI storage before publishing
+        run: |
+          python3 scripts/check_pypi_storage.py \
+            --distribution sparkless=dist/sparkless \
+            --distribution sparkless-native=dist/native \
+            --distribution sparkless-server-bin=dist/server-bin
       - name: Preserve checked distributions for publication
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: verified-sparkless-candidate
           path: dist/sparkless/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-native-candidate
+          path: dist/native/*
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -680,6 +731,26 @@ jobs:
           publish_one robin-sparkless-polars
           publish_one robin-sparkless
           publish_one sparkless-server
+
+  publish-native:
+    name: Publish native engine distributions to PyPI
+    if: needs.release-metadata.outputs.publish_python == 'true'
+    runs-on: ubuntu-latest
+    needs: [release-metadata, release-validation-gate, publish]
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-native-candidate
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          skip-existing: true
 
   publish-server-bin:
     name: Publish server binary wheels to PyPI
@@ -753,7 +824,7 @@ jobs:
     name: Publish sparkless distributions to PyPI
     if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
-    needs: [release-metadata, release-validation-gate, publish-server-bin, publish-server-container]
+    needs: [release-metadata, release-validation-gate, publish-native, publish-server-bin, publish-server-container]
     environment:
       name: pypi
     permissions:
@@ -777,7 +848,13 @@ jobs:
         with:
           name: verified-server-bin-candidate
           path: public-server-bin
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-native-candidate
+          path: public-native
       - name: Verify public package inventory and hashes
         run: |
           python scripts/verify_public_release_416.py --version "${GITHUB_REF_NAME#v}" \
-            --sparkless-directory dist --server-bin-directory public-server-bin
+            --sparkless-directory dist --server-bin-directory public-server-bin \
+            --native-directory public-native \
+            --engine-version "$(python -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"

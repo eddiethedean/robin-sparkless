@@ -1,45 +1,63 @@
-# Release evidence — 4.18.0 candidate
+# Release evidence — 4.18 Python packaging recovery
 
-Publication state is separate from validation. A direct registry API check on
-2026-10-30 found 4.17.0 latest across the coordinated PyPI/crates.io inventory;
-no 4.18 publication is asserted here.
-[RELEASING](RELEASING.md) is the authority for current gates; phase plans are
-historical evidence, and optional diagnostics are not silently promoted to requirements.
+## Current 4.18.1 candidate
 
-## Current 4.18.0 candidate evidence
+The Python packaging recovery separates the universal `sparkless==4.18.1` API
+from `sparkless-native==4.18.0`. The server extra pins the already published
+`sparkless-server-bin==4.18.0`; the five Rust crates also remain at 4.18.0.
+The release tag follows the API version. Exact dependency pins and separate
+inventories keep the component versions explicit.
 
-On 2026-10-30, both required candidate workflows passed on exact branch head
-`525ffe564585a4349890aa36a458f8530ea7ee7c` (`codex/release-4.18-readiness`):
+The native project contains the platform wheels and native source archive. The
+API contains one `py3-none-any` wheel and one small Python source archive; it does
+not bundle a native binary. This stops large extension wheels accumulating in the
+nearly full `sparkless` PyPI project and permits Python-only patches to reuse
+published component versions. Each PyPI project still has its own storage quota.
 
-- [CI run 40996635814](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996635814)
-  passed, including the CI acceptance gate, server HTTP/Connect suite, Python
-  suites, audit, strict documentation build, and documentation examples.
-- [Release run 40996636369](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996636369)
-  passed the cross-platform candidate build and smoke checks, server wheels and
-  container, and candidate inventory/acceptance checks. The retained
-  `verified-sparkless-candidate` artifact has SHA-256
-  `f5920a37e4ceef0eedf1c5eacc5080579aac9dca5e56da9d40b2be3e138b33dd` and is
-  available through 2027-01-28.
+This candidate requires exact-commit CI and Release validation before tagging.
+The new `sparkless-native` PyPI project also needs a pending Trusted Publisher for
+`eddiethedean/robin-sparkless`, workflow `release.yml`, environment `pypi`.
+[RELEASING](RELEASING.md) defines the build, reuse and publication checks.
 
-This is candidate validation only: no `v4.18.0` tag or public package/image
-publication is asserted. The normal release procedure still requires merging the
-reviewed candidate to `main` and successful CI on the exact commit to be tagged.
-V34 remains a post-publication check.
+PyPI's default limits are 100 MiB per file and 10 GiB per project. The locally
+built API wheel and source archive total 131,862 bytes (69,492 and 62,370 bytes);
+the API project therefore adds about 129 KiB to its roughly 9.99 GiB current
+inventory. The local macOS ARM64 native wheel is 44,091,761 bytes and its source
+archive is 2,991,226 bytes. The new native project has room for all eight wheels;
+the release gate checks each actual platform artifact and the combined project
+inventory before publication.
 
-The registry check found `4.17.0` latest for [sparkless on PyPI](https://pypi.org/pypi/sparkless/json),
-[sparkless-server-bin on PyPI](https://pypi.org/pypi/sparkless-server-bin/json),
-and the five first-party crates ([robin-sparkless](https://crates.io/api/v1/crates/robin-sparkless),
-[robin-sparkless-core](https://crates.io/api/v1/crates/robin-sparkless-core),
-[robin-sparkless-polars](https://crates.io/api/v1/crates/robin-sparkless-polars),
-[spark-sql-parser](https://crates.io/api/v1/crates/spark-sql-parser),
-[sparkless-server](https://crates.io/api/v1/crates/sparkless-server)). Each `4.18.0`
-version lookup returned HTTP 404. GitHub lookups for the `v4.18.0` tag and release
-also returned HTTP 404, so no partial 4.18 publication was present at review time.
+## 4.18.0 publication outcome — 2026-10-30
 
-The evidence above covers the committed source revision shown. The documentation
-reconciliation currently in this checkout is later than those runs; its release
-metadata and strict documentation checks pass locally, and the resulting commit
-must receive exact-commit CI and Release validation before tagging.
+Tag [`v4.18.0`](https://github.com/eddiethedean/robin-sparkless/tree/v4.18.0)
+points to commit [`101c6f5a05912a293bf8719c61972bce9f1616d6`](https://github.com/eddiethedean/robin-sparkless/commit/101c6f5a05912a293bf8719c61972bce9f1616d6).
+[CI run 41115170468](https://github.com/eddiethedean/robin-sparkless/actions/runs/41115170468)
+passed on that exact commit. [PR #1732](https://github.com/eddiethedean/robin-sparkless/pull/1732)
+moved release jobs from the unavailable macOS 14 runners to macOS 15 before this cut.
+
+The tagged [Release run 41119833550](https://github.com/eddiethedean/robin-sparkless/actions/runs/41119833550)
+passed every build, wheel smoke test, server consumer check, and release validation
+gate. Publication then stopped at the final `sparkless` PyPI upload:
+
+| Component | Observed publication state |
+| --- | --- |
+| Five first-party Rust crates, 4.18.0 | Published; Rust publisher succeeded |
+| `sparkless-server-bin==4.18.0` | Both supported server wheels published |
+| `ghcr.io/eddiethedean/sparkless-server:v4.18.0` | Published from the tested server wheel |
+| `sparkless==4.18.0` | Six of eight extension wheels published; Windows x64/ARM64 wheels and source archive missing |
+| Coordinated public inventory verification / V34 | Incomplete; final publisher failed before public verification |
+
+PyPI rejected the Windows x64 wheel with HTTP 400:
+`Project size too large. Limit for project 'sparkless' total size is 10 GB.`
+The Windows ARM64 wheel and source archive were not attempted.
+
+A [public PyPI metadata](https://pypi.org/pypi/sparkless/json) snapshot on
+2026-10-30 counted 73 earlier versions and 391 files, totaling 10,470,383,176
+bytes (9.75 GiB) before the partial 4.18.0 upload. The six new wheels added
+253,340,956 bytes, bringing usage to about 9.99 GiB. The quota counts all retained
+release files, not just one release; see [PyPI storage limits](https://docs.pypi.org/project-management/storage-limits/).
+No historical files were deleted. Published 4.18.0 files remain unchanged; the
+packaging recovery uses a new API patch version.
 
 ## Earlier evidence snapshots
 

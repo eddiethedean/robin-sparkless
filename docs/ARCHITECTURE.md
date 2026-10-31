@@ -7,7 +7,7 @@ different capabilities; [the support matrix](SUPPORT_MATRIX.md) is the contract.
 ```text
 Python application                       Rust application
   sparkless.sql / testing                  robin-sparkless facade
-          | PyO3 native extension                    |
+          | sparkless-native PyO3 extension          |
           +-------------------+----------------------+
                               |
                     core traits / ExprIr / schemas

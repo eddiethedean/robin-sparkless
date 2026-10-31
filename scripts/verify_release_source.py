@@ -58,7 +58,7 @@ def verify(
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="sparkless-source-") as scratch:
         root = extract_source(archive, Path(scratch))
-        manifest = root / "python/Cargo.toml"
+        manifest = root / "python/native/Cargo.toml"
         command = [
             "cargo",
             "metadata",
@@ -101,7 +101,7 @@ def verify(
                     str(wheel_output_dir),
                 ],
                 # The published sdist is rooted at the Python project and has
-                # its Rust extension manifest in python/Cargo.toml. Building
+                # its Rust extension manifest in python/native/Cargo.toml. Building
                 # from that nested Rust directory loses the root pyproject.
                 cwd=root,
                 env=environment,

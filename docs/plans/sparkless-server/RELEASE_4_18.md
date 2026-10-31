@@ -8,11 +8,25 @@ search:
 
 # 4.18.0 implementation and release plan
 
-**Status: candidate revision `525ffe564585a4349890aa36a458f8530ea7ee7c` passed the current cut criteria in [RELEASING.md](../../RELEASING.md).** On 2026-10-30, both CI and cross-platform Release validation passed on that exact candidate branch head: [CI run 40996635814](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996635814) and [Release run 40996636369](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996636369). The latter built and checked the candidate packages, platform wheels, both server distributions, container, and candidate inventory; its retained candidate bundle is recorded in [release evidence](../../RELEASE_EVIDENCE.md). The documentation/status reconciliation in this checkout is later than those workflow runs. Its release metadata and strict documentation checks pass locally; its resulting commit still needs exact-SHA CI and Release validation before tagging. The full 4.18 candidate diagnostics, including V17, V18–V24, V26, and V33, passed on `688da4d4f1042839ece4047075af94a0bf8c2c48`. Cargo, Python package, Connect test, benchmark, budget, and security-policy sources are unchanged between those commits; later changes are release automation, package verification, the release Dockerfile, and documentation. V26's approved numeric budget passed. The 4.18.0 Cargo consumer audit has a maintainer-approved, time-bounded exception through 2026-11-26, and the strict patched consumer graph is clean. V25 is not advertised because the separate MiniLake Connect route is unavailable. No release tag or publication has been made; V34 remains a post-publication check. Every first-party package in the [release inventory](ROADMAP.md#coordinated-version-and-publication-policy) publishes at **4.18.0**, including unchanged packages.
+**Status as of 2026-10-30: 4.18.0 tagged; publication incomplete.** Tag
+`v4.18.0` points to `101c6f5a05912a293bf8719c61972bce9f1616d6`, whose CI and
+release validation gates passed. Rust crates, server wheels and the container
+published; PyPI's cumulative project limit stopped `sparkless` after six wheels.
+Windows wheels and the source archive remain missing, and V34 is incomplete.
+The 4.18.1 Python packaging recovery splits the API from the 4.18.0 engine and
+server components. See [release evidence](../../RELEASE_EVIDENCE.md) for exact
+workflow links, inventories, the failure and recovery status.
+
+Earlier candidate diagnostics below are historical. V25 is not advertised. The
+approved 4.18.0 Rust consumer exception remains scoped through 2026-11-26; the
+packaging patch does not extend it. [RELEASING.md](../../RELEASING.md) defines
+current cut and component-version requirements.
 
 [Plan index](README.md) · [Epic](EPIC.md) · [Roadmap](ROADMAP.md) · [Protocol research](CONNECT_PROTOCOL_RESEARCH.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md)
 
 ## 4.18.0 cut evidence
+
+These candidate snapshots precede the tagged publication outcome recorded above.
 
 - Current release workflow: [run 40996636369](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996636369), successful on exact candidate head `525ffe56`. It built and checked the candidate packages, ran platform wheel smoke tests, built and exercised both server distributions, passed the acceptance gate, and verified the candidate inventory.
 - Current CI workflow: [run 40996635814](https://github.com/eddiethedean/robin-sparkless/actions/runs/40996635814), successful on the same exact candidate head, including the strict documentation job and acceptance gate.
@@ -47,7 +61,7 @@ Slice IDs are local plan identifiers. Assign an owner, reviewable change, exact 
 | **418-07 — implemented locally** | Public launcher readiness, CLI endpoints, packaged Connect feature | 418-06; SS-02/06 | V24 and packaged HTTP/Connect server checks passed in the full candidate diagnostics; the current release run also passed both server-extra platform checks. |
 | **418-08 — implemented locally** | Separate emulator gRPC route harness and concurrent-client measurements | 418-06; pinned external proxy for V25; 418-07 for packaged launcher witnesses | The approved V26 throughput, p95, and RSS limits passed across three paired measurements. V25 remains unnecessary because the MiniLake route is not advertised. |
 | **418-09 — complete for cut** | Freeze the supported capability/docs, rerun applicable regressions, and verify the complete candidate distribution | 418-01–418-08; prior releases complete | Full candidate diagnostics passed on `688da4d4`; current package, platform, and acceptance checks passed on `e5c95724`. Current release criteria are defined in [RELEASING.md](../../RELEASING.md). |
-| **418-10 — implemented locally** | Coordinated publication and fresh public-artifact verification | 418-09 | Stable-tag workflow publishes the candidate Rust crates, PyPI distributions, and GHCR image; V34 verifies exact public inventories/digests and runs Connect clients against fresh PyPI, crates.io, and container installs. No 4.18.0 publication has run yet. |
+| **418-10 — implemented locally** | Coordinated publication and fresh public-artifact verification | 418-09 | Stable-tag workflow publishes the candidate Rust crates, PyPI distributions, and GHCR image; V34 verifies exact public inventories/digests and runs Connect clients against fresh PyPI, crates.io, and container installs. The tagged publication partially succeeded; PyPI storage blocked the final extension files. V34 remains incomplete. |
 
 Translation and Arrow work can proceed independently against the interface frozen in 418-01; their integrated exit requires replay and the actual client. No individual workstream establishes protocol support alone.
 
@@ -239,7 +253,7 @@ The D06 wire contract is control protocol version `2` and capabilities protocol 
 
 ### 418-09 capability and candidate record
 
-The 4.18.0 candidate inventory is coordinated across the Rust facade/core/Polars/parser/server crates, the Python extension, `sparkless`, and `sparkless-server-bin`. `sparkless[server]` pins the exact matching server binary. Cargo manifests and lock entries, wheel metadata, server version output, source distribution metadata, and container build evidence must agree on `4.18.0`. The supported binary builds with `http,connect`; feature-isolated HTTP-only and Connect-only builds remain tested. The client-facing capability and type matrix is published in [Spark Connect support](../../SPARK_CONNECT.md).
+The original 4.18.0 candidate inventory coordinated the Rust facade/core/Polars/parser/server crates, the Python extension, `sparkless`, and `sparkless-server-bin`. The later 4.18.1 packaging recovery versions the universal API independently and pins the existing `sparkless-native==4.18.0` and optional `sparkless-server-bin==4.18.0` artifacts. The supported server binary builds with `http,connect`; feature-isolated HTTP-only and Connect-only builds remain tested. The client-facing capability and type matrix is published in [Spark Connect support](../../SPARK_CONNECT.md).
 
 The V33 workflow runs the pinned V18–V23 client/oracle corpus and applicable V17 witness, verifies the packaged Connect server on both server-wheel platforms plus the container/owned launcher, and rechecks the exact wheel, sdist, server-binary and image bytes before preserving the candidate artifacts. V26 builds the pinned parent and candidate, then runs three alternating paired measurements on one hosted runner. It compares each cohort's median throughput, p95 latency, and peak server RSS against the limits in `tests/connect/v26-regression-budget.json` (throughput regression at most 20%, p95 regression at most 25%, and peak server RSS growth at most 15%). The paired reports must match CPU model, logical CPUs, workload, iteration count, and source provenance. All raw reports are preserved in the run artifact. The MiniLake route is not advertised in 4.18, so V25 is supplemental and is not inferred from local proxy tests.
 
@@ -275,7 +289,7 @@ V26 measures correctness, cold start, throughput, p50/p95 latency, RSS, CPU, bat
 - [x] 418-07: launcher, CLI, packaged Connect feature, and V24 checks pass.
 - [x] 418-08: same-runner V26 measurement passed the approved budget; V25 is not advertised.
 - [x] 418-09: full candidate diagnostics and current release package/inventory gates pass; see [cut evidence](#4180-cut-evidence).
-- [x] 418-10 local publication and V34 workflow implementation complete: the post-publication job verifies exact public PyPI inventories and hashes, crates.io versions, the pushed GHCR digest, the fresh `sparkless[server]` Connect launcher, the published Connect-enabled Rust server against V18–V23, and the published container against HTTP and Spark Connect clients. This wires V34; no 4.18.0 publication has run.
+- [x] 418-10 publication and V34 workflow implementation complete: the post-publication job verifies exact public PyPI inventories and hashes, crates.io versions, the GHCR digest, the fresh `sparkless[server]` Connect launcher, the published Connect-enabled Rust server against V18–V23, and the published container against HTTP and Spark Connect clients. The 4.18.0 publication partially ran, but its PyPI inventory gate did not pass; V34 is incomplete. The 4.18.1 packaging recovery changes the API/native project boundary and needs new exact-commit CI and Release validation.
 - [ ] 418-10: V34 public inventory and fresh-install verification passes on the published 4.18.0 artifacts.
 
 ## Current implementation boundary

@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import getpass
 
-from sparkless import _native, _Column
-from sparkless._native import PyColumn as _ColumnType  # for type hints only
+import sparkless_native._native as _native
+from sparkless import _Column
+from sparkless_native._native import PyColumn as _ColumnType  # for type hints only
 from sparkless import (
     column as col,
     lit,

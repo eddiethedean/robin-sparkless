@@ -11,13 +11,15 @@ from typing import Type
 
 try:
     # Native exception provided by the Rust extension.
-    from sparkless._native import SparklessError as _SparklessError
-    from sparkless._native import SparklessCancelledError as _SparklessCancelledError
+    from sparkless_native._native import SparklessError as _SparklessError
+    from sparkless_native._native import (
+        SparklessCancelledError as _SparklessCancelledError,
+    )
 
     SparklessError = _SparklessError
     SparklessCancelledError = _SparklessCancelledError
     try:
-        from sparkless._native import (
+        from sparkless_native._native import (
             SparklessExternalCatalogError as _SparklessExternalCatalogError,
         )
 

@@ -74,6 +74,34 @@ class ReleaseVersionsTest(unittest.TestCase):
         self.assertEqual(validate_server_inventory(root), [])
         self.assertEqual(check_release(root), [])
 
+    def test_python_patch_can_reuse_a_versioned_engine(self):
+        self.assertEqual(
+            self.validate(
+                release_version="4.13.4",
+                python_version="4.13.4",
+                changelog="## [4.13.4] - 2026-10-30\n",
+                tag="v4.13.4",
+            ),
+            [],
+        )
+
+    def test_api_dependency_cannot_silently_drift_from_the_engine(self):
+        source = Path(__file__).resolve().parents[1]
+        from unittest.mock import patch
+        from check_release_versions import read_toml
+
+        def changed(path):
+            result = read_toml(path)
+            if path == source / "python/pyproject.toml":
+                result["project"]["dependencies"] = ["sparkless-native>=4.18.0"]
+            return result
+
+        with patch("check_release_versions.read_toml", side_effect=changed):
+            errors = check_release(source)
+        self.assertTrue(
+            any("pin the exact sparkless-native" in error for error in errors)
+        )
+
     def test_coordinated_candidate_requires_parser_dependency_alignment(self):
         source = Path(__file__).resolve().parents[1]
         with TemporaryDirectory() as temporary:

@@ -129,11 +129,12 @@ sparkless-parity:
 	python tests/regenerate_expected_from_pyspark.py tests/fixtures/converted
 	$(MAKE) test-parity-phases
 
-# Python package (sparkless 4.0.0)
+# Python API and native engine distributions
 build-python:
-	cd python && maturin build
+	maturin build --release --manifest-path python/native/Cargo.toml
+	python -m build --wheel python
 
-# Run Python smoke test (requires maturin develop or pip install ./python; uses .venv if present)
+# Run Python smoke test (requires the native engine and API installed; uses .venv if present)
 test-python:
 	@PYTHON=$$(test -f .venv/bin/python && echo .venv/bin/python || echo python); \
 	$$PYTHON -c "from sparkless.sql import SparkSession; from sparkless.sql.functions import col, lit_i64; s = SparkSession.builder.app_name('test').get_or_create(); df = s.create_dataframe([(1, 2, 'a')], ['x', 'y', 'z']); assert df.count() == 1; print('sparkless OK')"
