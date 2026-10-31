@@ -52,6 +52,7 @@ All workstreams are **planned**, with owners unassigned and implementation issue
 | SS-17 | [Connect sources, artifacts, caching, and checkpoints](17-connect-sources-artifacts-and-persistence.md) | 8; connectors/storage explicitly enabled |
 | SS-18 | [Durable Connect sessions, outcomes, and replay](18-durable-connect-recovery.md) | 9; optional persistent recovery mode |
 | SS-19 | [Single-node Structured Streaming](19-structured-streaming.md) | 10; optional, after API/I/O/recovery prerequisites |
+| SS-20 | [Connect feature scope across Phases 4–10](20-connect-feature-scope.md) | Proposed feature-level matrix and phase decision checklist; aligns SS-12–19 before implementation |
 
 ## Milestone dependency order
 
