@@ -29,6 +29,7 @@ use uuid::Uuid;
 static CONNECT_PRODUCER_STARTS: AtomicU64 = AtomicU64::new(0);
 const CONNECT_GRACEFUL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_FORCE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+const CONNECT_RESPONSE_STALL_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 struct ConnectConnectionRegistry {
@@ -1389,6 +1390,7 @@ struct ConnectResponseSender {
     terminal: ConnectTerminal,
     trace_enabled: bool,
     operation_id: String,
+    send_blocked_since: Arc<Mutex<Option<Instant>>>,
     planning_wait: Duration,
     planning_time: Duration,
     arrow_next_time: Duration,
@@ -1410,7 +1412,7 @@ impl ConnectResponseSender {
         item: Result<connect_proto::ExecutePlanResponse, Status>,
         operation: &crate::ConnectOperationLease,
     ) -> bool {
-        let mut response = match item {
+        let response = match item {
             Ok(response) => response,
             Err(status) => {
                 self.terminal.finish(Err(status));
@@ -1464,66 +1466,48 @@ impl ConnectResponseSender {
             self.cancellation.cancel();
             return false;
         }
-        if completes_operation {
-            operation.complete();
-            self.terminal.finish(Ok(()));
+        let blocked = self.sender.capacity() == 0;
+        let send_started = Instant::now();
+        if blocked && let Ok(mut blocked_since) = self.send_blocked_since.lock() {
+            *blocked_since = Some(send_started);
         }
-        let send_started = now;
-        let mut blocked_send_time = Duration::ZERO;
-        loop {
-            let now = Instant::now();
-            if now >= self.deadline {
-                operation.replay.release_sender_buffer(reservation_id);
-                if self.terminal.finish_deadline(connect_deadline_status()) {
-                    operation.reject(
-                        "CONNECT_RESPONSE_DEADLINE",
-                        "Connect execution exceeded its response deadline",
-                    );
-                    self.cancellation.cancel();
+        let result = self.sender.blocking_send(ConnectQueuedResponse {
+            response,
+            reservation_id,
+        });
+        if blocked && let Ok(mut blocked_since) = self.send_blocked_since.lock() {
+            *blocked_since = None;
+        }
+        let blocked_send_time = if blocked {
+            send_started.elapsed()
+        } else {
+            Duration::ZERO
+        };
+        match result {
+            Ok(()) => {
+                if completes_operation {
+                    operation.complete();
+                    self.terminal.finish(Ok(()));
                 }
-                self.blocked_send_time += blocked_send_time;
-                return false;
+                self.record_sent_response(sender_bytes, response_rows, blocked_send_time);
+                true
             }
-            if now.duration_since(send_started) >= Duration::from_secs(5) {
-                operation.replay.release_sender_buffer(reservation_id);
-                let status = Status::deadline_exceeded(
-                    "Connect response stream stalled without progress for 5 seconds",
-                );
-                if self.terminal.finish_deadline(status.clone()) {
-                    operation.reject("CONNECT_REPLAY_STALL", status.message());
-                    self.cancellation.cancel();
-                }
-                self.blocked_send_time += blocked_send_time;
-                return false;
-            }
-            match self.sender.try_send(ConnectQueuedResponse {
-                response,
-                reservation_id,
-            }) {
-                Ok(()) => {
-                    self.record_sent_response(sender_bytes, response_rows, blocked_send_time);
-                    return true;
-                }
-                Err(tokio::sync::mpsc::error::TrySendError::Closed(queued)) => {
-                    operation
-                        .replay
-                        .release_sender_buffer(queued.reservation_id);
-                    if operation.replay.reattachable {
-                        self.record_sent_response(sender_bytes, response_rows, blocked_send_time);
-                        return true;
+            Err(queued) => {
+                operation
+                    .replay
+                    .release_sender_buffer(queued.0.reservation_id);
+                if operation.replay.reattachable && !self.cancellation.is_cancelled() {
+                    if completes_operation {
+                        operation.complete();
+                        self.terminal.finish(Ok(()));
                     }
+                    self.record_sent_response(sender_bytes, response_rows, blocked_send_time);
+                    true
+                } else {
                     self.cancellation.cancel();
                     self.blocked_send_time += blocked_send_time;
-                    return false;
+                    false
                 }
-                Err(tokio::sync::mpsc::error::TrySendError::Full(returned)) => {
-                    response = returned.response;
-                }
-            }
-            let sleep_started = self.trace_enabled.then(Instant::now);
-            std::thread::sleep((self.deadline - now).min(Duration::from_millis(10)));
-            if let Some(started) = sleep_started {
-                blocked_send_time += started.elapsed();
             }
         }
     }
@@ -1764,6 +1748,7 @@ fn start_connect_producer(
         sender: Arc::new(Mutex::new(Some(outcome_tx))),
         replay: Arc::clone(&replay),
     };
+    let send_blocked_since: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
     let timer_cancellation = cancellation.clone();
     let timer_terminal = terminal.clone();
@@ -1772,6 +1757,8 @@ fn start_connect_producer(
     let stall_replay = Arc::clone(&replay);
     let stall_cancellation = cancellation.clone();
     let stall_operation = Arc::clone(&operation.record);
+    let stall_send_blocked_since = Arc::clone(&send_blocked_since);
+    let stall_terminal = terminal.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(100));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1791,6 +1778,33 @@ fn start_connect_producer(
                             ));
                         }
                         stall_cancellation.cancel();
+                        break;
+                    }
+                    let send_stalled = stall_send_blocked_since
+                        .lock()
+                        .ok()
+                        .and_then(|blocked_since| *blocked_since)
+                        .is_some_and(|blocked_since| {
+                            blocked_since.elapsed() >= CONNECT_RESPONSE_STALL_TIMEOUT
+                        });
+                    if send_stalled {
+                        let status = Status::deadline_exceeded(
+                            "Connect response stream stalled without progress for 5 seconds",
+                        );
+                        if stall_terminal.finish_deadline(status.clone()) {
+                            if let Ok(mut record) = stall_operation.lock()
+                                && record.execution_state == "running"
+                                && record.effect_outcome == "pending"
+                            {
+                                record.execution_state = "failed";
+                                record.effect_outcome = "rejected";
+                                record.error = Some((
+                                    "CONNECT_REPLAY_STALL".to_string(),
+                                    status.message().to_string(),
+                                ));
+                            }
+                            stall_cancellation.cancel();
+                        }
                         break;
                     }
                 }
@@ -1826,6 +1840,7 @@ fn start_connect_producer(
             trace_enabled: std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref()
                 == Some(std::ffi::OsStr::new("1")),
             operation_id: operation_id.clone(),
+            send_blocked_since,
             planning_wait,
             planning_time: Duration::ZERO,
             arrow_next_time: Duration::ZERO,
@@ -2044,9 +2059,7 @@ fn start_connect_producer(
                 let _ = sender.send(Err(status), &operation);
                 return;
             }
-            if sender.send(Ok(response), &operation) {
-                operation.complete();
-            }
+            let _ = sender.send(Ok(response), &operation);
         } else if sender.terminal.finish(Ok(())) {
             operation.complete();
         }
