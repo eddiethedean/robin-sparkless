@@ -116,8 +116,8 @@ def main() -> None:
         parser.error("source-limit rejection cannot be combined with a slow reader")
     if args.expect_rejection == "result" and not args.slow_reader_delay_ms:
         parser.error("result-limit rejection requires --slow-reader-delay-ms")
-    if args.expect_rejection and args.concurrent_readers != 1:
-        parser.error("expected source-limit rejection supports one reader only")
+    if args.expect_rejection in ("ipc", "rows") and args.concurrent_readers != 1:
+        parser.error("IPC and row-limit rejection supports one reader only")
     server_bin = args.server_bin.absolute()
     if not server_bin.is_file():
         parser.error(f"server binary not found: {server_bin}")
@@ -179,6 +179,7 @@ def main() -> None:
         owner = SparklessConnect(server_options={"executable_path": str(server_bin)})
         samples_ms: list[float] = []
         batch_samples_ms: list[float] = []
+        action_outcomes: list[dict[str, Any]] = []
         expected_rejection: str | None = None
         with owner as spark:
             if not isinstance(spark, ConnectSession):
@@ -201,37 +202,93 @@ def main() -> None:
                 for _ in range(args.concurrent_readers - 1)
             )
 
-            def run_parallel() -> tuple[list[int], list[float], float]:
+            def run_parallel() -> tuple[
+                list[int | None], list[float], list[str | None], float
+            ]:
                 batch_started = time.perf_counter()
 
-                def timed_action(session: ConnectSession) -> tuple[int, float]:
+                def timed_action(
+                    session: ConnectSession,
+                ) -> tuple[int | None, float, str | None]:
                     started = time.perf_counter()
-                    count = run_action(session)
-                    return count, (time.perf_counter() - started) * 1000
+                    try:
+                        count = run_action(session)
+                        return count, (time.perf_counter() - started) * 1000, None
+                    except Exception as error:
+                        return (
+                            None,
+                            (time.perf_counter() - started) * 1000,
+                            str(error),
+                        )
 
                 with ThreadPoolExecutor(max_workers=len(client_sessions)) as pool:
                     results = list(pool.map(timed_action, client_sessions))
                 elapsed = (time.perf_counter() - batch_started) * 1000
+                round_index = len(action_outcomes) // len(client_sessions)
+                for reader_index, (count, duration_ms, error) in enumerate(results):
+                    action_outcomes.append(
+                        {
+                            "phase": "warmup" if round_index == 0 else "measured",
+                            "iteration": round_index,
+                            "reader": reader_index,
+                            "result": "rejected" if error else "completed",
+                            "count": count,
+                            "duration_ms": duration_ms,
+                            "error": error,
+                        }
+                    )
                 return (
                     [item[0] for item in results],
                     [item[1] for item in results],
+                    [item[2] for item in results],
                     elapsed,
                 )
 
-            try:
-                warm_counts, _, _ = run_parallel()
-                if any(count != args.rows for count in warm_counts):
+            def validate_round(
+                counts: list[int | None], errors: list[str | None]
+            ) -> None:
+                failures = [error for error in errors if error is not None]
+                expected_messages = {
+                    "ipc": (
+                        "DuckDB source exceeds the "
+                        f"{SOURCE_LIMITS['ipc_bytes_per_statement']}-byte operation limit"
+                    ),
+                    "rows": (
+                        "DuckDB source exceeds the "
+                        f"{SOURCE_LIMITS['rows_per_statement']}-row operation limit"
+                    ),
+                    "result": (
+                        "Connect replay and sender buffers exceed "
+                        f"{CONNECT_RESULT_LIMIT_BYTES} bytes for one operation"
+                    ),
+                }
+                expected_message = expected_messages.get(args.expect_rejection)
+                if failures:
+                    if expected_message and all(
+                        expected_message in error for error in failures
+                    ):
+                        raise RuntimeError(
+                            f"{expected_message} "
+                            f"(rejected {len(failures)} of {len(client_sessions)} readers)"
+                        )
+                    raise RuntimeError(f"concurrent source action failed: {failures!r}")
+                if args.expect_rejection:
                     raise AssertionError(
-                        f"source counts returned {warm_counts}, expected {args.rows} each"
+                        "scan succeeded, but an expected source limit was not enforced"
                     )
+                if any(count != args.rows for count in counts):
+                    raise AssertionError(
+                        f"source counts returned {counts}, expected {args.rows} each"
+                    )
+
+            try:
+                warm_counts, _, warm_errors, _ = run_parallel()
+                validate_round(warm_counts, warm_errors)
                 for _ in range(args.iterations):
-                    counts, action_samples, batch_elapsed = run_parallel()
+                    counts, action_samples, errors, batch_elapsed = run_parallel()
                     samples_ms.extend(action_samples)
                     batch_samples_ms.append(batch_elapsed)
-                    if any(count != args.rows for count in counts):
-                        raise AssertionError(
-                            f"source counts returned {counts}, expected {args.rows} each"
-                        )
+                    validate_round(counts, errors)
             except Exception as error:
                 message = str(error)
                 expected_messages = {
@@ -252,11 +309,6 @@ def main() -> None:
                 if expected_message is None or expected_message not in message:
                     raise
                 expected_rejection = message
-            else:
-                if args.expect_rejection:
-                    raise AssertionError(
-                        "scan succeeded, but an expected source limit was not enforced"
-                    )
             finally:
                 for extra_session in client_sessions[1:]:
                     extra_session.stop()
@@ -311,12 +363,14 @@ def main() -> None:
             "source_database_bytes": database_size_bytes,
             "iterations": args.iterations,
             "warmups": 1,
+            "timed_rounds_completed": len(batch_samples_ms),
             "action": "slow_to_local_iterator"
             if args.slow_reader_delay_ms
             else "count",
             "slow_reader_delay_ms": args.slow_reader_delay_ms,
             "action_samples_ms": samples_ms,
             "concurrent_batch_samples_ms": batch_samples_ms,
+            "action_outcomes": action_outcomes,
             "action_p50_ms": percentile(samples_ms, 0.50) if samples_ms else None,
             "action_p95_ms": percentile(samples_ms, 0.95) if samples_ms else None,
             "result": (
