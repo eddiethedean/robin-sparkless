@@ -154,10 +154,12 @@ Cancelling a Quack scan interrupts the local DuckDB client and sends `quack_canc
 owner. The control connection is reserved with the scan under the four-connection cap and uses a
 three-second HTTP timeout.
 
-Quack mode and an independent writer fixture are implemented. The exact-commit workflow is being
-extended to install the packaged Quack extension and run the public source smoke on Linux x86_64
-and macOS arm64; until it passes, cross-platform Quack acceptance remains open. D14 and V36 also
-remain open for broader platform/resource evidence. DuckDB writes, unsupported types, arbitrary
+Quack mode and an independent writer fixture are implemented. Exact-commit Linux x86_64 and macOS
+arm64 server-extra installs, packaged Quack public source smokes, and four-reader 100k-row
+slow-consumer checks passed in [release run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918).
+Each measured reader completed; observed server-child RSS was 192.9 MiB on Linux and 137.8 MiB on
+macOS. These are single-run observations, not a hard cross-platform memory limit. D14 and V36
+remain open for broader source/resource evidence. DuckDB writes, unsupported types, arbitrary
 client-supplied paths, and cross-owner joins fail explicitly.
 
 ## Limits and unsupported operations

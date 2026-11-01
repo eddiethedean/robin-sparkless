@@ -41,15 +41,17 @@ Evidence and narrower contracts:
   joins, and arbitrary Connect SQL are rejected or unsupported. See the
   [4.19 source contract](plans/sparkless-server/RELEASE_4_19.md#duckdb-source-contract)
   and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
-- Public DuckDB Connect behavior is verified on macOS arm64. The candidate
-  server wheels now carry the platform-matched DuckDB 2.0.0 Quack extension; the
-  release workflow now runs the exact-commit Linux x86_64 and macOS arm64
-  install/source smokes plus a four-reader slow-consumer resource case and
-  retains its report. Those platform results remain pending until that workflow
-  succeeds. A source-built server can
-  load a trusted local extension path. Installed wheels resolve the bundled
-  extension beside the server executable when `extension_path` is omitted,
-  without a runtime download.
+- Public DuckDB Connect behavior is verified on macOS arm64. The exact-commit
+  [release workflow run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918)
+  passed the installed Linux x86_64 and macOS arm64 server-extra source smokes
+  and a four-reader, 100k-row slow-consumer run on each platform. Every measured
+  reader returned all rows; observed server-child RSS was 192.9 MiB on Linux and
+  137.8 MiB on macOS. These are single-run observations, not a hard or broad
+  cross-platform RSS guarantee. Retained raw reports and limits are in the
+  [4.19 resource evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#exact-commit-linux-and-macos-source-extra-resource-checks-2026-11-01).
+  A source-built server can load a trusted local extension path. Installed
+  wheels resolve the bundled extension beside the server executable when
+  `extension_path` is omitted, without a runtime download.
 
 - [Generated compatibility inventory](PARITY_STATUS.md): counts and oracle provenance, not a parity percentage.
 - [Executable examples](https://github.com/eddiethedean/robin-sparkless/tree/main/examples/python): backend identity, pipeline, UDF.
