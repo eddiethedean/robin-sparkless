@@ -147,6 +147,25 @@ metadata reported `sparkless`, `sparkless-native`, and `sparkless-server-bin` as
 `pyspark-client==4.0.5`. The local server wheel carries a `macosx_26_0_arm64` tag because the
 available host is macOS 26; it does not validate the release workflow's macOS 14 deployment tag.
 
+A fresh CPython 3.11.14 consumer matrix was then built from the current 4.19 sources and installed
+into four separate virtual environments on macOS 26.5.2 arm64. The exact API wheel SHA-256 is
+`9c4b75f79864862d238a5498ccc003743c6bceb3644b9e5e81913bf093371ba9`; the native wheel is
+`83c96a8f58d3275c48a61497f33ea565aa710069f06fac3a0879d815e0499380`; and the server wheel is
+`954b563bf3d2430298086ee8455694c2aa208b1bf7310b8d823249399f9ccc52`. The server wheel contains
+the release binary from source `43ce29b2c31a3da8d175a91cc350d09a76e8eeb4`, built with
+`http,connect,duckdb-source` (binary SHA-256
+`8c48df6228973930c744a491356f48e3058fa6f3f384d397c85c939d91778199`).
+
+All four installs and `pip check` passed. The base install imported `SparklessConnect` without
+installing `pyspark-client` or `sparkless-server-bin`; the server extra passed its installed-binary,
+HTTP mutation, restart, and HTTP-only checks without PySpark; and both the Connect extra and
+combined server/Connect extras passed the hash-locked `pyspark-client==4.0.5` dependency set and an
+exact 32-row public `SparklessConnect` query. The raw matrix, installed metadata, wheel hashes, and
+host limitation are in [phase-419-clean-install-matrix-macos.json](evidence/phase-419-clean-install-matrix-macos.json),
+SHA-256 `333e31186428afbc79fc5e9d726a32a469a60ea2ba6837ac0e84b5c75e154c93`. This closes the
+clean-consumer install/import matrix on the tested macOS arm64 host; the Linux and macOS 14-tagged
+server-extra release jobs remain the cross-platform check.
+
 The release workflow now builds both supported server wheels with `http,connect,duckdb-source`.
 Its Linux and macOS server-extra consumer jobs install the hash-locked CPython 3.11 DuckDB 1.5.1
 fixture dependency and run the public-client source smoke against the bundled server executable.
@@ -200,6 +219,17 @@ extension, cancelling after its first batch and observing `cancelled` on the sha
 Quack cancellation during service shutdown and clean cross-platform extension packaging remain
 open. The Spark differential corpus is now recorded below. D14 and V35/V36 are still open; the
 release does not claim complete DuckDB-source acceptance.
+
+After the final Connect response-acknowledgment changes, the server was rebuilt at source
+`43ce29b2c31a3da8d175a91cc350d09a76e8eeb4` with `http,connect,duckdb-source`. The release server
+binary reports 4.19.0 and has SHA-256
+`8c48df6228973930c744a491356f48e3058fa6f3f384d397c85c939d91778199`; the matching Quack owner
+fixture binary has SHA-256 `ffe5dea9c2f513157ee6b3cf2efe3837dd31a4b0b81851b4fd12513faf21cfdc`. The
+public DuckDB smoke passed in standalone mode with Python DuckDB 1.5.1 and in Quack mode with the
+DuckDB 2.0.0 `osx_arm64` extension, using the 4.19.0 candidate client environment and pinned
+`pyspark-client==4.0.5`. This validates source reads and the client retry/cancel path on the final
+Connect implementation; it does not close shutdown cancellation or cross-platform extension
+acceptance.
 
 ### DuckDB Connect source comparison with Spark 4.0.5 (2026-11-01)
 
@@ -759,7 +789,7 @@ environment samples:
 ## Open acceptance gates
 
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. Four-reader slow-consumer runs select a provisional 256 MiB observed RSS guardrail on macOS arm64; broader platform/resource coverage and clean cross-platform extension packaging remain open. D14 and V35/V36 remain open.
-- The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
+- The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; cross-platform server-extra package checks remain tied to the release workflow below.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against the post-export/count intermediate candidate are retained above. Exporter buffer-size estimates are recorded, but allocator-wide accounting and a complete scheduler comparison against the released baseline remain open.
 - Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow still needs a successful run, and release publication checks have not been performed.
 
