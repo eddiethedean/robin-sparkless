@@ -324,6 +324,15 @@ limit`. The decoded-byte counter separately has a unit test that accepts exactly
 batches and rejects the next byte without increasing accounting. Existing source-pool tests
 exercise the four-connection/sixteen-waiter limits and Quack's two-slot scan/cancel reservation.
 
+On branch revision `f386022bc88f9a1ec9ab244a75f50cdfd469455c`, release-mode validation with
+`--features sql,duckdb-source` passed all seven `duckdb_source` integration tests (six passed; the
+live Quack extension test was ignored because no extension path was supplied) and all five
+`source_pool_tests`. The pool is a concurrency limiter: waiting acquires occur before a source
+connection is opened or any source batch is read, so queued source Arrow/decoded payload bytes are
+zero. Waiters still retain plan/control state that is count-bounded but not separately
+byte-accounted. Active connections belong to statement snapshots and close when those snapshots
+are dropped; there is no idle connection pool or source idle TTL.
+
 Raw reports retain counts, timings, file sizes, server/client hashes, and OS RSS:
 
 | Case | Report | SHA-256 |
@@ -686,7 +695,7 @@ and `smoke_phase419_client.py` passed against the same 4.19 release server.
 
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. Four-reader slow-consumer runs select a provisional 256 MiB observed RSS guardrail on macOS arm64; broader platform/resource coverage and clean cross-platform extension packaging remain open. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. Four-reader slow-consumer runs select a provisional 256 MiB observed RSS guardrail on macOS arm64; broader platform/resource coverage and clean cross-platform extension packaging remain open. D14 and V35/V36 remain open.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 11.39× across three release pairs; paired exporter/count reports, three-pair small-job action/startup guardrails, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against the post-export/count intermediate candidate are retained above. Exporter buffer-size estimates are recorded, but allocator-wide accounting, small-job server CPU/RSS/first-batch/cancellation comparisons, and a complete scheduler comparison against the released baseline remain open.
 - Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow still needs a successful run, and release publication checks have not been performed.
