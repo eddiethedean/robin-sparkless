@@ -315,12 +315,13 @@ def run_small_jobs(spark: ConnectSession, iterations: int) -> list[dict[str, Any
     measurements: list[dict[str, Any]] = []
     for row_count in (10, 100, 1_000, 10_000):
         rows = [(index, f"item-{index}") for index in range(row_count)]
-        expected = (row_count + 1) // 2
+        threshold = row_count // 2
+        expected = max(row_count - threshold - 1, 0)
 
         def ingest_filter_count(rows: list[tuple[int, str]] = rows) -> list[int]:
             return [
                 spark.createDataFrame(rows, "id BIGINT, label STRING")
-                .filter("id % 2 = 0")
+                .filter(f"id > {threshold}")
                 .count()
             ]
 
