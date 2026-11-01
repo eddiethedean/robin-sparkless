@@ -203,7 +203,7 @@ The table pools 60 warm samples per side and reports nearest-rank p50/p95 in mil
 | Variable-width `collect()` | 16.284 / 18.782 | 16.905 / 19.122 | 0.96× |
 | Variable-width `toArrow()` | 16.707 / 19.438 | 18.723 / 19.528 | 0.89× |
 
-The initial 2× 100k-row target is met at the `toArrow()` median (2.96×); row-object `collect()` improves 1.27×, so the target remains open if it is intended to cover that API too. LIMIT, at-cap local relations, variable-width values, and empty filters returned exact results. In this per-export harness the client peak RSS ranged from 250.7–254.2 MB on baseline and 254.3–256.7 MB on candidate; server RSS and retained Arrow-buffer measurements are not included. A separate candidate diagnostic on the same 100k-row Arrow result reported 391 source batches for 100,000 rows, 7 output batches, 0.636 ms serialization, 0.026 ms combine time, 0.979 ms in `arrow_next`, 15.012 ms blocked-send time, and 803,244 response bytes. The full diagnostic is [phase-419-arrow-export-mechanism-100k.json.gz](evidence/phase-419-arrow-export-mechanism-100k.json.gz), SHA-256 `9aec2fc1294789eb1c14cc45502791cd41ab158fef2555a13756a102257470da`; it is one instrumentation observation, not a repeated timing.
+These measurements use bare ranges: the 100k-row `toArrow()` median improves 2.96× and row-object `collect()` improves 1.27×. The original #1736 reproduction includes `.select("id")`; the [projected-range measurements below](#projected-range-speed-target) cover that speed target. LIMIT, at-cap local relations, variable-width values, and empty filters returned exact results. In this per-export harness the client peak RSS ranged from 250.7–254.2 MB on baseline and 254.3–256.7 MB on candidate; server RSS and retained Arrow-buffer measurements are not included. A separate candidate diagnostic on the same 100k-row Arrow result reported 391 source batches for 100,000 rows, 7 output batches, 0.636 ms serialization, 0.026 ms combine time, 0.979 ms in `arrow_next`, 15.012 ms blocked-send time, and 803,244 response bytes. The full diagnostic is [phase-419-arrow-export-mechanism-100k.json.gz](evidence/phase-419-arrow-export-mechanism-100k.json.gz), SHA-256 `9aec2fc1294789eb1c14cc45502791cd41ab158fef2555a13756a102257470da`; it is one instrumentation observation, not a repeated timing.
 
 The full raw baseline/candidate reports and SHA-256 values are:
 
@@ -212,6 +212,58 @@ The full raw baseline/candidate reports and SHA-256 values are:
 | 1 | [phase-419-exports-baseline-pair-1.json.gz](evidence/phase-419-exports-baseline-pair-1.json.gz) | `d21906ec8b7b8b6d37be181c31647f05aa6791e1811b60a2f2490cefd255a84b` | [phase-419-exports-candidate-pair-1.json.gz](evidence/phase-419-exports-candidate-pair-1.json.gz) | `da321980339305e843d0d7920f9c893c65ceaa13c7b839015488526cf90e1474` |
 | 2 | [phase-419-exports-baseline-pair-2.json.gz](evidence/phase-419-exports-baseline-pair-2.json.gz) | `2aa727f3a24365e985b0e21e96fd89d4cdf53d4da39214dac5b255cd4703859c` | [phase-419-exports-candidate-pair-2.json.gz](evidence/phase-419-exports-candidate-pair-2.json.gz) | `d7ddef6b363ffe7691a4fd6f3424039e7423c36f2d19dbe2da5fff70ae87221c` |
 | 3 | [phase-419-exports-baseline-pair-3.json.gz](evidence/phase-419-exports-baseline-pair-3.json.gz) | `cd98e6aeb255eab2c783e9b66fb8150c026038b211cd9b352f9933b1c2f30d8d` | [phase-419-exports-candidate-pair-3.json.gz](evidence/phase-419-exports-candidate-pair-3.json.gz) | `f0ea6c9547162e6c989ed9dfb082db920a136f4bd45c49483cc0943dfbaaf1a8` |
+
+### Projected range speed target
+
+**The original #1736 latency target passes:** `range(100_000).select("id").collect()` is **11.39× faster** at the pooled warm median, falling from **1,005.217 ms to 88.271 ms**. Each of the three fresh runtime pairs exceeds the initial 2× target (11.46×, 11.39×, and 11.27×). The earlier export harness omitted the projection and measured a different execution path. It now retains projected and bare ranges at 1k/10k/100k rows, with distinct workload names. The bare 100k-row `collect()` control improves 1.54× in these runs.
+
+The baseline is the published `sparkless-server-bin==4.18.0` macOS arm64 executable, SHA-256 `1d79128ea8f09c40d980a5e8907b4a967f909b4c2e38ef58097daee0e0b91b13`, reporting `4.18.0`; its release source is `adce3c34de69ab2732de7ab16c8bb4c7445023c5` (`v4.18.0`). The release workflow at that tag builds the server with `cargo build --locked --release -p sparkless-server --no-default-features --features http,connect`. The candidate uses that same release build command at source `41ec36e03cb6f8bd82a65293b0e7e302c74c7c5b`, reports `4.19.0`, and has binary SHA-256 `55b18957519c0603b4c14dbba90ac711a3cd03febf189a0ef2c042223f0f5c31`.
+
+All six reports use the same clean harness revision `41ec36e03cb6f8bd82a65293b0e7e302c74c7c5b`, CPython 3.11.15, unchanged `pyspark-client==4.0.5`, and PyArrow 26.0.0. Host: Apple M4 Pro, 12 logical CPUs, 24 GiB, macOS 26.5.2 arm64; candidate Rust 1.93.1. Both sides use four-thread Polars/Rayon/OpenMP pools, active operations 2, pending operations 16, a 10m-row range cap, a 5-second queue timeout, and a 60-second response timeout. Each fresh server gets one warmup and 20 timed actions per workload. Pair order is baseline/candidate, candidate/baseline, baseline/candidate. Range plan construction, result validation, startup, and shutdown are outside the action timer; local-relation actions include `createDataFrame`. Every returned range value and every local-relation value is checked.
+
+The runner command is the same on both sides, with the executable, source revision, and report path changed. The source launcher is imported from the clean harness checkout; matching installed server-package metadata is supplied for each executable.
+
+```sh
+python tests/connect/benchmark_phase419_exports.py \
+  --server-bin "$SERVER_BIN" --build-features http,connect \
+  --build-profile release --server-source-revision "$SERVER_REVISION" \
+  --iterations 20 --output "$REPORT"
+```
+
+Values below pool 60 samples per side and use nearest-rank p50/p95 in milliseconds. All measured export medians and p95 values improve; the p95 values are descriptive with this sample count. The client peak RSS ranges are 242.4–245.8 MiB on baseline and 245.0–245.3 MiB on candidate. This harness does not measure server RSS or complete the broader #1736 resource/lifecycle acceptance matrix.
+
+| Workload | Released p50 / p95 | Candidate p50 / p95 | p50 speedup |
+| --- | ---: | ---: | ---: |
+| Projected range 1k `collect()` | 24.745 / 28.599 | 0.957 / 1.092 | 25.87× |
+| Projected range 1k `toArrow()` | 24.334 / 24.994 | 0.429 / 0.500 | 56.72× |
+| Projected range 10k `collect()` | 109.945 / 120.876 | 5.752 / 16.652 | 19.11× |
+| Projected range 10k `toArrow()` | 103.842 / 107.786 | 0.786 / 0.902 | 132.05× |
+| Projected range 100k `collect()` | 1005.217 / 1040.453 | 88.271 / 121.799 | 11.39× |
+| Projected range 100k `toArrow()` | 909.688 / 925.651 | 4.293 / 4.442 | 211.88× |
+| Bare range 1k `collect()` | 16.119 / 20.721 | 0.988 / 1.611 | 16.31× |
+| Bare range 1k `toArrow()` | 16.592 / 18.148 | 0.421 / 0.494 | 39.38× |
+| Bare range 10k `collect()` | 23.458 / 35.280 | 5.380 / 16.068 | 4.36× |
+| Bare range 10k `toArrow()` | 18.417 / 22.759 | 0.453 / 0.518 | 40.70× |
+| Bare range 100k `collect()` | 131.494 / 163.819 | 85.514 / 118.882 | 1.54× |
+| Bare range 100k `toArrow()` | 45.953 / 48.386 | 1.381 / 1.579 | 33.27× |
+| Range 100k, LIMIT 1k `collect()` | 16.104 / 19.150 | 0.906 / 1.069 | 17.77× |
+| Range 100k, LIMIT 1k `toArrow()` | 16.929 / 18.184 | 0.420 / 0.523 | 40.26× |
+| Empty filter 1k `collect()` | 47.265 / 50.147 | 0.533 / 0.584 | 88.62× |
+| Empty filter 1k `toArrow()` | 47.417 / 49.948 | 0.525 / 0.603 | 90.27× |
+| Empty filter 10k `collect()` | 330.288 / 352.736 | 1.678 / 1.747 | 196.88× |
+| Empty filter 10k `toArrow()` | 334.350 / 351.742 | 1.695 / 1.777 | 197.26× |
+| Local relation 10k `collect()` | 118.125 / 131.457 | 9.639 / 20.932 | 12.25× |
+| Local relation 10k `toArrow()` | 110.038 / 113.815 | 4.271 / 4.492 | 25.76× |
+| Variable-width `collect()` | 16.483 / 19.379 | 1.327 / 1.442 | 12.42× |
+| Variable-width `toArrow()` | 17.416 / 19.795 | 1.323 / 1.445 | 13.16× |
+
+The six reports record the binary source separately from the harness source, release profile, features, environment, and all raw samples:
+
+| Pair | Released baseline report | SHA-256 | Candidate report | SHA-256 |
+| ---: | --- | --- | --- | --- |
+| 1 | [phase-419-projected-release-baseline-pair-1.json.gz](evidence/phase-419-projected-release-baseline-pair-1.json.gz) | `714b31e92cecdfda060c2b31dc5172970091e8ebd8ec3b2910c770df80b6328c` | [phase-419-projected-release-candidate-pair-1.json.gz](evidence/phase-419-projected-release-candidate-pair-1.json.gz) | `dfb0ce5cd6995c240052796f2a6d107675ffc6a4eaf96baee0b6a89e7f2d0166` |
+| 2 | [phase-419-projected-release-baseline-pair-2.json.gz](evidence/phase-419-projected-release-baseline-pair-2.json.gz) | `173414ccd319090465228b38e4928340a6f26ff80ff914c92f6ec5784e17b12b` | [phase-419-projected-release-candidate-pair-2.json.gz](evidence/phase-419-projected-release-candidate-pair-2.json.gz) | `012937acdedac3c5f51bebcca18b03abd5f03c36562172796a58722651316d7d` |
+| 3 | [phase-419-projected-release-baseline-pair-3.json.gz](evidence/phase-419-projected-release-baseline-pair-3.json.gz) | `8cbb8e4195a03aad152f8ac5930cfd0ea2621d5992c63d121196f3f4674d72fa` | [phase-419-projected-release-candidate-pair-3.json.gz](evidence/phase-419-projected-release-candidate-pair-3.json.gz) | `27f5bdd1716634972b6ed5c2f16e9bb33f675f9bbb84a56d21b853a5c2097b5e` |
 
 ### Paired public range-count measurements
 
@@ -334,7 +386,7 @@ For the post-export/count candidate, the active-2/16-client cohort measured 105.
 
 To isolate the #1738 send-path change, three rotating pairs compared clean 4.19 revisions that differ only in `crates/sparkless-server/src/connect.rs`: the polling baseline at `2d22d4a54f9f05dd3e72d979f600bf9def521dd9` and the wakeup candidate at `f0a81cc6f368355fb01b972443691b9cb1715d66`. Both servers were built with `cargo build --locked --release -p sparkless-server --no-default-features --features http,connect`; both report version `4.19.0`. Each fresh server ran the same public `pyspark-client==4.0.5` harness on an Apple M4 Pro (macOS 26.5.2 arm64), CPython 3.11.15, and PyArrow 26.0.0. Each workload had one warmup and 20 timed samples. Pair order was baseline/candidate, candidate/baseline, baseline/candidate. The harness source worktrees were clean and match the corresponding server revisions.
 
-The table pools 60 samples per side and reports nearest-rank p50/p95 in milliseconds. These p95 values are descriptive with this sample count. The candidate removed the roughly 15 ms send-polling floor from small `toArrow()` and empty-result calls. The 100k row-object `collect()` median improved 1.15× in this sender-only comparison; the broader #1736 target remains open. Client peak RSS was 242.3–245.7 MiB on the baseline and 239.0–246.7 MiB on the candidate; server RSS was not measured by this harness.
+The table pools 60 samples per side and reports nearest-rank p50/p95 in milliseconds. These p95 values are descriptive with this sample count. The candidate removed the roughly 15 ms send-polling floor from small `toArrow()` and empty-result calls. The bare 100k row-object `collect()` median improved 1.15× in this sender-only comparison; the original #1736 reproduction is covered by the [projected-range measurements](#projected-range-speed-target). Client peak RSS was 242.3–245.7 MiB on the baseline and 239.0–246.7 MiB on the candidate; server RSS was not measured by this harness.
 
 | Workload | Polling p50 / p95 | Wakeup p50 / p95 | p50 speedup |
 | --- | ---: | ---: | ---: |
@@ -367,7 +419,7 @@ The six compressed reports retain all per-operation samples, binary hashes, and 
 
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The Quack fixture proves owner sharing and next-statement visibility, but is ignored unless the platform extension path is supplied and does not constitute a Spark differential corpus. The full source lifecycle/write-rejection matrix, clean platform packaging, and measured source resource budgets remain open. D14 and V35/V36 remain open.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
-- #1736–#1738 correctness and instrumentation work has landed. Paired exporter/count reports and a three-pair sender-only release A/B are retained above. The 100k row-object `collect()` target, allocation/buffer measurements, full small-job guardrails, and a scheduler-only mixed-load comparison against the post-export/count intermediate candidate remain open.
+- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 11.39× across three release pairs; paired exporter/count reports and a three-pair sender-only release A/B are retained above. Allocation/buffer measurements, full small-job guardrails, and a scheduler-only mixed-load comparison against the post-export/count intermediate candidate remain open.
 - Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow still needs a successful run, and release publication checks have not been performed.
 
 Accordingly, this evidence record does not mark any 4.19 slice or issue complete and does not authorize release publication.
