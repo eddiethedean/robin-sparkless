@@ -103,15 +103,6 @@ impl DuckDbCatalog {
         })?;
         Self::new(configs)
     }
-
-    fn source_for(&self, alias: &str) -> Result<Arc<ConfiguredSource>, EngineError> {
-        self.sources
-            .get(&alias.to_ascii_lowercase())
-            .cloned()
-            .ok_or_else(|| {
-                EngineError::User(format!("DuckDB source alias '{alias}' is not configured"))
-            })
-    }
 }
 
 impl ExternalCatalogProvider for DuckDbCatalog {
@@ -165,7 +156,9 @@ impl DuckDbCatalog {
         if !valid_identifier(alias) || !valid_identifier(schema) || !valid_identifier(table) {
             return Ok(None);
         }
-        let source = self.source_for(alias)?;
+        let Some(source) = self.sources.get(&alias.to_ascii_lowercase()).cloned() else {
+            return Ok(None);
+        };
         Ok(Some((source, schema.to_string(), table.to_string())))
     }
 }
@@ -262,7 +255,10 @@ impl DuckDbReadSnapshot {
             ));
         }
         if fields.is_empty() {
-            return Ok(None);
+            return Err(EngineError::NotFound(format!(
+                "DuckDB table '{}.{}.{}' was not found",
+                source.alias, schema_name, table_name
+            )));
         }
         let path = source
             .database_path
@@ -299,7 +295,9 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
         if !valid_identifier(alias) || !valid_identifier(schema) || !valid_identifier(table) {
             return Ok(None);
         }
-        let source = self.source_for(alias)?;
+        let Some(source) = self.sources.get(&alias.to_ascii_lowercase()).cloned() else {
+            return Ok(None);
+        };
         let mut state = self
             .state
             .lock()

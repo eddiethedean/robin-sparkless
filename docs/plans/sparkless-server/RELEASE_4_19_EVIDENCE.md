@@ -47,14 +47,31 @@ cargo fmt --all -- --check
 git diff --check
 ```
 
-`crates/robin-sparkless-polars/tests/duckdb_source.rs` adds local fixtures for schema-only reads,
-typed nonempty/empty tables, unknown aliases, duplicate/missing configurations, and snapshot owner
-reuse. That fixture suite has not been run, so Arrow 60-to-Polars IPC interoperability and runtime
-behavior remain unverified. The source is local-file, standalone, and read-only only: Quack/live
-owner mode, cross-process writer visibility, transactional races, disconnect/replay/source-loss
-acceptance, source DDL/DML rejection coverage, platform packaging, and a bounded source connection
-queue are still open. D14 and V35/V36 remain open; the release does not claim live shared-table
-support or complete DuckDB-source acceptance.
+The focused source fixture command then passed all four tests:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home cargo test --locked --release -p robin-sparkless-polars --features duckdb-source --test duckdb_source
+```
+
+This validates Arrow 60-to-Polars IPC interoperability for the fixture's BOOLEAN, SMALLINT,
+INTEGER, BIGINT, finite DOUBLE, VARCHAR, DATE, TIMESTAMPTZ, DECIMAL, null and empty-table cases,
+plus rejection of NaN and nested types, schema-only reads, config rejection, and snapshot owner
+reuse. The public-client smoke also passed through the server and asserts the locked
+`pyspark-client==4.0.5` version:
+
+```sh
+PYTHONPATH=python/sparkless:/tmp/sparkless-duckdb-python-only /tmp/sparkless-linkedin-verify/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin target/release/sparkless-server
+```
+
+It verifies exact values/schema, filter/project, UTC timestamp instant, `count(1)`, null-excluding
+`count(column)` on populated/all-null/empty data, limit zero, empty-table schema, same-owner inner
+join, grouped count/sum, and unsupported source type/value errors. The fixture file was created by
+Python DuckDB 1.5.1; this does not demonstrate simultaneous writer/reader use of one live database
+owner or replace a Spark differential corpus. The source is local-file, standalone,
+and read-only only: Quack/live-owner mode, cross-process writer visibility, transactional races,
+disconnect/replay/source-loss acceptance, source DDL/DML rejection coverage, platform packaging,
+and a bounded source connection queue are still open. D14 and V35/V36 remain open; the release
+does not claim live shared-table support or complete DuckDB-source acceptance.
 
 ## #1736 export and #1737 range-count measurements
 
@@ -95,7 +112,7 @@ For the post-export/count candidate, the active-2/16-client cohort measured 105.
 
 ## Open acceptance gates
 
-- The optional standalone DuckDB source candidate is present and the enabled/disabled server feature configurations compile. Its local fixture suite has not been run. It does not implement Quack/live-owner sharing, an independent source-connection queue, the full source lifecycle/write-rejection matrix, or measured source resource budgets. D14 and V35/V36 remain open. The named-table, join, and grouped-aggregate Connect translator additions are wired to source tables but do not yet have real DuckDB public-client differential evidence.
+- The optional standalone DuckDB source candidate and a focused real DuckDB public-client smoke are present; they do not constitute a Spark differential corpus. It does not implement Quack/live-owner sharing, an independent source-connection queue, the full source lifecycle/write-rejection matrix, or measured source resource budgets. D14 and V35/V36 remain open.
 - The helper has focused lifecycle and public smoke coverage, but its full package-install, import-boundary, fork, startup/session/cleanup failure, nested/reentry, and unrelated-session matrix is still outstanding.
 - #1736/#1737/#1738 correctness and instrumentation work has landed locally, but the complete workload and repeated performance guardrails in the release plan are not all satisfied by the evidence above.
 - No 4.19 API/native/server package version bump, clean-consumer package matrix, exact-commit CI result, or release publication check has been performed.

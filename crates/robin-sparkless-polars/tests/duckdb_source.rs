@@ -23,6 +23,18 @@ fn fixture_database() -> (tempfile::TempDir, std::path::PathBuf) {
                 (1, 10, 'alpha', 12.50, true),
                 (2, 10, 'beta', NULL, false),
                 (3, 20, 'gamma', 7.25, true);
+            CREATE TABLE typed_events (
+                small SMALLINT,
+                score DOUBLE,
+                day DATE,
+                seen_at TIMESTAMPTZ
+            );
+            INSERT INTO typed_events VALUES
+                (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
+            CREATE TABLE non_finite_events (score DOUBLE);
+            INSERT INTO non_finite_events VALUES (CAST('NaN' AS DOUBLE));
+            CREATE TABLE nested_events (items INTEGER[]);
+            INSERT INTO nested_events VALUES ([1, 2]);
             CREATE TABLE empty_events (id BIGINT NOT NULL, label VARCHAR);",
         )
         .expect("populate DuckDB fixture");
@@ -53,7 +65,7 @@ fn duckdb_read_only_catalog_resolves_schema_and_streams_typed_batches() {
     let analyzed = session
         .table_schema_only("warehouse.main.events")
         .expect("analyze table schema");
-    assert!(analyzed.collect_rows().unwrap().is_empty());
+    assert!(analyzed.collect_as_json_rows().unwrap().is_empty());
     let schema = analyzed.schema_engine().unwrap();
     let fields = schema.logical_fields();
     assert_eq!(
@@ -72,12 +84,25 @@ fn duckdb_read_only_catalog_resolves_schema_and_streams_typed_batches() {
     let loaded = session
         .table("warehouse.events")
         .expect("read DuckDB table");
-    let rows = loaded.collect_rows().unwrap();
+    let rows = loaded.collect_as_json_rows().unwrap();
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0]["label"], serde_json::json!("alpha"));
-    assert_eq!(rows[0]["amount"], serde_json::json!(12.5));
+    assert_eq!(rows[0]["amount"], serde_json::json!("12.50"));
     assert_eq!(rows[1]["amount"], serde_json::Value::Null);
     assert_eq!(rows[2]["id"], serde_json::json!(3));
+
+    let typed = session
+        .table("warehouse.typed_events")
+        .expect("read typed scalar table");
+    let typed_schema = typed.schema_engine().unwrap();
+    let typed_fields = typed_schema.logical_fields();
+    assert!(matches!(typed_fields[0].data_type, DataType::Short));
+    assert!(matches!(typed_fields[1].data_type, DataType::Double));
+    assert!(matches!(typed_fields[2].data_type, DataType::Date));
+    assert!(matches!(typed_fields[3].data_type, DataType::Timestamp));
+    assert_eq!(typed.collect_as_json_rows().unwrap().len(), 1);
+    assert!(session.table("warehouse.non_finite_events").is_err());
+    assert!(session.table("warehouse.nested_events").is_err());
 }
 
 #[test]
@@ -91,7 +116,7 @@ fn duckdb_empty_tables_keep_their_declared_schema_and_unknown_aliases_fail() {
     let empty = session
         .table("warehouse.main.empty_events")
         .expect("read empty table");
-    assert!(empty.collect_rows().unwrap().is_empty());
+    assert!(empty.collect_as_json_rows().unwrap().is_empty());
     assert_eq!(
         empty
             .schema_engine()
@@ -147,5 +172,10 @@ fn duckdb_read_snapshot_reuses_one_database_owner_for_multiple_tables() {
             .unwrap()
             .is_some()
     );
-    assert!(snapshot.resolve_table("other_database.events").is_err());
+    assert!(
+        snapshot
+            .resolve_table("other_database.events")
+            .unwrap()
+            .is_none()
+    );
 }

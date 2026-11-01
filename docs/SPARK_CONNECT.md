@@ -102,8 +102,8 @@ protocol: an operation is supported only when it is listed here and covered by t
 ## Phase 4.19 branch additions (pre-release)
 
 The `codex/release-4.19` branch adds optional named-table relations, aliases, joins, grouped
-count/sum, and the `SparklessConnect` helper. The helper behavior is described above; phase
-acceptance and release remain open.
+count/sum, global `count(column)`, and the `SparklessConnect` helper. The helper behavior is
+described above; phase acceptance and release remain open.
 
 Build the native server with `--features connect,duckdb-source` to enable configured local
 DuckDB sources. The default server build does not include DuckDB. Set a trusted alias-to-file map
@@ -117,10 +117,14 @@ SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/wareh
 The client can read `warehouse.main.events` or `warehouse.events`. Schema analysis resolves
 metadata without scanning rows. Execution opens the configured database read-only and retains one
 statement transaction while it exports typed batches to Polars. A statement can read only one
-configured database owner. Enforced source limits are 1,000,000 rows, 32 MiB of Arrow IPC input,
+configured database owner. Configured aliases reserve their qualified namespace; a missing source
+table does not fall through to a managed table with the same name. Enforced source limits are
+1,000,000 rows, 32 MiB of Arrow IPC input,
 and 64 MiB of decoded data per statement, plus 16,384 rows and 1 MiB per batch.
 The supported source types are BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE, VARCHAR, DATE,
 TIMESTAMPTZ, and DECIMAL with precision at most 38 and scale no greater than precision.
+The branch's public-client source smoke covers table reads, filter/project/limit, row and
+non-null-column counts, same-owner inner joins, and grouped count/sum.
 
 This is currently standalone read-only file mode. Independent writers sharing a live DuckDB
 owner through Quack are not implemented or certified; D14 and V36 remain open. DuckDB writes,

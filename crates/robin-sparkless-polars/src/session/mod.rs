@@ -3787,6 +3787,12 @@ impl SparkSession {
         self.table_impl_with_source(name, true, false, None, CancellationToken::new(), false)
     }
 
+    fn empty_dataframe_with_schema(&self, schema: StructType) -> Result<DataFrame, PolarsError> {
+        let empty = PlDataFrame::empty_with_schema(&schema.to_polars_schema());
+        DataFrame::from_eager_with_options(empty, self.is_case_sensitive())
+            .with_logical_schema(schema)
+    }
+
     /// Resolve and scan a table in the caller's statement-wide external source snapshot.
     pub fn table_in_read_snapshot(
         &self,
@@ -3857,6 +3863,20 @@ impl SparkSession {
         } {
             return Ok(df);
         }
+        let (mut external_df, mut has_external_provider) = (None, provider_configured);
+        // External aliases are qualified namespaces. Resolve them before the managed catalog
+        // validates the first component as a registered database (for example, `warehouse`).
+        if resolve_external && name.contains('.') {
+            (external_df, has_external_provider) = self.resolve_external_table_for_read(
+                name,
+                source_snapshot.clone(),
+                &token,
+                materialize_external,
+            )?;
+            if let Some(df) = external_df.as_ref() {
+                return Ok(df.clone());
+            }
+        }
         self.check_saved_table_database(name)?;
         let saved_table_key = self.saved_table_key(name);
         if let Some(df) = self
@@ -3868,7 +3888,7 @@ impl SparkSession {
         {
             return Ok(df);
         }
-        let (external_df, has_external_provider) = if resolve_external {
+        let (external_df, has_external_provider) = if resolve_external && !name.contains('.') {
             self.resolve_external_table_for_read(
                 name,
                 source_snapshot,
@@ -3876,7 +3896,7 @@ impl SparkSession {
                 materialize_external,
             )?
         } else {
-            (None, provider_configured)
+            (external_df, has_external_provider)
         };
         if let Some(df) = external_df {
             return Ok(df);
@@ -3965,16 +3985,7 @@ impl SparkSession {
             )
         })?;
         if !materialize {
-            let (empty, _) = self
-                .create_dataframe_from_arrow_ipc(
-                    None,
-                    Some(descriptor.schema.clone()),
-                    1024 * 1024,
-                    0,
-                    64 * 1024 * 1024,
-                    512 * 1024,
-                )
-                .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+            let empty = self.empty_dataframe_with_schema(descriptor.schema.clone())?;
             return Ok((Some(empty), true));
         }
         let frame =
@@ -4121,8 +4132,19 @@ impl SparkSession {
                     64 * 1024 * 1024,
                     512 * 1024,
                 )?;
-                let decoded = decoded
+                let mut decoded = decoded
                     .collect()
+                    .map_err(|error| EngineError::User(error.to_string()))?
+                    .as_ref()
+                    .clone();
+                let source_names = descriptor
+                    .schema
+                    .logical_fields()
+                    .iter()
+                    .map(|field| field.name.clone())
+                    .collect::<Vec<_>>();
+                decoded
+                    .set_column_names(&source_names)
                     .map_err(|error| EngineError::User(error.to_string()))?;
                 snapshot.charge_decoded_bytes(decoded.estimated_size())?;
                 match frame.as_mut() {
@@ -4131,7 +4153,7 @@ impl SparkSession {
                             .vstack_mut(&decoded)
                             .map_err(|error| EngineError::User(error.to_string()))?;
                     }
-                    None => frame = Some(decoded.as_ref().clone()),
+                    None => frame = Some(decoded),
                 }
                 Ok(())
             })
@@ -4142,18 +4164,7 @@ impl SparkSession {
         let dataframe = match frame {
             Some(frame) => DataFrame::from_polars_with_options(frame, self.is_case_sensitive())
                 .with_logical_schema(descriptor.schema.clone())?,
-            None => {
-                self.create_dataframe_from_arrow_ipc(
-                    None,
-                    Some(descriptor.schema.clone()),
-                    1024 * 1024,
-                    0,
-                    64 * 1024 * 1024,
-                    512 * 1024,
-                )
-                .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?
-                .0
-            }
+            None => self.empty_dataframe_with_schema(descriptor.schema.clone())?,
         };
         let _ = name;
         Ok(dataframe)

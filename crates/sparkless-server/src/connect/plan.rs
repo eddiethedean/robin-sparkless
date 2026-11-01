@@ -530,16 +530,24 @@ fn translate_relation_with_context(
             let physical_schema = input.dataframe.schema_engine().map_err(engine_failure)?;
             validate_connect_aggregate_types(&physical_schema, &expressions)?;
             if aggregate.grouping_expressions.is_empty() {
-                if expressions.len() != 1 || !is_global_count_rows(&expressions[0]) {
+                let [expression] = expressions.as_slice() else {
                     return Err(unsupported(
-                        "only global count(1) is supported without grouping expressions",
+                        "one global count(1) or count(column) is supported without grouping expressions",
+                    ));
+                };
+                let global_count_rows = is_global_count_rows(expression);
+                if !global_count_rows && !is_global_count_column(expression) {
+                    return Err(unsupported(
+                        "global aggregation supports count(1) or count(column) only",
                     ));
                 }
                 let dataframe = input
                     .dataframe
                     .select_expr_ir(&expressions)
                     .map_err(engine_failure)?;
-                deferred_count_input = Some(input.dataframe);
+                if global_count_rows {
+                    deferred_count_input = Some(input.dataframe);
+                }
                 let schema = StructType::from_logical_fields(vec![LogicalField::new(
                     aggregate_output_name(&aggregate.aggregate_expressions[0], &input.schema)?,
                     DataType::Long,
@@ -1242,6 +1250,19 @@ fn is_global_count_rows(expression: &ExprIr) -> bool {
         ExprIr::Call { name, args } if name == "alias" => {
             matches!(args.as_slice(), [inner, ExprIr::Lit(LiteralValue::Str(_))]
                 if is_global_count_rows(inner))
+        }
+        _ => false,
+    }
+}
+
+fn is_global_count_column(expression: &ExprIr) -> bool {
+    match expression {
+        ExprIr::Call { name, args } if name == "count" => {
+            matches!(args.as_slice(), [ExprIr::Column(_)])
+        }
+        ExprIr::Call { name, args } if name == "alias" => {
+            matches!(args.as_slice(), [inner, ExprIr::Lit(LiteralValue::Str(_))]
+                if is_global_count_column(inner))
         }
         _ => false,
     }
