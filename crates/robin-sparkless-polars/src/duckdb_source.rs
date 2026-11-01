@@ -1,11 +1,11 @@
 //! Optional, read-only DuckDB catalog integration for Polars.
 //!
-//! The native source currently supports local DuckDB files. The catalog never accepts a path
-//! from a table identifier: the server supplies a trusted alias-to-path map. A statement uses
-//! one DuckDB read transaction and exports typed Arrow IPC batches before Polars evaluates its
-//! relational plan.
+//! Sources can be standalone local files or DuckDB owners served over Quack. The catalog never
+//! accepts a path, URI, extension, or credential from a table identifier: the server supplies a
+//! trusted alias-to-source map. A statement uses one DuckDB read transaction and exports typed
+//! Arrow IPC batches before Polars evaluates its relational plan.
 
-use duckdb::{AccessMode, Config, Connection, InterruptHandle, params};
+use duckdb::{AccessMode, Config, Connection, InterruptHandle};
 use robin_sparkless_core::engine::{
     ArrowIpcStream, CancellationToken, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
     ExternalTableDescriptor, ExternalTableFormat,
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -29,8 +29,12 @@ pub const DUCKDB_SOURCE_MAX_DECODED_BYTES: usize = 64 * 1024 * 1024;
 pub const DUCKDB_SOURCE_MAX_BATCH_BYTES: usize = 1024 * 1024;
 /// Maximum rows accepted in one DuckDB-produced source batch.
 pub const DUCKDB_SOURCE_MAX_BATCH_ROWS: usize = 16_384;
+/// Maximum simultaneously open DuckDB source connections per configured catalog.
+pub const DUCKDB_SOURCE_MAX_CONNECTIONS: usize = 4;
+/// Maximum source operations queued while waiting for a DuckDB connection.
+pub const DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS: usize = 16;
 
-/// Trusted server configuration for a read-only DuckDB database alias.
+/// Trusted server configuration for a read-only standalone DuckDB database alias.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DuckDbSourceConfig {
@@ -40,68 +44,242 @@ pub struct DuckDbSourceConfig {
     pub database_path: PathBuf,
 }
 
-#[derive(Debug, Clone)]
+/// Trusted server configuration for a read-only Quack-backed DuckDB alias.
+///
+/// `extension_path` must point to the Quack extension built for the exact DuckDB version and
+/// platform bundled with this Sparkless build. Keeping the extension path explicit prevents a
+/// source connection from downloading executable code at runtime.
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DuckDbQuackSourceConfig {
+    /// Prefix clients use in table names, such as `warehouse` in `warehouse.main.events`.
+    pub alias: String,
+    /// Quack URI such as `quack:localhost:9494` or `quack://localhost:9494`.
+    pub quack_uri: String,
+    /// Quack authentication token supplied by the trusted deployment configuration.
+    pub token: String,
+    /// Exact local DuckDB 2.0.0 Quack extension binary to load.
+    pub extension_path: PathBuf,
+    /// Optional transport override. Omit to use Quack's local/remote defaults.
+    #[serde(default)]
+    pub disable_ssl: Option<bool>,
+    /// Optional expected TLS certificate fingerprint for a self-signed remote certificate.
+    #[serde(default)]
+    pub ssl_fingerprint: Option<String>,
+}
+
+impl std::fmt::Debug for DuckDbQuackSourceConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DuckDbQuackSourceConfig")
+            .field("alias", &self.alias)
+            .field("quack_uri", &self.quack_uri)
+            .field("token", &"[redacted]")
+            .field("extension_path", &self.extension_path)
+            .field("disable_ssl", &self.disable_ssl)
+            .field(
+                "ssl_fingerprint",
+                &self.ssl_fingerprint.as_ref().map(|_| "[redacted]"),
+            )
+            .finish()
+    }
+}
+
+/// One trusted source definition accepted by [`DuckDbCatalog::new_with_sources`].
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum DuckDbSourceSpec {
+    /// Standalone read-only file mode.
+    Local(DuckDbSourceConfig),
+    /// Shared-owner Quack mode.
+    Quack(DuckDbQuackSourceConfig),
+}
+
+#[derive(Clone)]
+enum ConfiguredOwner {
+    Local {
+        database_path: PathBuf,
+    },
+    Quack {
+        uri: String,
+        token: String,
+        extension_path: PathBuf,
+        disable_ssl: Option<bool>,
+        ssl_fingerprint: Option<String>,
+    },
+}
+
+impl ConfiguredOwner {
+    fn identity(&self) -> String {
+        match self {
+            Self::Local { database_path } => database_path.to_string_lossy().into_owned(),
+            Self::Quack { uri, .. } => uri.clone(),
+        }
+    }
+
+    fn quack_endpoint(&self) -> Option<&str> {
+        match self {
+            Self::Quack { uri, .. } => Some(uri),
+            Self::Local { .. } => None,
+        }
+    }
+
+    fn same_quack_connection(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Quack {
+                    uri: left_uri,
+                    token: left_token,
+                    extension_path: left_extension,
+                    disable_ssl: left_disable_ssl,
+                    ssl_fingerprint: left_fingerprint,
+                },
+                Self::Quack {
+                    uri: right_uri,
+                    token: right_token,
+                    extension_path: right_extension,
+                    disable_ssl: right_disable_ssl,
+                    ssl_fingerprint: right_fingerprint,
+                },
+            ) => {
+                left_uri == right_uri
+                    && left_token == right_token
+                    && left_extension == right_extension
+                    && left_disable_ssl == right_disable_ssl
+                    && left_fingerprint == right_fingerprint
+            }
+            _ => false,
+        }
+    }
+}
+
+const QUACK_CATALOG: &str = "__sparkless_quack_source";
+
+#[derive(Clone)]
 struct ConfiguredSource {
     alias: String,
-    database_path: PathBuf,
+    owner: ConfiguredOwner,
 }
 
 /// Read-only DuckDB table resolver. This source is opt-in through the `duckdb-source` feature.
 pub struct DuckDbCatalog {
     sources: HashMap<String, Arc<ConfiguredSource>>,
+    pool: Arc<SourceConnectionPool>,
 }
 
 impl DuckDbCatalog {
     /// Validate and freeze trusted source aliases and paths.
     pub fn new(configs: impl IntoIterator<Item = DuckDbSourceConfig>) -> Result<Self, EngineError> {
+        Self::new_with_sources(configs.into_iter().map(DuckDbSourceSpec::Local))
+    }
+
+    /// Validate and freeze trusted local-file and Quack source definitions.
+    pub fn new_with_sources(
+        configs: impl IntoIterator<Item = DuckDbSourceSpec>,
+    ) -> Result<Self, EngineError> {
         let mut sources = HashMap::new();
-        for config in configs {
-            if !valid_identifier(&config.alias) {
+        for spec in configs {
+            let (alias_value, owner) = match spec {
+                DuckDbSourceSpec::Local(config) => {
+                    let database_path =
+                        std::fs::canonicalize(&config.database_path).map_err(|error| {
+                            EngineError::User(format!(
+                                "DuckDB source '{}' database path is unavailable: {error}",
+                                config.alias
+                            ))
+                        })?;
+                    if !database_path.is_file() {
+                        return Err(EngineError::User(format!(
+                            "DuckDB source '{}' path is not a database file",
+                            config.alias
+                        )));
+                    }
+                    (config.alias, ConfiguredOwner::Local { database_path })
+                }
+                DuckDbSourceSpec::Quack(config) => {
+                    validate_quack_uri(&config.quack_uri)?;
+                    if config.token.trim().len() < 4 {
+                        return Err(EngineError::User(format!(
+                            "DuckDB Quack source '{}' requires a token of at least four characters",
+                            config.alias
+                        )));
+                    }
+                    if config.disable_ssl == Some(true) && config.ssl_fingerprint.is_some() {
+                        return Err(EngineError::User(format!(
+                            "DuckDB Quack source '{}' cannot set an SSL fingerprint when SSL is disabled",
+                            config.alias
+                        )));
+                    }
+                    let extension_path =
+                        std::fs::canonicalize(&config.extension_path).map_err(|error| {
+                            EngineError::User(format!(
+                                "DuckDB Quack source '{}' extension path is unavailable: {error}",
+                                config.alias
+                            ))
+                        })?;
+                    if !extension_path.is_file()
+                        || extension_path.file_name().and_then(|name| name.to_str())
+                            != Some("quack.duckdb_extension")
+                    {
+                        return Err(EngineError::User(format!(
+                            "DuckDB Quack source '{}' extension path must name quack.duckdb_extension",
+                            config.alias
+                        )));
+                    }
+                    (
+                        config.alias,
+                        ConfiguredOwner::Quack {
+                            uri: config.quack_uri,
+                            token: config.token,
+                            extension_path,
+                            disable_ssl: config.disable_ssl,
+                            ssl_fingerprint: config.ssl_fingerprint,
+                        },
+                    )
+                }
+            };
+            if let Some(endpoint) = owner.quack_endpoint()
+                && sources.values().any(|configured: &Arc<ConfiguredSource>| {
+                    configured.owner.quack_endpoint() == Some(endpoint)
+                        && !configured.owner.same_quack_connection(&owner)
+                })
+            {
+                return Err(EngineError::User(
+                    "DuckDB Quack aliases for one endpoint must use the same token and transport settings"
+                        .into(),
+                ));
+            }
+            if !valid_identifier(&alias_value) {
                 return Err(EngineError::User(format!(
                     "DuckDB source alias {:?} must be a simple identifier",
-                    config.alias
+                    alias_value
                 )));
             }
-            let alias = config.alias.to_ascii_lowercase();
+            let alias = alias_value.to_ascii_lowercase();
             if sources.contains_key(&alias) {
                 return Err(EngineError::User(format!(
                     "duplicate DuckDB source alias '{alias}'"
                 )));
             }
-            let database_path = std::fs::canonicalize(&config.database_path).map_err(|error| {
-                EngineError::User(format!(
-                    "DuckDB source '{}' database path is unavailable: {error}",
-                    config.alias
-                ))
-            })?;
-            if !database_path.is_file() {
-                return Err(EngineError::User(format!(
-                    "DuckDB source '{}' path is not a database file",
-                    config.alias
-                )));
-            }
-            sources.insert(
-                alias.clone(),
-                Arc::new(ConfiguredSource {
-                    alias,
-                    database_path,
-                }),
-            );
+            sources.insert(alias.clone(), Arc::new(ConfiguredSource { alias, owner }));
         }
         if sources.is_empty() {
             return Err(EngineError::User(
                 "at least one DuckDB source alias is required".into(),
             ));
         }
-        Ok(Self { sources })
+        Ok(Self {
+            sources,
+            pool: Arc::new(SourceConnectionPool::default()),
+        })
     }
 
     /// Parse the JSON value used by `SPARKLESS_DUCKDB_SOURCES`.
     pub fn from_json(json: &str) -> Result<Self, EngineError> {
-        let configs: Vec<DuckDbSourceConfig> = serde_json::from_str(json).map_err(|error| {
+        let configs: Vec<DuckDbSourceSpec> = serde_json::from_str(json).map_err(|error| {
             EngineError::User(format!("invalid SPARKLESS_DUCKDB_SOURCES JSON: {error}"))
         })?;
-        Self::new(configs)
+        Self::new_with_sources(configs)
     }
 }
 
@@ -113,7 +291,11 @@ impl ExternalCatalogProvider for DuckDbCatalog {
         let Some((source, schema_name, table_name)) = self.parse_identifier(identifier)? else {
             return Ok(None);
         };
-        let snapshot = DuckDbReadSnapshot::new(self.sources.clone());
+        let snapshot = DuckDbReadSnapshot::new(
+            self.sources.clone(),
+            Arc::clone(&self.pool),
+            CancellationToken::new(),
+        );
         let mut state = snapshot
             .state
             .lock()
@@ -128,6 +310,8 @@ impl ExternalCatalogProvider for DuckDbCatalog {
         token.check_cancelled()?;
         Ok(Some(Arc::new(DuckDbReadSnapshot::new(
             self.sources.clone(),
+            Arc::clone(&self.pool),
+            token.clone(),
         ))))
     }
 
@@ -137,7 +321,8 @@ impl ExternalCatalogProvider for DuckDbCatalog {
         token: &CancellationToken,
         consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
     ) -> Result<(), EngineError> {
-        let snapshot = DuckDbReadSnapshot::new(self.sources.clone());
+        let snapshot =
+            DuckDbReadSnapshot::new(self.sources.clone(), Arc::clone(&self.pool), token.clone());
         snapshot.scan_table(table, token, consume)
     }
 }
@@ -163,13 +348,89 @@ impl DuckDbCatalog {
     }
 }
 
+/*
+ * Source ownership, lookup, and scanning are deliberately implemented below the public
+ * configuration surface so table identifiers never carry connection details.
+ */
+
 struct DuckDbSnapshotState {
     connection: Option<Connection>,
-    database_path: Option<PathBuf>,
+    owner_identity: Option<String>,
+    permit: Option<SourceConnectionPermit>,
+}
+
+#[derive(Default)]
+struct SourceConnectionPool {
+    state: Mutex<SourceConnectionPoolState>,
+    available: Condvar,
+}
+
+#[derive(Default)]
+struct SourceConnectionPoolState {
+    active: usize,
+    waiting: usize,
+}
+
+impl SourceConnectionPool {
+    fn acquire(
+        self: &Arc<Self>,
+        token: &CancellationToken,
+    ) -> Result<SourceConnectionPermit, EngineError> {
+        token.check_cancelled()?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| EngineError::Internal("DuckDB source pool lock poisoned".into()))?;
+        if state.active >= DUCKDB_SOURCE_MAX_CONNECTIONS {
+            if state.waiting >= DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS {
+                return Err(EngineError::User(format!(
+                    "DuckDB source connection queue is full ({DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS} waiting operations)"
+                )));
+            }
+            state.waiting += 1;
+            while state.active >= DUCKDB_SOURCE_MAX_CONNECTIONS {
+                if token.is_cancelled() {
+                    state.waiting -= 1;
+                    self.available.notify_one();
+                    return Err(EngineError::Cancelled("operation cancelled".into()));
+                }
+                let (next_state, _) = self
+                    .available
+                    .wait_timeout(state, Duration::from_millis(10))
+                    .map_err(|_| {
+                        EngineError::Internal("DuckDB source pool lock poisoned".into())
+                    })?;
+                state = next_state;
+            }
+            state.waiting -= 1;
+        }
+        state.active += 1;
+        Ok(SourceConnectionPermit {
+            pool: Arc::clone(self),
+        })
+    }
+}
+
+struct SourceConnectionPermit {
+    pool: Arc<SourceConnectionPool>,
+}
+
+impl Drop for SourceConnectionPermit {
+    fn drop(&mut self) {
+        let mut state = self
+            .pool
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.active = state.active.saturating_sub(1);
+        self.pool.available.notify_one();
+    }
 }
 
 struct DuckDbReadSnapshot {
     sources: HashMap<String, Arc<ConfiguredSource>>,
+    pool: Arc<SourceConnectionPool>,
+    token: CancellationToken,
     state: Mutex<DuckDbSnapshotState>,
     rows: AtomicU64,
     ipc_bytes: AtomicUsize,
@@ -178,12 +439,19 @@ struct DuckDbReadSnapshot {
 }
 
 impl DuckDbReadSnapshot {
-    fn new(sources: HashMap<String, Arc<ConfiguredSource>>) -> Self {
+    fn new(
+        sources: HashMap<String, Arc<ConfiguredSource>>,
+        pool: Arc<SourceConnectionPool>,
+        token: CancellationToken,
+    ) -> Self {
         Self {
             sources,
+            pool,
+            token,
             state: Mutex::new(DuckDbSnapshotState {
                 connection: None,
-                database_path: None,
+                owner_identity: None,
+                permit: None,
             }),
             rows: AtomicU64::new(0),
             ipc_bytes: AtomicUsize::new(0),
@@ -206,8 +474,9 @@ impl DuckDbReadSnapshot {
         state: &'a mut DuckDbSnapshotState,
         source: &ConfiguredSource,
     ) -> Result<&'a Connection, EngineError> {
-        if let Some(path) = state.database_path.as_ref() {
-            if path != &source.database_path {
+        let owner_identity = source.owner.identity();
+        if let Some(existing_owner) = state.owner_identity.as_ref() {
+            if existing_owner != &owner_identity {
                 return Err(EngineError::User(
                     "one Connect statement cannot read DuckDB tables from different database owners"
                         .into(),
@@ -216,14 +485,16 @@ impl DuckDbReadSnapshot {
             return Ok(state
                 .connection
                 .as_ref()
-                .expect("path and connection match"));
+                .expect("owner identity and connection match"));
         }
-        let connection = open_read_only(&source.database_path)?;
+        let permit = self.pool.acquire(&self.token)?;
+        let connection = open_source(&source.owner)?;
         connection
             .execute_batch("BEGIN TRANSACTION")
             .map_err(duckdb_failure)?;
-        state.database_path = Some(source.database_path.clone());
+        state.owner_identity = Some(owner_identity);
         state.connection = Some(connection);
+        state.permit = Some(permit);
         Ok(state.connection.as_ref().expect("connection just inserted"))
     }
 
@@ -235,14 +506,32 @@ impl DuckDbReadSnapshot {
         table_name: &str,
     ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
         let connection = self.ensure_connection(state, &source)?;
-        let sql = "SELECT column_name, data_type, is_nullable FROM information_schema.columns \
-                   WHERE lower(table_schema) = lower(?) AND lower(table_name) = lower(?) \
-                   ORDER BY ordinal_position";
+        let sql = match &source.owner {
+            ConfiguredOwner::Local { .. } => format!(
+                "SELECT column_name, data_type, is_nullable FROM information_schema.columns \
+                 WHERE lower(table_schema) = lower({}) AND lower(table_name) = lower({}) \
+                 ORDER BY ordinal_position",
+                quote_literal(schema_name),
+                quote_literal(table_name)
+            ),
+            ConfiguredOwner::Quack { .. } => {
+                let remote_query = format!(
+                    "SELECT column_name, data_type, is_nullable \
+                     FROM information_schema.columns \
+                     WHERE lower(table_schema) = lower({}) AND lower(table_name) = lower({}) \
+                     ORDER BY ordinal_position",
+                    quote_literal(schema_name),
+                    quote_literal(table_name)
+                );
+                format!(
+                    "SELECT column_name, data_type, is_nullable FROM quack_query_by_name({}, {}, use_transaction := true)",
+                    quote_literal(QUACK_CATALOG),
+                    quote_literal(&remote_query)
+                )
+            }
+        };
         let mut statement = connection.prepare(&sql).map_err(duckdb_failure)?;
-        let described = statement
-            .query(params![schema_name, table_name])
-            .map_err(duckdb_failure)?;
-        let mut rows = described;
+        let mut rows = statement.query([]).map_err(duckdb_failure)?;
         let mut fields = Vec::new();
         while let Some(row) = rows.next().map_err(duckdb_failure)? {
             let name: String = row.get(0).map_err(duckdb_failure)?;
@@ -260,13 +549,9 @@ impl DuckDbReadSnapshot {
                 source.alias, schema_name, table_name
             )));
         }
-        let path = source
-            .database_path
-            .to_str()
-            .ok_or_else(|| EngineError::User("DuckDB database paths must be valid UTF-8".into()))?;
         let descriptor = ExternalTableDescriptor {
             table_id: format!("duckdb:{}:{schema_name}:{table_name}", source.alias),
-            canonical_location: path.to_string(),
+            canonical_location: source.owner.identity(),
             schema: StructType::from_logical_fields(fields),
             version: None,
             provider: "duckdb-rs-1.20000.1".into(),
@@ -343,9 +628,9 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
                 ));
             }
             let source = self.source_for(alias)?;
-            if table.canonical_location != source.database_path.to_string_lossy() {
+            if table.canonical_location != source.owner.identity() {
                 return Err(EngineError::User(
-                    "DuckDB table descriptor does not match its configured source path".into(),
+                    "DuckDB table descriptor does not match its configured source owner".into(),
                 ));
             }
             let mut state = self
@@ -356,11 +641,20 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
             token.check_cancelled()?;
             let _watchdog =
                 CancellationWatchdog::new(token.clone(), connection.interrupt_handle())?;
-            let sql = format!(
-                "SELECT * FROM {}.{}",
-                quote_identifier(schema),
-                quote_identifier(table_name)
-            );
+            let table_reference = match &source.owner {
+                ConfiguredOwner::Local { .. } => format!(
+                    "{}.{}",
+                    quote_identifier(schema),
+                    quote_identifier(table_name)
+                ),
+                ConfiguredOwner::Quack { .. } => format!(
+                    "{}.{}.{}",
+                    quote_identifier(QUACK_CATALOG),
+                    quote_identifier(schema),
+                    quote_identifier(table_name)
+                ),
+            };
+            let sql = format!("SELECT * FROM {table_reference}");
             let mut statement = connection.prepare(&sql).map_err(duckdb_failure)?;
             let mut batches = statement.stream_arrow([]).map_err(duckdb_failure)?;
             while let Some(batch) = batches.next() {
@@ -510,10 +804,77 @@ fn open_read_only(path: &Path) -> Result<Connection, EngineError> {
         .access_mode(AccessMode::ReadOnly)
         .map_err(duckdb_failure)?;
     let connection = Connection::open_with_flags(path, config).map_err(duckdb_failure)?;
+    configure_connection(&connection)?;
+    Ok(connection)
+}
+
+fn open_source(owner: &ConfiguredOwner) -> Result<Connection, EngineError> {
+    match owner {
+        ConfiguredOwner::Local { database_path } => open_read_only(database_path),
+        ConfiguredOwner::Quack {
+            uri,
+            token,
+            extension_path,
+            disable_ssl,
+            ssl_fingerprint,
+        } => {
+            let connection = Connection::open_in_memory().map_err(duckdb_failure)?;
+            configure_connection(&connection)?;
+            let extension_path = extension_path.to_str().ok_or_else(|| {
+                EngineError::User("DuckDB Quack extension paths must be valid UTF-8".into())
+            })?;
+            connection
+                .execute_batch(&format!("LOAD {}", quote_literal(extension_path)))
+                .map_err(duckdb_failure)?;
+
+            let mut options = vec![format!("TOKEN {}", quote_literal(token))];
+            if let Some(disable_ssl) = disable_ssl {
+                options.push(format!("DISABLE_SSL {disable_ssl}"));
+            }
+            if let Some(fingerprint) = ssl_fingerprint {
+                options.push(format!("SSL_FINGERPRINT {}", quote_literal(fingerprint)));
+            }
+            let attach = format!(
+                "ATTACH {} AS {} ({})",
+                quote_literal(uri),
+                quote_identifier(QUACK_CATALOG),
+                options.join(", ")
+            );
+            connection
+                .execute_batch(&attach)
+                .map_err(|error| duckdb_quack_failure(error, token))?;
+            Ok(connection)
+        }
+    }
+}
+
+fn configure_connection(connection: &Connection) -> Result<(), EngineError> {
     connection
         .execute_batch("SET TimeZone = 'UTC'; SET threads = 1; SET memory_limit = '256MB';")
         .map_err(duckdb_failure)?;
-    Ok(connection)
+    Ok(())
+}
+
+fn validate_quack_uri(uri: &str) -> Result<(), EngineError> {
+    let address = uri
+        .strip_prefix("quack://")
+        .or_else(|| uri.strip_prefix("quack:"));
+    let Some(address) = address else {
+        return Err(EngineError::User(
+            "DuckDB Quack source URI must use the quack: scheme".into(),
+        ));
+    };
+    let invalid = address.is_empty()
+        || address.chars().any(|character| {
+            character.is_whitespace()
+                || matches!(character, '\'' | '"' | '@' | '/' | '?' | '#' | '\\' | '\0')
+        });
+    if invalid {
+        return Err(EngineError::User(
+            "DuckDB Quack source URI must contain only a host and optional port".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_batch_scalars(
@@ -622,6 +983,10 @@ fn quote_identifier(identifier: &str) -> String {
     format!("\"{}\"", identifier.replace('"', "\"\""))
 }
 
+fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
 fn valid_identifier(identifier: &str) -> bool {
     let mut chars = identifier.chars();
     chars
@@ -632,4 +997,72 @@ fn valid_identifier(identifier: &str) -> bool {
 
 fn duckdb_failure(error: impl std::fmt::Display) -> EngineError {
     EngineError::User(format!("DuckDB source operation failed: {error}"))
+}
+
+fn duckdb_quack_failure(error: impl std::fmt::Display, token: &str) -> EngineError {
+    let message = error.to_string().replace(token, "[redacted]");
+    EngineError::User(format!("DuckDB Quack source operation failed: {message}"))
+}
+
+#[cfg(test)]
+mod source_pool_tests {
+    use super::*;
+    use std::thread;
+
+    fn wait_for_waiters(pool: &SourceConnectionPool, expected: usize) {
+        for _ in 0..10_000 {
+            if pool.state.lock().unwrap().waiting == expected {
+                return;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        panic!("source pool did not reach {expected} waiters");
+    }
+
+    #[test]
+    fn source_pool_enforces_connection_and_queue_caps() {
+        let pool = Arc::new(SourceConnectionPool::default());
+        let token = CancellationToken::new();
+        let active = (0..DUCKDB_SOURCE_MAX_CONNECTIONS)
+            .map(|_| pool.acquire(&token).unwrap())
+            .collect::<Vec<_>>();
+        let waiters = (0..DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS)
+            .map(|_| {
+                let pool = Arc::clone(&pool);
+                let token = token.clone();
+                thread::spawn(move || pool.acquire(&token))
+            })
+            .collect::<Vec<_>>();
+        wait_for_waiters(&pool, DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS);
+
+        assert!(matches!(
+            pool.acquire(&token),
+            Err(EngineError::User(message)) if message.contains("queue is full")
+        ));
+        drop(active);
+        for waiter in waiters {
+            waiter.join().unwrap().unwrap();
+        }
+        assert_eq!(pool.state.lock().unwrap().active, 0);
+    }
+
+    #[test]
+    fn source_pool_cancellation_removes_a_waiter() {
+        let pool = Arc::new(SourceConnectionPool::default());
+        let token = CancellationToken::new();
+        let active = (0..DUCKDB_SOURCE_MAX_CONNECTIONS)
+            .map(|_| pool.acquire(&token).unwrap())
+            .collect::<Vec<_>>();
+        let waiter_token = token.clone();
+        let waiter_pool = Arc::clone(&pool);
+        let waiter = thread::spawn(move || waiter_pool.acquire(&waiter_token));
+        wait_for_waiters(&pool, 1);
+        token.cancel();
+        assert!(matches!(
+            waiter.join().unwrap(),
+            Err(EngineError::Cancelled(_))
+        ));
+        assert_eq!(pool.state.lock().unwrap().waiting, 0);
+        drop(active);
+    }
 }

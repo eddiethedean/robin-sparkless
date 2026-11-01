@@ -89,3 +89,7 @@ arrow60 = { package = "arrow", version = "=60.1.0", optional = true, default-fea
 tempfile = "3"
 polars-parquet = { version = "0.53", default-features = false, features = ["zstd"] }
 zstd = { version = "=0.14.3", default-features = false }
+
+[[example]]
+name = "duckdb_quack_fixture_owner"
+required-features = ["duckdb-source"]

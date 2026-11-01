@@ -62,7 +62,9 @@ pub use dataframe::{
     PivotedGroupedData, SaveMode, SelectItem, WriteFormat, WriteMode, broadcast,
 };
 #[cfg(feature = "duckdb-source")]
-pub use duckdb_source::{DuckDbCatalog, DuckDbSourceConfig};
+pub use duckdb_source::{
+    DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
+};
 pub use error::{EngineError, polars_to_core_error};
 pub use expression::{column_to_expr, lit_bool, lit_f64, lit_i32, lit_i64, lit_str};
 pub use functions::*;

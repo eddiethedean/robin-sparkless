@@ -1,7 +1,7 @@
 """Exercise configured DuckDB sources through an unmodified public Connect client.
 
-Requires the optional ``duckdb`` Python package only to create the fixture file. The native server
-under test uses its separately pinned bundled DuckDB driver.
+Standalone mode uses Python DuckDB to create a file fixture. Quack mode starts the bundled native
+DuckDB 2.0.0 owner fixture passed with ``--quack-owner-bin``.
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 import importlib.metadata
 import json
 import os
+import selectors
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -25,49 +27,91 @@ def main() -> None:
     assert importlib.metadata.version("pyspark-client") == "4.0.5"
     parser = argparse.ArgumentParser()
     parser.add_argument("--server-bin", type=Path, required=True)
+    parser.add_argument("--quack-owner-bin", type=Path)
+    parser.add_argument("--quack-extension-path", type=Path)
     args = parser.parse_args()
+    if bool(args.quack_owner_bin) != bool(args.quack_extension_path):
+        parser.error("--quack-owner-bin and --quack-extension-path must be supplied together")
 
+    previous_sources = os.environ.get("SPARKLESS_DUCKDB_SOURCES")
+    owner: subprocess.Popen[str] | None = None
     with tempfile.TemporaryDirectory(prefix="sparkless-duckdb-source-") as temp_dir:
-        database_path = Path(temp_dir) / "warehouse.duckdb"
-        connection = duckdb.connect(str(database_path))
-        connection.execute(
-            """
-            CREATE TABLE events (
-                id BIGINT NOT NULL,
-                bucket INTEGER,
-                label VARCHAR,
-                amount DECIMAL(12, 2),
-                active BOOLEAN
-            );
-            INSERT INTO events VALUES
-                (1, 10, 'alpha', 12.50, true),
-                (2, 10, 'beta', NULL, false),
-                (3, 20, 'gamma', 7.25, true);
-            CREATE TABLE typed_events (
-                small SMALLINT,
-                score DOUBLE,
-                day DATE,
-                seen_at TIMESTAMPTZ
-            );
-            INSERT INTO typed_events VALUES
-                (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
-            CREATE TABLE non_finite_events (score DOUBLE);
-            INSERT INTO non_finite_events VALUES (CAST('NaN' AS DOUBLE));
-            CREATE TABLE nested_events (items INTEGER[]);
-            INSERT INTO nested_events VALUES ([1, 2]);
-            CREATE TABLE right_events (id BIGINT, note VARCHAR);
-            INSERT INTO right_events VALUES (1, 'one'), (2, 'two'), (4, 'four');
-            CREATE TABLE empty_events (id BIGINT NOT NULL, label VARCHAR);
-            CREATE TABLE all_null_events (id INTEGER, label VARCHAR);
-            INSERT INTO all_null_events VALUES (1, NULL), (2, NULL);
-            """
-        )
-        connection.close()
+        if args.quack_owner_bin:
+            assert args.quack_extension_path is not None
+            owner = subprocess.Popen(
+                [
+                    str(args.quack_owner_bin.absolute()),
+                    str(args.quack_extension_path.absolute()),
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=None,
+                text=True,
+                bufsize=1,
+            )
+            with selectors.DefaultSelector() as selector:
+                assert owner.stdout is not None
+                selector.register(owner.stdout, selectors.EVENT_READ)
+                if not selector.select(timeout=30):
+                    owner.terminate()
+                    owner.wait(timeout=10)
+                    raise TimeoutError("DuckDB Quack fixture owner did not become ready")
+                owner_line = owner.stdout.readline()
+            if not owner_line:
+                raise RuntimeError(f"DuckDB Quack owner exited with status {owner.poll()}")
+            try:
+                owner_info = json.loads(owner_line)
+                source_config = [
+                    {
+                        "alias": "warehouse",
+                        "quack_uri": owner_info["uri"],
+                        "token": owner_info["token"],
+                        "extension_path": str(args.quack_extension_path.absolute()),
+                    }
+                ]
+            except Exception:
+                owner.terminate()
+                owner.wait(timeout=10)
+                raise
+        else:
+            database_path = Path(temp_dir) / "warehouse.duckdb"
+            connection = duckdb.connect(str(database_path))
+            connection.execute(
+                """
+                CREATE TABLE events (
+                    id BIGINT NOT NULL,
+                    bucket INTEGER,
+                    label VARCHAR,
+                    amount DECIMAL(12, 2),
+                    active BOOLEAN
+                );
+                INSERT INTO events VALUES
+                    (1, 10, 'alpha', 12.50, true),
+                    (2, 10, 'beta', NULL, false),
+                    (3, 20, 'gamma', 7.25, true);
+                CREATE TABLE typed_events (
+                    small SMALLINT,
+                    score DOUBLE,
+                    day DATE,
+                    seen_at TIMESTAMPTZ
+                );
+                INSERT INTO typed_events VALUES
+                    (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
+                CREATE TABLE non_finite_events (score DOUBLE);
+                INSERT INTO non_finite_events VALUES (CAST('NaN' AS DOUBLE));
+                CREATE TABLE nested_events (items INTEGER[]);
+                INSERT INTO nested_events VALUES ([1, 2]);
+                CREATE TABLE right_events (id BIGINT, note VARCHAR);
+                INSERT INTO right_events VALUES (1, 'one'), (2, 'two'), (4, 'four');
+                CREATE TABLE empty_events (id BIGINT NOT NULL, label VARCHAR);
+                CREATE TABLE all_null_events (id INTEGER, label VARCHAR);
+                INSERT INTO all_null_events VALUES (1, NULL), (2, NULL);
+                """
+            )
+            connection.close()
+            source_config = [{"alias": "warehouse", "database_path": str(database_path)}]
 
-        previous_sources = os.environ.get("SPARKLESS_DUCKDB_SOURCES")
-        os.environ["SPARKLESS_DUCKDB_SOURCES"] = json.dumps(
-            [{"alias": "warehouse", "database_path": str(database_path)}]
-        )
+        os.environ["SPARKLESS_DUCKDB_SOURCES"] = json.dumps(source_config)
         try:
             with SparklessConnect(
                 server_options={
@@ -99,6 +143,49 @@ def main() -> None:
                     (2, 10, "beta", None, False),
                     (3, 20, "gamma", "7.25", True),
                 ], rows
+
+                for statement in (
+                    "INSERT INTO warehouse.main.events VALUES "
+                    "(4, 30, 'delta', 99.00, true)",
+                    "UPDATE warehouse.main.events SET label = 'changed' WHERE id = 1",
+                    "DELETE FROM warehouse.main.events WHERE id = 1",
+                    "CREATE TABLE warehouse.main.forbidden (id BIGINT)",
+                ):
+                    try:
+                        spark.sql(statement).collect()
+                    except Exception as error:
+                        message = str(error).lower()
+                        assert any(
+                            marker in message
+                            for marker in (
+                                "unsupported",
+                                "not supported",
+                                "read-only",
+                                "not implemented",
+                            )
+                        ), error
+                    else:
+                        raise AssertionError(
+                            f"DuckDB source write was accepted: {statement}"
+                        )
+                assert events.count() == 3, "a rejected source write changed the table"
+                for mode in ("append", "overwrite"):
+                    try:
+                        events.write.mode(mode).saveAsTable("warehouse.main.events")
+                    except Exception as error:
+                        message = str(error).lower()
+                        assert any(
+                            marker in message
+                            for marker in (
+                                "unsupported",
+                                "not supported",
+                                "read-only",
+                                "not implemented",
+                            )
+                        ), error
+                    else:
+                        raise AssertionError(f"DuckDB {mode} write was accepted")
+                    assert events.count() == 3, f"a rejected {mode} write changed the table"
 
                 typed = spark.table("warehouse.typed_events")
                 assert typed.schema.fieldNames() == [
@@ -182,15 +269,23 @@ def main() -> None:
                 )
                 assert joined == [(1, "one"), (2, "two")], joined
 
-            print(
-                "4.19 public Connect DuckDB source smoke passed "
-                f"(Python DuckDB fixture writer {duckdb.__version__})"
+            source_mode = (
+                "Quack shared owner"
+                if owner
+                else f"Python DuckDB fixture writer {duckdb.__version__}"
             )
+            print(f"4.19 public Connect DuckDB source smoke passed ({source_mode})")
         finally:
             if previous_sources is None:
                 os.environ.pop("SPARKLESS_DUCKDB_SOURCES", None)
             else:
                 os.environ["SPARKLESS_DUCKDB_SOURCES"] = previous_sources
+            if owner is not None:
+                if owner.stdin is not None:
+                    owner.stdin.write("stop\n")
+                    owner.stdin.flush()
+                    owner.stdin.close()
+                owner.wait(timeout=15)
 
 
 if __name__ == "__main__":

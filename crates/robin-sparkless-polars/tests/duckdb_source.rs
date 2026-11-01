@@ -2,7 +2,8 @@
 
 use robin_sparkless_core::engine::{CancellationToken, begin_external_catalog_read_snapshot};
 use robin_sparkless_polars::{
-    DataType, DuckDbCatalog, DuckDbSourceConfig, ExternalCatalogProvider, SparkSession,
+    DataType, DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
+    ExternalCatalogProvider, SparkSession,
 };
 use std::sync::Arc;
 
@@ -154,6 +155,52 @@ fn duckdb_catalog_rejects_duplicate_aliases_and_missing_database_files() {
 }
 
 #[test]
+fn duckdb_quack_configuration_requires_one_consistent_connection_per_endpoint() {
+    let directory = tempfile::tempdir().expect("create extension fixture directory");
+    let extension_path = directory.path().join("quack.duckdb_extension");
+    std::fs::write(&extension_path, b"fixture").expect("create extension path fixture");
+    let source = |alias: &str, token: &str| {
+        DuckDbSourceSpec::Quack(DuckDbQuackSourceConfig {
+            alias: alias.into(),
+            quack_uri: "quack:localhost:9494".into(),
+            token: token.into(),
+            extension_path: extension_path.clone(),
+            disable_ssl: None,
+            ssl_fingerprint: None,
+        })
+    };
+
+    assert!(
+        DuckDbCatalog::new_with_sources([
+            source("first", "shared-token"),
+            source("second", "shared-token")
+        ])
+        .is_ok()
+    );
+    assert!(
+        DuckDbCatalog::new_with_sources([
+            source("first", "first-token"),
+            source("second", "second-token")
+        ])
+        .is_err()
+    );
+    assert!(
+        !format!(
+            "{:?}",
+            DuckDbQuackSourceConfig {
+                alias: "warehouse".into(),
+                quack_uri: "quack:localhost:9494".into(),
+                token: "secret-token".into(),
+                extension_path,
+                disable_ssl: None,
+                ssl_fingerprint: None,
+            }
+        )
+        .contains("secret-token")
+    );
+}
+
+#[test]
 fn duckdb_read_snapshot_reuses_one_database_owner_for_multiple_tables() {
     let (_directory, database) = fixture_database();
     let provider: Arc<dyn ExternalCatalogProvider> = source(&database);
@@ -178,4 +225,106 @@ fn duckdb_read_snapshot_reuses_one_database_owner_for_multiple_tables() {
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+#[ignore = "requires SPARKLESS_TEST_QUACK_EXTENSION_PATH for DuckDB 2.0.0"]
+fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_statement() {
+    use std::net::TcpListener;
+
+    let extension_path = std::env::var("SPARKLESS_TEST_QUACK_EXTENSION_PATH")
+        .expect("set the path to the DuckDB 2.0.0 quack.duckdb_extension");
+    let extension_literal = sql_literal(&extension_path);
+    let port_listener = TcpListener::bind(("127.0.0.1", 0)).expect("allocate free Quack port");
+    let port = port_listener.local_addr().unwrap().port();
+    drop(port_listener);
+
+    let uri = format!("quack:localhost:{port}");
+    let token = "sparkless-phase419-test-token";
+    let server = duckdb::Connection::open_in_memory().expect("open Quack owner");
+    server
+        .execute_batch(&format!(
+            "LOAD {extension_literal};
+             SET TimeZone = 'UTC';
+             CREATE TABLE events (id BIGINT, note VARCHAR);
+             INSERT INTO events VALUES (1, 'one');"
+        ))
+        .expect("load Quack and create owner fixture");
+    server
+        .query_row(
+            &format!(
+                "CALL quack_serve({}, token = {})",
+                sql_literal(&uri),
+                sql_literal(token)
+            ),
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("start Quack service");
+
+    let writer = duckdb::Connection::open_in_memory().expect("open independent writer client");
+    writer
+        .execute_batch(&format!(
+            "LOAD {extension_literal};
+             ATTACH {} AS writer (TOKEN {});",
+            sql_literal(&uri),
+            sql_literal(token)
+        ))
+        .expect("attach writer to shared owner");
+
+    let catalog_json = serde_json::json!([{
+        "alias": "warehouse",
+        "quack_uri": uri,
+        "token": token,
+        "extension_path": extension_path,
+        "disable_ssl": true,
+    }]);
+    let provider: Arc<dyn ExternalCatalogProvider> = Arc::new(
+        DuckDbCatalog::from_json(&catalog_json.to_string()).expect("configure Quack source"),
+    );
+    let cancellation = CancellationToken::new();
+    let first_snapshot = begin_external_catalog_read_snapshot(Arc::clone(&provider), &cancellation)
+        .expect("begin first shared-owner snapshot");
+    let descriptor = first_snapshot
+        .resolve_table("warehouse.events")
+        .expect("resolve table in first snapshot")
+        .expect("table exists");
+
+    writer
+        .execute_batch("INSERT INTO writer.main.events VALUES (2, 'two');")
+        .expect("commit independent writer change");
+
+    let mut first_snapshot_rows = 0;
+    first_snapshot
+        .scan_table(&descriptor, &cancellation, &mut |batch| {
+            first_snapshot_rows += batch.row_count;
+            Ok(())
+        })
+        .expect("scan from pinned snapshot");
+    assert_eq!(first_snapshot_rows, 1);
+    drop(first_snapshot);
+
+    let second_snapshot = begin_external_catalog_read_snapshot(provider, &cancellation)
+        .expect("begin second shared-owner snapshot");
+    let descriptor = second_snapshot
+        .resolve_table("warehouse.events")
+        .expect("resolve table in second snapshot")
+        .expect("table exists");
+    let mut second_snapshot_rows = 0;
+    second_snapshot
+        .scan_table(&descriptor, &cancellation, &mut |batch| {
+            second_snapshot_rows += batch.row_count;
+            Ok(())
+        })
+        .expect("scan after writer commit");
+    assert_eq!(second_snapshot_rows, 2);
+    drop(second_snapshot);
+    drop(writer);
+    server
+        .execute_batch(&format!("CALL quack_stop({})", sql_literal(&uri)))
+        .expect("stop Quack service");
+}
+
+fn sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }

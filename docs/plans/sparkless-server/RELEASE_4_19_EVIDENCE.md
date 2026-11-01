@@ -20,23 +20,26 @@ PYTHONPATH=python/sparkless /tmp/sparkless-linkedin-verify/bin/python -m pytest 
 PYTHONPATH=python/sparkless SPARKLESS_MAX_ACTIVE_OPERATIONS=4 SPARKLESS_MAX_RANGE_ROWS=10000000 /tmp/sparkless-linkedin-verify/bin/python tests/connect/smoke_phase419_client.py --server-bin target/release/sparkless-server
 ```
 
-Results: release build passed; server library suite passed **85 tests**; focused ReleaseAll regression passed; Connect plan suite passed **19 tests**; launcher suite passed **12 tests**; the public PySpark client smoke passed helper lifecycle, range count, table join, and grouped aggregate checks. `cargo fmt --all` and `git diff --check` passed. These checks cover implemented behavior only; they do not exercise a DuckDB source provider.
+Results: release build passed; server library suite passed **85 tests**; focused ReleaseAll regression passed; Connect plan suite passed **19 tests**; launcher suite passed **12 tests**; the public PySpark client smoke passed helper lifecycle, range count, table join, and grouped aggregate checks. `cargo fmt --all` and `git diff --check` passed. These earlier checks cover implemented behavior only; DuckDB-source-specific evidence is recorded below.
 
-## DuckDB standalone source candidate (2026-10-31)
+## DuckDB source candidate (standalone and Quack, 2026-10-31)
 
 The branch now contains an opt-in `duckdb-source` integration using `duckdb-rs==1.20000.1`
 (bundled DuckDB 2.0.0) and Arrow IPC 60.1.0. The configured catalog accepts only trusted aliases
-and canonical local database paths. It exposes schema metadata without materializing table rows,
-then pins one read-only connection/transaction per execution snapshot and rejects reads from a
-second canonical database owner in the same statement. The Polars integration consumes IPC
-batches synchronously and materializes source relations before evaluating the Connect plan.
+and either canonical local database paths or an explicit Quack endpoint/token/extension path. It
+loads the exact configured Quack extension file without runtime downloads, exposes schema metadata
+without materializing table rows, pins one read-only connection/transaction per execution snapshot,
+and rejects reads from a second database owner in the same statement. The Polars integration
+consumes IPC batches synchronously and materializes source relations before evaluating the Connect
+plan.
 
 The candidate enforces 16,384 rows and 1 MiB IPC bytes per batch; 1,000,000 source rows, 32 MiB
 IPC bytes, and 64 MiB estimated decoded Polars data across one statement; and 512 KiB per VARCHAR
 value. DuckDB is configured for one thread and a 256 MiB per-connection memory limit. A 5 ms
-cancellation watcher calls DuckDB's interrupt handle during a scan. These are configured/enforced
-limits, not measured process-RSS guarantees; there is no independent source-connection admission
-limit beyond server operation admission, and no measured increasing-size or slow-consumer budget.
+cancellation watcher calls DuckDB's interrupt handle during a scan. The catalog admits at most four
+source connections and queues at most sixteen waiting operations per catalog. These are
+configured/enforced limits, not measured process-RSS guarantees; remote owner resource usage is
+outside the local connection limit, and increasing-size/slow-consumer budgets are not measured.
 
 The following compile checks passed after the source and Connect wiring changes:
 
@@ -47,10 +50,34 @@ cargo fmt --all -- --check
 git diff --check
 ```
 
-The focused source fixture command then passed all four tests:
+The focused source fixture command passed five ordinary tests; the Quack fixture is ignored unless
+an exact platform extension path is supplied:
 
 ```sh
 CARGO_HOME=/tmp/sparkless-cargo-home cargo test --locked --release -p robin-sparkless-polars --features duckdb-source --test duckdb_source
+```
+
+An ignored integration fixture exercises an independent writer over Quack against the same owner.
+It passed on the current `osx_arm64` host with the DuckDB 2.0.0 extension already installed:
+
+```sh
+SPARKLESS_TEST_QUACK_EXTENSION_PATH=/Users/odosmatthews/.duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension \
+  CARGO_HOME=/tmp/sparkless-cargo-home cargo test --locked --release -p robin-sparkless-polars \
+  --features duckdb-source --test duckdb_source \
+  quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_statement -- --ignored
+```
+
+The fixture checks that the reader retains one row in its transaction after an independent Quack
+writer commits a second row, then sees both rows in the next statement. It uses three independent
+DuckDB connections in one test process and loopback HTTP; clean-platform extension installation,
+separate-process/service lifecycle, TLS, cancellation, and wider race/resource cases remain open.
+
+The source-pool unit tests passed with the crate's `sql` and `test-hooks` features enabled. They
+verify the four-connection cap, sixteen-waiter cap, queue-full rejection, and cancellation removal:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home cargo test --locked --release -p robin-sparkless-polars \
+  --features duckdb-source,sql,test-hooks source_pool_tests
 ```
 
 This validates Arrow 60-to-Polars IPC interoperability for the fixture's BOOLEAN, SMALLINT,
@@ -63,15 +90,28 @@ reuse. The public-client smoke also passed through the server and asserts the lo
 PYTHONPATH=python/sparkless:/tmp/sparkless-duckdb-python-only /tmp/sparkless-linkedin-verify/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin target/release/sparkless-server
 ```
 
+The same public-client fixture passed against the Quack owner and bundled native server:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home cargo build --locked --release -p robin-sparkless-polars \
+  --features duckdb-source --example duckdb_quack_fixture_owner
+PYTHONPATH=python/sparkless:/tmp/sparkless-duckdb-python-only /tmp/sparkless-linkedin-verify/bin/python \
+  tests/connect/smoke_phase419_duckdb_client.py \
+  --server-bin target/release/sparkless-server \
+  --quack-owner-bin target/release/examples/duckdb_quack_fixture_owner \
+  --quack-extension-path /Users/odosmatthews/.duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension
+```
+
 It verifies exact values/schema, filter/project, UTC timestamp instant, `count(1)`, null-excluding
 `count(column)` on populated/all-null/empty data, limit zero, empty-table schema, same-owner inner
-join, grouped count/sum, and unsupported source type/value errors. The fixture file was created by
-Python DuckDB 1.5.1; this does not demonstrate simultaneous writer/reader use of one live database
-owner or replace a Spark differential corpus. The source is local-file, standalone,
-and read-only only: Quack/live-owner mode, cross-process writer visibility, transactional races,
-disconnect/replay/source-loss acceptance, source DDL/DML rejection coverage, platform packaging,
-and a bounded source connection queue are still open. D14 and V35/V36 remain open; the release
-does not claim live shared-table support or complete DuckDB-source acceptance.
+join, grouped count/sum, unsupported source type/value errors, and rejected CREATE/INSERT/UPDATE/
+DELETE/append/overwrite requests with an unchanged row count. The standalone fixture file was
+created by Python DuckDB 1.5.1; the
+Quack fixture separately uses the bundled DuckDB 2.0.0 owner.
+Neither test replaces a Spark differential corpus. Broader disconnect/replay/source-loss acceptance,
+the full source DDL/DML rejection matrix, clean platform packaging, and measured source/RSS budgets
+remain open. D14 and V35/V36 are still open; the release does not claim complete DuckDB-source
+acceptance.
 
 ## #1736 export and #1737 range-count measurements
 
@@ -112,7 +152,7 @@ For the post-export/count candidate, the active-2/16-client cohort measured 105.
 
 ## Open acceptance gates
 
-- The optional standalone DuckDB source candidate and a focused real DuckDB public-client smoke are present; they do not constitute a Spark differential corpus. It does not implement Quack/live-owner sharing, an independent source-connection queue, the full source lifecycle/write-rejection matrix, or measured source resource budgets. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The Quack fixture proves owner sharing and next-statement visibility, but is ignored unless the platform extension path is supplied and does not constitute a Spark differential corpus. The full source lifecycle/write-rejection matrix, clean platform packaging, and measured source resource budgets remain open. D14 and V35/V36 remain open.
 - The helper has focused lifecycle and public smoke coverage, but its full package-install, import-boundary, fork, startup/session/cleanup failure, nested/reentry, and unrelated-session matrix is still outstanding.
 - #1736/#1737/#1738 correctness and instrumentation work has landed locally, but the complete workload and repeated performance guardrails in the release plan are not all satisfied by the evidence above.
 - No 4.19 API/native/server package version bump, clean-consumer package matrix, exact-commit CI result, or release publication check has been performed.

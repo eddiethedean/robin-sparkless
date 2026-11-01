@@ -105,30 +105,49 @@ The `codex/release-4.19` branch adds optional named-table relations, aliases, jo
 count/sum, global `count(column)`, and the `SparklessConnect` helper. The helper behavior is
 described above; phase acceptance and release remain open.
 
-Build the native server with `--features connect,duckdb-source` to enable configured local
-DuckDB sources. The default server build does not include DuckDB. Set a trusted alias-to-file map
-at startup; clients provide table names only:
+Build the native server with `--features connect,duckdb-source` to enable DuckDB sources. The
+default server build does not include DuckDB. Configure trusted aliases at startup; clients provide
+table names only. Standalone mode maps an alias to a local file:
 
 ```sh
 SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/warehouse.duckdb"}]' \
   sparkless-server
 ```
 
+For shared-owner mode, the configured Quack endpoint must already be serving the DuckDB database.
+Point `extension_path` at the DuckDB 2.0.0 `quack.duckdb_extension` built for the same platform as
+the Sparkless server. The source loads that exact file and does not install or download extensions
+at runtime:
+
+```sh
+SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","quack_uri":"quack:localhost:9494","token":"replace-with-secret","extension_path":"/opt/duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension"}]' \
+  sparkless-server
+```
+
+Pass the JSON through the deployment's secret mechanism so the token does not appear in a shell
+history. Configure Quack authorization on the owner to restrict that token to the intended
+read-only queries; DuckDB's default Quack authorization permits the full SQL surface, so possession
+of the token is broader than Sparkless's read-only source API.
+
 The client can read `warehouse.main.events` or `warehouse.events`. Schema analysis resolves
 metadata without scanning rows. Execution opens the configured database read-only and retains one
-statement transaction while it exports typed batches to Polars. A statement can read only one
-configured database owner. Configured aliases reserve their qualified namespace; a missing source
-table does not fall through to a managed table with the same name. Enforced source limits are
-1,000,000 rows, 32 MiB of Arrow IPC input,
-and 64 MiB of decoded data per statement, plus 16,384 rows and 1 MiB per batch.
+statement transaction while it exports typed batches to Polars. Quack mode uses one transaction on
+the attached remote owner; an independent writer's commit becomes visible to the next statement.
+A statement can read only one configured database owner. Configured aliases reserve their
+qualified namespace; a missing source table does not fall through to a managed table with the same
+name. Per catalog, at most four source connections are open and sixteen operations can wait for a
+connection. Enforced source limits are 1,000,000 rows, 32 MiB of Arrow IPC input, and 64 MiB of
+decoded data per statement, plus 16,384 rows and 1 MiB per batch.
 The supported source types are BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE, VARCHAR, DATE,
 TIMESTAMPTZ, and DECIMAL with precision at most 38 and scale no greater than precision.
 The branch's public-client source smoke covers table reads, filter/project/limit, row and
-non-null-column counts, same-owner inner joins, and grouped count/sum.
+non-null-column counts, same-owner inner joins, grouped count/sum, and source DDL/DML plus append
+and overwrite rejection with an unchanged row count. It runs against both a local file and a live
+Quack owner.
 
-This is currently standalone read-only file mode. Independent writers sharing a live DuckDB
-owner through Quack are not implemented or certified; D14 and V36 remain open. DuckDB writes,
-unsupported types, arbitrary client-supplied paths, and cross-owner joins fail explicitly.
+Quack mode and an independent writer fixture are implemented, but broader source acceptance and
+platform packaging remain open; D14 and V36 are not complete. DuckDB writes, unsupported types,
+arbitrary client-supplied paths, and cross-owner joins fail explicitly.
 
 ## Limits and unsupported operations
 
