@@ -81,6 +81,38 @@ def arrow_trace_records(diagnostics: str) -> list[dict[str, str]]:
     return records
 
 
+def parse_ps_cpu_time(value: str) -> float:
+    parts = value.strip().split(":")
+    if len(parts) == 3:
+        leading, minutes, seconds = parts
+        if "-" in leading:
+            days_text, hours_text = leading.split("-", maxsplit=1)
+            days, hours = int(days_text), int(hours_text)
+        else:
+            days, hours = 0, int(leading)
+    elif len(parts) == 2:
+        days, hours = 0, 0
+        minutes, seconds = parts
+    elif len(parts) == 1:
+        days, hours, minutes, seconds = 0, 0, 0, parts[0]
+    else:
+        raise ValueError(f"unexpected ps CPU time: {value!r}")
+    return days * 86_400 + hours * 3_600 + int(minutes) * 60 + float(seconds)
+
+
+def server_process_metrics(pid: int) -> tuple[float, int]:
+    result = subprocess.run(
+        ["ps", "-o", "cputime=,rss=", "-p", str(pid)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    fields = result.stdout.split()
+    if len(fields) != 2:
+        raise RuntimeError(f"could not read server metrics for pid {pid}")
+    return parse_ps_cpu_time(fields[0]), int(fields[1]) * 1024
+
+
 def measure_additional_startups(server_bin: Path, sample_count: int) -> list[float]:
     samples = []
     for _ in range(sample_count):
@@ -101,17 +133,24 @@ def measure_case(
     action: Callable[[], list[Any]],
     validate: Callable[[list[Any]], None],
     iterations: int,
+    server_pid: int | None = None,
 ) -> dict[str, Any]:
     warmup_result = action()
     validate(warmup_result)
     samples: list[float] = []
+    server_metrics_start = (
+        server_process_metrics(server_pid) if server_pid is not None else None
+    )
+    server_rss_samples: list[int] = []
     for iteration in range(iterations):
         started = time.perf_counter()
         result = action()
         elapsed_ms = (time.perf_counter() - started) * 1000
         validate(result)
         samples.append(elapsed_ms)
-    return {
+        if server_pid is not None:
+            server_rss_samples.append(server_process_metrics(server_pid)[1])
+    measurement = {
         "workload": name,
         "warmup_rows": len(warmup_result),
         "samples_ms": samples,
@@ -121,6 +160,17 @@ def measure_case(
         "p99_ms": percentile(samples, 0.99),
         "max_ms": max(samples),
     }
+    if server_pid is not None:
+        assert server_metrics_start is not None
+        server_metrics_end = server_process_metrics(server_pid)
+        measurement["server_cpu_ms_total"] = max(
+            0.0, server_metrics_end[0] - server_metrics_start[0]
+        ) * 1_000
+        measurement["server_rss_after_action_bytes_samples"] = server_rss_samples
+        measurement["server_peak_rss_bytes_observed"] = max(
+            [server_metrics_start[1], server_metrics_end[1], *server_rss_samples]
+        )
+    return measurement
 
 
 def exact_range_rows(rows: int) -> Callable[[list[Any]], None]:
@@ -325,7 +375,9 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
     return measurements
 
 
-def run_small_jobs(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
+def run_small_jobs(
+    spark: ConnectSession, iterations: int, server_pid: int
+) -> list[dict[str, Any]]:
     """Measure the small public-client cases used by the 4.19 regression gate."""
     measurements: list[dict[str, Any]] = []
     for row_count in (10, 100, 1_000, 10_000):
@@ -355,6 +407,7 @@ def run_small_jobs(spark: ConnectSession, iterations: int) -> list[dict[str, Any
                 ingest_filter_count,
                 validate_count,
                 iterations,
+                server_pid,
             )
         )
         measurements[-1]["input_rows"] = row_count
@@ -381,7 +434,13 @@ def run_small_jobs(spark: ConnectSession, iterations: int) -> list[dict[str, Any
             raise AssertionError("25-row preview returned incorrect nullable values")
 
     measurements.append(
-        measure_case("preview_25_nullable", preview_25, validate_preview, iterations)
+        measure_case(
+            "preview_25_nullable",
+            preview_25,
+            validate_preview,
+            iterations,
+            server_pid,
+        )
     )
     measurements[-1]["input_rows"] = len(preview_rows)
 
@@ -421,6 +480,7 @@ def run_small_jobs(spark: ConnectSession, iterations: int) -> list[dict[str, Any
             collect_nullable_mixed,
             validate_nullable_mixed,
             iterations,
+            server_pid,
         )
     )
     measurements[-1]["input_rows"] = len(mixed_rows)
@@ -439,9 +499,93 @@ def run_small_jobs(spark: ConnectSession, iterations: int) -> list[dict[str, Any
             analyze_range_schema,
             validate_range_schema,
             iterations,
+            server_pid,
         )
     )
     measurements[-1]["input_rows"] = 1_000
+
+    cancellation_records: list[dict[str, Any]] = []
+
+    def first_batch_then_cancel() -> list[dict[str, Any]]:
+        iterator = iter(spark.range(10_000_000).select("id").toLocalIterator())
+        started = time.perf_counter()
+        consumed = 0
+        try:
+            first = next(iterator)
+            first_batch_ms = (time.perf_counter() - started) * 1_000
+            if first.id != 0:
+                raise AssertionError(
+                    f"stream began at row {first.id}, expected the first row"
+                )
+            consumed = 1
+            cancel_started = time.perf_counter()
+            interrupted_ids = spark._client.interrupt_all()
+            cancel_rpc_ms = (time.perf_counter() - cancel_started) * 1_000
+            if not interrupted_ids:
+                raise AssertionError("no active operation was returned for cancellation")
+            observe_started = time.perf_counter()
+            deadline = time.monotonic() + 30
+            while consumed < 10_000_000:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("interrupted stream did not terminate within 30s")
+                try:
+                    next(iterator)
+                    consumed += 1
+                except StopIteration as error:
+                    raise AssertionError(
+                        "interrupted stream ended without a cancellation error"
+                    ) from error
+                except Exception as error:
+                    message = f"{error} {error!r}".upper()
+                    if "CANCELLED" not in message and "INTERRUPTED" not in message:
+                        raise AssertionError(
+                            f"stream cancellation returned the wrong error: {error}"
+                        ) from error
+                    record = {
+                        "first_batch_ms": first_batch_ms,
+                        "cancel_rpc_ms": cancel_rpc_ms,
+                        "cancel_observed_after_rpc_ms": (
+                            time.perf_counter() - observe_started
+                        )
+                        * 1_000,
+                        "interrupted_operation_count": len(interrupted_ids),
+                        "rows_consumed_before_cancel": consumed,
+                        "cancel_error": type(error).__name__,
+                    }
+                    cancellation_records.append(record)
+                    return [record]
+            raise AssertionError("the 10M-row stream completed before cancellation")
+        finally:
+            close_iterator = getattr(iterator, "close", None)
+            if callable(close_iterator):
+                close_iterator()
+
+    def validate_first_batch_cancel(result: list[Any]) -> None:
+        if (
+            len(result) != 1
+            or result[0]["first_batch_ms"] <= 0
+            or result[0]["interrupted_operation_count"] < 1
+        ):
+            raise AssertionError("first-batch/cancellation witness was incomplete")
+
+    cancellation_measurement = measure_case(
+        "range_10m_first_batch_and_cancel",
+        first_batch_then_cancel,
+        validate_first_batch_cancel,
+        iterations,
+        server_pid,
+    )
+    cancellation_measurement["warmup_first_batch_and_cancel"] = cancellation_records[0]
+    cancellation_measurement["first_batch_and_cancel_samples"] = cancellation_records[1:]
+    for metric in (
+        "first_batch_ms",
+        "cancel_rpc_ms",
+        "cancel_observed_after_rpc_ms",
+    ):
+        samples = [record[metric] for record in cancellation_records[1:]]
+        cancellation_measurement[f"{metric}_p50"] = percentile(samples, 0.50)
+        cancellation_measurement[f"{metric}_p95"] = percentile(samples, 0.95)
+    measurements.append(cancellation_measurement)
     return measurements
 
 
@@ -500,10 +644,13 @@ def main() -> None:
         owned_server = helper._server
         if owned_server is None:
             raise RuntimeError("SparklessConnect did not retain its owned server")
+        owned_process = owned_server._process
+        if owned_process is None or owned_process.pid is None:
+            raise RuntimeError("SparklessConnect does not own a running server process")
         if not isinstance(spark, ConnectSession):
             raise TypeError(f"expected PySpark Connect session, got {type(spark)!r}")
         if args.small_jobs_only:
-            measurements = run_small_jobs(spark, args.iterations)
+            measurements = run_small_jobs(spark, args.iterations, owned_process.pid)
         else:
             measurements = run_exports(spark, args.iterations)
     startup_samples_ms = [startup_ms]
