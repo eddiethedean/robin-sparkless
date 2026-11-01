@@ -270,6 +270,19 @@ The matched active-8 candidate diagnostic, `run-20261101T021819Z-95676`, used th
 
 The million-row slow reader completed with no probe errors; injected disconnect replay reported one producer start and one reattach RPC; shutdown was graceful. The compressed full report is [phase-419-connect-mixed-candidate-a0-connect-active-8-q30.json.gz](evidence/phase-419-connect-mixed-candidate-a0-connect-active-8-q30.json.gz), SHA-256 `462c00cb2580b3838930f1d2c24b7d1912b736396c4b5077e8b51dbda926a225`. This candidate diagnostic did not produce a baseline ratio because the baseline failed its HTTP progress probe at eight clients.
 
+A follow-up pair used `--queue-timeout-ms 30000` and `--http-probe-timeout-seconds 30` on both sides to remove the earlier client-side probe timeout. The v4.18.1 baseline (`run-20261101T043019Z-9560`, Connect-only binary SHA-256 `4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`) completed the 1-, 4-, and 8-client cohorts, then failed during the 16-client cohort with `RESOURCE_EXHAUSTED: OperationHistoryCapacityExceeded: Connect operation history is full`. The baseline rejects `ReleaseAll` for non-reattachable operations, so completed query records accumulate against its 1,024-entry limit. The compressed server trace is [phase-419-connect-mixed-baseline-v4.18.1-active-8-q30-p30-operation-history-failure.server.log.gz](evidence/phase-419-connect-mixed-baseline-v4.18.1-active-8-q30-p30-operation-history-failure.server.log.gz), SHA-256 `1712716efc0498b40006a222dc65b3fbbe6f8fe384239490dc1a7b7f97711591`.
+
+The matched 4.19 runtime candidate (`run-20261101T043413Z-12208`) used the same four 60-second cohorts and settings. Its runner source was clean at `09e99540163626a2f104c4fbaa2b296695b0ab00`; the Connect-only server binary SHA-256 was `92e8b76afc0547c572ba2b28316891b6c06da93a1fc3534f9766937d4dc44bb7` (runtime source `a0edec2d`). It completed all cohorts with zero health/HTTP probe errors:
+
+| Clients | Throughput (ops/s) | Short-job p95/p99 (ms) | Admission p95 (ms) | Blocked-send p95 (ms) | Peak RSS (MiB) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 21.03 | 19.5 / 20.3 | 0.005 | 15.02 | 53.7 |
+| 4 | 80.53 | 19.7 / 20.1 | 0.004 | 15.02 | 57.6 |
+| 8 | 147.70 | 20.3 / 21.0 | 0.006 | 15.02 | 61.9 |
+| 16 | 202.53 | 27.1 / 35.8 | 3.416 | 15.35 | 55.0 |
+
+The one-million-row slow reader, injected disconnect replay (one producer start and one reattach), cancellation, and graceful shutdown all passed. The compressed full report is [phase-419-connect-mixed-candidate-a0-connect-active-8-q30-p30.json.gz](evidence/phase-419-connect-mixed-candidate-a0-connect-active-8-q30-p30.json.gz), SHA-256 `e7f56f80e0e3c0f2b6a92a0701d58401f1ddffc9eba8af79601ba870ceed825a`. This is candidate liveness and baseline failure evidence, not a paired throughput result at 16 clients; repeated paired performance acceptance remains open.
+
 For the post-export/count candidate, the active-2/16-client cohort measured 105.67 correct ops/s, short-job p95/p99 of 216.9/232.4 ms, and 57.7 MiB server peak RSS. A **provisional** #1738 comparison floor is 100 correct ops/s at 16 clients and active limit 2, short-job p95 at most 220 ms and p99 at most 240 ms, zero health/HTTP errors, and peak RSS at most 64 MiB. This sets the requested numeric floor before any scheduler change, with roughly 5.4% throughput headroom. It is a selection from one fresh run per active limit, not a passed acceptance gate. The required three or more rotating fresh baseline/candidate pairs, 20-iteration small-job guardrails, and scheduler-only comparison against the post-export/count intermediate candidate remain outstanding. The active-8 run suggests improved tails without a clear throughput gain over active 4; no default was changed from this single observation.
 
 ## Open acceptance gates
