@@ -141,7 +141,40 @@ The export comparison contains three fresh baseline/candidate runtime pairs and 
 | Empty filter, 1,000 input rows | 43.236 / 51.344 | 15.532 / 20.014 | 2.78× |
 | Empty filter, 10,000 input rows | 269.540 / 282.917 | 16.501 / 16.782 | 16.33× |
 
-The 100,000-row result exceeds the initial 2× target. The report does not include the full #1736 required matrix (local relations, wide/variable-width data, LIMIT, oversized cells, allocation/buffer measurements) or the paired count measurements at 1k/1M/10M. The exact invocation and immutable binary/package hashes for both sides were not retained in this JSON, so this is preliminary evidence rather than a protocol-complete acceptance run. The compressed full report is [phase-419-export-smoke.json.gz](evidence/phase-419-export-smoke.json.gz), SHA-256 `9a551e66a977b5299a085cd869b5518ed4ef40be798522a20bbe00d5286a2587`.
+The 100,000-row result exceeds the initial 2× target. The report does not include the full #1736 required matrix (local relations, wide/variable-width data, LIMIT, oversized cells, allocation/buffer measurements). The exact invocation and immutable binary/package hashes for both sides were not retained in this JSON, so this is preliminary export evidence rather than a protocol-complete acceptance run. The compressed full report is [phase-419-export-smoke.json.gz](evidence/phase-419-export-smoke.json.gz), SHA-256 `9a551e66a977b5299a085cd869b5518ed4ef40be798522a20bbe00d5286a2587`.
+
+### Paired public range-count measurements
+
+The new `tests/connect/benchmark_phase419_counts.py` harness measured exact Connect `count()` results for string `id > 5` and Column `id >= 5` on 1k, 1M, and 10M ranges. Each fresh runtime warmed each case once, then collected 20 timed samples. Three baseline/candidate runtime pairs ran in rotating order (baseline/candidate, candidate/baseline, baseline/candidate) on the same Apple M4 Pro host with the locked `pyspark-client==4.0.5`/PyArrow 26.0.0 client. All six reports use clean runner revision `79527d182a91c00d4dee389e0eacec9e6e46e515`. The baseline server is v4.18.1 source `0ad225677ec47b20c9c6225fa9f4b73b00e54aba`, Connect-only binary SHA-256 `4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`; the candidate is Connect-only binary SHA-256 `92e8b76afc0547c572ba2b28316891b6c06da93a1fc3534f9766937d4dc44bb7`, built from the candidate runtime source at `a0edec2d`. The helper records the binary hash, exact values, raw timings, environment, limits, and source provenance in each report.
+
+Each run used the same command shape, changing `SERVER_BIN` and `REPORT` for the six baseline/candidate artifacts:
+
+```sh
+PYTHONPATH=python/sparkless /tmp/sparkless-linkedin-verify/bin/python \
+  tests/connect/benchmark_phase419_counts.py \
+  --server-bin "$SERVER_BIN" --iterations 20 --output "$REPORT"
+```
+
+The following values pool the 60 warm samples per side and use nearest-rank p50/p95; speedup is baseline p50 divided by candidate p50. The 20/60-sample tails are descriptive and do not establish stable p99 behavior.
+
+| Rows | Predicate | Baseline p50/p95 (ms) | Candidate p50/p95 (ms) | p50 speedup |
+| ---: | --- | ---: | ---: | ---: |
+| 1,000 | String `id > 5` | 15.513 / 16.732 | 15.508 / 17.175 | 1.00× |
+| 1,000 | Column `id >= 5` | 16.548 / 18.773 | 15.972 / 18.015 | 1.04× |
+| 1,000,000 | String `id > 5` | 20.327 / 22.319 | 15.686 / 17.317 | 1.30× |
+| 1,000,000 | Column `id >= 5` | 20.324 / 21.318 | 15.465 / 17.790 | 1.31× |
+| 10,000,000 | String `id > 5` | 46.924 / 48.487 | 15.323 / 17.326 | 3.06× |
+| 10,000,000 | Column `id >= 5` | 46.794 / 48.838 | 16.062 / 17.898 | 2.91× |
+
+Each baseline/candidate report contains 20 samples per case; artifact SHA-256 values are:
+
+| Pair | Baseline report | SHA-256 | Candidate report | SHA-256 |
+| ---: | --- | --- | --- | --- |
+| 1 | [phase-419-counts-baseline-pair-1.json.gz](evidence/phase-419-counts-baseline-pair-1.json.gz) | `5540001952bec57e07af49e3442ac3177b4bf1abae0906f324d31792f74622a4` | [phase-419-counts-candidate-pair-1.json.gz](evidence/phase-419-counts-candidate-pair-1.json.gz) | `ae2ee6edc9793ca40f7a033729a620c3b4a772682f496f1ea50a363cbff2108f` |
+| 2 | [phase-419-counts-baseline-pair-2.json.gz](evidence/phase-419-counts-baseline-pair-2.json.gz) | `fd5e84f4dd6562d1bc3ff9438cc88317b7c92d3a519fe23c76c3735e2c1d43ac` | [phase-419-counts-candidate-pair-2.json.gz](evidence/phase-419-counts-candidate-pair-2.json.gz) | `b624c91da9a18f51836f806d38f0bff3fc23c31bd6b32eb3b3ff401e87cd1e49` |
+| 3 | [phase-419-counts-baseline-pair-3.json.gz](evidence/phase-419-counts-baseline-pair-3.json.gz) | `95b6ca4da7ad8800324ae90897feac5379e00ae7edb97afd9cbc9ad763b672c5` | [phase-419-counts-candidate-pair-3.json.gz](evidence/phase-419-counts-candidate-pair-3.json.gz) | `9756099150e3f4fb1eac34de851d24005120681d008cd383a5ea2d109aff14bc` |
+
+The measured 10M p50 results exceed #1737's initial 2× latency target for both public predicate forms. The paired results cover only those two predicates; the full reversed-comparison, signed-boundary, empty/negative-step, unsupported/fractional fallback, cancellation, and core-IR eligibility matrix remains a separate acceptance requirement.
 
 ## #1738 mixed Connect load
 
@@ -200,6 +233,17 @@ The four cohorts had zero health/HTTP probe errors; the slow reader and disconne
 At 16 clients, the c1 active-2 run clears the provisional floor once: 103.50 correct ops/s, 217.0/232.8 ms short-job p95/p99, zero probe errors, and 60.2 MiB peak RSS. It is one candidate observation, not a repeated paired comparison. The baseline was built from v4.18.1 source tag commit `0ad225677ec47b20c9c6225fa9f4b73b00e54aba`, binary SHA-256 `4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`, with `--features connect`; the c1 benchmark runner and clients were copied into the detached tag worktree so both sides used the same workload. Baseline run `run-20261101T014645Z-75661` at active limit 2 completed the one-client cohort but failed at four clients with `DEADLINE_EXCEEDED: timed out waiting for Connect compute admission` (the configured timeout was 5 seconds). Run `run-20261101T015303Z-80128` at active limit 4 completed the one- and four-client cohorts but failed at eight clients with the same admission timeout. Neither run produced benchmark JSON or comparable throughput. Their retained server traces are [active 2](evidence/phase-419-connect-mixed-baseline-v4.18.1-active-2-failure.server.log.gz), SHA-256 `b475f00c488029aa98e89e96aad654ab53bb2a2ce5d936ce10765ce6c2312cf5`, and [active 4](evidence/phase-419-connect-mixed-baseline-v4.18.1-active-4-failure.server.log.gz), SHA-256 `87d87c58acfe4c73bd8ef14307830adc7bc6da85bbf928602a526fa91e2cea2e`. These are baseline liveness failures, not throughput comparisons.
 
 The runner now supports `--queue-timeout-ms` (default `5000`) and records that value in its settings and server environment; its harness unit test covers both the default and an override. A diagnostic active-8 baseline run, `run-20261101T021439Z-93005`, used a 30,000 ms queue timeout with the same workload and 60,000 ms response timeout. It advanced through the one- and four-client cohorts, then failed during the eight-client cohort because the HTTP progress probe reported `HTTP SELECT 1 failed`. It also produced no benchmark JSON. The retained trace is [phase-419-connect-mixed-baseline-v4.18.1-active-8-q30-failure.server.log.gz](evidence/phase-419-connect-mixed-baseline-v4.18.1-active-8-q30-failure.server.log.gz), SHA-256 `fd1a74653c70e9746b1505310332a8e57ee7d945c0a224d1a453e2b4b98e48e4`.
+
+The matched active-8 candidate diagnostic, `run-20261101T021819Z-95676`, used the same 30,000 ms queue and 60,000 ms response timeouts, Connect-only features, and four 60-second cohorts. The runner source was clean at `27c7ccdb75419d786cb9a4087ce195051c6fc72c`; the server was rebuilt from the candidate runtime source at `a0edec2d` (binary SHA-256 `92e8b76afc0547c572ba2b28316891b6c06da93a1fc3534f9766937d4dc44bb7`). It completed every cohort with zero health/HTTP probe errors:
+
+| Clients | Throughput (ops/s) | Short-job p95/p99 (ms) | Admission p95 (ms) | Peak RSS (MiB) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 21.24 | 19.5 / 19.7 | 0.005 | 54.2 |
+| 4 | 80.68 | 19.7 / 20.1 | 0.004 | 57.3 |
+| 8 | 145.19 | 20.5 / 21.2 | 0.006 | 60.4 |
+| 16 | 200.22 | 31.2 / 43.1 | 4.068 | 51.1 |
+
+The million-row slow reader completed with no probe errors; injected disconnect replay reported one producer start and one reattach RPC; shutdown was graceful. The compressed full report is [phase-419-connect-mixed-candidate-a0-connect-active-8-q30.json.gz](evidence/phase-419-connect-mixed-candidate-a0-connect-active-8-q30.json.gz), SHA-256 `462c00cb2580b3838930f1d2c24b7d1912b736396c4b5077e8b51dbda926a225`. This candidate diagnostic did not produce a baseline ratio because the baseline failed its HTTP progress probe at eight clients.
 
 For the post-export/count candidate, the active-2/16-client cohort measured 105.67 correct ops/s, short-job p95/p99 of 216.9/232.4 ms, and 57.7 MiB server peak RSS. A **provisional** #1738 comparison floor is 100 correct ops/s at 16 clients and active limit 2, short-job p95 at most 220 ms and p99 at most 240 ms, zero health/HTTP errors, and peak RSS at most 64 MiB. This sets the requested numeric floor before any scheduler change, with roughly 5.4% throughput headroom. It is a selection from one fresh run per active limit, not a passed acceptance gate. The required three or more rotating fresh baseline/candidate pairs, 20-iteration small-job guardrails, and scheduler-only comparison against the post-export/count intermediate candidate remain outstanding. The active-8 run suggests improved tails without a clear throughput gain over active 4; no default was changed from this single observation.
 
