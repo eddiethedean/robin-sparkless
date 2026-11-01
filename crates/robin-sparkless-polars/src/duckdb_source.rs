@@ -1114,6 +1114,30 @@ mod source_pool_tests {
     use super::*;
     use std::thread;
 
+    #[test]
+    fn source_snapshot_charges_decoded_bytes_across_all_batches() {
+        let snapshot = DuckDbReadSnapshot::new(
+            HashMap::new(),
+            Arc::new(SourceConnectionPool::default()),
+            CancellationToken::new(),
+        );
+        assert!(
+            snapshot
+                .charge_decoded_bytes(DUCKDB_SOURCE_MAX_DECODED_BYTES - 1)
+                .is_ok()
+        );
+        assert!(snapshot.charge_decoded_bytes(1).is_ok());
+        assert!(matches!(
+            snapshot.charge_decoded_bytes(1),
+            Err(EngineError::User(message)) if message.contains("decoded data exceeds")
+        ));
+        assert_eq!(
+            snapshot.decoded_bytes.load(Ordering::Acquire),
+            DUCKDB_SOURCE_MAX_DECODED_BYTES
+        );
+        assert!(snapshot.failed.load(Ordering::Acquire));
+    }
+
     fn wait_for_waiters(pool: &SourceConnectionPool, expected: usize) {
         for _ in 0..10_000 {
             if pool.state.lock().unwrap().waiting == expected {

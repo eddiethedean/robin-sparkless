@@ -23,6 +23,23 @@ from pyspark.sql.connect.session import SparkSession as ConnectSession
 from sparkless.server import SparklessConnect
 
 
+def send_quack_owner_command(owner: subprocess.Popen[str], command: str) -> None:
+    if owner.stdin is None or owner.stdout is None:
+        raise RuntimeError("DuckDB Quack fixture owner control pipes are unavailable")
+    owner.stdin.write(f"{command}\n")
+    owner.stdin.flush()
+    with selectors.DefaultSelector() as selector:
+        selector.register(owner.stdout, selectors.EVENT_READ)
+        if not selector.select(timeout=15):
+            raise TimeoutError(f"DuckDB Quack fixture owner did not answer {command!r}")
+        response = owner.stdout.readline().strip()
+    expected_response = {"stop": "stopped", "start": "started"}.get(command)
+    if response != expected_response:
+        raise RuntimeError(
+            f"DuckDB Quack fixture owner returned {response!r} for {command!r}"
+        )
+
+
 def main() -> None:
     assert importlib.metadata.version("pyspark-client") == "4.0.5"
     parser = argparse.ArgumentParser()
@@ -37,6 +54,7 @@ def main() -> None:
 
     previous_sources = os.environ.get("SPARKLESS_DUCKDB_SOURCES")
     owner: subprocess.Popen[str] | None = None
+    owner_info: dict[str, str] | None = None
     standalone_database: Path | None = None
     with tempfile.TemporaryDirectory(prefix="sparkless-duckdb-source-") as temp_dir:
         if args.quack_owner_bin:
@@ -109,6 +127,8 @@ def main() -> None:
                 INSERT INTO non_finite_events VALUES (CAST('NaN' AS DOUBLE));
                 CREATE TABLE nested_events (items INTEGER[]);
                 INSERT INTO nested_events VALUES ([1, 2]);
+                CREATE TABLE oversized_events (payload VARCHAR);
+                INSERT INTO oversized_events VALUES (repeat('x', 524289));
                 CREATE TABLE right_events (id BIGINT, note VARCHAR);
                 INSERT INTO right_events VALUES (1, 'one'), (2, 'two'), (4, 'four');
                 CREATE TABLE empty_events (id BIGINT NOT NULL, label VARCHAR);
@@ -287,6 +307,12 @@ def main() -> None:
                     ), error
                 else:
                     raise AssertionError("nested DuckDB values were accepted")
+                try:
+                    spark.table("warehouse.oversized_events").collect()
+                except Exception as error:
+                    assert "512 kib" in str(error).lower(), error
+                else:
+                    raise AssertionError("oversized DuckDB VARCHAR values were accepted")
 
                 filtered = sorted(
                     (row.id, row.label)
@@ -375,6 +401,64 @@ def main() -> None:
                     assert pending_read.count() == 3, (
                         "a source failure leaked its read lease or corrupted a later statement"
                     )
+                else:
+                    assert args.quack_owner_bin is not None
+                    assert args.quack_extension_path is not None
+                    assert owner_info is not None
+                    subprocess.run(
+                        [
+                            str(args.quack_owner_bin.absolute()),
+                            str(args.quack_extension_path.absolute()),
+                            "--writer",
+                            owner_info["uri"],
+                            owner_info["token"],
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    assert events.count() == 4, (
+                        "a commit from an independent Quack writer process was not visible "
+                        "to the next Connect statement"
+                    )
+
+                    # Stop the shared Quack owner after analysis but before execution. The
+                    # operation must fail without retrying against a different snapshot; a
+                    # fresh operation must succeed after the same owner returns.
+                    pending_read = spark.table("warehouse.main.events")
+                    assert pending_read.schema.fieldNames() == [
+                        "id",
+                        "bucket",
+                        "label",
+                        "amount",
+                        "active",
+                    ]
+                    send_quack_owner_command(owner, "stop")
+                    try:
+                        try:
+                            pending_read.collect()
+                        except Exception as error:
+                            message = str(error).lower()
+                            assert any(
+                                marker in message
+                                for marker in (
+                                    "quack",
+                                    "duckdb",
+                                    "source",
+                                    "connection",
+                                    "refused",
+                                )
+                            ), error
+                        else:
+                            raise AssertionError(
+                                "a read succeeded while its configured Quack owner was stopped"
+                            )
+                    finally:
+                        send_quack_owner_command(owner, "start")
+                    assert pending_read.count() == 4, (
+                        "a Quack source failure leaked its read lease or corrupted a later statement"
+                    )
 
             source_mode = (
                 "Quack shared owner"
@@ -389,7 +473,7 @@ def main() -> None:
                 os.environ["SPARKLESS_DUCKDB_SOURCES"] = previous_sources
             if owner is not None:
                 if owner.stdin is not None:
-                    owner.stdin.write("stop\n")
+                    owner.stdin.write("quit\n")
                     owner.stdin.flush()
                     owner.stdin.close()
                 owner.wait(timeout=15)
