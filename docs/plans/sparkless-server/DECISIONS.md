@@ -26,6 +26,18 @@ D14 must select a native source/driver and prove database ownership, stable snap
 
 The [4.19 implementation plan](RELEASE_4_19.md) retains 419-01–419-11 and adds explicit cross-track dependencies and acceptance. D14's candidate native/library pins are selected, but acceptance remains open: 419-01 must verify the exact platform packaging, freeze name/type/snapshot behavior, and measure source connection/snapshot/queue/batch/cleanup budgets. The required Connect source matrix includes named-table analysis/reads, existing filter/project/limit, global counts, same-owner inner equijoins, and grouped count/BIGINT sum. These translator additions require public 4.0.5 client fixtures; no general Connect SQL or broader API support is inferred.
 
+### 4.19 source differential evidence (2026-11-01)
+
+The declared DuckDB source table/filter/project/limit/count/join/grouped-aggregate subset now has a 12-case public-client differential against Apache Spark 4.0.5 local mode; the raw report and runner are recorded in [phase evidence](RELEASE_4_19_EVIDENCE.md#duckdb-connect-source-comparison-with-spark-405-2026-11-01). This closes that bounded reference-comparison item. It does not close D14 or V35/V36: clean cross-platform Quack extension packaging, wider platform/resource coverage, and the complete support matrix still need evidence.
+
+### 4.19 source lifecycle and budget update (2026-11-01)
+
+The public Quack fixture now starts a long source scan, shuts the server down through its normal control path, and confirms the pinned client receives the shutdown status while the DuckDB owner accepts the remote cancellation. Four-client slow-reader reports now include per-reader completion/rejection outcomes; a 100k-row cohort completes all scans, a larger cohort exercises the 8 MiB replay/sender rejection, and observed server-child RSS remains below the provisional 256 MiB guardrail on the tested macOS arm64 host. The current enforced row, IPC, decoded-byte, batch, scalar, source-pool, request, and replay budgets are listed in the [4.19 plan](RELEASE_4_19.md#performance-protocol-and-completion-criteria) and [evidence record](RELEASE_4_19_EVIDENCE.md#concurrent-source-scans-and-slow-reader-budgets-2026-11-01). D14 and V35/V36 remain open for clean cross-platform Quack packaging, wider platform/resource coverage, and full release acceptance.
+
+### 4.19 performance guardrail update (2026-11-01)
+
+Three rotating release pairs now cover the selected small-job action and startup latency guardrails: 60 samples per workload/side, with 20 fresh starts in each of three fresh runtimes. Every tested p50/p95 is within the stated regression thresholds. The projected 100k range exporter also records separate write/rechunk/schema-rewrite timing and bounded frame/IPC size estimates. These close the measured small-job latency subset and add exporter buffer diagnostics; allocator-wide accounting, small-job CPU/server-RSS/first-batch/cancellation comparisons, and the released-baseline scheduler comparison remain open. See the [4.19 performance evidence](RELEASE_4_19_EVIDENCE.md#small-job-latency-guardrails-and-arrow-buffer-instrumentation-2026-11-01).
+
 ## DuckDB source driver candidate (2026-10-31)
 
 Use DuckDB 2.0.0 LTS as the optional source engine and pin the Rust binding to `duckdb-rs==1.20000.1` (the `1.20000.x` binding line tracks DuckDB 2.0.0). Use the matching Quack 2.0.0 core extension for the live shared-owner mode. DuckDB 2.0.0 is an LTS release through at least October 2027, and its release notes describe Quack as polished with substantial performance and stability improvements. Keep DuckDB and Quack opt-in; the default engine remains Polars.

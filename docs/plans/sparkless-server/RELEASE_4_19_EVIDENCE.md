@@ -197,9 +197,89 @@ fault proxy, which drops the stream after the first ExecutePlan response. The pi
 normal retry returns every exact row; server tracing asserts one producer start and at least one
 ReattachExecute RPC. The DuckDB-source cancellation fixture also passed against the same Quack
 extension, cancelling after its first batch and observing `cancelled` on the shared owner. Public
-Quack cancellation during service shutdown, clean cross-platform extension packaging, and the
-Spark differential corpus remain open. D14 and V35/V36 are still open; the release does not claim
-complete DuckDB-source acceptance.
+Quack cancellation during service shutdown and clean cross-platform extension packaging remain
+open. The Spark differential corpus is now recorded below. D14 and V35/V36 are still open; the
+release does not claim complete DuckDB-source acceptance.
+
+### DuckDB Connect source comparison with Spark 4.0.5 (2026-11-01)
+
+`tests/connect/differential_phase419_duckdb.py` passed 12 row/schema comparisons against Apache
+Spark 4.0.5 `local[4]` using the public Spark Connect client for the candidate and Spark's local
+DataFrames for the reference. The cases cover two tables, filter/project, `LIMIT 0`, global and
+nullable counts, empty table schema, all-null count, grouped count/sum, same-owner inner join with
+duplicate/null keys, grouped null keys, and `SMALLINT`/`DOUBLE`/`DATE`/UTC timestamp types. This
+closes the recorded table/join/aggregate reference-comparison corpus for the declared subset; it
+does not certify general Connect SQL, other Spark versions, or untested source types.
+
+The run used source `57646d92`, API `4.19.0`, PySpark `4.0.5`, DuckDB fixture writer `1.5.1`,
+macOS 26.5.2 arm64, and the packaged release `sparkless-server 4.19.0` executable with SHA-256
+`252e1e5d2d0c7d9461163be9864def4b67535c94c748ab47a4d0d1e9957376be`. The oracle ran in Spark's
+bundled `local[4]` runtime in the same process; it was not a Spark Connect reference server. The
+raw report is [phase-419-duckdb-spark-differential.json.gz](evidence/phase-419-duckdb-spark-differential.json.gz),
+SHA-256 `aa5569a0cbd6313618f2f78c89d2c58d97ffde6df0cdfe89c7befc949f8f8c80`.
+
+### Public DuckDB cancellation during graceful shutdown (2026-11-01)
+
+`tests/connect/smoke_phase419_duckdb_shutdown.py` passed against a live Quack owner with a public
+Spark Connect client. The source query was confirmed active before the normal server shutdown
+command. Shutdown completed in 0.088 seconds, the client received `Spark Connect server is
+shutting down`, and the server's source trace recorded `duckdb_source_cancel_requested` followed by
+`duckdb_source_remote_cancel accepted=true`. This closes the macOS arm64 public shutdown-cancel
+witness; it does not establish the same extension behavior on other platforms.
+
+The release executable was built at source `6b3b7408` with
+`cargo build --locked --release -p sparkless-server --no-default-features --features
+http,connect,duckdb-source`, and has SHA-256
+`15c8ce1c0ab9caca28b56de8d5b6646ecbc5bc89cc665da48da7bcab0b93e92d`. The fixture used the
+DuckDB 2.0.0 `osx_arm64` Quack extension and the owner example from that same source. The runner is
+at source `0d6215c9`. Its compressed result is
+[phase-419-duckdb-shutdown-cancel.json.gz](evidence/phase-419-duckdb-shutdown-cancel.json.gz),
+SHA-256 `e246e9eda7a2f3da87e267e14b50d1bad6e37340703469ef8ca1ea9d35ac433a`.
+
+### Concurrent source scans and slow-reader budgets (2026-11-01)
+
+Three fresh release-server processes per cohort ran four independent `pyspark-client==4.0.5`
+sessions against one standalone DuckDB source, with four active Connect operations, a 16-operation
+pending limit, and a 10 ms pause after each 16,384-row group. The host was an Apple M4 Pro running
+macOS 26.5.2 arm64 with CPython 3.11.14, PyArrow 26.0.0, DuckDB fixture writer 1.5.1, and the
+packaged `sparkless-server 4.19.0` executable (SHA-256
+`252e1e5d2d0c7d9461163be9864def4b67535c94c748ab47a4d0d1e9957376be`). Each RSS value is the
+peak of that one server child after exit, not a total machine, client, or allocator measurement.
+
+At 100,000 rows per reader with 16-byte payloads, all four readers completed on every measured
+round. Three server RSS peaks were 155.5, 147.5, and 147.3 MiB; the per-reader latency p50 ranged
+from 1,022.5 to 1,026.2 ms, and the descriptive p95 ranged from 1,038.1 to 1,072.1 ms. At 200,000
+rows per reader, the 8 MiB Connect replay/sender cap was occasionally reached by slow consumers:
+across the three fresh processes, 7, 0, and 8 of 16 total warmup/measured actions were rejected
+with the expected cap error, while every completed action returned exactly 200,000 rows. RSS peaks
+were 206.6, 195.6, and 198.8 MiB. At 350,000 rows per reader, all four clients hit the same
+expected cap in each warmup, and the retained per-reader errors confirm prompt rejection; the three
+server RSS peaks were 211.3, 213.1, and 211.3 MiB.
+
+This selects a **provisional measured guardrail of 256 MiB server-child RSS** for the tested
+four-reader 100k–350k workload range on this host. It is an observational release-candidate budget,
+not an enforced process memory ceiling or a promise for other platforms. The 200k mixed
+completion/rejection reports also show why result outcomes are retained per reader instead of
+reducing the run to one median.
+
+The 100k success cohort used harness source `6b3b7408` / script SHA-256
+`495718bf1a9c903b848e3e6468812aee946ef5340def2157fa5e64fb1fec9546`; the mixed 200k cohort used
+source `819333a5` / script SHA-256
+`c47fcf95d4442f978d3e98e74c04b01b0b95325f242801f2340a8c6c333c7dcd`; the 350k cap cohort used
+source `578b6ee5` / script SHA-256
+`f50dfd1f5ee9ded1bdd6925881fce92b08888dd8fc06c22b010ebf5a45998c71`.
+
+| Cohort | Run | Result report | SHA-256 |
+| --- | ---: | --- | --- |
+| 100k × 16 B, four readers | 1 | [report](evidence/phase-419-duckdb-concurrent-slow-readers-run-1.json.gz) | `c6f61fc2753cac2ed48d6167ec41c148e9084b4a2d9e6eea3cc06704ac7af2b3` |
+| 100k × 16 B, four readers | 2 | [report](evidence/phase-419-duckdb-concurrent-slow-readers-run-2.json.gz) | `849a0c191aa063f94ef63505ebbe6e408308f79a261bf6eb9564efb276d5cdef` |
+| 100k × 16 B, four readers | 3 | [report](evidence/phase-419-duckdb-concurrent-slow-readers-run-3.json.gz) | `7a262129f9be302f8cb82a40e1f2437a61b5269358844f33371fd017d500c7a8` |
+| 200k × 16 B, four readers | 1 | [report](evidence/phase-419-duckdb-concurrent-slow-readers-200k-run-1.json.gz) | `a7ce3f0292b90c49d24ed4d3c8aba2ecb1ce18683b0b458135235a14ae32b3ff` |
+| 200k × 16 B, four readers | 2 | [report](evidence/phase-419-duckdb-concurrent-slow-readers-200k-run-2.json.gz) | `416bf4c58bcb9f03260c07539576d8edf6f7f3390e5453b017febdfa2b5d2c19` |
+| 200k × 16 B, four readers | 3 | [report](evidence/phase-419-duckdb-concurrent-slow-readers-200k-run-3.json.gz) | `0f88223558bff91d995c0351fc82945597b6b183df4ce89bcd1aed28fd1e0186` |
+| 350k × 16 B, four readers | 1 | [report](evidence/phase-419-duckdb-concurrent-result-reject-350k-run-1.json.gz) | `577e247a08c3c0e960f7d605adb58c4f3206a6d2a93cd69e3c35e496e9577a0e` |
+| 350k × 16 B, four readers | 2 | [report](evidence/phase-419-duckdb-concurrent-result-reject-350k-run-2.json.gz) | `909f3d36b1da002e7115b00d0e37588642af931312fc0b159730a5f903a49fe8` |
+| 350k × 16 B, four readers | 3 | [report](evidence/phase-419-duckdb-concurrent-result-reject-350k-run-3.json.gz) | `a45bb99ba714b2b21edb4e178efb6d3514552423887280f0dc5bdd5fbd61f8f9` |
 
 ### Standalone DuckDB source resource measurements (2026-11-01)
 
@@ -530,11 +610,85 @@ The 18 compressed reports retain per-operation samples, phase counters, environm
 | 8 | 2 | [baseline](evidence/phase-419-scheduler-intermediate-active-8-baseline-pair-2.json.gz) | `2d868bd91898d2b13b875174ddd9692239118626c5b4de1ad7404c1f3ded94b9` | [candidate](evidence/phase-419-scheduler-intermediate-active-8-candidate-pair-2.json.gz) | `2789812dd23155af81d3d6a21260387b3befbaaefff91a0db87c4bf4cd6588b9` |
 | 8 | 3 | [baseline](evidence/phase-419-scheduler-intermediate-active-8-baseline-pair-3.json.gz) | `b5786ca1d5339c19d01b60529018b20f2dd42928570592cd2be90b305742a81e` | [candidate](evidence/phase-419-scheduler-intermediate-active-8-candidate-pair-3.json.gz) | `48cdc384f60451a8ac590727535767bcc604e421839cd7bc88ead7e3bb2dff03` |
 
+### Small-job latency guardrails and Arrow buffer instrumentation (2026-11-01)
+
+Three rotating release pairs measured the public-client small-job cases at 20 timed iterations
+after one warmup per runtime. Each of the three fresh Python runtimes per side also recorded 20
+fresh server/readiness/session starts. Pair order was baseline/candidate, candidate/baseline,
+baseline/candidate. The harness source is `bc068ff4f6e4f1ce92a489f4547fce645f2bee0e` and uses the
+same `pyspark-client==4.0.5`, CPython 3.11.15, and PyArrow 26.0.0 on both sides, with local
+`SparklessConnect` launcher code from that source. The host was an Apple M4 Pro, macOS 26.5.2
+arm64.
+
+The published baseline executable is the `v4.18.1` server build from source
+`0ad225677ec47b20c9c6225fa9f4b73b00e54aba`, reports server version 4.18.0, and has SHA-256
+`4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`. The release candidate is
+the `http,connect` release executable built from source `43f43589` (full source revision
+`43f43589f0124fe250327bea4f5af61745406aaa`), reports version 4.19.0, and has SHA-256
+`207dac093924892e9a08b8d23e2b685faeea2812e2ec2df97e2888a471aebef6`. The baseline build uses
+the `connect` feature with default `http`; the candidate explicitly enables both, so the effective
+server feature sets match. Both used the same Python API helper source, native package, and
+Connect client dependencies; the installed server-binary version metadata matched the executable
+on each side for the launcher's compatibility check.
+
+The table pools 60 timed actions per side and uses nearest-rank p50/p95. The acceptance limits
+are a median regression no greater than `max(5% of baseline, 1 ms)` and p95 regression no greater
+than `max(10% of baseline, 2 ms)`. Every action stayed within those limits; all but schema analysis
+improved by several milliseconds, while schema analysis was effectively unchanged. Startup p50
+increased by 0.313 ms, below the 1 ms absolute allowance, and startup p95 improved. Startup p95
+uses 60 fresh starts and is descriptive rather than a high-confidence extreme-tail estimate.
+
+| Workload | Baseline p50 / p95 (ms) | Candidate p50 / p95 (ms) |
+| --- | ---: | ---: |
+| Tuple ingest/filter/count, 10 rows | 15.933 / 18.610 | 0.833 / 1.085 |
+| Tuple ingest/filter/count, 100 rows | 16.643 / 18.852 | 0.779 / 1.017 |
+| Tuple ingest/filter/count, 1,000 rows | 16.807 / 19.363 | 1.009 / 1.165 |
+| Tuple ingest/filter/count, 10,000 rows | 18.487 / 23.239 | 3.298 / 3.412 |
+| Nullable preview, 25 of 1,000 rows | 17.418 / 19.644 | 0.952 / 1.145 |
+| Nullable/mixed collect, 256 rows | 19.283 / 20.758 | 1.012 / 1.187 |
+| Range schema analysis, 1,000 rows | 0.156 / 0.328 | 0.125 / 0.193 |
+| Fresh server/readiness/session start | 8.437 / 10.740 | 8.750 / 10.548 |
+
+Client-process peak RSS ranged from 133.5–134.7 MiB on the baseline and 133.5–133.7 MiB on the
+candidate. This harness does not sample server RSS or server CPU and does not measure first-batch
+or cancellation latency; those resource and lifecycle comparisons remain separate acceptance
+work.
+
+The six compressed reports preserve each fresh runtime and its action/startup samples:
+
+| Pair | Baseline report | SHA-256 | Candidate report | SHA-256 |
+| ---: | --- | --- | --- | --- |
+| 1 | [baseline](evidence/phase-419-small-jobs-baseline-pair-1.json.gz) | `10ea515ab50ae02887cc292205d1842e178436b90794a25f4f59d5eb3fd93737` | [candidate](evidence/phase-419-small-jobs-candidate-pair-1.json.gz) | `89298dc6e7163d27f1b8d0e673121d0cb334d5e3045fd9bb08f9b363d77aaff3` |
+| 2 | [baseline](evidence/phase-419-small-jobs-baseline-pair-2.json.gz) | `ac37e53f35c68e5e02969b75f4377eb8f4d5f019a7a379092e2f236ca25a6506` | [candidate](evidence/phase-419-small-jobs-candidate-pair-2.json.gz) | `47cf50a5f3a547df9f63b05ffc6b72a9988f626bd44741f7d9e8de110bdb63a0` |
+| 3 | [baseline](evidence/phase-419-small-jobs-baseline-pair-3.json.gz) | `7961112f99ac7cb2982670ca81c8c738306119dfc70c50807bd0836990a7dc4c` | [candidate](evidence/phase-419-small-jobs-candidate-pair-3.json.gz) | `73528d8b14a3889e9224a4787a052ea320e4d8955efb51f08a8d2706490ba679` |
+
+The exporter now emits opt-in `SPARKLESS_ARROW_TRACE=1` records split into source size, buffered
+frame size estimates, IPC buffer sizes, rechunk/IPC-write/schema-rewrite/combine time, and
+serialized versus emitted bytes. In the single measured `range(100_000).select("id")` trace,
+both `collect()` records processed 100,000 rows in 391 source chunks and seven output batches.
+The largest source batch estimate was 2,048 bytes; peak buffered and combined frame estimates
+were 131,072 bytes; the largest serialized IPC batch was 131,344 bytes; and the estimated raw plus
+rewritten schema buffer high-water was 262,688 bytes. Each stream serialized and emitted 801,904
+IPC bytes. Across the warmup and timed `collect()` traces, serialization took 0.095–0.112 ms,
+including 0.021–0.023 ms rechunking, 0.053–0.065 ms IPC writing, and 0.020–0.022 ms schema
+rewriting. These are reported buffer-length/data-size estimates, not allocator-wide accounting or
+server RSS measurements. The full one-iteration trace report is
+[phase-419-arrow-buffer-trace.json.gz](evidence/phase-419-arrow-buffer-trace.json.gz), SHA-256
+`f407eb57c61d63f74c40ca311ce0c9065ea144c7c22e53126c278a9c8fcf4285`.
+
+The trace implementation passed `cargo check --locked --release -p sparkless-server
+--no-default-features --features http,connect` and the matching release build at source
+`43f43589f0124fe250327bea4f5af61745406aaa`. The bounded IPC regressions passed with
+`cargo test --locked --release -p robin-sparkless-polars --features sql arrow_ipc_batches_`
+(3 passed). `test_slice8_harness.py` passed all 7 parser/harness tests, the benchmark scripts passed
+Ruff and Python compilation, `scripts/check_documentation.py` checked all 187 documentation files,
+and `smoke_phase419_client.py` passed against the same 4.19 release server.
+
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; the native Quack cancellation fixture observes remote cancellation after a batch. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. Public cancellation during shutdown, concurrent/slow-reader RSS budgets, the Spark differential corpus, and clean cross-platform extension packaging remain open. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. Four-reader slow-consumer runs select a provisional 256 MiB observed RSS guardrail on macOS arm64; broader platform/resource coverage and clean cross-platform extension packaging remain open. D14 and V35/V36 remain open.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
-- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 11.39× across three release pairs; paired exporter/count reports, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against the post-export/count intermediate candidate are retained above. Allocation/buffer measurements, full small-job guardrails, and a complete scheduler comparison against the released baseline remain open.
+- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 11.39× across three release pairs; paired exporter/count reports, three-pair small-job action/startup guardrails, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against the post-export/count intermediate candidate are retained above. Exporter buffer-size estimates are recorded, but allocator-wide accounting, small-job server CPU/RSS/first-batch/cancellation comparisons, and a complete scheduler comparison against the released baseline remain open.
 - Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow still needs a successful run, and release publication checks have not been performed.
 
 Accordingly, this evidence record does not mark any 4.19 slice or issue complete and does not authorize release publication.
