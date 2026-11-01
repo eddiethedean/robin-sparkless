@@ -11,16 +11,20 @@ from datetime import datetime, timezone
 import importlib.metadata
 import json
 import os
+import re
 import selectors
+import socket
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import duckdb
 from pyspark.sql import functions as F
 from pyspark.sql.connect.session import SparkSession as ConnectSession
 
-from sparkless.server import SparklessConnect
+from sparkless.server import SparklessConnect, SparklessServer
 
 
 def send_quack_owner_command(owner: subprocess.Popen[str], command: str) -> None:
@@ -38,6 +42,87 @@ def send_quack_owner_command(owner: subprocess.Popen[str], command: str) -> None
         raise RuntimeError(
             f"DuckDB Quack fixture owner returned {response!r} for {command!r}"
         )
+
+
+def run_source_replay_smoke(server_bin: Path) -> None:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        proxy_port = listener.getsockname()[1]
+    server = SparklessServer(
+        executable_path=str(server_bin),
+        env={"SPARKLESS_CONNECT_TRACE": "1"},
+    )
+    proxy: subprocess.Popen[str] | None = None
+    spark: ConnectSession | None = None
+    try:
+        server.start()
+        upstream = urlsplit(server.spark_connect_url)
+        if upstream.hostname is None or upstream.port is None:
+            raise RuntimeError(f"invalid Spark Connect endpoint: {server.spark_connect_url}")
+        proxy = subprocess.Popen(
+            [
+                sys.executable,
+                str(Path(__file__).with_name("fault_proxy.py").resolve()),
+                "--listen",
+                f"127.0.0.1:{proxy_port}",
+                "--upstream",
+                f"{upstream.hostname}:{upstream.port}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        if proxy.stdout is None:
+            raise RuntimeError("fault proxy stdout was not captured")
+        with selectors.DefaultSelector() as selector:
+            selector.register(proxy.stdout, selectors.EVENT_READ)
+            if not selector.select(timeout=30):
+                raise TimeoutError("source replay fault proxy did not become ready")
+            proxy_ready = proxy.stdout.readline().strip()
+        if proxy_ready != f"fault_proxy ready address=127.0.0.1:{proxy_port}":
+            raise RuntimeError(f"source replay fault proxy exited early: {proxy_ready!r}")
+
+        producer_pattern = r"event=producer_started"
+        reattach_pattern = r"event=rpc method=ReattachExecute"
+        before = server.diagnostics
+        producers_before = len(re.findall(producer_pattern, before))
+        reattaches_before = len(re.findall(reattach_pattern, before))
+        spark = ConnectSession.builder.remote(f"sc://127.0.0.1:{proxy_port}").create()
+        values = [row.id for row in spark.table("warehouse.main.replay_events").collect()]
+        if (
+            len(values) != 50_000
+            or values[0] != 0
+            or values[-1] != 49_999
+            or sum(values) != 1_249_975_000
+        ):
+            raise AssertionError("source replay returned incorrect rows")
+        spark.stop()
+        spark = None
+
+        trace = server.diagnostics
+        producer_delta = len(re.findall(producer_pattern, trace)) - producers_before
+        reattach_delta = len(re.findall(reattach_pattern, trace)) - reattaches_before
+        proxy.terminate()
+        proxy_text, _ = proxy.communicate(timeout=10)
+        proxy = None
+        if (
+            producer_delta != 1
+            or reattach_delta < 1
+            or "injected UNAVAILABLE" not in proxy_text
+        ):
+            raise AssertionError(
+                "source query did not resume the original producer after disconnect: "
+                f"producer_starts={producer_delta}, reattach_rpcs={reattach_delta}, "
+                f"proxy_log={proxy_text!r}, server_trace={trace!r}"
+            )
+    finally:
+        if spark is not None:
+            spark.stop()
+        if proxy is not None:
+            proxy.terminate()
+            proxy.wait(timeout=10)
+        server.stop()
 
 
 def main() -> None:
@@ -129,6 +214,8 @@ def main() -> None:
                 INSERT INTO nested_events VALUES ([1, 2]);
                 CREATE TABLE oversized_events (payload VARCHAR);
                 INSERT INTO oversized_events VALUES (repeat('x', 524289));
+                CREATE TABLE replay_events AS
+                    SELECT i::BIGINT AS id FROM range(50000) AS source_rows(i);
                 CREATE TABLE right_events (id BIGINT, note VARCHAR);
                 INSERT INTO right_events VALUES (1, 'one'), (2, 'two'), (4, 'four');
                 CREATE TABLE empty_events (id BIGINT NOT NULL, label VARCHAR);
@@ -460,6 +547,7 @@ def main() -> None:
                         "a Quack source failure leaked its read lease or corrupted a later statement"
                     )
 
+            run_source_replay_smoke(args.server_bin.absolute())
             source_mode = (
                 "Quack shared owner"
                 if owner

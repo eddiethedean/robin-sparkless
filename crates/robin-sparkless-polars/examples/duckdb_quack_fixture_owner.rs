@@ -70,7 +70,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          CREATE TABLE nested_events (items INTEGER[]);
          INSERT INTO nested_events VALUES ([1, 2]);
          CREATE TABLE oversized_events (payload VARCHAR);
-         INSERT INTO oversized_events VALUES (repeat('x', 524289));",
+         INSERT INTO oversized_events VALUES (repeat('x', 524289));
+         CREATE TABLE replay_events AS
+             SELECT i::BIGINT AS id FROM range(50000) AS source_rows(i);",
         sql_literal(extension_path)
     ))?;
     connection.query_row(&serve_sql(&uri, token), [], |row| row.get::<_, String>(0))?;
