@@ -439,6 +439,31 @@ The six reports record the binary source separately from the harness source, rel
 | 2 | [phase-419-projected-release-baseline-pair-2.json.gz](evidence/phase-419-projected-release-baseline-pair-2.json.gz) | `173414ccd319090465228b38e4928340a6f26ff80ff914c92f6ec5784e17b12b` | [phase-419-projected-release-candidate-pair-2.json.gz](evidence/phase-419-projected-release-candidate-pair-2.json.gz) | `012937acdedac3c5f51bebcca18b03abd5f03c36562172796a58722651316d7d` |
 | 3 | [phase-419-projected-release-baseline-pair-3.json.gz](evidence/phase-419-projected-release-baseline-pair-3.json.gz) | `8cbb8e4195a03aad152f8ac5930cfd0ea2621d5992c63d121196f3f4674d72fa` | [phase-419-projected-release-candidate-pair-3.json.gz](evidence/phase-419-projected-release-candidate-pair-3.json.gz) | `27f5bdd1716634972b6ed5c2f16e9bb33f675f9bbb84a56d21b853a5c2097b5e` |
 
+The table above measures the earlier exporter candidate. After the final reattachable-response
+acknowledgment and cancellation changes, the exact original `range(100_000).select("id").collect()`
+target was rerun using `--projected-range-only` on the same public client. Three rotating release
+pairs each collected 20 warm samples per side and 20 fresh startup samples per runtime. The
+baseline was the `v4.18.1` release binary (reported version 4.18.0, effective `http,connect`, SHA-256
+`4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`); the candidate was clean
+source revision `43ce29b2c31a3da8d175a91cc350d09a76e8eeb4`, release profile, `http,connect`, SHA-256
+`c604f85ab4856dbe3717c930ff3a47b3119b2b00f6a98a54ef9263889779f745`. The host, CPython 3.11.15,
+PyArrow 26.0.0, `pyspark-client==4.0.5`, helper, and server limits matched the comparison above.
+Across 60 samples, baseline p50/p95 was 1,013.776/1,052.723 ms and candidate p50/p95 was
+148.010/181.050 ms, a **6.85× p50 speedup** at the final source revision. Startup p50/p95 was
+9.005/10.977 ms baseline and 9.017/11.527 ms candidate. The 2× target therefore still passes at
+the final cancellation-safe revision; its response acknowledgment adds latency relative to the
+earlier exporter-only candidate while retaining substantial margin over the target.
+
+Each run used `tests/connect/benchmark_phase419_exports.py --projected-range-only --iterations 20
+--startup-samples 20`; the reports retain the binary and harness provenance, all raw samples, and
+environment:
+
+| Pair | Baseline report | SHA-256 | Candidate report | SHA-256 |
+| ---: | --- | --- | --- | --- |
+| 1 | [baseline](evidence/phase-419-projected-final-baseline-pair-1.json.gz) | `5ec07ae190c75405f51e2c3cf00cd437a23224187fe1b1bb4fdecd1dcb0579b1` | [candidate](evidence/phase-419-projected-final-candidate-pair-1.json.gz) | `5f48275562c860af1ddac997d4862525dbfce68f85fddb06640967a502f0ff45` |
+| 2 | [baseline](evidence/phase-419-projected-final-baseline-pair-2.json.gz) | `3dd1c77d3edb0f95a555b249ff144ab6124caccd46400034bc20824dce1ee72e` | [candidate](evidence/phase-419-projected-final-candidate-pair-2.json.gz) | `612240604e6c1becaf142c75c7b7d46fafd5931d8d2b90c38da39f8d507f098c` |
+| 3 | [baseline](evidence/phase-419-projected-final-baseline-pair-3.json.gz) | `826e270fe9ab5f2337e6dbd433dcf789c92da09db4d20aa7869ea41e3ad41efa` | [candidate](evidence/phase-419-projected-final-candidate-pair-3.json.gz) | `9946eea010866556a1a4a6de0e7b7b053ee4d14ec0b026c283268b092d6df0b9` |
+
 ### Paired public range-count measurements
 
 The new `tests/connect/benchmark_phase419_counts.py` harness measured exact Connect `count()` results for string `id > 5` and Column `id >= 5` on 1k, 1M, and 10M ranges. Each fresh runtime warmed each case once, then collected 20 timed samples. Three baseline/candidate runtime pairs ran in rotating order (baseline/candidate, candidate/baseline, baseline/candidate) on the same Apple M4 Pro host with the locked `pyspark-client==4.0.5`/PyArrow 26.0.0 client. All six reports use clean runner revision `79527d182a91c00d4dee389e0eacec9e6e46e515`. The baseline server is v4.18.1 source `0ad225677ec47b20c9c6225fa9f4b73b00e54aba`, Connect-only binary SHA-256 `4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`; the candidate is Connect-only binary SHA-256 `92e8b76afc0547c572ba2b28316891b6c06da93a1fc3534f9766937d4dc44bb7`, built from the candidate runtime source at `a0edec2d`. The helper records the binary hash, exact values, raw timings, environment, limits, and source provenance in each report.
@@ -693,11 +718,49 @@ The trace implementation passed `cargo check --locked --release -p sparkless-ser
 Ruff and Python compilation, `scripts/check_documentation.py` checked all 187 documentation files,
 and `smoke_phase419_client.py` passed against the same 4.19 release server.
 
+### Small-job server resource and cancellation comparison (2026-11-01)
+
+After the response-acknowledgment and cancellation changes at source `43ce29b2c31a3da8d175a91cc350d09a76e8eeb4`, three rotating release pairs measured 20 timed actions per case and 20 fresh readiness/session starts per runtime. Each side therefore has 60 timed samples per case and 60 startup samples. Pair order was baseline/candidate, candidate/baseline, baseline/candidate. Both sides used the same local Python helper, `pyspark-client==4.0.5`, CPython 3.11.15, PyArrow 26.0.0, and Apple M4 Pro / macOS 26.5.2 arm64. The baseline is the released `v4.18.1` server, version `4.18.0`, release profile, effective `http,connect` features, and binary SHA-256 `4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`. The candidate is the clean 4.19.0 release binary with `http,connect`, built at the source revision above, SHA-256 `c604f85ab4856dbe3717c930ff3a47b3119b2b00f6a98a54ef9263889779f745`.
+
+Pooled nearest-rank action and startup percentiles are:
+
+| Workload | Baseline p50 / p95 (ms) | Candidate p50 / p95 (ms) |
+| --- | ---: | ---: |
+| Tuple ingest/filter/count, 10 rows | 16.476 / 16.856 | 1.772 / 2.115 |
+| Tuple ingest/filter/count, 100 rows | 16.467 / 16.874 | 1.725 / 2.005 |
+| Tuple ingest/filter/count, 1,000 rows | 16.768 / 16.955 | 1.987 / 2.340 |
+| Tuple ingest/filter/count, 10,000 rows | 19.233 / 19.573 | 4.484 / 4.976 |
+| Nullable preview, 25 of 1,000 rows | 16.783 / 17.304 | 1.953 / 2.152 |
+| Nullable/mixed collect, 256 rows | 18.891 / 19.361 | 2.024 / 2.484 |
+| Range schema analysis, 1,000 rows | 0.489 / 0.650 | 0.524 / 0.682 |
+| Range(10M) first-batch-and-cancel action | 168.205 / 175.354 | 21.319 / 23.301 |
+| Fresh server/readiness/session start | 8.526 / 9.329 | 8.701 / 9.363 |
+
+The cancellation case consumed exactly one 16,384-row batch on both sides. Candidate first-batch
+latency was 18.802/20.504 ms p50/p95 versus 165.616/172.766 ms for the baseline. The interrupt
+RPC took 0.291/0.359 ms versus 0.299/0.383 ms; after that RPC, cancellation surfaced to the client
+in 1.999/2.393 ms versus 2.043/2.373 ms. Across the three sampled server processes, peak observed
+RSS was 47.36 MiB for the candidate and 58.42 MiB for the baseline. Summed `ps` process-CPU deltas
+over these workloads were 0.37 s and 10.39 s respectively; macOS `ps` reports CPU time at coarse
+resolution, so these totals are descriptive samples rather than allocator-wide or per-operation
+CPU accounting. The server CPU/RSS/first-batch/cancellation comparison is now recorded for this
+host and workload set; it does not establish cross-platform limits or close allocator-wide
+accounting.
+
+The six compressed reports preserve raw action, startup, cancellation, server-process, and
+environment samples:
+
+| Pair | Baseline report | SHA-256 | Candidate report | SHA-256 |
+| ---: | --- | --- | --- | --- |
+| 1 | [baseline](evidence/phase-419-small-jobs-cancel-ack-baseline-pair-1.json.gz) | `ff05f805a1903054ca70da2c6fd320326f4e05a82a7b812855dc7fd3584046da` | [candidate](evidence/phase-419-small-jobs-cancel-ack-candidate-pair-1.json.gz) | `bfc9008abbea465b9123deb9c539eb92d901d1e3dbb1a1845897080ea010a4d7` |
+| 2 | [baseline](evidence/phase-419-small-jobs-cancel-ack-baseline-pair-2.json.gz) | `7a50db2c8f8334b0f37f96118cac033230c0962fbe62e0fb8cb1f05dcaca09f1` | [candidate](evidence/phase-419-small-jobs-cancel-ack-candidate-pair-2.json.gz) | `002dc79ddcd358ea6ce5fa79cdf16635b5e6ba4b8f79145db16b3805e9d3ff94` |
+| 3 | [baseline](evidence/phase-419-small-jobs-cancel-ack-baseline-pair-3.json.gz) | `9d4bf2274f668c61c523087e3a9cec0b3246cadf98b537bd5a32b3b6a8a0d094` | [candidate](evidence/phase-419-small-jobs-cancel-ack-candidate-pair-3.json.gz) | `270e63c9888d2b83eae1446b40504d2634d5573ba7e5e0b70fd94159bed06ba4` |
+
 ## Open acceptance gates
 
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. Four-reader slow-consumer runs select a provisional 256 MiB observed RSS guardrail on macOS arm64; broader platform/resource coverage and clean cross-platform extension packaging remain open. D14 and V35/V36 remain open.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
-- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 11.39× across three release pairs; paired exporter/count reports, three-pair small-job action/startup guardrails, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against the post-export/count intermediate candidate are retained above. Exporter buffer-size estimates are recorded, but allocator-wide accounting, small-job server CPU/RSS/first-batch/cancellation comparisons, and a complete scheduler comparison against the released baseline remain open.
+- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against the post-export/count intermediate candidate are retained above. Exporter buffer-size estimates are recorded, but allocator-wide accounting and a complete scheduler comparison against the released baseline remain open.
 - Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow still needs a successful run, and release publication checks have not been performed.
 
 Accordingly, this evidence record does not mark any 4.19 slice or issue complete and does not authorize release publication.

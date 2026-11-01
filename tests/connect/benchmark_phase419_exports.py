@@ -614,10 +614,17 @@ def main() -> None:
         action="store_true",
         help="run only tuple-ingest, preview, nullable, and schema guardrails",
     )
+    parser.add_argument(
+        "--projected-range-only",
+        action="store_true",
+        help="run only the original range(100_000).select('id').collect() target",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.iterations < 1 or args.startup_samples < 1:
         parser.error("--iterations and --startup-samples must be positive")
+    if args.small_jobs_only and args.projected_range_only:
+        parser.error("--small-jobs-only and --projected-range-only cannot be combined")
     server_bin = args.server_bin.absolute()
     if not server_bin.is_file():
         parser.error(f"server binary not found: {server_bin}")
@@ -649,7 +656,17 @@ def main() -> None:
             raise RuntimeError("SparklessConnect does not own a running server process")
         if not isinstance(spark, ConnectSession):
             raise TypeError(f"expected PySpark Connect session, got {type(spark)!r}")
-        if args.small_jobs_only:
+        if args.projected_range_only:
+            projected_range = spark.range(100_000).select("id")
+            measurements = [
+                measure_case(
+                    "range_select_id_collect_100000",
+                    projected_range.collect,
+                    exact_range_rows(100_000),
+                    args.iterations,
+                )
+            ]
+        elif args.small_jobs_only:
             measurements = run_small_jobs(spark, args.iterations, owned_process.pid)
         else:
             measurements = run_exports(spark, args.iterations)
