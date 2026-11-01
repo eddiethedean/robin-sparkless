@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -30,6 +30,7 @@ static CONNECT_PRODUCER_STARTS: AtomicU64 = AtomicU64::new(0);
 const CONNECT_GRACEFUL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_FORCE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_RESPONSE_STALL_TIMEOUT: Duration = Duration::from_secs(5);
+const CONNECT_FIRST_BATCH_ACK_GRACE: Duration = Duration::from_millis(50);
 
 #[derive(Default)]
 struct ConnectConnectionRegistry {
@@ -189,6 +190,7 @@ struct ConnectReplayState {
     expired: bool,
     detached_at: Option<Instant>,
     sender: Option<tokio::sync::mpsc::Sender<()>>,
+    execution_waker: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     cancellation: robin_sparkless_core::engine::CancellationToken,
     producer_stopped: bool,
     producer_done: tokio::sync::watch::Sender<bool>,
@@ -205,6 +207,7 @@ pub(crate) struct ConnectReplayRecord {
     pub(crate) tags: HashSet<String>,
     pub(crate) operation_id: String,
     state: Mutex<ConnectReplayState>,
+    response_released: Condvar,
     process_bytes: Arc<AtomicUsize>,
     process_history_bytes: Arc<AtomicUsize>,
 }
@@ -261,11 +264,13 @@ impl ConnectReplayRecord {
                 expired: false,
                 detached_at: None,
                 sender: None,
+                execution_waker: None,
                 cancellation: robin_sparkless_core::engine::CancellationToken::new(),
                 producer_stopped: false,
                 producer_done,
                 error: None,
             }),
+            response_released: Condvar::new(),
             process_bytes,
             process_history_bytes,
         })
@@ -306,6 +311,31 @@ impl ConnectReplayRecord {
             .unwrap_or_default()
     }
 
+    fn attach_execution_waker(&self) -> tokio::sync::mpsc::UnboundedReceiver<()> {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        if let Ok(mut state) = self.state.lock() {
+            state.execution_waker = Some(sender.clone());
+            if state.cancellation.is_cancelled() {
+                let _ = sender.send(());
+            }
+        }
+        receiver
+    }
+
+    fn clear_execution_waker(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.execution_waker = None;
+        }
+    }
+
+    fn cancellation_terminal_status(&self) -> Option<Status> {
+        let state = self.state.lock().ok()?;
+        if !state.cancellation.is_cancelled() {
+            return None;
+        }
+        state.terminal.as_ref()?.as_ref().err().cloned()
+    }
+
     pub(crate) fn matches_session(&self, session_key: &str, generation: u64) -> bool {
         self.session_key == session_key && self.session_generation == generation
     }
@@ -313,6 +343,12 @@ impl ConnectReplayRecord {
     fn notify(state: &ConnectReplayState) {
         if let Some(sender) = state.sender.as_ref() {
             let _ = sender.try_send(());
+        }
+    }
+
+    fn notify_execution(state: &ConnectReplayState) {
+        if let Some(sender) = state.execution_waker.as_ref() {
+            let _ = sender.send(());
         }
     }
 
@@ -531,6 +567,7 @@ impl ConnectReplayRecord {
         };
         state.terminal = Some(outcome.clone());
         Self::notify(&state);
+        self.response_released.notify_all();
         outcome
     }
 
@@ -744,7 +781,67 @@ impl ConnectReplayRecord {
             self.release_process_bytes(released_headroom);
         }
         Self::notify(&state);
+        self.response_released.notify_all();
         released_bytes
+    }
+
+    fn wait_for_response_release(
+        &self,
+        response_id: &str,
+        deadline: Instant,
+        cancellation: &robin_sparkless_core::engine::CancellationToken,
+    ) -> Result<(), Status> {
+        let mut state = self.lock()?;
+        loop {
+            if let Some(Err(status)) = state.terminal.as_ref() {
+                return Err(status.clone());
+            }
+            if cancellation.is_cancelled() {
+                return Err(Status::cancelled("Connect execution was cancelled"));
+            }
+            if !state.response_ids.contains_key(response_id) {
+                return Ok(());
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(Status::deadline_exceeded(
+                    "Connect response stream stalled waiting for client acknowledgment",
+                ));
+            }
+            let wait = (deadline - now).min(Duration::from_millis(100));
+            let (next_state, _) = self
+                .response_released
+                .wait_timeout(state, wait)
+                .map_err(|_| Status::internal("Connect replay state is unavailable"))?;
+            state = next_state;
+        }
+    }
+
+    fn wait_for_cancellation_grace(
+        &self,
+        duration: Duration,
+        deadline: Instant,
+        cancellation: &robin_sparkless_core::engine::CancellationToken,
+    ) -> Result<(), Status> {
+        let grace_deadline = (Instant::now() + duration).min(deadline);
+        let mut state = self.lock()?;
+        loop {
+            if let Some(Err(status)) = state.terminal.as_ref() {
+                return Err(status.clone());
+            }
+            if cancellation.is_cancelled() {
+                return Err(Status::cancelled("Connect execution was cancelled"));
+            }
+            let now = Instant::now();
+            if now >= grace_deadline {
+                return Ok(());
+            }
+            let (next_state, _) = self
+                .response_released
+                .wait_timeout(state, grace_deadline - now)
+                .map_err(|_| Status::internal("Connect replay state is unavailable"))?;
+            state = next_state;
+        }
     }
 
     pub(crate) fn release_all(&self) {
@@ -770,6 +867,7 @@ impl ConnectReplayRecord {
         state.released_response_order.clear();
         if !state.producer_stopped {
             state.cancellation.cancel();
+            Self::notify_execution(&state);
         }
         if state.terminal.is_none() {
             let status = Status::cancelled("Connect operation was released");
@@ -778,6 +876,7 @@ impl ConnectReplayRecord {
         self.release_process_bytes(released_bytes.saturating_add(released_headroom));
         self.release_history_bytes(released_metadata);
         Self::notify(&state);
+        self.response_released.notify_all();
         state.sender = None;
     }
 
@@ -791,7 +890,9 @@ impl ConnectReplayRecord {
         state.cancellation.cancel();
         let status = Status::cancelled(message.to_string());
         state.terminal = Some(Err(self.store_error(&mut state, status)));
+        Self::notify_execution(&state);
         Self::notify(&state);
+        self.response_released.notify_all();
         true
     }
 
@@ -826,7 +927,9 @@ impl ConnectReplayRecord {
         state.response_ids.clear();
         state.released_response_ids.clear();
         state.released_response_order.clear();
+        Self::notify_execution(&state);
         Self::notify(&state);
+        self.response_released.notify_all();
         self.release_process_bytes(released_bytes.saturating_add(released_headroom));
         self.release_history_bytes(released_metadata);
         true
@@ -851,7 +954,9 @@ impl ConnectReplayRecord {
             "Connect detached response stream made no progress for 5 seconds",
         );
         state.terminal = Some(Err(self.store_error(&mut state, status)));
+        Self::notify_execution(&state);
         Self::notify(&state);
+        self.response_released.notify_all();
         true
     }
 
@@ -1386,6 +1491,10 @@ fn connect_deadline_status() -> Status {
 struct ConnectResponseSender {
     sender: tokio::sync::mpsc::Sender<ConnectQueuedResponse>,
     deadline: Instant,
+    queue_timeout: Duration,
+    active_compute: Arc<tokio::sync::Semaphore>,
+    compute_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    runtime: tokio::runtime::Handle,
     cancellation: robin_sparkless_core::engine::CancellationToken,
     terminal: ConnectTerminal,
     trace_enabled: bool,
@@ -1396,6 +1505,9 @@ struct ConnectResponseSender {
     arrow_next_time: Duration,
     replay_accounting_time: Duration,
     blocked_send_time: Duration,
+    client_ack_wait_time: Duration,
+    first_batch_grace_time: Duration,
+    admission_wait_time: Duration,
     response_count: u64,
     response_rows: u64,
     response_bytes: u64,
@@ -1407,6 +1519,36 @@ struct ConnectQueuedResponse {
 }
 
 impl ConnectResponseSender {
+    fn acquire_compute_permit(&mut self) -> Result<(), Status> {
+        if self.compute_permit.is_some() {
+            return Ok(());
+        }
+        let started = Instant::now();
+        let queue_deadline = (started + self.queue_timeout).min(self.deadline);
+        let active_compute = Arc::clone(&self.active_compute);
+        let cancellation = self.cancellation.clone();
+        let result = self.runtime.block_on(async move {
+            let cancellation_wait = wait_for_cancellation(cancellation);
+            tokio::pin!(cancellation_wait);
+            tokio::select! {
+                _ = &mut cancellation_wait => Err(Status::cancelled(
+                    "Connect execution was cancelled while waiting for compute admission",
+                )),
+                result = tokio::time::timeout_at(
+                    tokio::time::Instant::from_std(queue_deadline),
+                    active_compute.acquire_owned(),
+                ) => result
+                    .map_err(|_| Status::deadline_exceeded(
+                        "timed out waiting for Connect compute admission",
+                    ))?
+                    .map_err(|_| Status::unavailable("Connect compute admission is closed")),
+            }
+        });
+        self.admission_wait_time += started.elapsed();
+        self.compute_permit = Some(result?);
+        Ok(())
+    }
+
     fn send(
         &mut self,
         item: Result<connect_proto::ExecutePlanResponse, Status>,
@@ -1442,6 +1584,15 @@ impl ConnectResponseSender {
             }
             _ => 0,
         };
+        let response_id = response.response_id.clone();
+        let waits_for_client_ack = operation.replay.reattachable
+            && matches!(
+                response.response_type.as_ref(),
+                Some(connect_proto::execute_plan_response::ResponseType::ArrowBatch(_))
+            );
+        let first_full_batch = waits_for_client_ack
+            && response.schema.is_some()
+            && response_rows == MAX_CONNECT_ARROW_BATCH_ROWS as u64;
         let reservation_id = match operation.replay.reserve_sender_buffer(sender_bytes) {
             Ok(id) => id,
             Err(status) => {
@@ -1490,6 +1641,46 @@ impl ConnectResponseSender {
                     self.terminal.finish(Ok(()));
                 }
                 self.record_sent_response(sender_bytes, response_rows, blocked_send_time);
+                if waits_for_client_ack {
+                    drop(self.compute_permit.take());
+                    let ack_started = Instant::now();
+                    let ack_deadline =
+                        (ack_started + CONNECT_RESPONSE_STALL_TIMEOUT).min(self.deadline);
+                    let acknowledged = operation.replay.wait_for_response_release(
+                        &response_id,
+                        ack_deadline,
+                        &self.cancellation,
+                    );
+                    self.client_ack_wait_time += ack_started.elapsed();
+                    if let Err(status) = acknowledged {
+                        if self.cancellation.is_cancelled() {
+                            return false;
+                        }
+                        operation.reject("CONNECT_RESPONSE_ACK_TIMEOUT", status.message());
+                        self.terminal.finish(Err(status));
+                        self.cancellation.cancel();
+                        return false;
+                    }
+                    if first_full_batch {
+                        // Let callers observe the first full batch and interrupt before the
+                        // producer fills the public client's response queue.
+                        let grace_started = Instant::now();
+                        let grace = operation.replay.wait_for_cancellation_grace(
+                            CONNECT_FIRST_BATCH_ACK_GRACE,
+                            self.deadline,
+                            &self.cancellation,
+                        );
+                        self.first_batch_grace_time += grace_started.elapsed();
+                        if let Err(status) = grace {
+                            if self.cancellation.is_cancelled() {
+                                return false;
+                            }
+                            self.terminal.finish(Err(status));
+                            self.cancellation.cancel();
+                            return false;
+                        }
+                    }
+                }
                 true
             }
             Err(queued) => {
@@ -1526,13 +1717,16 @@ impl Drop for ConnectResponseSender {
     fn drop(&mut self) {
         if self.trace_enabled {
             eprintln!(
-                "connect_trace event=producer_phases operation_id={} admission_wait_ms={:.3} planning_ms={:.3} arrow_next_ms={:.3} replay_accounting_ms={:.3} blocked_send_ms={:.3} responses={} rows={} response_bytes={}",
+                "connect_trace event=producer_phases operation_id={} admission_wait_ms={:.3} planning_ms={:.3} arrow_next_ms={:.3} replay_accounting_ms={:.3} blocked_send_ms={:.3} client_ack_wait_ms={:.3} first_batch_grace_ms={:.3} admission_reacquire_ms={:.3} responses={} rows={} response_bytes={}",
                 self.operation_id,
                 self.planning_wait.as_secs_f64() * 1_000.0,
                 self.planning_time.as_secs_f64() * 1_000.0,
                 self.arrow_next_time.as_secs_f64() * 1_000.0,
                 self.replay_accounting_time.as_secs_f64() * 1_000.0,
                 self.blocked_send_time.as_secs_f64() * 1_000.0,
+                self.client_ack_wait_time.as_secs_f64() * 1_000.0,
+                self.first_batch_grace_time.as_secs_f64() * 1_000.0,
+                self.admission_wait_time.as_secs_f64() * 1_000.0,
                 self.response_count,
                 self.response_rows,
                 self.response_bytes,
@@ -1543,6 +1737,7 @@ impl Drop for ConnectResponseSender {
 
 struct ConnectExecutionStream {
     receiver: tokio::sync::mpsc::Receiver<ConnectQueuedResponse>,
+    cancellation_waker: tokio::sync::mpsc::UnboundedReceiver<()>,
     outcome: Option<tokio::sync::oneshot::Receiver<ConnectOutcome>>,
     cancellation: robin_sparkless_core::engine::CancellationToken,
     replay: Arc<ConnectReplayRecord>,
@@ -1569,6 +1764,21 @@ impl tonic::codegen::tokio_stream::Stream for ConnectExecutionStream {
         if this.ended {
             return Poll::Ready(None);
         }
+        match std::pin::Pin::new(&mut this.cancellation_waker).poll_recv(cx) {
+            Poll::Ready(Some(())) => {
+                if let Some(status) = this.replay.cancellation_terminal_status() {
+                    this.ended = true;
+                    this.receiver.close();
+                    this.outcome = None;
+                    this.replay.clear_execution_waker();
+                    while let Ok(queued) = this.receiver.try_recv() {
+                        this.replay.release_sender_buffer(queued.reservation_id);
+                    }
+                    return Poll::Ready(Some(Err(status)));
+                }
+            }
+            Poll::Ready(None) | Poll::Pending => {}
+        }
         if let Some(outcome) = this.outcome.as_mut() {
             match std::pin::Pin::new(outcome).poll(cx) {
                 Poll::Pending => {}
@@ -1577,6 +1787,10 @@ impl tonic::codegen::tokio_stream::Stream for ConnectExecutionStream {
                     this.ended = true;
                     this.receiver.close();
                     this.cancellation.cancel();
+                    this.replay.clear_execution_waker();
+                    while let Ok(queued) = this.receiver.try_recv() {
+                        this.replay.release_sender_buffer(queued.reservation_id);
+                    }
                     let status = match result {
                         Ok(Err(status)) => status,
                         _ => Status::internal("Connect producer ended without a terminal outcome"),
@@ -1593,6 +1807,7 @@ impl tonic::codegen::tokio_stream::Stream for ConnectExecutionStream {
             Poll::Ready(None) if this.outcome.is_some() => Poll::Pending,
             Poll::Ready(None) => {
                 this.ended = true;
+                this.replay.clear_execution_waker();
                 Poll::Ready(None)
             }
             Poll::Pending => Poll::Pending,
@@ -1603,6 +1818,7 @@ impl tonic::codegen::tokio_stream::Stream for ConnectExecutionStream {
 impl Drop for ConnectExecutionStream {
     fn drop(&mut self) {
         self.receiver.close();
+        self.replay.clear_execution_waker();
         self.replay
             .release_sender_buffer(self.pending_sender_reservation);
         while let Ok(queued) = self.receiver.try_recv() {
@@ -1735,6 +1951,8 @@ fn start_connect_producer(
     reattachable: bool,
     cancellation: robin_sparkless_core::engine::CancellationToken,
     sender: tokio::sync::mpsc::Sender<ConnectQueuedResponse>,
+    active_compute: Arc<tokio::sync::Semaphore>,
+    queue_timeout: Duration,
     deadline: Instant,
     planning_wait: Duration,
 ) -> tokio::sync::oneshot::Receiver<ConnectOutcome> {
@@ -1750,6 +1968,7 @@ fn start_connect_producer(
     };
     let send_blocked_since: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
     let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+    let runtime = tokio::runtime::Handle::current();
     let timer_cancellation = cancellation.clone();
     let timer_terminal = terminal.clone();
     let mark_deadline = operation.deadline_marker();
@@ -1832,9 +2051,14 @@ fn start_connect_producer(
             sender: Some(finished_tx),
             replay,
         };
+        let (session_guard, compute_permit, session_compute_permit) = planning_resources;
         let mut sender = ConnectResponseSender {
             sender,
             deadline,
+            queue_timeout,
+            active_compute,
+            compute_permit: Some(compute_permit),
+            runtime,
             cancellation: cancellation.clone(),
             terminal,
             trace_enabled: std::env::var_os("SPARKLESS_CONNECT_TRACE").as_deref()
@@ -1846,11 +2070,13 @@ fn start_connect_producer(
             arrow_next_time: Duration::ZERO,
             replay_accounting_time: Duration::ZERO,
             blocked_send_time: Duration::ZERO,
+            client_ack_wait_time: Duration::ZERO,
+            first_batch_grace_time: Duration::ZERO,
+            admission_wait_time: Duration::ZERO,
             response_count: 0,
             response_rows: 0,
             response_bytes: 0,
         };
-        let (session_guard, compute_permit, session_compute_permit) = planning_resources;
         session.sync_thread_context();
         let planning_started = sender.trace_enabled.then(Instant::now);
         let translated = plan::translate_plan_for_execution(&session, &plan, &cancellation)
@@ -1909,7 +2135,6 @@ fn start_connect_producer(
             let _ = sender.send(Err(status), &operation);
             return;
         };
-        let _compute_permit = compute_permit;
         let mut batches = match dataframe.to_arrow_ipc_batches_with_schema_and_cancellation(
             MAX_CONNECT_ARROW_BATCH_ROWS,
             max_arrow_payload_bytes,
@@ -1928,6 +2153,13 @@ fn start_connect_producer(
         let mut response_bytes = 0usize;
         let mut first_batch = true;
         loop {
+            if let Err(status) = sender.acquire_compute_permit() {
+                if !cancellation.is_cancelled() {
+                    operation.reject("CONNECT_COMPUTE_ADMISSION_TIMEOUT", status.message());
+                }
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
             if sender.sender.is_closed() && !operation.replay.reattachable {
                 cancellation.cancel();
                 return;
@@ -2167,11 +2399,14 @@ impl SparkConnectService for ConnectService {
             reattachable,
             cancellation.clone(),
             sender,
+            Arc::clone(&self.server.inner.admission.active),
+            self.server.inner.config.queue_timeout,
             deadline,
             planning_wait,
         );
         let stream = ConnectExecutionStream {
             receiver,
+            cancellation_waker: operation_replay.attach_execution_waker(),
             outcome: Some(outcome),
             cancellation,
             replay: Arc::clone(&operation_replay),
@@ -3375,6 +3610,7 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
+        assert!(stream.next().await.expect("initial response").is_ok());
         let interrupted = service
             .interrupt(Request::new(connect_proto::InterruptRequest {
                 session_id: execute.session_id.clone(),
@@ -3390,17 +3626,11 @@ mod tests {
             .into_inner();
         assert_eq!(interrupted.interrupted_ids, vec![operation_id.clone()]);
 
-        let terminal = tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                match stream.next().await {
-                    Some(Ok(_)) => continue,
-                    Some(Err(status)) => break status,
-                    None => panic!("interrupted operation must end with a visible failure"),
-                }
-            }
-        })
-        .await
-        .expect("native producer observes cancellation");
+        let terminal = tokio::time::timeout(Duration::from_secs(3), stream.next())
+            .await
+            .expect("stream wakes when the interrupt is accepted")
+            .expect("interrupted operation must end with a visible failure")
+            .expect_err("responses queued before cancellation must not be sent afterward");
         assert_eq!(terminal.code(), Code::Cancelled);
         assert!(terminal.message().contains("interrupted"));
     }
