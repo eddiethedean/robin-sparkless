@@ -163,13 +163,24 @@ UPDATE, DELETE, CREATE/REPLACE TABLE, DROP TABLE, ALTER TABLE, TRUNCATE, append/
 creating a missing target in the configured source namespace; it confirms the original schema and
 rows remain. Additional DDL/DML syntax forms and the source-loss/replay/resource cases remain open.
 
+The standalone public-client smoke now also analyzes a table, temporarily removes its configured
+database before collection, and verifies that the request fails; after restoring the same source,
+the next statement succeeds with all rows. This checks that a source unavailable between analysis
+and execution does not silently resolve elsewhere and that failure releases the source lease. It
+passed against a release server rebuilt from `a850b891fc63503eeef82e6a122e426b5192a35b`
+(`http,connect,duckdb-source`, binary SHA-256
+`1518dc4368c186bf4a769563335f0cbb4c4b17d94886c591a86aad800a7b31e8`), installed 4.19.0 API,
+native and server wheels, `pyspark-client==4.0.5`, and DuckDB 1.5.1. The cross-platform workflow
+has not yet run this addition. Quack source loss during production, disconnect/reattach replay,
+the full DDL/DML rejection matrix, and measured source/RSS budgets remain open.
+
 It verifies exact values/schema, filter/project, UTC timestamp instant, `count(1)`, null-excluding
 `count(column)` on populated/all-null/empty data, limit zero, empty-table schema, same-owner inner
 join, grouped count/sum, unsupported source type/value errors, and rejected CREATE/INSERT/UPDATE/
 DELETE/append/overwrite requests with an unchanged row count. The standalone fixture file was
 created by Python DuckDB 1.5.1; the
 Quack fixture separately uses the bundled DuckDB 2.0.0 owner.
-Neither test replaces a Spark differential corpus. Broader disconnect/replay/source-loss acceptance,
+Neither test replaces a Spark differential corpus. Quack disconnect/replay/source-loss acceptance,
 the full source DDL/DML rejection matrix, clean platform packaging, and measured source/RSS budgets
 remain open. D14 and V35/V36 are still open; the release does not claim complete DuckDB-source
 acceptance.

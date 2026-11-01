@@ -37,6 +37,7 @@ def main() -> None:
 
     previous_sources = os.environ.get("SPARKLESS_DUCKDB_SOURCES")
     owner: subprocess.Popen[str] | None = None
+    standalone_database: Path | None = None
     with tempfile.TemporaryDirectory(prefix="sparkless-duckdb-source-") as temp_dir:
         if args.quack_owner_bin:
             assert args.quack_extension_path is not None
@@ -81,6 +82,7 @@ def main() -> None:
                 raise
         else:
             database_path = Path(temp_dir) / "warehouse.duckdb"
+            standalone_database = database_path
             connection = duckdb.connect(str(database_path))
             connection.execute(
                 """
@@ -315,6 +317,47 @@ def main() -> None:
                     .collect()
                 )
                 assert joined == [(1, "one"), (2, "two")], joined
+
+                if standalone_database is not None:
+                    # Analysis can precede execution. If the configured source disappears in
+                    # between, fail the operation instead of silently resolving a local table
+                    # or replaying against another source. Restoring it must leave the source
+                    # connection lease usable for the next operation.
+                    pending_read = spark.table("warehouse.main.events")
+                    assert pending_read.schema.fieldNames() == [
+                        "id",
+                        "bucket",
+                        "label",
+                        "amount",
+                        "active",
+                    ]
+                    unavailable_path = standalone_database.with_suffix(
+                        ".duckdb.unavailable"
+                    )
+                    standalone_database.rename(unavailable_path)
+                    try:
+                        try:
+                            pending_read.collect()
+                        except Exception as error:
+                            message = str(error).lower()
+                            assert any(
+                                marker in message
+                                for marker in (
+                                    "duckdb",
+                                    "source",
+                                    "database",
+                                    "not found",
+                                )
+                            ), error
+                        else:
+                            raise AssertionError(
+                                "a read succeeded after its configured DuckDB source disappeared"
+                            )
+                    finally:
+                        unavailable_path.rename(standalone_database)
+                    assert pending_read.count() == 3, (
+                        "a source failure leaked its read lease or corrupted a later statement"
+                    )
 
             source_mode = (
                 "Quack shared owner"
