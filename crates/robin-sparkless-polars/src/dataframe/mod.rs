@@ -963,7 +963,17 @@ struct PolarsIpcBatchIterator {
     source_rows: u64,
     output_batches: u64,
     serialization_time: std::time::Duration,
+    rechunk_time: std::time::Duration,
+    ipc_write_time: std::time::Duration,
+    schema_rewrite_time: std::time::Duration,
     combine_time: std::time::Duration,
+    max_source_batch_bytes_estimated: usize,
+    peak_buffered_frame_bytes_estimated: usize,
+    peak_combined_frame_bytes_estimated: usize,
+    peak_ipc_buffer_bytes: usize,
+    peak_ipc_rewrite_bytes_estimated: usize,
+    serialized_ipc_bytes: u64,
+    emitted_ipc_bytes: u64,
 }
 
 impl PolarsIpcBatchIterator {
@@ -973,12 +983,22 @@ impl PolarsIpcBatchIterator {
         }
         self.trace_emitted = true;
         eprintln!(
-            "sparkless_arrow_trace event=complete source_batches={} source_rows={} output_batches={} serialization_ms={:.3} combine_ms={:.3}",
+            "sparkless_arrow_trace event=complete source_batches={} source_rows={} output_batches={} serialization_ms={:.3} rechunk_ms={:.3} ipc_write_ms={:.3} schema_rewrite_ms={:.3} combine_ms={:.3} max_source_batch_bytes_estimated={} peak_buffered_frame_bytes_estimated={} peak_combined_frame_bytes_estimated={} peak_ipc_buffer_bytes={} peak_ipc_rewrite_bytes_estimated={} serialized_ipc_bytes={} emitted_ipc_bytes={}",
             self.source_batches,
             self.source_rows,
             self.output_batches,
             self.serialization_time.as_secs_f64() * 1_000.0,
+            self.rechunk_time.as_secs_f64() * 1_000.0,
+            self.ipc_write_time.as_secs_f64() * 1_000.0,
+            self.schema_rewrite_time.as_secs_f64() * 1_000.0,
             self.combine_time.as_secs_f64() * 1_000.0,
+            self.max_source_batch_bytes_estimated,
+            self.peak_buffered_frame_bytes_estimated,
+            self.peak_combined_frame_bytes_estimated,
+            self.peak_ipc_buffer_bytes,
+            self.peak_ipc_rewrite_bytes_estimated,
+            self.serialized_ipc_bytes,
+            self.emitted_ipc_bytes,
         );
     }
 
@@ -1006,6 +1026,11 @@ impl PolarsIpcBatchIterator {
                     self.source_rows = self
                         .source_rows
                         .saturating_add(batch.height().try_into().unwrap_or(u64::MAX));
+                    if self.trace_enabled {
+                        self.max_source_batch_bytes_estimated = self
+                            .max_source_batch_bytes_estimated
+                            .max(batch.estimated_size());
+                    }
                     self.current = Some(batch);
                 }
                 Some(Err(error)) => return Some(Err(error)),
@@ -1033,9 +1058,14 @@ impl PolarsIpcBatchIterator {
 
     fn serialize_batch(&mut self, batch: &mut PlDataFrame) -> Result<Vec<u8>, EngineError> {
         let started = self.trace_enabled.then(std::time::Instant::now);
+        let rechunk_started = self.trace_enabled.then(std::time::Instant::now);
         batch.rechunk_mut();
+        if let Some(started) = rechunk_started {
+            self.rechunk_time += started.elapsed();
+        }
         let mut cursor = std::io::Cursor::new(Vec::new());
-        let result = (|| {
+        let ipc_write_started = self.trace_enabled.then(std::time::Instant::now);
+        let raw_bytes = (|| {
             {
                 use polars::io::ipc::IpcStreamWriter;
                 use polars::prelude::SerWriter;
@@ -1049,16 +1079,48 @@ impl PolarsIpcBatchIterator {
                 }
                 writer.finish(batch).map_err(polars_to_core_error)?;
             }
-            let bytes = cursor.into_inner();
-            match &self.connect_output_schema {
-                Some(schema) => rewrite_connect_arrow_stream_schema(&bytes, schema),
-                None => Ok(bytes),
-            }
+            Ok::<_, EngineError>(cursor.into_inner())
         })();
+        if let Some(started) = ipc_write_started {
+            self.ipc_write_time += started.elapsed();
+        }
+        let result = raw_bytes.and_then(|bytes| {
+            if let Some(schema) = &self.connect_output_schema {
+                let rewrite_started = self.trace_enabled.then(std::time::Instant::now);
+                let rewritten = rewrite_connect_arrow_stream_schema(&bytes, schema);
+                if let Some(started) = rewrite_started {
+                    self.schema_rewrite_time += started.elapsed();
+                }
+                rewritten.map(|rewritten| {
+                    if self.trace_enabled {
+                        self.peak_ipc_rewrite_bytes_estimated = self
+                            .peak_ipc_rewrite_bytes_estimated
+                            .max(bytes.len().saturating_add(rewritten.len()));
+                    }
+                    rewritten
+                })
+            } else {
+                Ok(bytes)
+            }
+        });
         if let Some(started) = started {
             self.serialization_time += started.elapsed();
         }
+        if let Ok(bytes) = &result
+            && self.trace_enabled
+        {
+            self.peak_ipc_buffer_bytes = self.peak_ipc_buffer_bytes.max(bytes.len());
+            self.serialized_ipc_bytes = self
+                .serialized_ipc_bytes
+                .saturating_add(bytes.len().try_into().unwrap_or(u64::MAX));
+        }
         result
+    }
+
+    fn record_emitted_ipc_bytes(&mut self, bytes: usize) {
+        self.emitted_ipc_bytes = self
+            .emitted_ipc_bytes
+            .saturating_add(bytes.try_into().unwrap_or(u64::MAX));
     }
 }
 
@@ -1208,6 +1270,11 @@ impl Iterator for PolarsIpcBatchIterator {
             estimated_bytes = estimated_bytes.saturating_add(batch_bytes);
             row_count = row_count.saturating_add(batch.height());
             rows.push(batch);
+            if self.trace_enabled {
+                self.peak_buffered_frame_bytes_estimated = self
+                    .peak_buffered_frame_bytes_estimated
+                    .max(estimated_bytes);
+            }
             if row_count >= self.max_rows || estimated_bytes >= self.max_bytes {
                 break;
             }
@@ -1234,6 +1301,7 @@ impl Iterator for PolarsIpcBatchIterator {
                         ))));
                     }
                     self.output_batches = self.output_batches.saturating_add(1);
+                    self.record_emitted_ipc_bytes(bytes.len());
                     self.close();
                     return Some(Ok(ArrowIpcStream {
                         bytes,
@@ -1255,6 +1323,11 @@ impl Iterator for PolarsIpcBatchIterator {
         if let Some(started) = combine_started {
             self.combine_time += started.elapsed();
         }
+        if self.trace_enabled {
+            self.peak_combined_frame_bytes_estimated = self
+                .peak_combined_frame_bytes_estimated
+                .max(combined.estimated_size());
+        }
         let bytes = match self.serialize_batch(&mut combined) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -1264,6 +1337,7 @@ impl Iterator for PolarsIpcBatchIterator {
         };
         if bytes.len() <= self.max_bytes {
             self.output_batches = self.output_batches.saturating_add(1);
+            self.record_emitted_ipc_bytes(bytes.len());
             if source_ended {
                 self.close();
             }
@@ -1313,6 +1387,7 @@ impl Iterator for PolarsIpcBatchIterator {
                 self.current = Some(pending);
                 self.current_offset = 0;
                 self.output_batches = self.output_batches.saturating_add(1);
+                self.record_emitted_ipc_bytes(prefix_bytes.len());
                 return Some(Ok(ArrowIpcStream {
                     bytes: prefix_bytes,
                     row_count: prefix_rows as u64,
@@ -3718,7 +3793,17 @@ impl DataFrame {
             source_rows: 0,
             output_batches: 0,
             serialization_time: std::time::Duration::ZERO,
+            rechunk_time: std::time::Duration::ZERO,
+            ipc_write_time: std::time::Duration::ZERO,
+            schema_rewrite_time: std::time::Duration::ZERO,
             combine_time: std::time::Duration::ZERO,
+            max_source_batch_bytes_estimated: 0,
+            peak_buffered_frame_bytes_estimated: 0,
+            peak_combined_frame_bytes_estimated: 0,
+            peak_ipc_buffer_bytes: 0,
+            peak_ipc_rewrite_bytes_estimated: 0,
+            serialized_ipc_bytes: 0,
+            emitted_ipc_bytes: 0,
         }))
     }
 

@@ -301,6 +301,125 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
     return measurements
 
 
+def run_small_jobs(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
+    """Measure the small public-client cases used by the 4.19 regression gate."""
+    measurements: list[dict[str, Any]] = []
+    for row_count in (10, 100, 1_000, 10_000):
+        rows = [(index, f"item-{index}") for index in range(row_count)]
+        expected = (row_count + 1) // 2
+
+        def ingest_filter_count(rows: list[tuple[int, str]] = rows) -> list[int]:
+            return [
+                spark.createDataFrame(rows, "id BIGINT, label STRING")
+                .filter("id % 2 = 0")
+                .count()
+            ]
+
+        def validate_count(
+            result: list[int], expected: int = expected, row_count: int = row_count
+        ) -> None:
+            if result != [expected]:
+                raise AssertionError(
+                    f"{row_count}-row tuple ingest/filter/count returned {result}, "
+                    f"expected {[expected]}"
+                )
+
+        measurements.append(
+            measure_case(
+                f"tuple_ingest_filter_count_{row_count}",
+                ingest_filter_count,
+                validate_count,
+                iterations,
+            )
+        )
+        measurements[-1]["input_rows"] = row_count
+        measurements[-1]["expected_count"] = expected
+
+    preview_rows = [
+        (index, None if index % 7 == 0 else f"item-{index}") for index in range(1_000)
+    ]
+
+    def preview_25() -> list[Any]:
+        return (
+            spark.createDataFrame(preview_rows, "id BIGINT, label STRING")
+            .limit(25)
+            .collect()
+        )
+
+    def validate_preview(result: list[Any]) -> None:
+        if len(result) != 25 or [row.id for row in result] != list(range(25)):
+            raise AssertionError("25-row preview returned the wrong row window")
+        if any(
+            row.label != (None if row.id % 7 == 0 else f"item-{row.id}")
+            for row in result
+        ):
+            raise AssertionError("25-row preview returned incorrect nullable values")
+
+    measurements.append(
+        measure_case("preview_25_nullable", preview_25, validate_preview, iterations)
+    )
+    measurements[-1]["input_rows"] = len(preview_rows)
+
+    mixed_rows = [
+        (
+            index,
+            None if index % 3 == 0 else index * 10,
+            None if index % 5 == 0 else f"value-{index}",
+            index % 2 == 0,
+        )
+        for index in range(256)
+    ]
+
+    def collect_nullable_mixed() -> list[Any]:
+        return spark.createDataFrame(
+            mixed_rows,
+            "id INT, quantity BIGINT, label STRING, enabled BOOLEAN",
+        ).collect()
+
+    def validate_nullable_mixed(result: list[Any]) -> None:
+        if len(result) != len(mixed_rows):
+            raise AssertionError(
+                "nullable/mixed collection returned the wrong row count"
+            )
+        for index, row in enumerate(result):
+            expected = mixed_rows[index]
+            if (row.id, row.quantity, row.label, row.enabled) != expected:
+                raise AssertionError(
+                    f"nullable/mixed row {index} returned "
+                    f"{(row.id, row.quantity, row.label, row.enabled)!r}, "
+                    f"expected {expected!r}"
+                )
+
+    measurements.append(
+        measure_case(
+            "nullable_mixed_collect_256",
+            collect_nullable_mixed,
+            validate_nullable_mixed,
+            iterations,
+        )
+    )
+    measurements[-1]["input_rows"] = len(mixed_rows)
+
+    def analyze_range_schema() -> list[Any]:
+        schema = spark.range(1_000).schema
+        return [(schema.simpleString(), tuple(schema.fieldNames()))]
+
+    def validate_range_schema(result: list[Any]) -> None:
+        if result != [("struct<id:bigint>", ("id",))]:
+            raise AssertionError(f"range schema analysis returned {result!r}")
+
+    measurements.append(
+        measure_case(
+            "schema_analysis_range_1000",
+            analyze_range_schema,
+            validate_range_schema,
+            iterations,
+        )
+    )
+    measurements[-1]["input_rows"] = 1_000
+    return measurements
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--server-bin", type=Path, required=True)
@@ -310,6 +429,11 @@ def main() -> None:
     )
     parser.add_argument("--server-source-revision")
     parser.add_argument("--iterations", type=int, default=20)
+    parser.add_argument(
+        "--small-jobs-only",
+        action="store_true",
+        help="run only tuple-ingest, preview, nullable, and schema guardrails",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.iterations < 1:
@@ -329,10 +453,15 @@ def main() -> None:
     with server_bin.open("rb") as binary:
         binary_sha256 = hashlib.file_digest(binary, "sha256").hexdigest()
 
+    startup_started = time.perf_counter()
     with SparklessConnect(server_options={"executable_path": str(server_bin)}) as spark:
+        startup_ms = (time.perf_counter() - startup_started) * 1_000
         if not isinstance(spark, ConnectSession):
             raise TypeError(f"expected PySpark Connect session, got {type(spark)!r}")
-        measurements = run_exports(spark, args.iterations)
+        if args.small_jobs_only:
+            measurements = run_small_jobs(spark, args.iterations)
+        else:
+            measurements = run_exports(spark, args.iterations)
 
     client_peak_rss_bytes = None
     if resource is not None:
@@ -352,6 +481,7 @@ def main() -> None:
         "server_version": version,
         "server_binary_sha256": binary_sha256,
         "server_environment": SERVER_ENVIRONMENT,
+        "startup_readiness_and_session_ms": startup_ms,
         "iterations_per_case": args.iterations,
         "warmups_per_case": 1,
         "environment": {
@@ -374,6 +504,7 @@ def main() -> None:
             f"max_ms={result['max_ms']:.3f} samples={result['sample_count']}"
         )
     print(f"client_peak_rss_bytes={client_peak_rss_bytes}")
+    print(f"startup_readiness_and_session_ms={startup_ms:.3f}")
     print(f"report={args.output}")
 
 

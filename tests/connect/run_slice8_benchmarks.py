@@ -468,8 +468,55 @@ def phase_trace_summary(lines: str) -> dict[str, Any]:
         "serialization_ms_total": sum(
             float(stream.get("serialization_ms", "0")) for stream in arrow_streams
         ),
+        "rechunk_ms_total": sum(
+            float(stream.get("rechunk_ms", "0")) for stream in arrow_streams
+        ),
+        "ipc_write_ms_total": sum(
+            float(stream.get("ipc_write_ms", "0")) for stream in arrow_streams
+        ),
+        "schema_rewrite_ms_total": sum(
+            float(stream.get("schema_rewrite_ms", "0")) for stream in arrow_streams
+        ),
         "combine_ms_total": sum(
             float(stream.get("combine_ms", "0")) for stream in arrow_streams
+        ),
+        "max_source_batch_bytes_estimated": max(
+            (
+                int(stream.get("max_source_batch_bytes_estimated", "0"))
+                for stream in arrow_streams
+            ),
+            default=0,
+        ),
+        "peak_buffered_frame_bytes_estimated": max(
+            (
+                int(stream.get("peak_buffered_frame_bytes_estimated", "0"))
+                for stream in arrow_streams
+            ),
+            default=0,
+        ),
+        "peak_combined_frame_bytes_estimated": max(
+            (
+                int(stream.get("peak_combined_frame_bytes_estimated", "0"))
+                for stream in arrow_streams
+            ),
+            default=0,
+        ),
+        "peak_ipc_buffer_bytes": max(
+            (int(stream.get("peak_ipc_buffer_bytes", "0")) for stream in arrow_streams),
+            default=0,
+        ),
+        "peak_ipc_rewrite_bytes_estimated": max(
+            (
+                int(stream.get("peak_ipc_rewrite_bytes_estimated", "0"))
+                for stream in arrow_streams
+            ),
+            default=0,
+        ),
+        "serialized_ipc_bytes_total": sum(
+            int(stream.get("serialized_ipc_bytes", "0")) for stream in arrow_streams
+        ),
+        "emitted_ipc_bytes_total": sum(
+            int(stream.get("emitted_ipc_bytes", "0")) for stream in arrow_streams
         ),
     }
     for field in (

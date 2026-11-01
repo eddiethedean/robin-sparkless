@@ -5,6 +5,7 @@ import unittest
 from run_slice8_benchmarks import (
     ProgressMonitor,
     cpu_time_seconds,
+    phase_trace_summary,
     percentile,
     server_configuration,
 )
@@ -38,6 +39,37 @@ class Slice8HarnessTests(unittest.TestCase):
 
         self.assertEqual(default.http_timeout_seconds, 5)
         self.assertEqual(diagnostic.http_timeout_seconds, 30)
+
+    def test_phase_trace_summarizes_arrow_timing_and_buffer_high_water_marks(
+        self,
+    ) -> None:
+        summary = phase_trace_summary(
+            "sparkless_arrow_trace event=complete source_batches=2 source_rows=10 "
+            "output_batches=1 serialization_ms=2.500 rechunk_ms=0.100 "
+            "ipc_write_ms=1.900 schema_rewrite_ms=0.200 combine_ms=0.300 "
+            "max_source_batch_bytes_estimated=128 "
+            "peak_buffered_frame_bytes_estimated=512 "
+            "peak_combined_frame_bytes_estimated=400 peak_ipc_buffer_bytes=256 "
+            "peak_ipc_rewrite_bytes_estimated=512 serialized_ipc_bytes=256 "
+            "emitted_ipc_bytes=200\n"
+            "sparkless_arrow_trace event=complete source_batches=1 source_rows=4 "
+            "output_batches=1 serialization_ms=1.500 rechunk_ms=0.050 "
+            "ipc_write_ms=1.200 schema_rewrite_ms=0.100 combine_ms=0.200 "
+            "max_source_batch_bytes_estimated=64 "
+            "peak_buffered_frame_bytes_estimated=128 "
+            "peak_combined_frame_bytes_estimated=100 peak_ipc_buffer_bytes=128 "
+            "peak_ipc_rewrite_bytes_estimated=256 serialized_ipc_bytes=128 "
+            "emitted_ipc_bytes=100"
+        )
+
+        self.assertEqual(summary["arrow_streams"], 2)
+        self.assertEqual(summary["source_batches_total"], 3)
+        self.assertAlmostEqual(summary["rechunk_ms_total"], 0.15)
+        self.assertAlmostEqual(summary["ipc_write_ms_total"], 3.1)
+        self.assertEqual(summary["peak_buffered_frame_bytes_estimated"], 512)
+        self.assertEqual(summary["peak_ipc_rewrite_bytes_estimated"], 512)
+        self.assertEqual(summary["serialized_ipc_bytes_total"], 384)
+        self.assertEqual(summary["emitted_ipc_bytes_total"], 300)
 
     def test_proxy_route_requires_a_clean_pinned_spark_connect_url(self) -> None:
         self.assertEqual(
