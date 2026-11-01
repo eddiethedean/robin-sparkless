@@ -131,17 +131,42 @@ acceptance.
 
 ## #1736 export and #1737 range-count measurements
 
-The export comparison contains three fresh baseline/candidate runtime pairs and 15 samples per workload. Values are milliseconds; speedup is baseline median divided by candidate median.
+An earlier smoke comparison with 15 samples per case claimed an 8.53× median improvement for 100k-row `collect()`, but omitted the exact commands and binary hashes. Its compressed report remains at [phase-419-export-smoke.json.gz](evidence/phase-419-export-smoke.json.gz), SHA-256 `9a551e66a977b5299a085cd869b5518ed4ef40be798522a20bbe00d5286a2587`; the controlled measurements below supersede that unpinned comparison.
 
-| Workload | Baseline median / p95 | Candidate median / p95 | Median speedup |
+### Paired public export measurements
+
+`tests/connect/benchmark_phase419_exports.py` measures public `collect()` and `toArrow()` exports for ranges, empty filters, a limited range, a 10k-row local relation, and variable-width values including a 300k-character cell. It validates every returned range and local-relation value. Each fresh server gets one warmup per workload and 20 timed iterations; three baseline/candidate pairs ran in rotating order (baseline/candidate, candidate/baseline, baseline/candidate) on the same Apple M4 Pro host with `pyspark-client==4.0.5` and PyArrow 26.0.0. All six reports use clean harness revision `1bb18f26ff90919e84cd24383af942e4e413d6d0`. Both binaries are Connect-only: baseline v4.18.1 source `0ad225677ec47b20c9c6225fa9f4b73b00e54aba`, SHA-256 `4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`; candidate runtime source `a0edec2d`, SHA-256 `92e8b76afc0547c572ba2b28316891b6c06da93a1fc3534f9766937d4dc44bb7`. The harness used active operations 2, pending operations 16, max range rows 10m, queue timeout 5s, and response timeout 60s.
+
+The table pools 60 warm samples per side and reports nearest-rank p50/p95 in milliseconds; speedup is baseline p50 divided by candidate p50. p95 and p99 from these sample counts are descriptive, not stable tail acceptance evidence.
+
+| Workload | Baseline p50/p95 | Candidate p50/p95 | p50 speedup |
 | --- | ---: | ---: | ---: |
-| Collect 1,000 range rows | 24.947 / 26.310 | 15.947 / 18.244 | 1.56× |
-| Collect 10,000 range rows | 110.489 / 122.518 | 20.962 / 32.723 | 5.27× |
-| Collect 100,000 range rows | 1,029.311 / 1,255.731 | 120.682 / 140.492 | 8.53× |
-| Empty filter, 1,000 input rows | 43.236 / 51.344 | 15.532 / 20.014 | 2.78× |
-| Empty filter, 10,000 input rows | 269.540 / 282.917 | 16.501 / 16.782 | 16.33× |
+| Range 1k `collect()` | 16.212 / 19.308 | 15.927 / 19.549 | 1.02× |
+| Range 1k `toArrow()` | 16.399 / 18.444 | 14.100 / 16.491 | 1.16× |
+| Range 10k `collect()` | 23.477 / 34.405 | 20.404 / 31.605 | 1.15× |
+| Range 10k `toArrow()` | 18.441 / 20.761 | 15.356 / 16.688 | 1.20× |
+| Range 100k `collect()` | 131.750 / 165.337 | 103.809 / 132.093 | 1.27× |
+| Range 100k `toArrow()` | 46.526 / 48.313 | 15.705 / 30.760 | 2.96× |
+| Range 100k, LIMIT 1k `collect()` | 16.111 / 20.456 | 16.041 / 19.335 | 1.00× |
+| Range 100k, LIMIT 1k `toArrow()` | 16.968 / 18.412 | 14.975 / 16.488 | 1.13× |
+| Empty filter 1k `collect()` | 42.012 / 48.222 | 16.021 / 17.176 | 2.62× |
+| Empty filter 1k `toArrow()` | 42.013 / 48.562 | 16.427 / 17.288 | 2.56× |
+| Empty filter 10k `collect()` | 267.060 / 332.510 | 16.720 / 19.415 | 15.97× |
+| Empty filter 10k `toArrow()` | 275.862 / 332.950 | 16.854 / 18.719 | 16.37× |
+| Local 10k `collect()` | 119.480 / 133.854 | 24.526 / 35.819 | 4.87× |
+| Local 10k `toArrow()` | 110.622 / 119.169 | 19.175 / 21.255 | 5.77× |
+| Variable-width `collect()` | 16.284 / 18.782 | 16.905 / 19.122 | 0.96× |
+| Variable-width `toArrow()` | 16.707 / 19.438 | 18.723 / 19.528 | 0.89× |
 
-The 100,000-row result exceeds the initial 2× target. The report does not include the full #1736 required matrix (local relations, wide/variable-width data, LIMIT, oversized cells, allocation/buffer measurements). The exact invocation and immutable binary/package hashes for both sides were not retained in this JSON, so this is preliminary export evidence rather than a protocol-complete acceptance run. The compressed full report is [phase-419-export-smoke.json.gz](evidence/phase-419-export-smoke.json.gz), SHA-256 `9a551e66a977b5299a085cd869b5518ed4ef40be798522a20bbe00d5286a2587`.
+The initial 2× 100k-row target is met at the `toArrow()` median (2.96×); row-object `collect()` improves 1.27×, so the target remains open if it is intended to cover that API too. LIMIT, at-cap local relations, variable-width values, and empty filters returned exact results. In this per-export harness the client peak RSS ranged from 250.7–254.2 MB on baseline and 254.3–256.7 MB on candidate; server RSS and retained Arrow-buffer measurements are not included. A separate candidate diagnostic on the same 100k-row Arrow result reported 391 source batches for 100,000 rows, 7 output batches, 0.636 ms serialization, 0.026 ms combine time, 0.979 ms in `arrow_next`, 15.012 ms blocked-send time, and 803,244 response bytes. The full diagnostic is [phase-419-arrow-export-mechanism-100k.json.gz](evidence/phase-419-arrow-export-mechanism-100k.json.gz), SHA-256 `9aec2fc1294789eb1c14cc45502791cd41ab158fef2555a13756a102257470da`; it is one instrumentation observation, not a repeated timing.
+
+The full raw baseline/candidate reports and SHA-256 values are:
+
+| Pair | Baseline report | SHA-256 | Candidate report | SHA-256 |
+| ---: | --- | --- | --- | --- |
+| 1 | [phase-419-exports-baseline-pair-1.json.gz](evidence/phase-419-exports-baseline-pair-1.json.gz) | `d21906ec8b7b8b6d37be181c31647f05aa6791e1811b60a2f2490cefd255a84b` | [phase-419-exports-candidate-pair-1.json.gz](evidence/phase-419-exports-candidate-pair-1.json.gz) | `da321980339305e843d0d7920f9c893c65ceaa13c7b839015488526cf90e1474` |
+| 2 | [phase-419-exports-baseline-pair-2.json.gz](evidence/phase-419-exports-baseline-pair-2.json.gz) | `2aa727f3a24365e985b0e21e96fd89d4cdf53d4da39214dac5b255cd4703859c` | [phase-419-exports-candidate-pair-2.json.gz](evidence/phase-419-exports-candidate-pair-2.json.gz) | `d7ddef6b363ffe7691a4fd6f3424039e7423c36f2d19dbe2da5fff70ae87221c` |
+| 3 | [phase-419-exports-baseline-pair-3.json.gz](evidence/phase-419-exports-baseline-pair-3.json.gz) | `cd98e6aeb255eab2c783e9b66fb8150c026038b211cd9b352f9933b1c2f30d8d` | [phase-419-exports-candidate-pair-3.json.gz](evidence/phase-419-exports-candidate-pair-3.json.gz) | `f0ea6c9547162e6c989ed9dfb082db920a136f4bd45c49483cc0943dfbaaf1a8` |
 
 ### Paired public range-count measurements
 
