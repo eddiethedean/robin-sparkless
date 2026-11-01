@@ -56,6 +56,16 @@ The [4.19 implementation plan](RELEASE_4_19.md#delivery-order-and-dependencies) 
 
 ## Acceptance and evidence
 
+The current branch has standalone size/RSS measurements and public-client source checks for
+fault-proxy reattachment, plus Quack checks for a separate-process writer, owner loss between
+analysis and execution, and recovery after restarting the same owner. The native Quack fixture
+also observes remote cancellation after its first batch. The exact commands, binary hashes, raw reports, and limits are in the
+[4.19 evidence record](RELEASE_4_19_EVIDENCE.md#standalone-duckdb-source-resource-measurements-2026-11-01).
+These single-scan measurements do not establish aggregate RSS limits under concurrent operations
+or slow readers at the result-buffer cap; D14 and V36 remain open until those cases, public
+cancellation during shutdown, the differential corpus, and clean platform extension packaging
+are covered.
+
 - **V35:** a pinned unmodified Connect client reads real DuckDB tables, computes the advertised transformation corpus through Polars, preserves values/schema, and receives explicit errors for unsupported types and source writes. Test empty tables and joins as well as scalar smoke queries.
 - **V36:** controlled concurrent source writes/replacements demonstrate snapshots; cancellation, disconnect, reattach, source loss, and shutdown preserve ownership. Increasing source sizes demonstrate numeric allocation/RSS/queue budgets recorded in D14. An independent DuckDB writer and a Connect reader share one database owner and observe the declared commit visibility without export or synchronization.
 - Record source/library/client revisions, schemas, commands, source sizes, platforms, latency/RSS, and limits. If live sharing fails feasibility, keep its gate open and revise advertised scope explicitly instead of claiming live shared-table support from a standalone scan.

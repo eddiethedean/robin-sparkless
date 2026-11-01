@@ -165,8 +165,8 @@ TRUNCATE, append/overwrite, and creating a missing save target in the configured
 it confirms the original schema and rows remain. A later smoke run with the same packaged server
 (`http,connect,duckdb-source`, SHA-256
 `252e1e5d2d0c7d9461163be9864def4b67535c94c748ab47a4d0d1e9957376be`),
-`pyspark-client==4.0.5`, and Python DuckDB 1.5.1 passed these expanded checks. Other
-dialect-specific write forms and the Quack source-loss/replay/resource cases remain open.
+`pyspark-client==4.0.5`, and Python DuckDB 1.5.1 passed these expanded checks. The public smoke
+also rejects nested and non-finite values and a VARCHAR larger than 512 KiB.
 
 The standalone public-client smoke now also analyzes a table, temporarily removes its configured
 database before collection, and verifies that the request fails; after restoring the same source,
@@ -176,19 +176,88 @@ passed against a release server rebuilt from `a850b891fc63503eeef82e6a122e426b51
 (`http,connect,duckdb-source`, binary SHA-256
 `1518dc4368c186bf4a769563335f0cbb4c4b17d94886c591a86aad800a7b31e8`), installed 4.19.0 API,
 native and server wheels, `pyspark-client==4.0.5`, and DuckDB 1.5.1. The cross-platform workflow
-has not yet run this addition. Quack source loss during production, disconnect/reattach replay,
-the full DDL/DML rejection matrix, and measured source/RSS budgets remain open.
+has not yet run this addition.
 
 It verifies exact values/schema, filter/project, UTC timestamp instant, `count(1)`, null-excluding
 `count(column)` on populated/all-null/empty data, limit zero, empty-table schema, same-owner inner
 join, grouped count/sum, unsupported source type/value errors, and rejected CREATE/INSERT/UPDATE/
 DELETE/append/overwrite requests with an unchanged row count. The standalone fixture file was
-created by Python DuckDB 1.5.1; the
-Quack fixture separately uses the bundled DuckDB 2.0.0 owner.
-Neither test replaces a Spark differential corpus. Quack disconnect/replay/source-loss acceptance,
-the full source DDL/DML rejection matrix, clean platform packaging, and measured source/RSS budgets
-remain open. D14 and V35/V36 are still open; the release does not claim complete DuckDB-source
-acceptance.
+created by Python DuckDB 1.5.1; the Quack fixture separately uses the bundled DuckDB 2.0.0 owner.
+Neither test replaces a Spark differential corpus.
+
+The public Quack smoke now uses a separate owner process and a separate writer process. After the
+writer commits an event, the next Connect statement sees all four rows. The smoke then analyzes a
+table, stops the shared owner before execution, verifies the read fails, restarts that same owner,
+and verifies a subsequent query succeeds. This passed on macOS arm64 using the packaged release
+server above and the DuckDB 2.0.0 `osx_arm64` Quack extension; the owner/writer fixture was built
+from source revision `a857fde6`.
+
+Both standalone and Quack public smokes now route a 50,000-row source scan through the existing
+fault proxy, which drops the stream after the first ExecutePlan response. The pinned client's
+normal retry returns every exact row; server tracing asserts one producer start and at least one
+ReattachExecute RPC. The DuckDB-source cancellation fixture also passed against the same Quack
+extension, cancelling after its first batch and observing `cancelled` on the shared owner. Public
+Quack cancellation during service shutdown, clean cross-platform extension packaging, and the
+Spark differential corpus remain open. D14 and V35/V36 are still open; the release does not claim
+complete DuckDB-source acceptance.
+
+### Standalone DuckDB source resource measurements (2026-11-01)
+
+`tests/connect/benchmark_phase419_duckdb_source.py` created distinct hash-derived VARCHAR rows in
+Python DuckDB 1.5.1 and issued one warmup plus three measured public-client actions through a fresh
+Sparkless server for each report. The count reports use `count()`; the bounded slow-reader report
+uses `toLocalIterator()`. The client stack was `pyspark-client==4.0.5`,
+PyArrow 26.0.0, CPython 3.11.14. Platform: Apple M4 Pro, macOS 26.5.2 arm64. Server artifact:
+release 4.19.0, features `http,connect,duckdb-source`, binary SHA-256
+`252e1e5d2d0c7d9461163be9864def4b67535c94c748ab47a4d0d1e9957376be`. Harness source revision
+`8977b683f0d167011cc0c452d58b6eb223fb25e3`, script SHA-256
+`0127ad46725b87ec03097a204603925b35e4566224deb24120b767e224decbcc`. Count timings include the
+Connect request and result action but exclude startup and shutdown. RSS is the operating system's
+peak for the single managed server child (`getrusage(RUSAGE_CHILDREN)` after it exits); this is a
+measured single-operation observation, not a process-enforced RSS cap.
+
+| Rows × payload | Uncompressed columns | DuckDB file | Action p50 / p95 | Peak server RSS |
+| --- | ---: | ---: | ---: | ---: |
+| 100k × 16 B | 2.4 MB | 1.26 MiB | 43.94 / 44.84 ms | 73.9 MiB |
+| 500k × 16 B | 12 MB | 4.76 MiB | 57.43 / 58.94 ms | 97.8 MiB |
+| 1M × 16 B | 24 MB | 9.01 MiB | 74.09 / 74.29 ms | 122.4 MiB |
+| 1M × 20 B | 28 MB | 11.01 MiB | 81.24 / 81.80 ms | 131.0 MiB |
+
+The 1M × 20 B case was repeated in three fresh server processes. Peak RSS was 131.0, 138.9, and
+136.0 MiB; count p50 was 81.24, 81.55, and 81.36 ms. The maximum observed 138.9 MiB is the
+current single-scan measurement at the 1M-row cap with a 28 MB logical source; it is not a hard
+limit and does not cover concurrent scans or replay retention.
+
+A bounded public `toLocalIterator()` run consumed 200k × 16 B rows while pausing for 20 ms after
+each 16,384-row group. All IDs and payload lengths were checked. It completed with action p50/p95
+of 845.82/852.65 ms and peak server RSS of 107.2 MiB. At the 1M × 20 B size, the same public
+iterator reaches the existing 8 MiB per-operation Connect replay/sender-buffer limit and fails
+with `Connect replay and sender buffers exceed 8388608 bytes for one operation`; the server peak
+on that rejected run was 140.8 MiB. This records the transport boundary, not a passing 1M-row slow
+reader. These reports use harness revision `45b6803fa7b8bb1ce78951cc727e8bf5416b64e7`, script
+SHA-256 `22a4e9621e954e0b7fa6e4dc5bc8ebca6e92795cdd701278680b3e208cd5f434`.
+
+Two negative runs confirm operation-level enforcement. A 1M-row × 256 B source (264 MB logical,
+155.8 MiB on disk) fails with `DuckDB source exceeds the 33554432-byte operation limit`; a
+1,000,001-row × empty-string source fails with `DuckDB source exceeds the 1000000-row operation
+limit`. The decoded-byte counter separately has a unit test that accepts exactly 64 MiB across
+batches and rejects the next byte without increasing accounting. Existing source-pool tests
+exercise the four-connection/sixteen-waiter limits and Quack's two-slot scan/cancel reservation.
+
+Raw reports retain counts, timings, file sizes, server/client hashes, and OS RSS:
+
+| Case | Report | SHA-256 |
+| --- | --- | --- |
+| 100k × 16 B | [report](evidence/phase-419-duckdb-source-100k.json.gz) | `455566f8e85a38c3225282e66c01c63e80a876b9b07b70ce8bc19b25c545d896` |
+| 500k × 16 B | [report](evidence/phase-419-duckdb-source-500k.json.gz) | `e80233504a023272b746aeef908c5246047621ad56d7b8af9c599c77eee3cd03` |
+| 1M × 16 B | [report](evidence/phase-419-duckdb-source-1m.json.gz) | `0d2547fc511c13c475d063904945204d4abaef3e79d2432f2460cef4775462e9` |
+| 1M × 20 B | [report](evidence/phase-419-duckdb-source-near-cap-1m.json.gz) | `f7aed52f457c549adc48c053142fa6b3290b75d3ef919e071741e5ca843622dc` |
+| 1M × 20 B repeat 2 | [report](evidence/phase-419-duckdb-source-near-cap-pair-2.json.gz) | `4dc18862f76a2cf8ba15d259220413c23ff1e37f9fe5a0fca82ebe86f1314bc5` |
+| 1M × 20 B repeat 3 | [report](evidence/phase-419-duckdb-source-near-cap-pair-3.json.gz) | `55986f983c0870ae6df533d564280041fc999deffef5dae59c1112a50393edc5` |
+| Slow reader, 200k × 16 B | [report](evidence/phase-419-duckdb-source-slowreader-200k.json.gz) | `ec32aa64a20b224d89d1bce8490ff03e272fc77c204735be1a9b9873a3961482` |
+| IPC cap rejection | [report](evidence/phase-419-duckdb-source-reject-ipc.json.gz) | `8b2b98762f8df191ef9542d63fc37154a8a0b717652e7569c553bdc1c355d85f` |
+| Row cap rejection | [report](evidence/phase-419-duckdb-source-reject-rows.json.gz) | `b54bd7e5455eb16f50bde156ba7670f2933e049238e05014f78b224b5bfb4807` |
+| Result-buffer cap rejection, 1M × 20 B | [report](evidence/phase-419-duckdb-source-reject-result.json.gz) | `4a8a32361118301825b4183c8dc29b5d3e89c61c8a4d52187429ab088cb5f386` |
 
 ## #1736 export and #1737 range-count measurements
 
@@ -396,7 +465,7 @@ The matched 4.19 runtime candidate (`run-20261101T043413Z-12208`) used the same 
 
 The one-million-row slow reader, injected disconnect replay (one producer start and one reattach), cancellation, and graceful shutdown all passed. The compressed full report is [phase-419-connect-mixed-candidate-a0-connect-active-8-q30-p30.json.gz](evidence/phase-419-connect-mixed-candidate-a0-connect-active-8-q30-p30.json.gz), SHA-256 `e7f56f80e0e3c0f2b6a92a0701d58401f1ddffc9eba8af79601ba870ceed825a`. This is candidate liveness and baseline failure evidence, not a paired throughput result at 16 clients; repeated paired performance acceptance remains open.
 
-For the post-export/count candidate, the active-2/16-client cohort measured 105.67 correct ops/s, short-job p95/p99 of 216.9/232.4 ms, and 57.7 MiB server peak RSS. A **provisional** #1738 comparison floor is 100 correct ops/s at 16 clients and active limit 2, short-job p95 at most 220 ms and p99 at most 240 ms, zero health/HTTP errors, and peak RSS at most 64 MiB. This sets the requested numeric floor before any scheduler change, with roughly 5.4% throughput headroom. It is a selection from one fresh run per active limit, not a passed acceptance gate. The required three or more rotating fresh baseline/candidate pairs, 20-iteration small-job guardrails, and scheduler-only comparison against the post-export/count intermediate candidate remain outstanding. The active-8 run suggests improved tails without a clear throughput gain over active 4; no default was changed from this single observation.
+For the post-export/count candidate, the active-2/16-client cohort measured 105.67 correct ops/s, short-job p95/p99 of 216.9/232.4 ms, and 57.7 MiB server peak RSS. A **provisional** #1738 comparison floor is 100 correct ops/s at 16 clients and active limit 2, short-job p95 at most 220 ms and p99 at most 240 ms, zero health/HTTP errors, and peak RSS at most 64 MiB. This sets the requested numeric floor before any scheduler change, with roughly 5.4% throughput headroom. The original selection was one fresh run; the three-pair scheduler-only comparison against this intermediate candidate is recorded below and passes the floor at active limit 2. The 20-iteration small-job guardrails and complete scheduler comparison against the released baseline remain outstanding. No default was changed.
 
 ### Response-channel wakeup paired release A/B
 
@@ -463,7 +532,7 @@ The 18 compressed reports retain per-operation samples, phase counters, environm
 
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The Quack fixture proves owner sharing and next-statement visibility, but is ignored unless the platform extension path is supplied and does not constitute a Spark differential corpus. The full source lifecycle/write-rejection matrix, clean platform packaging, and measured source resource budgets remain open. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; the native Quack cancellation fixture observes remote cancellation after a batch. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. Public cancellation during shutdown, concurrent/slow-reader RSS budgets, the Spark differential corpus, and clean cross-platform extension packaging remain open. D14 and V35/V36 remain open.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 11.39× across three release pairs; paired exporter/count reports, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against the post-export/count intermediate candidate are retained above. Allocation/buffer measurements, full small-job guardrails, and a complete scheduler comparison against the released baseline remain open.
 - Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow still needs a successful run, and release publication checks have not been performed.
