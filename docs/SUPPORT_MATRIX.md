@@ -43,8 +43,10 @@ Evidence and narrower contracts:
   and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
 - Public DuckDB Connect behavior is verified on macOS arm64. The candidate
   server wheels now carry the platform-matched DuckDB 2.0.0 Quack extension; the
-  exact-commit Linux x86_64 and macOS arm64 install/source smokes still need to
-  pass before those platform results are accepted. A source-built server can
+  release workflow now runs the exact-commit Linux x86_64 and macOS arm64
+  install/source smokes plus a four-reader slow-consumer resource case and
+  retains its report. Those platform results remain pending until that workflow
+  succeeds. A source-built server can
   load a trusted local extension path. Installed wheels resolve the bundled
   extension beside the server executable when `extension_path` is omitted,
   without a runtime download.

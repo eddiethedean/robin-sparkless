@@ -32,6 +32,8 @@ The declared DuckDB source table/filter/project/limit/count/join/grouped-aggrega
 
 ### 4.19 source lifecycle and budget update (2026-11-01)
 
+The release workflow now repeats the four-reader 100k-row slow-consumer case against the installed Linux x86_64 and macOS arm64 server extras and retains each raw report; this cross-platform run remains pending. D14 and V35/V36 remain open until those results and full release validation pass.
+
 The public Quack fixture now starts a long source scan, shuts the server down through its normal control path, and confirms the pinned client receives the shutdown status while the DuckDB owner accepts the remote cancellation. Four-client slow-reader reports now include per-reader completion/rejection outcomes; a 100k-row cohort completes all scans, a larger cohort exercises the 8 MiB replay/sender rejection, and observed server-child RSS remains below the provisional 256 MiB guardrail on the tested macOS arm64 host. The current enforced row, IPC, decoded-byte, batch, scalar, source-pool, request, and replay budgets are listed in the [4.19 plan](RELEASE_4_19.md#performance-protocol-and-completion-criteria) and [evidence record](RELEASE_4_19_EVIDENCE.md#concurrent-source-scans-and-slow-reader-budgets-2026-11-01). D14 and V35/V36 remain open for clean cross-platform Quack packaging, wider platform/resource coverage, and full release acceptance.
 
 ### 4.19 performance guardrail update (2026-11-01)

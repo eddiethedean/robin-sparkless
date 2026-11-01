@@ -570,7 +570,7 @@ jobs:
     name: Server extra (${{ matrix.runner }})
     needs: [build-wheels, source-dist, server-bin-manylinux-x86_64, server-bin-macos-arm64]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -619,6 +619,24 @@ jobs:
           chmod +x "$owner_bin"
           .venv/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin"
           .venv/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin" --quack-owner-bin "$owner_bin" --quack-extension-path "$quack_extension"
+      - name: Measure four-reader DuckDB source resource envelope
+        run: |
+          server_bin="$(.venv/bin/python -c 'from sparkless_server_bin import executable_path; print(executable_path())')"
+          .venv/bin/python tests/connect/benchmark_phase419_duckdb_source.py \
+            --server-bin "$server_bin" \
+            --rows 100000 \
+            --payload-bytes 16 \
+            --iterations 1 \
+            --concurrent-readers 4 \
+            --slow-reader-delay-ms 10 \
+            --output "$RUNNER_TEMP/phase419-source-resource-${{ matrix.sparkless }}.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: phase419-source-resource-${{ matrix.sparkless }}
+          path: ${{ runner.temp }}/phase419-source-resource-${{ matrix.sparkless }}.json
+          if-no-files-found: warn
+          retention-days: 30
 
   release-validation-gate:
     name: Release validation acceptance gate
