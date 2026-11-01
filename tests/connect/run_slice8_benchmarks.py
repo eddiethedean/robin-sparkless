@@ -68,6 +68,20 @@ def clean_client_environment() -> dict[str, str]:
     return environment
 
 
+def server_configuration(
+    rows: int, active_operations: int, queue_timeout_ms: int
+) -> dict[str, str]:
+    return {
+        **SERVER_CONFIG_ENVIRONMENT,
+        "SPARKLESS_MAX_RANGE_ROWS": str(max(rows, 10_000_000, 200_000)),
+        "SPARKLESS_MAX_ACTIVE_OPERATIONS": str(active_operations),
+        "SPARKLESS_QUEUE_TIMEOUT_MS": str(queue_timeout_ms),
+        "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+        "SPARKLESS_CONNECT_TRACE": "1",
+        "SPARKLESS_ARROW_TRACE": "1",
+    }
+
+
 def free_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -181,7 +195,11 @@ def read_control_record(
 
 
 def start_server(
-    binary: Path, log_path: Path, rows: int, active_operations: int
+    binary: Path,
+    log_path: Path,
+    rows: int,
+    active_operations: int,
+    queue_timeout_ms: int,
 ) -> tuple[subprocess.Popen[str], dict[str, Any], float]:
     environment = os.environ.copy()
     for key in (
@@ -199,15 +217,7 @@ def start_server(
         if key.startswith("SPARKLESS_"):
             environment.pop(key, None)
     environment.update(
-        {
-            **SERVER_CONFIG_ENVIRONMENT,
-            "SPARKLESS_CONNECT_TRACE": "1",
-            "SPARKLESS_ARROW_TRACE": "1",
-            "SPARKLESS_MAX_RANGE_ROWS": str(max(rows, 10_000_000, 200_000)),
-            "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
-            "SPARKLESS_MAX_ACTIVE_OPERATIONS": str(active_operations),
-            "TZ": "UTC",
-        }
+        {**server_configuration(rows, active_operations, queue_timeout_ms), "TZ": "UTC"}
     )
     command = [
         str(binary),
@@ -852,6 +862,7 @@ def main() -> int:
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--duration-seconds", type=int, default=60)
     parser.add_argument("--active-operations", type=int, default=2)
+    parser.add_argument("--queue-timeout-ms", type=int, default=5_000)
     parser.add_argument("--rows", type=int, default=1_000_000)
     parser.add_argument("--collect-rows", type=int, default=None)
     parser.add_argument("--slow-reader-rows", type=int, default=None)
@@ -862,8 +873,15 @@ def main() -> int:
     server_bin = args.server_bin.absolute()
     if not client_python.is_file():
         raise FileNotFoundError(f"pinned client interpreter not found: {client_python}")
-    if args.iterations < 1 or args.rows < 10 or args.active_operations < 1:
-        raise ValueError("iterations and workload rows must be positive")
+    if (
+        args.iterations < 1
+        or args.rows < 10
+        or args.active_operations < 1
+        or args.queue_timeout_ms < 1
+    ):
+        raise ValueError(
+            "iterations, workload rows, active operations, and queue timeout must be positive"
+        )
     slow_reader_rows = args.slow_reader_rows
     if slow_reader_rows is None:
         slow_reader_rows = 1_000_000 if args.profile == "419" else 200_000
@@ -921,7 +939,11 @@ def main() -> int:
     server: subprocess.Popen[str] | None = None
     try:
         server, ready_record, startup_seconds = start_server(
-            server_bin, run_dir / "server.log", args.rows, args.active_operations
+            server_bin,
+            run_dir / "server.log",
+            args.rows,
+            args.active_operations,
+            args.queue_timeout_ms,
         )
         http_url = ready_record["http_url"]
         connect_url = ready_record["spark_connect_url"]
@@ -1158,20 +1180,16 @@ def main() -> int:
                 "collect_rows": collect_rows,
                 "slow_reader_rows": slow_reader_rows,
                 "active_operations": args.active_operations,
+                "queue_timeout_ms": args.queue_timeout_ms,
                 "warmup": "one filtered count and 32-row collect per client, excluded from timed cohorts",
                 "regression_budget": None,
                 "interpretation": "measurements only; no numeric regression budget or performance claim is implied",
                 "server_config_environment": {
-                    **SERVER_CONFIG_ENVIRONMENT,
-                    "SPARKLESS_MAX_ACTIVE_OPERATIONS": str(
-                        args.active_operations
+                    **server_configuration(
+                        args.rows,
+                        args.active_operations,
+                        args.queue_timeout_ms,
                     ),
-                    "SPARKLESS_MAX_RANGE_ROWS": str(
-                        max(args.rows, 10_000_000, 200_000)
-                    ),
-                    "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
-                    "SPARKLESS_CONNECT_TRACE": "1",
-                    "SPARKLESS_ARROW_TRACE": "1",
                 },
                 "server_thread_environment": {
                     key: None for key in THREAD_ENVIRONMENT_KEYS
