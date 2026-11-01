@@ -122,7 +122,6 @@ def main() -> None:
             states = owner_states(owner)
             observed_active = states - baseline_states
             if states & active_states or observed_active & active_states:
-                print(f"owner active states={sorted(states)}", flush=True)
                 break
             if not worker.is_alive():
                 result = result_queue.get_nowait()
