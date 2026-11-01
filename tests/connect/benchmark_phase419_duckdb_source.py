@@ -95,6 +95,11 @@ def main() -> None:
         choices=("ipc", "rows", "result"),
         help="record a successful check that the selected statement limit rejects this scan",
     )
+    parser.add_argument(
+        "--allow-result-rejection",
+        action="store_true",
+        help="record both completed scans and expected 8 MiB result-cap rejections",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     max_rows = SOURCE_LIMITS["rows_per_statement"] + int(
@@ -116,6 +121,12 @@ def main() -> None:
         parser.error("source-limit rejection cannot be combined with a slow reader")
     if args.expect_rejection == "result" and not args.slow_reader_delay_ms:
         parser.error("result-limit rejection requires --slow-reader-delay-ms")
+    if args.allow_result_rejection and not args.slow_reader_delay_ms:
+        parser.error("result-limit recording requires --slow-reader-delay-ms")
+    if args.allow_result_rejection and args.expect_rejection:
+        parser.error(
+            "--allow-result-rejection cannot be combined with --expect-rejection"
+        )
     if args.expect_rejection in ("ipc", "rows") and args.concurrent_readers != 1:
         parser.error("IPC and row-limit rejection supports one reader only")
     server_bin = args.server_bin.absolute()
@@ -264,6 +275,19 @@ def main() -> None:
                 }
                 expected_message = expected_messages.get(args.expect_rejection)
                 if failures:
+                    result_limit_message = expected_messages["result"]
+                    result_limit_failures = all(
+                        result_limit_message in error for error in failures
+                    )
+                    successful_counts = [
+                        count
+                        for count, error in zip(counts, errors, strict=True)
+                        if error is None
+                    ]
+                    if any(count != args.rows for count in successful_counts):
+                        raise AssertionError(
+                            f"source counts returned {successful_counts}, expected {args.rows} each"
+                        )
                     if expected_message and all(
                         expected_message in error for error in failures
                     ):
@@ -271,6 +295,8 @@ def main() -> None:
                             f"{expected_message} "
                             f"(rejected {len(failures)} of {len(client_sessions)} readers)"
                         )
+                    if args.allow_result_rejection and result_limit_failures:
+                        return
                     raise RuntimeError(f"concurrent source action failed: {failures!r}")
                 if args.expect_rejection:
                     raise AssertionError(
@@ -341,6 +367,13 @@ def main() -> None:
     ).stdout.strip()
     with harness_path.open("rb") as harness:
         harness_sha256 = hashlib.file_digest(harness, "sha256").hexdigest()
+    result_limit_message = (
+        "Connect replay and sender buffers exceed "
+        f"{CONNECT_RESULT_LIMIT_BYTES} bytes for one operation"
+    )
+    result_limit_rejections = sum(
+        result_limit_message in (outcome["error"] or "") for outcome in action_outcomes
+    )
     report: dict[str, Any] = {
         "schema_version": 2,
         "timestamp_utc": datetime.now(UTC).isoformat(),
@@ -363,6 +396,7 @@ def main() -> None:
             "source_database_bytes": database_size_bytes,
             "iterations": args.iterations,
             "warmups": 1,
+            "attempted_rounds": len(action_outcomes) // args.concurrent_readers,
             "timed_rounds_completed": len(batch_samples_ms),
             "action": "slow_to_local_iterator"
             if args.slow_reader_delay_ms
@@ -371,11 +405,14 @@ def main() -> None:
             "action_samples_ms": samples_ms,
             "concurrent_batch_samples_ms": batch_samples_ms,
             "action_outcomes": action_outcomes,
+            "result_limit_rejections": result_limit_rejections,
             "action_p50_ms": percentile(samples_ms, 0.50) if samples_ms else None,
             "action_p95_ms": percentile(samples_ms, 0.95) if samples_ms else None,
             "result": (
                 f"expected_{args.expect_rejection}_limit_rejection"
                 if expected_rejection
+                else "completed_with_result_limit_rejections"
+                if args.allow_result_rejection and result_limit_rejections
                 else "completed"
             ),
             "expected_error": expected_rejection,
