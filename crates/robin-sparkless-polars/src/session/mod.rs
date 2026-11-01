@@ -3886,6 +3886,18 @@ impl SparkSession {
         } {
             return Ok(df);
         }
+        // An exact session-local saved table shadows an external catalog entry. Check it
+        // before resolving multipart aliases so an unrelated provider row cannot capture it.
+        let saved_table_key = self.saved_table_key(name);
+        if let Some(df) = self
+            .tables
+            .lock()
+            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
+            .get(&saved_table_key)
+            .cloned()
+        {
+            return Ok(df);
+        }
         let (mut external_df, mut has_external_provider) = (None, provider_configured);
         // External aliases are qualified namespaces. Resolve them before the managed catalog
         // validates the first component as a registered database (for example, `warehouse`).
@@ -3901,16 +3913,6 @@ impl SparkSession {
             }
         }
         self.check_saved_table_database(name)?;
-        let saved_table_key = self.saved_table_key(name);
-        if let Some(df) = self
-            .tables
-            .lock()
-            .map_err(|_| PolarsError::InvalidOperation("catalog lock poisoned".into()))?
-            .get(&saved_table_key)
-            .cloned()
-        {
-            return Ok(df);
-        }
         let (external_df, has_external_provider) = if resolve_external && !name.contains('.') {
             self.resolve_external_table_for_read(
                 name,
@@ -8860,6 +8862,48 @@ mod tests {
         assert_eq!(
             *resolutions.lock().expect("test resolution lock"),
             vec!["main.analytics.orders".to_string()]
+        );
+    }
+
+    #[test]
+    fn exact_local_saved_table_shadows_external_catalog_entry() {
+        let session = SparkSession::builder()
+            .app_name("external-catalog-local-shadow")
+            .get_or_create();
+        let identifier = "main.analytics.orders";
+        let local = session
+            .create_dataframe(
+                vec![(99, 0, "local".to_string())],
+                vec!["id", "age", "name"],
+            )
+            .unwrap();
+        local
+            .write()
+            .save_as_table(
+                &session,
+                identifier,
+                crate::dataframe::SaveMode::ErrorIfExists,
+            )
+            .expect("save local table");
+        let descriptor = external_descriptor(
+            std::path::Path::new("/unused/external-table"),
+            local.schema().unwrap(),
+        );
+        let (provider, resolutions) = test_external_catalog(identifier, Some(descriptor), None);
+        session
+            .set_external_catalog_provider(Some(provider))
+            .expect("set external provider");
+
+        let rows = session
+            .table(identifier)
+            .expect("local saved table should shadow external catalog")
+            .collect_as_json_rows()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], 99);
+        assert!(
+            resolutions.lock().expect("resolution lock").is_empty(),
+            "the external provider must not be consulted for an exact local table"
         );
     }
 

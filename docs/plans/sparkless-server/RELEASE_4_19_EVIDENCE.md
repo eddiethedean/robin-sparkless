@@ -5,7 +5,7 @@ search:
 
 # Phase 4.19 implementation evidence
 
-This is an interim record for the [4.19 release plan](RELEASE_4_19.md), not a release acceptance report. The implementation branch is `codex/release-4.19`. At the time of the measured runs, `HEAD` was `1f43130c0f96c9641442953fbb941478069922d9`, the working-tree source digest was `c5174677078c1fe0683c6424cdb268d77eb0387c37aa4889e24b73f1c75b6451`, and the Connect server binary SHA-256 was `e6c41781d633629904bc2966e35e0fc9487944d8b2522b1fa78b6a5cb8726278` (reported version `4.18.0`). The source digest covered the then-dirty source tree and `output/benchmarks` paths; those untracked benchmark workspace files are not part of this implementation change.
+This is an interim record for the [4.19 release plan](RELEASE_4_19.md), not a release acceptance report. The implementation branch is `codex/release-4.19`. The earliest exploratory runs used `HEAD` `1f43130c0f96c9641442953fbb941478069922d9`, a then-dirty source digest `c5174677078c1fe0683c6424cdb268d77eb0387c37aa4889e24b73f1c75b6451`, and a Connect server binary SHA-256 `e6c41781d633629904bc2966e35e0fc9487944d8b2522b1fa78b6a5cb8726278` (reported version `4.18.0`). Later controlled runs below record their exact clean source revisions and binary hashes. The early digest included `output/benchmarks`; those untracked benchmark workspace files are not part of this implementation change.
 
 ## Correctness and build checks
 
@@ -330,11 +330,44 @@ The one-million-row slow reader, injected disconnect replay (one producer start 
 
 For the post-export/count candidate, the active-2/16-client cohort measured 105.67 correct ops/s, short-job p95/p99 of 216.9/232.4 ms, and 57.7 MiB server peak RSS. A **provisional** #1738 comparison floor is 100 correct ops/s at 16 clients and active limit 2, short-job p95 at most 220 ms and p99 at most 240 ms, zero health/HTTP errors, and peak RSS at most 64 MiB. This sets the requested numeric floor before any scheduler change, with roughly 5.4% throughput headroom. It is a selection from one fresh run per active limit, not a passed acceptance gate. The required three or more rotating fresh baseline/candidate pairs, 20-iteration small-job guardrails, and scheduler-only comparison against the post-export/count intermediate candidate remain outstanding. The active-8 run suggests improved tails without a clear throughput gain over active 4; no default was changed from this single observation.
 
+### Response-channel wakeup paired release A/B
+
+To isolate the #1738 send-path change, three rotating pairs compared clean 4.19 revisions that differ only in `crates/sparkless-server/src/connect.rs`: the polling baseline at `2d22d4a54f9f05dd3e72d979f600bf9def521dd9` and the wakeup candidate at `f0a81cc6f368355fb01b972443691b9cb1715d66`. Both servers were built with `cargo build --locked --release -p sparkless-server --no-default-features --features http,connect`; both report version `4.19.0`. Each fresh server ran the same public `pyspark-client==4.0.5` harness on an Apple M4 Pro (macOS 26.5.2 arm64), CPython 3.11.15, and PyArrow 26.0.0. Each workload had one warmup and 20 timed samples. Pair order was baseline/candidate, candidate/baseline, baseline/candidate. The harness source worktrees were clean and match the corresponding server revisions.
+
+The table pools 60 samples per side and reports nearest-rank p50/p95 in milliseconds. These p95 values are descriptive with this sample count. The candidate removed the roughly 15 ms send-polling floor from small `toArrow()` and empty-result calls. The 100k row-object `collect()` median improved 1.15× in this sender-only comparison; the broader #1736 target remains open. Client peak RSS was 242.3–245.7 MiB on the baseline and 239.0–246.7 MiB on the candidate; server RSS was not measured by this harness.
+
+| Workload | Polling p50 / p95 | Wakeup p50 / p95 | p50 speedup |
+| --- | ---: | ---: | ---: |
+| Range 1k `collect()` | 15.758 / 18.547 | 0.933 / 1.571 | 16.89× |
+| Range 1k `toArrow()` | 15.187 / 16.074 | 0.386 / 0.485 | 39.36× |
+| Range 10k `collect()` | 20.399 / 31.446 | 5.458 / 16.096 | 3.74× |
+| Range 10k `toArrow()` | 15.302 / 16.877 | 0.405 / 0.515 | 37.76× |
+| Range 100k `collect()` | 101.923 / 148.096 | 88.441 / 123.174 | 1.15× |
+| Range 100k `toArrow()` | 15.792 / 27.945 | 1.297 / 1.454 | 12.18× |
+| Range 100k, LIMIT 1k `collect()` | 16.385 / 18.430 | 0.891 / 1.138 | 18.38× |
+| Range 100k, LIMIT 1k `toArrow()` | 15.482 / 16.933 | 0.398 / 0.469 | 38.92× |
+| Empty filter 1k `collect()` | 15.732 / 17.384 | 0.497 / 0.576 | 31.64× |
+| Empty filter 1k `toArrow()` | 15.812 / 17.731 | 0.494 / 0.606 | 31.99× |
+| Empty filter 10k `collect()` | 17.055 / 19.877 | 1.485 / 2.046 | 11.49× |
+| Empty filter 10k `toArrow()` | 17.692 / 20.082 | 1.483 / 1.726 | 11.93× |
+| Local relation 10k `collect()` | 25.056 / 37.422 | 9.750 / 21.165 | 2.57× |
+| Local relation 10k `toArrow()` | 20.060 / 21.006 | 4.051 / 4.329 | 4.95× |
+| Variable-width `collect()` | 17.694 / 19.510 | 1.214 / 1.326 | 14.58× |
+| Variable-width `toArrow()` | 17.824 / 19.201 | 1.207 / 1.301 | 14.77× |
+
+The six compressed reports retain all per-operation samples, binary hashes, and environment metadata:
+
+| Pair | Polling baseline report | SHA-256 | Wakeup candidate report | SHA-256 |
+| ---: | --- | --- | --- | --- |
+| 1 | [phase-419-send-wakeup-baseline-pair-1.json.gz](evidence/phase-419-send-wakeup-baseline-pair-1.json.gz) | `b5869bc973d6795e4af0bc2aad37df95a7b3001cb48d7d46f7b81e944ffa2de2` | [phase-419-send-wakeup-candidate-pair-1.json.gz](evidence/phase-419-send-wakeup-candidate-pair-1.json.gz) | `8e59ddded638fa0e8c8829fa303b80da82e3e1b9986e6847f8a8525e53e18219` |
+| 2 | [phase-419-send-wakeup-baseline-pair-2.json.gz](evidence/phase-419-send-wakeup-baseline-pair-2.json.gz) | `29367f8bdf2e48ce37bf5c6736217d9edd2fbecf85808f317ebf6f5801e1c93a` | [phase-419-send-wakeup-candidate-pair-2.json.gz](evidence/phase-419-send-wakeup-candidate-pair-2.json.gz) | `29294c0485ae2aba4da1c77285ddf22d2c6a21ccfa04d8029d8a22c3fb9c720b` |
+| 3 | [phase-419-send-wakeup-baseline-pair-3.json.gz](evidence/phase-419-send-wakeup-baseline-pair-3.json.gz) | `974dcf5c123b68d0e9d51f98da0f632dec47afc53e55d5dca189331bc6192078` | [phase-419-send-wakeup-candidate-pair-3.json.gz](evidence/phase-419-send-wakeup-candidate-pair-3.json.gz) | `328741dec6ee0f01f0faceab57e0309e500a1058d284e7c53fa07310185d5efb` |
+
 ## Open acceptance gates
 
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The Quack fixture proves owner sharing and next-statement visibility, but is ignored unless the platform extension path is supplied and does not constitute a Spark differential corpus. The full source lifecycle/write-rejection matrix, clean platform packaging, and measured source resource budgets remain open. D14 and V35/V36 remain open.
-- The helper's 17 launcher tests and public smoke now cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
-- #1736/#1737/#1738 correctness and instrumentation work has landed on this branch. The public smoke covers the local-relation boundary and empty-result correctness cases, but the full paired export/count matrices, allocation/buffer measurements, repeated performance guardrails, and scheduler-only comparison remain open.
-- No 4.19 API/native/server package version bump, clean-consumer package matrix, exact-commit CI result, or release publication check has been performed.
+- The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
+- #1736–#1738 correctness and instrumentation work has landed. Paired exporter/count reports and a three-pair sender-only release A/B are retained above. The 100k row-object `collect()` target, allocation/buffer measurements, full small-job guardrails, and a scheduler-only mixed-load comparison against the post-export/count intermediate candidate remain open.
+- Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow still needs a successful run, and release publication checks have not been performed.
 
 Accordingly, this evidence record does not mark any 4.19 slice or issue complete and does not authorize release publication.

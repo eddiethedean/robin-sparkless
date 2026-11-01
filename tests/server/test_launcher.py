@@ -187,6 +187,8 @@ def test_sparkless_connect_missing_client_fails_before_server_construction(monke
 def test_sparkless_connect_startup_failure_attempts_shutdown_and_keeps_primary(monkeypatch):
     servers = []
 
+    _install_fake_pyspark_client(monkeypatch, object())
+
     class FakeServer:
         def __init__(self, **options):
             self.stop_calls = 0
