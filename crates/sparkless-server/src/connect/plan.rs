@@ -106,6 +106,7 @@ fn translate_plan_with_context(
     })
 }
 
+#[cfg(test)]
 fn translate_relation(
     session: &SparkSession,
     relation: &proto::Relation,

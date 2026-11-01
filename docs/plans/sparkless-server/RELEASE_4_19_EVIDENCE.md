@@ -20,7 +20,7 @@ PYTHONPATH=python/sparkless /tmp/sparkless-linkedin-verify/bin/python -m pytest 
 PYTHONPATH=python/sparkless SPARKLESS_MAX_ACTIVE_OPERATIONS=4 SPARKLESS_MAX_RANGE_ROWS=10000000 /tmp/sparkless-linkedin-verify/bin/python tests/connect/smoke_phase419_client.py --server-bin target/release/sparkless-server
 ```
 
-Results: release build passed; server library suite passed **85 tests**; focused ReleaseAll regression passed; Connect plan suite passed **19 tests**; launcher suite passed **12 tests**; the public PySpark client smoke passed helper lifecycle, range count, table join, and grouped aggregate checks. `cargo fmt --all` and `git diff --check` passed. These earlier checks cover implemented behavior only; DuckDB-source-specific evidence is recorded below.
+Results: release build passed; server library suite passed **85 tests**; focused ReleaseAll regression passed; Connect plan suite passed **19 tests**; the expanded launcher suite passed **17 tests**; and the public PySpark client smoke passed helper lifecycle, range count, table join, and grouped aggregate checks. The launcher coverage includes missing optional-client detection before server construction, startup/session-creation failures, cleanup retries, preservation of the primary/body errors, fork protection, separate nested helpers, sequential reuse, and an unrelated active session. A Connect-only release build after marking the test-only relation wrapper `#[cfg(test)]` passed without warnings. `cargo fmt --all -- --check` and `git diff --check` passed. These checks cover implemented behavior only; DuckDB-source-specific evidence is recorded below.
 
 ## DuckDB source candidate (standalone and Quack, 2026-10-31)
 
@@ -66,7 +66,7 @@ It passed on the current `osx_arm64` host with the DuckDB 2.0.0 extension alread
 SPARKLESS_TEST_QUACK_EXTENSION_PATH=/Users/odosmatthews/.duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension \
   CARGO_HOME=/tmp/sparkless-cargo-home cargo test --locked --release -p robin-sparkless-polars \
   --features duckdb-source --test duckdb_source \
-  quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_statement -- --ignored
+  quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_statement -- --ignored --nocapture
 ```
 
 The fixture checks that the reader retains one row in its transaction after an independent Quack
@@ -83,7 +83,7 @@ weighted waiter wakeups, and cancellation removal:
 
 ```sh
 CARGO_HOME=/tmp/sparkless-cargo-home cargo test --locked --release -p robin-sparkless-polars \
-  --features duckdb-source,sql,test-hooks source_pool_tests
+  --features duckdb-source,sql,test-hooks --lib source_pool_tests -- --test-threads=1
 ```
 
 This validates Arrow 60-to-Polars IPC interoperability for the fixture's BOOLEAN, SMALLINT,
@@ -154,13 +154,37 @@ All 12 cohorts recorded zero health/HTTP probe errors. The slow reader completed
 
 These runs were taken before the final alias-resolution change; that fix affects a duplicate-label Connect plan. The release build, 85-test server suite, plan suite, and public-client smoke above were rerun after the fix. The binary hash embedded in these reports is therefore a pre-fix binary hash, not the current candidate hash.
 
+An additional run used the exact pushed candidate commit `c1a191a4a59b800c863a6b519598a58cf45c3377`, with a clean source tree and binary SHA-256 `558628bd2b3169fabf7c41cc1067bfb71f0587244c22ea846fa3fbb183f9026a`. This binary was built with `--features connect,duckdb-source`; the v4.18.1 baseline has only the Connect feature because it predates DuckDB integration. The run completed all four 60-second cohorts at active limit 2. Results are throughput; short-job p95/p99; admission-wait p95; and peak server RSS:
+
+| Clients | Throughput (ops/s) | Short-job p95/p99 (ms) | Admission p95 (ms) | Peak RSS (MiB) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 20.82 | 19.6 / 20.0 | 0.0 | 55.6 |
+| 4 | 71.90 | 46.0 / 54.1 | 30.1 | 58.1 |
+| 8 | 102.06 | 101.8 / 118.3 | 84.0 | 59.4 |
+| 16 | 103.50 | 217.0 / 232.8 | 202.0 | 60.2 |
+
+The report records zero health/HTTP probe errors in every cohort, completion of the concurrent one-million-row slow reader, one native producer start and one reattach during injected disconnect replay, and graceful server shutdown. The exact compressed report is [phase-419-connect-mixed-candidate-c1-active-2.json.gz](evidence/phase-419-connect-mixed-candidate-c1-active-2.json.gz), SHA-256 `8e116c9ccc705e5e8ac86a8beb5e86f7b46a97427a805e32fd0a552c4aab41f6`.
+
+A second c1 run used the clean source revision above, binary SHA-256 `d0595d6b0afc0b3960fdd4474f0dbba293c535c2cfbfbe67449e40f8432476d4`, and `--features connect` to match the baseline's feature set. It completed all four 60-second cohorts at active limit 4. Values are throughput; short-job p95/p99; admission-wait p95; and peak server RSS:
+
+| Clients | Throughput (ops/s) | Short-job p95/p99 (ms) | Admission p95 (ms) | Peak RSS (MiB) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 21.08 | 19.4 / 19.6 | 0.0 | 54.2 |
+| 4 | 80.78 | 19.7 / 20.5 | 0.0 | 57.2 |
+| 8 | 144.39 | 23.8 / 30.7 | 7.1 | 61.3 |
+| 16 | 183.83 | 62.3 / 73.5 | 42.1 | 65.4 |
+
+All cohorts had zero health/HTTP probe errors. The slow reader completed one million rows; injected disconnect replay reported one producer start and one reattach RPC; shutdown was graceful. The compressed report is [phase-419-connect-mixed-candidate-c1-connect-active-4.json.gz](evidence/phase-419-connect-mixed-candidate-c1-connect-active-4.json.gz), SHA-256 `82a26a7e932985d9aa1e1c5c37dc4863ce1df2640b6cf3ca272d77b137a8f54f`. The active-4 v4.18.1 baseline failed during its eight-client cohort, so this is not a throughput ratio; the repeated paired performance gate remains open.
+
+At 16 clients, the c1 active-2 run clears the provisional floor once: 103.50 correct ops/s, 217.0/232.8 ms short-job p95/p99, zero probe errors, and 60.2 MiB peak RSS. It is one candidate observation, not a repeated paired comparison. The baseline was built from v4.18.1 source tag commit `0ad225677ec47b20c9c6225fa9f4b73b00e54aba`, binary SHA-256 `4bcccfb2d838e3dab57ee91f2f6ee5735fb9b8c03d13361b04dd792f68c19aae`, with `--features connect`; the c1 benchmark runner and clients were copied into the detached tag worktree so both sides used the same workload. Baseline run `run-20261101T014645Z-75661` at active limit 2 completed the one-client cohort but failed at four clients with `DEADLINE_EXCEEDED: timed out waiting for Connect compute admission` (the configured timeout was 5 seconds). Run `run-20261101T015303Z-80128` at active limit 4 completed the one- and four-client cohorts but failed at eight clients with the same admission timeout. Neither run produced benchmark JSON or comparable throughput. Their retained server traces are [active 2](evidence/phase-419-connect-mixed-baseline-v4.18.1-active-2-failure.server.log.gz), SHA-256 `b475f00c488029aa98e89e96aad654ab53bb2a2ce5d936ce10765ce6c2312cf5`, and [active 4](evidence/phase-419-connect-mixed-baseline-v4.18.1-active-4-failure.server.log.gz), SHA-256 `87d87c58acfe4c73bd8ef14307830adc7bc6da85bbf928602a526fa91e2cea2e`. These are baseline liveness failures, not throughput comparisons.
+
 For the post-export/count candidate, the active-2/16-client cohort measured 105.67 correct ops/s, short-job p95/p99 of 216.9/232.4 ms, and 57.7 MiB server peak RSS. A **provisional** #1738 comparison floor is 100 correct ops/s at 16 clients and active limit 2, short-job p95 at most 220 ms and p99 at most 240 ms, zero health/HTTP errors, and peak RSS at most 64 MiB. This sets the requested numeric floor before any scheduler change, with roughly 5.4% throughput headroom. It is a selection from one fresh run per active limit, not a passed acceptance gate. The required three or more rotating fresh baseline/candidate pairs, 20-iteration small-job guardrails, and scheduler-only comparison against the post-export/count intermediate candidate remain outstanding. The active-8 run suggests improved tails without a clear throughput gain over active 4; no default was changed from this single observation.
 
 ## Open acceptance gates
 
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter pool, and focused source fixtures are present. The Quack fixture proves owner sharing and next-statement visibility, but is ignored unless the platform extension path is supplied and does not constitute a Spark differential corpus. The full source lifecycle/write-rejection matrix, clean platform packaging, and measured source resource budgets remain open. D14 and V35/V36 remain open.
-- The helper has focused lifecycle and public smoke coverage, but its full package-install, import-boundary, fork, startup/session/cleanup failure, nested/reentry, and unrelated-session matrix is still outstanding.
-- #1736/#1737/#1738 correctness and instrumentation work has landed locally, but the complete workload and repeated performance guardrails in the release plan are not all satisfied by the evidence above.
+- The helper's 17 launcher tests and public smoke now cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. A full clean-consumer package installation/import matrix remains open.
+- #1736/#1737/#1738 correctness and instrumentation work has landed on this branch, but the complete workload and repeated performance guardrails in the release plan are not all satisfied by the evidence above.
 - No 4.19 API/native/server package version bump, clean-consumer package matrix, exact-commit CI result, or release publication check has been performed.
 
 Accordingly, this evidence record does not mark any 4.19 slice or issue complete and does not authorize release publication.

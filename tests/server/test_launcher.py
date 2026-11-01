@@ -168,6 +168,229 @@ def test_sparkless_connect_retains_ownership_until_server_shutdown_succeeds(monk
     assert owner._server is None
 
 
+def test_sparkless_connect_missing_client_fails_before_server_construction(monkeypatch):
+    constructions = []
+    monkeypatch.setattr(
+        server_module,
+        "SparklessServer",
+        lambda **options: constructions.append(options),
+    )
+    monkeypatch.setitem(sys.modules, "pyspark", None)
+    monkeypatch.setitem(sys.modules, "pyspark.sql", None)
+
+    with pytest.raises(ImportError, match=r"install sparkless\[connect\]"):
+        SparklessConnect().__enter__()
+
+    assert constructions == []
+
+
+def test_sparkless_connect_startup_failure_attempts_shutdown_and_keeps_primary(monkeypatch):
+    servers = []
+
+    class FakeServer:
+        def __init__(self, **options):
+            self.stop_calls = 0
+            servers.append(self)
+
+        def start(self):
+            raise RuntimeError("server startup failed")
+
+        def stop(self):
+            self.stop_calls += 1
+            if self.stop_calls == 1:
+                raise RuntimeError("startup cleanup failed")
+
+    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    owner = SparklessConnect()
+    with pytest.raises(RuntimeError, match="server startup failed") as error:
+        owner.__enter__()
+
+    assert any("startup cleanup failed" in note for note in error.value.__notes__)
+    assert len(servers) == 1
+    assert servers[0].stop_calls == 1
+    assert owner._active
+    assert owner._server is not None
+    owner.__exit__(None, None, None)
+    assert servers[0].stop_calls == 2
+    assert not owner._active
+    assert owner._server is None
+
+
+def test_sparkless_connect_session_creation_failure_stops_server(monkeypatch):
+    class Builder:
+        def remote(self, url):
+            assert url == "sc://127.0.0.1:45679"
+            return self
+
+        def create(self):
+            raise RuntimeError("session creation failed")
+
+    pyspark = ModuleType("pyspark")
+    sql = ModuleType("pyspark.sql")
+    sql.SparkSession = type("SparkSession", (), {"builder": Builder()})
+    pyspark.sql = sql
+    monkeypatch.setitem(sys.modules, "pyspark", pyspark)
+    monkeypatch.setitem(sys.modules, "pyspark.sql", sql)
+
+    servers = []
+
+    class FakeServer:
+        def __init__(self, **options):
+            self.stop_calls = 0
+            servers.append(self)
+
+        def start(self):
+            return self
+
+        @property
+        def spark_connect_url(self):
+            return "sc://127.0.0.1:45679"
+
+        def stop(self):
+            self.stop_calls += 1
+
+    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    owner = SparklessConnect()
+    with pytest.raises(RuntimeError, match="session creation failed"):
+        owner.__enter__()
+
+    assert len(servers) == 1
+    assert servers[0].stop_calls == 1
+    assert owner._server is None
+    assert owner._session is None
+    assert not owner._active
+
+
+def test_sparkless_connect_attempts_both_cleanups_and_preserves_body_error(monkeypatch):
+    class FakeSession:
+        def __init__(self):
+            self.stop_calls = 0
+            self.fail_stop = True
+
+        def stop(self):
+            self.stop_calls += 1
+            if self.fail_stop:
+                raise RuntimeError("session cleanup failed")
+
+    class FakeServer:
+        def __init__(self, **options):
+            self.stop_calls = 0
+            self.fail_stop = True
+
+        def start(self):
+            return self
+
+        @property
+        def spark_connect_url(self):
+            return "sc://127.0.0.1:45679"
+
+        def stop(self):
+            self.stop_calls += 1
+            if self.fail_stop:
+                raise RuntimeError("server cleanup failed")
+
+    session = FakeSession()
+    _install_fake_pyspark_client(monkeypatch, session)
+    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    owner = SparklessConnect()
+
+    with pytest.raises(ValueError, match="body failed") as error:
+        with owner:
+            raise ValueError("body failed")
+
+    notes = " ".join(error.value.__notes__)
+    assert "session cleanup failed" in notes
+    assert "server cleanup failed" in notes
+    assert session.stop_calls == 1
+    assert owner._session is session
+    assert owner._server is not None
+    assert owner._active
+    server = owner._server
+    assert server.stop_calls == 1
+
+    session.fail_stop = False
+    server.fail_stop = False
+    owner.__exit__(None, None, None)
+    assert session.stop_calls == 2
+    assert owner._server is None
+    assert not owner._active
+    assert owner._session is None
+
+
+def test_sparkless_connect_supports_separate_nesting_and_sequential_reuse(monkeypatch):
+    class FakeSession:
+        def __init__(self):
+            self.stop_calls = 0
+
+        def stop(self):
+            self.stop_calls += 1
+
+    class Builder:
+        def __init__(self):
+            self.sessions = []
+
+        def remote(self, url):
+            assert url == "sc://127.0.0.1:45679"
+            return self
+
+        def create(self):
+            session = FakeSession()
+            self.sessions.append(session)
+            return session
+
+    unrelated_session = FakeSession()
+
+    class FakeServer:
+        def __init__(self, **options):
+            self.stop_calls = 0
+
+        def start(self):
+            return self
+
+        @property
+        def spark_connect_url(self):
+            return "sc://127.0.0.1:45679"
+
+        def stop(self):
+            self.stop_calls += 1
+
+    builder = Builder()
+    pyspark = ModuleType("pyspark")
+    sql = ModuleType("pyspark.sql")
+    sql.SparkSession = type(
+        "SparkSession",
+        (),
+        {
+            "builder": builder,
+            "getActiveSession": staticmethod(lambda: unrelated_session),
+        },
+    )
+    pyspark.sql = sql
+    monkeypatch.setitem(sys.modules, "pyspark", pyspark)
+    monkeypatch.setitem(sys.modules, "pyspark.sql", sql)
+
+    servers = []
+
+    def create_server(**options):
+        server = FakeServer(**options)
+        servers.append(server)
+        return server
+
+    monkeypatch.setattr(server_module, "SparklessServer", create_server)
+    owner = SparklessConnect()
+    with owner as first:
+        with SparklessConnect() as nested:
+            assert first is not nested
+    with owner as reused:
+        assert reused is not first
+
+    assert len(servers) == 3
+    assert all(server.stop_calls == 1 for server in servers)
+    assert len(builder.sessions) == 3
+    assert all(session.stop_calls == 1 for session in builder.sessions)
+    assert unrelated_session.stop_calls == 0
+
+
 def _write_fake_server(path, *, delay=0.0, stderr_bytes=0, version=None):
     source = textwrap.dedent(
         """\
