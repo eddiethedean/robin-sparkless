@@ -35,6 +35,9 @@ SERVER_ENVIRONMENT = {
     "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
     "SPARKLESS_CONNECT_TRACE": "0",
     "SPARKLESS_ARROW_TRACE": "0",
+    "POLARS_MAX_THREADS": "4",
+    "RAYON_NUM_THREADS": "4",
+    "OMP_NUM_THREADS": "4",
 }
 
 
@@ -144,6 +147,23 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
             measure_case(
                 f"range_to_arrow_{rows}",
                 frame.toArrow,
+                exact_arrow_range(rows),
+                iterations,
+            )
+        )
+        projected = frame.select("id")
+        measurements.append(
+            measure_case(
+                f"range_select_id_collect_{rows}",
+                projected.collect,
+                exact_range_rows(rows),
+                iterations,
+            )
+        )
+        measurements.append(
+            measure_case(
+                f"range_select_id_to_arrow_{rows}",
+                projected.toArrow,
                 exact_arrow_range(rows),
                 iterations,
             )
@@ -285,6 +305,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--server-bin", type=Path, required=True)
     parser.add_argument("--build-features", default="connect")
+    parser.add_argument(
+        "--build-profile", choices=("release", "debug", "unknown"), default="unknown"
+    )
+    parser.add_argument("--server-source-revision")
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -323,6 +347,8 @@ def main() -> None:
         "source_dirty_paths": source_dirty_paths,
         "server_binary": str(server_bin),
         "server_build_features": args.build_features,
+        "server_build_profile": args.build_profile,
+        "server_source_revision": args.server_source_revision,
         "server_version": version,
         "server_binary_sha256": binary_sha256,
         "server_environment": SERVER_ENVIRONMENT,
@@ -334,6 +360,7 @@ def main() -> None:
             "processor": platform.processor(),
             "python": platform.python_version(),
             "pyspark_client": importlib.metadata.version("pyspark-client"),
+            "pyarrow": importlib.metadata.version("pyarrow"),
             "client_peak_rss_bytes": client_peak_rss_bytes,
         },
         "measurements": measurements,
