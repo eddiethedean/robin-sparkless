@@ -157,15 +157,31 @@ def main() -> None:
                 for statement in (
                     "INSERT INTO warehouse.main.events VALUES "
                     "(4, 30, 'delta', 99.00, true)",
+                    "INSERT OVERWRITE TABLE warehouse.main.events "
+                    "SELECT id, bucket, label, amount, active "
+                    "FROM warehouse.main.events",
                     "UPDATE warehouse.main.events SET label = 'changed' WHERE id = 1",
                     "DELETE FROM warehouse.main.events WHERE id = 1",
                     "CREATE TABLE warehouse.main.forbidden (id BIGINT)",
                     "CREATE TABLE IF NOT EXISTS warehouse.main.events (id BIGINT)",
                     "CREATE OR REPLACE TABLE warehouse.main.events "
                     "USING parquet AS SELECT 99 AS id",
+                    "CREATE TABLE warehouse.main.copy LIKE warehouse.main.events",
+                    "CREATE VIEW warehouse.main.forbidden_view "
+                    "AS SELECT id FROM warehouse.main.events",
+                    "CREATE OR REPLACE VIEW warehouse.main.events "
+                    "AS SELECT 99 AS id",
                     "DROP TABLE warehouse.main.events",
                     "DROP TABLE IF EXISTS warehouse.main.events",
+                    "DROP VIEW warehouse.main.events",
+                    "CREATE SCHEMA warehouse.forbidden_schema",
+                    "CREATE DATABASE warehouse.forbidden_database",
+                    "DROP SCHEMA warehouse.main CASCADE",
+                    "DROP DATABASE warehouse.main CASCADE",
                     "ALTER TABLE warehouse.main.events ADD COLUMN forbidden STRING",
+                    "ALTER TABLE warehouse.main.events RENAME TO "
+                    "warehouse.main.renamed_events",
+                    "ALTER TABLE warehouse.main.events DROP COLUMN label",
                     "TRUNCATE TABLE warehouse.main.events",
                 ):
                     try:
@@ -180,6 +196,7 @@ def main() -> None:
                                 "read-only",
                                 "not implemented",
                                 "parse error",
+                                "syntax",
                                 "only select",
                             )
                         ), error

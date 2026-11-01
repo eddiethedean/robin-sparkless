@@ -158,10 +158,15 @@ The SQL mutation path now checks configured read-only source namespaces before r
 falling through to a local catalog. This also covers missing table targets, including
 `saveAsTable`. The release server rebuilt with the guard (`http,connect,duckdb-source`, SHA-256
 `820674f28d96a61c250fb93b69b16bd993021da2b02f88d6aeb654acfe24138e`) passed the focused
-read-only namespace test and the public-client smoke against that server binary. The smoke now checks INSERT,
-UPDATE, DELETE, CREATE/REPLACE TABLE, DROP TABLE, ALTER TABLE, TRUNCATE, append/overwrite, and
-creating a missing target in the configured source namespace; it confirms the original schema and
-rows remain. Additional DDL/DML syntax forms and the source-loss/replay/resource cases remain open.
+read-only namespace test and the public-client smoke against that server binary. The smoke checks
+INSERT and INSERT OVERWRITE, UPDATE, DELETE, CREATE/REPLACE TABLE and TABLE LIKE, CREATE/REPLACE
+VIEW, DROP TABLE/VIEW, CREATE/DROP SCHEMA and DATABASE, ALTER TABLE add/rename/drop-column,
+TRUNCATE, append/overwrite, and creating a missing save target in the configured source namespace;
+it confirms the original schema and rows remain. A later smoke run with the same packaged server
+(`http,connect,duckdb-source`, SHA-256
+`252e1e5d2d0c7d9461163be9864def4b67535c94c748ab47a4d0d1e9957376be`),
+`pyspark-client==4.0.5`, and Python DuckDB 1.5.1 passed these expanded checks. Other
+dialect-specific write forms and the Quack source-loss/replay/resource cases remain open.
 
 The standalone public-client smoke now also analyzes a table, temporarily removes its configured
 database before collection, and verifies that the request fails; after restoring the same source,
