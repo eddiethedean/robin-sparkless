@@ -27,6 +27,57 @@ def main() -> None:
         range_rows = spark.range(10_000_000)
         assert range_rows.filter("id > 5").count() == 9_999_994
         assert range_rows.filter(F.col("id") >= 5).count() == 9_999_995
+        assert spark.range(1_000).filter("id > 1000").collect() == []
+        assert spark.range(10_000).filter("id > 10000").count() == 0
+
+        bounded_local = spark.createDataFrame(
+            [(index,) for index in range(10_000)], "id BIGINT"
+        )
+        assert bounded_local.count() == 10_000
+
+        wide_value = "w" * 300_000
+        variable_width = spark.createDataFrame(
+            [(1, ""), (2, "x"), (3, "界" * 4_096), (4, wide_value)],
+            "id INT, payload STRING",
+        )
+        variable_rows = variable_width.limit(3).collect()
+        assert [(row.id, row.payload) for row in variable_rows] == [
+            (1, ""),
+            (2, "x"),
+            (3, "界" * 4_096),
+        ]
+        wide_rows = variable_width.collect()
+        assert len(wide_rows) == 4 and wide_rows[-1].payload == wide_value
+
+        for label, oversized in (
+            (
+                "local row limit",
+                spark.createDataFrame(
+                    [(index,) for index in range(10_001)], "id BIGINT"
+                ),
+            ),
+            (
+                "local scalar limit",
+                spark.createDataFrame(
+                    [(1, "x" * (512 * 1024 + 1))], "id INT, payload STRING"
+                ),
+            ),
+            (
+                "local IPC byte limit",
+                spark.createDataFrame(
+                    [(1, "a" * 400_000), (2, "b" * 400_000), (3, "c" * 400_000)],
+                    "id INT, payload STRING",
+                ),
+            ),
+        ):
+            try:
+                oversized.collect()
+            except Exception as error:
+                message = str(error).lower()
+                assert "connect local" in message, (label, error)
+                assert "limit" in message or "exceed" in message, (label, error)
+            else:
+                raise AssertionError(f"{label} was accepted")
 
         left = spark.createDataFrame(
             [(1, 10), (1, None), (2, 20), (4, 40)],
@@ -50,7 +101,11 @@ def main() -> None:
             (tuple(row) for row in left.join(right, on="id", how="inner").collect()),
             key=lambda row: (row[0], row[1] is not None, row[1] or 0),
         )
-        assert using_rows == [(1, None, "one"), (1, 10, "one"), (2, 20, "two")], using_rows
+        assert using_rows == [
+            (1, None, "one"),
+            (1, 10, "one"),
+            (2, 20, "two"),
+        ], using_rows
 
         grouped = left.groupBy("id").agg(
             F.count(F.lit(1)).alias("rows"),
@@ -78,7 +133,10 @@ def main() -> None:
         assert not grouped.schema["non_null_amounts"].nullable
         assert grouped.schema["total"].nullable
 
-        print("4.19 public-client helper, range-count, join, and aggregate smoke passed")
+        print(
+            "4.19 public-client helper, range, bounded local relation, "
+            "join, and aggregate smoke passed"
+        )
 
 
 if __name__ == "__main__":
