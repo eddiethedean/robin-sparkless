@@ -375,23 +375,29 @@ impl SourceConnectionPool {
     fn acquire(
         self: &Arc<Self>,
         token: &CancellationToken,
+        slots: usize,
     ) -> Result<SourceConnectionPermit, EngineError> {
         token.check_cancelled()?;
+        if slots == 0 || slots > DUCKDB_SOURCE_MAX_CONNECTIONS {
+            return Err(EngineError::Internal(
+                "invalid DuckDB source connection reservation".into(),
+            ));
+        }
         let mut state = self
             .state
             .lock()
             .map_err(|_| EngineError::Internal("DuckDB source pool lock poisoned".into()))?;
-        if state.active >= DUCKDB_SOURCE_MAX_CONNECTIONS {
+        if state.active + slots > DUCKDB_SOURCE_MAX_CONNECTIONS {
             if state.waiting >= DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS {
                 return Err(EngineError::User(format!(
                     "DuckDB source connection queue is full ({DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS} waiting operations)"
                 )));
             }
             state.waiting += 1;
-            while state.active >= DUCKDB_SOURCE_MAX_CONNECTIONS {
+            while state.active + slots > DUCKDB_SOURCE_MAX_CONNECTIONS {
                 if token.is_cancelled() {
                     state.waiting -= 1;
-                    self.available.notify_one();
+                    self.available.notify_all();
                     return Err(EngineError::Cancelled("operation cancelled".into()));
                 }
                 let (next_state, _) = self
@@ -404,15 +410,17 @@ impl SourceConnectionPool {
             }
             state.waiting -= 1;
         }
-        state.active += 1;
+        state.active += slots;
         Ok(SourceConnectionPermit {
             pool: Arc::clone(self),
+            slots,
         })
     }
 }
 
 struct SourceConnectionPermit {
     pool: Arc<SourceConnectionPool>,
+    slots: usize,
 }
 
 impl Drop for SourceConnectionPermit {
@@ -422,8 +430,10 @@ impl Drop for SourceConnectionPermit {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.active = state.active.saturating_sub(1);
-        self.pool.available.notify_one();
+        state.active = state.active.saturating_sub(self.slots);
+        // Waiters can reserve different slot counts (Quack scans reserve a second control slot),
+        // so wake all of them to let any request that now fits claim the released capacity.
+        self.pool.available.notify_all();
     }
 }
 
@@ -487,7 +497,14 @@ impl DuckDbReadSnapshot {
                 .as_ref()
                 .expect("owner identity and connection match"));
         }
-        let permit = self.pool.acquire(&self.token)?;
+        // Quack cancellation is a separate client request. Reserve its connection alongside
+        // the scan connection so cancellation never exceeds the catalog's four-connection cap.
+        let slots = if matches!(&source.owner, ConfiguredOwner::Quack { .. }) {
+            2
+        } else {
+            1
+        };
+        let permit = self.pool.acquire(&self.token, slots)?;
         let connection = open_source(&source.owner)?;
         connection
             .execute_batch("BEGIN TRANSACTION")
@@ -639,8 +656,18 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
                 .map_err(|_| EngineError::Internal("DuckDB snapshot lock poisoned".into()))?;
             let connection = self.ensure_connection(&mut state, &source)?;
             token.check_cancelled()?;
-            let _watchdog =
-                CancellationWatchdog::new(token.clone(), connection.interrupt_handle())?;
+            let quack_cancel = match &source.owner {
+                ConfiguredOwner::Local { .. } => None,
+                ConfiguredOwner::Quack { .. } => Some(QuackCancellation {
+                    owner: source.owner.clone(),
+                    connection_id: quack_connection_id(connection)?,
+                }),
+            };
+            let _watchdog = CancellationWatchdog::new(
+                token.clone(),
+                connection.interrupt_handle(),
+                quack_cancel,
+            )?;
             let table_reference = match &source.owner {
                 ConfiguredOwner::Local { .. } => format!(
                     "{}.{}",
@@ -744,16 +771,43 @@ struct CancellationWatchdog {
     worker: Option<JoinHandle<()>>,
 }
 
+struct QuackCancellation {
+    owner: ConfiguredOwner,
+    connection_id: String,
+}
+
 impl CancellationWatchdog {
-    fn new(token: CancellationToken, interrupt: Arc<InterruptHandle>) -> Result<Self, EngineError> {
+    fn new(
+        token: CancellationToken,
+        interrupt: Arc<InterruptHandle>,
+        quack: Option<QuackCancellation>,
+    ) -> Result<Self, EngineError> {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let worker = std::thread::Builder::new()
             .name("sparkless-duckdb-cancel".into())
             .spawn(move || {
+                let mut quack = quack;
                 while !worker_stop.load(Ordering::Acquire) {
                     if token.is_cancelled() {
                         interrupt.interrupt();
+                        // The local interrupt stops DuckDB's HTTP scan. Quack also needs an
+                        // explicit cancellation request to stop work on the shared owner. The
+                        // scan lease remains held until this request finishes.
+                        if let Some(quack) = quack.take() {
+                            match cancel_quack_query(&quack.owner, &quack.connection_id) {
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    eprintln!(
+                                        "sparkless DuckDB Quack cancellation was not accepted"
+                                    );
+                                }
+                                Err(_) => {
+                                    eprintln!("sparkless DuckDB Quack cancellation request failed");
+                                }
+                            }
+                        }
+                        break;
                     }
                     std::thread::sleep(Duration::from_millis(5));
                 }
@@ -809,6 +863,13 @@ fn open_read_only(path: &Path) -> Result<Connection, EngineError> {
 }
 
 fn open_source(owner: &ConfiguredOwner) -> Result<Connection, EngineError> {
+    open_source_with_http_timeout(owner, None)
+}
+
+fn open_source_with_http_timeout(
+    owner: &ConfiguredOwner,
+    http_timeout_seconds: Option<u64>,
+) -> Result<Connection, EngineError> {
     match owner {
         ConfiguredOwner::Local { database_path } => open_read_only(database_path),
         ConfiguredOwner::Quack {
@@ -820,6 +881,11 @@ fn open_source(owner: &ConfiguredOwner) -> Result<Connection, EngineError> {
         } => {
             let connection = Connection::open_in_memory().map_err(duckdb_failure)?;
             configure_connection(&connection)?;
+            if let Some(timeout) = http_timeout_seconds {
+                connection
+                    .execute_batch(&format!("SET http_timeout = {timeout}"))
+                    .map_err(duckdb_failure)?;
+            }
             let extension_path = extension_path.to_str().ok_or_else(|| {
                 EngineError::User("DuckDB Quack extension paths must be valid UTF-8".into())
             })?;
@@ -846,6 +912,37 @@ fn open_source(owner: &ConfiguredOwner) -> Result<Connection, EngineError> {
             Ok(connection)
         }
     }
+}
+
+fn quack_connection_id(connection: &Connection) -> Result<String, EngineError> {
+    connection
+        .query_row(
+            &format!(
+                "SELECT quack_connection_id({})",
+                quote_literal(QUACK_CATALOG)
+            ),
+            [],
+            |row| row.get(0),
+        )
+        .map_err(duckdb_failure)
+}
+
+fn cancel_quack_query(owner: &ConfiguredOwner, connection_id: &str) -> Result<bool, EngineError> {
+    // Cancellation must not wait forever if the owner is unreachable. This timeout applies only
+    // to the short lived control connection; it does not cap source query duration.
+    let connection = open_source_with_http_timeout(owner, Some(3))?;
+    let sql = format!(
+        "SELECT * FROM quack_cancel({}, {})",
+        quote_literal(QUACK_CATALOG),
+        quote_literal(connection_id)
+    );
+    let mut statement = connection.prepare(&sql).map_err(duckdb_failure)?;
+    let mut rows = statement.query([]).map_err(duckdb_failure)?;
+    let row = rows
+        .next()
+        .map_err(duckdb_failure)?
+        .ok_or_else(|| EngineError::Internal("DuckDB Quack cancel returned no result".into()))?;
+    row.get(1).map_err(duckdb_failure)
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), EngineError> {
@@ -1024,24 +1121,26 @@ mod source_pool_tests {
         let pool = Arc::new(SourceConnectionPool::default());
         let token = CancellationToken::new();
         let active = (0..DUCKDB_SOURCE_MAX_CONNECTIONS)
-            .map(|_| pool.acquire(&token).unwrap())
+            .map(|_| pool.acquire(&token, 1).unwrap())
             .collect::<Vec<_>>();
         let waiters = (0..DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS)
             .map(|_| {
                 let pool = Arc::clone(&pool);
                 let token = token.clone();
-                thread::spawn(move || pool.acquire(&token))
+                thread::spawn(move || {
+                    let _permit = pool.acquire(&token, 1).unwrap();
+                })
             })
             .collect::<Vec<_>>();
         wait_for_waiters(&pool, DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS);
 
         assert!(matches!(
-            pool.acquire(&token),
+            pool.acquire(&token, 1),
             Err(EngineError::User(message)) if message.contains("queue is full")
         ));
         drop(active);
         for waiter in waiters {
-            waiter.join().unwrap().unwrap();
+            waiter.join().unwrap();
         }
         assert_eq!(pool.state.lock().unwrap().active, 0);
     }
@@ -1051,11 +1150,11 @@ mod source_pool_tests {
         let pool = Arc::new(SourceConnectionPool::default());
         let token = CancellationToken::new();
         let active = (0..DUCKDB_SOURCE_MAX_CONNECTIONS)
-            .map(|_| pool.acquire(&token).unwrap())
+            .map(|_| pool.acquire(&token, 1).unwrap())
             .collect::<Vec<_>>();
         let waiter_token = token.clone();
         let waiter_pool = Arc::clone(&pool);
-        let waiter = thread::spawn(move || waiter_pool.acquire(&waiter_token));
+        let waiter = thread::spawn(move || waiter_pool.acquire(&waiter_token, 1));
         wait_for_waiters(&pool, 1);
         token.cancel();
         assert!(matches!(
@@ -1064,5 +1163,69 @@ mod source_pool_tests {
         ));
         assert_eq!(pool.state.lock().unwrap().waiting, 0);
         drop(active);
+    }
+
+    #[test]
+    fn source_pool_reserves_quack_data_and_cancel_connections_together() {
+        let pool = Arc::new(SourceConnectionPool::default());
+        let token = CancellationToken::new();
+        let first = pool.acquire(&token, 2).unwrap();
+        let second = pool.acquire(&token, 2).unwrap();
+        assert_eq!(pool.state.lock().unwrap().active, 4);
+
+        let waiter_pool = Arc::clone(&pool);
+        let waiter_token = token.clone();
+        let waiter = thread::spawn(move || waiter_pool.acquire(&waiter_token, 2));
+        wait_for_waiters(&pool, 1);
+        drop(first);
+        let third = waiter.join().unwrap().unwrap();
+        assert_eq!(pool.state.lock().unwrap().active, 4);
+
+        drop((second, third));
+        assert_eq!(pool.state.lock().unwrap().active, 0);
+    }
+
+    #[test]
+    fn source_pool_wakes_waiters_whose_weight_fits_released_capacity() {
+        use std::sync::mpsc;
+
+        let pool = Arc::new(SourceConnectionPool::default());
+        let token = CancellationToken::new();
+        let pair = pool.acquire(&token, 2).unwrap();
+        let first_single = pool.acquire(&token, 1).unwrap();
+        let second_single = pool.acquire(&token, 1).unwrap();
+
+        let (large_tx, large_rx) = mpsc::channel();
+        let large_pool = Arc::clone(&pool);
+        let large_token = token.clone();
+        let large = thread::spawn(move || {
+            let permit = large_pool.acquire(&large_token, 2).unwrap();
+            large_tx.send(()).unwrap();
+            permit
+        });
+        wait_for_waiters(&pool, 1);
+
+        let (small_tx, small_rx) = mpsc::channel();
+        let small_pool = Arc::clone(&pool);
+        let small_token = token.clone();
+        let small = thread::spawn(move || {
+            let permit = small_pool.acquire(&small_token, 1).unwrap();
+            small_tx.send(()).unwrap();
+            permit
+        });
+        wait_for_waiters(&pool, 2);
+
+        drop(first_single);
+        small_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the one-slot waiter fits the released capacity");
+        let small_permit = small.join().unwrap();
+        drop((pair, second_single, small_permit));
+        large_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the two-slot waiter fits after the larger reservation is released");
+        let large_permit = large.join().unwrap();
+        drop(large_permit);
+        assert_eq!(pool.state.lock().unwrap().active, 0);
     }
 }

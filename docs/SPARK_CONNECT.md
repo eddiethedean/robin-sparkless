@@ -145,6 +145,10 @@ non-null-column counts, same-owner inner joins, grouped count/sum, and source DD
 and overwrite rejection with an unchanged row count. It runs against both a local file and a live
 Quack owner.
 
+Cancelling a Quack scan interrupts the local DuckDB client and sends `quack_cancel` to the shared
+owner. The control connection is reserved with the scan under the four-connection cap and uses a
+three-second HTTP timeout.
+
 Quack mode and an independent writer fixture are implemented, but broader source acceptance and
 platform packaging remain open; D14 and V36 are not complete. DuckDB writes, unsupported types,
 arbitrary client-supplied paths, and cross-owner joins fail explicitly.

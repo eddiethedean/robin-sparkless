@@ -36,8 +36,10 @@ plan.
 The candidate enforces 16,384 rows and 1 MiB IPC bytes per batch; 1,000,000 source rows, 32 MiB
 IPC bytes, and 64 MiB estimated decoded Polars data across one statement; and 512 KiB per VARCHAR
 value. DuckDB is configured for one thread and a 256 MiB per-connection memory limit. A 5 ms
-cancellation watcher calls DuckDB's interrupt handle during a scan. The catalog admits at most four
-source connections and queues at most sixteen waiting operations per catalog. These are
+cancellation watcher interrupts the local DuckDB client and calls Quack's `quack_cancel` on the
+shared owner through a short-lived control connection with a 3-second HTTP timeout. The catalog
+reserves the scan and control slots together under its four-connection cap, and queues at most
+sixteen waiting operations per catalog. These are
 configured/enforced limits, not measured process-RSS guarantees; remote owner resource usage is
 outside the local connection limit, and increasing-size/slow-consumer budgets are not measured.
 
@@ -68,12 +70,16 @@ SPARKLESS_TEST_QUACK_EXTENSION_PATH=/Users/odosmatthews/.duckdb/extensions/v2.0.
 ```
 
 The fixture checks that the reader retains one row in its transaction after an independent Quack
-writer commits a second row, then sees both rows in the next statement. It uses three independent
-DuckDB connections in one test process and loopback HTTP; clean-platform extension installation,
-separate-process/service lifecycle, TLS, cancellation, and wider race/resource cases remain open.
+writer commits a second row, then sees both rows in the next statement. It also cancels a scan of a
+large remote view after its first batch and verifies that the shared owner records the query as
+cancelled.
+It uses independent DuckDB connections in one test process and loopback HTTP; clean-platform
+extension installation, separate-process/service lifecycle, TLS, source-loss behavior, and wider
+race/resource cases remain open.
 
-The source-pool unit tests passed with the crate's `sql` and `test-hooks` features enabled. They
-verify the four-connection cap, sixteen-waiter cap, queue-full rejection, and cancellation removal:
+Four source-pool unit tests passed with the crate's `sql` and `test-hooks` features enabled. They
+verify the four-connection cap, weighted Quack scan/cancel reservations, queue-full rejection,
+weighted waiter wakeups, and cancellation removal:
 
 ```sh
 CARGO_HOME=/tmp/sparkless-cargo-home cargo test --locked --release -p robin-sparkless-polars \

@@ -247,7 +247,9 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
             "LOAD {extension_literal};
              SET TimeZone = 'UTC';
              CREATE TABLE events (id BIGINT, note VARCHAR);
-             INSERT INTO events VALUES (1, 'one');"
+             INSERT INTO events VALUES (1, 'one');
+             CREATE VIEW slow_events AS
+                 SELECT i::BIGINT AS id FROM range(1000000000) AS source_rows(i);"
         ))
         .expect("load Quack and create owner fixture");
     server
@@ -304,8 +306,9 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
     assert_eq!(first_snapshot_rows, 1);
     drop(first_snapshot);
 
-    let second_snapshot = begin_external_catalog_read_snapshot(provider, &cancellation)
-        .expect("begin second shared-owner snapshot");
+    let second_snapshot =
+        begin_external_catalog_read_snapshot(Arc::clone(&provider), &cancellation)
+            .expect("begin second shared-owner snapshot");
     let descriptor = second_snapshot
         .resolve_table("warehouse.events")
         .expect("resolve table in second snapshot")
@@ -319,6 +322,43 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
         .expect("scan after writer commit");
     assert_eq!(second_snapshot_rows, 2);
     drop(second_snapshot);
+
+    // Cancelling after the first remote batch must stop work on the shared DuckDB owner, not
+    // only interrupt DuckDB's local HTTP client connection.
+    let cancel_token = CancellationToken::new();
+    let cancel_snapshot = begin_external_catalog_read_snapshot(provider, &cancel_token)
+        .expect("begin cancellable shared-owner snapshot");
+    let slow_table = cancel_snapshot
+        .resolve_table("warehouse.slow_events")
+        .expect("resolve slow view")
+        .expect("slow view exists");
+    let cancel_signal = cancel_token.clone();
+    let cancel_started = std::time::Instant::now();
+    let cancelled = cancel_snapshot.scan_table(&slow_table, &cancel_token, &mut |batch| {
+        assert!(batch.row_count > 0);
+        cancel_signal.cancel();
+        Ok(())
+    });
+    assert!(matches!(
+        cancelled,
+        Err(robin_sparkless_core::EngineError::Cancelled(_))
+    ));
+    assert!(cancel_started.elapsed() < std::time::Duration::from_secs(8));
+    let owner_states_after_cancel: String = server
+        .query_row(
+            "SELECT string_agg(DISTINCT state, ',') FROM quack_active_connections()",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .expect("inspect Quack owner after cancellation")
+        .expect("Quack owner reported connection states");
+    assert!(
+        owner_states_after_cancel
+            .split(',')
+            .any(|state| state.trim() == "cancelled"),
+        "owner did not record the cancelled remote query: {owner_states_after_cancel}"
+    );
+    drop(cancel_snapshot);
     drop(writer);
     server
         .execute_batch(&format!("CALL quack_stop({})", sql_literal(&uri)))
