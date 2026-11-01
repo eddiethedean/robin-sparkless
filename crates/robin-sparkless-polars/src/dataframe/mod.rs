@@ -7276,6 +7276,133 @@ mod tests {
         let fractional = reverse.filter(col("id").gt(3.5_f64)).unwrap();
         assert_eq!(fractional.row_count_hint, None);
         assert_eq!(fractional.count().unwrap(), 4);
+
+        let out_of_range = reverse.filter(col("id").lt(lit(u64::MAX))).unwrap();
+        assert_eq!(out_of_range.row_count_hint, None);
+        assert_eq!(out_of_range.count().unwrap(), 6);
+
+        let lower = Expr::BinaryExpr {
+            left: std::sync::Arc::new(col("id")),
+            op: Operator::Gt,
+            right: std::sync::Arc::new(lit(2_i64)),
+        };
+        let upper = Expr::BinaryExpr {
+            left: std::sync::Arc::new(col("id")),
+            op: Operator::Lt,
+            right: std::sync::Arc::new(lit(9_i64)),
+        };
+        let compound = Expr::BinaryExpr {
+            left: std::sync::Arc::new(lower),
+            op: Operator::And,
+            right: std::sync::Arc::new(upper),
+        };
+        let unsupported = reverse.filter(compound).unwrap();
+        assert_eq!(unsupported.row_count_hint, None);
+        assert_eq!(unsupported.count().unwrap(), 3);
+
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        assert!(matches!(
+            fractional.count_with_cancellation(&cancelled),
+            Err(EngineError::Cancelled(_))
+        ));
+    }
+
+    #[test]
+    fn dynamic_range_comparison_hints_match_values_at_signed_boundaries() {
+        use std::sync::Arc;
+
+        let session = SparkSession::builder()
+            .app_name("dynamic-range-count-comparison-matrix")
+            .get_or_create();
+        let ranges = [
+            (0, 11, 2, vec![i64::MIN, -1, 0, 3, 10, i64::MAX]),
+            (9, -4, -3, vec![i64::MIN, -4, 0, 3, 9, i64::MAX]),
+            (
+                i64::MIN,
+                i64::MIN + 5,
+                1,
+                vec![i64::MIN, i64::MIN + 1, i64::MIN + 4, i64::MAX],
+            ),
+            (
+                i64::MAX - 5,
+                i64::MAX,
+                2,
+                vec![i64::MIN, i64::MAX - 5, i64::MAX - 1, i64::MAX],
+            ),
+            (3, 3, 1, vec![i64::MIN, 0, 3, i64::MAX]),
+        ];
+        let operators = [
+            Operator::Eq,
+            Operator::NotEq,
+            Operator::Lt,
+            Operator::LtEq,
+            Operator::Gt,
+            Operator::GtEq,
+        ];
+
+        for (start, end, step, thresholds) in ranges {
+            let range = session.range(start, end, step).unwrap();
+            let mut values = Vec::new();
+            let mut value = start as i128;
+            let end = end as i128;
+            let step_wide = step as i128;
+            while if step_wide > 0 {
+                value < end
+            } else {
+                value > end
+            } {
+                values.push(value as i64);
+                value += step_wide;
+            }
+
+            for threshold in thresholds {
+                for operator in operators {
+                    for reversed in [false, true] {
+                        let compare = |left: i64, right: i64| match operator {
+                            Operator::Eq => left == right,
+                            Operator::NotEq => left != right,
+                            Operator::Lt => left < right,
+                            Operator::LtEq => left <= right,
+                            Operator::Gt => left > right,
+                            Operator::GtEq => left >= right,
+                            _ => unreachable!("only integer comparison operators are used"),
+                        };
+                        let expected = values
+                            .iter()
+                            .filter(|value| {
+                                if reversed {
+                                    compare(threshold, **value)
+                                } else {
+                                    compare(**value, threshold)
+                                }
+                            })
+                            .count() as u64;
+                        let (left, right) = if reversed {
+                            (lit(threshold), col("id"))
+                        } else {
+                            (col("id"), lit(threshold))
+                        };
+                        let predicate = Expr::BinaryExpr {
+                            left: Arc::new(left),
+                            op: operator,
+                            right: Arc::new(right),
+                        };
+                        let filtered = range.clone().filter(predicate).unwrap();
+                        let context = format!(
+                            "range=({start}, {end}, {step}) operator={operator:?} \
+                             threshold={threshold} reversed={reversed}"
+                        );
+                        assert_eq!(filtered.row_count_hint, Some(expected), "{context}");
+                        assert_eq!(
+                            filtered.collect().unwrap().height() as u64,
+                            expected,
+                            "{context}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
