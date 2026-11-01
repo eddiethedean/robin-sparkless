@@ -41,6 +41,7 @@ SOURCE_LIMITS = {
     "connections_per_catalog": 4,
     "queued_operations_per_catalog": 16,
 }
+CONNECT_RESULT_LIMIT_BYTES = 8 * 1024 * 1024
 
 SERVER_ENVIRONMENT = {
     "SPARKLESS_MAX_ACTIVE_OPERATIONS": "2",
@@ -83,7 +84,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--expect-rejection",
-        choices=("ipc", "rows"),
+        choices=("ipc", "rows", "result"),
         help="record a successful check that the selected statement limit rejects this scan",
     )
     parser.add_argument("--output", type=Path, required=True)
@@ -97,8 +98,10 @@ def main() -> None:
         parser.error("payload bytes must be 0..4096 and iterations must be positive")
     if not 0 <= args.slow_reader_delay_ms <= 1000:
         parser.error("slow-reader delay must be between 0 and 1000 milliseconds")
-    if args.expect_rejection and args.slow_reader_delay_ms:
-        parser.error("expected limit rejection cannot be combined with a slow reader")
+    if args.expect_rejection in ("ipc", "rows") and args.slow_reader_delay_ms:
+        parser.error("source-limit rejection cannot be combined with a slow reader")
+    if args.expect_rejection == "result" and not args.slow_reader_delay_ms:
+        parser.error("result-limit rejection requires --slow-reader-delay-ms")
     server_bin = args.server_bin.absolute()
     if not server_bin.is_file():
         parser.error(f"server binary not found: {server_bin}")
@@ -187,6 +190,10 @@ def main() -> None:
                         "DuckDB source exceeds the "
                         f"{SOURCE_LIMITS['rows_per_statement']}-row operation limit"
                     ),
+                    "result": (
+                        "Connect replay and sender buffers exceed "
+                        f"{CONNECT_RESULT_LIMIT_BYTES} bytes for one operation"
+                    ),
                 }
                 expected_message = expected_messages.get(args.expect_rejection)
                 if expected_message is None or expected_message not in message:
@@ -255,6 +262,7 @@ def main() -> None:
             "expected_error": expected_rejection,
         },
         "source_limits": SOURCE_LIMITS,
+        "connect_result_limit_bytes": CONNECT_RESULT_LIMIT_BYTES,
         "server_rss": {
             "peak_bytes": server_rss_peak_bytes,
             "method": "resource.getrusage(RUSAGE_CHILDREN) after the server child exits",
