@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from run_slice8_benchmarks import cpu_time_seconds, percentile, server_configuration
+from run_slice8_benchmarks import (
+    ProgressMonitor,
+    cpu_time_seconds,
+    percentile,
+    server_configuration,
+)
 from run_slice8_proxy_route import require_sc_url
 from slice8_proxy_url import url_with_token
 
@@ -26,6 +31,13 @@ class Slice8HarnessTests(unittest.TestCase):
         self.assertEqual(diagnostic["SPARKLESS_QUEUE_TIMEOUT_MS"], "30000")
         self.assertEqual(diagnostic["SPARKLESS_MAX_ACTIVE_OPERATIONS"], "8")
         self.assertEqual(diagnostic["SPARKLESS_RESPONSE_TIMEOUT_MS"], "60000")
+
+    def test_progress_monitor_records_http_timeout(self) -> None:
+        default = ProgressMonitor("http://127.0.0.1")
+        diagnostic = ProgressMonitor("http://127.0.0.1", 30)
+
+        self.assertEqual(default.http_timeout_seconds, 5)
+        self.assertEqual(diagnostic.http_timeout_seconds, 30)
 
     def test_proxy_route_requires_a_clean_pinned_spark_connect_url(self) -> None:
         self.assertEqual(

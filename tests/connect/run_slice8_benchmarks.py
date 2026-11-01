@@ -342,7 +342,7 @@ def health_probe(http_url: str) -> tuple[float, bool]:
         return (time.perf_counter() - started) * 1000, False
 
 
-def http_probe(http_url: str) -> tuple[float, bool]:
+def http_probe(http_url: str, timeout_seconds: float = 5) -> tuple[float, bool]:
     body = json.dumps(
         {
             # Reuse one read-only probe session so a 60-second cohort does not
@@ -360,7 +360,7 @@ def http_probe(http_url: str) -> tuple[float, bool]:
     )
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             payload = json.load(response)
         result = payload["data"]["application/json"]["data"]
         return (
@@ -378,8 +378,11 @@ def http_probe(http_url: str) -> tuple[float, bool]:
 
 
 class ProgressMonitor:
-    def __init__(self, http_url: str) -> None:
+    def __init__(self, http_url: str, http_timeout_seconds: float = 5) -> None:
+        if not math.isfinite(http_timeout_seconds) or http_timeout_seconds <= 0:
+            raise ValueError("HTTP probe timeout must be a finite positive number")
         self.http_url = http_url
+        self.http_timeout_seconds = http_timeout_seconds
         self.stop_event = threading.Event()
         self.health_ms: list[float] = []
         self.http_ms: list[float] = []
@@ -399,7 +402,7 @@ class ProgressMonitor:
 
     def _http_loop(self) -> None:
         while not self.stop_event.is_set():
-            elapsed, ok = http_probe(self.http_url)
+            elapsed, ok = http_probe(self.http_url, self.http_timeout_seconds)
             self.http_ms.append(elapsed)
             if not ok:
                 self.errors.append("HTTP SELECT 1 failed")
@@ -412,7 +415,7 @@ class ProgressMonitor:
     def stop(self) -> dict[str, Any]:
         self.stop_event.set()
         for thread in self.threads:
-            thread.join(timeout=7)
+            thread.join(timeout=max(7, self.http_timeout_seconds + 1))
         if any(thread.is_alive() for thread in self.threads):
             raise TimeoutError("health/HTTP progress monitor did not stop")
         return {
@@ -496,6 +499,7 @@ def run_cohort(
     duration_seconds: int,
     batch_rows: int,
     slow_reader_rows: int,
+    http_probe_timeout_seconds: float,
 ) -> dict[str, Any]:
     trace_log_path = output_dir / "server.log"
     trace_start = trace_log_path.stat().st_size if trace_log_path.exists() else 0
@@ -578,7 +582,7 @@ def run_cohort(
         sampler.start()
         stage_started = time.perf_counter()
         barrier.write_text("start\n", encoding="utf-8")
-        progress = ProgressMonitor(http_url)
+        progress = ProgressMonitor(http_url, http_probe_timeout_seconds)
         progress.start()
         results = []
         for index, process in enumerate(processes):
@@ -863,6 +867,7 @@ def main() -> int:
     parser.add_argument("--duration-seconds", type=int, default=60)
     parser.add_argument("--active-operations", type=int, default=2)
     parser.add_argument("--queue-timeout-ms", type=int, default=5_000)
+    parser.add_argument("--http-probe-timeout-seconds", type=float, default=5.0)
     parser.add_argument("--rows", type=int, default=1_000_000)
     parser.add_argument("--collect-rows", type=int, default=None)
     parser.add_argument("--slow-reader-rows", type=int, default=None)
@@ -878,9 +883,11 @@ def main() -> int:
         or args.rows < 10
         or args.active_operations < 1
         or args.queue_timeout_ms < 1
+        or not math.isfinite(args.http_probe_timeout_seconds)
+        or args.http_probe_timeout_seconds <= 0
     ):
         raise ValueError(
-            "iterations, workload rows, active operations, and queue timeout must be positive"
+            "iterations, workload rows, active operations, queue timeout, and HTTP probe timeout must be positive"
         )
     slow_reader_rows = args.slow_reader_rows
     if slow_reader_rows is None:
@@ -961,11 +968,12 @@ def main() -> int:
                 args.duration_seconds,
                 collect_rows,
                 slow_reader_rows,
+                args.http_probe_timeout_seconds,
             )
             for concurrency in concurrencies
         ]
 
-        slow_progress = ProgressMonitor(http_url)
+        slow_progress = ProgressMonitor(http_url, args.http_probe_timeout_seconds)
         slow_progress.start()
         slow_sampler = ProcessSampler(server.pid)
         slow_sampler.start()
@@ -1181,6 +1189,7 @@ def main() -> int:
                 "slow_reader_rows": slow_reader_rows,
                 "active_operations": args.active_operations,
                 "queue_timeout_ms": args.queue_timeout_ms,
+                "http_probe_timeout_seconds": args.http_probe_timeout_seconds,
                 "warmup": "one filtered count and 32-row collect per client, excluded from timed cohorts",
                 "regression_budget": None,
                 "interpretation": "measurements only; no numeric regression budget or performance claim is implied",
