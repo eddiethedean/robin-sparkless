@@ -118,6 +118,42 @@ PYTHONPATH=python/sparkless:/tmp/sparkless-duckdb-python-only /tmp/sparkless-lin
   --quack-extension-path /Users/odosmatthews/.duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension
 ```
 
+Both public-client modes and the four source-pool unit tests were rerun from source revision
+`ddf35e94c29f6eadd85c037afb8d3f6ed92404a6`. The standalone and Quack smokes used a release
+server built with `http,connect,duckdb-source` (SHA-256
+`b735bedee7fb5164fd7986ce96147f0cfbe25bf4d3ba73c52beb15edd50c479b`); the Quack owner was a
+release example binary (SHA-256
+`f3785aecac6e5adf5a77d5a46afef0ebf38befd826471e26900d8bd74817f7b5`). Both public-client
+smokes passed, and all four source-pool tests passed.
+
+### 4.19 package and release-workflow validation (2026-11-01)
+
+All three Python distributions were built at version `4.19.0`, installed together in a temporary
+CPython 3.11 overlay, and exercised through the installed public client. The API wheel
+(`sparkless-4.19.0-py3-none-any.whl`, 70,425 bytes) has SHA-256
+`15ca08ada712b953804eb5a88fb1f6b4b0b524cf379ee52532ac71635b76673f`; the native wheel
+(`sparkless_native-4.19.0-cp311-abi3-macosx_11_0_arm64.whl`, 44,122,687 bytes) has SHA-256
+`fe396247bf297019f9d0190c07319a95729abe66d4c5c06116abec6bb287b96c`; and the bundled server
+wheel (`sparkless_server_bin-4.19.0-py3-none-macosx_26_0_arm64.whl`, 48,741,610 bytes) has
+SHA-256 `a9b488ee8c308645e1172b24acf483b5d83fcca3dac1b4527b239422201a76cc`. The packaged server
+binary was built in release mode with `http,connect,duckdb-source`, reports version `4.19.0`, and
+has SHA-256 `252e1e5d2d0c7d9461163be9864def4b67535c94c748ab47a4d0d1e9957376be`.
+
+The installed-wheel runtime verifier passed SQL, Parquet, and Delta checks. The server-wheel
+verifier passed readiness, HTTP, Connect, port, and shutdown checks. Public `SparklessConnect`
+checks passed for range/Column comparison/count, and the DuckDB source smoke passed in both
+standalone mode (Python DuckDB 1.5.1 fixture) and Quack mode (bundled DuckDB 2.0.0 owner). Package
+metadata reported `sparkless`, `sparkless-native`, and `sparkless-server-bin` as `4.19.0`, with
+`pyspark-client==4.0.5`. The local server wheel carries a `macosx_26_0_arm64` tag because the
+available host is macOS 26; it does not validate the release workflow's macOS 14 deployment tag.
+
+The release workflow now builds both supported server wheels with `http,connect,duckdb-source`.
+Its Linux and macOS server-extra consumer jobs install the hash-locked CPython 3.11 DuckDB 1.5.1
+fixture dependency and run the public-client source smoke against the bundled server executable.
+These exact release-runner jobs have not run for this branch yet, so cross-platform package
+acceptance remains pending. Source loss/replay, full DDL/DML rejection, and measured source/RSS
+budgets also remain open; this evidence does not claim complete DuckDB-source acceptance.
+
 It verifies exact values/schema, filter/project, UTC timestamp instant, `count(1)`, null-excluding
 `count(column)` on populated/all-null/empty data, limit zero, empty-table schema, same-owner inner
 join, grouped count/sum, unsupported source type/value errors, and rejected CREATE/INSERT/UPDATE/

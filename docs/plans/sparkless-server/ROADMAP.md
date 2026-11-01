@@ -14,6 +14,12 @@ search:
 
 **Standalone development policy (2026-10-25):** Sparkless milestones, CI, and release readiness depend on its own native/HTTP/Connect contracts, standard clients, and self-contained fixtures. Work in external applications is managed separately; their features, maintainer decisions, and merge timing cannot block Sparkless.
 
+## Full existing local API baseline — scope revision 2026-11-01
+
+[SS-22](22-local-sql-feature-parity.md) makes every implemented feature in the [existing local `sparkless.sql` baseline](LOCAL_SQL_FEATURE_BASELINE.md) required server work. This includes all built-ins/overloads, pivot/cube/rollup, statistical/approximate functions, generators, supported window frames, type/Row utilities, local SQL statements, local RDD/flatMap compatibility and optional storage/provider features. Earlier shortlists are starting slices, not final exclusions. Preserve actual documented local semantics and classify stubs explicitly.
+
+Assign worker/bridge features to Phase 5, Delta/providers to Phase 6, all native API/types/functions and HTTP/Connect SQL to Phase 7, and remaining I/O/cache/warehouse integration to Phase 8. Default Polars covers the native baseline. Standard Connect is supplemented by a documented Sparkless client bridge only for local interfaces absent from the upstream client. Complete D21 and V56–V58 before Phase 11; do not move baseline gaps after certification. New local features receive a registry entry and server delivery slice before their local release is finalized. Release numbers remain scope targets without calendar commitments.
+
 ## Coordinated version and publication policy
 
 Starting with **4.16.0**, every release publishes all first-party packages in the release inventory, including packages whose implementation did not change. All package manifests, first-party dependency requirements, lockfile entries, Python runtime version metadata, binary versions, and release artifact tags must agree on the release version.
@@ -48,8 +54,8 @@ This policy supersedes the earlier exception allowing `spark-sql-parser` to rema
 | **4.20** | **4.20.0** | 4, optional capability | DuckDB execution backend exposed through Sparkless's supported Connect server |
 | **4.21** | **4.21.0** | 5, optional capability | Isolated Python Jobs/notebooks and scalar/Pandas UDF workers |
 | **4.22** | **4.22.0** | 6, optional capability | Native Delta Lake / Unity Catalog interoperability |
-| **4.23** | **4.23.0** | 7 | Expanded Connect DataFrame operations, scalar/nested types, analysis, and session configuration |
-| **4.24** | **4.24.0** | 8, connectors opt-in | Connect CSV/JSON/Parquet and optional JDBC I/O, artifacts, caching, and DataFrame checkpoints |
+| **4.23** | **4.23.0** | 7 | Complete existing native local SQL/DataFrame/functions/types baseline on Connect and HTTP SQL, analysis and session configuration (SS-16/22) |
+| **4.24** | **4.24.0** | 8, connectors opt-in | Complete local reader/writer/warehouse/cache baseline, optional JDBC/SQLite/drivers, artifacts and DataFrame checkpoints (SS-17/22) |
 | **4.25** | **4.25.0** | 9, optional capability | Durable operation outcomes, replay, and eligible session recovery across restart |
 | **4.26** | **4.26.0** | 10, optional capability | Single-node Structured Streaming, state/checkpoints, and verified sink recovery |
 | **4.27** | **4.27.0** | 11 | `sparkless-connect40`: certify the complete planned PySpark 4.0 server feature baseline after Phases 3–10 |
@@ -60,7 +66,7 @@ This policy supersedes the earlier exception allowing `spark-sql-parser` to rema
 
 All rows are planned. Release scope is cumulative: each release retains and regression-tests previously shipped capabilities. Later scope cannot bypass an unfinished prerequisite. If an optional phase is deferred or reordered, explicitly revise this release map and its gates before assigning different work to that version. The two DuckDB phases are explicitly sequenced after supported Connect: source integration first, execution backend second. Python workers and Delta/UC move to Phases 5/6; neither has an inherent technical dependency on DuckDB, and Delta/UC does not require Python workers. Reordering requires an explicit roadmap revision, not an incidental dependency in the implementation.
 
-**Scope extension (2026-10-29):** formerly unassigned Connect gaps are now scheduled below. The proposed feature-level choices and exclusions for Phases 4–10 are collected in [SS-20](20-connect-feature-scope.md); each phase decision register must freeze its matrix before implementation. The release numbers are scope targets without calendar commitments. Phases 7–10 retain native single-node execution; RDD/SparkContext, distributed executors, and universal Spark compatibility remain outside the roadmap. Optional workers/connectors/storage are required only for the surfaces that use them, not for the default native API.
+**Scope extension (2026-10-29):** formerly unassigned Connect gaps are now scheduled below. The proposed feature-level choices and exclusions for Phases 4–10 are collected in [SS-20](20-connect-feature-scope.md); each phase decision register must freeze its matrix before implementation. The release numbers are scope targets without calendar commitments. Phases 7–10 retain native single-node execution; distributed RDD/SparkContext execution, distributed executors, and universal Spark compatibility remain outside the roadmap; the existing bounded local RDD and metadata-only SparkContext interfaces are included by SS-22. Optional workers/connectors/storage are required only for the surfaces that use them, not for the default native API.
 
 ## 4.16.0 — HTTP service, launcher, and unified distribution
 
@@ -251,6 +257,8 @@ Primary plan: [SS-12](12-optional-python-workers.md).
 - [ ] Preserve Python/JVM-free core SQL/Connect images and rerun their regression gates.
 - [ ] Publish and verify all participating packages at **4.21.0**; installation of optional worker support remains opt-in.
 
+Phase 5 also completes SS-22 LSQL-02: existing local scalar UDF contexts and bounded RDD/DataFrame callback operations through isolated workers and the named compatibility bridge; standard Connect conformance remains independent.
+
 ## 4.22.0 — Optional native Delta Lake / Unity Catalog
 
 Target **Phase 6** using native storage/catalog integration. Publish the complete package set, including any new first-party integration distributions, at **4.22.0**.
@@ -260,14 +268,16 @@ Primary plan: [SS-13](13-optional-delta-and-unity-catalog.md).
 - [ ] Pin native storage/catalog dependencies and document supported operations, credentials, conflict handling, and recovery semantics.
 - [ ] Pass **V28** using an independent reader for schema, decimal precision, data files, and `_delta_log` transactions.
 - [ ] Verify concurrent writers, cancellation/failure near commit, and explicit unsupported DDL/DML errors.
-- [ ] Preserve previously shipped capabilities and keep Delta/UC optional; no Python worker dependency is introduced.
+- [ ] Preserve previously shipped capabilities and keep native Delta/UC optional and independent of Python workers. Existing Python callback providers use the separately enabled SS-12 worker integration under SS-22.
 - [ ] Publish and verify all participating packages at **4.22.0**.
+
+Phase 6 also completes SS-22 LSQL-03: the existing Delta and external provider registration/read/write/batch/error contract, using Phase 5 workers for Python callbacks and native catalog/storage services for execution.
 
 ## 4.23.0 — Expanded Connect API, types, and analysis
 
 Complete **Phase 7 / [SS-16](16-connect-api-types-and-analysis.md)** for the default Polars backend and publish backend-specific support matrices. Earlier DuckDB support does not establish default-backend parity.
 
-- Freeze **D16** for comparisons/boolean/null predicates, arithmetic/casts/functions, column APIs, joins/grouping/distinct aggregates, sorting/windows, and union/intersect/except semantics.
+- Freeze **D16/D21** for every existing native local API/function/overload/type and SQL statement, including pivot/cube/rollup, statistics/approximation, generators, all locally implemented window frames, NA/reshaping/sampling/actions and client utilities. Shortlists cannot exclude baseline entries; complete LSQL-04 on Connect and HTTP SQL with V56–V58.
 - Enable BYTE, FLOAT, BINARY, TIMESTAMP_NTZ, arrays/maps/nested structs across local input, analysis, execution, and Arrow results.
 - Add truthful explain/analysis and explicitly mutable session settings; unsupported settings/functions remain named errors.
 - Pass **V39/V40** against the pinned unmodified client/reference, including nested/null/empty/boundary cases, expensive-operator resource budgets, session isolation, and earlier lifecycle regressions.
@@ -277,7 +287,7 @@ Complete **Phase 7 / [SS-16](16-connect-api-types-and-analysis.md)** for the def
 
 Complete **Phase 8 / [SS-17](17-connect-sources-artifacts-and-persistence.md)** after the required Phase 7 API/type work.
 
-- Freeze **D17** for CSV/JSON/Parquet and optional JDBC read/write APIs, source/sink options, catalog/view APIs, credentials/path policy, commit outcomes, and ownership.
+- Freeze **D17/D21** for the entire local reader/writer/options/modes/warehouse baseline, including optional JDBC/SQLite/compiled drivers, plus source/sink policy, catalog/view APIs, commit outcomes and ownership. Complete LSQL-05 and all remaining baseline integration rows under V56–V58; Delta remains owned by SS-13.
 - Implement bounded artifact upload/status and cached local relations using actual public-client threshold behavior.
 - Implement cache/persist/unpersist, truthful storage status, and local/durable DataFrame checkpoints with explicit memory/disk/lifetime rules.
 - Keep the core server Python/JVM-free; actual JDBC drivers may run only in a separately packaged optional connector process. Delta public APIs require the SS-13 capability and their own integration checks.
@@ -303,7 +313,7 @@ Complete **Phase 10 / [SS-19](19-structured-streaming.md)** using the enabled AP
 
 ## 4.27.0–4.30.0 — One server compatibility phase per Spark version
 
-Follow [SS-21: versioned compatibility packages](21-versioned-connect-packages.md). Complete all planned server features in Phases 3–10 before Phase 11 certifies `sparkless-connect40` at 4.27.0. Then deliver one phase each for `sparkless-connect35` (Phase 12 / 4.28), `sparkless-connect41` (Phase 13 / 4.29), and `sparkless-connect42` (Phase 14 / 4.30). The owner confirmed 3.5, 4.0, 4.1 and 4.2 as the upstream targets; 3.6–3.9 are not released Spark lines.
+Follow [SS-21: versioned compatibility packages](21-versioned-connect-packages.md). Complete all planned server features in Phases 3–10, including SS-22 LSQL-06 and V56–V58 for the complete existing local feature baseline, before Phase 11 certifies `sparkless-connect40` at 4.27.0. Then deliver one phase each for `sparkless-connect35` (Phase 12 / 4.28), `sparkless-connect41` (Phase 13 / 4.29), and `sparkless-connect42` (Phase 14 / 4.30). The owner confirmed 3.5, 4.0, 4.1 and 4.2 as the upstream targets; 3.6–3.9 are not released Spark lines.
 
 Each package pins a tested upstream client patch and the exact matching Sparkless launcher/native binary, selecting an explicit server semantic/protocol profile. Complete the applicable feature matrix and differential/fault tests before certification. Shared code and earlier profiles must retain their behavior. Resolve **D20** for each line, then pass **V48/V49**, **V50/V51**, **V52/V53**, and **V54/V55**, respectively, including coordinated candidate and fresh public installs. Optional workers/backends/connectors stay opt-in; universal Apache Spark parity remains outside scope.
 

@@ -25,7 +25,13 @@ Both transports use the same native execution, session, catalog, and result serv
 
 This epic covers the complete direction. Each phase has its own supported surface and release gate; a passing smoke query does not establish general Spark or Databricks compatibility.
 
-The 2026-10-29 scope extension schedules remaining Connect API gaps in Phases 7–10 and adds scalar/Pandas UDFs to Phase 5. Optional UDF workers and JDBC connector processes remain separately packaged; the core native process/image never embeds Python or a JVM. RDD/SparkContext and distributed Spark execution remain outside this single-node roadmap.
+The 2026-10-29 scope extension schedules remaining Connect API gaps in Phases 7–10 and adds scalar/Pandas UDFs to Phase 5. Optional UDF workers and JDBC connector processes remain separately packaged; the core native process/image never embeds Python or a JVM. Distributed RDD/SparkContext execution remains outside this single-node roadmap. The existing bounded local RDD and metadata-only SparkContext compatibility interfaces are included through SS-22's bridge/worker contract.
+
+## Complete existing local feature scope — 2026-11-01
+
+The owner requires **all existing implemented `sparkless.sql` features** on the server. [SS-22](22-local-sql-feature-parity.md) defines the complete [local baseline](LOCAL_SQL_FEATURE_BASELINE.md), transport mappings and delivery in Phases 5–8. This supersedes narrower proposed function/operator/type exclusions: native functions, pivots/grouping sets where implemented, statistics/approximation, generators, supported unbounded batch-window endpoints, actions/conversions, all accepted local SQL statements, optional workers/providers/connectors and bounded local callback APIs are required.
+
+HTTP SQL must cover the locally implemented SQL language and result types; Connect must cover the representable local API. Client utilities and local interfaces absent from standard Connect receive an explicit, tested Sparkless client bridge rather than an implicit exclusion. Preserve documented local behavior, including known limitations and compatibility stubs; no requirement for distributed Spark or functionality absent locally is introduced. D21 and V56–V58 reconcile source/wheel/SQL cases with remote behavior and block Phase 11 certification until the baseline is complete.
 
 ## Delivery order and scope
 
@@ -360,7 +366,7 @@ The [4.19 implementation plan](RELEASE_4_19.md) refines Phase 3 and its independ
 
 - **Phases 11–14 / SS-21 / 4.27–4.30:** after completing all planned server features, certify `sparkless-connect40`, followed by separate phases for `sparkless-connect35`, `sparkless-connect41` and `sparkless-connect42`. Each package pins a tested upstream patch and matching Sparkless launcher/server and selects a certified server compatibility profile. [SS-21](21-versioned-connect-packages.md) defines D20 and V48–V55, full version-delta audits, semantic/protocol implementations and coordinated packaging gates.
 
-Each new phase preserves earlier enabled capabilities and passes coordinated candidate/public installation checks. Optional Python/JDBC/Delta/DuckDB components are dependencies only for the APIs selecting them. Full Spark compatibility, RDD/SparkContext, distributed execution/failover, and continuous streaming are not implied by this extension.
+Each new phase preserves earlier enabled capabilities and passes coordinated candidate/public installation checks. Optional Python/JDBC/Delta/DuckDB components are dependencies only for the APIs selecting them. Full Spark compatibility, distributed RDD/SparkContext execution, distributed execution/failover, and continuous streaming are not implied by this extension. SS-22 includes existing local RDD/SparkContext compatibility behavior and is a required Phase 11 prerequisite.
 
 ### Common release checks
 

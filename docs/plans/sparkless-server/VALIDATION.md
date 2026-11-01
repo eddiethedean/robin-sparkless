@@ -83,6 +83,15 @@ The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Ru
 | V53 | 13 / SS-21 | Spark 4.1 compatibility distribution | Exact client/launcher/binary pins; clean candidate and fresh public installs on supported Python/platforms; real SparklessConnect lifecycle and profile handshake; conflict and cross-profile rejection; coordinated artifact inventory |
 | V54 | 14 / SS-21 | Spark 4.2 server profile and feature certification | Exact client/proto/oracle pins; completed applicable planned feature matrix and classified upstream deltas; differential semantics/schema/error tests; optional features, resource/fault/recovery/streaming checks; earlier-profile regressions |
 | V55 | 14 / SS-21 | Spark 4.2 compatibility distribution | Exact client/launcher/binary pins; clean candidate and fresh public installs on supported Python/platforms; real SparklessConnect lifecycle and profile handshake; conflict and cross-profile rejection; coordinated artifact inventory |
+| V56 | 5–8 / SS-22; before 11 | Complete local source/wheel/SQL inventory and drift check | Per-symbol/overload/SQL-case source and local behavior, concrete transport/bridge mapping, owning slice/fixture and optional dependency; zero omitted or unassigned implemented features; explicit evidence for stubs/declarations |
+| V57 | 5–8 / SS-22; before 11 | Existing local API/server behavioral parity | Local/server values/schema/errors and composition tests, aliases/operators/helpers/converted results, standard Connect plus labeled bridge, optional workers/providers/drivers, cancellation/replay/isolation and resource budgets; full default Polars native baseline |
+| V58 | 5–8 / SS-22; before 11 | Complete local SQL language on HTTP and Connect | Every locally supported query/mutation/function/type/option case; exact positional HTTP and Arrow results, nested/empty results, versioned encodings if needed, snapshots/identity/outcomes and configured I/O with zero-effect negative cases |
+
+## Complete local SQL baseline gates — SS-22
+
+The 2026-11-01 owner scope revision requires every implemented existing local `sparkless.sql` feature on the server. [SS-22](22-local-sql-feature-parity.md) defines V56–V58 and the [named baseline](LOCAL_SQL_FEATURE_BASELINE.md). They are planned gates, not current CI or passing evidence. V56 reconciles source/wheel/SQL cases and fails on omitted or unassigned implemented entries; V57 proves full local/server API behavior through standard Connect and separately labeled bridges; V58 proves the local SQL corpus on HTTP and Connect, including statements, types, functions and mutation outcomes.
+
+Apply each gate to the owning Phase 5/6/7/8 slices, optional-enabled and disabled deployments, and current local additions through candidate freeze. Complete all baseline rows before Phase 11 V48/V49; deleting an entry or returning Unsupported remotely cannot satisfy an implemented local feature. Stubs/no-ops and declarations require explicit local-behavior evidence rather than invented functionality. Native baseline coverage must pass on default Polars, independently of optional DuckDB; worker/provider/connector rows use their own deployments.
 
 ## 4.16 execution order
 
@@ -193,7 +202,7 @@ For [SS-18 / Phase 9 / 4.25](18-durable-connect-recovery.md), resolve D18 and co
 
 For [SS-19 / Phase 10 / 4.26](19-structured-streaming.md), resolve D19 and complete V46/V47 using the enabled API/I/O/recovery contracts. UDF/JDBC/Delta streaming combinations need separate evidence and must not become hidden dependencies of the native file/rate subset.
 
-Each phase must rerun applicable earlier native/HTTP/Connect/lifecycle/resource gates and V26 budgets, certify its full coordinated candidate inventory and isolated installs, and verify fresh exact-version public artifacts after publication. V39–V47 are planned requirements; adding rows does not pass gates or implement CI jobs. RDD/SparkContext and distributed execution remain outside scope.
+Each phase must rerun applicable earlier native/HTTP/Connect/lifecycle/resource gates and V26 budgets, certify its full coordinated candidate inventory and isolated installs, and verify fresh exact-version public artifacts after publication. V39–V47 are planned requirements; adding rows does not pass gates or implement CI jobs. Distributed RDD/SparkContext execution remains outside scope; SS-22 includes the bounded local RDD and metadata-only compatibility interfaces and requires V56–V58 before Phase 11.
 
 ### Recovering a partial PyPI upload
 

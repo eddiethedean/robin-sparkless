@@ -61,4 +61,6 @@ The default Phase 2 translator targets the existing Polars backend. Plan/schema 
 
 SS-09 and SS-10 share an interface design and can develop against agreed fixtures; their release gates require both implementations.
 
+[SS-22](22-local-sql-feature-parity.md) now requires the complete existing local `sparkless.sql` baseline, including all native functions/operators/types and SQL commands on default Polars and HTTP SQL. D21 and V56–V58 cover source/wheel/SQL completeness, exact remote behavior and separately labeled client bridges for local interfaces absent from standard Connect. This expands the later plan, not the frozen Phase 2 release.
+
 Follow-on [SS-16 / Phase 7](16-connect-api-types-and-analysis.md) assigns expanded default-backend operations, scalar/nested types, truthful analysis, and mutable session settings to 4.23. [SS-17 / Phase 8](17-connect-sources-artifacts-and-persistence.md) assigns public I/O/table paths, artifact-backed data, and caches/checkpoints to 4.24. These plans do not expand the frozen 4.18 contract before their implementation and acceptance evidence.

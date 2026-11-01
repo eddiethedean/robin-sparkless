@@ -1,4 +1,4 @@
-# Python symbol reference — 4.18.1
+# Python symbol reference — 4.19.0
 
 Generated from the installed package by `scripts/generate_documentation.py --api`.
 CI regenerates this against its wheel and fails on drift. This is the runtime
@@ -1725,13 +1725,13 @@ PySpark 4 year-month interval type (collect shape differs from 3.x).
 
 An asyncio owner for one ``sparkless-server`` child process.
 
+### `SparklessConnect(*, server_options: 'Optional[Mapping[str, Any]]' = None) -> 'None'`
+
+Own a Spark Connect server and one real pyspark-client session.
+
 ### `SparklessServer(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0) -> 'None'`
 
 A synchronous owner for one ``sparkless-server`` child process.
-
-### `SparklessConnect(*, server_options: 'Optional[Mapping[str, Any]]' = None) -> 'None'`
-
-Owns a SparklessServer and an independent public Spark Connect session for a ``with`` block.
 
 ### `SparklessServerError(native signature unavailable)`
 

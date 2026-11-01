@@ -17,6 +17,10 @@ Design out-of-process Python execution without introducing a Python dependency i
 
 Phase 5 now explicitly includes scalar Python UDFs and scalar/grouped/iterator Pandas UDF APIs through Connect. Freeze the exact forms and type matrix under D12; workers support only enabled input/output types, with later SS-16 type expansion gated independently. Jobs/notebook execution and UDF execution require separate positive/negative evidence before either is advertised.
 
+## Existing local Python and callback baseline
+
+[SS-22](22-local-sql-feature-parity.md) adds mandatory LSQL-02/V56/V57 coverage for every existing scalar UDF context and return-type rule, DataFrame flatMap/flat_map and the bounded local RDD map/filter/flatMap/reduce/distinct/actions. Standard Connect has no RDD API: deliver a documented Sparkless compatibility bridge backed by isolated workers, preserving bounded single-node behavior and testing full operation compositions. Host existing Python external-provider callbacks in these workers for Phase 6 integration, including lazy batch consumption, errors and cleanup. Metadata-only SparkContext properties/no-op compatibility remain client utilities; distributed SparkContext/RDD execution is excluded. D12/D21 must choose concrete APIs and bounded callback RPCs; no local baseline row may disappear because a public-client encoder is absent.
+
 ## Dependencies and delivery slices
 
 Stable SS-04 operations, SS-06 ownership/control, SS-07 catalogs/identities, and SS-11 core release evidence.

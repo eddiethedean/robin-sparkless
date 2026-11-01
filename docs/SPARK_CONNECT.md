@@ -105,9 +105,11 @@ The `codex/release-4.19` branch adds optional named-table relations, aliases, jo
 count/sum, global `count(column)`, and the `SparklessConnect` helper. The helper behavior is
 described above; phase acceptance and release remain open.
 
-Build the native server with `--features connect,duckdb-source` to enable DuckDB sources. The
-default server build does not include DuckDB. Configure trusted aliases at startup; clients provide
-table names only. Standalone mode maps an alias to a local file:
+Manually build the native server with `--features connect,duckdb-source` to enable DuckDB sources;
+an ordinary Cargo build does not include DuckDB. The 4.19 `sparkless-server-bin` release wheels are
+configured with that feature so the optional source works with the installed `sparkless[connect]`
+helper. Configure trusted aliases at startup; clients provide table names only. Standalone mode
+maps an alias to a local file:
 
 ```sh
 SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/warehouse.duckdb"}]' \

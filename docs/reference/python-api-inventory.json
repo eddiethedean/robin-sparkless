@@ -420,6 +420,7 @@
   },
   "server": {
     "AsyncSparklessServer": "(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0) -> 'None'",
+    "SparklessConnect": "(*, server_options: 'Optional[Mapping[str, Any]]' = None) -> 'None'",
     "SparklessServer": "(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0) -> 'None'",
     "SparklessServerError": "(native signature unavailable)",
     "UnsupportedServerPlatformError": "(native signature unavailable)",

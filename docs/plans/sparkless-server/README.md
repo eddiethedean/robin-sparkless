@@ -12,6 +12,10 @@ search:
 
 Build a single-node Rust service in `crates/sparkless-server/` that calls Robin's native engine directly. HTTP statement-agent and Spark Connect transports share execution/session/catalog services. Native SQL/Connect requires neither Python nor a JVM. The optional Python launcher manages an owned executable; optional Python code workers are a later, separate capability.
 
+## Existing local SQL coverage requirement — 2026-11-01
+
+The owner requested server coverage for **all existing implemented `sparkless.sql` features**. [SS-22](22-local-sql-feature-parity.md) and the [named local baseline](LOCAL_SQL_FEATURE_BASELINE.md) supersede earlier selected-function and local-RDD exclusions for this requirement. Phases 5–8 own the complete baseline, including HTTP SQL, standard Connect and a documented Sparkless compatibility bridge where the public client cannot express a local interface. Phase 11 certification requires V56–V58 with no omitted implemented baseline entries. These are planned requirements; released support remains unchanged.
+
 ## Read first
 
 - [Release roadmap](ROADMAP.md): 4.16.0 and later release scope, coordinated package versions, and publication gates.
@@ -56,8 +60,8 @@ All workstreams are **planned**, with owners unassigned and implementation issue
 | SS-18 | [Durable Connect sessions, outcomes, and replay](18-durable-connect-recovery.md) | 9; optional persistent recovery mode |
 | SS-19 | [Single-node Structured Streaming](19-structured-streaming.md) | 10; optional, after API/I/O/recovery prerequisites |
 | SS-20 | [Connect feature scope across Phases 4–10](20-connect-feature-scope.md) | Proposed feature-level matrix and phase decision checklist; aligns SS-12–19 before implementation |
-
 | SS-21 | [Versioned server compatibility packages](21-versioned-connect-packages.md) | 11–14; `connect40` after all planned features, then `connect35`, `connect41`, `connect42` |
+| SS-22 | [Complete existing local SQL feature coverage](22-local-sql-feature-parity.md) | Cross-cutting Phases 5–8; full local API/SQL baseline and V56–V58 before Phase 11 |
 
 ## Milestone dependency order
 
@@ -90,7 +94,7 @@ SS-07 and SS-08 have explicit early slices: session ownership and scalar schema 
 5. Pass the full 0B matrix, including direct HTTP typed results and packaged consumers, before calling the HTTP MVP complete.
 6. Expand shared catalogs/types and then production Connect lifecycle/plan coverage.
 7. After supported Connect, deliver the DuckDB source phase, then the separate DuckDB execution backend phase. Python workers and native Delta/UC follow under the revised release map. Workstream IDs SS-12–SS-15 are identifiers, not phase order.
-8. Expand the default Connect API/types, then I/O/artifacts/cache, durable recovery, and optional Structured Streaming under SS-16–19. Keep optional component dependencies scoped to their enabled APIs; RDD/SparkContext and distributed executors remain outside the single-node roadmap.
+8. Expand the default Connect API/types, then I/O/artifacts/cache, durable recovery, and optional Structured Streaming under SS-16–19. Keep optional component dependencies scoped to their enabled APIs; distributed RDD/SparkContext execution and distributed executors remain outside the single-node roadmap. SS-22 includes the existing bounded local RDD and metadata-only SparkContext compatibility interfaces through an explicit bridge.
 
 ## Tracking conventions
 

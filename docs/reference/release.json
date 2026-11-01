@@ -1,6 +1,6 @@
 {
-  "version": "4.18.1",
-  "status": "published",
-  "reviewed": "2026-10-31",
+  "version": "4.19.0",
+  "status": "candidate",
+  "reviewed": "2026-11-01",
   "published_stable_at_review": "4.18.1"
 }

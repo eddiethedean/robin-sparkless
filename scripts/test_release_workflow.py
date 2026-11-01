@@ -83,6 +83,24 @@ class ReleaseContextTests(unittest.TestCase):
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_419_server_wheels_include_and_exercise_duckdb_sources(self):
+        jobs = workflow("release.yml")["jobs"]
+        for job_name in ("server-bin-manylinux-x86_64", "server-bin-macos-arm64"):
+            with self.subTest(job=job_name):
+                build = next(
+                    step
+                    for step in jobs[job_name]["steps"]
+                    if step.get("name")
+                    in {"Build the combined server once", "Build native server"}
+                )
+                self.assertIn("--features http,connect,duckdb-source", build["run"])
+
+        consumer = "\n".join(
+            step.get("run", "") for step in jobs["server-extra-consumer"]["steps"]
+        )
+        self.assertIn("duckdb-source-py311.lock", consumer)
+        self.assertIn("smoke_phase419_duckdb_client.py", consumer)
+
     def test_every_validation_job_is_required_before_publishing(self):
         jobs = workflow("release.yml")["jobs"]
         gate = jobs["release-validation-gate"]

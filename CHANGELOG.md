@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.19.0] - 2026-11-01
+
+### Added
+
+- **Optional DuckDB table sources** — configured standalone and shared Quack owners can serve typed, read-only tables to Spark Connect through bounded, cancellable Arrow batches. The supported plan subset includes filtering, projection, limits, counts, same-owner inner joins, and grouped count/sum.
+- **Owned Spark Connect sessions** — `SparklessConnect` starts a native server and returns an independently owned public client session with deterministic cleanup.
+
+### Changed
+
+- **Arrow export and range counts** — consume range and local-relation batches in bounded columnar chunks and use an exact fast path for supported dynamic integer range counts.
+- **Connect operation cleanup** — `ReleaseAll` for a completed non-reattachable query now frees its idempotency and replay history.
+
 ## [4.18.1] - 2026-10-31
 
 Published from tag [`v4.18.1`](https://github.com/eddiethedean/robin-sparkless/tree/v4.18.1) at commit [`0ad225677ec47b20c9c6225fa9f4b73b00e54aba`](https://github.com/eddiethedean/robin-sparkless/commit/0ad225677ec47b20c9c6225fa9f4b73b00e54aba). Exact-commit [CI run 41168209494](https://github.com/eddiethedean/robin-sparkless/actions/runs/41168209494) and [Release run 41170498256](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256) passed, including final PyPI inventory and hash verification. See [release evidence](docs/RELEASE_EVIDENCE.md).

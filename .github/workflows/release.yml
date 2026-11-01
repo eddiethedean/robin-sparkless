@@ -391,7 +391,7 @@ jobs:
         run: |
           /opt/python/cp311-cp311/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
       - name: Build the combined server once
-        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
+        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect,duckdb-source
         env:
           CARGO_BUILD_JOBS: 1
           RUSTUP_TOOLCHAIN: 1.93.1
@@ -440,7 +440,7 @@ jobs:
           restore-keys: |
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Build native server
-        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
+        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect,duckdb-source
         env:
           CARGO_BUILD_JOBS: 1
       - name: Build and verify macOS wheel
@@ -577,8 +577,11 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install --no-index --find-links dist "sparkless[server]==${version}"
           .venv/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+          .venv/bin/python -m pip install --require-hashes -r tests/connect/duckdb-source-py311.lock
           .venv/bin/python -m pip check
           .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations --connect-client --client-python .venv/bin/python
+          server_bin="$(.venv/bin/python -c 'from sparkless_server_bin import executable_path; print(executable_path())')"
+          .venv/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin"
 
   release-validation-gate:
     name: Release validation acceptance gate

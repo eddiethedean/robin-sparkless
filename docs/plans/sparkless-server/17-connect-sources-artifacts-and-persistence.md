@@ -17,6 +17,10 @@ Support public Connect readers/writers for CSV, JSON, and Parquet, plus an optio
 
 Implement bounded `AddArtifacts`, `ArtifactStatus`, and `CachedLocalRelation`, including the public client's normal cache-threshold crossing. Add DataFrame `cache`/`persist`/`unpersist`, truthful storage status, and durable/local DataFrame checkpoints with separately documented lifetimes. A checkpoint materializes data; it does not by itself preserve operation replay across restart.
 
+## Complete existing reader/writer and materialization baseline
+
+[SS-22](22-local-sql-feature-parity.md) requires LSQL-05 and V56/V57/V58 for every existing local reader/writer method, alias, source option, schema/inference mode, write mode, partitioning behavior, table-saving/warehouse API and cache/persist/storage behavior. Include SQLite and every locally available compiled database driver as independently enabled capabilities, not only the initial JDBC shortlist. Delta/provider behavior remains SS-13; integrate its public load/save/SQL paths here without deferral. Preserve documented local no-ops as compatibility behavior rather than claiming distributed shuffles/storage. Classify local WriterV2 or other stubs explicitly instead of advertising absent functionality. Where HTTP SQL exposes these features, use configured server paths/credentials and the shared engine with mutation outcomes; SQL transport coverage is a V58 requirement.
+
 ## Dependencies and boundaries
 
 Use SS-16's expanded plan/type matrix and SS-04/07/10 lifecycle/accounting. Gate each optional source independently; native file support must not require DuckDB, Delta, Python workers, or JDBC. Keep the core native server/image Python/JVM-free. Actual JDBC drivers may use a separately packaged, opt-in JVM connector process; freeze that RPC, driver distribution, trust, resource, and process-tree contract before enabling JDBC. A native database driver must not be mislabeled as JDBC.

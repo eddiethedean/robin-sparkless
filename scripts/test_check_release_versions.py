@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from check_release_versions import (
     check_release,
+    read_toml,
     validate_server_inventory,
     validate_versions,
 )
@@ -104,6 +105,8 @@ class ReleaseVersionsTest(unittest.TestCase):
 
     def test_coordinated_candidate_requires_parser_dependency_alignment(self):
         source = Path(__file__).resolve().parents[1]
+        candidate_version = read_toml(source / "Cargo.toml")["package"]["version"]
+        stale_version = "4.17.0" if candidate_version != "4.17.0" else "4.16.0"
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             manifests = (
@@ -124,12 +127,12 @@ class ReleaseVersionsTest(unittest.TestCase):
             server_manifest = root / "crates/sparkless-server/Cargo.toml"
             server_manifest.write_text(
                 server_manifest.read_text().replace(
-                    'spark-sql-parser = { version = "4.18.0"',
-                    'spark-sql-parser = { version = "4.17.0"',
+                    f'spark-sql-parser = {{ version = "{candidate_version}"',
+                    f'spark-sql-parser = {{ version = "{stale_version}"',
                     1,
                 )
             )
-            errors = validate_server_inventory(root, "v4.18.0")
+            errors = validate_server_inventory(root, f"v{candidate_version}")
             self.assertTrue(
                 any("sparkless-server/spark-sql-parser" in error for error in errors)
             )

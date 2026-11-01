@@ -27,7 +27,7 @@ _sys.modules[__name__ + "._native"] = _native
 
 from sparkless_native._native import PyColumn as _ColumnType  # noqa: E402
 
-__version__ = "4.18.1"
+__version__ = "4.19.0"
 
 
 _mod = __import__(
