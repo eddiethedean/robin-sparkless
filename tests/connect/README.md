@@ -143,7 +143,7 @@ The interpreter-specific dependency snapshots are hash-locked for CPython 3.11:
 
 The reference starts with Apache's `sbin/start-connect-server.sh`, with UTC timezone, ANSI enabled, case sensitivity disabled, and `spark.sql.execution.arrow.useLargeVarTypes=false`. The client's local-relation cache threshold remains at its real 64 MiB default. The matching Python distribution is pinned in `oracle-py311.lock`; this is the client-side dependency lock, not the server archive checksum.
 
-`benchmark_phase419_duckdb_source.py` creates a standalone DuckDB fixture with distinct, hash-derived string values and measures a warm public-client `count()` through the packaged server. It records source and logical data sizes, the server binary hash, per-iteration latency, and the managed server child's peak RSS. Run it from the locked `duckdb-source-py311.lock` environment; `--expect-rejection ipc` and `--expect-rejection rows` turn the respective statement-cap failures into recorded passing outcomes.
+`benchmark_phase419_duckdb_source.py` creates a standalone DuckDB fixture with distinct, hash-derived string values and measures a warm public-client action through the packaged server. It records source and logical data sizes, the server binary hash, per-iteration latency, and the managed server child's peak RSS. Run it from the locked `duckdb-source-py311.lock` environment. `--expect-rejection ipc` and `--expect-rejection rows` turn the respective statement-cap failures into recorded passing outcomes; `--slow-reader-delay-ms` pauses public `toLocalIterator()` consumption after each row group to measure a bounded slow-reader case.
 
 Recreate and verify the client fixtures in an isolated environment:
 

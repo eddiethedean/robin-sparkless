@@ -223,7 +223,7 @@ def main() -> None:
     with harness_path.open("rb") as harness:
         harness_sha256 = hashlib.file_digest(harness, "sha256").hexdigest()
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "timestamp_utc": datetime.now(UTC).isoformat(),
         "harness_source_revision": harness_revision,
         "harness_script_sha256": harness_sha256,
@@ -244,9 +244,9 @@ def main() -> None:
             if args.slow_reader_delay_ms
             else "count",
             "slow_reader_delay_ms": args.slow_reader_delay_ms,
-            "count_samples_ms": samples_ms,
-            "count_p50_ms": percentile(samples_ms, 0.50) if samples_ms else None,
-            "count_p95_ms": percentile(samples_ms, 0.95) if samples_ms else None,
+            "action_samples_ms": samples_ms,
+            "action_p50_ms": percentile(samples_ms, 0.50) if samples_ms else None,
+            "action_p95_ms": percentile(samples_ms, 0.95) if samples_ms else None,
             "result": (
                 f"expected_{args.expect_rejection}_limit_rejection"
                 if expected_rejection
