@@ -154,6 +154,15 @@ These exact release-runner jobs have not run for this branch yet, so cross-platf
 acceptance remains pending. Source loss/replay, full DDL/DML rejection, and measured source/RSS
 budgets also remain open; this evidence does not claim complete DuckDB-source acceptance.
 
+The SQL mutation path now checks configured read-only source namespaces before resolving rows or
+falling through to a local catalog. This also covers missing table targets, including
+`saveAsTable`. The release server rebuilt with the guard (`http,connect,duckdb-source`, SHA-256
+`820674f28d96a61c250fb93b69b16bd993021da2b02f88d6aeb654acfe24138e`) passed the focused
+read-only namespace test and the public-client smoke against that server binary. The smoke now checks INSERT,
+UPDATE, DELETE, CREATE/REPLACE TABLE, DROP TABLE, ALTER TABLE, TRUNCATE, append/overwrite, and
+creating a missing target in the configured source namespace; it confirms the original schema and
+rows remain. Additional DDL/DML syntax forms and the source-loss/replay/resource cases remain open.
+
 It verifies exact values/schema, filter/project, UTC timestamp instant, `count(1)`, null-excluding
 `count(column)` on populated/all-null/empty data, limit zero, empty-table schema, same-owner inner
 join, grouped count/sum, unsupported source type/value errors, and rejected CREATE/INSERT/UPDATE/

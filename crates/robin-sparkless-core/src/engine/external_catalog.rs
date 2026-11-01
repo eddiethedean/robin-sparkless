@@ -257,6 +257,13 @@ pub trait ExternalCatalogProvider: Send + Sync {
         identifier: &str,
     ) -> Result<Option<ExternalTableDescriptor>, EngineError>;
 
+    /// Report whether writes to this configured namespace are forbidden, including when the
+    /// named table does not exist. This prevents DDL or DML from falling through to a local
+    /// catalog when an external provider owns the target namespace.
+    fn is_read_only_target(&self, _identifier: &str) -> Result<bool, EngineError> {
+        Ok(false)
+    }
+
     /// Start an operation-scoped source view. Existing providers receive a lightweight
     /// adapter; snapshot-capable providers override this to retain a transaction/lease.
     fn begin_read_snapshot(

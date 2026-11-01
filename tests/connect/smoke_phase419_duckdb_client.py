@@ -31,7 +31,9 @@ def main() -> None:
     parser.add_argument("--quack-extension-path", type=Path)
     args = parser.parse_args()
     if bool(args.quack_owner_bin) != bool(args.quack_extension_path):
-        parser.error("--quack-owner-bin and --quack-extension-path must be supplied together")
+        parser.error(
+            "--quack-owner-bin and --quack-extension-path must be supplied together"
+        )
 
     previous_sources = os.environ.get("SPARKLESS_DUCKDB_SOURCES")
     owner: subprocess.Popen[str] | None = None
@@ -55,10 +57,14 @@ def main() -> None:
                 if not selector.select(timeout=30):
                     owner.terminate()
                     owner.wait(timeout=10)
-                    raise TimeoutError("DuckDB Quack fixture owner did not become ready")
+                    raise TimeoutError(
+                        "DuckDB Quack fixture owner did not become ready"
+                    )
                 owner_line = owner.stdout.readline()
             if not owner_line:
-                raise RuntimeError(f"DuckDB Quack owner exited with status {owner.poll()}")
+                raise RuntimeError(
+                    f"DuckDB Quack owner exited with status {owner.poll()}"
+                )
             try:
                 owner_info = json.loads(owner_line)
                 source_config = [
@@ -109,7 +115,9 @@ def main() -> None:
                 """
             )
             connection.close()
-            source_config = [{"alias": "warehouse", "database_path": str(database_path)}]
+            source_config = [
+                {"alias": "warehouse", "database_path": str(database_path)}
+            ]
 
         os.environ["SPARKLESS_DUCKDB_SOURCES"] = json.dumps(source_config)
         try:
@@ -150,6 +158,13 @@ def main() -> None:
                     "UPDATE warehouse.main.events SET label = 'changed' WHERE id = 1",
                     "DELETE FROM warehouse.main.events WHERE id = 1",
                     "CREATE TABLE warehouse.main.forbidden (id BIGINT)",
+                    "CREATE TABLE IF NOT EXISTS warehouse.main.events (id BIGINT)",
+                    "CREATE OR REPLACE TABLE warehouse.main.events "
+                    "USING parquet AS SELECT 99 AS id",
+                    "DROP TABLE warehouse.main.events",
+                    "DROP TABLE IF EXISTS warehouse.main.events",
+                    "ALTER TABLE warehouse.main.events ADD COLUMN forbidden STRING",
+                    "TRUNCATE TABLE warehouse.main.events",
                 ):
                     try:
                         spark.sql(statement).collect()
@@ -162,13 +177,23 @@ def main() -> None:
                                 "not supported",
                                 "read-only",
                                 "not implemented",
+                                "parse error",
+                                "only select",
                             )
                         ), error
                     else:
                         raise AssertionError(
                             f"DuckDB source write was accepted: {statement}"
                         )
+                assert events.schema.fieldNames() == [
+                    "id",
+                    "bucket",
+                    "label",
+                    "amount",
+                    "active",
+                ], "a rejected DuckDB DDL statement changed the table schema"
                 assert events.count() == 3, "a rejected source write changed the table"
+                assert sorted(row.id for row in events.collect()) == [1, 2, 3]
                 for mode in ("append", "overwrite"):
                     try:
                         events.write.mode(mode).saveAsTable("warehouse.main.events")
@@ -185,7 +210,29 @@ def main() -> None:
                         ), error
                     else:
                         raise AssertionError(f"DuckDB {mode} write was accepted")
-                    assert events.count() == 3, f"a rejected {mode} write changed the table"
+                    assert events.count() == 3, (
+                        f"a rejected {mode} write changed the table"
+                    )
+
+                try:
+                    spark.range(1).write.mode("overwrite").saveAsTable(
+                        "warehouse.main.created_by_sparkless"
+                    )
+                except Exception as error:
+                    message = str(error).lower()
+                    assert any(
+                        marker in message
+                        for marker in (
+                            "unsupported",
+                            "not supported",
+                            "read-only",
+                            "not implemented",
+                        )
+                    ), error
+                else:
+                    raise AssertionError(
+                        "saveAsTable created a local table inside the DuckDB source namespace"
+                    )
 
                 typed = spark.table("warehouse.typed_events")
                 assert typed.schema.fieldNames() == [
@@ -208,7 +255,9 @@ def main() -> None:
                 except Exception as error:
                     assert "non-finite" in str(error).lower(), error
                 else:
-                    raise AssertionError("non-finite DuckDB DOUBLE values were accepted")
+                    raise AssertionError(
+                        "non-finite DuckDB DOUBLE values were accepted"
+                    )
                 try:
                     spark.table("warehouse.nested_events").schema
                 except Exception as error:
@@ -228,9 +277,7 @@ def main() -> None:
                 )
                 assert filtered == [(1, "alpha"), (2, "beta"), (3, "gamma")]
                 assert events.count() == 3
-                assert (
-                    events.agg(F.count("amount").alias("n")).collect()[0]["n"] == 2
-                )
+                assert events.agg(F.count("amount").alias("n")).collect()[0]["n"] == 2
                 assert events.limit(0).collect() == []
 
                 empty = spark.table("warehouse.empty_events")

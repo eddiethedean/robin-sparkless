@@ -345,7 +345,8 @@ fn execute_sql_statement(
             format,
             query,
         } => {
-            let table_name = table.to_string();
+            let table_name = translator::table_name_from_object_name(&table);
+            session.reject_read_only_external_target(&table_name)?;
             let format_lower = format.to_lowercase();
 
             // Execute the SELECT query to get the result DataFrame

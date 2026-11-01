@@ -5740,6 +5740,7 @@ impl<'a> DataFrameWriter<'a> {
             && !SparkSession::is_global_temp_name(name)
             && let Some(provider) = session.external_catalog_provider()?
         {
+            session.reject_read_only_external_target(name)?;
             let descriptor = provider.resolve_table(name).map_err(|error| {
                 PolarsError::InvalidOperation(
                     format!("external catalog provider failed to resolve '{name}': {error}").into(),

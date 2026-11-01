@@ -2774,6 +2774,29 @@ impl SparkSession {
             })
     }
 
+    pub(crate) fn reject_read_only_external_target(&self, name: &str) -> Result<(), PolarsError> {
+        let Some(provider) = self.external_catalog_provider()? else {
+            return Ok(());
+        };
+        let is_read_only = provider.is_read_only_target(name).map_err(|error| {
+            PolarsError::InvalidOperation(
+                format!(
+                    "external catalog provider failed to inspect write target '{name}': {error}"
+                )
+                .into(),
+            )
+        })?;
+        if is_read_only {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "external source target '{name}' is read-only; DDL and DML are not supported"
+                )
+                .into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Return the current database for this session. Defaults to "default".
     pub fn current_database(&self) -> String {
         match self.current_database.lock() {

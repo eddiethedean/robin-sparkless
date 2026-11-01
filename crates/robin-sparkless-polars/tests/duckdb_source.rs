@@ -155,6 +155,30 @@ fn duckdb_catalog_rejects_duplicate_aliases_and_missing_database_files() {
 }
 
 #[test]
+fn duckdb_source_write_targets_are_read_only_even_when_the_table_is_missing() {
+    let (_directory, database) = fixture_database();
+    let provider = source(&database);
+
+    assert!(
+        provider
+            .is_read_only_target("warehouse.main.events")
+            .unwrap()
+    );
+    assert!(
+        provider
+            .is_read_only_target("WAREHOUSE.main.not_created")
+            .unwrap()
+    );
+    assert!(provider.is_read_only_target("warehouse.main").unwrap());
+    assert!(
+        !provider
+            .is_read_only_target("unconfigured.main.events")
+            .unwrap()
+    );
+    assert!(!provider.is_read_only_target("warehouse.bad-name").unwrap());
+}
+
+#[test]
 fn duckdb_quack_configuration_requires_one_consistent_connection_per_endpoint() {
     let directory = tempfile::tempdir().expect("create extension fixture directory");
     let extension_path = directory.path().join("quack.duckdb_extension");

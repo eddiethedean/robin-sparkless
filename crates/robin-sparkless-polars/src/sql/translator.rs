@@ -247,6 +247,7 @@ pub fn translate_with_cancellation(
     token: &CancellationToken,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     check_cancellation(token)?;
+    reject_read_only_external_mutation(session, stmt)?;
     set_thread_udf_session(session.clone());
     match stmt {
         Statement::Query(q) => translate_query(session, q.as_ref()),
@@ -582,6 +583,56 @@ pub fn translate_with_cancellation(
                 .into(),
         )),
     }
+}
+
+fn reject_read_only_external_mutation(
+    session: &SparkSession,
+    statement: &Statement,
+) -> Result<(), PolarsError> {
+    let mut targets = Vec::new();
+    match statement {
+        Statement::CreateTable(create) => {
+            targets.push(table_name_from_object_name(&create.name));
+        }
+        Statement::CreateView(create) => {
+            targets.push(table_name_from_object_name(&create.name));
+        }
+        Statement::CreateSchema { schema_name, .. } => {
+            let name = match schema_name {
+                SchemaName::Simple(name) => table_name_from_object_name(name),
+                SchemaName::UnnamedAuthorization(ident) => ident.value.clone(),
+                _ => schema_name.to_string(),
+            };
+            targets.push(name);
+        }
+        Statement::CreateDatabase { db_name, .. } => {
+            targets.push(table_name_from_object_name(db_name));
+        }
+        Statement::Insert(insert) => {
+            if let TableObject::TableName(name) = &insert.table {
+                targets.push(table_name_from_object_name(name));
+            }
+        }
+        Statement::Update(update) => {
+            targets.push(table_name_from_factor(&update.table.relation)?);
+        }
+        Statement::Delete(delete) => {
+            let tables = match &delete.from {
+                FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables,
+            };
+            if let Some(first) = tables.first() {
+                targets.push(table_name_from_factor(&first.relation)?);
+            }
+        }
+        Statement::Drop { names, .. } => {
+            targets.extend(names.iter().map(table_name_from_object_name));
+        }
+        _ => {}
+    }
+    for target in targets {
+        session.reject_read_only_external_target(&target)?;
+    }
+    Ok(())
 }
 
 /// Map INSERT ... SELECT output onto the target table schema (respect column list, NULL-fill omitted columns).
@@ -1565,7 +1616,7 @@ fn translate_select_from(
     ))
 }
 
-fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
+pub(crate) fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
     if name.0.len() >= 2 {
         let parts: Vec<String> = name
             .0

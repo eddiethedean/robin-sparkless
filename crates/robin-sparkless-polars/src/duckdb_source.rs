@@ -303,6 +303,14 @@ impl ExternalCatalogProvider for DuckDbCatalog {
         snapshot.resolve_in_source(&mut state, source, &schema_name, &table_name)
     }
 
+    fn is_read_only_target(&self, identifier: &str) -> Result<bool, EngineError> {
+        let parts = identifier.split('.').collect::<Vec<_>>();
+        if !(1..=3).contains(&parts.len()) || !parts.iter().all(|part| valid_identifier(part)) {
+            return Ok(false);
+        }
+        Ok(self.sources.contains_key(&parts[0].to_ascii_lowercase()))
+    }
+
     fn begin_read_snapshot(
         &self,
         token: &CancellationToken,
