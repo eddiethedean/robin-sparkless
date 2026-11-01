@@ -102,6 +102,18 @@ def exact_range_rows(rows: int) -> Callable[[list[Any]], None]:
             raise AssertionError(f"range({rows}) returned {len(result)} rows")
         if rows and (result[0].id != 0 or result[-1].id != rows - 1):
             raise AssertionError(f"range({rows}) returned incorrect boundary values")
+        if any(row.id != index for index, row in enumerate(result)):
+            raise AssertionError(f"range({rows}) returned incorrect values")
+
+    return validate
+
+
+def exact_arrow_range(rows: int) -> Callable[[Any], None]:
+    def validate(table: Any) -> None:
+        if table.num_rows != rows or table.column_names != ["id"]:
+            raise AssertionError(f"range({rows}) returned an incorrect Arrow shape")
+        if table.column("id").to_pylist() != list(range(rows)):
+            raise AssertionError(f"range({rows}) returned incorrect Arrow values")
 
     return validate
 
@@ -109,6 +121,11 @@ def exact_range_rows(rows: int) -> Callable[[list[Any]], None]:
 def validate_empty_rows(result: list[Any]) -> None:
     if result:
         raise AssertionError(f"empty filter returned {len(result)} rows")
+
+
+def validate_empty_arrow(table: Any) -> None:
+    if table.num_rows != 0 or table.column_names != ["id"]:
+        raise AssertionError("empty filter returned an incorrect Arrow result")
 
 
 def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
@@ -123,6 +140,14 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 iterations,
             )
         )
+        measurements.append(
+            measure_case(
+                f"range_to_arrow_{rows}",
+                frame.toArrow,
+                exact_arrow_range(rows),
+                iterations,
+            )
+        )
 
     for rows in (1_000, 10_000):
         frame = spark.range(rows).filter(f"id > {rows}")
@@ -134,27 +159,57 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 iterations,
             )
         )
+        measurements.append(
+            measure_case(
+                f"empty_filter_to_arrow_{rows}",
+                frame.toArrow,
+                validate_empty_arrow,
+                iterations,
+            )
+        )
 
     local_rows = [(index, f"label-{index}") for index in range(10_000)]
 
     def collect_local_relation() -> list[Any]:
         return spark.createDataFrame(local_rows, "id BIGINT, label STRING").collect()
 
+    def to_arrow_local_relation() -> Any:
+        return spark.createDataFrame(local_rows, "id BIGINT, label STRING").toArrow()
+
     def validate_local_relation(result: list[Any]) -> None:
-        if (
-            len(result) != 10_000
-            or result[0].id != 0
-            or result[0].label != "label-0"
-            or result[-1].id != 9_999
-            or result[-1].label != "label-9999"
+        if len(result) != 10_000:
+            raise AssertionError("10,000-row local relation returned incorrect values")
+        if any(
+            row.id != index or row.label != f"label-{index}"
+            for index, row in enumerate(result)
         ):
             raise AssertionError("10,000-row local relation returned incorrect values")
+
+    def validate_local_relation_arrow(table: Any) -> None:
+        if (
+            table.num_rows != 10_000
+            or table.column_names != ["id", "label"]
+            or table.column("id").to_pylist() != list(range(10_000))
+            or table.column("label").to_pylist()
+            != [f"label-{index}" for index in range(10_000)]
+        ):
+            raise AssertionError(
+                "10,000-row Arrow local relation returned incorrect values"
+            )
 
     measurements.append(
         measure_case(
             "local_relation_collect_10000",
             collect_local_relation,
             validate_local_relation,
+            iterations,
+        )
+    )
+    measurements.append(
+        measure_case(
+            "local_relation_to_arrow_10000",
+            to_arrow_local_relation,
+            validate_local_relation_arrow,
             iterations,
         )
     )
@@ -177,11 +232,31 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
                 "variable-width local relation returned incorrect values"
             )
 
+    def validate_variable_width_arrow(table: Any) -> None:
+        if (
+            table.num_rows != 4
+            or table.column_names != ["id", "payload"]
+            or table.column("id").to_pylist() != [1, 2, 3, 4]
+            or table.column("payload").to_pylist()
+            != ["", "x", "界" * 4_096, wide_value]
+        ):
+            raise AssertionError(
+                "variable-width Arrow relation returned incorrect values"
+            )
+
     measurements.append(
         measure_case(
             "variable_width_collect_300k_cell",
             wide_frame.collect,
             validate_variable_width,
+            iterations,
+        )
+    )
+    measurements.append(
+        measure_case(
+            "variable_width_to_arrow_300k_cell",
+            wide_frame.toArrow,
+            validate_variable_width_arrow,
             iterations,
         )
     )
