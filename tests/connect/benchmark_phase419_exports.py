@@ -149,6 +149,24 @@ def run_exports(spark: ConnectSession, iterations: int) -> list[dict[str, Any]]:
             )
         )
 
+    limited_range = spark.range(100_000).limit(1_000)
+    measurements.append(
+        measure_case(
+            "range_100000_limit_1000_collect",
+            limited_range.collect,
+            exact_range_rows(1_000),
+            iterations,
+        )
+    )
+    measurements.append(
+        measure_case(
+            "range_100000_limit_1000_to_arrow",
+            limited_range.toArrow,
+            exact_arrow_range(1_000),
+            iterations,
+        )
+    )
+
     for rows in (1_000, 10_000):
         frame = spark.range(rows).filter(f"id > {rows}")
         measurements.append(
