@@ -803,12 +803,24 @@ impl CancellationWatchdog {
                         // explicit cancellation request to stop work on the shared owner. The
                         // scan lease remains held until this request finishes.
                         if let Some(quack) = quack.take() {
+                            let trace_enabled = std::env::var_os("SPARKLESS_CONNECT_TRACE")
+                                .as_deref()
+                                == Some(std::ffi::OsStr::new("1"));
+                            if trace_enabled {
+                                eprintln!("connect_trace event=duckdb_source_cancel_requested");
+                            }
                             match cancel_quack_query(&quack.owner, &quack.connection_id) {
-                                Ok(true) => {}
-                                Ok(false) => {
-                                    eprintln!(
-                                        "sparkless DuckDB Quack cancellation was not accepted"
-                                    );
+                                Ok(accepted) => {
+                                    if trace_enabled {
+                                        eprintln!(
+                                            "connect_trace event=duckdb_source_remote_cancel accepted={accepted}"
+                                        );
+                                    }
+                                    if !accepted {
+                                        eprintln!(
+                                            "sparkless DuckDB Quack cancellation was not accepted"
+                                        );
+                                    }
                                 }
                                 Err(_) => {
                                     eprintln!("sparkless DuckDB Quack cancellation request failed");

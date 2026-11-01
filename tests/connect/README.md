@@ -145,6 +145,31 @@ The reference starts with Apache's `sbin/start-connect-server.sh`, with UTC time
 
 `benchmark_phase419_duckdb_source.py` creates a standalone DuckDB fixture with distinct, hash-derived string values and measures a warm public-client action through the packaged server. It records source and logical data sizes, the server binary hash, per-iteration latency, and the managed server child's peak RSS. Run it from the locked `duckdb-source-py311.lock` environment. `--expect-rejection ipc` and `--expect-rejection rows` turn the respective statement-cap failures into recorded passing outcomes; `--slow-reader-delay-ms` pauses public `toLocalIterator()` consumption after each row group to measure a bounded slow-reader case. Combine that option with `--expect-rejection result` to check the 8 MiB per-operation Connect replay/sender cap.
 
+`differential_phase419_duckdb.py` compares the declared source subset with local Apache Spark 4.0.5 and a packaged Sparkless 4.19 server. Its fixtures cover table schemas/rows, filter and projection, empty results, global and nullable counts, grouped count/sum, same-owner joins with duplicate/null keys, and date/timestamp types. Use a CPython 3.11 environment containing `pyspark[connect]==4.0.5`, `duckdb==1.5.1`, the candidate `sparkless==4.19.0` API/native packages, and the corresponding server binary:
+
+```sh
+python tests/connect/differential_phase419_duckdb.py \
+  --server-bin /path/to/sparkless-server \
+  --output /tmp/phase419-duckdb-spark-differential.json
+```
+
+The script temporarily removes inherited `SPARK_HOME` so PySpark starts its bundled Spark 4.0.5 local runtime, then restores it. The retained candidate report records the exact API/server versions, executable hash, runtime versions, schemas, and rows.
+
+The source benchmark accepts `--concurrent-readers 1..4` to run independent public clients against one server and one source alias. It sets the server active-operation limit to match that cohort; action samples are per client, and `concurrent_batch_samples_ms` records each simultaneous round. Pair this with `--slow-reader-delay-ms` to measure concurrent source readers and replay pressure.
+
+`smoke_phase419_duckdb_shutdown.py` launches the Quack owner and packaged server as separate processes, begins a billion-row public source scan, then sends the normal graceful server shutdown command. It uses the pinned client's non-reattachable, zero-retry mode because the test intentionally stops the server; it requires the Connect action to receive the shutdown status and the server trace to confirm that Quack accepted the remote query cancellation. Build the source-enabled candidate and owner fixture, then run:
+
+```sh
+cargo build --locked --release -p sparkless-server --no-default-features \
+  --features http,connect,duckdb-source
+cargo build --locked --release -p robin-sparkless-polars \
+  --features duckdb-source --example duckdb_quack_fixture_owner
+python tests/connect/smoke_phase419_duckdb_shutdown.py \
+  --server-bin target/release/sparkless-server \
+  --quack-owner-bin target/release/examples/duckdb_quack_fixture_owner \
+  --quack-extension-path /path/to/duckdb-2.0.0/quack.duckdb_extension
+```
+
 Recreate and verify the client fixtures in an isolated environment:
 
 ```sh

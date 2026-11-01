@@ -72,7 +72,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          CREATE TABLE oversized_events (payload VARCHAR);
          INSERT INTO oversized_events VALUES (repeat('x', 524289));
          CREATE TABLE replay_events AS
-             SELECT i::BIGINT AS id FROM range(50000) AS source_rows(i);",
+             SELECT i::BIGINT AS id FROM range(50000) AS source_rows(i);
+         CREATE VIEW shutdown_events AS
+             SELECT i::BIGINT AS id FROM range(1000000000) AS source_rows(i);",
         sql_literal(extension_path)
     ))?;
     connection.query_row(&serve_sql(&uri, token), [], |row| row.get::<_, String>(0))?;
@@ -92,6 +94,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 connection.query_row(&serve_sql(&uri, token), [], |row| row.get::<_, String>(0))?;
                 serving = true;
                 println!("started");
+                io::stdout().flush()?;
+            }
+            "states" => {
+                let states: Option<String> = connection.query_row(
+                    "SELECT string_agg(DISTINCT state, ',') FROM quack_active_connections()",
+                    [],
+                    |row| row.get(0),
+                )?;
+                println!("{}", serde_json::json!({ "states": states }));
                 io::stdout().flush()?;
             }
             "quit" => {

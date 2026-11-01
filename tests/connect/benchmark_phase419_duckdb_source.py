@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 try:
@@ -63,11 +64,12 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
 
 
-def clean_server_environment() -> None:
+def clean_server_environment(active_operations: int) -> None:
     for key in tuple(os.environ):
         if key.startswith("SPARKLESS_"):
             os.environ.pop(key, None)
     os.environ.update(SERVER_ENVIRONMENT)
+    os.environ["SPARKLESS_MAX_ACTIVE_OPERATIONS"] = str(active_operations)
 
 
 def main() -> None:
@@ -76,6 +78,12 @@ def main() -> None:
     parser.add_argument("--rows", type=int, default=1_000_000)
     parser.add_argument("--payload-bytes", type=int, default=16)
     parser.add_argument("--iterations", type=int, default=3)
+    parser.add_argument(
+        "--concurrent-readers",
+        type=int,
+        default=1,
+        help="number of independent Spark Connect clients reading the same source",
+    )
     parser.add_argument(
         "--slow-reader-delay-ms",
         type=int,
@@ -89,19 +97,27 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    max_rows = SOURCE_LIMITS["rows_per_statement"] + int(args.expect_rejection == "rows")
+    max_rows = SOURCE_LIMITS["rows_per_statement"] + int(
+        args.expect_rejection == "rows"
+    )
     if not 1 <= args.rows <= max_rows:
         parser.error("--rows must be between 1 and the configured one-million-row cap")
     if args.expect_rejection == "rows" and args.rows != max_rows:
         parser.error("row-limit rejection requires one row above the configured cap")
     if not 0 <= args.payload_bytes <= 4096 or args.iterations < 1:
         parser.error("payload bytes must be 0..4096 and iterations must be positive")
+    if not 1 <= args.concurrent_readers <= SOURCE_LIMITS["connections_per_catalog"]:
+        parser.error(
+            "concurrent readers must be between 1 and the configured source connection cap"
+        )
     if not 0 <= args.slow_reader_delay_ms <= 1000:
         parser.error("slow-reader delay must be between 0 and 1000 milliseconds")
     if args.expect_rejection in ("ipc", "rows") and args.slow_reader_delay_ms:
         parser.error("source-limit rejection cannot be combined with a slow reader")
     if args.expect_rejection == "result" and not args.slow_reader_delay_ms:
         parser.error("result-limit rejection requires --slow-reader-delay-ms")
+    if args.expect_rejection and args.concurrent_readers != 1:
+        parser.error("expected source-limit rejection supports one reader only")
     server_bin = args.server_bin.absolute()
     if not server_bin.is_file():
         parser.error(f"server binary not found: {server_bin}")
@@ -114,7 +130,7 @@ def main() -> None:
     if duckdb.__version__ != "1.5.1":
         parser.error(f"expected duckdb==1.5.1, found {duckdb.__version__}")
 
-    clean_server_environment()
+    clean_server_environment(args.concurrent_readers)
 
     def run_action(spark: ConnectSession) -> int:
         dataframe = spark.table("warehouse.main.events")
@@ -133,14 +149,20 @@ def main() -> None:
                 time.sleep(args.slow_reader_delay_ms / 1000)
         upper = args.rows - 1
         expected_xor = (upper, 1, upper + 1, 0)[upper % 4]
-        if observed != args.rows or id_sum != args.rows * upper // 2 or id_xor != expected_xor:
+        if (
+            observed != args.rows
+            or id_sum != args.rows * upper // 2
+            or id_xor != expected_xor
+        ):
             raise AssertionError(
                 "source iterator returned incorrect ids: "
                 f"rows={observed}, sum={id_sum}, xor={id_xor}"
             )
         return observed
 
-    with tempfile.TemporaryDirectory(prefix="sparkless-phase419-duckdb-budget-") as work:
+    with tempfile.TemporaryDirectory(
+        prefix="sparkless-phase419-duckdb-budget-"
+    ) as work:
         database_path = Path(work) / "source.duckdb"
         fixture = duckdb.connect(str(database_path))
         fixture.execute(
@@ -154,30 +176,61 @@ def main() -> None:
         os.environ["SPARKLESS_DUCKDB_SOURCES"] = json.dumps(source_config)
         database_size_bytes = database_path.stat().st_size
 
-        owner = SparklessConnect(
-            server_options={"executable_path": str(server_bin)}
-        )
+        owner = SparklessConnect(server_options={"executable_path": str(server_bin)})
         samples_ms: list[float] = []
+        batch_samples_ms: list[float] = []
         expected_rejection: str | None = None
         with owner as spark:
             if not isinstance(spark, ConnectSession):
-                raise TypeError(f"expected PySpark Connect session, got {type(spark)!r}")
+                raise TypeError(
+                    f"expected PySpark Connect session, got {type(spark)!r}"
+                )
             server_process = getattr(getattr(owner, "_server", None), "_process", None)
             if server_process is None or server_process.poll() is not None:
-                raise RuntimeError("SparklessConnect did not retain a running server process")
+                raise RuntimeError(
+                    "SparklessConnect did not retain a running server process"
+                )
+            client_sessions = [spark]
+            connect_url = getattr(owner._server, "spark_connect_url", None)
+            if not connect_url:
+                raise RuntimeError(
+                    "SparklessConnect did not retain its Connect endpoint"
+                )
+            client_sessions.extend(
+                ConnectSession.builder.remote(connect_url).create()
+                for _ in range(args.concurrent_readers - 1)
+            )
+
+            def run_parallel() -> tuple[list[int], list[float], float]:
+                batch_started = time.perf_counter()
+
+                def timed_action(session: ConnectSession) -> tuple[int, float]:
+                    started = time.perf_counter()
+                    count = run_action(session)
+                    return count, (time.perf_counter() - started) * 1000
+
+                with ThreadPoolExecutor(max_workers=len(client_sessions)) as pool:
+                    results = list(pool.map(timed_action, client_sessions))
+                elapsed = (time.perf_counter() - batch_started) * 1000
+                return (
+                    [item[0] for item in results],
+                    [item[1] for item in results],
+                    elapsed,
+                )
+
             try:
-                warm_count = run_action(spark)
-                if warm_count != args.rows:
+                warm_counts, _, _ = run_parallel()
+                if any(count != args.rows for count in warm_counts):
                     raise AssertionError(
-                        f"source count returned {warm_count}, expected {args.rows}"
+                        f"source counts returned {warm_counts}, expected {args.rows} each"
                     )
                 for _ in range(args.iterations):
-                    started = time.perf_counter()
-                    count = run_action(spark)
-                    samples_ms.append((time.perf_counter() - started) * 1000)
-                    if count != args.rows:
+                    counts, action_samples, batch_elapsed = run_parallel()
+                    samples_ms.extend(action_samples)
+                    batch_samples_ms.append(batch_elapsed)
+                    if any(count != args.rows for count in counts):
                         raise AssertionError(
-                            f"source count returned {count}, expected {args.rows}"
+                            f"source counts returned {counts}, expected {args.rows} each"
                         )
             except Exception as error:
                 message = str(error)
@@ -204,14 +257,21 @@ def main() -> None:
                     raise AssertionError(
                         "scan succeeded, but an expected source limit was not enforced"
                     )
+            finally:
+                for extra_session in client_sessions[1:]:
+                    extra_session.stop()
 
     server_rss_peak_bytes = None
     client_peak_rss_bytes = None
     if resource is not None:
         rss_raw = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-        server_rss_peak_bytes = int(rss_raw if sys.platform == "darwin" else rss_raw * 1024)
+        server_rss_peak_bytes = int(
+            rss_raw if sys.platform == "darwin" else rss_raw * 1024
+        )
         client_raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        client_peak_rss_bytes = int(client_raw if sys.platform == "darwin" else client_raw * 1024)
+        client_peak_rss_bytes = int(
+            client_raw if sys.platform == "darwin" else client_raw * 1024
+        )
 
     server_version = subprocess.run(
         [str(server_bin), "--version"], check=True, capture_output=True, text=True
@@ -242,8 +302,12 @@ def main() -> None:
         "workload": {
             "source_mode": "standalone read-only DuckDB file",
             "rows": args.rows,
+            "concurrent_readers": args.concurrent_readers,
             "payload_bytes_per_row": args.payload_bytes,
             "logical_uncompressed_column_bytes": args.rows * (8 + args.payload_bytes),
+            "aggregate_logical_uncompressed_column_bytes": (
+                args.rows * (8 + args.payload_bytes) * args.concurrent_readers
+            ),
             "source_database_bytes": database_size_bytes,
             "iterations": args.iterations,
             "warmups": 1,
@@ -252,6 +316,7 @@ def main() -> None:
             else "count",
             "slow_reader_delay_ms": args.slow_reader_delay_ms,
             "action_samples_ms": samples_ms,
+            "concurrent_batch_samples_ms": batch_samples_ms,
             "action_p50_ms": percentile(samples_ms, 0.50) if samples_ms else None,
             "action_p95_ms": percentile(samples_ms, 0.95) if samples_ms else None,
             "result": (
@@ -263,6 +328,15 @@ def main() -> None:
         },
         "source_limits": SOURCE_LIMITS,
         "connect_result_limit_bytes": CONNECT_RESULT_LIMIT_BYTES,
+        "server_configuration": {
+            "max_active_operations": args.concurrent_readers,
+            "max_pending_operations": 16,
+            "queue_timeout_ms": 5000,
+            "response_timeout_ms": 60000,
+            "polars_max_threads": 4,
+            "rayon_threads": 4,
+            "omp_threads": 4,
+        },
         "server_rss": {
             "peak_bytes": server_rss_peak_bytes,
             "method": "resource.getrusage(RUSAGE_CHILDREN) after the server child exits",
