@@ -81,6 +81,21 @@ def arrow_trace_records(diagnostics: str) -> list[dict[str, str]]:
     return records
 
 
+def measure_additional_startups(server_bin: Path, sample_count: int) -> list[float]:
+    samples = []
+    for _ in range(sample_count):
+        helper = SparklessConnect(server_options={"executable_path": str(server_bin)})
+        started = time.perf_counter()
+        with helper as spark:
+            elapsed_ms = (time.perf_counter() - started) * 1_000
+            if not isinstance(spark, ConnectSession):
+                raise TypeError(
+                    f"expected PySpark Connect session, got {type(spark)!r}"
+                )
+        samples.append(elapsed_ms)
+    return samples
+
+
 def measure_case(
     name: str,
     action: Callable[[], list[Any]],
@@ -440,6 +455,12 @@ def main() -> None:
     parser.add_argument("--server-source-revision")
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument(
+        "--startup-samples",
+        type=int,
+        default=1,
+        help="number of fresh server/readiness/session starts to measure",
+    )
+    parser.add_argument(
         "--arrow-trace",
         action="store_true",
         help="include per-stream Arrow timing and buffer high-water records",
@@ -451,8 +472,8 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.iterations < 1:
-        parser.error("--iterations must be positive")
+    if args.iterations < 1 or args.startup_samples < 1:
+        parser.error("--iterations and --startup-samples must be positive")
     server_bin = args.server_bin.absolute()
     if not server_bin.is_file():
         parser.error(f"server binary not found: {server_bin}")
@@ -485,6 +506,10 @@ def main() -> None:
             measurements = run_small_jobs(spark, args.iterations)
         else:
             measurements = run_exports(spark, args.iterations)
+    startup_samples_ms = [startup_ms]
+    startup_samples_ms.extend(
+        measure_additional_startups(server_bin, args.startup_samples - 1)
+    )
 
     client_peak_rss_bytes = None
     if resource is not None:
@@ -505,6 +530,9 @@ def main() -> None:
         "server_binary_sha256": binary_sha256,
         "server_environment": server_environment,
         "startup_readiness_and_session_ms": startup_ms,
+        "startup_samples_ms": startup_samples_ms,
+        "startup_p50_ms": percentile(startup_samples_ms, 0.50),
+        "startup_p95_ms": percentile(startup_samples_ms, 0.95),
         "iterations_per_case": args.iterations,
         "warmups_per_case": 1,
         "environment": {
@@ -531,6 +559,11 @@ def main() -> None:
         )
     print(f"client_peak_rss_bytes={client_peak_rss_bytes}")
     print(f"startup_readiness_and_session_ms={startup_ms:.3f}")
+    print(
+        f"startup_samples={len(startup_samples_ms)} "
+        f"startup_p50_ms={percentile(startup_samples_ms, 0.50):.3f} "
+        f"startup_p95_ms={percentile(startup_samples_ms, 0.95):.3f}"
+    )
     print(f"arrow_trace_records={len(report['arrow_trace_records'])}")
     print(f"report={args.output}")
 
