@@ -36,8 +36,9 @@ It passed the empty-result, 10,000-row local-relation, wide/variable-width strin
 
 The branch now contains an opt-in `duckdb-source` integration using `duckdb-rs==1.20000.1`
 (bundled DuckDB 2.0.0) and Arrow IPC 60.1.0. The configured catalog accepts only trusted aliases
-and either canonical local database paths or an explicit Quack endpoint/token/extension path. It
-loads the exact configured Quack extension file without runtime downloads, exposes schema metadata
+and either canonical local database paths or an explicit Quack endpoint/token plus a matching
+locally packaged or explicitly configured extension path. It loads that exact Quack extension
+without runtime downloads, exposes schema metadata
 without materializing table rows, pins one read-only connection/transaction per execution snapshot,
 and rejects reads from a second database owner in the same statement. The Polars integration
 consumes IPC batches synchronously and materializes source relations before evaluating the Connect
@@ -168,12 +169,15 @@ SHA-256 `333e31186428afbc79fc5e9d726a32a469a60ea2ba6837ac0e84b5c75e154c93`. This
 clean-consumer install/import matrix on the tested macOS arm64 host; the Linux and macOS 14-tagged
 server-extra release jobs remain the cross-platform check.
 
-The release workflow now builds both supported server wheels with `http,connect,duckdb-source`.
-Its Linux and macOS server-extra consumer jobs install the hash-locked CPython 3.11 DuckDB 1.5.1
-fixture dependency and run the public-client source smoke against the bundled server executable.
-These exact release-runner jobs have not run for this branch yet, so cross-platform package
-acceptance remains pending. Source loss/replay, full DDL/DML rejection, and measured source/RSS
-budgets also remain open; this evidence does not claim complete DuckDB-source acceptance.
+The release workflow builds both supported server wheels with `http,connect,duckdb-source` and
+now fetches the DuckDB 2.0.0 Quack extension for the exact wheel platform, packages it beside the
+executable, and builds a matching owner fixture. The Linux and macOS server-extra consumer jobs
+install the hash-locked CPython 3.11 DuckDB 1.5.1 fixture dependency and run the public-client
+source smoke in standalone and packaged-Quack modes. These exact release-runner jobs have not run
+for this branch yet, so cross-platform package acceptance remains pending. The standalone and
+Quack source-loss/replay cases, write rejection, and macOS arm64 source/RSS budget evidence are
+recorded below; broader platform/resource coverage remains open, and this evidence does not claim
+complete DuckDB-source acceptance.
 
 The SQL mutation path now checks configured read-only source namespaces before resolving rows or
 falling through to a local catalog. This also covers missing table targets, including
@@ -218,9 +222,10 @@ fault proxy, which drops the stream after the first ExecutePlan response. The pi
 normal retry returns every exact row; server tracing asserts one producer start and at least one
 ReattachExecute RPC. The DuckDB-source cancellation fixture also passed against the same Quack
 extension, cancelling after its first batch and observing `cancelled` on the shared owner. Public
-Quack cancellation during service shutdown and clean cross-platform extension packaging remain
-open. The Spark differential corpus is now recorded below. D14 and V35/V36 are still open; the
-release does not claim complete DuckDB-source acceptance.
+Quack cancellation during graceful server shutdown also passed, as recorded below. Release-wheel
+Quack extension packaging is implemented; exact cross-platform package validation and broader
+platform/resource acceptance remain open. The Spark differential corpus is now recorded below.
+D14 and V35/V36 are still open; the release does not claim complete DuckDB-source acceptance.
 
 After the final Connect response-acknowledgment changes, the server was rebuilt at source
 `43ce29b2c31a3da8d175a91cc350d09a76e8eeb4` with `http,connect,duckdb-source`. The release server
@@ -790,7 +795,7 @@ environment samples:
 
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. Four-reader slow-consumer runs select a provisional 256 MiB observed RSS guardrail on macOS arm64; broader platform/resource coverage and clean cross-platform extension packaging remain open. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. Four-reader slow-consumer runs select a provisional 256 MiB observed RSS guardrail on macOS arm64. Release wheels now bundle the matching platform Quack extension; exact-commit Linux/macOS package smokes and broader platform/resource coverage remain open. D14 and V35/V36 remain open.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; cross-platform server-extra package checks remain tied to the release workflow below.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against the post-export/count intermediate candidate are retained above. Exporter buffer-size estimates are recorded, but allocator-wide accounting and a complete scheduler comparison against the released baseline remain open.
 - Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow still needs a successful run, and release publication checks have not been performed.

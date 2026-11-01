@@ -390,8 +390,15 @@ jobs:
       - name: Install pinned public Connect client
         run: |
           /opt/python/cp311-cp311/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+      - name: Fetch the signed DuckDB 2.0.0 Quack extension
+        run: /opt/python/cp311-cp311/bin/python scripts/fetch_duckdb_quack_extension.py --platform linux_amd64 --output "$RUNNER_TEMP/quack.duckdb_extension"
       - name: Build the combined server once
         run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect,duckdb-source
+        env:
+          CARGO_BUILD_JOBS: 1
+          RUSTUP_TOOLCHAIN: 1.93.1
+      - name: Build the Quack owner fixture
+        run: cargo build --locked --release -p robin-sparkless-polars --features duckdb-source --example duckdb_quack_fixture_owner
         env:
           CARGO_BUILD_JOBS: 1
           RUSTUP_TOOLCHAIN: 1.93.1
@@ -402,18 +409,24 @@ jobs:
           "$PY" -m pip install wheel auditwheel setuptools
           mkdir -p dist
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
+            SPARKLESS_QUACK_EXTENSION_BINARY="$RUNNER_TEMP/quack.duckdb_extension" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
             "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
           version="$("$PY" -c 'import tomllib; print(tomllib.load(open("python/server-bin/pyproject.toml", "rb"))["project"]["version"])')"
           "$PY" scripts/reuse_pypi_distributions.py --directory dist --project sparkless-server-bin --version "$version"
           wheel=(dist/*.whl)
-          "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64 --connect --connect-client --client-python "$PY"
+          "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64 --connect --connect-client --client-python "$PY" --duckdb-source
           auditwheel show "${wheel[0]}"
       - name: Upload manylinux server wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sparkless-server-bin-manylinux-2-28-x86_64
           path: dist/*.whl
+      - name: Upload Quack owner fixture
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: duckdb-quack-fixture-owner-linux-amd64
+          path: target/release/examples/duckdb_quack_fixture_owner
 
   server-bin-macos-arm64:
     name: Server binary wheel (macOS arm64)
@@ -429,6 +442,8 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
         with:
           toolchain: 1.93.1
+      - name: Fetch the signed DuckDB 2.0.0 Quack extension
+        run: python3 scripts/fetch_duckdb_quack_extension.py --platform osx_arm64 --output "$RUNNER_TEMP/quack.duckdb_extension"
       - name: Cache cargo
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         continue-on-error: true
@@ -443,6 +458,10 @@ jobs:
         run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect,duckdb-source
         env:
           CARGO_BUILD_JOBS: 1
+      - name: Build the Quack owner fixture
+        run: cargo build --locked --release -p robin-sparkless-polars --features duckdb-source --example duckdb_quack_fixture_owner
+        env:
+          CARGO_BUILD_JOBS: 1
       - name: Build and verify macOS wheel
         run: |
           set -euo pipefail
@@ -452,17 +471,23 @@ jobs:
           "$SPARKLESS_WHEEL_PYTHON" -m pip install --require-hashes -r tests/connect/client-py311.lock
           mkdir -p dist
           SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
+            SPARKLESS_QUACK_EXTENSION_BINARY="$RUNNER_TEMP/quack.duckdb_extension" \
             SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
             "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
           version="$("$SPARKLESS_WHEEL_PYTHON" -c 'import tomllib; print(tomllib.load(open("python/server-bin/pyproject.toml", "rb"))["project"]["version"])')"
           "$SPARKLESS_WHEEL_PYTHON" scripts/reuse_pypi_distributions.py --directory dist --project sparkless-server-bin --version "$version"
           wheel=(dist/*.whl)
-          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64 --connect --connect-client --client-python "$SPARKLESS_WHEEL_PYTHON"
+          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64 --connect --connect-client --client-python "$SPARKLESS_WHEEL_PYTHON" --duckdb-source
       - name: Upload macOS server wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sparkless-server-bin-macosx-14-0-arm64
           path: dist/*.whl
+      - name: Upload Quack owner fixture
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: duckdb-quack-fixture-owner-osx-arm64
+          path: target/release/examples/duckdb_quack_fixture_owner
 
   server-container:
     name: Native server container build and smoke
@@ -486,6 +511,8 @@ jobs:
         run: |
           python -m pip install --target "$RUNNER_TEMP/server-image" server-wheel/*.whl
           cp "$RUNNER_TEMP/server-image/sparkless_server_bin/sparkless-server" "$RUNNER_TEMP/server-image/sparkless-server"
+          cp "$RUNNER_TEMP/server-image/sparkless_server_bin/quack.duckdb_extension" "$RUNNER_TEMP/server-image/quack.duckdb_extension"
+          cp "$RUNNER_TEMP/server-image/sparkless_server_bin/NOTICE-quack.txt" "$RUNNER_TEMP/server-image/NOTICE-quack.txt"
           chmod +x "$RUNNER_TEMP/server-image/sparkless-server"
           docker build -f crates/sparkless-server/Dockerfile.release \
             -t "${{ steps.image.outputs.image }}" "$RUNNER_TEMP/server-image"
@@ -551,9 +578,11 @@ jobs:
           - runner: ubuntu-24.04
             sparkless: manylinux-x86_64
             server: manylinux-2-28-x86_64
+            quack-fixture: linux-amd64
           - runner: macos-15
             sparkless: macos-aarch64
             server: macosx-14-0-arm64
+            quack-fixture: osx-arm64
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -571,6 +600,10 @@ jobs:
         with:
           name: sparkless-server-bin-${{ matrix.server }}
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: duckdb-quack-fixture-owner-${{ matrix.quack-fixture }}
+          path: quack-fixture
       - name: Install and exercise the matching server extra
         run: |
           version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
@@ -581,7 +614,11 @@ jobs:
           .venv/bin/python -m pip check
           .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations --connect-client --client-python .venv/bin/python
           server_bin="$(.venv/bin/python -c 'from sparkless_server_bin import executable_path; print(executable_path())')"
+          quack_extension="$(.venv/bin/python -c 'from sparkless_server_bin import quack_extension_path; print(quack_extension_path())')"
+          owner_bin="$GITHUB_WORKSPACE/quack-fixture/duckdb_quack_fixture_owner"
+          chmod +x "$owner_bin"
           .venv/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin"
+          .venv/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin" --quack-owner-bin "$owner_bin" --quack-extension-path "$quack_extension"
 
   release-validation-gate:
     name: Release validation acceptance gate

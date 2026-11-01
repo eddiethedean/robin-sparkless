@@ -22,4 +22,9 @@ packages = ["sparkless_server_bin"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-sparkless_server_bin = ["sparkless-server", "sparkless-server.exe"]
+sparkless_server_bin = [
+    "sparkless-server",
+    "sparkless-server.exe",
+    "quack.duckdb_extension",
+    "NOTICE-quack.txt",
+]

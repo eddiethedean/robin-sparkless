@@ -64,6 +64,7 @@ def _smoke_installed_binary(
     *,
     connect: bool = False,
     connect_client: bool = False,
+    duckdb_source: bool = False,
     client_python: str | None = None,
 ) -> None:
     installed_version = importlib.metadata.version(PACKAGE_NAME)
@@ -75,6 +76,16 @@ def _smoke_installed_binary(
         )
     package = importlib.import_module("sparkless_server_bin")
     executable = Path(package.executable_path())
+    if duckdb_source:
+        extension_path = Path(package.quack_extension_path())
+        if (
+            not extension_path.is_file()
+            or extension_path.stat().st_size == 0
+            or extension_path.parent != executable.parent
+        ):
+            raise RuntimeError(
+                "installed server wheel does not contain its matching Quack extension"
+            )
     verify_binary(
         executable,
         expected_version,
@@ -394,6 +405,7 @@ def verify_wheel(
     *,
     connect: bool = False,
     connect_client: bool = False,
+    duckdb_source: bool = False,
     client_python: str | None = None,
 ) -> None:
     wheel = wheel.resolve()
@@ -430,6 +442,8 @@ def verify_wheel(
             smoke_command.append("--connect")
         if connect_client:
             smoke_command.append("--connect-client")
+        if duckdb_source:
+            smoke_command.append("--duckdb-source")
         if client_python:
             smoke_command.extend(("--client-python", client_python))
         subprocess.run(smoke_command, check=True)
@@ -462,6 +476,11 @@ def main() -> int:
         help="run the public PySpark Connect client (requires --connect)",
     )
     parser.add_argument(
+        "--duckdb-source",
+        action="store_true",
+        help="require the platform-matched Quack extension in the installed wheel",
+    )
+    parser.add_argument(
         "--client-python", help="Python executable with pyspark-client installed"
     )
     parser.add_argument(
@@ -492,6 +511,7 @@ def main() -> int:
                 args.smoke_installed,
                 connect=args.connect,
                 connect_client=args.connect_client,
+                duckdb_source=args.duckdb_source,
                 client_python=args.client_python,
             )
         else:
@@ -505,6 +525,7 @@ def main() -> int:
                 args.project,
                 connect=args.connect,
                 connect_client=args.connect_client,
+                duckdb_source=args.duckdb_source,
                 client_python=args.client_python,
             )
     except (OSError, ValueError, subprocess.SubprocessError, RuntimeError) as error:

@@ -225,6 +225,18 @@ fn duckdb_quack_configuration_requires_one_consistent_connection_per_endpoint() 
 }
 
 #[test]
+fn duckdb_quack_configuration_can_omit_the_packaged_extension_path() {
+    let error = match DuckDbCatalog::from_json(
+        r#"[{"alias":"warehouse","quack_uri":"quack:localhost:9494","token":"fixture-token"}]"#,
+    ) {
+        Ok(_) => panic!("the unbundled test executable has no adjacent Quack extension"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("extension path is unavailable"));
+    assert!(!error.to_string().contains("missing field `extension_path`"));
+}
+
+#[test]
 fn duckdb_read_snapshot_reuses_one_database_owner_for_multiple_tables() {
     let (_directory, database) = fixture_database();
     let provider: Arc<dyn ExternalCatalogProvider> = source(&database);

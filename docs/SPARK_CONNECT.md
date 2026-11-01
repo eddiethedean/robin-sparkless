@@ -106,10 +106,9 @@ count/sum, global `count(column)`, and the `SparklessConnect` helper. The helper
 described above; phase acceptance and release remain open.
 
 Manually build the native server with `--features connect,duckdb-source` to enable DuckDB sources;
-an ordinary Cargo build does not include DuckDB. The 4.19 `sparkless-server-bin` release wheels are
-configured with that feature so the optional source works with the installed `sparkless[connect]`
-helper. Configure trusted aliases at startup; clients provide table names only. Standalone mode
-maps an alias to a local file:
+an ordinary Cargo build does not include DuckDB. The 4.19 server wheel includes that feature and
+the platform-matched DuckDB 2.0.0 Quack extension. Configure trusted aliases at startup; clients
+provide table names only. Standalone mode maps an alias to a local read-only file:
 
 ```sh
 SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/warehouse.duckdb"}]' \
@@ -117,12 +116,14 @@ SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/wareh
 ```
 
 For shared-owner mode, the configured Quack endpoint must already be serving the DuckDB database.
-Point `extension_path` at the DuckDB 2.0.0 `quack.duckdb_extension` built for the same platform as
-the Sparkless server. The source loads that exact file and does not install or download extensions
-at runtime:
+The installed 4.19 server wheel uses its bundled extension when `extension_path` is omitted. A
+source-built executable can use an explicit local DuckDB 2.0.0 `quack.duckdb_extension` built for
+the same platform. The server loads that exact file and does not install or download extensions at
+runtime. Quack itself is an [experimental, pre-release DuckDB extension](https://github.com/duckdb/duckdb-quack):
+keep this source mode opt-in and pin the owner to the tested DuckDB 2.0.0 line:
 
 ```sh
-SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","quack_uri":"quack:localhost:9494","token":"replace-with-secret","extension_path":"/opt/duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension"}]' \
+SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","quack_uri":"quack:localhost:9494","token":"replace-with-secret"}]' \
   sparkless-server
 ```
 
@@ -140,8 +141,10 @@ qualified namespace; a missing source table does not fall through to a managed t
 name. Per catalog, at most four source connections are open and sixteen operations can wait for a
 connection. Enforced source limits are 1,000,000 rows, 32 MiB of Arrow IPC input, and 64 MiB of
 decoded data per statement, plus 16,384 rows and 1 MiB per batch.
-The supported source types are BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE, VARCHAR, DATE,
-TIMESTAMPTZ, and DECIMAL with precision at most 38 and scale no greater than precision.
+The source mapping supports BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE, VARCHAR, DATE,
+TIMESTAMPTZ, and DECIMAL with precision at most 38 and scale no greater than precision. The
+retained public smoke/differential covers BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE,
+VARCHAR, DATE, UTC TIMESTAMPTZ, and DECIMAL(12, 2); it does not certify every decimal boundary.
 The branch's public-client source smoke covers table reads, filter/project/limit, row and
 non-null-column counts, same-owner inner joins, grouped count/sum, and source DDL/DML plus append
 and overwrite rejection with an unchanged row count. It runs against both a local file and a live
@@ -151,9 +154,11 @@ Cancelling a Quack scan interrupts the local DuckDB client and sends `quack_canc
 owner. The control connection is reserved with the scan under the four-connection cap and uses a
 three-second HTTP timeout.
 
-Quack mode and an independent writer fixture are implemented, but broader source acceptance and
-platform packaging remain open; D14 and V36 are not complete. DuckDB writes, unsupported types,
-arbitrary client-supplied paths, and cross-owner joins fail explicitly.
+Quack mode and an independent writer fixture are implemented. The exact-commit workflow is being
+extended to install the packaged Quack extension and run the public source smoke on Linux x86_64
+and macOS arm64; until it passes, cross-platform Quack acceptance remains open. D14 and V36 also
+remain open for broader platform/resource evidence. DuckDB writes, unsupported types, arbitrary
+client-supplied paths, and cross-owner joins fail explicitly.
 
 ## Limits and unsupported operations
 

@@ -44,6 +44,10 @@ At final Connect source revision `43ce29b2c31a3da8d175a91cc350d09a76e8eeb4`, the
 
 Fresh macOS arm64 CPython 3.11 environments now pass the base, server, Connect, and combined extras. Base import does not install PySpark or a server binary; the server extra starts and exercises the packaged binary without PySpark; Connect and combined extras pass the locked 4.0.5 public-client query. The exact wheels, installed metadata, and host limitation are recorded in the [clean install matrix](RELEASE_4_19_EVIDENCE.md#clean-consumer-install-matrix-2026-11-01) and its [raw report](evidence/phase-419-clean-install-matrix-macos.json). The final source-level DuckDB standalone and Quack public smokes also pass after the cancellation changes. Cross-platform server-extra jobs, allocator-wide accounting, and the full released-baseline scheduler comparison remain open; D14 and V35/V36 are not closed.
 
+### 4.19 Quack wheel packaging update (2026-11-01)
+
+The release workflow now fetches the official DuckDB 2.0.0 Quack extension for the `linux_amd64` and `osx_arm64` server targets, bundles it beside each server executable, retains its license notice, and builds a matching owner fixture. The installed server resolves the adjacent extension when trusted Quack configuration omits `extension_path`; source builds can continue to specify an explicit local file. The exact-commit Linux/macOS wheel and container checks still need to pass before cross-platform acceptance is recorded. Quack remains an experimental, pre-release DuckDB extension; the feature stays optional.
+
 ## DuckDB source driver candidate (2026-10-31)
 
 Use DuckDB 2.0.0 LTS as the optional source engine and pin the Rust binding to `duckdb-rs==1.20000.1` (the `1.20000.x` binding line tracks DuckDB 2.0.0). Use the matching Quack 2.0.0 core extension for the live shared-owner mode. DuckDB 2.0.0 is an LTS release through at least October 2027, and its release notes describe Quack as polished with substantial performance and stability improvements. Keep DuckDB and Quack opt-in; the default engine remains Polars.

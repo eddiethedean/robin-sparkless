@@ -176,9 +176,15 @@ def main() -> None:
                         "alias": "warehouse",
                         "quack_uri": owner_info["uri"],
                         "token": owner_info["token"],
-                        "extension_path": str(args.quack_extension_path.absolute()),
                     }
                 ]
+                packaged_extension = (
+                    args.server_bin.resolve().parent / "quack.duckdb_extension"
+                )
+                if args.quack_extension_path.resolve() != packaged_extension.resolve():
+                    source_config[0]["extension_path"] = str(
+                        args.quack_extension_path.absolute()
+                    )
             except Exception:
                 owner.terminate()
                 owner.wait(timeout=10)

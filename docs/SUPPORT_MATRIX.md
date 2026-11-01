@@ -1,14 +1,16 @@
-# 4.18.0 support contract
+# 4.19.0 candidate support contract
 
-Reviewed against candidate source on 2026-10-29. **4.18.0 is a release candidate
-until the package indexes publish it.** See [versions and installation](INSTALLATION.md).
+Reviewed against branch `codex/release-4.19` on 2026-11-01. **4.19.0 is an
+unpublished release candidate; this page describes only the behavior and
+platforms covered by the retained candidate evidence.** See [versions and
+installation](INSTALLATION.md).
 “Implemented” describes a bounded API, not every Spark semantic or workload.
 “Behavior-tested” means linked regression/example coverage exists. “Unsupported”
 is outside the published contract; “unknown” requires workload validation.
 
 | Capability | Local Python | Rust embedding | HTTP service | Spark Connect |
 | --- | --- | --- | --- | --- |
-| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Range/local relation, filter/project/limit/global count only |
+| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Range/local relation and the documented read-only source subset below; general Connect SQL remains unsupported |
 | SQL queries | SQL enabled in official wheel | Requires `sql` | Bounded SELECT on service catalog | Unsupported SQL commands |
 | Scalar Python UDF | Behavior-tested in withColumn/select/scalar comparison filters | Native expression callbacks, separate API | Unsupported | Unsupported |
 | pandas/vectorized/grouped Python UDF, UDTF | Unsupported public API | No equivalent public Python contract | Unsupported | Unsupported |
@@ -18,6 +20,7 @@ is outside the published contract; “unknown” requires workload validation.
 | CREATE TABLE / INSERT / database DDL | SQL subset | SQL subset | Bounded mutations with identity | Unsupported commands |
 | Warehouse persistence | Parquet with explicit warehouse config | Same engine mechanism | In-memory service catalog only | In-memory session/operation state |
 | External catalog provider | Local callback contract | Core provider trait | No general provider configuration contract | Unsupported |
+| Optional DuckDB table source | Not applicable | `duckdb-source` feature; read-only standalone file or shared Quack owner | Trusted server configuration only; no client-selected paths or credentials | Candidate-tested with `pyspark-client==4.0.5`: named-table schema/read, filter, project, limit, global/column count, same-owner inner equijoin, grouped count and sum |
 | Distributed scheduling / Structured Streaming | Unsupported | Unsupported | Unsupported | Unsupported |
 | Repartition/cache/broadcast hints | Local compatibility behavior; no Spark cluster semantics | Local only | Unsupported | Unsupported |
 
@@ -28,6 +31,23 @@ query plans can differ. Run representative pipelines against the actual Spark
 version used in production, including nulls, empty inputs, invalid data, and types.
 
 Evidence and narrower contracts:
+
+- The 4.19 DuckDB source is opt-in through the `duckdb-source` server feature and
+  `SPARKLESS_DUCKDB_SOURCES`. Public smoke and reference cases cover BOOLEAN,
+  SMALLINT, INT, BIGINT, finite DOUBLE, STRING, DATE, UTC microsecond TIMESTAMP,
+  and DECIMAL(12, 2); the source contract permits the documented wider DECIMAL
+  range but does not certify every precision/scale boundary. Nested/unsigned
+  values, non-finite DOUBLEs, writes, cross-owner
+  joins, and arbitrary Connect SQL are rejected or unsupported. See the
+  [4.19 source contract](plans/sparkless-server/RELEASE_4_19.md#duckdb-source-contract)
+  and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
+- Public DuckDB Connect behavior is verified on macOS arm64. The candidate
+  server wheels now carry the platform-matched DuckDB 2.0.0 Quack extension; the
+  exact-commit Linux x86_64 and macOS arm64 install/source smokes still need to
+  pass before those platform results are accepted. A source-built server can
+  load a trusted local extension path. Installed wheels resolve the bundled
+  extension beside the server executable when `extension_path` is omitted,
+  without a runtime download.
 
 - [Generated compatibility inventory](PARITY_STATUS.md): counts and oracle provenance, not a parity percentage.
 - [Executable examples](https://github.com/eddiethedean/robin-sparkless/tree/main/examples/python): backend identity, pipeline, UDF.

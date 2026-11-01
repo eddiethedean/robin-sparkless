@@ -22,6 +22,7 @@ class BinaryDistribution(Distribution):
 class build_py(_build_py):
     def run(self):
         super().run()
+        self._extra_outputs = []
         source = os.environ.get("SPARKLESS_SERVER_BINARY")
         if not source:
             raise RuntimeError(
@@ -50,6 +51,27 @@ class build_py(_build_py):
             destination.chmod(
                 destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
             )
+
+        extension = os.environ.get("SPARKLESS_QUACK_EXTENSION_BINARY")
+        if extension:
+            extension_path = Path(extension).expanduser()
+            if (
+                not extension_path.is_file()
+                or extension_path.name != "quack.duckdb_extension"
+            ):
+                raise RuntimeError(
+                    "SPARKLESS_QUACK_EXTENSION_BINARY must point to a local "
+                    "quack.duckdb_extension built for this DuckDB version and platform"
+                )
+            extension_destination = destination.parent / "quack.duckdb_extension"
+            shutil.copy2(str(extension_path), str(extension_destination))
+            if not (destination.parent / "NOTICE-quack.txt").is_file():
+                raise RuntimeError("the bundled Quack extension license notice is missing")
+            self._extra_outputs.append(str(extension_destination))
+
+    def get_outputs(self, include_bytecode=True):
+        outputs = super().get_outputs(include_bytecode)
+        return outputs + getattr(self, "_extra_outputs", [])
 
 
 class bdist_wheel(_bdist_wheel):

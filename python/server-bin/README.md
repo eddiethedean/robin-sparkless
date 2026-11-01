@@ -2,13 +2,16 @@
 
 This distribution contains the precompiled `sparkless-server` native HTTP and
 Spark Connect executable for one explicitly built operating-system and architecture target.
-The 4.18 release build enabled both transports. The 4.19 release build also includes
-the optional DuckDB source feature; source aliases remain disabled unless trusted
-`SPARKLESS_DUCKDB_SOURCES` configuration is provided. The executable can serve HTTP
-only with `--disable-connect`. Build a wheel
+The 4.19 candidate build enables both transports and the optional DuckDB source feature;
+source aliases remain disabled unless trusted `SPARKLESS_DUCKDB_SOURCES` configuration is
+provided. The supported 4.19 server wheels also carry the matching DuckDB 2.0.0 Quack
+extension, so a Quack source can omit `extension_path`. An explicit trusted local path remains
+available for development builds. The executable can serve HTTP only with `--disable-connect`.
+Build a wheel
 with `SPARKLESS_SERVER_BINARY` pointing at a matching release executable. The
 build fails when the binary is missing; it never creates a platform-independent
-placeholder wheel. Set `SPARKLESS_SERVER_WHEEL_PLATFORM` when the build runner
+placeholder wheel. Set `SPARKLESS_QUACK_EXTENSION_BINARY` to bundle the platform-matched
+extension into the release wheel. Set `SPARKLESS_SERVER_WHEEL_PLATFORM` when the build runner
 uses a different minimum platform floor, and only when the binary was built for
 and tested against that exact operating-system and architecture tag.
 

@@ -95,11 +95,40 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 )
                 self.assertIn("--features http,connect,duckdb-source", build["run"])
 
+                steps = jobs[job_name]["steps"]
+                self.assertTrue(
+                    any(
+                        step.get("name") == "Fetch the signed DuckDB 2.0.0 Quack extension"
+                        for step in steps
+                    )
+                )
+                wheel_step = next(
+                    step
+                    for step in steps
+                    if step.get("name") in {
+                        "Build and verify manylinux wheel",
+                        "Build and verify macOS wheel",
+                    }
+                )
+                self.assertIn("SPARKLESS_QUACK_EXTENSION_BINARY", wheel_step["run"])
+                self.assertIn("--duckdb-source", wheel_step["run"])
+
         consumer = "\n".join(
             step.get("run", "") for step in jobs["server-extra-consumer"]["steps"]
         )
         self.assertIn("duckdb-source-py311.lock", consumer)
         self.assertIn("smoke_phase419_duckdb_client.py", consumer)
+        self.assertIn("quack_extension_path", consumer)
+        self.assertIn("duckdb-quack-fixture-owner", str(jobs["server-extra-consumer"]))
+        container_build = next(
+            step["run"]
+            for step in jobs["server-container"]["steps"]
+            if step.get("name") == "Build image from the tested server executable"
+        )
+        self.assertIn("quack.duckdb_extension", container_build)
+        dockerfile = (ROOT / "crates/sparkless-server/Dockerfile.release").read_text()
+        self.assertIn("COPY quack.duckdb_extension /usr/local/bin/quack.duckdb_extension", dockerfile)
+        self.assertIn("COPY NOTICE-quack.txt", dockerfile)
 
     def test_every_validation_job_is_required_before_publishing(self):
         jobs = workflow("release.yml")["jobs"]

@@ -46,9 +46,9 @@ pub struct DuckDbSourceConfig {
 
 /// Trusted server configuration for a read-only Quack-backed DuckDB alias.
 ///
-/// `extension_path` must point to the Quack extension built for the exact DuckDB version and
-/// platform bundled with this Sparkless build. Keeping the extension path explicit prevents a
-/// source connection from downloading executable code at runtime.
+/// `extension_path` may point to a local Quack extension built for the exact DuckDB version and
+/// platform bundled with this Sparkless build. If omitted, the server looks for the extension
+/// packaged beside its executable. It never downloads executable code at runtime.
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DuckDbQuackSourceConfig {
@@ -58,7 +58,9 @@ pub struct DuckDbQuackSourceConfig {
     pub quack_uri: String,
     /// Quack authentication token supplied by the trusted deployment configuration.
     pub token: String,
-    /// Exact local DuckDB 2.0.0 Quack extension binary to load.
+    /// Exact local DuckDB 2.0.0 Quack extension binary to load. Omit to use the extension shipped
+    /// beside the Sparkless server executable.
+    #[serde(default)]
     pub extension_path: PathBuf,
     /// Optional transport override. Omit to use Quack's local/remote defaults.
     #[serde(default)]
@@ -210,8 +212,8 @@ impl DuckDbCatalog {
                             config.alias
                         )));
                     }
-                    let extension_path =
-                        std::fs::canonicalize(&config.extension_path).map_err(|error| {
+                    let extension_path = resolve_quack_extension_path(&config.extension_path)
+                        .map_err(|error| {
                             EngineError::User(format!(
                                 "DuckDB Quack source '{}' extension path is unavailable: {error}",
                                 config.alias
@@ -992,6 +994,23 @@ fn validate_quack_uri(uri: &str) -> Result<(), EngineError> {
         ));
     }
     Ok(())
+}
+
+fn resolve_quack_extension_path(configured_path: &Path) -> Result<PathBuf, std::io::Error> {
+    let path = if configured_path.as_os_str().is_empty() {
+        std::env::current_exe()?
+            .parent()
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "server executable has no parent directory",
+                )
+            })?
+            .join("quack.duckdb_extension")
+    } else {
+        configured_path.to_path_buf()
+    };
+    std::fs::canonicalize(path)
 }
 
 fn validate_batch_scalars(

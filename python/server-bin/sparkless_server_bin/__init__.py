@@ -18,4 +18,14 @@ def executable_path() -> str:
     return str(path)
 
 
-__all__ = ["executable_path"]
+def quack_extension_path() -> str:
+    """Return the matching Quack extension shipped with this server wheel."""
+    path = Path(__file__).resolve().parent / "quack.duckdb_extension"
+    if not path.is_file():
+        raise FileNotFoundError(
+            "sparkless-server-bin has no bundled Quack extension for this platform"
+        )
+    return str(path)
+
+
+__all__ = ["executable_path", "quack_extension_path"]
