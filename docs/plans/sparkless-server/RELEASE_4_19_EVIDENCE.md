@@ -147,6 +147,8 @@ metadata reported `sparkless`, `sparkless-native`, and `sparkless-server-bin` as
 `pyspark-client==4.0.5`. The local server wheel carries a `macosx_26_0_arm64` tag because the
 available host is macOS 26; it does not validate the release workflow's macOS 14 deployment tag.
 
+#### Clean consumer install matrix (2026-11-01)
+
 A fresh CPython 3.11.14 consumer matrix was then built from the current 4.19 sources and installed
 into four separate virtual environments on macOS 26.5.2 arm64. The exact API wheel SHA-256 is
 `9c4b75f79864862d238a5498ccc003743c6bceb3644b9e5e81913bf093371ba9`; the native wheel is
