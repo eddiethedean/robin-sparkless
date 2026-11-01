@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -70,6 +71,14 @@ def prepare_server_environment() -> None:
             os.environ.pop(key, None)
     os.environ.update(SERVER_ENVIRONMENT)
     os.environ["TZ"] = "UTC"
+
+
+def arrow_trace_records(diagnostics: str) -> list[dict[str, str]]:
+    records = []
+    for line in diagnostics.splitlines():
+        if "sparkless_arrow_trace event=complete" in line:
+            records.append(dict(re.findall(r"([a-z_]+)=([^\s]+)", line)))
+    return records
 
 
 def measure_case(
@@ -430,6 +439,11 @@ def main() -> None:
     parser.add_argument("--server-source-revision")
     parser.add_argument("--iterations", type=int, default=20)
     parser.add_argument(
+        "--arrow-trace",
+        action="store_true",
+        help="include per-stream Arrow timing and buffer high-water records",
+    )
+    parser.add_argument(
         "--small-jobs-only",
         action="store_true",
         help="run only tuple-ingest, preview, nullable, and schema guardrails",
@@ -443,6 +457,10 @@ def main() -> None:
         parser.error(f"server binary not found: {server_bin}")
 
     prepare_server_environment()
+    server_environment = dict(SERVER_ENVIRONMENT)
+    if args.arrow_trace:
+        server_environment["SPARKLESS_ARROW_TRACE"] = "1"
+    os.environ.update(server_environment)
     source_revision, source_dirty_paths = git_source_state()
     version = subprocess.run(
         [str(server_bin), "--version"],
@@ -454,8 +472,12 @@ def main() -> None:
         binary_sha256 = hashlib.file_digest(binary, "sha256").hexdigest()
 
     startup_started = time.perf_counter()
-    with SparklessConnect(server_options={"executable_path": str(server_bin)}) as spark:
+    helper = SparklessConnect(server_options={"executable_path": str(server_bin)})
+    with helper as spark:
         startup_ms = (time.perf_counter() - startup_started) * 1_000
+        owned_server = helper._server
+        if owned_server is None:
+            raise RuntimeError("SparklessConnect did not retain its owned server")
         if not isinstance(spark, ConnectSession):
             raise TypeError(f"expected PySpark Connect session, got {type(spark)!r}")
         if args.small_jobs_only:
@@ -480,7 +502,7 @@ def main() -> None:
         "server_source_revision": args.server_source_revision,
         "server_version": version,
         "server_binary_sha256": binary_sha256,
-        "server_environment": SERVER_ENVIRONMENT,
+        "server_environment": server_environment,
         "startup_readiness_and_session_ms": startup_ms,
         "iterations_per_case": args.iterations,
         "warmups_per_case": 1,
@@ -494,6 +516,9 @@ def main() -> None:
             "client_peak_rss_bytes": client_peak_rss_bytes,
         },
         "measurements": measurements,
+        "arrow_trace_records": arrow_trace_records(owned_server.diagnostics)
+        if args.arrow_trace
+        else [],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -505,6 +530,7 @@ def main() -> None:
         )
     print(f"client_peak_rss_bytes={client_peak_rss_bytes}")
     print(f"startup_readiness_and_session_ms={startup_ms:.3f}")
+    print(f"arrow_trace_records={len(report['arrow_trace_records'])}")
     print(f"report={args.output}")
 
 
