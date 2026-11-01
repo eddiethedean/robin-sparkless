@@ -26,6 +26,9 @@ pub mod udfs;
 
 #[cfg(feature = "delta")]
 pub mod delta;
+
+#[cfg(feature = "duckdb-source")]
+mod duckdb_source;
 #[cfg(any(
     feature = "jdbc",
     feature = "jdbc_mysql",
@@ -58,13 +61,15 @@ pub use dataframe::{
     CubeRollupData, DataFrame, DataFrameBatches, GroupBySpec, GroupedData, JoinType,
     PivotedGroupedData, SaveMode, SelectItem, WriteFormat, WriteMode, broadcast,
 };
+#[cfg(feature = "duckdb-source")]
+pub use duckdb_source::{DuckDbCatalog, DuckDbSourceConfig};
 pub use error::{EngineError, polars_to_core_error};
 pub use expression::{column_to_expr, lit_bool, lit_f64, lit_i32, lit_i64, lit_str};
 pub use functions::*;
 pub use robin_sparkless_core::engine::{
-    ArrowIpcBatchStream, ArrowIpcStream, ExternalCatalogProvider, ExternalTableDescriptor,
-    ExternalTableFormat, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
-    ExternalTableWriteRequest, ExternalTableWriteResult,
+    ArrowIpcBatchStream, ArrowIpcStream, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
+    ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
+    ExternalTableWriteBatchRequest, ExternalTableWriteRequest, ExternalTableWriteResult,
 };
 pub use schema::{DataType, StructField, StructType, StructTypePolarsExt, schema_from_json};
 pub use session::{

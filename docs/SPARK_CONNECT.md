@@ -99,6 +99,33 @@ Field labels, nullability and supported metadata are preserved through the check
 Empty results carry their schema. The 4.18 feature matrix is narrower than the Spark Connect
 protocol: an operation is supported only when it is listed here and covered by the 4.18 tests.
 
+## Phase 4.19 branch additions (pre-release)
+
+The `codex/release-4.19` branch adds optional named-table relations, aliases, joins, grouped
+count/sum, and the `SparklessConnect` helper. The helper behavior is described above; phase
+acceptance and release remain open.
+
+Build the native server with `--features connect,duckdb-source` to enable configured local
+DuckDB sources. The default server build does not include DuckDB. Set a trusted alias-to-file map
+at startup; clients provide table names only:
+
+```sh
+SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/warehouse.duckdb"}]' \
+  sparkless-server
+```
+
+The client can read `warehouse.main.events` or `warehouse.events`. Schema analysis resolves
+metadata without scanning rows. Execution opens the configured database read-only and retains one
+statement transaction while it exports typed batches to Polars. A statement can read only one
+configured database owner. Enforced source limits are 1,000,000 rows, 32 MiB of Arrow IPC input,
+and 64 MiB of decoded data per statement, plus 16,384 rows and 1 MiB per batch.
+The supported source types are BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE, VARCHAR, DATE,
+TIMESTAMPTZ, and DECIMAL with precision at most 38 and scale no greater than precision.
+
+This is currently standalone read-only file mode. Independent writers sharing a live DuckDB
+owner through Quack are not implemented or certified; D14 and V36 remain open. DuckDB writes,
+unsupported types, arbitrary client-supplied paths, and cross-owner joins fail explicitly.
+
 ## Limits and unsupported operations
 
 Connect plans share the server's process-wide execution admission with HTTP, plus bounded result

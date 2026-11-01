@@ -27,13 +27,14 @@ use polars_arrow::io::ipc::read::read_stream_metadata;
 use polars_arrow::match_integer_type;
 use polars_arrow::with_match_primitive_type_full;
 use robin_sparkless_core::engine::{
-    ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
+    ExternalCatalogProvider, ExternalCatalogReadSnapshot, ExternalTableDescriptor,
+    ExternalTableFormat, begin_external_catalog_read_snapshot,
 };
 use robin_sparkless_core::schema::{
     DataType as CoreDataType, LogicalField as StructField, StructType,
 };
 use robin_sparkless_core::{
-    PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils,
+    CancellationToken, PysparkCompat, SessionRuntimeConfig, SparklessConfig, date_utils,
     decimal_allow_precision_loss_from_session_map,
 };
 use serde_json::Value as JsonValue;
@@ -2746,6 +2747,22 @@ impl SparkSession {
         Ok(())
     }
 
+    /// Begin one external-source snapshot for a Connect operation, if a provider is configured.
+    pub fn begin_external_catalog_read_snapshot(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Option<Arc<dyn ExternalCatalogReadSnapshot>>, EngineError> {
+        let Some(provider) = self
+            .external_catalog_provider
+            .read()
+            .map_err(|_| EngineError::Internal("external catalog provider lock poisoned".into()))?
+            .clone()
+        else {
+            return Ok(None);
+        };
+        Ok(Some(begin_external_catalog_read_snapshot(provider, token)?))
+    }
+
     pub(crate) fn external_catalog_provider(
         &self,
     ) -> Result<Option<Arc<dyn ExternalCatalogProvider>>, PolarsError> {
@@ -3764,6 +3781,22 @@ impl SparkSession {
         self.table_impl(name, true, false)
     }
 
+    /// Resolve local tables normally and external table schemas without scanning source rows.
+    /// Connect analysis uses this to report names/types before execution begins.
+    pub fn table_schema_only(&self, name: &str) -> Result<DataFrame, PolarsError> {
+        self.table_impl_with_source(name, true, false, None, CancellationToken::new(), false)
+    }
+
+    /// Resolve and scan a table in the caller's statement-wide external source snapshot.
+    pub fn table_in_read_snapshot(
+        &self,
+        name: &str,
+        snapshot: Arc<dyn ExternalCatalogReadSnapshot>,
+        token: CancellationToken,
+    ) -> Result<DataFrame, PolarsError> {
+        self.table_impl_with_source(name, true, true, Some(snapshot), token, true)
+    }
+
     #[cfg(any(feature = "sql", feature = "delta"))]
     pub(crate) fn table_after_external_miss(
         &self,
@@ -3778,6 +3811,25 @@ impl SparkSession {
         name: &str,
         resolve_external: bool,
         provider_configured: bool,
+    ) -> Result<DataFrame, PolarsError> {
+        self.table_impl_with_source(
+            name,
+            resolve_external,
+            provider_configured,
+            None,
+            CancellationToken::new(),
+            true,
+        )
+    }
+
+    fn table_impl_with_source(
+        &self,
+        name: &str,
+        resolve_external: bool,
+        provider_configured: bool,
+        source_snapshot: Option<Arc<dyn ExternalCatalogReadSnapshot>>,
+        token: CancellationToken,
+        materialize_external: bool,
     ) -> Result<DataFrame, PolarsError> {
         // global_temp.xyz -> global catalog only
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
@@ -3817,7 +3869,12 @@ impl SparkSession {
             return Ok(df);
         }
         let (external_df, has_external_provider) = if resolve_external {
-            self.resolve_external_table(name)?
+            self.resolve_external_table_for_read(
+                name,
+                source_snapshot,
+                &token,
+                materialize_external,
+            )?
         } else {
             (None, provider_configured)
         };
@@ -3871,12 +3928,57 @@ impl SparkSession {
         ))
     }
 
-    fn resolve_external_table(&self, name: &str) -> Result<(Option<DataFrame>, bool), PolarsError> {
-        let (external_target, has_provider) = self.resolve_external_table_descriptor(name)?;
-        let Some((_, descriptor)) = external_target else {
-            return Ok((None, has_provider));
+    fn resolve_external_table_for_read(
+        &self,
+        name: &str,
+        snapshot: Option<Arc<dyn ExternalCatalogReadSnapshot>>,
+        token: &CancellationToken,
+        materialize: bool,
+    ) -> Result<(Option<DataFrame>, bool), PolarsError> {
+        let provider = self.external_catalog_provider()?;
+        let Some(provider) = provider else {
+            return if snapshot.is_some() {
+                Err(PolarsError::InvalidOperation(
+                    "external source snapshot is not attached to this SparkSession".into(),
+                ))
+            } else {
+                Ok((None, false))
+            };
         };
-        let frame = self.read_external_table_descriptor(name, &descriptor)?;
+        let snapshot = match snapshot {
+            Some(snapshot) => snapshot,
+            None => begin_external_catalog_read_snapshot(provider.clone(), token)
+                .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?,
+        };
+        let Some(descriptor) = snapshot.resolve_table(name).map_err(|error| {
+            PolarsError::InvalidOperation(
+                format!("external catalog provider failed to resolve '{name}': {error}").into(),
+            )
+        })?
+        else {
+            return Ok((None, true));
+        };
+        descriptor.validate().map_err(|error| {
+            PolarsError::InvalidOperation(
+                format!("external catalog returned an invalid descriptor for '{name}': {error}")
+                    .into(),
+            )
+        })?;
+        if !materialize {
+            let (empty, _) = self
+                .create_dataframe_from_arrow_ipc(
+                    None,
+                    Some(descriptor.schema.clone()),
+                    1024 * 1024,
+                    0,
+                    64 * 1024 * 1024,
+                    512 * 1024,
+                )
+                .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+            return Ok((Some(empty), true));
+        }
+        let frame =
+            self.read_external_table_in_snapshot(name, &descriptor, Some(snapshot), token, true)?;
         Ok((Some(frame), true))
     }
 
@@ -3918,7 +4020,45 @@ impl SparkSession {
         descriptor: &ExternalTableDescriptor,
         validate_schema: bool,
     ) -> Result<DataFrame, PolarsError> {
-        let frame = self.read_external_descriptor(descriptor)?;
+        let token = CancellationToken::new();
+        let snapshot = if descriptor.format == ExternalTableFormat::DuckDb {
+            let provider = self.external_catalog_provider()?.ok_or_else(|| {
+                PolarsError::InvalidOperation("DuckDB source is not configured".into())
+            })?;
+            Some(
+                begin_external_catalog_read_snapshot(provider, &token)
+                    .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?,
+            )
+        } else {
+            None
+        };
+        self.read_external_table_in_snapshot(name, descriptor, snapshot, &token, validate_schema)
+    }
+
+    fn read_external_table_in_snapshot(
+        &self,
+        name: &str,
+        descriptor: &ExternalTableDescriptor,
+        snapshot: Option<Arc<dyn ExternalCatalogReadSnapshot>>,
+        token: &CancellationToken,
+        validate_schema: bool,
+    ) -> Result<DataFrame, PolarsError> {
+        #[cfg(not(feature = "duckdb-source"))]
+        let _ = (&snapshot, token);
+        let frame = if descriptor.format == ExternalTableFormat::DuckDb {
+            #[cfg(feature = "duckdb-source")]
+            {
+                self.read_duckdb_table_batches(name, descriptor, snapshot.as_deref(), token)?
+            }
+            #[cfg(not(feature = "duckdb-source"))]
+            {
+                return Err(PolarsError::InvalidOperation(
+                    "DuckDB source reads require the 'duckdb-source' feature".into(),
+                ));
+            }
+        } else {
+            self.read_external_descriptor(descriptor)?
+        };
 
         if !validate_schema {
             return Ok(frame);
@@ -3943,6 +4083,82 @@ impl SparkSession {
         Ok(frame)
     }
 
+    #[cfg(feature = "duckdb-source")]
+    fn read_duckdb_table_batches(
+        &self,
+        name: &str,
+        descriptor: &ExternalTableDescriptor,
+        snapshot: Option<&dyn ExternalCatalogReadSnapshot>,
+        token: &CancellationToken,
+    ) -> Result<DataFrame, PolarsError> {
+        let snapshot = snapshot.ok_or_else(|| {
+            PolarsError::InvalidOperation(
+                "DuckDB source read requires an operation snapshot".into(),
+            )
+        })?;
+        let mut frame: Option<PlDataFrame> = None;
+        let mut row_count = 0u64;
+        snapshot
+            .scan_table(descriptor, token, &mut |batch| {
+                if batch.bytes.len() > crate::duckdb_source::DUCKDB_SOURCE_MAX_BATCH_BYTES {
+                    return Err(EngineError::User(
+                        "DuckDB source IPC batch exceeded its configured byte limit".into(),
+                    ));
+                }
+                row_count = row_count
+                    .checked_add(batch.row_count)
+                    .ok_or_else(|| EngineError::User("DuckDB source row count overflow".into()))?;
+                if row_count > crate::duckdb_source::DUCKDB_SOURCE_MAX_ROWS {
+                    return Err(EngineError::User(
+                        "DuckDB source exceeded its configured row limit".into(),
+                    ));
+                }
+                let (decoded, _) = self.create_dataframe_from_arrow_ipc(
+                    Some(&batch.bytes),
+                    Some(descriptor.schema.clone()),
+                    crate::duckdb_source::DUCKDB_SOURCE_MAX_BATCH_BYTES,
+                    crate::duckdb_source::DUCKDB_SOURCE_MAX_BATCH_ROWS,
+                    64 * 1024 * 1024,
+                    512 * 1024,
+                )?;
+                let decoded = decoded
+                    .collect()
+                    .map_err(|error| EngineError::User(error.to_string()))?;
+                snapshot.charge_decoded_bytes(decoded.estimated_size())?;
+                match frame.as_mut() {
+                    Some(frame) => {
+                        frame
+                            .vstack_mut(&decoded)
+                            .map_err(|error| EngineError::User(error.to_string()))?;
+                    }
+                    None => frame = Some(decoded.as_ref().clone()),
+                }
+                Ok(())
+            })
+            .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+        token
+            .check_cancelled()
+            .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+        let dataframe = match frame {
+            Some(frame) => DataFrame::from_polars_with_options(frame, self.is_case_sensitive())
+                .with_logical_schema(descriptor.schema.clone())?,
+            None => {
+                self.create_dataframe_from_arrow_ipc(
+                    None,
+                    Some(descriptor.schema.clone()),
+                    1024 * 1024,
+                    0,
+                    64 * 1024 * 1024,
+                    512 * 1024,
+                )
+                .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?
+                .0
+            }
+        };
+        let _ = name;
+        Ok(dataframe)
+    }
+
     fn read_external_descriptor(
         &self,
         descriptor: &ExternalTableDescriptor,
@@ -3963,6 +4179,9 @@ impl SparkSession {
             #[cfg(not(feature = "delta"))]
             ExternalTableFormat::Delta => Err(PolarsError::InvalidOperation(
                 "external Delta table reads require the 'delta' feature".into(),
+            )),
+            ExternalTableFormat::DuckDb => Err(PolarsError::InvalidOperation(
+                "DuckDB table reads require an operation-scoped source snapshot".into(),
             )),
             _ => Err(PolarsError::InvalidOperation(
                 "external table format is not supported by this Sparkless backend".into(),

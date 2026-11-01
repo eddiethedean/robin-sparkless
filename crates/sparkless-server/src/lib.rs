@@ -21,6 +21,7 @@ use robin_sparkless::{
     DataType, EngineError, LogicalField as StructField, SharedCatalog, SparkSession,
 };
 use robin_sparkless_core::CancellationToken;
+use robin_sparkless_core::engine::ExternalCatalogProvider;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sha2::{Digest, Sha256};
@@ -102,6 +103,7 @@ struct ServerInner {
     instance_id: String,
     http_address: Mutex<Option<SocketAddr>>,
     root_session: SparkSession,
+    external_catalog_provider: Option<Arc<dyn ExternalCatalogProvider>>,
     sessions: Mutex<HashMap<String, Arc<SessionLifetime>>>,
     #[cfg(feature = "connect")]
     connect_tombstones: Mutex<HashMap<String, String>>,
@@ -406,6 +408,30 @@ impl Server {
                 message: "server limits are invalid or contradictory".into(),
             });
         }
+        #[cfg(feature = "duckdb-source")]
+        let external_catalog_provider: Option<Arc<dyn ExternalCatalogProvider>> =
+            match config.duckdb_sources_json.as_deref() {
+                Some(source_json) => {
+                    let catalog = robin_sparkless::DuckDbCatalog::from_json(&source_json).map_err(
+                        |error| ServerError {
+                            message: format!("invalid DuckDB source configuration: {error}"),
+                        },
+                    )?;
+                    Some(Arc::new(catalog))
+                }
+                None => None,
+            };
+        #[cfg(not(feature = "duckdb-source"))]
+        let external_catalog_provider: Option<Arc<dyn ExternalCatalogProvider>> = {
+            if config.duckdb_sources_json.is_some() {
+                return Err(ServerError {
+                    message:
+                        "SPARKLESS_DUCKDB_SOURCES requires the optional duckdb-source build feature"
+                            .into(),
+                });
+            }
+            None
+        };
         let catalog = SharedCatalog::new();
         let root_session = SparkSession::builder()
             .app_name("sparkless-server")
@@ -434,6 +460,13 @@ impl Server {
             )
             .shared_catalog(catalog)
             .get_or_create();
+        if let Some(provider) = external_catalog_provider.as_ref() {
+            root_session
+                .set_external_catalog_provider(Some(Arc::clone(provider)))
+                .map_err(|error| ServerError {
+                    message: format!("cannot configure the external catalog: {error}"),
+                })?;
+        }
         root_session.register_database("default");
         let max_accepted = config
             .max_active_operations
@@ -450,6 +483,7 @@ impl Server {
             instance_id: Uuid::new_v4().to_string(),
             http_address: Mutex::new(None),
             root_session,
+            external_catalog_provider,
             sessions: Mutex::new(HashMap::new()),
             #[cfg(feature = "connect")]
             connect_tombstones: Mutex::new(HashMap::new()),
@@ -727,7 +761,12 @@ impl Server {
     }
 
     async fn startup_check(&self) -> Result<(), ServerError> {
-        let session = self.inner.root_session.new_session();
+        let session = self
+            .inner
+            .new_logical_session()
+            .map_err(|error| ServerError {
+                message: format!("cannot initialize startup session: {error}"),
+            })?;
         let token = CancellationToken::new();
         let result = tokio::task::spawn_blocking(move || {
             let df = session.sql_with_cancellation("SELECT 1 AS ready", &token)?;
@@ -813,6 +852,14 @@ async fn shutdown_signal() {
 }
 
 impl ServerInner {
+    fn new_logical_session(&self) -> Result<SparkSession, EngineError> {
+        let session = self.root_session.new_session();
+        if let Some(provider) = self.external_catalog_provider.as_ref() {
+            session.set_external_catalog_provider(Some(Arc::clone(provider)))?;
+        }
+        Ok(session)
+    }
+
     fn session_lease(self: &Arc<Self>, id: &str) -> Result<SessionLease, RequestFailure> {
         validate_identifier("session", id)?;
         let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
@@ -856,7 +903,7 @@ impl ServerInner {
         let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
         let lifetime = Arc::new(SessionLifetime {
             id: id.to_string(),
-            session: self.root_session.new_session(),
+            session: self.new_logical_session().map_err(|_| internal_failure())?,
             generation,
             #[cfg(feature = "connect")]
             server_side_session_id: Uuid::new_v4().to_string(),
@@ -993,7 +1040,7 @@ impl ServerInner {
                     let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
                     let lifetime = Arc::new(SessionLifetime {
                         id: key.clone(),
-                        session: self.root_session.new_session(),
+                        session: self.new_logical_session().map_err(|_| internal_failure())?,
                         generation,
                         server_side_session_id: Uuid::new_v4().to_string(),
                         connect_execution: Arc::new(Semaphore::new(1)),

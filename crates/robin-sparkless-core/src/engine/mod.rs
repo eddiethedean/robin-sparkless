@@ -27,9 +27,10 @@ pub use cancellation::CancellationToken;
 pub use collected::CollectedRows;
 pub use dataframe::{DataFrameBackend, GroupedDataBackend};
 pub use external_catalog::{
-    ArrowIpcBatchStream, ArrowIpcStream, ExternalCatalogProvider, ExternalTableDescriptor,
-    ExternalTableFormat, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
-    ExternalTableWriteRequest, ExternalTableWriteResult,
+    ArrowIpcBatchStream, ArrowIpcStream, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
+    ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
+    ExternalTableWriteBatchRequest, ExternalTableWriteRequest, ExternalTableWriteResult,
+    begin_external_catalog_read_snapshot,
 };
 pub use join::JoinType;
 pub use plan::PlanExecutor;

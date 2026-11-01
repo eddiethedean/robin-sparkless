@@ -9,6 +9,8 @@ pub(crate) const MIN_MUTATION_RECORD_BYTES: usize = MUTATION_RECORD_BASE_BYTES +
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub bind: SocketAddr,
+    /// Optional JSON array of trusted DuckDB alias/path configurations.
+    pub duckdb_sources_json: Option<String>,
     pub max_request_bytes: usize,
     pub max_sql_bytes: usize,
     pub max_result_rows: usize,
@@ -29,6 +31,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8099),
+            duckdb_sources_json: None,
             max_request_bytes: 1024 * 1024,
             max_sql_bytes: 256 * 1024,
             max_result_rows: 10_000,
@@ -56,6 +59,9 @@ impl ServerConfig {
                 .parse()
                 .map_err(|_| "SPARKLESS_SERVER_HOST must be an IP address".to_string())?;
             config.bind.set_ip(ip);
+        }
+        if let Ok(sources) = std::env::var("SPARKLESS_DUCKDB_SOURCES") {
+            config.duckdb_sources_json = Some(sources);
         }
         if let Ok(port) = std::env::var("SPARKLESS_SERVER_PORT") {
             let port = parse_positive("SPARKLESS_SERVER_PORT", &port)?;

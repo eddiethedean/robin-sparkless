@@ -22,6 +22,40 @@ PYTHONPATH=python/sparkless SPARKLESS_MAX_ACTIVE_OPERATIONS=4 SPARKLESS_MAX_RANG
 
 Results: release build passed; server library suite passed **85 tests**; focused ReleaseAll regression passed; Connect plan suite passed **19 tests**; launcher suite passed **12 tests**; the public PySpark client smoke passed helper lifecycle, range count, table join, and grouped aggregate checks. `cargo fmt --all` and `git diff --check` passed. These checks cover implemented behavior only; they do not exercise a DuckDB source provider.
 
+## DuckDB standalone source candidate (2026-10-31)
+
+The branch now contains an opt-in `duckdb-source` integration using `duckdb-rs==1.20000.1`
+(bundled DuckDB 2.0.0) and Arrow IPC 60.1.0. The configured catalog accepts only trusted aliases
+and canonical local database paths. It exposes schema metadata without materializing table rows,
+then pins one read-only connection/transaction per execution snapshot and rejects reads from a
+second canonical database owner in the same statement. The Polars integration consumes IPC
+batches synchronously and materializes source relations before evaluating the Connect plan.
+
+The candidate enforces 16,384 rows and 1 MiB IPC bytes per batch; 1,000,000 source rows, 32 MiB
+IPC bytes, and 64 MiB estimated decoded Polars data across one statement; and 512 KiB per VARCHAR
+value. DuckDB is configured for one thread and a 256 MiB per-connection memory limit. A 5 ms
+cancellation watcher calls DuckDB's interrupt handle during a scan. These are configured/enforced
+limits, not measured process-RSS guarantees; there is no independent source-connection admission
+limit beyond server operation admission, and no measured increasing-size or slow-consumer budget.
+
+The following compile checks passed after the source and Connect wiring changes:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home cargo check --locked --release -p sparkless-server --features connect,duckdb-source
+CARGO_HOME=/tmp/sparkless-cargo-home cargo check --locked --release -p sparkless-server --features connect
+cargo fmt --all -- --check
+git diff --check
+```
+
+`crates/robin-sparkless-polars/tests/duckdb_source.rs` adds local fixtures for schema-only reads,
+typed nonempty/empty tables, unknown aliases, duplicate/missing configurations, and snapshot owner
+reuse. That fixture suite has not been run, so Arrow 60-to-Polars IPC interoperability and runtime
+behavior remain unverified. The source is local-file, standalone, and read-only only: Quack/live
+owner mode, cross-process writer visibility, transactional races, disconnect/replay/source-loss
+acceptance, source DDL/DML rejection coverage, platform packaging, and a bounded source connection
+queue are still open. D14 and V35/V36 remain open; the release does not claim live shared-table
+support or complete DuckDB-source acceptance.
+
 ## #1736 export and #1737 range-count measurements
 
 The export comparison contains three fresh baseline/candidate runtime pairs and 15 samples per workload. Values are milliseconds; speedup is baseline median divided by candidate median.
@@ -61,7 +95,7 @@ For the post-export/count candidate, the active-2/16-client cohort measured 105.
 
 ## Open acceptance gates
 
-- The DuckDB source implementation is not present yet: no optional native source feature/configuration, typed cancellable scan batches, operation-owned transaction/snapshot leases, source write rejection path, or standalone/live-owner fixtures have been added. D14 and V35/V36 remain open. The named-table, join, and grouped-aggregate Connect translator support currently runs against registered in-memory tables, not DuckDB sources.
+- The optional standalone DuckDB source candidate is present and the enabled/disabled server feature configurations compile. Its local fixture suite has not been run. It does not implement Quack/live-owner sharing, an independent source-connection queue, the full source lifecycle/write-rejection matrix, or measured source resource budgets. D14 and V35/V36 remain open. The named-table, join, and grouped-aggregate Connect translator additions are wired to source tables but do not yet have real DuckDB public-client differential evidence.
 - The helper has focused lifecycle and public smoke coverage, but its full package-install, import-boundary, fork, startup/session/cleanup failure, nested/reentry, and unrelated-session matrix is still outstanding.
 - #1736/#1737/#1738 correctness and instrumentation work has landed locally, but the complete workload and repeated performance guardrails in the release plan are not all satisfied by the evidence above.
 - No 4.19 API/native/server package version bump, clean-consumer package matrix, exact-commit CI result, or release publication check has been performed.

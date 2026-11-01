@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 pub enum ExternalTableFormat {
     /// A Delta Lake table readable by the selected Sparkless backend.
     Delta,
+    /// A read-only table exposed by the optional DuckDB source connector.
+    DuckDb,
 }
 
 /// A stable catalog result that identifies a table snapshot independently of a catalog service.
@@ -122,6 +124,65 @@ pub struct ExternalTableWriteResult {
     pub committed_version: i64,
 }
 
+/// One operation's view of an external catalog. Implementations may keep a database
+/// transaction or snapshot lease alive while resolving and scanning several relations.
+pub trait ExternalCatalogReadSnapshot: Send + Sync {
+    /// Resolve a name against this operation's catalog view without scanning table rows.
+    fn resolve_table(
+        &self,
+        identifier: &str,
+    ) -> Result<Option<ExternalTableDescriptor>, EngineError>;
+
+    /// Deliver typed, independently readable Arrow IPC batches to the consumer.
+    /// Returning early from the consumer stops the scan and drops provider resources.
+    fn scan_table(
+        &self,
+        table: &ExternalTableDescriptor,
+        token: &CancellationToken,
+        consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError>;
+
+    /// Account for decoded source data retained by the execution engine. Snapshot-capable
+    /// providers can enforce a statement-wide decoded-byte budget across several tables.
+    fn charge_decoded_bytes(&self, _bytes: usize) -> Result<(), EngineError> {
+        Ok(())
+    }
+}
+
+struct ProviderReadSnapshot {
+    provider: std::sync::Arc<dyn ExternalCatalogProvider>,
+}
+
+impl ExternalCatalogReadSnapshot for ProviderReadSnapshot {
+    fn resolve_table(
+        &self,
+        identifier: &str,
+    ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+        self.provider.resolve_table(identifier)
+    }
+
+    fn scan_table(
+        &self,
+        table: &ExternalTableDescriptor,
+        token: &CancellationToken,
+        consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        self.provider.scan_table(table, token, consume)
+    }
+}
+
+/// Start a provider-specific operation snapshot, or wrap a provider that uses the legacy
+/// independent resolver contract.
+pub fn begin_external_catalog_read_snapshot(
+    provider: std::sync::Arc<dyn ExternalCatalogProvider>,
+    token: &CancellationToken,
+) -> Result<std::sync::Arc<dyn ExternalCatalogReadSnapshot>, EngineError> {
+    match provider.begin_read_snapshot(token)? {
+        Some(snapshot) => Ok(snapshot),
+        None => Ok(std::sync::Arc::new(ProviderReadSnapshot { provider })),
+    }
+}
+
 impl ExternalTableWriteResult {
     /// Validate that the receipt keeps the target identity stable and reports its commit.
     pub fn validate_against(&self, previous: &ExternalTableDescriptor) -> Result<(), EngineError> {
@@ -195,6 +256,27 @@ pub trait ExternalCatalogProvider: Send + Sync {
         &self,
         identifier: &str,
     ) -> Result<Option<ExternalTableDescriptor>, EngineError>;
+
+    /// Start an operation-scoped source view. Existing providers receive a lightweight
+    /// adapter; snapshot-capable providers override this to retain a transaction/lease.
+    fn begin_read_snapshot(
+        &self,
+        _token: &CancellationToken,
+    ) -> Result<Option<std::sync::Arc<dyn ExternalCatalogReadSnapshot>>, EngineError> {
+        Ok(None)
+    }
+
+    /// Scan one table as bounded IPC batches. Read-only catalog providers override this method.
+    fn scan_table(
+        &self,
+        _table: &ExternalTableDescriptor,
+        _token: &CancellationToken,
+        _consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::User(
+            "external catalog provider does not support table reads".into(),
+        ))
+    }
 
     /// Commit a write to a table previously resolved by this provider.
     ///

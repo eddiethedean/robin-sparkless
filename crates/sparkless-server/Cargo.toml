@@ -21,6 +21,7 @@ connect = [
     "dep:protoc-bin-vendored",
     "dep:tokio-stream",
 ]
+duckdb-source = ["robin-sparkless/duckdb-source"]
 
 [[bin]]
 name = "sparkless-server"

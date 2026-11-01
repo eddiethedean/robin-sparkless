@@ -1,7 +1,9 @@
 //! Root-owned Session API; delegates to robin-sparkless-polars for execution.
 
 use crate::EngineError;
-use robin_sparkless_core::engine::ExternalCatalogProvider;
+use robin_sparkless_core::engine::{
+    CancellationToken, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
+};
 use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 use robin_sparkless_polars::{
     DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError, SharedCatalog,
@@ -129,6 +131,14 @@ impl SparkSession {
         self.0.set_external_catalog_provider(provider)
     }
 
+    /// Begin one external-source snapshot for a statement, if a provider is configured.
+    pub fn begin_external_catalog_read_snapshot(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Option<Arc<dyn ExternalCatalogReadSnapshot>>, EngineError> {
+        self.0.begin_external_catalog_read_snapshot(token)
+    }
+
     pub fn register_database(&self, name: &str) {
         self.0.register_database(name)
     }
@@ -212,6 +222,23 @@ impl SparkSession {
 
     pub fn table(&self, name: &str) -> Result<DataFrame, PolarsError> {
         self.0.table(name).map(DataFrame)
+    }
+
+    /// Resolve local tables normally and external table schemas without scanning source rows.
+    pub fn table_schema_only(&self, name: &str) -> Result<DataFrame, PolarsError> {
+        self.0.table_schema_only(name).map(DataFrame)
+    }
+
+    /// Resolve and scan an external table in the statement-wide source snapshot.
+    pub fn table_in_read_snapshot(
+        &self,
+        name: &str,
+        snapshot: Arc<dyn ExternalCatalogReadSnapshot>,
+        token: CancellationToken,
+    ) -> Result<DataFrame, PolarsError> {
+        self.0
+            .table_in_read_snapshot(name, snapshot, token)
+            .map(DataFrame)
     }
 
     /// Returns true when `name` resolves to a session temporary view.

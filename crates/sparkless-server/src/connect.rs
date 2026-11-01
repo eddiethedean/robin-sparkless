@@ -1838,10 +1838,11 @@ fn start_connect_producer(
         let (session_guard, compute_permit, session_compute_permit) = planning_resources;
         session.sync_thread_context();
         let planning_started = sender.trace_enabled.then(Instant::now);
-        let translated = plan::translate_plan(&session, &plan).and_then(|translated| {
-            let schema = plan::schema_to_proto(&translated.schema)?;
-            Ok((translated, schema))
-        });
+        let translated = plan::translate_plan_for_execution(&session, &plan, &cancellation)
+            .and_then(|translated| {
+                let schema = plan::schema_to_proto(&translated.schema)?;
+                Ok((translated, schema))
+            });
         if let Some(started) = planning_started {
             sender.planning_time += started.elapsed();
         }

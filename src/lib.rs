@@ -55,10 +55,11 @@ pub mod traits;
 pub mod engine {
     pub use robin_sparkless_core::engine::{
         ArrowIpcBatchStream, ArrowIpcStream, CollectedRows, DataFrameBackend,
-        DataFrameReaderBackend, ExternalCatalogProvider, ExternalTableDescriptor,
-        ExternalTableFormat, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
-        ExternalTableWriteRequest, ExternalTableWriteResult, GroupedDataBackend, JoinType,
-        PlanExecutor, SparkSessionBackend,
+        DataFrameReaderBackend, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
+        ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
+        ExternalTableWriteBatchRequest, ExternalTableWriteRequest, ExternalTableWriteResult,
+        GroupedDataBackend, JoinType, PlanExecutor, SparkSessionBackend,
+        begin_external_catalog_read_snapshot,
     };
     pub use robin_sparkless_core::expr::{
         ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
@@ -109,6 +110,8 @@ pub use dataframe::{
     try_extract_join_eq_columns, try_extract_join_eq_columns_all,
 };
 pub use robin_sparkless_polars::dataframe::DropColumnSpec;
+#[cfg(feature = "duckdb-source")]
+pub use robin_sparkless_polars::{DuckDbCatalog, DuckDbSourceConfig};
 pub use robin_sparkless_polars::{SharedCatalog, SharedCatalogReadLease};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 

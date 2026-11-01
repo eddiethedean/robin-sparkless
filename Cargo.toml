@@ -48,6 +48,7 @@ jdbc_mssql = ["robin-sparkless-polars/jdbc_mssql"]
 jdbc_oracle = ["robin-sparkless-polars/jdbc_oracle"]
 jdbc_db2 = ["robin-sparkless-polars/jdbc_db2"]
 sqlite = ["robin-sparkless-polars/sqlite"]
+duckdb-source = ["robin-sparkless-polars/duckdb-source"]
 
 [dependencies]
 robin-sparkless-core = { version = "4.18.0", path = "crates/robin-sparkless-core" }

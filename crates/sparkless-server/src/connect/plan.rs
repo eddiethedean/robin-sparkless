@@ -8,8 +8,10 @@ use proto::relation::RelType;
 use robin_sparkless::{
     DataType, EngineError, ExprIr, LiteralValue, LogicalField, SparkSession, StructType,
 };
+use robin_sparkless_core::engine::{CancellationToken, ExternalCatalogReadSnapshot};
 use spark_sql_parser::ast::{BinaryOperator, Expr as SqlExpr, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 use tonic::{Code, Status};
 
 const MAX_PLAN_DEPTH: usize = 64;
@@ -42,8 +44,54 @@ pub(super) fn translate_plan(
     session: &SparkSession,
     plan: &proto::Plan,
 ) -> Result<TranslatedPlan, Status> {
+    translate_plan_with_context(session, plan, TranslationContext::analysis())
+}
+
+pub(super) fn translate_plan_for_execution(
+    session: &SparkSession,
+    plan: &proto::Plan,
+    token: &CancellationToken,
+) -> Result<TranslatedPlan, Status> {
+    let source_snapshot = session
+        .begin_external_catalog_read_snapshot(token)
+        .map_err(engine_failure)?;
+    translate_plan_with_context(
+        session,
+        plan,
+        TranslationContext {
+            source_snapshot,
+            token: token.clone(),
+            materialize_sources: true,
+        },
+    )
+}
+
+#[derive(Clone)]
+struct TranslationContext {
+    source_snapshot: Option<Arc<dyn ExternalCatalogReadSnapshot>>,
+    token: CancellationToken,
+    materialize_sources: bool,
+}
+
+impl TranslationContext {
+    fn analysis() -> Self {
+        Self {
+            source_snapshot: None,
+            token: CancellationToken::new(),
+            materialize_sources: false,
+        }
+    }
+}
+
+fn translate_plan_with_context(
+    session: &SparkSession,
+    plan: &proto::Plan,
+    context: TranslationContext,
+) -> Result<TranslatedPlan, Status> {
     let relation = match plan.op_type.as_ref() {
-        Some(PlanOp::Root(relation)) => translate_relation(session, relation, 1)?,
+        Some(PlanOp::Root(relation)) => {
+            translate_relation_with_context(session, relation, 1, &context)?
+        }
         Some(PlanOp::Command(_)) => {
             return Err(unsupported(
                 "Connect commands and SQL execution are outside the 4.19 subset",
@@ -62,6 +110,15 @@ fn translate_relation(
     session: &SparkSession,
     relation: &proto::Relation,
     depth: usize,
+) -> Result<TranslatedRelation, Status> {
+    translate_relation_with_context(session, relation, depth, &TranslationContext::analysis())
+}
+
+fn translate_relation_with_context(
+    session: &SparkSession,
+    relation: &proto::Relation,
+    depth: usize,
+    context: &TranslationContext,
 ) -> Result<TranslatedRelation, Status> {
     if depth > MAX_PLAN_DEPTH {
         return Err(Status::resource_exhausted(format!(
@@ -160,9 +217,27 @@ fn translate_relation(
                     "named-table reads require a simple qualified table identifier",
                 ));
             }
-            let dataframe = session
-                .table(&named_table.unparsed_identifier)
-                .map_err(|error| engine_failure(EngineError::User(error.to_string())))?;
+            let dataframe = if context.materialize_sources {
+                match context.source_snapshot.as_ref() {
+                    Some(snapshot) => session.table_in_read_snapshot(
+                        &named_table.unparsed_identifier,
+                        Arc::clone(snapshot),
+                        context.token.clone(),
+                    ),
+                    None => session.table(&named_table.unparsed_identifier),
+                }
+            } else {
+                session.table_schema_only(&named_table.unparsed_identifier)
+            };
+            let dataframe = match dataframe {
+                Ok(dataframe) => dataframe,
+                Err(_) if context.token.is_cancelled() => {
+                    return Err(Status::cancelled("Connect source read was cancelled"));
+                }
+                Err(error) => {
+                    return Err(engine_failure(EngineError::User(error.to_string())));
+                }
+            };
             let schema = dataframe.schema_engine().map_err(engine_failure)?;
             (dataframe, schema, HashSet::new())
         }
@@ -181,6 +256,7 @@ fn translate_relation(
                 alias.input.as_deref(),
                 "SubqueryAlias.input",
                 depth,
+                context,
             )?;
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
@@ -195,7 +271,13 @@ fn translate_relation(
             )
         }
         Some(RelType::Filter(filter)) => {
-            let input = translate_child(session, filter.input.as_deref(), "Filter.input", depth)?;
+            let input = translate_child(
+                session,
+                filter.input.as_deref(),
+                "Filter.input",
+                depth,
+                context,
+            )?;
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
                     "filters over a global aggregate are outside the 4.19 subset",
@@ -232,7 +314,13 @@ fn translate_relation(
             (dataframe, schema, input.plan_ids)
         }
         Some(RelType::Project(project)) => {
-            let input = translate_child(session, project.input.as_deref(), "Project.input", depth)?;
+            let input = translate_child(
+                session,
+                project.input.as_deref(),
+                "Project.input",
+                depth,
+                context,
+            )?;
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
                     "projections over a global aggregate are outside the 4.19 subset",
@@ -273,7 +361,13 @@ fn translate_relation(
             (dataframe, schema, input.plan_ids)
         }
         Some(RelType::Limit(limit)) => {
-            let input = translate_child(session, limit.input.as_deref(), "Limit.input", depth)?;
+            let input = translate_child(
+                session,
+                limit.input.as_deref(),
+                "Limit.input",
+                depth,
+                context,
+            )?;
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
                     "limits over a global aggregate are outside the 4.19 subset",
@@ -296,8 +390,9 @@ fn translate_relation(
                     "JoinWith struct output is outside the 4.19 subset",
                 ));
             }
-            let left = translate_child(session, join.left.as_deref(), "Join.left", depth)?;
-            let right = translate_child(session, join.right.as_deref(), "Join.right", depth)?;
+            let left = translate_child(session, join.left.as_deref(), "Join.left", depth, context)?;
+            let right =
+                translate_child(session, join.right.as_deref(), "Join.right", depth, context)?;
             if left.deferred_count_input.is_some() || right.deferred_count_input.is_some() {
                 return Err(unsupported("joins over a global aggregate are unsupported"));
             }
@@ -395,6 +490,7 @@ fn translate_relation(
                 aggregate.input.as_deref(),
                 "Aggregate.input",
                 depth,
+                context,
             )?;
             let group_type = proto::aggregate::GroupType::try_from(aggregate.group_type)
                 .map_err(|_| Status::invalid_argument("Aggregate.group_type is unknown"))?;
@@ -1301,9 +1397,10 @@ fn translate_child(
     input: Option<&proto::Relation>,
     name: &'static str,
     depth: usize,
+    context: &TranslationContext,
 ) -> Result<TranslatedRelation, Status> {
     let input = input.ok_or_else(|| Status::invalid_argument(format!("{name} is required")))?;
-    translate_relation(session, input, depth + 1)
+    translate_relation_with_context(session, input, depth + 1, context)
 }
 
 fn translate_expression(
@@ -1986,6 +2083,7 @@ fn data_type_to_proto(data_type: &DataType) -> Result<proto::DataType, Status> {
 
 fn engine_failure(error: EngineError) -> Status {
     let code = match &error {
+        EngineError::Cancelled(_) => Code::Cancelled,
         EngineError::User(_) => Code::InvalidArgument,
         EngineError::NotFound(_) => Code::NotFound,
         _ => Code::FailedPrecondition,

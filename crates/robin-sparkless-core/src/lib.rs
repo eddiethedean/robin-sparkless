@@ -13,9 +13,11 @@ pub mod schema;
 pub use config::SparklessConfig;
 pub use engine::{
     ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, CollectedRows, DataFrameBackend,
-    DataFrameReaderBackend, ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
-    ExternalTableSaveMode, ExternalTableWriteBatchRequest, ExternalTableWriteRequest,
-    ExternalTableWriteResult, GroupedDataBackend, JoinType, PlanExecutor, SparkSessionBackend,
+    DataFrameReaderBackend, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
+    ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
+    ExternalTableWriteBatchRequest, ExternalTableWriteRequest, ExternalTableWriteResult,
+    GroupedDataBackend, JoinType, PlanExecutor, SparkSessionBackend,
+    begin_external_catalog_read_snapshot,
 };
 pub use error::{EngineError, normalize_unresolved_column_message};
 pub use expr::{
