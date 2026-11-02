@@ -1,0 +1,23 @@
+[package]
+name = "robin-sparkless-duckdb"
+version = "4.19.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Optional DuckDB source catalog and bounded Arrow reader for Robin Sparkless"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[features]
+default = []
+
+[dependencies]
+robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+duckdb = { version = "=1.20000.1", default-features = false, features = ["bundled"] }
+arrow60 = { package = "arrow", version = "=60.1.0", default-features = false, features = ["ipc"] }
+
+[[example]]
+name = "duckdb_quack_fixture_owner"
+required-features = []

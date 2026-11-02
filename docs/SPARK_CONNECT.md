@@ -103,29 +103,40 @@ protocol: an operation is supported only when it is listed here and covered by t
 
 The `codex/release-4.19` branch adds optional named-table relations, aliases, joins, grouped
 count/sum, global `count(column)`, and the `SparklessConnect` helper. The helper behavior is
-described above; phase acceptance and release remain open.
+described above. The local branch contains the product/package split, but its new wheels and
+install matrix still need final acceptance; release remains open.
 
-Manually build the native server with `--features connect,duckdb-source` to enable DuckDB sources;
-an ordinary Cargo build does not include DuckDB. The 4.19 server wheel includes that feature and
-the platform-matched DuckDB 2.0.0 Quack extension. Configure trusted aliases at startup; clients
-provide table names only. Standalone mode maps an alias to a local read-only file:
+The 4.19 base `sparkless-server` product has no DuckDB feature. The separate
+`sparkless-server-duckdb` product enables the read-only source adapter and carries the matching
+DuckDB 2.0.0 Quack extension. Both products execute transformations in Polars. Configure trusted
+aliases at startup; clients provide table names only. To run a source-enabled development build:
+
+```sh
+cargo run -p sparkless-server-duckdb --features http,connect -- serve
+```
+
+Standalone mode maps an alias to a local read-only file:
 
 ```sh
 SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/warehouse.duckdb"}]' \
-  sparkless-server
+  sparkless-server-duckdb
 ```
 
 For shared-owner mode, the configured Quack endpoint must already be serving the DuckDB database.
 The installed 4.19 server wheel uses its bundled extension when `extension_path` is omitted. A
 source-built executable can use an explicit local DuckDB 2.0.0 `quack.duckdb_extension` built for
-the same platform. The server loads that exact file and does not install or download extensions at
-runtime. Quack itself is an [experimental, pre-release DuckDB extension](https://github.com/duckdb/duckdb-quack):
+the same platform. The DuckDB product loads that exact file and does not install or download
+extensions at runtime. Quack itself is an [experimental, pre-release DuckDB extension](https://github.com/duckdb/duckdb-quack):
 keep this source mode opt-in and pin the owner to the tested DuckDB 2.0.0 line:
 
 ```sh
 SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","quack_uri":"quack:localhost:9494","token":"replace-with-secret"}]' \
-  sparkless-server
+  sparkless-server-duckdb
 ```
+
+For an installed Python product, use `sparkless-server-duckdb[connect]` and
+`sparkless_server_duckdb.SparklessServer` (or its product-bound `SparklessConnect`). The legacy
+`sparkless.server` helper keeps the base default even when both products are installed.
 
 Pass the JSON through the deployment's secret mechanism so the token does not appear in a shell
 history. Configure Quack authorization on the owner to restrict that token to the intended

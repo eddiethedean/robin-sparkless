@@ -83,18 +83,13 @@ class ReleaseContextTests(unittest.TestCase):
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
-    def test_419_server_wheels_include_and_exercise_duckdb_sources(self):
+    def test_419_server_products_are_built_and_verified_separately(self):
         jobs = workflow("release.yml")["jobs"]
-        for job_name in ("server-bin-manylinux-x86_64", "server-bin-macos-arm64"):
+        for job_name in (
+            "server-products-manylinux-x86_64",
+            "server-products-macos-arm64",
+        ):
             with self.subTest(job=job_name):
-                build = next(
-                    step
-                    for step in jobs[job_name]["steps"]
-                    if step.get("name")
-                    in {"Build the combined server once", "Build native server"}
-                )
-                self.assertIn("--features http,connect,duckdb-source", build["run"])
-
                 steps = jobs[job_name]["steps"]
                 self.assertTrue(
                     any(
@@ -102,33 +97,43 @@ class ReleaseWorkflowTests(unittest.TestCase):
                         for step in steps
                     )
                 )
+                base_build = next(
+                    step for step in steps if step.get("name") == "Build the base server without DuckDB"
+                )
+                duckdb_build = next(
+                    step for step in steps if step.get("name") == "Build the DuckDB server product"
+                )
+                self.assertIn("-p sparkless-server ", base_build["run"])
+                self.assertIn("--features http,connect", base_build["run"])
+                self.assertNotIn("duckdb-source", base_build["run"])
+                self.assertIn("-p sparkless-server-duckdb ", duckdb_build["run"])
                 wheel_step = next(
-                    step
-                    for step in steps
-                    if step.get("name") in {
-                        "Build and verify manylinux wheel",
-                        "Build and verify macOS wheel",
-                    }
+                    step for step in steps if step.get("name", "").startswith("Build and verify separate")
                 )
                 self.assertIn("SPARKLESS_QUACK_EXTENSION_BINARY", wheel_step["run"])
-                self.assertIn("--duckdb-source", wheel_step["run"])
+                self.assertIn("sparkless_server_duckdb", wheel_step["run"])
 
         consumer = "\n".join(
-            step.get("run", "") for step in jobs["server-extra-consumer"]["steps"]
+            step.get("run", "") for step in jobs["server-product-consumer"]["steps"]
         )
         self.assertIn("duckdb-source-py311.lock", consumer)
         self.assertIn("smoke_phase419_duckdb_client.py", consumer)
         self.assertIn("quack_extension_path", consumer)
-        self.assertIn("duckdb-quack-fixture-owner", str(jobs["server-extra-consumer"]))
-        container_build = next(
-            step["run"]
-            for step in jobs["server-container"]["steps"]
-            if step.get("name") == "Build image from the tested server executable"
+        self.assertIn("duckdb-quack-fixture-owner", str(jobs["server-product-consumer"]))
+        self.assertIn("--profile coinstall", consumer)
+        self.assertIn("--profile client-only", consumer)
+        self.assertIn("--profile local-only", consumer)
+        self.assertIn("--legacy-forwarder", consumer)
+        container_build = "\n".join(
+            step.get("run", "") for step in jobs["server-container"]["steps"]
         )
-        self.assertIn("quack.duckdb_extension", container_build)
+        self.assertIn("Dockerfile.release", container_build)
+        self.assertIn("Dockerfile.duckdb.release", container_build)
         dockerfile = (ROOT / "crates/sparkless-server/Dockerfile.release").read_text()
-        self.assertIn("COPY quack.duckdb_extension /usr/local/bin/quack.duckdb_extension", dockerfile)
-        self.assertIn("COPY NOTICE-quack.txt", dockerfile)
+        duckdb_dockerfile = (ROOT / "crates/sparkless-server/Dockerfile.duckdb.release").read_text()
+        self.assertNotIn("quack.duckdb_extension", dockerfile)
+        self.assertIn("COPY quack.duckdb_extension", duckdb_dockerfile)
+        self.assertIn("NOTICE-quack.txt", duckdb_dockerfile)
 
     def test_every_validation_job_is_required_before_publishing(self):
         jobs = workflow("release.yml")["jobs"]
@@ -169,9 +174,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertIn("--distribution sparkless=dist/sparkless", storage_check)
         self.assertIn("--distribution sparkless-native=dist/native", storage_check)
-        self.assertIn(
-            "--distribution sparkless-server-bin=dist/server-bin", storage_check
-        )
+        for distribution in (
+            "sparkless-server=dist/server-base",
+            "sparkless-server-duckdb=dist/server-duckdb",
+            "sparkless-connect=dist/connect",
+            "sparkless-server-bin=dist/server-compat",
+        ):
+            self.assertIn("--distribution " + distribution, storage_check)
 
     def test_release_gate_rejects_failed_cancelled_and_skipped_jobs(self):
         gate = workflow("release.yml")["jobs"]["release-validation-gate"]

@@ -32,7 +32,7 @@ jdbc_mssql = ["dep:tiberius", "dep:tokio", "dep:tokio-util", "dep:futures-util"]
 jdbc_oracle = ["dep:oracle-rs", "dep:tokio"]
 jdbc_db2 = ["dep:odbc-api"]
 sqlite = ["dep:rusqlite"]
-duckdb-source = ["dep:duckdb", "dep:arrow60"]
+duckdb-source = ["dep:robin-sparkless-duckdb"]
 
 [dependencies]
 robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
@@ -82,14 +82,9 @@ tokio-util = { version = "0.7", optional = true, features = ["compat"] }
 futures-util = { version = "0.3", optional = true }
 oracle-rs = { version = "0.1.5", package = "oracle-rs", optional = true }
 odbc-api = { version = "21.0", optional = true }
-duckdb = { version = "=1.20000.1", optional = true, default-features = false, features = ["bundled"] }
-arrow60 = { package = "arrow", version = "=60.1.0", optional = true, default-features = false, features = ["ipc"] }
+robin-sparkless-duckdb = { version = "4.19.0", path = "../robin-sparkless-duckdb", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
 polars-parquet = { version = "0.53", default-features = false, features = ["zstd"] }
 zstd = { version = "=0.14.3", default-features = false }
-
-[[example]]
-name = "duckdb_quack_fixture_owner"
-required-features = ["duckdb-source"]

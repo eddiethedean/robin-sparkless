@@ -1,8 +1,8 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-pub(crate) const MUTATION_RECORD_BASE_BYTES: usize = 2048;
-pub(crate) const MIN_MUTATION_RECORD_BYTES: usize = MUTATION_RECORD_BASE_BYTES + 2;
+pub const MUTATION_RECORD_BASE_BYTES: usize = 2048;
+pub const MIN_MUTATION_RECORD_BYTES: usize = MUTATION_RECORD_BASE_BYTES + 2;
 
 /// Enforced transport and admission limits. CPU and intermediate native memory remain
 /// cooperative budgets because a Polars call cannot be forcibly interrupted in-process.

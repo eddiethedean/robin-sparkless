@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sparkless-connect"
+version = "4.19.0"
+description = "Lightweight Sparkless server and Spark Connect client lifecycle helpers"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[project.optional-dependencies]
+client = ["pyspark-client==4.0.5"]
+
+[tool.setuptools]
+packages = ["sparkless_connect"]
+
+[tool.setuptools.package-data]
+sparkless_connect = ["py.typed"]

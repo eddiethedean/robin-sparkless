@@ -5,10 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sparkless-server-bin"
 version = "4.19.0"
-description = "Platform-specific native HTTP and Spark Connect server executable for sparkless"
+description = "Compatibility accessor for the separately packaged Sparkless server products"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
+dependencies = ["sparkless-server==4.19.0"]
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Rust",
@@ -22,9 +23,4 @@ packages = ["sparkless_server_bin"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-sparkless_server_bin = [
-    "sparkless-server",
-    "sparkless-server.exe",
-    "quack.duckdb_extension",
-    "NOTICE-quack.txt",
-]
+sparkless_server_bin = ["py.typed"]

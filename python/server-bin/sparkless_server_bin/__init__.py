@@ -1,31 +1,20 @@
-"""Locate the native server executable installed by this platform wheel."""
-
-from __future__ import annotations
-
-import os
-import sys
-from pathlib import Path
+"""Compatibility accessors for applications using the former server binary package."""
 
 
 def executable_path() -> str:
-    name = "sparkless-server.exe" if os.name == "nt" else "sparkless-server"
-    path = Path(__file__).resolve().parent / name
-    if not path.is_file():
-        platform = "{}-{}".format(sys.platform, getattr(os, "uname", lambda: None)())
-        raise FileNotFoundError(
-            "sparkless-server-bin has no precompiled executable for {}".format(platform)
-        )
-    return str(path)
+    from sparkless_server import executable_path as base_executable_path
+
+    return base_executable_path()
 
 
 def quack_extension_path() -> str:
-    """Return the matching Quack extension shipped with this server wheel."""
-    path = Path(__file__).resolve().parent / "quack.duckdb_extension"
-    if not path.is_file():
+    try:
+        from sparkless_server_duckdb import quack_extension_path as duckdb_extension_path
+    except ImportError as error:
         raise FileNotFoundError(
-            "sparkless-server-bin has no bundled Quack extension for this platform"
-        )
-    return str(path)
+            "install sparkless-server-duckdb to access the Quack extension"
+        ) from error
+    return duckdb_extension_path()
 
 
 __all__ = ["executable_path", "quack_extension_path"]

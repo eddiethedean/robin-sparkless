@@ -150,7 +150,7 @@ def verify_client_stack() -> dict[str, str]:
     return versions
 
 
-def add_candidate_wheel_metadata(wheel: Path, destination: Path) -> None:
+def add_candidate_wheel_metadata(wheel: Path, destination: Path, product: str) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(wheel) as archive:
         metadata_paths = [
@@ -167,12 +167,15 @@ def add_candidate_wheel_metadata(wheel: Path, destination: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(archive.read(metadata_paths[0]))
     sys.path.insert(0, str(destination))
+    distribution = (
+        "sparkless-server" if product == "base" else "sparkless-server-duckdb"
+    )
     try:
-        actual = importlib.metadata.version("sparkless-server-bin")
+        actual = importlib.metadata.version(distribution)
     except importlib.metadata.PackageNotFoundError as error:
         raise SystemExit("could not read candidate server wheel metadata") from error
     if actual != "4.19.0":
-        raise SystemExit(f"expected sparkless-server-bin==4.19.0, found {actual}")
+        raise SystemExit(f"expected {distribution}==4.19.0, found {actual}")
 
 
 def nearest_rank(values: list[float], fraction: float) -> float | None:
@@ -414,6 +417,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-binary", type=Path, required=True)
     parser.add_argument("--server-wheel", type=Path, required=True)
+    parser.add_argument("--product", choices=("base", "duckdb"), default="base")
     parser.add_argument("--spark-archive", type=Path, required=True)
     parser.add_argument("--spark-home", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -442,7 +446,9 @@ def main() -> None:
         (suite_dir / "test_phase419_xdist_suite.py").write_text(
             SUITE_SOURCE, encoding="utf-8"
         )
-        add_candidate_wheel_metadata(wheel, work_dir / "candidate-wheel-metadata")
+        add_candidate_wheel_metadata(
+            wheel, work_dir / "candidate-wheel-metadata", args.product
+        )
         reports = []
         order = (
             "sparkless-server",

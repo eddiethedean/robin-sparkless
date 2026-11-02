@@ -111,7 +111,7 @@ pub use dataframe::{
 };
 pub use robin_sparkless_polars::dataframe::DropColumnSpec;
 #[cfg(feature = "duckdb-source")]
-pub use robin_sparkless_polars::{DuckDbCatalog, DuckDbSourceConfig};
+pub use robin_sparkless_duckdb::{DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec};
 pub use robin_sparkless_polars::{SharedCatalog, SharedCatalogReadLease};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 

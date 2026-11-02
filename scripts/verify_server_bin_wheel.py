@@ -1,4 +1,4 @@
-"""Build-independent smoke test for an installed sparkless-server-bin wheel."""
+"""Build-independent smoke test for an installed Sparkless server product wheel."""
 
 from __future__ import annotations
 
@@ -15,28 +15,32 @@ import tempfile
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
+import zipfile
 
 from verify_server_http import verify_endpoint, verify_mutations
 
 import tomllib
 
 
-PACKAGE_NAME = "sparkless-server-bin"
+PRODUCTS = {
+    "base": ("sparkless-server", "sparkless_server", "base", False),
+    "duckdb": ("sparkless-server-duckdb", "sparkless_server_duckdb", "duckdb", True),
+}
 CONTROL_PROTOCOL_VERSION = 2
 CAPABILITIES_PROTOCOL_VERSION = 1
 SPARK_CONNECT_PROTOCOL_VERSION = "4.0.5"
 MAX_CONTROL_FRAME_BYTES = 16 * 1024
 
 
-def _wheel_parts(path: Path) -> tuple[str, str, str]:
+def _wheel_parts(path: Path, package_name: str) -> tuple[str, str, str]:
     if not path.is_file() or path.suffix != ".whl":
         raise ValueError("wheel must name an existing .whl file")
     parts = path.name[:-4].split("-")
     if len(parts) != 5:
         raise ValueError("wheel filename does not follow the five-field wheel format")
     distribution, version, _python, _abi, platform = parts
-    if distribution.replace("_", "-").lower() != PACKAGE_NAME:
-        raise ValueError("wheel is not the sparkless-server-bin distribution")
+    if distribution.replace("_", "-").lower() != package_name:
+        raise ValueError("wheel is not the {} distribution".format(package_name))
     return version, platform, distribution
 
 
@@ -66,17 +70,19 @@ def _smoke_installed_binary(
     connect_client: bool = False,
     duckdb_source: bool = False,
     client_python: str | None = None,
+    product: str = "base",
 ) -> None:
-    installed_version = importlib.metadata.version(PACKAGE_NAME)
+    package_name, module_name, _identity, includes_duckdb = PRODUCTS[product]
+    installed_version = importlib.metadata.version(package_name)
     if installed_version != expected_version:
         raise RuntimeError(
             "installed wheel version {} does not match {}".format(
                 installed_version, expected_version
             )
         )
-    package = importlib.import_module("sparkless_server_bin")
+    package = importlib.import_module(module_name)
     executable = Path(package.executable_path())
-    if duckdb_source:
+    if duckdb_source or includes_duckdb:
         extension_path = Path(package.quack_extension_path())
         if (
             not extension_path.is_file()
@@ -104,6 +110,7 @@ def _verify_instance(
     connect_client: bool = False,
     client_python: str | None = None,
     mutations: bool = True,
+    product: str = "base",
 ) -> None:
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise RuntimeError("installed wheel does not contain an executable server")
@@ -146,12 +153,32 @@ def _verify_instance(
             raise RuntimeError("installed server capabilities protocol is incompatible")
         if ready.get("server_version") != expected_version:
             raise RuntimeError("installed binary and wheel versions do not match")
+        _package_name, _module_name, product_id, has_duckdb = PRODUCTS[product]
+        if ready.get("server_product") != product_id:
+            raise RuntimeError("installed binary reported the wrong product identity")
+        if ready.get("execution_backend") != "polars":
+            raise RuntimeError("installed binary reported the wrong execution backend")
         instance_id = ready.get("server_instance_id")
         capabilities = ready.get("capabilities")
         if not isinstance(instance_id, str) or not instance_id:
             raise RuntimeError("installed server did not identify its instance")
         if not isinstance(capabilities, dict):
             raise RuntimeError("installed server did not report capabilities")
+        if capabilities.get("server_product") != product_id:
+            raise RuntimeError("installed capabilities reported the wrong product identity")
+        if capabilities.get("execution_backend") != "polars":
+            raise RuntimeError("installed capabilities reported the wrong execution backend")
+        sources = capabilities.get("data_sources")
+        owner_modes = capabilities.get("duckdb_owner_modes")
+        if not isinstance(sources, list) or not isinstance(owner_modes, list):
+            raise RuntimeError("installed server reported invalid source capabilities")
+        if has_duckdb:
+            if "duckdb" not in sources or not {
+                "standalone-read-only", "shared-quack-owner"
+            }.issubset(owner_modes):
+                raise RuntimeError("DuckDB product did not advertise both source modes")
+        elif sources or owner_modes:
+            raise RuntimeError("base server advertised DuckDB capabilities")
         if capabilities.get("server_instance_id") != instance_id:
             raise RuntimeError("ready and capability instance identities differ")
         nested_capabilities_version = capabilities.get("capabilities_protocol_version")
@@ -373,6 +400,7 @@ def verify_binary(
     connect_client: bool = False,
     client_python: str | None = None,
     connect_only: bool = False,
+    product: str = "base",
 ) -> None:
     if connect_only and not connect:
         raise ValueError("Connect-only mode requires --connect")
@@ -385,6 +413,7 @@ def verify_binary(
         connect=connect,
         connect_client=connect_client,
         client_python=client_python,
+        product=product,
     )
     if connect:
         _verify_connect_bind_failure(executable, http=not connect_only)
@@ -395,6 +424,7 @@ def verify_binary(
                 http=True,
                 connect=False,
                 mutations=False,
+                product=product,
             )
 
 
@@ -407,10 +437,13 @@ def verify_wheel(
     connect_client: bool = False,
     duckdb_source: bool = False,
     client_python: str | None = None,
+    product: str = "base",
+    dependency_wheels: list[Path] | None = None,
 ) -> None:
     wheel = wheel.resolve()
+    package_name, _module_name, _identity, includes_duckdb = PRODUCTS[product]
     expected_version = tomllib.loads(package_project.read_text())["project"]["version"]
-    wheel_version, platform, _distribution = _wheel_parts(wheel)
+    wheel_version, platform, _distribution = _wheel_parts(wheel, package_name)
     if wheel_version != expected_version:
         raise ValueError(
             "wheel version {} does not match package metadata {}".format(
@@ -424,14 +457,35 @@ def verify_wheel(
             )
         )
 
-    with tempfile.TemporaryDirectory(prefix="sparkless-server-bin-") as temporary:
+    with zipfile.ZipFile(wheel) as archive:
+        contents = set(archive.namelist())
+    if product == "base":
+        forbidden = [
+            name for name in contents
+            if "quack" in name.lower() or "duckdb" in name.lower()
+        ]
+        if forbidden:
+            raise ValueError("base server wheel contains DuckDB/Quack files: {}".format(forbidden[:3]))
+        if not any(name.startswith("sparkless_server/sparkless-server") for name in contents):
+            raise ValueError("base server wheel has no packaged executable")
+    else:
+        required_payload = {
+            "sparkless_server_duckdb/sparkless-server-duckdb",
+            "sparkless_server_duckdb/quack.duckdb_extension",
+            "sparkless_server_duckdb/NOTICE-quack.txt",
+        }
+        if not required_payload.issubset(contents):
+            raise ValueError("DuckDB server wheel is missing its executable, extension, or notice")
+        if any(name.startswith("sparkless_server/sparkless-server") for name in contents):
+            raise ValueError("DuckDB wheel must not bundle the base product executable")
+
+    with tempfile.TemporaryDirectory(prefix="sparkless-server-product-") as temporary:
         venv_path = Path(temporary) / "venv"
         subprocess.run([sys.executable, "-m", "venv", str(venv_path)], check=True)
         python = venv_path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        subprocess.run(
-            [str(python), "-m", "pip", "install", "--no-deps", str(wheel)],
-            check=True,
-        )
+        packages = [str(path.resolve()) for path in (dependency_wheels or [])]
+        packages.append(str(wheel))
+        subprocess.run([str(python), "-m", "pip", "install", "--no-deps", *packages], check=True)
         smoke_command = [
             str(python),
             str(Path(__file__).resolve()),
@@ -442,8 +496,9 @@ def verify_wheel(
             smoke_command.append("--connect")
         if connect_client:
             smoke_command.append("--connect-client")
-        if duckdb_source:
+        if duckdb_source or includes_duckdb:
             smoke_command.append("--duckdb-source")
+        smoke_command.extend(("--product", product))
         if client_python:
             smoke_command.extend(("--client-python", client_python))
         subprocess.run(smoke_command, check=True)
@@ -487,6 +542,11 @@ def main() -> int:
         "--binary", type=Path, help="verify this exact native executable"
     )
     parser.add_argument("--version", help="expected native binary version")
+    parser.add_argument("--product", choices=tuple(PRODUCTS), default="base")
+    parser.add_argument(
+        "--dependency-wheel", action="append", type=Path, default=[],
+        help="install this exact dependency wheel in the isolated verifier venv",
+    )
     args = parser.parse_args()
     try:
         if args.connect_client and not (args.connect or args.connect_only):
@@ -503,6 +563,7 @@ def main() -> int:
                 connect_client=args.connect_client,
                 client_python=args.client_python,
                 connect_only=args.connect_only,
+                product=args.product,
             )
         elif args.smoke_installed is not None:
             if args.connect_only:
@@ -513,6 +574,7 @@ def main() -> int:
                 connect_client=args.connect_client,
                 duckdb_source=args.duckdb_source,
                 client_python=args.client_python,
+                product=args.product,
             )
         else:
             if args.wheel is None or args.platform is None:
@@ -527,6 +589,8 @@ def main() -> int:
                 connect_client=args.connect_client,
                 duckdb_source=args.duckdb_source,
                 client_python=args.client_python,
+                product=args.product,
+                dependency_wheels=args.dependency_wheel,
             )
     except (OSError, ValueError, subprocess.SubprocessError, RuntimeError) as error:
         print("ERROR: {}".format(error), file=sys.stderr)

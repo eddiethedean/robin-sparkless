@@ -70,13 +70,27 @@ def read_toml(path: Path) -> dict:
 def check_release(root: Path, tag: str | None = None) -> list[str]:
     facade = read_toml(root / "Cargo.toml")
     core = read_toml(root / "crates/robin-sparkless-core/Cargo.toml")
+    duckdb = read_toml(root / "crates/robin-sparkless-duckdb/Cargo.toml")
     polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
+    server_core = read_toml(root / "crates/sparkless-server-core/Cargo.toml")
+    server_polars = read_toml(root / "crates/sparkless-server-polars/Cargo.toml")
     server = read_toml(root / "crates/sparkless-server/Cargo.toml")
+    server_duckdb = read_toml(root / "crates/sparkless-server-duckdb/Cargo.toml")
     native = read_toml(root / "python/native/Cargo.toml")
     project = read_toml(root / "python/pyproject.toml")["project"]
     packages = {
         manifest["package"]["name"]: manifest["package"]["version"]
-        for manifest in (facade, core, polars, server, native)
+        for manifest in (
+            facade,
+            core,
+            duckdb,
+            polars,
+            server_core,
+            server_polars,
+            server,
+            server_duckdb,
+            native,
+        )
     }
     expected = facade["package"]["version"]
     if _is_coordinated_release(expected):
@@ -90,14 +104,19 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         "facade/core": facade["dependencies"]["robin-sparkless-core"]["version"],
         "facade/polars": facade["dependencies"]["robin-sparkless-polars"]["version"],
         "polars/core": polars["dependencies"]["robin-sparkless-core"]["version"],
-        "server/facade": server["dependencies"]["robin-sparkless"]["version"],
-        "server/core": server["dependencies"]["robin-sparkless-core"]["version"],
+        "facade/duckdb": facade["dependencies"]["robin-sparkless-duckdb"]["version"],
+        "polars/duckdb": polars["dependencies"]["robin-sparkless-duckdb"]["version"],
+        "server/polars-adapter": server["dependencies"]["sparkless-server-polars"]["version"],
+        "server-polars/facade": server_polars["dependencies"]["robin-sparkless"]["version"],
+        "server-polars/core": server_polars["dependencies"]["sparkless-server-core"]["version"],
+        "server-duckdb/polars-adapter": server_duckdb["dependencies"]["sparkless-server-polars"]["version"],
+        "server-duckdb/core": server_duckdb["dependencies"]["sparkless-server-core"]["version"],
     }
     if _is_coordinated_release(expected):
         dependencies["polars/parser"] = polars["dependencies"]["spark-sql-parser"][
             "version"
         ]
-        dependencies["server/parser"] = server["dependencies"]["spark-sql-parser"][
+        dependencies["server-polars/parser"] = server_polars["dependencies"]["spark-sql-parser"][
             "version"
         ]
     module = ast.parse((root / "python/sparkless/sparkless/__init__.py").read_text())
@@ -126,6 +145,8 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         errors.append("sparkless-native: Python and Cargo versions differ")
     if f"sparkless-native=={engine['version']}" not in project.get("dependencies", []):
         errors.append("sparkless must pin the exact sparkless-native version")
+    if any(dep.startswith("sparkless-connect") for dep in project.get("dependencies", [])):
+        errors.append("sparkless local API must not depend on the server/client launcher")
     errors.extend(validate_server_inventory(root, tag))
     if tuple(map(int, expected.split(".")[:2])) >= (4, 17):
         if project.get("requires-python") != ">=3.11":
@@ -136,18 +157,25 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
 
 
 def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
-    """Check the separately distributed native server and its package coupling."""
+    """Check the base/DuckDB server products and their package coupling."""
     facade = read_toml(root / "Cargo.toml")
     core = read_toml(root / "crates/robin-sparkless-core/Cargo.toml")
+    duckdb = read_toml(root / "crates/robin-sparkless-duckdb/Cargo.toml")
     polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
     parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
+    server_core = read_toml(root / "crates/sparkless-server-core/Cargo.toml")
+    server_polars = read_toml(root / "crates/sparkless-server-polars/Cargo.toml")
     server = read_toml(root / "crates/sparkless-server/Cargo.toml")
+    server_duckdb = read_toml(root / "crates/sparkless-server-duckdb/Cargo.toml")
     lock_versions = {
         package["name"]: package["version"]
         for package in read_toml(root / "Cargo.lock")["package"]
     }
     python = read_toml(root / "python/pyproject.toml")
-    server_binary = read_toml(root / "python/server-bin/pyproject.toml")["project"]
+    connect_package = read_toml(root / "python/connect/pyproject.toml")["project"]
+    base_package = read_toml(root / "python/server/pyproject.toml")["project"]
+    duckdb_package = read_toml(root / "python/server-duckdb/pyproject.toml")["project"]
+    server_compat = read_toml(root / "python/server-bin/pyproject.toml")["project"]
 
     expected = facade["package"]["version"]
     errors = []
@@ -157,39 +185,70 @@ def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
                 server["package"]["version"], expected
             )
         )
-    if lock_versions.get("sparkless-server") != server["package"]["version"]:
-        errors.append("sparkless-server: Cargo.lock does not match its manifest")
-    for dependency, package_version in (
-        ("robin-sparkless", expected),
-        ("robin-sparkless-core", core["package"]["version"]),
-        ("spark-sql-parser", parser["package"]["version"]),
+    for name, manifest in (
+        ("robin-sparkless-duckdb", duckdb),
+        ("sparkless-server-core", server_core),
+        ("sparkless-server-polars", server_polars),
+        ("sparkless-server", server),
+        ("sparkless-server-duckdb", server_duckdb),
     ):
-        actual = server["dependencies"][dependency]["version"]
+        if lock_versions.get(name) != manifest["package"]["version"]:
+            errors.append("{}: Cargo.lock does not match its manifest".format(name))
+    dependency_sets = (
+        ("sparkless-server/adapter", server, "sparkless-server-polars", expected),
+        ("sparkless-server-polars/facade", server_polars, "robin-sparkless", expected),
+        ("sparkless-server-polars/core", server_polars, "sparkless-server-core", expected),
+        ("sparkless-server-polars/parser", server_polars, "spark-sql-parser", expected),
+        ("sparkless-server-duckdb/adapter", server_duckdb, "sparkless-server-polars", expected),
+        ("sparkless-server-duckdb/core", server_duckdb, "sparkless-server-core", expected),
+        ("robin-sparkless-polars/duckdb", polars, "robin-sparkless-duckdb", expected),
+        ("robin-sparkless-duckdb/core", duckdb, "robin-sparkless-core", core["package"]["version"]),
+    )
+    for label, manifest, dependency, package_version in dependency_sets:
+        actual = manifest["dependencies"][dependency]["version"]
         if actual != package_version:
             errors.append(
-                "sparkless-server/{}: dependency version {} does not match {}".format(
-                    dependency, actual, package_version
+                "{}/{}: dependency version {} does not match {}".format(
+                    label, dependency, actual, package_version
                 )
             )
-    if server_binary["version"] != expected:
-        errors.append(
-            "sparkless-server-bin: version {} does not match {}".format(
-                server_binary["version"], expected
-            )
-        )
-    server_extra = python["project"].get("optional-dependencies", {}).get("server", [])
-    required_extra = "sparkless-server-bin=={}".format(expected)
-    if (
-        tuple(map(int, expected.split(".")[:2])) >= (4, 17)
-        and server_binary.get("requires-python") != ">=3.11"
-    ):
-        errors.append("sparkless-server-bin must require Python >=3.11")
-    if required_extra not in server_extra:
-        errors.append(
-            "sparkless[server]: missing exact binary dependency {}".format(
-                required_extra
-            )
-        )
+    if "duckdb-source" in server.get("features", {}):
+        errors.append("sparkless-server base product must not expose a DuckDB-selecting feature")
+    if "robin-sparkless-duckdb" in server.get("dependencies", {}):
+        errors.append("sparkless-server base product must not depend on the DuckDB source crate")
+    python_products = (
+        ("sparkless-connect", connect_package),
+        ("sparkless-server", base_package),
+        ("sparkless-server-duckdb", duckdb_package),
+        ("sparkless-server-bin", server_compat),
+    )
+    for name, package in python_products:
+        if package.get("version") != expected:
+            errors.append("{}: Python distribution version does not match {}".format(name, expected))
+        if package.get("requires-python") != ">=3.11":
+            errors.append("{} must require Python >=3.11".format(name))
+    exact_connect = "sparkless-connect=={}".format(expected)
+    for name, package in (("sparkless-server", base_package), ("sparkless-server-duckdb", duckdb_package)):
+        if exact_connect not in package.get("dependencies", []):
+            errors.append("{}: missing exact shared launcher dependency {}".format(name, exact_connect))
+        if any(dep.startswith(("sparkless-native", "sparkless==")) for dep in package.get("dependencies", [])):
+            errors.append("{} must not depend on the local API/native engine".format(name))
+        if "pyspark-client==4.0.5" not in package.get("optional-dependencies", {}).get("connect", []):
+            errors.append("{}[connect] must pin pyspark-client==4.0.5".format(name))
+    if "sparkless-server=={}".format(expected) not in server_compat.get("dependencies", []):
+        errors.append("sparkless-server-bin compatibility package must forward to the base product")
+    extras = python["project"].get("optional-dependencies", {})
+    expected_extras = {
+        "server": "sparkless-server=={}".format(expected),
+        "connect": "sparkless-server[connect]=={}".format(expected),
+        "server-duckdb": "sparkless-server-duckdb=={}".format(expected),
+        "connect-duckdb": "sparkless-server-duckdb[connect]=={}".format(expected),
+    }
+    for extra, requirement in expected_extras.items():
+        if requirement not in extras.get(extra, []):
+            errors.append("sparkless[{}]: missing exact product dependency {}".format(extra, requirement))
+    if "pyspark-client==4.0.5" not in connect_package.get("optional-dependencies", {}).get("client", []):
+        errors.append("sparkless-connect[client] must pin pyspark-client==4.0.5")
 
     # From the 4.16 candidate line onward, the parser joins the coordinated first-party
     # release inventory. Determine this from either the candidate manifest version or the
@@ -212,8 +271,8 @@ def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
                 polars["dependencies"]["spark-sql-parser"]["version"],
             ),
             (
-                "sparkless-server/spark-sql-parser",
-                server["dependencies"]["spark-sql-parser"]["version"],
+                "sparkless-server-polars/spark-sql-parser",
+                server_polars["dependencies"]["spark-sql-parser"]["version"],
             ),
         ):
             if actual != expected:

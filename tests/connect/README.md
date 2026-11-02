@@ -3,14 +3,14 @@
 This corpus is pinned to **`pyspark-client==4.0.5`**, with the matching Apache Spark **4.0.5** protocol source. It captures protobuf requests from unmodified public Python APIs and the client's own reattachment/release encoder. The recording stub stops before a server executes a plan. These files establish client wire shapes; they do not claim Sparkless interoperability or server behavior.
 
 The native `connect` feature compiles Apache Spark's ten unchanged protocol sources vendored in
-`crates/sparkless-server/proto/spark/connect/`. Their reviewed source hashes and selected client
+`crates/sparkless-server-polars/proto/spark/connect/`. Their reviewed source hashes and selected client
 behavior are recorded in `docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md`. The Rust
 service tests decode the checked-in `execute-range-filter-count.pb` fixture and cover malformed
 session IDs, duplicate operation IDs, session-generation/tombstone behavior, structural protobuf
 limits, and a real gRPC listener's inbound-size rejection. Run them with:
 
 ```sh
-cargo test -p sparkless-server --no-default-features --features connect connect::tests --lib
+cargo test -p sparkless-server-polars --no-default-features --features connect connect::tests --lib
 ```
 
 These are slice 2 transport and identity tests. They do not exercise native plan translation or
@@ -160,12 +160,13 @@ The reference starts with Apache's `sbin/start-connect-server.sh`, with UTC time
 
 `benchmark_phase419_exports.py --small-jobs-only --startup-samples 20` measures the 10/100/1,000/10,000-row Python-tuple ingest/filter/count cases, a nullable 25-row preview, nullable/mixed collection, and public schema analysis. It validates each result, records 20 warm iterations by default, and measures twenty fresh server/readiness/session starts in the same client runtime. Run it for three fresh runtimes per executable when collecting the paired small-job guardrails; `--iterations` changes the warm action sample count and `--startup-samples` changes the fresh-start sample count.
 
-`benchmark_phase419_xdist.py` runs a 38-case pytest suite with four real xdist workers against one shared server per engine. Every worker creates its own Connect session. Its four job shapes cover the four-job mix described in #1738; the original case list behind the issue's earlier 38-test timing is not retained, so these timings do not reproduce that historical suite. Results, per-test durations, suite timings, rotations, and artifact hashes are retained in the JSON report. It requires a CPython 3.11 environment with `sparkless.server`, `pyspark-client==4.0.5`, PyArrow 26.0.0, pytest, and pytest-xdist 3.8.0; `--spark-home` points to the extracted `deps` directory from the PySpark 4.0.5 source archive.
+`benchmark_phase419_xdist.py` runs a 38-case pytest suite with four real xdist workers against one shared server per engine. Every worker creates its own Connect session. Its four job shapes cover the four-job mix described in #1738; the original case list behind the issue's earlier 38-test timing is not retained, so these timings do not reproduce that historical suite. Results, per-test durations, suite timings, rotations, and artifact hashes are retained in the JSON report. It requires a CPython 3.11 environment with `sparkless-connect`, `pyspark-client==4.0.5`, PyArrow 26.0.0, pytest, and pytest-xdist 3.8.0; `--spark-home` points to the extracted `deps` directory from the PySpark 4.0.5 source archive. Select `--product base` or `--product duckdb` to match the supplied server wheel and executable.
 
 ```sh
 python tests/connect/benchmark_phase419_xdist.py \
   --server-binary /path/to/sparkless-server \
-  --server-wheel /path/to/sparkless_server_bin-4.19.0.whl \
+  --server-wheel /path/to/sparkless_server-4.19.0-py3-none-manylinux_2_28_x86_64.whl \
+  --product base \
   --spark-archive /path/to/pyspark-4.0.5.tar.gz \
   --spark-home /path/to/pyspark-4.0.5-deps \
   --output /tmp/phase419-four-worker-pytest.json
@@ -186,12 +187,12 @@ The source benchmark accepts `--concurrent-readers 1..4` to run independent publ
 `smoke_phase419_duckdb_shutdown.py` launches the Quack owner and packaged server as separate processes, begins a billion-row public source scan, then sends the normal graceful server shutdown command. It uses the pinned client's non-reattachable, zero-retry mode because the test intentionally stops the server; it requires the Connect action to receive the shutdown status and the server trace to confirm that Quack accepted the remote query cancellation. Build the source-enabled candidate and owner fixture, then run:
 
 ```sh
-cargo build --locked --release -p sparkless-server --no-default-features \
-  --features http,connect,duckdb-source
-cargo build --locked --release -p robin-sparkless-polars \
-  --features duckdb-source --example duckdb_quack_fixture_owner
+cargo build --locked --release -p sparkless-server-duckdb --no-default-features \
+  --features http,connect
+cargo build --locked --release -p robin-sparkless-duckdb \
+  --example duckdb_quack_fixture_owner
 python tests/connect/smoke_phase419_duckdb_shutdown.py \
-  --server-bin target/release/sparkless-server \
+  --server-bin target/release/sparkless-server-duckdb \
   --quack-owner-bin target/release/examples/duckdb_quack_fixture_owner \
   --quack-extension-path /path/to/duckdb-2.0.0/quack.duckdb_extension
 ```

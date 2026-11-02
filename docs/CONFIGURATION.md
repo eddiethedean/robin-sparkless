@@ -52,5 +52,5 @@ port. Query `/capabilities` after launch for the effective limits.
 Contradictory byte budgets fail startup. The reserved `sql-warehouse` session is
 exempt from idle expiry. These bounds do not cap query intermediate memory/CPU;
 Connect also has independent replay/live-stream limits listed in its guide.
-Source authority: [server configuration](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server/src/config.rs).
+Source authority: [shared server configuration](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server-core/src/config.rs).
 Operate within a trusted boundary using [the runbook](PRODUCTION.md).

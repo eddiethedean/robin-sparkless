@@ -8,29 +8,28 @@ installation](INSTALLATION.md).
 “Behavior-tested” means linked regression/example coverage exists. “Unsupported”
 is outside the published contract; “unknown” requires workload validation.
 
-The current candidate still uses the existing combined server packaging.
-[Planned product separation](plans/sparkless-server/23-product-and-package-separation.md)
-is required before the 4.19 release: distinct base/DuckDB server products and a
-shared lightweight Python launcher. That migration is not yet implemented or
-validated; the retained behavior/evidence below is its starting point. Both
-planned 4.19 server products execute through Polars; DuckDB execution remains
-later work.
+The branch now contains separate local, base-server, and DuckDB-server package
+boundaries and a shared lightweight Python launcher. The final split-product
+artifacts and dependency-isolation checks remain unvalidated; the earlier
+evidence below records the pre-separation candidate and cannot certify the new
+product builds. Both 4.19 server products execute through Polars; DuckDB
+execution remains later work.
 
-| Capability | Local Python | Rust embedding | HTTP service | Spark Connect |
-| --- | --- | --- | --- | --- |
-| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Range/local relation and the documented read-only source subset below; general Connect SQL remains unsupported |
-| SQL queries | SQL enabled in official wheel | Requires `sql` | Bounded SELECT on service catalog | Unsupported SQL commands |
-| Scalar Python UDF | Behavior-tested in withColumn/select/scalar comparison filters | Native expression callbacks, separate API | Unsupported | Unsupported |
-| pandas/vectorized/grouped Python UDF, UDTF | Unsupported public API | No equivalent public Python contract | Unsupported | Unsupported |
-| CSV/JSON/Parquet | Implemented | Implemented | No general file IO | Unsupported file sources |
-| Delta | Compiled in default wheel | Requires `delta` | Unsupported | Unsupported |
-| JDBC/SQLite | Requires native feature build | Driver-specific Cargo features | Unsupported | Unsupported |
-| CREATE TABLE / INSERT / database DDL | SQL subset | SQL subset | Bounded mutations with identity | Unsupported commands |
-| Warehouse persistence | Parquet with explicit warehouse config | Same engine mechanism | In-memory service catalog only | In-memory session/operation state |
-| External catalog provider | Local callback contract | Core provider trait | No general provider configuration contract | Unsupported |
-| Optional DuckDB table source | Not applicable | `duckdb-source` feature; read-only standalone file or shared Quack owner | Trusted server configuration only; no client-selected paths or credentials | Candidate-tested with `pyspark-client==4.0.5`: named-table schema/read, filter, project, limit, global/column count, same-owner inner equijoin, grouped count and sum |
-| Distributed scheduling / Structured Streaming | Unsupported | Unsupported | Unsupported | Unsupported |
-| Repartition/cache/broadcast hints | Local compatibility behavior; no Spark cluster semantics | Local only | Unsupported | Unsupported |
+| Capability | Local Python | Rust embedding | Base server | DuckDB server | Spark Connect |
+| --- | --- | --- | --- | --- | --- |
+| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Same Polars SQL service surface | Range/local relation and the documented read-only source subset below; general Connect SQL remains unsupported |
+| SQL queries | SQL enabled in official wheel | Requires `sql` | Bounded SELECT on managed catalog | Bounded SELECT on managed and configured source catalogs | Unsupported SQL commands |
+| Scalar Python UDF | Behavior-tested in withColumn/select/scalar comparison filters | Native expression callbacks, separate API | Unsupported | Unsupported | Unsupported |
+| pandas/vectorized/grouped Python UDF, UDTF | Unsupported public API | No equivalent public Python contract | Unsupported | Unsupported | Unsupported |
+| CSV/JSON/Parquet | Implemented | Implemented | No general file IO | No general file IO | Unsupported file sources |
+| Delta | Compiled in default wheel | Requires `delta` | Unsupported | Unsupported | Unsupported |
+| JDBC/SQLite | Requires native feature build | Driver-specific Cargo features | Unsupported | Unsupported | Unsupported |
+| CREATE TABLE / INSERT / database DDL | SQL subset | SQL subset | Bounded mutations with identity | Same bounded mutations | Unsupported commands |
+| Warehouse persistence | Parquet with explicit warehouse config | Same engine mechanism | In-memory service catalog only | In-memory service catalog only | In-memory session/operation state |
+| External catalog provider | Local callback contract | Core provider trait | No general provider configuration contract | No general provider configuration contract | Unsupported |
+| Optional DuckDB table source | Not applicable | `robin-sparkless-duckdb`; optional source feature | Unsupported; rejects DuckDB source configuration | Trusted read-only standalone or shared Quack owner; no client-selected paths or credentials | Available only through the DuckDB server product; tested source subset below |
+| Distributed scheduling / Structured Streaming | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
+| Repartition/cache/broadcast hints | Local compatibility behavior; no Spark cluster semantics | Local only | Unsupported | Unsupported | Unsupported |
 
 Do not interpret a name being importable as a behavior guarantee. Runtime stubs
 and no-op hints are called out in [PySpark differences](PYSPARK_DIFFERENCES.md).
@@ -40,8 +39,10 @@ version used in production, including nulls, empty inputs, invalid data, and typ
 
 Evidence and narrower contracts:
 
-- The 4.19 DuckDB source is opt-in through the `duckdb-source` server feature and
-  `SPARKLESS_DUCKDB_SOURCES`. Public smoke and reference cases cover BOOLEAN,
+- The 4.19 DuckDB source is packaged by `sparkless-server-duckdb` and enabled by
+  trusted `SPARKLESS_DUCKDB_SOURCES` configuration. The `duckdb-source` feature
+  belongs to the Polars adapter crate and is not exposed by the base product.
+  Public smoke and reference cases cover BOOLEAN,
   SMALLINT, INT, BIGINT (including integer extrema and non-null schema), finite
   DOUBLE, STRING, DATE, UTC microsecond TIMESTAMP,
   and exact decimal values at `DECIMAL(1,0)`, `(9,0)`, `(18,6)`, `(38,0)`, and
@@ -51,18 +52,14 @@ Evidence and narrower contracts:
   arbitrary Connect SQL are rejected or unsupported. See the
   [4.19 source contract](plans/sparkless-server/RELEASE_4_19.md#duckdb-source-contract)
   and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
-- The current 4.19.0 release-profile server wheel, installed helper, and public
-  standalone/Quack source smokes pass locally on macOS 26 arm64 with
-  `pyspark-client==4.0.5`. The wheel includes the matching DuckDB 2.0.0 Quack
-  extension; its exact binary, wheel, extension, install commands, and test
-  results are in the
-  [current local package evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#current-local-macos-server-wheel-checks-2026-11-02).
-  That local wheel has a `macosx_26_0_arm64` tag. A separate wheel with the
-  exact `macosx_14_0_arm64` release tag now passes the local wheel verifier and
-  `sparkless[server]` consumer smoke on macOS 26; both the server and Quack
-  extension declare macOS 11.0 as their minimum OS. The tag and packaged contents are checked, but
-  execution on an actual macOS 14 host remains open. See the
-  [local macOS 14-tagged wheel evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-14-tagged-server-wheel-check-2026-11-02).
+- The retained local macOS wheel and public standalone/Quack source smokes
+  validate the **pre-separation** DuckDB-enabled candidate only. They do not
+  certify the new base or DuckDB product wheels, whose exact-candidate checks
+  remain pending under V59. Historical wheel contents, tags, extension hashes,
+  and smoke results are recorded in the
+  [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md); do not
+  reuse those hashes as evidence for the split products. Execution on an actual
+  macOS 14 host also remains open.
 - The earlier exact-commit
   [release workflow run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918)
   passed installed Linux x86_64 and macOS arm64 server-extra source smokes and a

@@ -5662,6 +5662,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_distr 0.4.3",
  "robin-sparkless-core",
+ "robin-sparkless-duckdb",
  "robin-sparkless-polars",
  "serde",
  "serde_json",
@@ -5680,11 +5681,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "robin-sparkless-duckdb"
+version = "4.19.0"
+dependencies = [
+ "arrow 60.1.0",
+ "duckdb",
+ "robin-sparkless-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "robin-sparkless-polars"
 version = "4.19.0"
 dependencies = [
  "aes-gcm",
- "arrow 60.1.0",
  "arrow-array 57.2.0",
  "arrow-schema 57.2.0",
  "base64 0.22.1",
@@ -5694,7 +5705,6 @@ dependencies = [
  "chrono-tz 0.9.0",
  "crc32fast",
  "deltalake",
- "duckdb",
  "fancy-regex",
  "futures",
  "futures-util",
@@ -5718,6 +5728,7 @@ dependencies = [
  "rand_distr 0.4.3",
  "regex",
  "robin-sparkless-core",
+ "robin-sparkless-duckdb",
  "rusqlite",
  "serde",
  "serde_json",
@@ -6243,6 +6254,27 @@ dependencies = [
 name = "sparkless-server"
 version = "4.19.0"
 dependencies = [
+ "serde_json",
+ "sparkless-server-polars",
+ "tokio",
+]
+
+[[package]]
+name = "sparkless-server-core"
+version = "4.19.0"
+
+[[package]]
+name = "sparkless-server-duckdb"
+version = "4.19.0"
+dependencies = [
+ "sparkless-server-core",
+ "sparkless-server-polars",
+]
+
+[[package]]
+name = "sparkless-server-polars"
+version = "4.19.0"
+dependencies = [
  "bytes",
  "http-body-util",
  "hyper",
@@ -6258,6 +6290,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "spark-sql-parser",
+ "sparkless-server-core",
  "tokio",
  "tokio-stream",
  "tonic",

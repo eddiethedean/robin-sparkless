@@ -32,6 +32,31 @@ Install the optional server with `python -m pip install "sparkless[server]==4.18
 The exact engine and server pins are declared by the API package. The public
 inventories and hashes were checked by the successful [tagged Release run](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256).
 
+## 4.19 candidate products
+
+The current `codex/release-4.19` candidate is unpublished. Its package split is
+implemented in this branch, but the new wheels, install matrix, and images still
+need the final candidate acceptance before a 4.19 install is supported.
+
+| Install | Product contents |
+| --- | --- |
+| `sparkless` | Local API and native Polars engine |
+| `sparkless-server` or `sparkless[server]` | Base Polars server; no DuckDB/Quack payload |
+| `sparkless-server[connect]` or `sparkless[connect]` | Base server plus pinned `pyspark-client==4.0.5` |
+| `sparkless-server-duckdb` or `sparkless[server-duckdb]` | Polars server, read-only DuckDB sources, matching Quack extension |
+| `sparkless-server-duckdb[connect]` or `sparkless[connect-duckdb]` | DuckDB server plus pinned Connect client |
+| `sparkless-connect[client]` | Remote Connect client and shared launcher; no server binary or local engine |
+| `sparkless-server-bin` | Legacy universal accessor forwarding to the base server |
+
+The server products use separate import names: `sparkless_server` and
+`sparkless_server_duckdb`. Installing both keeps `sparkless.server` and
+`sparkless_server_bin.executable_path()` on the base product. Source users should
+select `sparkless_server_duckdb.SparklessServer` explicitly. The 4.19 DuckDB
+product still executes transformations in Polars; DuckDB is a read-only source.
+Both server wheel sets currently target Linux x86_64 with glibc 2.28+ and macOS
+14+ ARM64. Product images are `ghcr.io/eddiethedean/sparkless-server` and
+`ghcr.io/eddiethedean/sparkless-server-duckdb`.
+
 ## Platforms and build features
 
 The API wheel is universal; the separate `sparkless-native` extension wheels use **cp311-abi3**, compatible with supported CPython 3.11–3.14,

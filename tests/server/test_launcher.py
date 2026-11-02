@@ -6,8 +6,8 @@ from types import ModuleType
 import pytest
 
 import sparkless
-import sparkless.server as server_module
-from sparkless.server import (
+import sparkless_connect.server as server_module
+from sparkless_connect.server import (
     AsyncSparklessServer,
     SparklessConnect,
     SparklessServer,
@@ -445,7 +445,7 @@ def _write_fake_server(path, *, delay=0.0, stderr_bytes=0, version=None):
         delay=delay,
         stderr_bytes=stderr_bytes,
         version=version
-        or server_module._installed_server_binary_version()
+        or server_module._installed_product_version("base")
         or sparkless.__version__,
     )
     path.write_text(source)
@@ -511,11 +511,14 @@ def test_same_sync_context_owner_rejects_nested_entry(tmp_path, monkeypatch):
 
 def test_packaged_server_version_can_differ_from_api_patch(tmp_path, monkeypatch):
     executable = _write_fake_server(tmp_path / "sparkless-server", version="4.18.0")
-    package = ModuleType("sparkless_server_bin")
+    package = ModuleType("sparkless_server")
     package.executable_path = lambda: executable
     monkeypatch.setitem(sys.modules, "sparkless_server_bin", package)
+    monkeypatch.setitem(sys.modules, "sparkless_server", package)
     monkeypatch.setattr(
-        server_module, "_installed_server_binary_version", lambda: "4.18.0"
+        server_module,
+        "_installed_product_version",
+        lambda product: "4.18.0" if product == "base" else None,
     )
     _use_python_fake_server(monkeypatch)
 
@@ -533,11 +536,17 @@ def test_launcher_rejects_wrong_control_protocol(tmp_path):
         "type": "ready",
         "control_protocol_version": True,
         "server_version": sparkless.__version__,
+        "server_product": "base",
+        "execution_backend": "polars",
         "agent_protocol_version": "1",
         "server_instance_id": "instance",
         "http_url": "http://127.0.0.1:1234",
         "capabilities": {
             "transport": "http",
+            "server_product": "base",
+            "execution_backend": "polars",
+            "data_sources": [],
+            "duckdb_owner_modes": [],
             "server_instance_id": "instance",
             "spark_connect_supported": False,
             "agent_protocol_version": "1",

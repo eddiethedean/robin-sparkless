@@ -71,7 +71,7 @@ Use an in-repository fixture with a standard DuckDB client and Sparkless Connect
 ## Touchpoints
 
 - [Core engine interfaces](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/engine/mod.rs)
-- [Server runtime and construction](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server/src/lib.rs)
+- [Shared Polars-backed server runtime and construction](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server-polars/src/lib.rs)
 - [Connect translation](09-connect-plans-and-analysis.md) and [lifecycle conformance](10-arrow-replay-and-connect-conformance.md)
 - [DuckDB source ownership and schema decisions](14-duckdb-data-source.md)
 

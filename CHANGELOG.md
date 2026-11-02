@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Separate server products** — split the 4.19 server into a DuckDB-free `sparkless-server` product and a `sparkless-server-duckdb` product that owns the read-only DuckDB source and matching Quack extension. Both execute through Polars in 4.19 and report distinct product/source capabilities.
+- **Separate Python server packages** — move launcher helpers into `sparkless-connect`, keep local `sparkless` focused on the local engine, and retain `sparkless.server` and `sparkless-server-bin` as compatibility forwards. Existing source users select `sparkless_server_duckdb` explicitly.
 - **Arrow export and range counts** — consume range and local-relation batches in bounded columnar chunks and use an exact fast path for supported dynamic integer range counts.
 - **Connect operation cleanup** — `ReleaseAll` for a completed non-reattachable query now frees its idempotency and replay history.
 

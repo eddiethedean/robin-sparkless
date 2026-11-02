@@ -268,9 +268,21 @@ jobs:
           restore-keys: |
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Run the combined server regression suite
-        run: cargo test --locked --release -p sparkless-server --no-default-features --features http,connect
+        run: |
+          cargo test --locked --release -p sparkless-server-polars --no-default-features --features http,connect
+          cargo test --locked --release -p sparkless-server --no-default-features --features http,connect --test control_protocol --test phase1_http
         env:
           CARGO_BUILD_JOBS: 1
+      - name: Check product feature isolation
+        run: |
+          set -euo pipefail
+          CARGO_TARGET_DIR=target/server-base cargo tree --locked -e features -p sparkless-server --no-default-features --features http,connect > "$RUNNER_TEMP/base-server-tree.txt"
+          if grep -E 'robin-sparkless-duckdb|duckdb v|libduckdb-sys' "$RUNNER_TEMP/base-server-tree.txt"; then
+            echo 'base server feature graph contains DuckDB dependencies'
+            exit 1
+          fi
+          CARGO_TARGET_DIR=target/server-duckdb cargo tree --locked -e features -p sparkless-server-duckdb --no-default-features --features http,connect > "$RUNNER_TEMP/duckdb-server-tree.txt"
+          grep -q 'robin-sparkless-duckdb' "$RUNNER_TEMP/duckdb-server-tree.txt"
 
   python-build:
     name: Build one Linux CI wheel
@@ -292,6 +304,7 @@ jobs:
         run: |
           python -m pip install build
           python -m build --wheel --outdir dist python
+          python -m build --wheel --outdir dist python/connect
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sparkless-ci-wheel-linux-x86_64

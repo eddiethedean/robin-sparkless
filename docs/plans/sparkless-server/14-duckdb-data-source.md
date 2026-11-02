@@ -78,7 +78,7 @@ are covered.
 - [External catalog contract](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/engine/external_catalog.rs)
 - [Backend interfaces](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/engine/mod.rs)
 - [Polars sessions](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/src/session/mod.rs)
-- [Server runtime](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server/src/lib.rs)
+- [Shared Polars-backed server runtime](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server-polars/src/lib.rs)
 - [DuckDB concurrency](https://duckdb.org/docs/stable/connect/concurrency): verify the selected version's embedded/service ownership rules; documentation is not a compatibility pin.
 
 Python workers, distributed query execution, application-specific integration protocols, durable source caches, and a DuckDB execution backend are outside this phase.

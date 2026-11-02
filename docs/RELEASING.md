@@ -9,21 +9,20 @@ commit and do not satisfy this publication check.
 
 ## Prepare the release
 
-**4.19 candidate scope hold (2026-11-02):** before cutting the current unpublished
-candidate, implement [SS-23's product/package migration](plans/sparkless-server/23-product-and-package-separation.md)
-and its 419-12–419-15 candidate acceptance. The inventory described below reflects
-the existing tooling; it must be expanded to the shared launcher, separate base
-and DuckDB server products, compatibility forwarding package, new Rust crates
-and both images. Candidate V59 must pass before tagging/publication; its public
-stage closes after publication. Existing single-server wheel checks cannot
-authorize this revised release. This planning hold does not change published
-4.18 artifacts or claim that the migration is implemented.
+**4.19 release gate:** this branch now implements [SS-23's product/package
+migration](plans/sparkless-server/23-product-and-package-separation.md), including
+separate base and DuckDB server products, the shared launcher, compatibility
+accessors, and both images. The release workflow builds distinct products and
+inventories. Native Linux/macOS builds, the split-product consumer matrix, and
+V59 still need to pass before tagging/publication; the public stage closes after
+publication. Published 4.18 artifacts remain unchanged.
 
-The Rust facade/core/Polars/parser/server crates and `sparkless-native` share the
-engine version. The Python API has its own version and pins `sparkless-native`
-exactly. Its optional server extra pins `sparkless-server-bin` to the matching
-engine version. A Python-only patch can retain the tested engine/server versions.
-Change a component version whenever its published contents need to change.
+The Rust local facade, engine, DuckDB source, server core, Polars server adapter,
+and product crates share the engine version. Python `sparkless` pins the local
+native engine; the shared launcher, server products, and compatibility accessor
+use exact matching component pins. A Python-only patch can retain the tested
+engine/server versions. Change a component version whenever its published
+contents need to change.
 
 For an engine change, update Cargo manifests, internal requirements, `Cargo.lock`,
 `python/native/pyproject.toml`, the native package version, and server metadata.
@@ -59,11 +58,15 @@ If a tag was pushed before CI completed, rerun its failed release jobs after CI 
 
 ## What release checks
 
-The release workflow builds a small universal `sparkless` API wheel/source archive
-and all eight `sparkless-native` `cp311-abi3` extension wheel targets:
+The release workflow builds a small universal `sparkless` API wheel/source archive,
+the universal `sparkless-connect` and legacy accessor distributions, and all eight
+`sparkless-native` `cp311-abi3` extension wheel targets:
 Linux glibc and musl on x86_64/ARM64, macOS Intel/ARM64, and Windows x64/ARM64.
 The native source archive includes the fixed Cargo dependency graph. The workflow
-also checks the publishable Rust package archives. The API wheel must contain no
+checks every publishable Rust archive, distinct base and DuckDB server wheels for
+each supported server platform, and both server images. The base server wheel and
+feature graph must contain no DuckDB/Quack payload; the DuckDB wheel owns its
+executable, matching extension, and license notice. The API wheel must contain no
 native binaries, stay below 1 MiB, and pin the exact compatible native version.
 Before staging distributions, the release gate checks each file against PyPI's
 100 MiB default and adds the candidate sizes to each project's current published
@@ -73,14 +76,16 @@ This catches cumulative quota exhaustion before any publisher runs.
 The broad Python suite runs once against the Linux publication wheel. Focused
 native smoke tests run SQL, nested/nullable values, Parquet, and Delta on **every**
 wheel with Python 3.11 and 3.14. Linux checks use the declared glibc baseline or
-musl runtime. Both supported server wheels (`manylinux_2_28_x86_64` and
-`macosx_14_0_arm64`) run HTTP/Connect lifecycle checks and fresh offline
-`sparkless[server]` installs.
+musl runtime. Both products' wheels (`manylinux_2_28_x86_64` and
+`macosx_14_0_arm64`) run HTTP/Connect lifecycle checks and fresh product-only
+installs without `sparkless-native`; the consumer matrix also installs and
+exercises each product through its `sparkless` convenience extra. DuckDB source
+checks run only with the DuckDB product.
 
-The Linux server is compiled once. The release container copies the executable
-from that tested wheel, then checks its non-root user, HTTP mutations, public
-Connect client, and graceful shutdown. The source-build Dockerfile remains
-available for local development.
+Base and DuckDB Linux servers are compiled in separate target directories. Each
+container copies the exact executable from its tested wheel, then checks its
+non-root user, HTTP mutations, public Connect client, and graceful shutdown. The
+source-build Dockerfile remains available for local development.
 
 One acceptance job requires every validation job to succeed, checks package
 names, versions, ABI/platform inventory and Twine metadata, and stages the exact
@@ -90,9 +95,10 @@ layer.
 
 ## Publication and retries
 
-Stable tag pushes publish Rust crates in dependency order, then the native engine,
-server wheels and container in parallel, then the small `sparkless` API. The final job checks all three public PyPI inventories and hashes and the engine
-versions on crates.io. For reused component versions, each build job downloads
+Stable tag pushes publish Rust crates in dependency order, then the native engine
+and shared launcher, followed by the server products/images, compatibility
+accessor, and `sparkless` API. The final job checks public PyPI inventories and
+exact hashes for every product and the engine versions on crates.io. For reused component versions, each build job downloads
 matching published files by SHA-256 before running its smoke checks; validation
 and publication therefore consume the immutable published bytes. Publishers download the checked artifacts;
 they do not rebuild wheels or containers. Rust publication uses `--no-verify`

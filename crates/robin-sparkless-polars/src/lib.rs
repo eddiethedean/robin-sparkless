@@ -28,7 +28,7 @@ pub mod udfs;
 pub mod delta;
 
 #[cfg(feature = "duckdb-source")]
-mod duckdb_source;
+pub(crate) use robin_sparkless_duckdb as duckdb_source;
 #[cfg(any(
     feature = "jdbc",
     feature = "jdbc_mysql",
@@ -62,7 +62,7 @@ pub use dataframe::{
     PivotedGroupedData, SaveMode, SelectItem, WriteFormat, WriteMode, broadcast,
 };
 #[cfg(feature = "duckdb-source")]
-pub use duckdb_source::{
+pub use robin_sparkless_duckdb::{
     DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
 };
 pub use error::{EngineError, polars_to_core_error};
