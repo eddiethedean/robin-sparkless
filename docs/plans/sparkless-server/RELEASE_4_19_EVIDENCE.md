@@ -1333,6 +1333,41 @@ previous fixture build exited before the owner became ready with DuckDB's read-o
 error; the updated fixture passed on macOS. Linux Quack shared-owner validation remains open and is
 deferred to the release platform matrix. No CI workflow was started for these checks.
 
+### Quack shared-owner multi-table snapshot check (2026-11-02)
+
+The ignored Quack integration fixture now opens one source snapshot for `events` and `labels`, then
+commits inserts into both tables in one transaction through an independent writer. Scanning both
+tables through the original snapshot returns one row each; a subsequent snapshot returns two rows
+each. The loopback owner explicitly disables TLS for its local fixture. This is a provider-level
+multi-table snapshot check, while the public Spark differential separately verifies same-owner
+joins and schemas.
+
+The test passed at source commit
+`d7727a4bfdbf0e3283912b81c977800e4d9a7e97` on macOS 26.5.2 arm64:
+
+```sh
+SPARKLESS_TEST_QUACK_EXTENSION_PATH=/Users/odosmatthews/.duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension \
+CARGO_HOME=/tmp/sparkless-cargo-home \
+CARGO_TARGET_DIR=/tmp/sparkless-phase419-duckdb-target \
+CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  cargo test --locked --release -p robin-sparkless-polars \
+  --features duckdb-source --test duckdb_source \
+  quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_statement \
+  -- --ignored --nocapture
+```
+
+One test passed. Its executable SHA-256 is
+`3a73ef29cda3f5cf1b633fd9ab9e347444b5e155a40a0435360f683257bbaa25`; the loaded DuckDB 2.0.0
+`osx_arm64` extension SHA-256 is
+`ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935`. This closes the selected
+local multi-table Quack snapshot case; supported Linux Quack packaging and broader V35/V36
+acceptance remain open.
+
+The complete source integration target also passed at the same revision with nine tests passing
+and the Quack-specific test ignored when no extension path was supplied. The target uses the same
+executable hash shown above; it verifies schema/value conversion, read-only behavior, source
+configuration, and local multi-table snapshot ownership.
+
 ## Open acceptance gates
 
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; a fresh three-round current-wheel run at both 100k and 350k returned all readers with zero result-cap rejections and peaked at 136.6/209.8 MiB. A previous branch workflow recorded one 100k-row round per platform; that historical result is not used as a current implementation gate. Earlier 1M-row measurements completed 20 actions at active limits 1/2/4 across three processes per setting; the current packaged candidate also completed a local four-reader round at each limit with zero cap rejections and 257.4/290.1/320.8 MiB peak RSS. The provisional 384 MiB 1M-row macOS guardrail contains these observations, but is not enforced or portable. The current-source Linux x86_64 standalone smoke and one 100k-row resource round pass under Docker emulation; native Linux, Linux Quack shared-owner, and broader resource acceptance remain open. D14 and V35/V36 remain open.
