@@ -1013,7 +1013,17 @@ TZ=UTC PYTHONPATH=/tmp/sparkless-duckdb-python-only \
   --server-bin /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/sparkless-server \
   --quack-owner-bin /tmp/sparkless-phase419-duckdb-target/release/examples/duckdb_quack_fixture_owner \
   --quack-extension-path /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/quack.duckdb_extension
+TZ=UTC PYTHONPATH=/tmp/sparkless-duckdb-python-only \
+  /tmp/phase419-clean-install-matrix/combined/bin/python \
+  tests/connect/smoke_phase419_duckdb_shutdown.py \
+  --server-bin /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/sparkless-server \
+  --quack-owner-bin /tmp/sparkless-phase419-duckdb-target/release/examples/duckdb_quack_fixture_owner \
+  --quack-extension-path /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/quack.duckdb_extension
 ```
+
+The packaged Quack shutdown smoke confirms that server shutdown sends remote cancellation to an
+active owner query, then reports the expected Connect shutdown status. The local run completed in
+79.6 ms and the Quack owner acknowledged cancellation.
 
 The current Python launcher/helper unit suite also passes locally:
 
