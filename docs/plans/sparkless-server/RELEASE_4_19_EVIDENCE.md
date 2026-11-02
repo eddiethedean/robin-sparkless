@@ -1052,6 +1052,21 @@ CARGO_HOME=/tmp/sparkless-cargo-home CARGO_TARGET_DIR=/tmp/sparkless-phase419-du
 This current-source run passed 85 server unit tests, 3 control-protocol integration tests, and 2
 HTTP integration tests, with no failures or ignored tests.
 
+The complementary DuckDB-disabled release build and public-client package check also pass:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  cargo build --locked --release -p sparkless-server --no-default-features \
+  --features http,connect
+python3 scripts/verify_server_bin_wheel.py --binary target/release/sparkless-server \
+  --version 4.19.0 --connect --connect-client \
+  --client-python /tmp/phase419-clean-install-matrix/combined/bin/python
+```
+
+The HTTP/Connect-only executable reports `sparkless-server 4.19.0`, has SHA-256
+`5bca50730a305c3738eb15b9a7f2a71f3dd4f8b13a3efa60339c1b6519e44817`, and passes readiness,
+HTTP, Connect, port-collision, shutdown, and public-client checks.
+
 ## Exact-commit Linux and macOS source-extra resource checks (2026-11-01)
 
 Release workflow run [41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918) completed successfully at branch commit `7361d16850f8e76a84d70b4a88c6ee6c39da7b58`: 33 jobs passed and five publication jobs were skipped for the branch run. The `Server extra (ubuntu-24.04)` and `Server extra (macos-15)` jobs installed the platform-matched 4.19.0 server wheels, passed standalone and Quack public-client source smokes, and completed the four-reader slow-consumer case. The native server container build and smoke and the release validation acceptance gate also passed.
