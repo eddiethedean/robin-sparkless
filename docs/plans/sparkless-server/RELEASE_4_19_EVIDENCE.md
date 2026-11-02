@@ -1275,6 +1275,22 @@ first Connect run exposed four response-ack timeouts because the in-process reat
 collector did not send `ReleaseUntil`; the test helper now releases every consumed response prefix,
 matching the public protocol. No implementation stream or timeout was relaxed.
 
+After the local-only check policy was recorded, the full locked release workspace suite was rerun
+at documentation HEAD `8150c90e97c169c5b3c075c0f835392d6b8ec042`; product source remains the tested
+revision `c01b8d946436b1fe0876d286fe99073fa83d7b8a` because commits since then only update evidence
+and plans:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home \
+CARGO_TARGET_DIR=/tmp/sparkless-phase419-duckdb-target \
+CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  cargo test --locked --release --workspace
+```
+
+It passed all executed workspace unit, integration, and documentation tests. The default workspace
+feature set leaves `duckdb-source` disabled; its enabled build and source-specific fixtures are
+recorded separately below. This local run does not start or depend on CI.
+
 The current source was also rebuilt in release mode with `http,connect,duckdb-source`:
 
 ```sh
