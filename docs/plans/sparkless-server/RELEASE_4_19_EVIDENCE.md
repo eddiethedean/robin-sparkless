@@ -324,6 +324,10 @@ Three exploratory runs on macOS 26.5.2 arm64 used the 4.19.0 macOS server binary
 workflow [41362360697](https://github.com/eddiethedean/robin-sparkless/actions/runs/41362360697)
 (SHA-256 `eb1fec83f8018f311b85a307ef9b95f30f91ee9ee5f1fed4b18fa145ac2db4f0`; features
 `http,connect,duckdb-source`). Harness revision was `831fa0ff7778e9dfb5ccc560ad2d203bf43f06cc`.
+The active-limit-4 run used harness script SHA-256
+`c47fcf95d4442f978d3e98e74c04b01b0b95325f242801f2340a8c6c333c7dcd`; active limits 2 and 1
+used the script with explicit admission/queue options, SHA-256
+`41c5f83f7d3641efb5b8c077b30d6d3b4316fe2f214edae4b1d18e7663fd9344`.
 Four independent clients each consumed exactly 1,000,000 rows with 16-byte payloads through
 `toLocalIterator()`, pausing 10 ms per 16,384-row batch. The one warmup and one measured round
 completed for every reader without a result-limit rejection. Each source had 24 MB of logical
@@ -332,7 +336,7 @@ ms at active limit 4, 9,223.4/9,235.6 ms at active limit 2 (with a 30-second que
 and 9,039.3/9,122.4 ms at active limit 1 (with a 60-second queue timeout).
 
 Server-child RSS peaked at 337,117,184 bytes (321.5 MiB) with active limit 4 and 281,526,272 bytes
-(268.5 MiB) with active limit 2, and 265,909,248 bytes (253.6 MiB) with active limit 1. The first
+(268.5 MiB) with active limit 2, and 265,961,472 bytes (253.6 MiB) with active limit 1. The first
 two exceed the provisional 256 MiB guardrail selected for the 100k–350k four-reader range. The
 active-1 result is one run only, with roughly 2.4 MiB of headroom, so it does not establish a stable
 budget. These observations are not process memory limits, but they show that the 1M per-statement
@@ -865,6 +869,47 @@ environment samples:
 | 2 | [baseline](evidence/phase-419-small-jobs-cancel-ack-baseline-pair-2.json.gz) | `7a50db2c8f8334b0f37f96118cac033230c0962fbe62e0fb8cb1f05dcaca09f1` | [candidate](evidence/phase-419-small-jobs-cancel-ack-candidate-pair-2.json.gz) | `002dc79ddcd358ea6ce5fa79cdf16635b5e6ba4b8f79145db16b3805e9d3ff94` |
 | 3 | [baseline](evidence/phase-419-small-jobs-cancel-ack-baseline-pair-3.json.gz) | `9d4bf2274f668c61c523087e3a9cec0b3246cadf98b537bd5a32b3b6a8a0d094` | [candidate](evidence/phase-419-small-jobs-cancel-ack-candidate-pair-3.json.gz) | `270e63c9888d2b83eae1446b40504d2634d5573ba7e5e0b70fd94159bed06ba4` |
 
+### Four-worker pytest Connect comparison (2026-11-02)
+
+The retained runner `tests/connect/benchmark_phase419_xdist.py` launches one shared Connect
+server per engine, then runs three rotating baseline/candidate pairs. Each server handles one
+warmup suite and one timed suite. Four real `pytest-xdist` workers each create and stop their own
+session on that server. The 38-case suite validates four jobs from #1738's described mix: 10
+1,000-row local-relation ingest/filter/count cases, 10 nullable local-relation collections, 10
+25-row previews, and 8 10,000-row range collections. All results are checked. Each engine has 228
+passing executions; 456 executions passed in total.
+
+Both sides used `pyspark-client==4.0.5`, PyArrow 26.0.0, pytest 9.2.0, pytest-xdist 3.8.0, and
+CPython 3.11.15 on an Apple M4 Pro (12 logical CPUs), macOS 26.5.2 arm64. The JVM service is Spark
+Connect 4.0.5 with `local[4]`, FAIR scheduling, four shuffle/default partitions, and
+`ActiveProcessorCount=4`. Sparkless used a 4.19.0 release-profile server with `http,connect,
+duckdb-source`, four active operations, and four-thread Polars/Rayon/OpenMP pools. The Sparkless
+binary came from release workflow [41362360697](https://github.com/eddiethedean/robin-sparkless/actions/runs/41362360697),
+SHA-256 `eb1fec83f8018f311b85a307ef9b95f30f91ee9ee5f1fed4b18fa145ac2db4f0`; its Connect
+scheduler/exporter paths match the final candidate. The Spark distribution archive SHA-256 is
+`a0d44b0e7faf0458ad83b7aa664e7ed8b96beed8a55d66ce3b0dfac2309dfca6`, and the Connect JAR SHA-256
+is `f762b877f468efbcc2302f62bac2426fd3e0f67ea7d469952efe465bf5587192`.
+
+| Metric | Sparkless 4.19 | JVM Spark Connect 4.0.5 |
+| --- | ---: | ---: |
+| Timed suite p50 / p95 (3 samples) | 726.4 / 727.8 ms | 1,067.9 / 1,092.0 ms |
+| Server start + readiness action + first suite p50 (3 samples) | 833.0 ms | 4,541.9 ms |
+
+These three-run percentiles describe this checked-in four-job suite only. The earlier 2.699 s
+Sparkless and 1.378 s JVM warm-suite figures in the #1738 issue body refer to a 38-test suite, but
+the issue does not retain that suite's case list or source revision. This comparison therefore
+provides fresh shared-server evidence for the described four-job mix without claiming to reproduce
+those earlier figures. The JVM server process was stopped with SIGINT after each pair; the raw
+report retains its exit status and server-log digest.
+
+The deterministic compressed report is
+[phase-419-four-worker-pytest-macos.json.gz](evidence/phase-419-four-worker-pytest-macos.json.gz),
+SHA-256 `aec45e42cc838634e3d34dfe213e5758c1243b732ffd7b58f48b6430ff0cbd12`. It contains all
+six suite runs, per-test JUnit durations/statuses, startup/readiness timings, rotation, client and
+server artifact hashes, and exact configuration. The benchmark source revision was
+`936645fd088c46056a7a3e834838964152d94fc5`; the script SHA-256 is
+`84a3f6fc337006094f32c00d6c5e048c9b65c3af81edb8a6a2ebac7a04bc4205`.
+
 ## Exact-commit Linux and macOS source-extra resource checks (2026-11-01)
 
 Release workflow run [41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918) completed successfully at branch commit `7361d16850f8e76a84d70b4a88c6ee6c39da7b58`: 33 jobs passed and five publication jobs were skipped for the branch run. The `Server extra (ubuntu-24.04)` and `Server extra (macos-15)` jobs installed the platform-matched 4.19.0 server wheels, passed standalone and Quack public-client source smokes, and completed the four-reader slow-consumer case. The native server container build and smoke and the release validation acceptance gate also passed.
@@ -885,7 +930,7 @@ This closes the exact-commit packaged Linux/macOS source-smoke and single-cohort
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; exploratory four-reader 1M-row runs completed at 321.5 MiB (active limit 4) and 268.5 MiB (active limit 2). A single active-limit-1 run reached 253.6 MiB with only 2.4 MiB of headroom, which is not a stable budget. Exact-commit Linux/macOS wheel source smokes and one four-reader 100k-row resource cohort per platform passed in [release run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918); broader platform/resource coverage remains open. D14 and V35/V36 remain open.
 - The exact-commit release consumer jobs passed on Linux x86_64 and macOS arm64 and retained their raw source-resource reports above. Each measured reader completed. These single runs do not establish a cross-platform RSS limit.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; the cross-platform server-extra source package smokes also pass, while broader helper/platform acceptance remains open.
-- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. The four-worker pytest performance comparison required by #1738, source-specific broader platform/resource coverage, and the complete support acceptance gates remain open.
+- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. A new three-pair four-worker comparison covers the described four-job mix; the exact 38-test suite behind #1738's earlier timings is not retained, so reproducing that comparison remains open. Source-specific broader platform/resource coverage and the complete support acceptance gates remain open.
 - Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow succeeded with 33 passing jobs and five publication jobs skipped for the branch run, including package and container checks. Release publication checks have not been performed.
 
 Accordingly, this evidence record does not mark the 4.19 phase or its GitHub issues complete and does not authorize release publication.

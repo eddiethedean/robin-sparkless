@@ -160,6 +160,17 @@ The reference starts with Apache's `sbin/start-connect-server.sh`, with UTC time
 
 `benchmark_phase419_exports.py --small-jobs-only --startup-samples 20` measures the 10/100/1,000/10,000-row Python-tuple ingest/filter/count cases, a nullable 25-row preview, nullable/mixed collection, and public schema analysis. It validates each result, records 20 warm iterations by default, and measures twenty fresh server/readiness/session starts in the same client runtime. Run it for three fresh runtimes per executable when collecting the paired small-job guardrails; `--iterations` changes the warm action sample count and `--startup-samples` changes the fresh-start sample count.
 
+`benchmark_phase419_xdist.py` runs a 38-case pytest suite with four real xdist workers against one shared server per engine. Every worker creates its own Connect session. Its four job shapes cover the four-job mix described in #1738; the original case list behind the issue's earlier 38-test timing is not retained, so these timings do not reproduce that historical suite. Results, per-test durations, suite timings, rotations, and artifact hashes are retained in the JSON report. It requires a CPython 3.11 environment with `sparkless.server`, `pyspark-client==4.0.5`, PyArrow 26.0.0, pytest, and pytest-xdist 3.8.0; `--spark-home` points to the extracted `deps` directory from the PySpark 4.0.5 source archive.
+
+```sh
+python tests/connect/benchmark_phase419_xdist.py \
+  --server-binary /path/to/sparkless-server \
+  --server-wheel /path/to/sparkless_server_bin-4.19.0.whl \
+  --spark-archive /path/to/pyspark-4.0.5.tar.gz \
+  --spark-home /path/to/pyspark-4.0.5-deps \
+  --output /tmp/phase419-four-worker-pytest.json
+```
+
 `differential_phase419_duckdb.py` compares the declared source subset with local Apache Spark 4.0.5 and a packaged Sparkless 4.19 server. Its fixtures cover table schemas/rows, filter and projection, empty results, global and nullable counts, grouped count/sum, same-owner joins with duplicate/null keys, and date/timestamp types. Use a CPython 3.11 environment containing `pyspark[connect]==4.0.5`, `duckdb==1.5.1`, the candidate `sparkless==4.19.0` API/native packages, and the corresponding server binary:
 
 ```sh
