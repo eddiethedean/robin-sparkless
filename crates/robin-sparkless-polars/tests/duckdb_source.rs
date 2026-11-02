@@ -409,6 +409,8 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
              SET TimeZone = 'UTC';
              CREATE TABLE events (id BIGINT, note VARCHAR);
              INSERT INTO events VALUES (1, 'one');
+             CREATE TABLE labels (id BIGINT, note VARCHAR);
+             INSERT INTO labels VALUES (1, 'one');
              CREATE VIEW slow_events AS
                  SELECT i::BIGINT AS id FROM range(1000000000) AS source_rows(i);"
         ))
@@ -416,7 +418,7 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
     server
         .query_row(
             &format!(
-                "CALL quack_serve({}, token = {})",
+                "CALL quack_serve({}, token = {}, disable_ssl = true)",
                 sql_literal(&uri),
                 sql_literal(token)
             ),
@@ -452,10 +454,19 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
         .resolve_table("warehouse.events")
         .expect("resolve table in first snapshot")
         .expect("table exists");
+    let labels_descriptor = first_snapshot
+        .resolve_table("warehouse.labels")
+        .expect("resolve second table in first snapshot")
+        .expect("second table exists");
 
     writer
-        .execute_batch("INSERT INTO writer.main.events VALUES (2, 'two');")
-        .expect("commit independent writer change");
+        .execute_batch(
+            "BEGIN TRANSACTION;
+             INSERT INTO writer.main.events VALUES (2, 'two');
+             INSERT INTO writer.main.labels VALUES (2, 'two');
+             COMMIT;",
+        )
+        .expect("commit independent multi-table writer change");
 
     let mut first_snapshot_rows = 0;
     first_snapshot
@@ -465,6 +476,14 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
         })
         .expect("scan from pinned snapshot");
     assert_eq!(first_snapshot_rows, 1);
+    let mut first_snapshot_label_rows = 0;
+    first_snapshot
+        .scan_table(&labels_descriptor, &cancellation, &mut |batch| {
+            first_snapshot_label_rows += batch.row_count;
+            Ok(())
+        })
+        .expect("scan second table from the same pinned snapshot");
+    assert_eq!(first_snapshot_label_rows, 1);
     drop(first_snapshot);
 
     let second_snapshot =
@@ -482,6 +501,18 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
         })
         .expect("scan after writer commit");
     assert_eq!(second_snapshot_rows, 2);
+    let labels_descriptor = second_snapshot
+        .resolve_table("warehouse.labels")
+        .expect("resolve second table in second snapshot")
+        .expect("second table exists");
+    let mut second_snapshot_label_rows = 0;
+    second_snapshot
+        .scan_table(&labels_descriptor, &cancellation, &mut |batch| {
+            second_snapshot_label_rows += batch.row_count;
+            Ok(())
+        })
+        .expect("scan second table after writer commit");
+    assert_eq!(second_snapshot_label_rows, 2);
     drop(second_snapshot);
 
     // Cancelling after the first remote batch must stop work on the shared DuckDB owner, not
