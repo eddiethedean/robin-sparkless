@@ -49,9 +49,10 @@ Evidence and narrower contracts:
   137.8 MiB on macOS. These are single-run observations, not a hard or broad
   cross-platform RSS guarantee. Retained raw reports and limits are in the
   [4.19 resource evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#exact-commit-linux-and-macos-source-extra-resource-checks-2026-11-01).
-  A local current-source release build on macOS arm64 also completed the 100k-
-  and 350k-row four-reader slow-consumer cohorts, with 119.6 MiB and 184.5 MiB
-  peak server RSS respectively. Each size has one measured round; see the
+  A local current-source release build on macOS arm64 also completed three
+  measured rounds of the 100k- and 350k-row four-reader slow-consumer cohorts,
+  peaking at 135.0 MiB and 195.0 MiB server RSS respectively. Each size used
+  one fresh server process. See the
   [local reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-source-build-and-packaged-wheel-checks-2026-11-02).
   Exploratory four-reader 1M-row macOS scans returned all rows and reached
   321.5 MiB RSS with active limit 4 and 268.5 MiB with active limit 2. A single

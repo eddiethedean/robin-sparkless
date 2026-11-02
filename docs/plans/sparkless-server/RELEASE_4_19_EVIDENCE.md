@@ -959,14 +959,15 @@ shared-owner modes.
 
 | Rows per reader | Source file | Logical data per reader / across four | Action p50 / p95 (ms) | Server peak RSS | Raw report SHA-256 |
 | ---: | ---: | ---: | ---: | ---: | --- |
-| 100,000 | 1,323,008 bytes | 2.4 / 9.6 MB | 989.8 / 1,057.4 | 125,435,904 bytes (119.6 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-100k.json.gz), `a77aba07c8f21544a7015039baadb5b9de52b3aa3b8e0af53d5adc145a55f0d2` |
-| 350,000 | 3,682,304 bytes | 8.4 / 33.6 MB | 3,474.3 / 3,501.2 | 193,413,120 bytes (184.5 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-350k.json.gz), `8b24f6a6a2ca8c7fa9e80bd8c14bb6960246fb08d77b0c3c92ce578cc6335c08` |
+| 100,000 | 1,323,008 bytes | 2.4 / 9.6 MB | 1,023.9 / 1,058.9 | 141,524,992 bytes (135.0 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-100k.json.gz), `b2cb3d9aa548672c60e275e621fa0d627ce6cca10f5236c6bd71b9672a89eb1d` |
+| 350,000 | 3,682,304 bytes | 8.4 / 33.6 MB | 3,496.5 / 3,577.4 | 204,505,088 bytes (195.0 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-350k.json.gz), `8ff77608d96df491ed9c98015a0abda5cdb4e58af1094d6fba30ab50cb5ef972` |
 
-With four samples per action percentile, p95 is descriptive. These one-round local checks remain
-within the provisional 256 MiB macOS guardrail, but do not establish stable tails or a portable
-RSS bound. `tests/connect/smoke_phase419_duckdb_client.py` passed locally for both the standalone
-source and the separate-process Quack shared owner. `scripts/verify_server_bin_wheel.py` also
-passed against the packaged wheel with HTTP, Connect-client, and DuckDB-source checks enabled.
+Each case used one warmup and three measured rounds, for 12 measured reader actions. Nearest-rank
+p95 is the maximum of those 12 samples. Both local cohorts remain within the provisional 256 MiB
+macOS guardrail, but one fresh server per size does not establish stable tails or a portable RSS
+bound. `tests/connect/smoke_phase419_duckdb_client.py` passed locally for both the standalone source
+and the separate-process Quack shared owner. `scripts/verify_server_bin_wheel.py` also passed against
+the packaged wheel with HTTP, Connect-client, and DuckDB-source checks enabled.
 
 ## Open acceptance gates
 
