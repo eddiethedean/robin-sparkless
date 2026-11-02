@@ -60,17 +60,22 @@ Evidence and narrower contracts:
   macOS. These are single-run observations, not a hard or broad cross-platform
   RSS guarantee. Retained raw reports and limits are in the
   [4.19 resource evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#exact-commit-linux-and-macos-source-extra-resource-checks-2026-11-01).
-  A local current-source release build on macOS arm64 also completed three
-  measured rounds of the 100k- and 350k-row four-reader slow-consumer cohorts,
-  peaking at 135.0 MiB and 195.0 MiB server RSS respectively. Each size used
-  one fresh server process. See the
-  [local reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-source-build-and-packaged-wheel-checks-2026-11-02).
+  A current packaged-wheel release build on macOS arm64 completed three
+  measured rounds of the 100k- and 350k-row four-reader slow-consumer cohorts;
+  all 24 measured reader actions completed with zero result-cap rejections and
+  peak server RSS of 136.6 MiB and 209.8 MiB respectively. See the
+  [current local reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#current-packaged-source-100k350k-slow-reader-rerun-2026-11-02).
   Repeated current-source four-reader 1M-row macOS scans returned all rows at
   active limits 1/2/4. Twenty measured actions per setting across three fresh
   server processes peaked at 257.8/281.6/325.5 MiB, respectively, with zero
   result-cap rejections. A provisional 384 MiB guardrail covers this specific
   Mac workload; it is not enforced or portable. See the
   [repeated 1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#repeated-current-source-one-million-row-slow-reader-runs-2026-11-01).
+  The exact current packaged candidate also completed one local 1M-row round
+  at active limits 1/2/4, with all twelve reader actions returning every row
+  and zero cap rejections; peak RSS was 257.4/290.1/320.8 MiB. These are
+  single-round macOS results, not portable RSS guarantees. See the
+  [current boundary reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#current-packaged-source-one-million-row-boundary-rerun-2026-11-02).
   Current-source Linux x86_64 standalone and one resource round pass under
   Docker emulation; native Linux, Linux Quack, and broader resource acceptance
   remain open.
