@@ -1020,9 +1020,38 @@ the maximum observed peak was 325.5 MiB, leaving 58.5 MiB of measured headroom. 
 workload/platform observation, not an enforced process ceiling or a portable guarantee. Linux and
 other-host resource coverage remains open.
 
+## Local Linux x86_64 source build and smoke under Docker emulation (2026-11-02)
+
+The current source revision `3d96e2a716cb3dbfe201be6f24e17eb34ed9d358` was built locally in a
+`rust:1.93.1-bookworm` container with `CARGO_BUILD_JOBS=3`:
+
+```sh
+cargo build --locked --release -p sparkless-server \
+  --no-default-features --features http,connect,duckdb-source
+cargo build --locked --release -p sparkless-native --no-default-features
+```
+
+The release server reports `sparkless-server 4.19.0`; its SHA-256 is
+`9b768add8fa302099319a41a93d6bf64665e2f46836d899e9c3e103a05e30f63`. The native Python extension
+and API module were also built or loaded from this checkout. The public standalone source smoke
+passed with `pyspark-client==4.0.5`, PyArrow 26.0.0, DuckDB 1.5.1, CPython 3.11.18, and an explicit
+`SPARK_USER` in the container. The user setting is required because this minimal container does
+not define `USER`; without it, the client omits the Connect `user_context` field.
+
+The container ran with `--platform linux/amd64` on an Apple M4 Pro, so the x86_64 Linux execution
+used Docker's emulation. This validates the current-source Linux binary and public standalone path
+under emulation; it is not a native Linux or Quack shared-owner pass.
+
+One 100,000-row, four-reader slow-consumer round completed with all rows returned and zero
+8 MiB result-cap rejections. The action p50/p95 were 1,797.0/1,800.4 ms; the reported server-child
+peak RSS was 274,116,608 bytes (261.4 MiB). These one-round latency and RSS values include the
+emulated execution environment and do not select a Linux RSS guardrail. The raw report is
+[phase419-source-resource-local-linux-x86_64-qemu-100k.json.gz](evidence/phase419-source-resource-local-linux-x86_64-qemu-100k.json.gz),
+SHA-256 `b357173b6aa28a6f7f23870fc09777dba55a7a84c85ac0b43cd6d6cec2a2b44c`.
+
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; three measured current-source rounds at both 100k and 350k stayed below it. A previous branch workflow recorded one 100k-row round per platform; that historical result is not used as a current implementation gate. Repeated current-source 1M-row cohorts completed all readers at active limits 1/2/4 with 20 measured actions over three fresh server processes per setting and zero result-cap rejections; peak RSS ranged up to 257.8/281.6/325.5 MiB. A separate provisional 384 MiB macOS 1M-row guardrail contains every measured process peak, but is not enforced or portable. Local Linux source/resource acceptance and other-host coverage remain open. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; three measured current-source rounds at both 100k and 350k stayed below it. A previous branch workflow recorded one 100k-row round per platform; that historical result is not used as a current implementation gate. Repeated current-source 1M-row cohorts completed all readers at active limits 1/2/4 with 20 measured actions over three fresh server processes per setting and zero result-cap rejections; peak RSS ranged up to 257.8/281.6/325.5 MiB. A separate provisional 384 MiB macOS 1M-row guardrail contains every measured process peak, but is not enforced or portable. The current-source Linux x86_64 standalone smoke and one 100k-row resource round pass under Docker emulation; native Linux, Linux Quack shared-owner, and broader resource acceptance remain open. D14 and V35/V36 remain open.
 - An earlier branch workflow's consumer jobs passed on Linux x86_64 and macOS arm64 and retained source-resource reports above. Each measured reader completed. These runs are historical context only and do not replace local current-candidate checks or establish a cross-platform RSS limit.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; the cross-platform server-extra source package smokes also pass, while broader helper/platform acceptance remains open.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. A new three-pair four-worker comparison covers the described four-job mix; the exact 38-test suite behind #1738's earlier timings is not retained, so reproducing that comparison remains open. Source-specific broader platform/resource coverage and the complete support acceptance gates remain open.
