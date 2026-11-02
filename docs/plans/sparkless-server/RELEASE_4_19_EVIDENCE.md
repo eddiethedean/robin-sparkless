@@ -1059,6 +1059,14 @@ workspace build replacing the enabled executable in the shared Cargo target dire
 feature-matrix commands should use separate target directories or explicitly rebuild the intended
 features before packaging. Linux wheel and native Linux Quack acceptance remain open.
 
+The local release workflow definition suite also passed all nine tests:
+
+```sh
+PYTHONPATH=scripts python3 scripts/test_release_workflow.py
+```
+
+This checks workflow and publication-gate definitions locally; it does not run a workflow.
+
 The four local consumer environments (`base`, `server`, `connect`, and `combined`) all pass
 `pip check` with 4.19.0 API/native metadata. The base environment has neither the server binary
 nor `pyspark-client`; the server environment has the binary but no Connect client; and the Connect
