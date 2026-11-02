@@ -57,11 +57,11 @@ Evidence and narrower contracts:
   one fresh server process. See the
   [local reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-source-build-and-packaged-wheel-checks-2026-11-02).
   Repeated current-source four-reader 1M-row macOS scans returned all rows at
-  active limits 1/2/4 and reached 257.8/281.6/299.0 MiB peak RSS across three
-  measured rounds per setting. All exceeded the provisional 256 MiB guardrail
-  selected for 100k–350k rows. Each setting used one server process, so these
-  measurements do not establish a hard or portable 1M-row memory ceiling. See
-  the [repeated 1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#repeated-current-source-one-million-row-slow-reader-runs-2026-11-01).
+  active limits 1/2/4. Twenty measured actions per setting across three fresh
+  server processes peaked at 257.8/281.6/325.5 MiB, respectively, with zero
+  result-cap rejections. A provisional 384 MiB guardrail covers this specific
+  Mac workload; it is not enforced or portable. See the
+  [repeated 1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#repeated-current-source-one-million-row-slow-reader-runs-2026-11-01).
   A source-built server can load a trusted local extension path. Installed
   wheels resolve the bundled extension beside the server executable when
   `extension_path` is omitted, without a runtime download.

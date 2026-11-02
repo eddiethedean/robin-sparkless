@@ -992,10 +992,11 @@ results below supersede their latency and RSS estimates.
 
 ### Repeated current-source one-million-row slow-reader runs (2026-11-01)
 
-Each active-operation setting was measured in one fresh server process using one warmup and three
-measured rounds. Each round ran four independent Connect readers against the same one-million-row,
+Each active-operation setting was measured across three fresh server processes. The first process
+ran one warmup and three measured rounds; each of the next two processes ran one warmup and one
+measured round. Each round ran four independent Connect readers against the same one-million-row,
 16-byte-payload DuckDB table while delaying `toLocalIterator()` by 10 ms after each row group. This
-produced twelve measured reader actions per setting. All readers returned one million rows in every
+produced twenty measured reader actions per setting. All readers returned one million rows in every
 round, with zero 8 MiB result-cap rejections. The server used four-thread Polars/Rayon/OpenMP pools;
 the client used CPython 3.11.14, `pyspark-client==4.0.5`, PyArrow 26.0.0, and DuckDB 1.5.1 on an Apple
 M4 Pro / macOS 26.5.2 arm64. The local release-profile server reports 4.19.0, has SHA-256
@@ -1003,26 +1004,28 @@ M4 Pro / macOS 26.5.2 arm64. The local release-profile server reports 4.19.0, ha
 `22034d3014163c72c0511d0363d3388587412ecb`. The benchmark harness revision was
 `65fec52fb53c5d685a2f010dfbba407d325932b9`.
 
-Action p50/p95 use nearest-rank percentiles over the twelve measured reader actions; p95 is their
-maximum. Peak RSS is `resource.getrusage(RUSAGE_CHILDREN)` for the server child after exit.
+Action p50/p95 use nearest-rank percentiles over the twenty measured reader actions. Peak RSS is
+`resource.getrusage(RUSAGE_CHILDREN)` for each server child after exit; the table shows each
+setting's measured range and maximum.
 
-| Active operations | Action p50 / p95 (ms) | Server peak RSS | Raw report SHA-256 |
+| Active operations | Action p50 / p95 (ms) | Server peak RSS range (max) | Reports (max RSS report first) |
 | ---: | ---: | ---: | --- |
-| 1 | 10,093.8 / 10,196.8 | 270,368,768 bytes (257.8 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-1m-active1-3rounds.json.gz), `f1943a26f633e5879174b0836a43f4a89ee19f1a6f506cd2b7f8c862a871852e` |
-| 2 | 9,836.8 / 10,086.7 | 295,305,216 bytes (281.6 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-1m-active2-3rounds.json.gz), `75e70ff1e7078acf86a18d0dd2b44df5fd08d361acf3c21d26926d674f9cbe9f` |
-| 4 | 9,955.8 / 10,077.4 | 313,507,840 bytes (299.0 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-1m-active4-3rounds.json.gz), `f89c543663fe0430c0bf7cf2200840a8d3dc72976990f928ce296d4fb0615848` |
+| 1 | 10,072.1 / 10,181.2 | 247.7–257.8 MiB (270,368,768 bytes) | [three-process report 1](evidence/phase419-source-resource-local-macos-aarch64-1m-active1-3rounds.json.gz), SHA-256 `f1943a26f633e5879174b0836a43f4a89ee19f1a6f506cd2b7f8c862a871852e`; [2](evidence/phase419-source-resource-local-macos-aarch64-1m-active1-fresh2.json.gz), `c1966af42c2c5643b9acb79a9205f0899002b84bbbd8a12ff7e6285a6931233d`; [3](evidence/phase419-source-resource-local-macos-aarch64-1m-active1-fresh3.json.gz), `3c57e3a59859e344337348f6798deb47358f6cb04064071c2b4d8b5b9b38d92f` |
+| 2 | 9,910.3 / 10,034.2 | 264.8–281.6 MiB (295,305,216 bytes) | [three-process report 1](evidence/phase419-source-resource-local-macos-aarch64-1m-active2-3rounds.json.gz), SHA-256 `75e70ff1e7078acf86a18d0dd2b44df5fd08d361acf3c21d26926d674f9cbe9f`; [2](evidence/phase419-source-resource-local-macos-aarch64-1m-active2-fresh2.json.gz), `403f7aefa9e5bec4697cb563c1c2b8893b92b54614c3d691345992eb58708413`; [3](evidence/phase419-source-resource-local-macos-aarch64-1m-active2-fresh3.json.gz), `c3e5156064ef0b7d6bdfdc20932e3b8dcafccb4acf009d2bbcdbdaaeaee35859` |
+| 4 | 9,979.5 / 10,070.5 | 299.0–325.5 MiB (341,278,720 bytes) | [three-process report 1](evidence/phase419-source-resource-local-macos-aarch64-1m-active4-3rounds.json.gz), SHA-256 `f89c543663fe0430c0bf7cf2200840a8d3dc72976990f928ce296d4fb0615848`; [2](evidence/phase419-source-resource-local-macos-aarch64-1m-active4-fresh2.json.gz), `013236de24f2e94bf6a3c895723acdfd6853893e90cfa2b2363680d556322591`; [3](evidence/phase419-source-resource-local-macos-aarch64-1m-active4-fresh3.json.gz), `cbf9b572ff4d03fb3574bcd0cc31d6e033f7914e3ee1db8a552ac1df72c79179` |
 
-All three configurations exceed the provisional 256 MiB guardrail, which was selected for the
-100k–350k cohorts. These runs characterize a larger workload on one host; one process per setting
-does not establish a portable or hard 1M-row memory ceiling. High-volume source/resource acceptance
-remains open.
+The measured 100k–350k guardrail remains 256 MiB. For the 1M-row, four-reader workload on this
+macOS arm64 host, all three active settings fit under a separate provisional 384 MiB RSS guardrail;
+the maximum observed peak was 325.5 MiB, leaving 58.5 MiB of measured headroom. The budget is a
+workload/platform observation, not an enforced process ceiling or a portable guarantee. Linux and
+other-host resource coverage remains open.
 
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; three measured current-source rounds at both 100k and 350k stayed below it, while one exact-commit CI round per platform covered 100k rows. Repeated current-source 1M-row cohorts completed all readers at active limits 1/2/4 with three measured rounds and zero result-cap rejections; peak RSS was 257.8/281.6/299.0 MiB, so all exceeded the 100k–350k guardrail. Each active limit used one server process; a high-volume memory ceiling and broader platform/resource acceptance remain open. D14 and V35/V36 remain open.
-- The exact-commit release consumer jobs passed on Linux x86_64 and macOS arm64 and retained their raw source-resource reports above. Each measured reader completed. These single runs do not establish a cross-platform RSS limit.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; three measured current-source rounds at both 100k and 350k stayed below it. A previous branch workflow recorded one 100k-row round per platform; that historical result is not used as a current implementation gate. Repeated current-source 1M-row cohorts completed all readers at active limits 1/2/4 with 20 measured actions over three fresh server processes per setting and zero result-cap rejections; peak RSS ranged up to 257.8/281.6/325.5 MiB. A separate provisional 384 MiB macOS 1M-row guardrail contains every measured process peak, but is not enforced or portable. Local Linux source/resource acceptance and other-host coverage remain open. D14 and V35/V36 remain open.
+- An earlier branch workflow's consumer jobs passed on Linux x86_64 and macOS arm64 and retained source-resource reports above. Each measured reader completed. These runs are historical context only and do not replace local current-candidate checks or establish a cross-platform RSS limit.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; the cross-platform server-extra source package smokes also pass, while broader helper/platform acceptance remains open.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. A new three-pair four-worker comparison covers the described four-job mix; the exact 38-test suite behind #1738's earlier timings is not retained, so reproducing that comparison remains open. Source-specific broader platform/resource coverage and the complete support acceptance gates remain open.
-- Coordinated 4.19.0 API/native/server package versions and local package checks are in place. The exact-commit release workflow succeeded with 33 passing jobs and five publication jobs skipped for the branch run, including package and container checks. Release publication checks have not been performed.
+- Coordinated 4.19.0 API/native/server package versions and package build definitions are in place. Local current-candidate package and platform checks remain part of implementation acceptance. The earlier branch workflow succeeded with 33 passing jobs and five publication jobs skipped; it is retained as historical context and does not substitute for local checks of the current candidate. Release publication checks are deferred until the release-evidence stage.
 
 Accordingly, this evidence record does not mark the 4.19 phase or its GitHub issues complete and does not authorize release publication.
