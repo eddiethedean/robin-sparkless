@@ -130,12 +130,15 @@ and the workflows define the current release process.
 
 ## Credentials
 
-Rust publication needs `CARGO_REGISTRY_TOKEN`. All three PyPI projects use Trusted
-Publishing with owner `eddiethedean`, repository `robin-sparkless`, workflow
-`release.yml`, and environment `pypi`. Before the first native upload, register
-`sparkless-native` as a [pending publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
-on the PyPI account publishing page. GHCR publication uses the workflow token's
-`packages: write` permission for `ghcr.io/eddiethedean/sparkless-server`.
+Rust publication needs `CARGO_REGISTRY_TOKEN`. Existing PyPI projects
+`sparkless`, `sparkless-native`, and `sparkless-server-bin` use Trusted Publishing
+with owner `eddiethedean`, repository `robin-sparkless`, workflow `release.yml`,
+and environment `pypi`. New projects `sparkless-connect`, `sparkless-server`, and
+`sparkless-server-duckdb` publish with the repository secret `PYPI_API_TOKEN`.
+Those token-backed uploads disable PyPI attestations; the OIDC jobs keep them
+enabled. The token must be able to upload each new project. GHCR publication uses
+the workflow token's `packages: write` permission for
+`ghcr.io/eddiethedean/sparkless-server`.
 
 ## Documentation checks
 

@@ -83,6 +83,36 @@ class ReleaseContextTests(unittest.TestCase):
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_new_pypi_projects_use_token_and_existing_projects_use_oidc(self):
+        jobs = workflow("release.yml")["jobs"]
+        token_publishers = ("publish-connect", "publish-server-products")
+        for name in token_publishers:
+            with self.subTest(publisher=name):
+                job = jobs[name]
+                self.assertNotIn("id-token", job["permissions"])
+                publish_step = next(
+                    step
+                    for step in job["steps"]
+                    if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+                )
+                self.assertEqual(
+                    publish_step["with"].get("password"),
+                    "${{ secrets.PYPI_API_TOKEN }}",
+                )
+                self.assertIs(publish_step["with"].get("attestations"), False)
+
+        oidc_publishers = ("publish-native", "publish-server-compat", "publish-sparkless")
+        for name in oidc_publishers:
+            with self.subTest(publisher=name):
+                job = jobs[name]
+                self.assertEqual(job["permissions"].get("id-token"), "write")
+                publish_step = next(
+                    step
+                    for step in job["steps"]
+                    if step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+                )
+                self.assertNotIn("password", publish_step.get("with", {}))
+
     def test_419_server_products_are_built_and_verified_separately(self):
         jobs = workflow("release.yml")["jobs"]
         for job_name in (

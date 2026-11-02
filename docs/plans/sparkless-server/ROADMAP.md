@@ -188,7 +188,7 @@ Primary plans: [SS-09](09-connect-plans-and-analysis.md), [SS-10](10-arrow-repla
 
 ## 4.19.0 — Optional DuckDB data source, SparklessConnect, and performance
 
-**2026-11-02 scope revision: product/package implementation is present in the 4.19 candidate; release HOLD for exact-candidate acceptance and publication setup.** The owner confirmed that [SS-23](23-product-and-package-separation.md) belongs in the current candidate before release. Preserve completed feature work and validate the final products under V59. D22's Rust boundary was refined after source audit: shared 4.19 server runtime remains Polars-backed because both products use the same executor; Phase 4 introduces a used backend-neutral interface before adding another executor. This does not reopen the 4.18 cut.
+**2026-11-02 scope revision: product/package implementation is present in the 4.19 candidate; release HOLD for exact-candidate acceptance and first uploads.** The owner confirmed that [SS-23](23-product-and-package-separation.md) belongs in the current candidate before release. Preserve completed feature work and validate the final products under V59. D22's Rust boundary was refined after source audit: shared 4.19 server runtime remains Polars-backed because both products use the same executor; Phase 4 introduces a used backend-neutral interface before adding another executor. This does not reopen the 4.18 cut.
 
 Complete **Phase 3**, after the supported Phase 2 Connect server. DuckDB supplies table data through native Arrow batches; the existing Polars backend performs the Sparkless query. This is a read-only source capability, not a new execution engine or a DuckDB write path.
 
