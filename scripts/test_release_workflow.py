@@ -141,7 +141,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     step for step in steps if step.get("name", "").startswith("Build and verify separate")
                 )
                 self.assertIn("SPARKLESS_QUACK_EXTENSION_BINARY", wheel_step["run"])
-                self.assertIn("sparkless_server_duckdb", wheel_step["run"])
+                self.assertIn("--product duckdb", wheel_step["run"])
+                self.assertIn("python/server-duckdb/pyproject.toml", wheel_step["run"])
 
         consumer = "\n".join(
             step.get("run", "") for step in jobs["server-product-consumer"]["steps"]
