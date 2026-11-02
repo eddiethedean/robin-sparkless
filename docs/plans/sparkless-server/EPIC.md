@@ -27,6 +27,14 @@ This epic covers the complete direction. Each phase has its own supported surfac
 
 The 2026-10-29 scope extension schedules remaining Connect API gaps in Phases 7–10 and adds scalar/Pandas UDFs to Phase 5. Optional UDF workers and JDBC connector processes remain separately packaged; the core native process/image never embeds Python or a JVM. Distributed RDD/SparkContext execution remains outside this single-node roadmap. The existing bounded local RDD and metadata-only SparkContext compatibility interfaces are included through SS-22's bridge/worker contract.
 
+## Product separation before 4.19 release — 2026-11-02
+
+The owner requires three independently installable products: local Sparkless, the base Polars server and the DuckDB-enabled server. [SS-23](23-product-and-package-separation.md) and D22 define shared engine-neutral server infrastructure, a Polars adapter, a separate DuckDB source crate and thin product crates. Python uses dedicated product distributions and a lightweight common launcher; server-only users need no local PyO3 engine. Preserve existing local/server imports through compatibility forwarding. Base artifacts exclude DuckDB/Quack, and installing the optional product cannot change default selection.
+
+This is required migration work on the largely implemented current 4.19 candidate, in slices 419-12–419-15 before release. Keep existing source/helper/performance code and reports, close earlier source/platform gaps, and pass V59 on the final product artifacts. Both 4.19 servers still execute through Polars; the DuckDB product adds the existing read-only standalone/Quack source. Phase 4 later adds DuckDB execution/writes under its own semantic/lifecycle gates. Product separation neither establishes backend parity nor supersedes SS-22's local baseline obligation.
+
+The original single-server workspace/distribution bullets below describe the initial architecture. SS-23 governs the required 4.19 extraction and expanded crate/Python/image inventory. This local plan update does not modify the remote epic or publish artifacts.
+
 ## Complete existing local feature scope — 2026-11-01
 
 The owner requires **all existing implemented `sparkless.sql` features** on the server. [SS-22](22-local-sql-feature-parity.md) defines the complete [local baseline](LOCAL_SQL_FEATURE_BASELINE.md), transport mappings and delivery in Phases 5–8. This supersedes narrower proposed function/operator/type exclusions: native functions, pivots/grouping sets where implemented, statistics/approximation, generators, supported unbounded batch-window endpoints, actions/conversions, all accepted local SQL statements, optional workers/providers/connectors and bounded local callback APIs are required.
@@ -41,7 +49,7 @@ HTTP SQL must cover the locally implemented SQL language and result types; Conne
 | **Phase 0B** | Read-only HTTP SQL service, minimum bounded runtime/session management, sync/async Python launcher, native image | Exact values and schemas through direct HTTP and fresh packaged consumer environments |
 | **Phase 1** | Shared catalog ownership, controlled mutations, richer logical types, lazy execution improvements | Visibility, concurrency, mutation outcomes, type fidelity, and resource-accounting tests |
 | **Phase 2** | Supported Spark Connect release with Arrow streaming and resumable executions | Pinned unmodified client, lifecycle/conformance suite, with optional external route certification outside the standalone release gate |
-| **Phase 3** | Optional DuckDB data source feeding Polars execution | Supported Connect first; V35/V36 typed scans, source snapshots, database ownership, and bounded resources |
+| **Phase 3** | Optional DuckDB data source feeding Polars execution; required local/base/DuckDB product separation before 4.19 release | Supported Connect first; V35/V36 typed scans, source snapshots, database ownership and bounded resources; SS-23/D22/V59 migration of implemented work and final product verification |
 | **Phase 4** | Optional DuckDB execution backend through Connect | Phase 3 first; V37/V38 Spark semantics, backend lifecycle, persistent transaction outcomes, and shared-table interoperability |
 | **Phase 5** | Optional isolated Python Jobs/notebooks and scalar/Pandas UDF workers | Separate trust, packaging, resource, UDF semantics, and lifecycle contract; V27 |
 | **Phase 6** | Optional Delta Lake / Unity Catalog | Verified native transactions and interoperability |

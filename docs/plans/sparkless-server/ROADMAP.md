@@ -188,13 +188,17 @@ Primary plans: [SS-09](09-connect-plans-and-analysis.md), [SS-10](10-arrow-repla
 
 ## 4.19.0 — Optional DuckDB data source, SparklessConnect, and performance
 
+**2026-11-02 scope revision: core features have implementation/local evidence; release HOLD for product separation and final acceptance.** The owner confirmed that [SS-23](23-product-and-package-separation.md) belongs in the current 4.19 candidate before release. Preserve the completed work, add 419-12–419-15, and validate the final products. D22 selects the architecture; V59 verifies dependency isolation, compatibility and the expanded artifact inventory. This does not reopen the 4.18 cut.
+
 Complete **Phase 3**, after the supported Phase 2 Connect server. DuckDB supplies table data through native Arrow batches; the existing Polars backend performs the Sparkless query. This is a read-only source capability, not a new execution engine or a DuckDB write path.
 
 Primary plans: [SS-14: DuckDB data source](14-duckdb-data-source.md), with ordered slices 419-01–419-05, and [SS-06: SparklessConnect](06-python-launcher.md#4190-optional-sparklessconnect-context-manager), with slices 419-06–419-08.
 
-The [4.19 implementation plan](RELEASE_4_19.md) defines dependencies across all eleven slices, the minimum Connect table/join/aggregate additions, source snapshot ownership, helper lifecycle, benchmark protocol, and integrated acceptance. Begin with the performance baseline and D14 feasibility; helper and range-count work are independent of DuckDB. Measure exporter/count improvements together before evaluating scheduling changes. Slice IDs are stable identifiers, not numeric execution order.
+The [4.19 implementation plan](RELEASE_4_19.md) defines the original eleven feature slices plus four migration slices, the minimum Connect table/join/aggregate additions, source snapshot ownership, helper lifecycle, benchmark protocol, and integrated acceptance. The original baseline/feasibility and exporter/count/scheduler work has retained implementation evidence; resume with 419-12's inventory/compatibility freeze, extract the current candidate, then complete final validation. Slice IDs are stable identifiers, not numeric execution order.
 
 Add an optional `SparklessConnect` context manager that starts `SparklessServer`, yields a real `SparkSession` from pyspark-client, and stops the session and server on exit. Package pyspark-client as an optional dependency through the proposed `sparkless[connect]` extra; the helper is independent of DuckDB.
+
+Before release, retain local `sparkless`, ship a DuckDB-free base `sparkless-server`, and ship a separate `sparkless-server-duckdb` with the implemented read-only source. Share a Rust server core/Polars adapter and a lightweight `sparkless-connect` Python launcher; preserve compatibility entry points. Both products execute through Polars in 4.19. Source users select the DuckDB product explicitly; 4.20 adds actual DuckDB execution later. Product packaging and source-enabled examples must follow the [D22 inventory](23-product-and-package-separation.md), superseding the earlier single source-enabled server-wheel plan.
 
 **Scope extension (2026-10-31):** include the three newest open issues, #1736–#1738, as performance work on the existing default Polars/Connect paths. These improvements are independent of enabling DuckDB.
 
@@ -216,6 +220,7 @@ Follow the [shared performance protocol](RELEASE_4_19.md#performance-protocol-an
 ### Release gate
 
 - [ ] Phase 2 is complete; existing native/HTTP/Connect surfaces still pass.
+- [ ] **419-12–419-15 / V59 candidate acceptance** passes before the 4.19 cut: shared Rust/Python code is extracted, distinct server crates/distributions/images are verified, compatibility imports and combined installs work, dependency/engine/source identities are truthful, and the final release inventory is enforced. Retained pre-separation reports do not certify new artifacts; V59's public stage follows publication.
 - [ ] The [4.19 minimum public-client matrix](RELEASE_4_19.md#minimum-public-client-matrix) passes, including the new named-table, inner equijoin, and grouped count/sum paths; analysis never scans rows and execution schemas match the selected statement snapshot.
 - [ ] SS-06 slices **419-06–419-08** pass: real Connect session, optional dependency isolation, normal/error cleanup, session ownership, and fresh packaged-install checks.
 - [ ] Performance slices **419-09–419-11** close [#1736](https://github.com/eddiethedean/robin-sparkless/issues/1736), [#1737](https://github.com/eddiethedean/robin-sparkless/issues/1737), and [#1738](https://github.com/eddiethedean/robin-sparkless/issues/1738) with their correctness/resource acceptance and paired benchmarks, including the shared small-job regression guardrails.
@@ -229,6 +234,8 @@ Follow the [shared performance protocol](RELEASE_4_19.md#performance-protocol-an
 Complete **Phase 4** after the Phase 3 source/ownership foundations. DuckDB now executes the advertised SQL/DataFrame plans and owns persistent table writes behind the existing Sparkless Connect endpoint. Polars remains the default backend; engine selection is explicit and fixed for a server instance's operations.
 
 Primary plan: [SS-15: DuckDB Connect backend](15-duckdb-connect-backend.md), with ordered slices 420-01–420-05.
+
+Build on the separate DuckDB product and neutral server boundaries delivered under 4.19 SS-23/D22. Do not create another server/launcher stack or infer execution support from the already shipped source-enabled product name. D15 still owns actual DuckDB execution semantics and lifecycle proof.
 
 - Freeze **D15**: backend selection/interfaces, Spark semantic translation, supported SQL/plans/configuration, analysis/result schemas, transactional outcomes, restart behavior, and resource accounting.
 - Reuse the supported Connect transport/session/replay infrastructure; prove it against the DuckDB backend independently of Polars.

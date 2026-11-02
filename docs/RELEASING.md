@@ -9,6 +9,16 @@ commit and do not satisfy this publication check.
 
 ## Prepare the release
 
+**4.19 candidate scope hold (2026-11-02):** before cutting the current unpublished
+candidate, implement [SS-23's product/package migration](plans/sparkless-server/23-product-and-package-separation.md)
+and its 419-12–419-15 candidate acceptance. The inventory described below reflects
+the existing tooling; it must be expanded to the shared launcher, separate base
+and DuckDB server products, compatibility forwarding package, new Rust crates
+and both images. Candidate V59 must pass before tagging/publication; its public
+stage closes after publication. Existing single-server wheel checks cannot
+authorize this revised release. This planning hold does not change published
+4.18 artifacts or claim that the migration is implemented.
+
 The Rust facade/core/Polars/parser/server crates and `sparkless-native` share the
 engine version. The Python API has its own version and pins `sparkless-native`
 exactly. Its optional server extra pins `sparkless-server-bin` to the matching

@@ -8,6 +8,14 @@ installation](INSTALLATION.md).
 “Behavior-tested” means linked regression/example coverage exists. “Unsupported”
 is outside the published contract; “unknown” requires workload validation.
 
+The current candidate still uses the existing combined server packaging.
+[Planned product separation](plans/sparkless-server/23-product-and-package-separation.md)
+is required before the 4.19 release: distinct base/DuckDB server products and a
+shared lightweight Python launcher. That migration is not yet implemented or
+validated; the retained behavior/evidence below is its starting point. Both
+planned 4.19 server products execute through Polars; DuckDB execution remains
+later work.
+
 | Capability | Local Python | Rust embedding | HTTP service | Spark Connect |
 | --- | --- | --- | --- | --- |
 | DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Range/local relation and the documented read-only source subset below; general Connect SQL remains unsupported |

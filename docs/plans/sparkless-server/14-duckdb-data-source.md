@@ -13,6 +13,8 @@ search:
 
 ## Outcome and boundary
 
+**Current 4.19 revision:** [SS-23](23-product-and-package-separation.md) requires moving the implemented native source into `robin-sparkless-duckdb` and shipping it in the dedicated `sparkless-server-duckdb` product before release. The base product excludes DuckDB/Quack. Keep current read-only Polars execution semantics, snapshots, limits and source evidence; final artifacts must pass the new product gate as well as V35/V36.
+
 Allow the existing Polars execution backend to read named DuckDB tables through a native, bounded Arrow batch source. An unmodified Connect client can resolve a configured DuckDB table and run the supported Sparkless transformations over it. No Parquet export or separately synchronized table copy is required. Arrow transfer may allocate or copy data; no zero-copy or zero-transfer claim follows.
 
 This phase adds a data source, not a DuckDB query execution backend. Sparkless/Polars still owns transformations and Spark semantics. DuckDB owns its storage and source transaction. Begin with read-only access: reject DuckDB-targeted DDL, appends, updates, deletes, overwrite, and table-save operations explicitly before effects. DuckDB execution and writes belong to [Phase 4 / SS-15](15-duckdb-connect-backend.md). Existing Sparkless-owned tables retain their current behavior.

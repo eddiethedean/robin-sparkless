@@ -13,6 +13,8 @@ search:
 
 ## Outcome
 
+**Current 4.19 revision:** [SS-23](23-product-and-package-separation.md) supersedes the original single-product packaging below. Extract the implemented runtime and engine adapters, compose distinct base/DuckDB Rust and Python products, and pass 419-12–419-15 / V59 candidate acceptance before release. Retain earlier API/CLI behavior and evidence; the old binary-wheel inventory is not the final 4.19 inventory.
+
 Build a separately installable Rust service without adding transport dependencies to embedded engine consumers.
 
 ## Dependencies and delivery slices

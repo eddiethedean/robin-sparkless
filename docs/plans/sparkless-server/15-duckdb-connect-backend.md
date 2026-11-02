@@ -13,6 +13,8 @@ search:
 
 ## Outcome and distinction from Phase 3
 
+The revised 4.19 scope requires [SS-23 product separation](23-product-and-package-separation.md) before release. It supplies the `sparkless-server-duckdb` Rust/Python product, independent DuckDB source crate and shared server/launcher boundaries. That product initially executes through Polars and exposes read-only DuckDB sources. Reuse these boundaries for Phase 4; its package name is not evidence that DuckDB execution already exists. D15 and V37/V38 remain required before advertising a DuckDB execution mode.
+
 Expose an optional DuckDB execution backend through Sparkless Server's existing Spark Connect endpoint. The same unmodified Connect client can submit the declared SQL/DataFrame subset, but DuckDB now executes the supported plans and owns persistent table writes. Phase 3 only supplied DuckDB table batches to Polars; this phase performs the query inside DuckDB.
 
 Polars remains the default engine. Choose an execution engine explicitly when configuring a server instance, bind that choice for its sessions/operations, and expose a truthful capability matrix. Do not silently switch engines for unsupported operations or after a statement may have taken effect. Backend selection uses Sparkless server configuration and the standard Connect contract.

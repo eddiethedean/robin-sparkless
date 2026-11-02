@@ -13,6 +13,8 @@ search:
 
 ## Outcome
 
+**Current 4.19 revision:** [SS-23](23-product-and-package-separation.md) requires extracting the implemented launcher/helper into `sparkless-connect`, dedicated base/DuckDB server distributions, and compatibility forwarding for existing imports. This supersedes the older helper/package placement below. Reuse the working lifecycle code and pass engine-free server/client installs and V59 candidate acceptance before release.
+
 Add optional sync/async lifecycle support in the existing sparkless package for an owned native executable.
 
 The [4.18 implementation plan](RELEASE_4_18.md) assigns supported endpoint work to 418-07 after standalone conformance: independent HTTP/gRPC binds, actual ephemeral endpoint readiness, negotiated control/capability validation, installed-platform lifecycle checks, and V24. Update the current validator that rejects Connect advertisement; disabled/experimental builds continue to reject `spark_connect_url`. Starting the native child must not import PySpark.
