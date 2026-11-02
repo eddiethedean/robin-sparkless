@@ -1049,6 +1049,77 @@ emulated execution environment and do not select a Linux RSS guardrail. The raw 
 [phase419-source-resource-local-linux-x86_64-qemu-100k.json.gz](evidence/phase419-source-resource-local-linux-x86_64-qemu-100k.json.gz),
 SHA-256 `b357173b6aa28a6f7f23870fc09777dba55a7a84c85ac0b43cd6d6cec2a2b44c`.
 
+## Local integrated checks on the current branch (2026-11-02)
+
+The following locked release checks passed with the source changes committed as
+`c01b8d946436b1fe0876d286fe99073fa83d7b8a`:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  cargo test --locked --release --workspace
+
+CARGO_HOME=/tmp/sparkless-cargo-home CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  cargo test --locked --release -p sparkless-server \
+  --no-default-features --features http,connect
+
+CARGO_HOME=/tmp/sparkless-cargo-home CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  cargo test --locked --release -p sparkless-server \
+  --no-default-features --features http,connect execute_plan_ -- --test-threads=1
+
+cargo fmt --all -- --check
+git diff --check
+```
+
+The workspace run passed all executed unit, integration, and doc tests; the Polars library
+reported 418 passed and two manual measurement tests ignored. Its default feature set leaves
+`duckdb-source` disabled. The separate Connect server run passed 85 unit tests, three control
+protocol tests, and two HTTP integration tests. The six-test targeted rerun passed serially. The
+first Connect run exposed four response-ack timeouts because the in-process reattachable response
+collector did not send `ReleaseUntil`; the test helper now releases every consumed response prefix,
+matching the public protocol. No implementation stream or timeout was relaxed.
+
+The current source was also rebuilt in release mode with `http,connect,duckdb-source`:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home \
+CARGO_TARGET_DIR=/tmp/sparkless-phase419-duckdb-target \
+CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  cargo build --locked --release -p sparkless-server \
+  --no-default-features --features http,connect,duckdb-source
+```
+
+It reports `sparkless-server 4.19.0`; the binary SHA-256 is
+`6ac6731e9136dd8582457cb310cc380375a8f5c5dcf5281083a1771c7ff1303b`. On macOS 26.5.2 arm64,
+the standalone and Quack public-client smokes both passed against this binary with
+`pyspark-client==4.0.5`, CPython 3.11, the 4.19.0 combined consumer environment, and Python DuckDB
+1.5.1 as the standalone fixture writer. The exact command shape was:
+
+```sh
+SPARK_USER=phase419-c01-standalone \
+PYTHONPATH=python/sparkless:/tmp/sparkless-duckdb-python-only \
+  /tmp/phase419-clean-install-matrix/combined/bin/python \
+  tests/connect/smoke_phase419_duckdb_client.py \
+  --server-bin /tmp/sparkless-phase419-duckdb-target/release/sparkless-server
+
+SPARK_USER=phase419-c01-quack \
+PYTHONPATH=python/sparkless:/tmp/sparkless-duckdb-python-only \
+  /tmp/phase419-clean-install-matrix/combined/bin/python \
+  tests/connect/smoke_phase419_duckdb_client.py \
+  --server-bin /tmp/sparkless-phase419-duckdb-target/release/sparkless-server \
+  --quack-owner-bin target/release/examples/duckdb_quack_fixture_owner \
+  --quack-extension-path \
+  /Users/odosmatthews/.duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension
+```
+
+The locally rebuilt Quack fixture owner SHA-256 is
+`b9de56658007704be354da93c7abd4ee3feebb3fcab4c5dd8263300a57b585fd`; the DuckDB 2.0.0
+`osx_arm64` Quack extension SHA-256 is
+`ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935`. The fixture explicitly
+sets `disable_ssl = true` for its loopback-only Quack listener. A Linux emulation smoke using the
+previous fixture build exited before the owner became ready with DuckDB's read-only crypto-module
+error; the updated fixture passed on macOS. Linux Quack shared-owner validation remains open and is
+deferred to the release platform matrix. No CI workflow was started for these checks.
+
 ## Open acceptance gates
 
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; three measured current-source rounds at both 100k and 350k stayed below it. A previous branch workflow recorded one 100k-row round per platform; that historical result is not used as a current implementation gate. Repeated current-source 1M-row cohorts completed all readers at active limits 1/2/4 with 20 measured actions over three fresh server processes per setting and zero result-cap rejections; peak RSS ranged up to 257.8/281.6/325.5 MiB. A separate provisional 384 MiB macOS 1M-row guardrail contains every measured process peak, but is not enforced or portable. The current-source Linux x86_64 standalone smoke and one 100k-row resource round pass under Docker emulation; native Linux, Linux Quack shared-owner, and broader resource acceptance remain open. D14 and V35/V36 remain open.
