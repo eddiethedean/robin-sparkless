@@ -155,6 +155,20 @@ def main() -> None:
             );
             INSERT INTO typed_events VALUES
                 (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
+            CREATE TABLE decimal_boundary_events (
+                d1 DECIMAL(1, 0),
+                d9 DECIMAL(9, 0),
+                d18 DECIMAL(18, 6),
+                d38 DECIMAL(38, 0),
+                d38s38 DECIMAL(38, 38)
+            );
+            INSERT INTO decimal_boundary_events VALUES
+                (9, 999999999, CAST('999999999999.999999' AS DECIMAL(18, 6)),
+                 CAST('99999999999999999999999999999999999999' AS DECIMAL(38, 0)),
+                 CAST('0.' || repeat('9', 38) AS DECIMAL(38, 38))),
+                (-9, -999999999, CAST('-999999999999.999999' AS DECIMAL(18, 6)),
+                 CAST('-99999999999999999999999999999999999999' AS DECIMAL(38, 0)),
+                 CAST('-0.' || repeat('9', 38) AS DECIMAL(38, 38)));
             CREATE TABLE join_left (id BIGINT, label VARCHAR);
             INSERT INTO join_left VALUES
                 (1, 'a'), (1, 'b'), (2, 'c'), (3, 'd'), (NULL, 'null');
@@ -263,6 +277,34 @@ def main() -> None:
             reference_empty.createOrReplaceTempView("empty_events_ref")
             reference_all_null.createOrReplaceTempView("all_null_events_ref")
             reference_typed.createOrReplaceTempView("typed_events_ref")
+            reference_decimals = reference.createDataFrame(
+                [
+                    (
+                        Decimal("9"),
+                        Decimal("999999999"),
+                        Decimal("999999999999.999999"),
+                        Decimal("99999999999999999999999999999999999999"),
+                        Decimal("0." + "9" * 38),
+                    ),
+                    (
+                        Decimal("-9"),
+                        Decimal("-999999999"),
+                        Decimal("-999999999999.999999"),
+                        Decimal("-99999999999999999999999999999999999999"),
+                        Decimal("-0." + "9" * 38),
+                    ),
+                ],
+                StructType(
+                    [
+                        StructField("d1", DecimalType(1, 0), True),
+                        StructField("d9", DecimalType(9, 0), True),
+                        StructField("d18", DecimalType(18, 6), True),
+                        StructField("d38", DecimalType(38, 0), True),
+                        StructField("d38s38", DecimalType(38, 38), True),
+                    ]
+                ),
+            )
+            reference_decimals.createOrReplaceTempView("decimal_boundary_events_ref")
             reference_left.createOrReplaceTempView("join_left_ref")
             reference_join_right.createOrReplaceTempView("join_right_ref")
 
@@ -379,6 +421,12 @@ def main() -> None:
                     "typed_scalars_and_utc_timestamp",
                     candidate.table("warehouse.typed_events"),
                     reference.sql("SELECT * FROM typed_events_ref"),
+                    report["cases"],
+                )
+                compare_dataframe(
+                    "decimal_precision_scale_boundaries",
+                    candidate.table("warehouse.decimal_boundary_events"),
+                    reference.sql("SELECT * FROM decimal_boundary_events_ref"),
                     report["cases"],
                 )
                 report["candidate_reported_spark_version"] = candidate.version

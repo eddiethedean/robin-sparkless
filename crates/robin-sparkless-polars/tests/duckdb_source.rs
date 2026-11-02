@@ -32,6 +32,20 @@ fn fixture_database() -> (tempfile::TempDir, std::path::PathBuf) {
             );
             INSERT INTO typed_events VALUES
                 (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
+            CREATE TABLE decimal_boundary_events (
+                d1 DECIMAL(1, 0),
+                d9 DECIMAL(9, 0),
+                d18 DECIMAL(18, 6),
+                d38 DECIMAL(38, 0),
+                d38s38 DECIMAL(38, 38)
+            );
+            INSERT INTO decimal_boundary_events VALUES
+                (9, 999999999, CAST('999999999999.999999' AS DECIMAL(18, 6)),
+                 CAST('99999999999999999999999999999999999999' AS DECIMAL(38, 0)),
+                 CAST('0.' || repeat('9', 38) AS DECIMAL(38, 38))),
+                (-9, -999999999, CAST('-999999999999.999999' AS DECIMAL(18, 6)),
+                 CAST('-99999999999999999999999999999999999999' AS DECIMAL(38, 0)),
+                 CAST('-0.' || repeat('9', 38) AS DECIMAL(38, 38)));
             CREATE TABLE non_finite_events (score DOUBLE);
             INSERT INTO non_finite_events VALUES (CAST('NaN' AS DOUBLE));
             CREATE TABLE nested_events (items INTEGER[]);
@@ -129,6 +143,58 @@ fn duckdb_empty_tables_keep_their_declared_schema_and_unknown_aliases_fail() {
         ["id", "label"]
     );
     assert!(session.table("unconfigured.events").is_err());
+}
+
+#[test]
+fn duckdb_decimal_precision_and_scale_boundaries_keep_exact_values() {
+    let (_directory, database) = fixture_database();
+    let session = SparkSession::builder().get_or_create();
+    session
+        .set_external_catalog_provider(Some(source(&database)))
+        .expect("attach external catalog");
+
+    let decimals = session
+        .table("warehouse.decimal_boundary_events")
+        .expect("read decimal boundary table");
+    let schema = decimals.schema_engine().unwrap();
+    let fields = schema.logical_fields();
+    assert_eq!(fields.len(), 5);
+    assert!(matches!(fields[0].data_type, DataType::Decimal(1, 0)));
+    assert!(matches!(fields[1].data_type, DataType::Decimal(9, 0)));
+    assert!(matches!(fields[2].data_type, DataType::Decimal(18, 6)));
+    assert!(matches!(fields[3].data_type, DataType::Decimal(38, 0)));
+    assert!(matches!(fields[4].data_type, DataType::Decimal(38, 38)));
+
+    let rows = decimals.collect_as_json_rows().unwrap();
+    assert_eq!(rows.len(), 2);
+    let mut rendered = rows
+        .iter()
+        .map(|row| {
+            ["d1", "d9", "d18", "d38", "d38s38"].map(|name| row[name].as_str().unwrap().to_string())
+        })
+        .collect::<Vec<_>>();
+    rendered.sort_by(|left, right| left[0].cmp(&right[0]));
+    let nines_38 = "9".repeat(38);
+    let fractional_38 = format!("0.{}", "9".repeat(38));
+    assert_eq!(
+        rendered,
+        [
+            [
+                "-9".to_string(),
+                "-999999999".to_string(),
+                "-999999999999.999999".to_string(),
+                format!("-{nines_38}"),
+                format!("-{}", fractional_38),
+            ],
+            [
+                "9".to_string(),
+                "999999999".to_string(),
+                "999999999999.999999".to_string(),
+                nines_38,
+                fractional_38,
+            ],
+        ]
+    );
 }
 
 #[test]

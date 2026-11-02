@@ -214,6 +214,20 @@ def main() -> None:
                 );
                 INSERT INTO typed_events VALUES
                     (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
+                CREATE TABLE decimal_boundary_events (
+                    d1 DECIMAL(1, 0),
+                    d9 DECIMAL(9, 0),
+                    d18 DECIMAL(18, 6),
+                    d38 DECIMAL(38, 0),
+                    d38s38 DECIMAL(38, 38)
+                );
+                INSERT INTO decimal_boundary_events VALUES
+                    (9, 999999999, CAST('999999999999.999999' AS DECIMAL(18, 6)),
+                     CAST('99999999999999999999999999999999999999' AS DECIMAL(38, 0)),
+                     CAST('0.' || repeat('9', 38) AS DECIMAL(38, 38))),
+                    (-9, -999999999, CAST('-999999999999.999999' AS DECIMAL(18, 6)),
+                     CAST('-99999999999999999999999999999999999999' AS DECIMAL(38, 0)),
+                     CAST('-0.' || repeat('9', 38) AS DECIMAL(38, 38)));
                 CREATE TABLE non_finite_events (score DOUBLE);
                 INSERT INTO non_finite_events VALUES (CAST('NaN' AS DOUBLE));
                 CREATE TABLE nested_events (items INTEGER[]);
@@ -381,6 +395,41 @@ def main() -> None:
                     2026, 10, 30, 12, 34, 56, tzinfo=timezone.utc
                 ).timestamp()
                 assert typed_row.seen_at.timestamp() == expected_instant
+
+                decimals = spark.table("warehouse.decimal_boundary_events")
+                assert [
+                    (
+                        field.name,
+                        field.dataType.precision,
+                        field.dataType.scale,
+                    )
+                    for field in decimals.schema.fields
+                ] == [
+                    ("d1", 1, 0),
+                    ("d9", 9, 0),
+                    ("d18", 18, 6),
+                    ("d38", 38, 0),
+                    ("d38s38", 38, 38),
+                ]
+                decimal_rows = sorted(decimals.collect(), key=lambda row: row.d1)
+                nines_38 = "9" * 38
+                fractional_38 = "0." + nines_38
+                assert [tuple(str(value) for value in row) for row in decimal_rows] == [
+                    (
+                        "-9",
+                        "-999999999",
+                        "-999999999999.999999",
+                        f"-{nines_38}",
+                        f"-{fractional_38}",
+                    ),
+                    (
+                        "9",
+                        "999999999",
+                        "999999999999.999999",
+                        nines_38,
+                        fractional_38,
+                    ),
+                ]
 
                 try:
                     spark.table("warehouse.non_finite_events").collect()

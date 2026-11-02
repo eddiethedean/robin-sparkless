@@ -1146,6 +1146,27 @@ mod source_pool_tests {
     use std::thread;
 
     #[test]
+    fn decimal_type_mapping_preserves_supported_precision_and_scale_boundaries() {
+        for (type_name, precision, scale) in [
+            ("DECIMAL(1, 0)", 1, 0),
+            ("DECIMAL(9, 0)", 9, 0),
+            ("DECIMAL(18, 6)", 18, 6),
+            ("DECIMAL(38, 0)", 38, 0),
+            ("DECIMAL(38, 38)", 38, 38),
+        ] {
+            assert!(matches!(
+                duckdb_type_to_spark(type_name),
+                Ok(DataType::Decimal(actual_precision, actual_scale))
+                    if actual_precision == precision && actual_scale == scale
+            ));
+        }
+
+        for type_name in ["DECIMAL(0, 0)", "DECIMAL(39, 0)", "DECIMAL(4, 5)"] {
+            assert!(duckdb_type_to_spark(type_name).is_err(), "{type_name}");
+        }
+    }
+
+    #[test]
     fn source_snapshot_charges_decoded_bytes_across_all_batches() {
         let snapshot = DuckDbReadSnapshot::new(
             HashMap::new(),
