@@ -34,11 +34,13 @@ Evidence and narrower contracts:
 
 - The 4.19 DuckDB source is opt-in through the `duckdb-source` server feature and
   `SPARKLESS_DUCKDB_SOURCES`. Public smoke and reference cases cover BOOLEAN,
-  SMALLINT, INT, BIGINT, finite DOUBLE, STRING, DATE, UTC microsecond TIMESTAMP,
-  and DECIMAL(12, 2); the source contract permits the documented wider DECIMAL
-  range but does not certify every precision/scale boundary. Nested/unsigned
-  values, non-finite DOUBLEs, writes, cross-owner
-  joins, and arbitrary Connect SQL are rejected or unsupported. See the
+  SMALLINT, INT, BIGINT (including integer extrema and non-null schema), finite
+  DOUBLE, STRING, DATE, UTC microsecond TIMESTAMP,
+  and exact decimal values at `DECIMAL(1,0)`, `(9,0)`, `(18,6)`, `(38,0)`, and
+  `(38,38)`. These exercise low, intermediate, maximum precision, and maximum
+  scale boundaries; they do not compare every valid precision/scale pair.
+  Nested/unsigned values, non-finite DOUBLEs, writes, cross-owner joins, and
+  arbitrary Connect SQL are rejected or unsupported. See the
   [4.19 source contract](plans/sparkless-server/RELEASE_4_19.md#duckdb-source-contract)
   and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
 - Public DuckDB Connect behavior is verified on macOS arm64. The exact-commit
@@ -54,14 +56,12 @@ Evidence and narrower contracts:
   peaking at 135.0 MiB and 195.0 MiB server RSS respectively. Each size used
   one fresh server process. See the
   [local reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-source-build-and-packaged-wheel-checks-2026-11-02).
-  Current-source four-reader 1M-row macOS scans returned all rows at active
-  limits 1/2/4 and reached 251.6/264.8/310.4 MiB peak RSS. Only active limit 1
-  stayed below the provisional 256 MiB guardrail selected for 100k–350k rows;
-  each is one measured round, not a stable budget. Earlier exploratory runs
-  reached 321.5 MiB at active limit 4 and 268.5 MiB at active limit 2. See the
-  [local evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-source-build-and-packaged-wheel-checks-2026-11-02).
-  Higher-volume concurrent scans remain outside the demonstrated envelope. See the
-  [1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#one-million-row-four-reader-boundary-2026-11-02).
+  Repeated current-source four-reader 1M-row macOS scans returned all rows at
+  active limits 1/2/4 and reached 257.8/281.6/299.0 MiB peak RSS across three
+  measured rounds per setting. All exceeded the provisional 256 MiB guardrail
+  selected for 100k–350k rows. Each setting used one server process, so these
+  measurements do not establish a hard or portable 1M-row memory ceiling. See
+  the [repeated 1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#repeated-current-source-one-million-row-slow-reader-runs-2026-11-01).
   A source-built server can load a trusted local extension path. Installed
   wheels resolve the bundled extension beside the server executable when
   `extension_path` is omitted, without a runtime download.
