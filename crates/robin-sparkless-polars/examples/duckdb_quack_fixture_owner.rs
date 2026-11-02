@@ -64,7 +64,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
              seen_at TIMESTAMPTZ
          );
          INSERT INTO typed_events VALUES
-             (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
+             (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56.123456+00');
+         CREATE TABLE integer_boundary_events (
+             small_min SMALLINT NOT NULL,
+             small_max SMALLINT NOT NULL,
+             int_min INTEGER NOT NULL,
+             int_max INTEGER NOT NULL,
+             bigint_min BIGINT NOT NULL,
+             bigint_max BIGINT NOT NULL
+         );
+         INSERT INTO integer_boundary_events VALUES
+             (-32768, 32767, -2147483648, 2147483647,
+              CAST('-9223372036854775808' AS BIGINT),
+              CAST('9223372036854775807' AS BIGINT));
          CREATE TABLE decimal_boundary_events (
              d1 DECIMAL(1, 0),
              d9 DECIMAL(9, 0),

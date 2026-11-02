@@ -31,7 +31,19 @@ fn fixture_database() -> (tempfile::TempDir, std::path::PathBuf) {
                 seen_at TIMESTAMPTZ
             );
             INSERT INTO typed_events VALUES
-                (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
+                (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56.123456+00');
+            CREATE TABLE integer_boundary_events (
+                small_min SMALLINT NOT NULL,
+                small_max SMALLINT NOT NULL,
+                int_min INTEGER NOT NULL,
+                int_max INTEGER NOT NULL,
+                bigint_min BIGINT NOT NULL,
+                bigint_max BIGINT NOT NULL
+            );
+            INSERT INTO integer_boundary_events VALUES
+                (-32768, 32767, -2147483648, 2147483647,
+                 CAST('-9223372036854775808' AS BIGINT),
+                 CAST('9223372036854775807' AS BIGINT));
             CREATE TABLE decimal_boundary_events (
                 d1 DECIMAL(1, 0),
                 d9 DECIMAL(9, 0),
@@ -195,6 +207,53 @@ fn duckdb_decimal_precision_and_scale_boundaries_keep_exact_values() {
             ],
         ]
     );
+}
+
+#[test]
+fn duckdb_integer_extrema_keep_exact_values_and_non_null_schema() {
+    let (_directory, database) = fixture_database();
+    let session = SparkSession::builder().get_or_create();
+    session
+        .set_external_catalog_provider(Some(source(&database)))
+        .expect("attach external catalog");
+
+    let extrema = session
+        .table("warehouse.integer_boundary_events")
+        .expect("read integer boundary table");
+    let schema = extrema.schema_engine().unwrap();
+    let fields = schema.logical_fields();
+    assert_eq!(fields.len(), 6);
+    assert!(matches!(fields[0].data_type, DataType::Short));
+    assert!(matches!(fields[1].data_type, DataType::Short));
+    assert!(matches!(fields[2].data_type, DataType::Integer));
+    assert!(matches!(fields[3].data_type, DataType::Integer));
+    assert!(matches!(fields[4].data_type, DataType::Long));
+    assert!(matches!(fields[5].data_type, DataType::Long));
+    assert!(fields.iter().all(|field| !field.nullable));
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "small_min",
+            "small_max",
+            "int_min",
+            "int_max",
+            "bigint_min",
+            "bigint_max"
+        ]
+    );
+
+    let rows = extrema.collect_as_json_rows().unwrap();
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row["small_min"].as_i64(), Some(i16::MIN as i64));
+    assert_eq!(row["small_max"].as_i64(), Some(i16::MAX as i64));
+    assert_eq!(row["int_min"].as_i64(), Some(i32::MIN as i64));
+    assert_eq!(row["int_max"].as_i64(), Some(i32::MAX as i64));
+    assert_eq!(row["bigint_min"].as_i64(), Some(i64::MIN));
+    assert_eq!(row["bigint_max"].as_i64(), Some(i64::MAX));
 }
 
 #[test]

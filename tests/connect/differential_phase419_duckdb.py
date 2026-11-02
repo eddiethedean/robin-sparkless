@@ -154,7 +154,19 @@ def main() -> None:
                 seen_at TIMESTAMPTZ
             );
             INSERT INTO typed_events VALUES
-                (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56+00');
+                (-32768, 3.5, DATE '2026-10-30', TIMESTAMPTZ '2026-10-30 12:34:56.123456+00');
+            CREATE TABLE integer_boundary_events (
+                small_min SMALLINT NOT NULL,
+                small_max SMALLINT NOT NULL,
+                int_min INTEGER NOT NULL,
+                int_max INTEGER NOT NULL,
+                bigint_min BIGINT NOT NULL,
+                bigint_max BIGINT NOT NULL
+            );
+            INSERT INTO integer_boundary_events VALUES
+                (-32768, 32767, -2147483648, 2147483647,
+                 CAST('-9223372036854775808' AS BIGINT),
+                 CAST('9223372036854775807' AS BIGINT));
             CREATE TABLE decimal_boundary_events (
                 d1 DECIMAL(1, 0),
                 d9 DECIMAL(9, 0),
@@ -241,7 +253,7 @@ def main() -> None:
                         -32768,
                         3.5,
                         date(2026, 10, 30),
-                        datetime(2026, 10, 30, 12, 34, 56, tzinfo=UTC),
+                        datetime(2026, 10, 30, 12, 34, 56, 123456, tzinfo=UTC),
                     )
                 ],
                 StructType(
@@ -277,6 +289,20 @@ def main() -> None:
             reference_empty.createOrReplaceTempView("empty_events_ref")
             reference_all_null.createOrReplaceTempView("all_null_events_ref")
             reference_typed.createOrReplaceTempView("typed_events_ref")
+            reference_integer_extrema = reference.createDataFrame(
+                [(-32768, 32767, -(2**31), 2**31 - 1, -(2**63), 2**63 - 1)],
+                StructType(
+                    [
+                        StructField("small_min", ShortType(), False),
+                        StructField("small_max", ShortType(), False),
+                        StructField("int_min", IntegerType(), False),
+                        StructField("int_max", IntegerType(), False),
+                        StructField("bigint_min", LongType(), False),
+                        StructField("bigint_max", LongType(), False),
+                    ]
+                ),
+            )
+            reference_integer_extrema.createOrReplaceTempView("integer_boundary_events_ref")
             reference_decimals = reference.createDataFrame(
                 [
                     (
@@ -421,6 +447,12 @@ def main() -> None:
                     "typed_scalars_and_utc_timestamp",
                     candidate.table("warehouse.typed_events"),
                     reference.sql("SELECT * FROM typed_events_ref"),
+                    report["cases"],
+                )
+                compare_dataframe(
+                    "integer_extrema_and_non_null_schema",
+                    candidate.table("warehouse.integer_boundary_events"),
+                    reference.sql("SELECT * FROM integer_boundary_events_ref"),
                     report["cases"],
                 )
                 compare_dataframe(
