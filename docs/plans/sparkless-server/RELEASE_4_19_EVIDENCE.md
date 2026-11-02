@@ -873,7 +873,10 @@ environment samples:
 | 2 | [baseline](evidence/phase-419-small-jobs-cancel-ack-baseline-pair-2.json.gz) | `7a50db2c8f8334b0f37f96118cac033230c0962fbe62e0fb8cb1f05dcaca09f1` | [candidate](evidence/phase-419-small-jobs-cancel-ack-candidate-pair-2.json.gz) | `002dc79ddcd358ea6ce5fa79cdf16635b5e6ba4b8f79145db16b3805e9d3ff94` |
 | 3 | [baseline](evidence/phase-419-small-jobs-cancel-ack-baseline-pair-3.json.gz) | `9d4bf2274f668c61c523087e3a9cec0b3246cadf98b537bd5a32b3b6a8a0d094` | [candidate](evidence/phase-419-small-jobs-cancel-ack-candidate-pair-3.json.gz) | `270e63c9888d2b83eae1446b40504d2634d5573ba7e5e0b70fd94159bed06ba4` |
 
-### Four-worker pytest Connect comparison (2026-11-02)
+### Historical workflow four-worker pytest Connect comparison
+
+This is a retained workflow artifact for the earlier candidate. It is historical context, not
+current-candidate acceptance; the local rerun below is the current four-worker check.
 
 The retained runner `tests/connect/benchmark_phase419_xdist.py` launches one shared Connect
 server per engine, then runs three rotating baseline/candidate pairs. Each server handles one
@@ -913,6 +916,82 @@ six suite runs, per-test JUnit durations/statuses, startup/readiness timings, ro
 server artifact hashes, and exact configuration. The benchmark source revision was
 `936645fd088c46056a7a3e834838964152d94fc5`; the script SHA-256 is
 `84a3f6fc337006094f32c00d6c5e048c9b65c3af81edb8a6a2ebac7a04bc4205`.
+
+### Current local four-worker pytest Connect comparison (2026-11-02)
+
+The same checked-in runner, `tests/connect/benchmark_phase419_xdist.py`, was run locally against
+the current source candidate. Three rotating baseline/candidate pairs each started one shared
+server per engine; four `pytest-xdist` workers each created and stopped their own session on that
+server. Each run executed the checked-in 38-case suite once for readiness and once for timing. The
+suite covers 10 1,000-row local-relation ingest/filter/count cases, 10 nullable local-relation
+collections, 10 25-row previews, and 8 10,000-row range collections. All assertions passed: 228
+test executions per engine and 456 total.
+
+Both engines used `pyspark-client==4.0.5`, PyArrow 26.0.0, pytest 9.2.0, pytest-xdist 3.8.0, and
+CPython 3.11.14 on an Apple M4 Pro (12 logical CPUs), macOS 26.5.2 arm64. JVM Spark Connect was
+4.0.5 with `local[4]`, FAIR scheduling, and four shuffle/default partitions. Sparkless used the
+locally built 4.19.0 release-profile server with `http,connect,duckdb-source`, four active
+operations, and four-thread Polars/Rayon/OpenMP pools. The raw report records exact pair order,
+commands, environment, client/server artifact hashes, per-test results, and all six runs.
+
+| Metric | Sparkless 4.19 | JVM Spark Connect 4.0.5 |
+| --- | ---: | ---: |
+| Timed suite p50 / p95 (3 samples) | 853.4 / 896.2 ms | 1,210.5 / 1,210.8 ms |
+| Server start + readiness action + first suite p50 (3 samples) | 884.1 ms | 4,397.7 ms |
+
+The current-source Sparkless server binary SHA-256 is
+`6ac6731e9136dd8582457cb310cc380375a8f5c5dcf5281083a1771c7ff1303b`. The locally built server
+wheel SHA-256 is `b474f124aac2b5fbddfe94ab935696c38a26607dcca1288fbfcc61312a4870d6`; the executable
+inside it has that same binary hash, and its bundled DuckDB 2.0.0 `osx_arm64` Quack extension SHA-256
+is `ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935`. The suite and runner
+SHA-256 values are `5694bb740e434f5e5b6d5c48ce512d6d7f0506042c70e26ae389c68a6a1a7e9f` and
+`84a3f6fc337006094f32c00d6c5e048c9b65c3af81edb8a6a2ebac7a04bc4205`; the report records source
+revision `a6f32b518dc91d4bfeee1415b7ff98e3e6bcfd75`, Spark distribution archive SHA-256
+`a0d44b0e7faf0458ad83b7aa664e7ed8b96beed8a55d66ce3b0dfac2309dfca6`, and Connect JAR SHA-256
+`f762b877f468efbcc2302f62bac2426fd3e0f67ea7d469952efe465bf5587192`.
+
+The deterministic compressed local report is
+[phase-419-four-worker-pytest-local-current.json.gz](evidence/phase-419-four-worker-pytest-local-current.json.gz),
+SHA-256 `dde66479756a112ef9509019ad838b732b8766c3c17fa619f047d099e26bac19`. The issue's earlier
+38-test timing lacks a retained case list and source revision, so this result establishes current
+performance for the checked-in four-job suite without claiming to reproduce those historical
+timings. Implementation checks remain local; release workflow evidence is deferred until the
+release-evidence stage.
+
+### Current local macOS server wheel checks (2026-11-02)
+
+The current source produced a release-profile server with `http,connect,duckdb-source` and a
+matching `macosx_26_0_arm64` server wheel. The wheel SHA-256 is
+`b474f124aac2b5fbddfe94ab935696c38a26607dcca1288fbfcc61312a4870d6`; its bundled executable
+matches the launched binary SHA-256 `6ac6731e9136dd8582457cb310cc380375a8f5c5dcf5281083a1771c7ff1303b`,
+and its DuckDB 2.0.0 Quack extension SHA-256 is
+`ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935`. The release-profile
+Quack owner fixture was rebuilt from the current source and has SHA-256
+`68816f305490c4cd14fea00494db24e741cdb22e0e0bdac16421be63ae1e7c92`.
+
+The local fresh-wheel verifier passed readiness, HTTP and HTTP-only modes, Connect socket and
+port-collision checks, graceful shutdown, the public client smoke, and bundled-extension presence:
+
+```sh
+python3 scripts/verify_server_bin_wheel.py \
+  --wheel /tmp/phase419-current-candidate-wheel/sparkless_server_bin-4.19.0-py3-none-macosx_26_0_arm64.whl \
+  --platform macosx_26_0_arm64 --connect --connect-client --duckdb-source \
+  --client-python /tmp/phase419-clean-install-matrix/combined/bin/python
+```
+
+The clean macOS server-extra environment was updated with this wheel; `pip check` and
+`verify_server_extra_install.py 4.19.0 --mutations --connect-client` passed, including launcher
+restart, HTTP mutations, and the public Connect client. The public DuckDB-source smoke then passed
+in standalone mode and in Quack shared-owner mode with the wheel's bundled extension, using
+`pyspark-client==4.0.5`, PyArrow 26.0.0, Python DuckDB 1.5.1 for the standalone fixture, and the
+current separate-process Quack owner. These checks validate the current macOS 26 wheel; the
+macOS 14 deployment tag and Linux wheel remain release-platform checks.
+
+With the current local `duckdb-source` build, `cargo test --locked --release -p
+robin-sparkless-polars --features duckdb-source --test duckdb_source` passed nine source tests
+with only the extension-dependent Quack case ignored. Running that Quack case separately with
+`SPARKLESS_TEST_QUACK_EXTENSION_PATH` set to the local DuckDB 2.0.0 `osx_arm64` extension passed
+the shared-owner snapshot and writer-commit assertions.
 
 ## Exact-commit Linux and macOS source-extra resource checks (2026-11-01)
 
@@ -1125,7 +1204,7 @@ deferred to the release platform matrix. No CI workflow was started for these ch
 - The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; three measured current-source rounds at both 100k and 350k stayed below it. A previous branch workflow recorded one 100k-row round per platform; that historical result is not used as a current implementation gate. Repeated current-source 1M-row cohorts completed all readers at active limits 1/2/4 with 20 measured actions over three fresh server processes per setting and zero result-cap rejections; peak RSS ranged up to 257.8/281.6/325.5 MiB. A separate provisional 384 MiB macOS 1M-row guardrail contains every measured process peak, but is not enforced or portable. The current-source Linux x86_64 standalone smoke and one 100k-row resource round pass under Docker emulation; native Linux, Linux Quack shared-owner, and broader resource acceptance remain open. D14 and V35/V36 remain open.
 - An earlier branch workflow's consumer jobs passed on Linux x86_64 and macOS arm64 and retained source-resource reports above. Each measured reader completed. These runs are historical context only and do not replace local current-candidate checks or establish a cross-platform RSS limit.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; the cross-platform server-extra source package smokes also pass, while broader helper/platform acceptance remains open.
-- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. A new three-pair four-worker comparison covers the described four-job mix; the exact 38-test suite behind #1738's earlier timings is not retained, so reproducing that comparison remains open. Source-specific broader platform/resource coverage and the complete support acceptance gates remain open.
-- Coordinated 4.19.0 API/native/server package versions and package build definitions are in place. Local current-candidate package and platform checks remain part of implementation acceptance. The earlier branch workflow succeeded with 33 passing jobs and five publication jobs skipped; it is retained as historical context and does not substitute for local checks of the current candidate. Release publication checks are deferred until the release-evidence stage.
+- #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. The checked-in four-job, 38-case suite now has a current local three-pair four-worker comparison with 228 passing executions per engine. The older issue timing's exact suite/revision is not retained, so reproducing that historical timing remains unavailable and is not used as the current local gate. Source-specific broader platform/resource coverage and the complete support acceptance gates remain open.
+- Coordinated 4.19.0 API/native/server package versions and package build definitions are in place. The current macOS 26 release server wheel, clean server-extra install, and packaged standalone/Quack smokes pass locally; macOS 14 deployment-tag and Linux wheel validation remain open. The earlier branch workflow succeeded with 33 passing jobs and five publication jobs skipped; it is retained as historical context and does not substitute for local checks of the current candidate. Release publication checks are deferred until the release-evidence stage.
 
 Accordingly, this evidence record does not mark the 4.19 phase or its GitHub issues complete and does not authorize release publication.
