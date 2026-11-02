@@ -43,13 +43,22 @@ Evidence and narrower contracts:
   arbitrary Connect SQL are rejected or unsupported. See the
   [4.19 source contract](plans/sparkless-server/RELEASE_4_19.md#duckdb-source-contract)
   and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
-- Public DuckDB Connect behavior is verified on macOS arm64. The exact-commit
+- The current 4.19.0 release-profile server wheel, installed helper, and public
+  standalone/Quack source smokes pass locally on macOS 26 arm64 with
+  `pyspark-client==4.0.5`. The wheel includes the matching DuckDB 2.0.0 Quack
+  extension; its exact binary, wheel, extension, install commands, and test
+  results are in the
+  [current local package evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#current-local-macos-server-wheel-checks-2026-11-02).
+  That local wheel has a `macosx_26_0_arm64` tag and does not verify the
+  `macosx_14_0_arm64` release tag.
+- The earlier exact-commit
   [release workflow run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918)
-  passed the installed Linux x86_64 and macOS arm64 server-extra source smokes
-  and a four-reader, 100k-row slow-consumer run on each platform. Every measured
-  reader returned all rows; observed server-child RSS was 192.9 MiB on Linux and
-  137.8 MiB on macOS. These are single-run observations, not a hard or broad
-  cross-platform RSS guarantee. Retained raw reports and limits are in the
+  passed installed Linux x86_64 and macOS arm64 server-extra source smokes and a
+  four-reader, 100k-row slow-consumer run on each platform. This is historical
+  context only for current implementation work. Every measured reader returned
+  all rows; observed server-child RSS was 192.9 MiB on Linux and 137.8 MiB on
+  macOS. These are single-run observations, not a hard or broad cross-platform
+  RSS guarantee. Retained raw reports and limits are in the
   [4.19 resource evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#exact-commit-linux-and-macos-source-extra-resource-checks-2026-11-01).
   A local current-source release build on macOS arm64 also completed three
   measured rounds of the 100k- and 350k-row four-reader slow-consumer cohorts,
@@ -62,6 +71,9 @@ Evidence and narrower contracts:
   result-cap rejections. A provisional 384 MiB guardrail covers this specific
   Mac workload; it is not enforced or portable. See the
   [repeated 1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#repeated-current-source-one-million-row-slow-reader-runs-2026-11-01).
+  Current-source Linux x86_64 standalone and one resource round pass under
+  Docker emulation; native Linux, Linux Quack, and broader resource acceptance
+  remain open.
   A source-built server can load a trusted local extension path. Installed
   wheels resolve the bundled extension beside the server executable when
   `extension_path` is omitted, without a runtime download.
