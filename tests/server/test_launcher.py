@@ -58,7 +58,7 @@ def test_sparkless_connect_owns_session_and_server(monkeypatch):
 
     session = FakeSession()
     _install_fake_pyspark_client(monkeypatch, session)
-    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    monkeypatch.setattr(SparklessConnect, "server_class", FakeServer)
     owner = SparklessConnect(server_options={"executable_path": "/tmp/sparkless"})
 
     with owner as actual:
@@ -99,7 +99,7 @@ def test_sparkless_connect_preserves_body_error_and_stops_server_after_session_e
 
     session = FakeSession()
     _install_fake_pyspark_client(monkeypatch, session)
-    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    monkeypatch.setattr(SparklessConnect, "server_class", FakeServer)
     owner = SparklessConnect()
     with pytest.raises(ValueError, match="body failed") as error:
         with owner:
@@ -153,7 +153,7 @@ def test_sparkless_connect_retains_ownership_until_server_shutdown_succeeds(monk
 
     session = FakeSession()
     _install_fake_pyspark_client(monkeypatch, session)
-    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    monkeypatch.setattr(SparklessConnect, "server_class", FakeServer)
     owner = SparklessConnect()
     owner.__enter__()
 
@@ -171,14 +171,14 @@ def test_sparkless_connect_retains_ownership_until_server_shutdown_succeeds(monk
 def test_sparkless_connect_missing_client_fails_before_server_construction(monkeypatch):
     constructions = []
     monkeypatch.setattr(
-        server_module,
-        "SparklessServer",
+        SparklessConnect,
+        "server_class",
         lambda **options: constructions.append(options),
     )
     monkeypatch.setitem(sys.modules, "pyspark", None)
     monkeypatch.setitem(sys.modules, "pyspark.sql", None)
 
-    with pytest.raises(ImportError, match=r"install sparkless\[connect\]"):
+    with pytest.raises(ImportError, match=r"install sparkless-connect\[client\]"):
         SparklessConnect().__enter__()
 
     assert constructions == []
@@ -202,7 +202,7 @@ def test_sparkless_connect_startup_failure_attempts_shutdown_and_keeps_primary(m
             if self.stop_calls == 1:
                 raise RuntimeError("startup cleanup failed")
 
-    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    monkeypatch.setattr(SparklessConnect, "server_class", FakeServer)
     owner = SparklessConnect()
     with pytest.raises(RuntimeError, match="server startup failed") as error:
         owner.__enter__()
@@ -251,7 +251,7 @@ def test_sparkless_connect_session_creation_failure_stops_server(monkeypatch):
         def stop(self):
             self.stop_calls += 1
 
-    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    monkeypatch.setattr(SparklessConnect, "server_class", FakeServer)
     owner = SparklessConnect()
     with pytest.raises(RuntimeError, match="session creation failed"):
         owner.__enter__()
@@ -293,7 +293,7 @@ def test_sparkless_connect_attempts_both_cleanups_and_preserves_body_error(monke
 
     session = FakeSession()
     _install_fake_pyspark_client(monkeypatch, session)
-    monkeypatch.setattr(server_module, "SparklessServer", FakeServer)
+    monkeypatch.setattr(SparklessConnect, "server_class", FakeServer)
     owner = SparklessConnect()
 
     with pytest.raises(ValueError, match="body failed") as error:
@@ -378,7 +378,7 @@ def test_sparkless_connect_supports_separate_nesting_and_sequential_reuse(monkey
         servers.append(server)
         return server
 
-    monkeypatch.setattr(server_module, "SparklessServer", create_server)
+    monkeypatch.setattr(SparklessConnect, "server_class", create_server)
     owner = SparklessConnect()
     with owner as first:
         with SparklessConnect() as nested:
@@ -411,6 +411,8 @@ def _write_fake_server(path, *, delay=0.0, stderr_bytes=0, version=None):
             'control_protocol_version': 2,
             'capabilities_protocol_version': 1,
             'server_version': {version!r},
+            'server_product': 'base',
+            'execution_backend': 'polars',
             'agent_protocol_version': '1',
             'server_instance_id': identity,
             'http_url': 'http://127.0.0.1:45678',
@@ -418,6 +420,10 @@ def _write_fake_server(path, *, delay=0.0, stderr_bytes=0, version=None):
             'capabilities': {{
                 'capabilities_protocol_version': 1,
                 'transport': 'http',
+                'server_product': 'base',
+                'execution_backend': 'polars',
+                'data_sources': [],
+                'duckdb_owner_modes': [],
                 'http_url': 'http://127.0.0.1:45678',
                 'transports': ['http'] if '--disable-connect' in sys.argv else ['http', 'spark_connect'],
                 'server_instance_id': identity,
