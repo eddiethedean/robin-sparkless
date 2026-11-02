@@ -3311,13 +3311,27 @@ mod tests {
     ) -> Result<Vec<connect_proto::ExecutePlanResponse>, Status> {
         use tonic::codegen::tokio_stream::StreamExt;
 
+        let reattachable = request_reattachable(&request.request_options)?;
         let mut stream = service
-            .execute_plan(Request::new(request))
+            .execute_plan(Request::new(request.clone()))
             .await?
             .into_inner();
         let mut responses = Vec::new();
         while let Some(response) = stream.next().await {
-            responses.push(response?);
+            let response = response?;
+            if reattachable {
+                service
+                    .release_execute(Request::new(release_request(
+                        &request,
+                        connect_proto::release_execute_request::Release::ReleaseUntil(
+                            connect_proto::release_execute_request::ReleaseUntil {
+                                response_id: response.response_id.clone(),
+                            },
+                        ),
+                    )))
+                    .await?;
+            }
+            responses.push(response);
         }
         Ok(responses)
     }

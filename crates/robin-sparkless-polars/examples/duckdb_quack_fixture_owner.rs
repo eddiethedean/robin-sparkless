@@ -146,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn serve_sql(uri: &str, token: &str) -> String {
     format!(
-        "CALL quack_serve({}, token = {})",
+        "CALL quack_serve({}, token = {}, disable_ssl = true)",
         sql_literal(uri),
         sql_literal(token)
     )
