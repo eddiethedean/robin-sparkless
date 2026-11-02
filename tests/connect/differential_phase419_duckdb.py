@@ -147,6 +147,12 @@ def main() -> None:
             CREATE TABLE empty_events (id BIGINT NOT NULL, label VARCHAR);
             CREATE TABLE all_null_events (id INTEGER, label VARCHAR);
             INSERT INTO all_null_events VALUES (1, NULL), (2, NULL);
+            CREATE TABLE null_measurement_events (group_key INTEGER, amount BIGINT);
+            INSERT INTO null_measurement_events VALUES (1, NULL), (1, NULL), (NULL, NULL);
+            CREATE TABLE schema_change_events (id INTEGER, label VARCHAR);
+            INSERT INTO schema_change_events VALUES (1, 'before');
+            CREATE TABLE nullable_filter_events (id BIGINT, bucket INTEGER);
+            INSERT INTO nullable_filter_events VALUES (1, 10), (2, NULL), (3, 20);
             CREATE TABLE typed_events (
                 small SMALLINT,
                 score DOUBLE,
@@ -247,6 +253,24 @@ def main() -> None:
                     ]
                 ),
             )
+            reference_null_measurements = reference.createDataFrame(
+                [(1, None), (1, None), (None, None)],
+                StructType(
+                    [
+                        StructField("group_key", IntegerType(), True),
+                        StructField("amount", LongType(), True),
+                    ]
+                ),
+            )
+            reference_nullable_filter = reference.createDataFrame(
+                [(1, 10), (2, None), (3, 20)],
+                StructType(
+                    [
+                        StructField("id", LongType(), True),
+                        StructField("bucket", IntegerType(), True),
+                    ]
+                ),
+            )
             reference_typed = reference.createDataFrame(
                 [
                     (
@@ -288,6 +312,12 @@ def main() -> None:
             reference_right.createOrReplaceTempView("right_events_ref")
             reference_empty.createOrReplaceTempView("empty_events_ref")
             reference_all_null.createOrReplaceTempView("all_null_events_ref")
+            reference_null_measurements.createOrReplaceTempView(
+                "null_measurement_events_ref"
+            )
+            reference_nullable_filter.createOrReplaceTempView(
+                "nullable_filter_events_ref"
+            )
             reference_typed.createOrReplaceTempView("typed_events_ref")
             reference_integer_extrema = reference.createDataFrame(
                 [(-32768, 32767, -(2**31), 2**31 - 1, -(2**63), 2**63 - 1)],
@@ -368,6 +398,16 @@ def main() -> None:
                     report["cases"],
                 )
                 compare_dataframe(
+                    "nullable_filter_drops_unknown",
+                    candidate.table("warehouse.nullable_filter_events")
+                    .filter(F.col("bucket") >= 10)
+                    .select("id"),
+                    reference.sql(
+                        "SELECT id FROM nullable_filter_events_ref WHERE bucket >= 10"
+                    ),
+                    report["cases"],
+                )
+                compare_dataframe(
                     "limit_zero",
                     events.limit(0),
                     reference.sql("SELECT * FROM events_ref LIMIT 0"),
@@ -397,6 +437,14 @@ def main() -> None:
                         F.count("label").alias("n")
                     ),
                     reference.sql("SELECT count(label) AS n FROM all_null_events_ref"),
+                    report["cases"],
+                )
+                compare_dataframe(
+                    "empty_count_rows",
+                    candidate.table("warehouse.empty_events").agg(
+                        F.count(F.lit(1)).alias("n")
+                    ),
+                    reference.sql("SELECT count(*) AS n FROM empty_events_ref"),
                     report["cases"],
                 )
                 compare_dataframe(
@@ -444,6 +492,37 @@ def main() -> None:
                     report["cases"],
                 )
                 compare_dataframe(
+                    "grouped_null_measurements",
+                    candidate.table("warehouse.null_measurement_events")
+                    .groupBy("group_key")
+                    .agg(
+                        F.count(F.lit(1)).alias("n"),
+                        F.count("amount").alias("amount_count"),
+                        F.sum("amount").alias("amount_sum"),
+                    ),
+                    reference.sql(
+                        "SELECT group_key, count(1) AS n, count(amount) AS amount_count, "
+                        "sum(amount) AS amount_sum FROM null_measurement_events_ref "
+                        "GROUP BY group_key"
+                    ),
+                    report["cases"],
+                )
+                compare_dataframe(
+                    "grouped_empty_input",
+                    candidate.table("warehouse.empty_events")
+                    .groupBy("id")
+                    .agg(
+                        F.count(F.lit(1)).alias("n"),
+                        F.count("label").alias("label_count"),
+                        F.sum("id").alias("id_sum"),
+                    ),
+                    reference.sql(
+                        "SELECT id, count(1) AS n, count(label) AS label_count, "
+                        "sum(id) AS id_sum FROM empty_events_ref GROUP BY id"
+                    ),
+                    report["cases"],
+                )
+                compare_dataframe(
                     "typed_scalars_and_utc_timestamp",
                     candidate.table("warehouse.typed_events"),
                     reference.sql("SELECT * FROM typed_events_ref"),
@@ -461,6 +540,79 @@ def main() -> None:
                     reference.sql("SELECT * FROM decimal_boundary_events_ref"),
                     report["cases"],
                 )
+                empty_join_left = candidate.table("warehouse.join_left")
+                empty_join_right = candidate.table("warehouse.empty_events")
+                compare_dataframe(
+                    "inner_join_empty_side",
+                    empty_join_left.join(
+                        empty_join_right,
+                        empty_join_left["id"] == empty_join_right["id"],
+                        "inner",
+                    ).select(
+                        empty_join_left["id"].alias("id"),
+                        empty_join_left["label"].alias("label"),
+                    ),
+                    reference.sql(
+                        "SELECT l.id AS id, l.label AS label FROM join_left_ref l "
+                        "INNER JOIN empty_events_ref r ON l.id = r.id"
+                    ),
+                    report["cases"],
+                )
+
+                stale_schema_frame = candidate.table("warehouse.schema_change_events")
+                schema_before_change = stale_schema_frame.schema
+                if not isinstance(schema_before_change["id"].dataType, IntegerType):
+                    raise AssertionError(
+                        "schema-change fixture must start with an INTEGER id"
+                    )
+                writer = duckdb.connect(str(database_path))
+                try:
+                    writer.execute(
+                        "ALTER TABLE schema_change_events "
+                        "ALTER COLUMN id SET DATA TYPE BIGINT"
+                    )
+                    writer.execute(
+                        "UPDATE schema_change_events SET id = 2147483648"
+                    )
+                finally:
+                    writer.close()
+                try:
+                    changed_rows = stale_schema_frame.collect()
+                except Exception as error:
+                    message = str(error)
+                    lowered = message.lower()
+                    if not any(
+                        marker in lowered
+                        for marker in ("schema", "analysis", "changed")
+                    ):
+                        raise AssertionError(
+                            "schema drift must fail with a clear analysis/schema error; "
+                            f"received {message!r}"
+                        ) from error
+                    report["cases"]["schema_change_between_analysis_and_execution"] = {
+                        "outcome": "clear_error",
+                        "schema_before": schema_before_change.jsonValue(),
+                        "message": message,
+                    }
+                else:
+                    current_schema = candidate.table(
+                        "warehouse.schema_change_events"
+                    ).schema
+                    if not isinstance(current_schema["id"].dataType, LongType):
+                        raise AssertionError(
+                            "post-change analysis did not report BIGINT id"
+                        )
+                    if [row.id for row in changed_rows] != [2147483648]:
+                        raise AssertionError(
+                            "pre-change plan did not return the reanalyzed BIGINT row: "
+                            f"{changed_rows!r}"
+                        )
+                    report["cases"]["schema_change_between_analysis_and_execution"] = {
+                        "outcome": "reanalyzed",
+                        "schema_before": schema_before_change.jsonValue(),
+                        "schema_after": current_schema.jsonValue(),
+                        "rows": [[row.id, row.label] for row in changed_rows],
+                    }
                 report["candidate_reported_spark_version"] = candidate.version
             report["candidate_passed"] = True
         finally:
