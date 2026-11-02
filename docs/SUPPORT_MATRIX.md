@@ -54,12 +54,12 @@ Evidence and narrower contracts:
   peaking at 135.0 MiB and 195.0 MiB server RSS respectively. Each size used
   one fresh server process. See the
   [local reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-source-build-and-packaged-wheel-checks-2026-11-02).
-  Exploratory four-reader 1M-row macOS scans returned all rows and reached
-  321.5 MiB RSS with active limit 4 and 268.5 MiB with active limit 2. A single
-  current-source active-limit-1 run reached 251.5 MiB, 4.5 MiB below the
-  provisional 256 MiB guardrail selected for 100k–350k rows; an earlier run
-  reached 253.6 MiB. Neither one-round observation is a stable budget. The
-  current-source report is in the [local evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-source-build-and-packaged-wheel-checks-2026-11-02).
+  Current-source four-reader 1M-row macOS scans returned all rows at active
+  limits 1/2/4 and reached 251.6/264.8/310.4 MiB peak RSS. Only active limit 1
+  stayed below the provisional 256 MiB guardrail selected for 100k–350k rows;
+  each is one measured round, not a stable budget. Earlier exploratory runs
+  reached 321.5 MiB at active limit 4 and 268.5 MiB at active limit 2. See the
+  [local evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-source-build-and-packaged-wheel-checks-2026-11-02).
   Higher-volume concurrent scans remain outside the demonstrated envelope. See the
   [1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#one-million-row-four-reader-boundary-2026-11-02).
   A source-built server can load a trusted local extension path. Installed

@@ -969,19 +969,26 @@ bound. `tests/connect/smoke_phase419_duckdb_client.py` passed locally for both t
 and the separate-process Quack shared owner. `scripts/verify_server_bin_wheel.py` also passed against
 the packaged wheel with HTTP, Connect-client, and DuckDB-source checks enabled.
 
-A separate current-source boundary run used four readers at active limit 1, a 60-second queue
-timeout, and one warmup plus one measured round at 1,000,000 rows per reader. All four readers
-returned one million rows with zero result-cap rejections. Action p50/p95 was 9,957.3/10,019.4 ms;
-server peak RSS was 263,782,400 bytes (251.5 MiB), leaving 4.5 MiB below the provisional guardrail.
-The server binary SHA-256 remained `81a72f39a383c01ccf96f56136fd560cb62d27b08dc1f70feeb1f0ab2fc708b0`;
-the report harness revision is `2c95c246d0145f8aa503d445d161f6c9d97f2f84`, and its compressed raw
-report SHA-256 is `9c3f36b41c9329a30730c4c20eb4591e79bb0fffaffa564e1e67c594fa9634e8` at
-[phase419-source-resource-local-macos-aarch64-1m-active1.json.gz](evidence/phase419-source-resource-local-macos-aarch64-1m-active1.json.gz).
-This is one observation and does not establish a stable 1M-row memory budget.
+Three current-source boundary runs used four readers, 1,000,000 rows per reader, one warmup, and
+one measured round. Active limit 1 used a 60-second queue timeout; limits 2 and 4 used 30 seconds.
+All four readers returned one million rows with zero result-cap rejections in all three runs. The
+server binary SHA-256 was
+`81a72f39a383c01ccf96f56136fd560cb62d27b08dc1f70feeb1f0ab2fc708b0`.
+
+| Active operations | Action p50 / p95 (ms) | Server peak RSS | Raw report SHA-256 |
+| ---: | ---: | ---: | --- |
+| 1 | 9,957.3 / 10,019.4 | 263,782,400 bytes (251.6 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-1m-active1.json.gz), `9c3f36b41c9329a30730c4c20eb4591e79bb0fffaffa564e1e67c594fa9634e8` |
+| 2 | 9,709.8 / 9,973.3 | 277,610,496 bytes (264.8 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-1m-active2.json.gz), `d77a72e6516bca68f2dc470f4c4e725b54fe99e0fc0c9265d7dd9d838f4f1c8c` |
+| 4 | 9,741.7 / 9,912.4 | 325,484,544 bytes (310.4 MiB) | [report](evidence/phase419-source-resource-local-macos-aarch64-1m-active4.json.gz), `5e5eade8add148f2303f263b48697b4c423067d327030cf636f92fa42b88c2d5` |
+
+Each p95 is descriptive, with four reader actions in one measured round. Active limit 1 remained
+4.4 MiB below the provisional guardrail; active limits 2 and 4 exceeded it by 8.8 and 54.4 MiB.
+These single-round observations confirm the concurrency boundary but do not establish a stable 1M-row
+memory budget.
 
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; three measured current-source rounds at both 100k and 350k stayed below it, while one exact-commit CI round per platform covered 100k rows. Four-reader 1M-row runs reached 321.5 MiB (active limit 4) and 268.5 MiB (active limit 2). One current-source active-limit-1 run completed at 251.5 MiB, leaving 4.5 MiB; an earlier active-limit-1 run reached 253.6 MiB with 2.4 MiB of headroom. Neither one-round active-1 result establishes a stable budget. Broader platform/resource coverage remains open. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; three measured current-source rounds at both 100k and 350k stayed below it, while one exact-commit CI round per platform covered 100k rows. Current-source 1M-row runs completed all readers at active limits 1/2/4 and peaked at 251.6/264.8/310.4 MiB, respectively; only active limit 1 stayed below the guardrail, and each result is one measured round. Earlier exploratory runs reached 321.5 MiB at active limit 4 and 268.5 MiB at active limit 2. Broader platform/resource coverage remains open. D14 and V35/V36 remain open.
 - The exact-commit release consumer jobs passed on Linux x86_64 and macOS arm64 and retained their raw source-resource reports above. Each measured reader completed. These single runs do not establish a cross-platform RSS limit.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; the cross-platform server-extra source package smokes also pass, while broader helper/platform acceptance remains open.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. A new three-pair four-worker comparison covers the described four-job mix; the exact 38-test suite behind #1738's earlier timings is not retained, so reproducing that comparison remains open. Source-specific broader platform/resource coverage and the complete support acceptance gates remain open.
