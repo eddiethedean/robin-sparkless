@@ -1326,6 +1326,81 @@ emulated execution environment and do not select a Linux RSS guardrail. The raw 
 [phase419-source-resource-local-linux-x86_64-qemu-100k.json.gz](evidence/phase419-source-resource-local-linux-x86_64-qemu-100k.json.gz),
 SHA-256 `b357173b6aa28a6f7f23870fc09777dba55a7a84c85ac0b43cd6d6cec2a2b44c`.
 
+### Local Linux generic wheel packaging and standalone source smoke (2026-11-02)
+
+The cached Linux server binary was built at `3d96e2a716cb3dbfe201be6f24e17eb34ed9d358` with
+`http,connect,duckdb-source` (SHA-256
+`9b768add8fa302099319a41a93d6bf64665e2f46836d899e9c3e103a05e30f63`). Product server code is
+unchanged through `c01b8d946436b1fe0876d286fe99073fa83d7b8a`; the intervening changes only update a
+test response collector and the Quack owner example. The bundled DuckDB 2.0.0 Quack extension SHA-256
+is `9c893bd543ec2c5253d0c47d5614f90a1bfa1791c735dc6bbcea4e8bd3811a97`.
+
+Using the cached artifacts, a generic `linux_x86_64` server wheel was built inside the local x86_64
+Python container:
+
+```sh
+docker run --rm --platform linux/amd64 \
+  -v "$PWD":/workspace \
+  -v /tmp/phase419-linux-build:/linux-build \
+  -v /tmp/phase419-linux-pyenv:/pyenv \
+  -v /tmp/phase419-local-linux-wheel:/linux-wheel \
+  -w /workspace \
+  -e PATH=/pyenv/bin:/usr/local/bin:/usr/bin:/bin \
+  -e SPARKLESS_SERVER_BINARY=/linux-build/sparkless-server \
+  -e SPARKLESS_QUACK_EXTENSION_BINARY=/linux-build/quack.duckdb_extension \
+  -e SPARKLESS_SERVER_WHEEL_PLATFORM=linux_x86_64 \
+  python:3.11-slim-bookworm /pyenv/bin/python -m pip wheel \
+  --no-deps --no-build-isolation --wheel-dir /linux-wheel python/server-bin
+```
+
+The wheel `sparkless_server_bin-4.19.0-py3-none-linux_x86_64.whl` has SHA-256
+`e2b09e4a5aab28e0bda9842f1a809f2b02c237e6adc195ae85fa9a5d86cdcec7`. The wheel verifier passed
+HTTP, HTTP-only, Connect, port collision, shutdown, and public-client checks in the same emulated
+container:
+
+```sh
+docker run --rm --platform linux/amd64 \
+  -v "$PWD":/workspace \
+  -v /tmp/phase419-local-linux-wheel:/linux-wheel \
+  -v /tmp/phase419-linux-pyenv:/pyenv \
+  -w /workspace -e PATH=/pyenv/bin:/usr/local/bin:/usr/bin:/bin \
+  python:3.11-slim-bookworm /pyenv/bin/python \
+  /workspace/scripts/verify_server_bin_wheel.py \
+  --wheel /linux-wheel/sparkless_server_bin-4.19.0-py3-none-linux_x86_64.whl \
+  --platform linux_x86_64 --connect --connect-client --duckdb-source \
+  --client-python /pyenv/bin/python
+```
+
+The wheel was installed in the local Linux client environment, then the standalone DuckDB source
+public smoke passed with Python DuckDB 1.5.1:
+
+```sh
+docker run --rm --platform linux/amd64 \
+  -v /tmp/phase419-local-linux-wheel:/linux-wheel \
+  -v /tmp/phase419-linux-pyenv:/pyenv \
+  -e PATH=/pyenv/bin:/usr/local/bin:/usr/bin:/bin \
+  python:3.11-slim-bookworm /pyenv/bin/python -m pip install \
+  --force-reinstall --no-deps \
+  /linux-wheel/sparkless_server_bin-4.19.0-py3-none-linux_x86_64.whl
+
+docker run --rm --platform linux/amd64 \
+  -v "$PWD":/workspace \
+  -v /tmp/phase419-linux-build:/linux-build \
+  -v /tmp/phase419-linux-pyenv:/pyenv \
+  -w /workspace \
+  -e PATH=/pyenv/bin:/usr/local/bin:/usr/bin:/bin \
+  -e PYTHONPATH=/workspace/python/sparkless:/linux-build \
+  -e SPARK_USER=phase419-linux-x86-wheel \
+  -e TZ=UTC \
+  python:3.11-slim-bookworm /pyenv/bin/python \
+  tests/connect/smoke_phase419_duckdb_client.py \
+  --server-bin /pyenv/lib/python3.11/site-packages/sparkless_server_bin/sparkless-server
+```
+
+This is generic Linux wheel packaging and runtime evidence under Docker x86_64 emulation. It is not
+a `manylinux_2_28_x86_64` compatibility check, native Linux result, or Linux Quack shared-owner
+pass.
+
 ## Local integrated checks on the current branch (2026-11-02)
 
 The following locked release checks passed with the source changes committed as
@@ -1450,7 +1525,7 @@ configuration, and local multi-table snapshot ownership.
 
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; a fresh three-round current-wheel run at both 100k and 350k returned all readers with zero result-cap rejections and peaked at 136.6/209.8 MiB. A previous branch workflow recorded one 100k-row round per platform; that historical result is not used as a current implementation gate. Earlier 1M-row measurements completed 20 actions at active limits 1/2/4 across three processes per setting; the current packaged candidate also completed a local four-reader round at each limit with zero cap rejections and 257.4/290.1/320.8 MiB peak RSS. The provisional 384 MiB 1M-row macOS guardrail contains these observations, but is not enforced or portable. The current-source Linux x86_64 standalone smoke and one 100k-row resource round pass under Docker emulation; native Linux, Linux Quack shared-owner, and broader resource acceptance remain open. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values, the documented write-rejection forms, integer extrema, microsecond timestamps, and exact decimal boundaries through `DECIMAL(38,38)`. The declared table/join/group/aggregate subset has a 14-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; a fresh three-round current-wheel run at both 100k and 350k returned all readers with zero result-cap rejections and peaked at 136.6/209.8 MiB. A previous branch workflow recorded one 100k-row round per platform; that historical result is not used as a current implementation gate. Earlier 1M-row measurements completed 20 actions at active limits 1/2/4 across three processes per setting; the current packaged candidate also completed a local four-reader round at each limit with zero cap rejections and 257.4/290.1/320.8 MiB peak RSS. The provisional 384 MiB 1M-row macOS guardrail contains these observations, but is not enforced or portable. The current-source Linux x86_64 standalone smoke, generic Linux wheel verifier, and one 100k-row resource round pass under Docker emulation; native Linux, manylinux wheel compatibility, Linux Quack shared-owner, and broader resource acceptance remain open. D14 and V35/V36 remain open.
 - An earlier branch workflow's consumer jobs passed on Linux x86_64 and macOS arm64 and retained source-resource reports above. Each measured reader completed. These runs are historical context only and do not replace local current-candidate checks or establish a cross-platform RSS limit.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; the cross-platform server-extra source package smokes also pass, while broader helper/platform acceptance remains open.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. The checked-in four-job, 38-case suite now has a current local three-pair four-worker comparison with 228 passing executions per engine. The older issue timing's exact suite/revision is not retained, so reproducing that historical timing remains unavailable and is not used as the current local gate. Source-specific broader platform/resource coverage and the complete support acceptance gates remain open.

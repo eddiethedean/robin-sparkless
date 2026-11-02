@@ -80,9 +80,10 @@ Evidence and narrower contracts:
   and zero cap rejections; peak RSS was 257.4/290.1/320.8 MiB. These are
   single-round macOS results, not portable RSS guarantees. See the
   [current boundary reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#current-packaged-source-one-million-row-boundary-rerun-2026-11-02).
-  Current-source Linux x86_64 standalone and one resource round pass under
-  Docker emulation; native Linux, Linux Quack, and broader resource acceptance
-  remain open.
+  Current-source Linux x86_64 standalone smoke, generic `linux_x86_64` wheel
+  verifier, and one resource round pass under Docker emulation. These checks do
+  not certify the `manylinux_2_28_x86_64` wheel. Native Linux, Linux Quack, and
+  broader resource acceptance remain open.
   A source-built server can load a trusted local extension path. Installed
   wheels resolve the bundled extension beside the server executable when
   `extension_path` is omitted, without a runtime download.
