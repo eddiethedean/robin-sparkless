@@ -116,6 +116,19 @@ dirty-source digest, server binary SHA-256, raw invocation, client/server CPU an
 and cleanup outcome. Measurements are evidence only until numeric regression budgets are selected;
 this runner does not claim a speedup or close formal V26 on its own.
 
+For 4.19 scheduler comparisons, `--operation-history-records` and
+`--operation-history-bytes` set the server's finite completed-operation history budget. Both
+default to the production values (1,024 records and 4 MiB); use the same explicit values for the
+released baseline and candidate when measuring a long cohort that exceeds the legacy history cap.
+The report records these limits. Overrides apply only to the benchmark server process and do not
+change production defaults.
+
+For a process-wide Rust allocation witness, build the server with the opt-in
+`allocator-trace` Cargo feature. Its control shutdown record reports live bytes, peak live bytes,
+and cumulative allocated bytes through Rust's global allocator. Direct native C/C++ allocations
+are excluded; pair these counters with the existing process RSS sampling and DuckDB connection
+memory limit when interpreting source runs.
+
 The V25 route runner is separate and requires a reachable authenticated emulator route plus its
 immutable source revision. Set `SPARKLESS_PROXY_TOKEN` through the environment or secret manager; the
 value is never written into the report or process arguments:

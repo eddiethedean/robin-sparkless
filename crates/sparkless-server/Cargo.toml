@@ -11,6 +11,7 @@ build = "build.rs"
 [features]
 default = ["http"]
 http = []
+allocator-trace = []
 connect = [
     "dep:prost",
     "dep:prost-reflect",

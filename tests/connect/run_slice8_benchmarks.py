@@ -69,12 +69,18 @@ def clean_client_environment() -> dict[str, str]:
 
 
 def server_configuration(
-    rows: int, active_operations: int, queue_timeout_ms: int
+    rows: int,
+    active_operations: int,
+    queue_timeout_ms: int,
+    operation_history_records: int = 1024,
+    operation_history_bytes: int = 4 * 1024 * 1024,
 ) -> dict[str, str]:
     return {
         **SERVER_CONFIG_ENVIRONMENT,
         "SPARKLESS_MAX_RANGE_ROWS": str(max(rows, 10_000_000, 200_000)),
         "SPARKLESS_MAX_ACTIVE_OPERATIONS": str(active_operations),
+        "SPARKLESS_MAX_MUTATION_RECORDS": str(operation_history_records),
+        "SPARKLESS_MAX_MUTATION_BYTES": str(operation_history_bytes),
         "SPARKLESS_QUEUE_TIMEOUT_MS": str(queue_timeout_ms),
         "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
         "SPARKLESS_CONNECT_TRACE": "1",
@@ -200,6 +206,8 @@ def start_server(
     rows: int,
     active_operations: int,
     queue_timeout_ms: int,
+    operation_history_records: int,
+    operation_history_bytes: int,
 ) -> tuple[subprocess.Popen[str], dict[str, Any], float]:
     environment = os.environ.copy()
     for key in (
@@ -217,7 +225,16 @@ def start_server(
         if key.startswith("SPARKLESS_"):
             environment.pop(key, None)
     environment.update(
-        {**server_configuration(rows, active_operations, queue_timeout_ms), "TZ": "UTC"}
+        {
+            **server_configuration(
+                rows,
+                active_operations,
+                queue_timeout_ms,
+                operation_history_records,
+                operation_history_bytes,
+            ),
+            "TZ": "UTC",
+        }
     )
     command = [
         str(binary),
@@ -305,6 +322,7 @@ def stop_server(process: subprocess.Popen[str], timeout: float = 15) -> dict[str
         "exit_code": process.returncode,
         "acknowledged": True,
         "control_protocol_version": stopped["control_protocol_version"],
+        "rust_global_allocator": stopped.get("rust_global_allocator"),
     }
 
 
@@ -914,6 +932,10 @@ def main() -> int:
     parser.add_argument("--duration-seconds", type=int, default=60)
     parser.add_argument("--active-operations", type=int, default=2)
     parser.add_argument("--queue-timeout-ms", type=int, default=5_000)
+    parser.add_argument("--operation-history-records", type=int, default=1024)
+    parser.add_argument(
+        "--operation-history-bytes", type=int, default=4 * 1024 * 1024
+    )
     parser.add_argument("--http-probe-timeout-seconds", type=float, default=5.0)
     parser.add_argument("--rows", type=int, default=1_000_000)
     parser.add_argument("--collect-rows", type=int, default=None)
@@ -930,11 +952,13 @@ def main() -> int:
         or args.rows < 10
         or args.active_operations < 1
         or args.queue_timeout_ms < 1
+        or args.operation_history_records < 1
+        or args.operation_history_bytes < 1
         or not math.isfinite(args.http_probe_timeout_seconds)
         or args.http_probe_timeout_seconds <= 0
     ):
         raise ValueError(
-            "iterations, workload rows, active operations, queue timeout, and HTTP probe timeout must be positive"
+            "iterations, workload rows, active operations, queue timeout, operation-history limits, and HTTP probe timeout must be positive"
         )
     slow_reader_rows = args.slow_reader_rows
     if slow_reader_rows is None:
@@ -998,6 +1022,8 @@ def main() -> int:
             args.rows,
             args.active_operations,
             args.queue_timeout_ms,
+            args.operation_history_records,
+            args.operation_history_bytes,
         )
         http_url = ready_record["http_url"]
         connect_url = ready_record["spark_connect_url"]
@@ -1236,6 +1262,8 @@ def main() -> int:
                 "slow_reader_rows": slow_reader_rows,
                 "active_operations": args.active_operations,
                 "queue_timeout_ms": args.queue_timeout_ms,
+                "operation_history_records": args.operation_history_records,
+                "operation_history_bytes": args.operation_history_bytes,
                 "http_probe_timeout_seconds": args.http_probe_timeout_seconds,
                 "warmup": "one filtered count and 32-row collect per client, excluded from timed cohorts",
                 "regression_budget": None,
@@ -1245,6 +1273,8 @@ def main() -> int:
                         args.rows,
                         args.active_operations,
                         args.queue_timeout_ms,
+                        args.operation_history_records,
+                        args.operation_history_bytes,
                     ),
                 },
                 "server_thread_environment": {

@@ -4,6 +4,9 @@ use std::io::{self, Write};
 use std::net::{IpAddr, SocketAddr};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
+#[cfg(feature = "allocator-trace")]
+mod allocation_metrics;
+
 const MAX_CONTROL_FRAME_BYTES: usize = 16 * 1024;
 
 fn main() {
@@ -150,10 +153,25 @@ async fn serve_control(
             },
         )
         .await?;
-    write_control_record(&serde_json::json!({
+    #[cfg(feature = "allocator-trace")]
+    let stopped_record = {
+        let allocation = allocation_metrics::snapshot();
+        serde_json::json!({
+            "type": "stopped",
+            "control_protocol_version": CONTROL_PROTOCOL_VERSION,
+            "rust_global_allocator": {
+                "live_bytes": allocation.live_bytes,
+                "peak_live_bytes": allocation.peak_live_bytes,
+                "cumulative_allocated_bytes": allocation.cumulative_allocated_bytes
+            }
+        })
+    };
+    #[cfg(not(feature = "allocator-trace"))]
+    let stopped_record = serde_json::json!({
         "type": "stopped",
         "control_protocol_version": CONTROL_PROTOCOL_VERSION
-    }))?;
+    });
+    write_control_record(&stopped_record)?;
     Ok(())
 }
 
