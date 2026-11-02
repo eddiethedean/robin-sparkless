@@ -1015,11 +1015,32 @@ TZ=UTC PYTHONPATH=/tmp/sparkless-duckdb-python-only \
   --quack-extension-path /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/quack.duckdb_extension
 ```
 
+The current Python launcher/helper unit suite also passes locally:
+
+```sh
+PYTHONPATH=python/sparkless /tmp/sparkless-linkedin-verify/bin/python \
+  -m pytest -q tests/server/test_launcher.py
+```
+
+Result: 17 passed. The run emitted one Pytest plugin assert-rewrite warning and no test failures.
+
 With the current local `duckdb-source` build, `cargo test --locked --release -p
 robin-sparkless-polars --features duckdb-source --test duckdb_source` passed nine source tests
 with only the extension-dependent Quack case ignored. Running that Quack case separately with
 `SPARKLESS_TEST_QUACK_EXTENSION_PATH` set to the local DuckDB 2.0.0 `osx_arm64` extension passed
 the shared-owner snapshot and writer-commit assertions.
+
+The integrated server suite also passed with all current server features enabled together:
+
+```sh
+CARGO_HOME=/tmp/sparkless-cargo-home CARGO_TARGET_DIR=/tmp/sparkless-phase419-duckdb-target \
+  CARGO_BUILD_JOBS=4 CMAKE_BUILD_PARALLEL_LEVEL=4 \
+  cargo test --locked --release -p sparkless-server --no-default-features \
+  --features http,connect,duckdb-source
+```
+
+This current-source run passed 85 server unit tests, 3 control-protocol integration tests, and 2
+HTTP integration tests, with no failures or ignored tests.
 
 ## Exact-commit Linux and macOS source-extra resource checks (2026-11-01)
 
