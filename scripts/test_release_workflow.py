@@ -137,6 +137,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertIn("--features http,connect", base_build["run"])
                 self.assertNotIn("duckdb-source", base_build["run"])
                 self.assertIn("-p sparkless-server-duckdb ", duckdb_build["run"])
+                graph_step = next(
+                    step for step in steps if step.get("name") == "Record isolated product feature graphs"
+                )
+                self.assertEqual(
+                    graph_step.get("env", {}).get("RUSTUP_TOOLCHAIN"), "1.93.1"
+                )
                 wheel_step = next(
                     step for step in steps if step.get("name", "").startswith("Build and verify separate")
                 )

@@ -431,6 +431,8 @@ jobs:
           fi
           CARGO_TARGET_DIR=target/server-duckdb cargo tree --locked -e features -p sparkless-server-duckdb --no-default-features --features http,connect > "$RUNNER_TEMP/server-feature-graphs/duckdb.txt"
           grep -q 'robin-sparkless-duckdb' "$RUNNER_TEMP/server-feature-graphs/duckdb.txt"
+        env:
+          RUSTUP_TOOLCHAIN: 1.93.1
       - name: Build the base server without DuckDB
         run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
         env:
@@ -521,6 +523,8 @@ jobs:
           fi
           CARGO_TARGET_DIR=target/server-duckdb cargo tree --locked -e features -p sparkless-server-duckdb --no-default-features --features http,connect > "$RUNNER_TEMP/server-feature-graphs/duckdb.txt"
           grep -q 'robin-sparkless-duckdb' "$RUNNER_TEMP/server-feature-graphs/duckdb.txt"
+        env:
+          RUSTUP_TOOLCHAIN: 1.93.1
       - name: Cache cargo
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         continue-on-error: true
