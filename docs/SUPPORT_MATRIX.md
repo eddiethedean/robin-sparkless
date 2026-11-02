@@ -49,8 +49,12 @@ Evidence and narrower contracts:
   extension; its exact binary, wheel, extension, install commands, and test
   results are in the
   [current local package evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#current-local-macos-server-wheel-checks-2026-11-02).
-  That local wheel has a `macosx_26_0_arm64` tag and does not verify the
-  `macosx_14_0_arm64` release tag.
+  That local wheel has a `macosx_26_0_arm64` tag. A separate wheel with the
+  exact `macosx_14_0_arm64` release tag now passes the local wheel verifier and
+  `sparkless[server]` consumer smoke on macOS 26; both the server and Quack
+  extension declare macOS 11.0 as their minimum OS. The tag and packaged contents are checked, but
+  execution on an actual macOS 14 host remains open. See the
+  [local macOS 14-tagged wheel evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-macos-14-tagged-server-wheel-check-2026-11-02).
 - The earlier exact-commit
   [release workflow run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918)
   passed installed Linux x86_64 and macOS arm64 server-extra source smokes and a

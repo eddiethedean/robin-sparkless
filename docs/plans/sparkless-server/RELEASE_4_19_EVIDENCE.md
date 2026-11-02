@@ -147,6 +147,7 @@ standalone mode (Python DuckDB 1.5.1 fixture) and Quack mode (bundled DuckDB 2.0
 metadata reported `sparkless`, `sparkless-native`, and `sparkless-server-bin` as `4.19.0`, with
 `pyspark-client==4.0.5`. The local server wheel carries a `macosx_26_0_arm64` tag because the
 available host is macOS 26; it does not validate the release workflow's macOS 14 deployment tag.
+The exact macOS 14 tag was checked separately in the local wheel evidence below.
 
 #### Clean consumer install matrix (2026-11-01)
 
@@ -984,8 +985,79 @@ The clean macOS server-extra environment was updated with this wheel; `pip check
 restart, HTTP mutations, and the public Connect client. The public DuckDB-source smoke then passed
 in standalone mode and in Quack shared-owner mode with the wheel's bundled extension, using
 `pyspark-client==4.0.5`, PyArrow 26.0.0, Python DuckDB 1.5.1 for the standalone fixture, and the
-current separate-process Quack owner. These checks validate the current macOS 26 wheel; the
-macOS 14 deployment tag and Linux wheel remain release-platform checks.
+current separate-process Quack owner. These checks validate the current macOS 26 wheel. The exact
+macOS 14 tag and packaged contents are validated locally below; runtime on macOS 14 and Linux wheel
+validation remain release-platform checks.
+
+### Local macOS 14-tagged server wheel check (2026-11-02)
+
+The current Connect/DuckDB-enabled server binary was rebuilt explicitly after the default-feature
+workspace test had reused its Cargo target directory. The enabled binary SHA-256 is
+`6ac6731e9136dd8582457cb310cc380375a8f5c5dcf5281083a1771c7ff1303b`. `vtool -show-build` reports
+`minos 11.0` and SDK 26.2 for the server, and `minos 11.0` and SDK 26.1 for the Quack extension.
+Using those binaries, the local wheel build produced the exact release tag:
+
+```sh
+SPARKLESS_SERVER_BINARY=/tmp/sparkless-phase419-duckdb-target/release/sparkless-server \
+SPARKLESS_QUACK_EXTENSION_BINARY=/Users/odosmatthews/.duckdb/extensions/v2.0.0/osx_arm64/quack.duckdb_extension \
+SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
+  python3 -m pip wheel --no-deps --no-build-isolation \
+  --wheel-dir /tmp/phase419-local-macos14-wheel python/server-bin
+```
+
+The wheel is `sparkless_server_bin-4.19.0-py3-none-macosx_14_0_arm64.whl`, SHA-256
+`89ce05ca813d23666788f7482429108c3ebdc2b5e3442c9007b691e6ce343905`. Its WHEEL metadata contains
+`Tag: py3-none-macosx_14_0_arm64`. The embedded server and extension hashes are respectively
+`6ac6731e9136dd8582457cb310cc380375a8f5c5dcf5281083a1771c7ff1303b` and
+`ef547f01cb30412aa6dbade59bdd5254ed897ba4f113a1700e3e01e00a747935`.
+
+The fresh-wheel verifier passed readiness, HTTP/HTTP-only, Connect, port collision, shutdown, and
+public client checks:
+
+```sh
+python3 scripts/verify_server_bin_wheel.py \
+  --wheel /tmp/phase419-local-macos14-wheel/sparkless_server_bin-4.19.0-py3-none-macosx_14_0_arm64.whl \
+  --platform macosx_14_0_arm64 --connect --connect-client --duckdb-source \
+  --client-python /tmp/phase419-clean-install-matrix/combined/bin/python
+```
+
+The same wheel was installed into the clean combined consumer environment and passed the server
+extra's mutation, restart, HTTP-only, and public Connect checks:
+
+```sh
+/tmp/phase419-clean-install-matrix/combined/bin/python \
+  scripts/verify_server_extra_install.py 4.19.0 --mutations --connect-client \
+  --client-python /tmp/phase419-clean-install-matrix/combined/bin/python
+```
+
+The exact-tagged wheel also passed the public DuckDB source smoke in standalone and packaged
+Quack modes. The Quack owner fixture SHA-256 is
+`68816f305490c4cd14fea00494db24e741cdb22e0e0bdac16421be63ae1e7c92`:
+
+```sh
+SPARK_USER=phase419-macos14-wheel-standalone TZ=UTC \
+PYTHONPATH=python/sparkless:/tmp/sparkless-duckdb-python-only \
+  /tmp/phase419-clean-install-matrix/combined/bin/python \
+  tests/connect/smoke_phase419_duckdb_client.py \
+  --server-bin /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/sparkless-server
+
+SPARK_USER=phase419-macos14-wheel-quack TZ=UTC \
+PYTHONPATH=python/sparkless:/tmp/sparkless-duckdb-python-only \
+  /tmp/phase419-clean-install-matrix/combined/bin/python \
+  tests/connect/smoke_phase419_duckdb_client.py \
+  --server-bin /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/sparkless-server \
+  --quack-owner-bin /tmp/sparkless-phase419-duckdb-target/release/examples/duckdb_quack_fixture_owner \
+  --quack-extension-path /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/quack.duckdb_extension
+```
+
+Both reported `4.19 public Connect DuckDB source smoke passed`.
+
+The combined environment was restored to its original `macosx_26_0_arm64` wheel afterward and
+`pip check` passed. This validates the exact macOS 14 tag and packaged contents while running on
+macOS 26; it is not a runtime test on macOS 14. The first packaging attempt caught the default
+workspace build replacing the enabled executable in the shared Cargo target directory, so future
+feature-matrix commands should use separate target directories or explicitly rebuild the intended
+features before packaging. Linux wheel and native Linux Quack acceptance remain open.
 
 The four local consumer environments (`base`, `server`, `connect`, and `combined`) all pass
 `pip check` with 4.19.0 API/native metadata. The base environment has neither the server binary
@@ -1374,6 +1446,6 @@ configuration, and local multi-table snapshot ownership.
 - An earlier branch workflow's consumer jobs passed on Linux x86_64 and macOS arm64 and retained source-resource reports above. Each measured reader completed. These runs are historical context only and do not replace local current-candidate checks or establish a cross-platform RSS limit.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; the cross-platform server-extra source package smokes also pass, while broader helper/platform acceptance remains open.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. The checked-in four-job, 38-case suite now has a current local three-pair four-worker comparison with 228 passing executions per engine. The older issue timing's exact suite/revision is not retained, so reproducing that historical timing remains unavailable and is not used as the current local gate. Source-specific broader platform/resource coverage and the complete support acceptance gates remain open.
-- Coordinated 4.19.0 API/native/server package versions and package build definitions are in place. The current macOS 26 release server wheel, clean server-extra install, and packaged standalone/Quack smokes pass locally; macOS 14 deployment-tag and Linux wheel validation remain open. The earlier branch workflow succeeded with 33 passing jobs and five publication jobs skipped; it is retained as historical context and does not substitute for local checks of the current candidate. Release publication checks are deferred until the release-evidence stage.
+- Coordinated 4.19.0 API/native/server package versions and package build definitions are in place. Current macOS 26 and exact `macosx_14_0_arm64` release-tag server wheels pass local installation and public-client checks on macOS 26; the tagged server binary and Quack extension declare macOS 11.0 as their minimum OS. Runtime execution on macOS 14 and Linux wheel validation remain open. The earlier branch workflow succeeded with 33 passing jobs and five publication jobs skipped; it is retained as historical context and does not substitute for local checks of the current candidate. Release publication checks are deferred until the release-evidence stage.
 
 Accordingly, this evidence record does not mark the 4.19 phase or its GitHub issues complete and does not authorize release publication.
