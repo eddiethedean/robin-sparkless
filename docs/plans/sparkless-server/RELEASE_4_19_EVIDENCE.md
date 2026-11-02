@@ -987,6 +987,34 @@ in standalone mode and in Quack shared-owner mode with the wheel's bundled exten
 current separate-process Quack owner. These checks validate the current macOS 26 wheel; the
 macOS 14 deployment tag and Linux wheel remain release-platform checks.
 
+The four local consumer environments (`base`, `server`, `connect`, and `combined`) all pass
+`pip check` with 4.19.0 API/native metadata. The base environment has neither the server binary
+nor `pyspark-client`; the server environment has the binary but no Connect client; and the Connect
+and combined environments have `pyspark-client==4.0.5`. After refreshing the server wheel in the
+three applicable environments, the installed `sparkless[connect]` helper/range/join/aggregate
+smoke passed, as did the combined installed-package standalone/Quack source smoke. The API and
+native wheels are the already checked 4.19.0 clean-matrix artifacts; this refresh tests the current
+candidate server wheel against them.
+
+The installed-package smoke commands were:
+
+```sh
+/tmp/phase419-clean-install-matrix/server/bin/python scripts/verify_server_extra_install.py \
+  4.19.0 --mutations --connect-client \
+  --client-python /tmp/phase419-clean-install-matrix/combined/bin/python
+/tmp/phase419-clean-install-matrix/connect/bin/python tests/connect/smoke_phase419_client.py
+TZ=UTC PYTHONPATH=/tmp/sparkless-duckdb-python-only \
+  /tmp/phase419-clean-install-matrix/combined/bin/python \
+  tests/connect/smoke_phase419_duckdb_client.py \
+  --server-bin /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/sparkless-server
+TZ=UTC PYTHONPATH=/tmp/sparkless-duckdb-python-only \
+  /tmp/phase419-clean-install-matrix/combined/bin/python \
+  tests/connect/smoke_phase419_duckdb_client.py \
+  --server-bin /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/sparkless-server \
+  --quack-owner-bin /tmp/sparkless-phase419-duckdb-target/release/examples/duckdb_quack_fixture_owner \
+  --quack-extension-path /private/tmp/phase419-clean-install-matrix/combined/lib/python3.11/site-packages/sparkless_server_bin/quack.duckdb_extension
+```
+
 With the current local `duckdb-source` build, `cargo test --locked --release -p
 robin-sparkless-polars --features duckdb-source --test duckdb_source` passed nine source tests
 with only the extension-dependent Quack case ignored. Running that Quack case separately with
