@@ -171,7 +171,7 @@ python tests/connect/benchmark_phase419_xdist.py \
   --output /tmp/phase419-four-worker-pytest.json
 ```
 
-`differential_phase419_duckdb.py` compares the declared source subset with local Apache Spark 4.0.5 and a packaged Sparkless 4.19 server. Its fixtures cover table schemas/rows, filter and projection, empty results, global and nullable counts, grouped count/sum, same-owner joins with duplicate/null keys, and date/timestamp types. Use a CPython 3.11 environment containing `pyspark[connect]==4.0.5`, `duckdb==1.5.1`, the candidate `sparkless==4.19.0` API/native packages, and the corresponding server binary:
+`differential_phase419_duckdb.py` compares the declared source subset with local Apache Spark 4.0.5 and a packaged Sparkless 4.19 server. Its fixtures cover table schemas/rows, nullable comparisons, filter and projection, empty results/counts/aggregates/join sides, all-null grouped counts and sums, same-owner joins with duplicate/null keys, date/timestamp and decimal boundaries, and a schema change between analysis and execution. Use a CPython 3.11 environment containing `pyspark[connect]==4.0.5`, `duckdb==1.5.1`, the candidate `sparkless==4.19.0` API/native packages, and the corresponding server binary:
 
 ```sh
 python tests/connect/differential_phase419_duckdb.py \

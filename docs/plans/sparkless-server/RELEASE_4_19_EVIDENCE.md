@@ -260,6 +260,37 @@ in the same process; it was not a Spark Connect reference server. The raw report
 [phase-419-duckdb-spark-differential.json.gz](evidence/phase-419-duckdb-spark-differential.json.gz),
 SHA-256 `b9fee26ffb696da3db7879132c925626fb90e756e29b08bfbedd80bff5e1f053`.
 
+### Expanded DuckDB source boundary differential (2026-11-02)
+
+The public differential now passes 20 cases against Spark 4.0.5 `local[4]` on macOS 26.5.2 arm64.
+Five added comparisons verify that nullable `>=` filters drop null predicate results, empty inputs
+produce correct global and grouped aggregate schemas, all-null grouped values preserve count and sum
+semantics, and an inner join with an empty side returns the Spark-compatible empty schema. A sixth
+case analyzes a table as `INTEGER`, changes its source column to `BIGINT` through an independent
+DuckDB writer before executing the same lazy Connect plan, and confirms the plan returns the new
+`2147483648` value with fresh analysis reporting `BIGINT`.
+
+The test harness is commit `03189a66`; its SHA-256 is
+`4b6c312bc933edb2b0f9af7eef1ae537e934b60c2c1ed86c777b93506d33b07a`. It used API `4.19.0`,
+PySpark `4.0.5`, DuckDB fixture writer `1.5.1`, and the release-profile server binary built from
+product commit `c01b8d94` (SHA-256
+`6ac6731e9136dd8582457cb310cc380375a8f5c5dcf5281083a1771c7ff1303b`). The compressed report is
+[phase-419-duckdb-spark-differential-expanded.json.gz](evidence/phase-419-duckdb-spark-differential-expanded.json.gz),
+SHA-256 `93c029434e07f5286f81cb60713f8230017cafc6daa273daf26a59044d02a3bd`. This closes these
+additional local semantic cases; it does not close D14, V35/V36, or the remaining platform/resource
+acceptance gates.
+
+The exact local invocation was:
+
+```sh
+env -u SPARK_REMOTE \
+  PYTHONPATH=/tmp/phase419-differential-deps:/tmp/phase419-differential-packages:/tmp/sparkless-duckdb-python-only \
+  /private/tmp/sparkless-benchmark-local/bin/python \
+  tests/connect/differential_phase419_duckdb.py \
+  --server-bin /tmp/sparkless-phase419-duckdb-target/release/sparkless-server \
+  --output /tmp/phase419-duckdb-spark-differential-expanded.json
+```
+
 ### Public DuckDB cancellation during graceful shutdown (2026-11-01)
 
 `tests/connect/smoke_phase419_duckdb_shutdown.py` passed against a live Quack owner with a public
