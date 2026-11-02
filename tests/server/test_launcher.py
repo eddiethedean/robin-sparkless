@@ -173,7 +173,7 @@ def test_sparkless_connect_missing_client_fails_before_server_construction(monke
     monkeypatch.setattr(
         SparklessConnect,
         "server_class",
-        lambda **options: constructions.append(options),
+        staticmethod(lambda **options: constructions.append(options)),
     )
     monkeypatch.setitem(sys.modules, "pyspark", None)
     monkeypatch.setitem(sys.modules, "pyspark.sql", None)
@@ -378,7 +378,9 @@ def test_sparkless_connect_supports_separate_nesting_and_sequential_reuse(monkey
         servers.append(server)
         return server
 
-    monkeypatch.setattr(SparklessConnect, "server_class", create_server)
+    monkeypatch.setattr(
+        SparklessConnect, "server_class", staticmethod(create_server)
+    )
     owner = SparklessConnect()
     with owner as first:
         with SparklessConnect() as nested:
