@@ -318,6 +318,31 @@ source `578b6ee5` / script SHA-256
 | 350k × 16 B, four readers | 2 | [report](evidence/phase-419-duckdb-concurrent-result-reject-350k-run-2.json.gz) | `909f3d36b1da002e7115b00d0e37588642af931312fc0b159730a5f903a49fe8` |
 | 350k × 16 B, four readers | 3 | [report](evidence/phase-419-duckdb-concurrent-result-reject-350k-run-3.json.gz) | `a45bb99ba714b2b21edb4e178efb6d3514552423887280f0dc5bdd5fbd61f8f9` |
 
+### One-million-row four-reader boundary (2026-11-02)
+
+Three exploratory runs on macOS 26.5.2 arm64 used the 4.19.0 macOS server binary from release
+workflow [41362360697](https://github.com/eddiethedean/robin-sparkless/actions/runs/41362360697)
+(SHA-256 `eb1fec83f8018f311b85a307ef9b95f30f91ee9ee5f1fed4b18fa145ac2db4f0`; features
+`http,connect,duckdb-source`). Harness revision was `831fa0ff7778e9dfb5ccc560ad2d203bf43f06cc`.
+Four independent clients each consumed exactly 1,000,000 rows with 16-byte payloads through
+`toLocalIterator()`, pausing 10 ms per 16,384-row batch. The one warmup and one measured round
+completed for every reader without a result-limit rejection. Each source had 24 MB of logical
+column data; the aggregate was 96 MB. The per-client action p50/p95 samples were 8,890.2/9,130.4
+ms at active limit 4, 9,223.4/9,235.6 ms at active limit 2 (with a 30-second queue timeout),
+and 9,039.3/9,122.4 ms at active limit 1 (with a 60-second queue timeout).
+
+Server-child RSS peaked at 337,117,184 bytes (321.5 MiB) with active limit 4 and 281,526,272 bytes
+(268.5 MiB) with active limit 2, and 265,909,248 bytes (253.6 MiB) with active limit 1. The first
+two exceed the provisional 256 MiB guardrail selected for the 100k–350k four-reader range. The
+active-1 result is one run only, with roughly 2.4 MiB of headroom, so it does not establish a stable
+budget. These observations are not process memory limits, but they show that the 1M per-statement
+row cap does not imply the same RSS budget under four simultaneous scans, even when compute
+admission is 2. High-volume concurrent source work remains outside the measured 256 MiB range. The
+compressed reports are [active limit 4](evidence/phase-419-duckdb-concurrent-resource-1m-active4-macos.json.gz),
+SHA-256 `2b55d1994fb18c3143b2fd07d159cddfe812ac6f194a268ab6e6c3b895b47fbf`, and [active limit 2](evidence/phase-419-duckdb-concurrent-resource-1m-active2-macos.json.gz),
+SHA-256 `ff42a1663b653451f0d6ae4b6168ddcf32d6192a90e2c6662017d10ff1fc7824`, and [active limit 1](evidence/phase-419-duckdb-concurrent-resource-1m-active1-macos.json.gz),
+SHA-256 `23fccebb4fe1e469ba08fd3c44eb109a8e8287ca2d976c15540cc53583afeb51`.
+
 ### Standalone DuckDB source resource measurements (2026-11-01)
 
 `tests/connect/benchmark_phase419_duckdb_source.py` created distinct hash-derived VARCHAR rows in
@@ -683,7 +708,7 @@ The 18 compressed reports retain per-operation samples, phase counters, environm
 
 ### Released-baseline scheduler comparison (2026-11-01–02)
 
-Three rotating pairs compared the published `sparkless-server-bin==4.18.0` executable (the 4.18.1 API baseline) with the 4.19 scheduler candidate. The baseline macOS arm64 wheel SHA-256 is `ea4e2a7eb0ae8605e999d2f4a45bdefcb6980cb538724feefc24a5cbc2a07dfa`; its bundled server executable SHA-256 is `1d79128ea8f09c40d980a5e8907b4a967f909b4c2e38ef58097daee0e0b91b13`. The candidate release executable reports 4.19.0, was built with `--no-default-features --features http,connect` from source revision `43ce29b2c31a3da8d175a91cc350d09a76e8eeb4`, and has SHA-256 `c604f85ab4856dbe3717c930ff3a47b3119b2b00f6a98a54ef9263889779f745`. Later source changes on the branch were confined to DuckDB-source code; the Connect scheduler and exporter paths in that binary match the final candidate.
+Three rotating pairs compared the published `sparkless-server-bin==4.18.0` executable (the 4.18.1 API baseline) with the 4.19 scheduler candidate. The baseline macOS arm64 wheel SHA-256 is `ea4e2a7eb0ae8605e999d2f4a45bdefcb6980cb538724feefc24a5cbc2a07dfa`; its bundled server executable SHA-256 is `1d79128ea8f09c40d980a5e8907b4a967f909b4c2e38ef58097daee0e0b91b13`. The candidate release executable reports 4.19.0, was built with `--no-default-features --features http,connect` from source revision `43ce29b2c31a3da8d175a91cc350d09a76e8eeb4`, and has SHA-256 `c604f85ab4856dbe3717c930ff3a47b3119b2b00f6a98a54ef9263889779f745`. Subsequent runtime changes on the branch were confined to DuckDB-source code; release packaging, workflow, documentation, and benchmark evidence also changed. The Connect scheduler and exporter paths in that binary match the final candidate.
 
 Both executables ran on the same Apple M4 Pro (12 logical CPUs), macOS 26.5.2 arm64 host, with CPython 3.11.15, `pyspark-client==4.0.5`, PyArrow 26.0.0, Rust 1.93.1, and UTC. The harness revision was `fa9cbd9c000c638f6a60a14e76aa9255283f3f00`; its benchmark-only dirty source digest was `e4f26ee259c24b0e9405f2a9ecf455203dd8510cd087b5d0374466605b6f3680`. Each server completed 60-second mixed-workload cohorts at 1/4/8/16 clients, with active limits 2/4/8, a one-million-row filtered count, 100,000-row `range(...).select("id").collect()` operations, a concurrent one-million-row slow reader, health and HTTP probes, disconnect/replay fault injection, and server CPU/RSS and Connect phase sampling. Pair order was baseline/candidate, candidate/baseline, baseline/candidate at each active limit. Queue and HTTP probe timeouts were both 30 seconds.
 
@@ -857,7 +882,7 @@ This closes the exact-commit packaged Linux/macOS source-smoke and single-cohort
 
 ## Open acceptance gates
 
-- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. Four-reader slow-consumer runs select a provisional 256 MiB observed RSS guardrail on macOS arm64. Exact-commit Linux/macOS wheel source smokes and one four-reader 100k-row resource cohort per platform passed in [release run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918); broader platform/resource coverage remains open. D14 and V35/V36 remain open.
+- The optional standalone and Quack source modes, a bounded four-connection/sixteen-waiter limiter, and focused source fixtures are present. Waiting acquires retain no source Arrow batches; statement snapshots own and close their connection rather than retaining it idle. The public Quack fixture proves a separate-process writer commit, owner loss between analysis/execution, recovery after owner restart, and one-producer disconnect/reattach replay; native and public Quack fixtures confirm remote cancellation after a batch and during graceful server shutdown. Standalone and Quack public smokes exercise unsupported types/values and the documented write-rejection forms. The declared table/join/group/aggregate subset has a 12-case Spark 4.0.5 differential report. The provisional 256 MiB observed-RSS guardrail covers four-reader 100k–350k slow-reader cohorts on macOS arm64; exploratory four-reader 1M-row runs completed at 321.5 MiB (active limit 4) and 268.5 MiB (active limit 2). A single active-limit-1 run reached 253.6 MiB with only 2.4 MiB of headroom, which is not a stable budget. Exact-commit Linux/macOS wheel source smokes and one four-reader 100k-row resource cohort per platform passed in [release run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918); broader platform/resource coverage remains open. D14 and V35/V36 remain open.
 - The exact-commit release consumer jobs passed on Linux x86_64 and macOS arm64 and retained their raw source-resource reports above. Each measured reader completed. These single runs do not establish a cross-platform RSS limit.
 - The helper's 17 launcher tests and public smoke cover missing-client import failure, fork protection, startup/session/cleanup failures and retries, nested helpers, sequential reuse, unrelated active-session preservation, and public session creation. The four-mode clean-consumer install/import matrix passes on macOS arm64; the cross-platform server-extra source package smokes also pass, while broader helper/platform acceptance remains open.
 - #1736–#1738 correctness and instrumentation work has landed. The original #1736 projected-range 2× latency target passes at 6.85× on the final source revision; the earlier exporter-only candidate measured 11.39× across three release pairs. Paired exporter/count reports, three-pair small-job action/startup guardrails and server CPU/RSS/first-batch/cancellation comparisons, a three-pair sender-only release A/B, and three-pair scheduler comparisons at active limits 2/4/8 against both the post-export/count intermediate candidate and the published 4.18.0 server are retained above. The optional Rust-global allocator witness records one process-wide trace, while excluding allocations made directly by DuckDB and other native C/C++ code. The four-worker pytest performance comparison required by #1738, source-specific broader platform/resource coverage, and the complete support acceptance gates remain open.

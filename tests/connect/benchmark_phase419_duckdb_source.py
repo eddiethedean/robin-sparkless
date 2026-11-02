@@ -64,12 +64,13 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
 
 
-def clean_server_environment(active_operations: int) -> None:
+def clean_server_environment(active_operations: int, queue_timeout_ms: int) -> None:
     for key in tuple(os.environ):
         if key.startswith("SPARKLESS_"):
             os.environ.pop(key, None)
     os.environ.update(SERVER_ENVIRONMENT)
     os.environ["SPARKLESS_MAX_ACTIVE_OPERATIONS"] = str(active_operations)
+    os.environ["SPARKLESS_QUEUE_TIMEOUT_MS"] = str(queue_timeout_ms)
 
 
 def main() -> None:
@@ -83,6 +84,17 @@ def main() -> None:
         type=int,
         default=1,
         help="number of independent Spark Connect clients reading the same source",
+    )
+    parser.add_argument(
+        "--active-operations",
+        type=int,
+        help="server compute-admission limit (defaults to the concurrent-reader count)",
+    )
+    parser.add_argument(
+        "--queue-timeout-ms",
+        type=int,
+        default=5000,
+        help="server queue deadline, needed when readers exceed active operations",
     )
     parser.add_argument(
         "--slow-reader-delay-ms",
@@ -115,6 +127,15 @@ def main() -> None:
         parser.error(
             "concurrent readers must be between 1 and the configured source connection cap"
         )
+    active_operations = (
+        args.concurrent_readers
+        if args.active_operations is None
+        else args.active_operations
+    )
+    if not 1 <= active_operations <= SOURCE_LIMITS["connections_per_catalog"]:
+        parser.error("active operations must be between 1 and the source connection cap")
+    if not 1 <= args.queue_timeout_ms <= 300_000:
+        parser.error("queue timeout must be between 1 and 300000 milliseconds")
     if not 0 <= args.slow_reader_delay_ms <= 1000:
         parser.error("slow-reader delay must be between 0 and 1000 milliseconds")
     if args.expect_rejection in ("ipc", "rows") and args.slow_reader_delay_ms:
@@ -141,7 +162,7 @@ def main() -> None:
     if duckdb.__version__ != "1.5.1":
         parser.error(f"expected duckdb==1.5.1, found {duckdb.__version__}")
 
-    clean_server_environment(args.concurrent_readers)
+    clean_server_environment(active_operations, args.queue_timeout_ms)
 
     def run_action(spark: ConnectSession) -> int:
         dataframe = spark.table("warehouse.main.events")
@@ -420,9 +441,9 @@ def main() -> None:
         "source_limits": SOURCE_LIMITS,
         "connect_result_limit_bytes": CONNECT_RESULT_LIMIT_BYTES,
         "server_configuration": {
-            "max_active_operations": args.concurrent_readers,
+            "max_active_operations": active_operations,
             "max_pending_operations": 16,
-            "queue_timeout_ms": 5000,
+            "queue_timeout_ms": args.queue_timeout_ms,
             "response_timeout_ms": 60000,
             "polars_max_threads": 4,
             "rayon_threads": 4,

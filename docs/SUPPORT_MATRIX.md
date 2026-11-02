@@ -1,6 +1,6 @@
 # 4.19.0 candidate support contract
 
-Reviewed against branch `codex/release-4.19` on 2026-11-01. **4.19.0 is an
+Reviewed against branch `codex/release-4.19` on 2026-11-02. **4.19.0 is an
 unpublished release candidate; this page describes only the behavior and
 platforms covered by the retained candidate evidence.** See [versions and
 installation](INSTALLATION.md).
@@ -49,6 +49,12 @@ Evidence and narrower contracts:
   137.8 MiB on macOS. These are single-run observations, not a hard or broad
   cross-platform RSS guarantee. Retained raw reports and limits are in the
   [4.19 resource evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#exact-commit-linux-and-macos-source-extra-resource-checks-2026-11-01).
+  Exploratory four-reader 1M-row macOS scans returned all rows and reached
+  321.5 MiB RSS with active limit 4 and 268.5 MiB with active limit 2. A single
+  active-limit-1 run reached 253.6 MiB, only 2.4 MiB below the provisional
+  256 MiB guardrail selected for 100k–350k rows; it is not a stable budget.
+  Higher-volume concurrent scans remain outside the demonstrated envelope. See the
+  [1M-row reports](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#one-million-row-four-reader-boundary-2026-11-02).
   A source-built server can load a trusted local extension path. Installed
   wheels resolve the bundled extension beside the server executable when
   `extension_path` is omitted, without a runtime download.
