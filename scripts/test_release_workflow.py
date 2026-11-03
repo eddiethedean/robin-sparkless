@@ -164,6 +164,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
         )
         self.assertIn("duckdb-source-py311.lock", consumer)
         self.assertIn("smoke_phase419_duckdb_client.py", consumer)
+        self.assertIn("smoke_phase419_duckdb_shutdown.py", consumer)
+        self.assertIn("differential_phase419_duckdb.py", consumer)
+        self.assertIn("oracle-py311.lock", consumer)
         self.assertIn("quack_extension_path", consumer)
         self.assertIn(
             "duckdb-quack-fixture-owner", str(jobs["server-product-consumer"])
@@ -217,8 +220,16 @@ class ReleaseWorkflowTests(unittest.TestCase):
             if step.get("name")
             == "Verify complete wheel and source distribution inventory"
         )
-        self.assertIn("--project sparkless-native", verification)
-        self.assertIn('--requires "sparkless-native==$engine_version"', verification)
+        self.assertIn("verify_candidate_inventory.py", verification)
+        self.assertIn("--root .", verification)
+        self.assertIn(
+            "verified-candidate-inventory",
+            [
+                step.get("with", {}).get("name")
+                for step in gate_steps
+                if step.get("uses", "").startswith("actions/upload-artifact@")
+            ],
+        )
         storage_check = next(
             step["run"]
             for step in gate_steps
@@ -233,6 +244,24 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "sparkless-testing=dist/testing",
         ):
             self.assertIn("--distribution " + distribution, storage_check)
+
+    def test_all_publishers_check_the_exact_candidate_inventory_hashes(self):
+        jobs = workflow("release.yml")["jobs"]
+        publishers = {
+            "publish-native": ["sparkless-native"],
+            "publish-connect": ["sparkless-connect"],
+            "publish-server-products": ["sparkless-server", "sparkless-server-duckdb"],
+            "publish-testing": ["sparkless-testing"],
+            "publish-sparkless": ["sparkless"],
+        }
+        for name, projects in publishers.items():
+            steps = jobs[name]["steps"]
+            script = "\n".join(step.get("run", "") for step in steps)
+            with self.subTest(publisher=name):
+                self.assertIn("verified-candidate-inventory", str(steps))
+                self.assertIn("verify_candidate_inventory.py", script)
+                for project in projects:
+                    self.assertIn(project, script)
 
     def test_testing_package_is_staged_and_published_before_the_api(self):
         jobs = workflow("release.yml")["jobs"]

@@ -641,6 +641,30 @@ acceptance checks. DuckDB remains read-only in 4.19; DuckDB writes and execution
 live JDBC service roundtrips, and the protocol-neutral typed Connect boundary remain
 outside this closure.
 
+### Phase 7 implementation record — 2026-11-03
+
+Phase 7 automation and migration documentation are implemented. CI and Release now
+share one isolated Rust feature-graph verifier for the base, DuckDB, HTTP-only, and
+Connect-only products. The release acceptance gate uses a single Python distribution
+inventory, validates all six projects and their exact platform/file counts, and
+retains a manifest bound to the source revision with each file's size and SHA-256.
+Every Python publisher verifies its downloaded files against that manifest before
+upload. The container image hashes remain checked by their existing manifest.
+
+The exact-product consumer matrix now exercises standalone and live Quack source
+behavior, a locked Spark differential, remote Quack cancellation during shutdown,
+and three slow-reader measurements per workload size on both advertised server
+platforms. The Rust/server and Python migration guides, changelog, documentation
+navigation, and release instructions describe the approved 4.19 breaks and the
+current product inventory. DuckDB writes remain outside 4.19.
+
+Local checks pass: the release workflow suite (12 tests), release helper/inventory
+suite (92 tests), server feature-graph suite (2 tests), and all four actual Cargo
+graphs pass. The release metadata check, 197-file documentation check, and Ruff
+lint/format checks also pass. Exact-head CI and Release acceptance are pending on
+the pushed Phase 7 candidate; P7 is not closed until those results pass. Public
+registry verification remains a post-publication stage.
+
 ## 7. Breaking-change ledger
 
 Record exact removed symbols/signatures and replacement examples during P0/P2. The

@@ -47,6 +47,10 @@ jobs:
         run: python -m pip install PyYAML
       - name: Validate release workflow and publication policy
         run: python scripts/test_release_workflow.py
+      - name: Verify candidate inventory and dependency gate unit tests
+        run: |
+          python -m unittest discover -s scripts -p 'test_release_inventory.py'
+          python -m unittest discover -s scripts -p 'test_server_feature_graphs.py'
       - name: Require successful CI for the publication commit
         if: steps.context.outputs.publish_rust == 'true'
         env:
@@ -430,16 +434,7 @@ jobs:
       - name: Fetch the signed DuckDB 2.0.0 Quack extension
         run: /opt/python/cp311-cp311/bin/python scripts/fetch_duckdb_quack_extension.py --platform linux_amd64 --output "$RUNNER_TEMP/quack.duckdb_extension"
       - name: Record isolated product feature graphs
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/server-feature-graphs"
-          CARGO_TARGET_DIR=target/server-base cargo tree --locked -e features -p sparkless-server --no-default-features --features http,connect > "$RUNNER_TEMP/server-feature-graphs/base.txt"
-          if grep -E 'robin-sparkless-duckdb|duckdb v|libduckdb-sys' "$RUNNER_TEMP/server-feature-graphs/base.txt"; then
-            echo 'base server feature graph contains DuckDB dependencies'
-            exit 1
-          fi
-          CARGO_TARGET_DIR=target/server-duckdb cargo tree --locked -e features -p sparkless-server-duckdb --no-default-features --features http,connect > "$RUNNER_TEMP/server-feature-graphs/duckdb.txt"
-          grep -q 'robin-sparkless-duckdb' "$RUNNER_TEMP/server-feature-graphs/duckdb.txt"
+        run: python3 scripts/verify_server_feature_graphs.py --output-dir "$RUNNER_TEMP/server-feature-graphs"
         env:
           RUSTUP_TOOLCHAIN: 1.93.1
       - name: Build the base server without DuckDB
@@ -522,16 +517,7 @@ jobs:
       - name: Fetch the signed DuckDB 2.0.0 Quack extension
         run: python3 scripts/fetch_duckdb_quack_extension.py --platform osx_arm64 --output "$RUNNER_TEMP/quack.duckdb_extension"
       - name: Record isolated product feature graphs
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/server-feature-graphs"
-          CARGO_TARGET_DIR=target/server-base cargo tree --locked -e features -p sparkless-server --no-default-features --features http,connect > "$RUNNER_TEMP/server-feature-graphs/base.txt"
-          if grep -E 'robin-sparkless-duckdb|duckdb v|libduckdb-sys' "$RUNNER_TEMP/server-feature-graphs/base.txt"; then
-            echo 'base server feature graph contains DuckDB dependencies'
-            exit 1
-          fi
-          CARGO_TARGET_DIR=target/server-duckdb cargo tree --locked -e features -p sparkless-server-duckdb --no-default-features --features http,connect > "$RUNNER_TEMP/server-feature-graphs/duckdb.txt"
-          grep -q 'robin-sparkless-duckdb' "$RUNNER_TEMP/server-feature-graphs/duckdb.txt"
+        run: python3 scripts/verify_server_feature_graphs.py --output-dir "$RUNNER_TEMP/server-feature-graphs"
         env:
           RUSTUP_TOOLCHAIN: 1.93.1
       - name: Cache cargo
@@ -687,7 +673,7 @@ jobs:
     name: ${{ matrix.product }} server install (${{ matrix.runner }})
     needs: [build-wheels, source-dist, server-products-manylinux-x86_64, server-products-macos-arm64]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -827,6 +813,33 @@ jobs:
           chmod +x "$owner_bin"
           .venv-product/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin"
           .venv-product/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin" --quack-owner-bin "$owner_bin" --quack-extension-path "$quack_extension"
+          .venv-product/bin/python tests/connect/smoke_phase419_duckdb_shutdown.py --server-bin "$server_bin" --quack-owner-bin "$owner_bin" --quack-extension-path "$quack_extension"
+      - name: Install the locked Spark oracle
+        if: matrix.product == 'duckdb'
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compare the packaged DuckDB product with Spark
+        if: matrix.product == 'duckdb'
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python -m venv .venv-differential
+          .venv-differential/bin/python -m pip install --require-hashes -r tests/connect/oracle-py311.lock
+          .venv-differential/bin/python -m pip install --require-hashes -r tests/connect/duckdb-source-py311.lock
+          .venv-differential/bin/python -m pip install --no-index --find-links dist "sparkless==$version" "sparkless-server-duckdb==$version"
+          server_bin="$(.venv-differential/bin/python -c 'from sparkless_server_duckdb import executable_path; print(executable_path())')"
+          .venv-differential/bin/python tests/connect/differential_phase419_duckdb.py \
+            --server-bin "$server_bin" \
+            --output "$RUNNER_TEMP/phase419-duckdb-differential-${{ matrix.sparkless }}.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.product == 'duckdb'
+        with:
+          name: phase419-duckdb-differential-${{ matrix.sparkless }}
+          path: ${{ runner.temp }}/phase419-duckdb-differential-${{ matrix.sparkless }}.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Measure four-reader DuckDB source resource envelope
         if: matrix.product == 'duckdb'
         run: |
@@ -840,7 +853,7 @@ jobs:
               --server-bin "$server_bin" \
               --rows "$rows" \
               --payload-bytes 16 \
-              --iterations 1 \
+              --iterations 3 \
               --concurrent-readers 4 \
               --slow-reader-delay-ms 10 \
               "${allow_result_rejection[@]}" \
@@ -913,50 +926,7 @@ jobs:
           path: dist/connect
       - name: Verify complete wheel and source distribution inventory
         run: |
-          set -euo pipefail
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
-          engine_version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/sparkless --project sparkless --version "$version" \
-            --wheels 1 --sdists 1 --platform any --requires "sparkless-native==$engine_version"
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/native \
-            --project sparkless-native \
-            --version "$engine_version" \
-            --wheels 8 \
-            --sdists 1 \
-            --platform macosx_10_12_x86_64 \
-            --platform macosx_11_0_arm64 \
-            --platform manylinux2014_x86_64.manylinux_2_17_x86_64 \
-            --platform manylinux_2_28_aarch64 \
-            --platform musllinux_1_2_aarch64 \
-            --platform musllinux_1_2_x86_64 \
-            --platform win_amd64 \
-            --platform win_arm64
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/server-base \
-            --project sparkless-server \
-            --version "$engine_version" \
-            --wheels 2 \
-            --sdists 0 \
-            --requires "sparkless-connect==$engine_version" \
-            --platform manylinux_2_28_x86_64 \
-            --platform macosx_14_0_arm64
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/server-duckdb \
-            --project sparkless-server-duckdb \
-            --version "$engine_version" \
-            --wheels 2 \
-            --sdists 0 \
-            --requires "sparkless-connect==$engine_version" \
-            --platform manylinux_2_28_x86_64 \
-            --platform macosx_14_0_arm64
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/connect --project sparkless-connect --version "$engine_version" \
-            --wheels 1 --sdists 1 --platform any
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/testing --project sparkless-testing --version "$engine_version" \
-            --wheels 1 --sdists 1 --platform any
+          python3 scripts/verify_candidate_inventory.py --root . --output dist/candidate-inventory.json
       - name: Check candidate distributions
         run: |
           python3 -m pip install twine
@@ -1001,6 +971,12 @@ jobs:
           name: verified-testing-candidate
           path: dist/testing/*
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-candidate-inventory
+          path: dist/candidate-inventory.json
+          if-no-files-found: error
+          retention-days: 90
 
   publish:
     name: Publish Rust crates
@@ -1077,10 +1053,18 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-native-candidate
           path: dist
+      - name: Verify native publisher bytes
+        run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-native
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
@@ -1096,11 +1080,19 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
       - name: Download verified server binary distributions
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-connect-candidate
           path: dist
+      - name: Verify shared launcher publisher bytes
+        run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-connect
       - name: Publish shared launcher distribution to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -1119,6 +1111,12 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-server-base-candidate
@@ -1127,6 +1125,9 @@ jobs:
         with:
           name: verified-server-duckdb-candidate
           path: dist
+      - name: Verify both server product publisher bytes
+        run: |
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-server --project sparkless-server-duckdb
       - name: Publish both native server products to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -1146,10 +1147,18 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-testing-candidate
           path: dist
+      - name: Verify standalone testing publisher bytes
+        run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-testing
       - name: Publish sparkless-testing to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -1227,6 +1236,13 @@ jobs:
         with:
           name: verified-sparkless-candidate
           path: dist
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
+      - name: Verify the API publisher bytes
+        run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless
       - name: Publish sparkless distributions to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -1252,6 +1268,14 @@ jobs:
         with:
           name: verified-native-candidate
           path: public-native
+      - name: Verify every candidate package before public hash checks
+        run: |
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-native --project sparkless-native
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-server-base --project sparkless-server
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-server-duckdb --project sparkless-server-duckdb
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-connect --project sparkless-connect
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-testing --project sparkless-testing
       - name: Verify public package inventory and hashes
         run: |
           python scripts/verify_public_release_416.py --version "${GITHUB_REF_NAME#v}" \

@@ -1,7 +1,9 @@
 # Migrating to Sparkless 4.19
 
 Sparkless 4.19 is a breaking release. This guide covers the Phase 2 core-contract,
-Phase 3 plan/SQL, and Phase 4 storage-boundary changes.
+Phase 3 plan/SQL, Phase 4 storage, Phase 5 server, and Phase 6 Python package changes.
+For Python application imports and installation examples, see the fuller
+[Python migration guide](python_migration.md).
 
 ## Rust engine contracts
 
@@ -148,3 +150,74 @@ metadata commands from effectful commands; command plans classify DDL/DML famili
 retain targets and nested queries where available, and preserve the canonical SQL for
 adapter-specific options. Shared identifier and numeric-promotion helpers live below
 the SQL and Connect adapters.
+
+## Server crates and product selection
+
+The server library is split by responsibility. `sparkless-server-core` owns
+engine-neutral server contracts and product identity; `sparkless-server-runtime`
+owns admission, sessions, and operation state; `sparkless-server-http` and
+`sparkless-server-connect` own their transports; and `sparkless-server-polars`
+composes the Polars application. Product consumers should depend on
+`sparkless-server` for the base product or `sparkless-server-duckdb` for the
+source-enabled product, rather than reaching into the former monolithic server
+implementation. The DuckDB product uses the same Polars execution path and adds
+read-only DuckDB sources; it does not execute queries in DuckDB or enable writes.
+
+The product crates re-export the server application types. Embedders that need a
+specific product identity can construct it explicitly:
+
+```rust,ignore
+use sparkless_server::{Server, ServerConfig, ServerProduct};
+
+let server = Server::new_for_product(config, ServerProduct::Base)?;
+```
+
+Use `ServerProduct::DuckDb` with the DuckDB product crate when composing that
+product. Select HTTP and Connect features explicitly for the listeners the
+application needs. Lower-level runtime and transport crates are available for
+integrations that implement their own composition; those consumers now supply the
+execution and application contracts instead of depending on Polars policy inside
+the transport.
+
+## Python package and import changes
+
+The launcher, product binaries, local extension, and test helpers now have separate
+owners. Install only the packages needed by the application:
+
+```bash
+python -m pip install "sparkless-connect[client]==4.19.0"
+python -m pip install "sparkless-server[connect]==4.19.0"
+python -m pip install "sparkless-server-duckdb[connect]==4.19.0"
+python -m pip install "sparkless[testing]==4.19.0"
+```
+
+The first command provides the shared launcher and pinned public Connect client,
+without a local engine or server binary. The next two commands install one
+product-bound server and its client. The last installs backend-independent test
+fixtures through the separate `sparkless-testing` distribution. Use a separate
+environment when selecting a mutually exclusive PySpark oracle version.
+
+Replace removed imports as follows:
+
+| Removed in 4.19 | Replacement |
+| --- | --- |
+| `from sparkless.server import SparklessServer` | `from sparkless_server import SparklessServer` for the base product, or `from sparkless_server_duckdb import SparklessServer` for the source-enabled product |
+| `from sparkless.server import AsyncSparklessServer, SparklessConnect` | Import from `sparkless_server` or `sparkless_server_duckdb` to bind to a product; use `sparkless_connect` for the shared launcher and explicit product selection |
+| `import sparkless.testing` | `import sparkless_testing` |
+| `pytest_plugins = ["sparkless.testing"]` | `pytest_plugins = ["sparkless_testing"]` |
+| `sparkless._native` | `sparkless_native._native` for integrations that intentionally use the internal extension |
+| `sparkless-server-bin` | `sparkless-server` or `sparkless-server-duckdb`, according to the required product |
+
+`SparklessConnect` owns both the server process and a new public client session.
+Its product-bound import determines the executable. The shared
+`sparkless_connect.SparklessServer` can use an explicit executable path or a
+product selection; it does not search `PATH`, download a binary, or infer that the
+DuckDB product should be selected just because it is installed. If both server
+products are installed, import the desired product helper explicitly. Ordinary
+local applications should continue importing `sparkless` and should not import
+the private native extension directly.
+
+The functions API remains `sparkless.sql.functions`; its private implementation
+modules are not a new application import surface. Likewise, launcher users should
+import from `sparkless_connect` or a product package rather than the new private
+launcher modules.

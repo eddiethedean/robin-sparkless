@@ -49,6 +49,7 @@ jobs:
           python -m unittest discover -s scripts -p 'test_*release*.py'
           python -m unittest discover -s scripts -p 'test_verify_server_bin_wheel.py'
           python -m unittest discover -s scripts -p 'test_verify_wheel_runtime.py'
+          python -m unittest discover -s scripts -p 'test_server_feature_graphs.py'
           mypy --config-file python/pyproject.toml --check-untyped-defs \
             python/sparkless/sparkless python/testing/sparkless_testing \
             python/connect/sparkless_connect
@@ -289,24 +290,7 @@ jobs:
           CARGO_BUILD_JOBS: 1
       - name: Check product feature isolation
         run: |
-          set -euo pipefail
-          CARGO_TARGET_DIR=target/server-base cargo tree --locked -e features -p sparkless-server --no-default-features --features http,connect > "$RUNNER_TEMP/base-server-tree.txt"
-          if grep -E 'robin-sparkless-duckdb|duckdb v|libduckdb-sys' "$RUNNER_TEMP/base-server-tree.txt"; then
-            echo 'base server feature graph contains DuckDB dependencies'
-            exit 1
-          fi
-          CARGO_TARGET_DIR=target/server-http-only cargo tree --locked -e features -p sparkless-server --no-default-features --features http > "$RUNNER_TEMP/http-server-tree.txt"
-          if grep -q 'sparkless-server-connect' "$RUNNER_TEMP/http-server-tree.txt"; then
-            echo 'HTTP-only server feature graph contains the Connect transport crate'
-            exit 1
-          fi
-          CARGO_TARGET_DIR=target/server-connect-only cargo tree --locked -e features -p sparkless-server --no-default-features --features connect > "$RUNNER_TEMP/connect-server-tree.txt"
-          if grep -q 'sparkless-server-http' "$RUNNER_TEMP/connect-server-tree.txt"; then
-            echo 'Connect-only server feature graph contains the HTTP transport crate'
-            exit 1
-          fi
-          CARGO_TARGET_DIR=target/server-duckdb cargo tree --locked -e features -p sparkless-server-duckdb --no-default-features --features http,connect > "$RUNNER_TEMP/duckdb-server-tree.txt"
-          grep -q 'robin-sparkless-duckdb' "$RUNNER_TEMP/duckdb-server-tree.txt"
+          python scripts/verify_server_feature_graphs.py --output-dir "$RUNNER_TEMP/server-feature-graphs"
 
   python-build:
     name: Build one Linux CI wheel

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.19.0] - 2026-11-01
 
-**Breaking changes:** 4.19 reorganizes Python package boundaries despite the minor-version number.
+**Breaking changes:** 4.19 changes Rust engine/server contracts and reorganizes Python package boundaries despite the minor-version number. See the [4.19 migration guide](docs/MIGRATION_4_19.md) and [Python package migration](docs/python_migration.md).
 
 ### Added
 

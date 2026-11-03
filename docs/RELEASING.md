@@ -14,8 +14,8 @@ migration](plans/sparkless-server/23-product-and-package-separation.md), includi
 separate base and DuckDB server products, the shared launcher, a standalone
 `sparkless-testing` package, removal of the old server forwarding package, and
 both images. The release workflow builds distinct products and inventories.
-Native Linux/macOS builds, the split-product consumer matrix, and V59 still need
-to pass before tagging/publication; the public stage closes after publication.
+Native Linux/macOS builds, the split-product consumer matrix, and V59 must pass
+before tagging/publication; the public stage closes after publication.
 Published 4.18 artifacts remain unchanged.
 
 The Rust local facade, engine, DuckDB source, server core, Polars server adapter,
@@ -81,7 +81,9 @@ musl runtime. Both products' wheels (`manylinux_2_28_x86_64` and
 `macosx_14_0_arm64`) run HTTP/Connect lifecycle checks and fresh product-only
 installs without `sparkless-native`; the consumer matrix also installs and
 exercises each product through its `sparkless` convenience extra. DuckDB source
-checks run only with the DuckDB product.
+checks run only with the DuckDB product and include standalone/live-Quack
+smokes, a locked Spark differential, remote cancellation during shutdown, and
+three slow-reader resource rounds at each measured size on both server platforms.
 
 Base and DuckDB Linux servers are compiled in separate target directories. Each
 container copies the exact executable from its tested wheel, then checks its
@@ -90,19 +92,23 @@ source-build Dockerfile remains available for local development.
 
 One acceptance job requires every validation job to succeed, checks package
 names, versions, ABI/platform inventory and Twine metadata, and stages the exact
-checked distributions. Failed, cancelled, or skipped required jobs block all
-publishers. There is no separate job inventory manifest or evidence aggregation
-layer.
+checked distributions. It writes `candidate-inventory.json` with the source
+revision and each distribution file's name, size, and SHA-256. Every publisher
+checks that manifest against its downloaded bytes before upload; another
+revision or changed/extra files fail the gate. Failed, cancelled, or skipped
+required jobs block all publishers. Container images retain their separate
+SHA-256 manifest.
 
 ## Publication and retries
 
 Stable tag pushes publish Rust crates in dependency order, then the native engine
-and shared launcher, followed by the server products/images, compatibility
-accessor, and `sparkless` API. The final job checks public PyPI inventories and
+and shared launcher, followed by the standalone testing package, server
+products/images, and `sparkless` API. The final job checks public PyPI inventories and
 exact hashes for every product and the engine versions on crates.io. For reused component versions, each build job downloads
 matching published files by SHA-256 before running its smoke checks; validation
-and publication therefore consume the immutable published bytes. Publishers download the checked artifacts;
-they do not rebuild wheels or containers. Rust publication uses `--no-verify`
+and publication therefore consume the immutable published bytes. Publishers
+download the checked artifacts and verify their candidate manifest; they do not
+rebuild wheels or containers. Rust publication uses `--no-verify`
 because the same commit has already passed CI and package-archive checks.
 
 For interrupted publication, use **Re-run failed jobs** on the original tagged run

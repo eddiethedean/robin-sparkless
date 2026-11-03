@@ -64,6 +64,7 @@ nav:
   - Use Sparkless:
     - Testing both engines: TESTING_GUIDE.md
     - Migration: python_migration.md
+    - 4.19 Rust and package changes: MIGRATION_4_19.md
     - Persistence and tables: PERSISTENCE_GUIDE.md
     - Scalar UDFs: UDF_GUIDE.md
     - External catalogs: EXTERNAL_CATALOGS.md

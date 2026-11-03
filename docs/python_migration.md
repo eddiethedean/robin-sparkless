@@ -49,6 +49,7 @@ the package boundary:
 | --- | --- |
 | `from sparkless.server import SparklessServer` | `from sparkless_connect import SparklessServer` for the shared launcher, or `from sparkless_server import SparklessServer` for the base product |
 | `from sparkless.server import AsyncSparklessServer, SparklessConnect` | `from sparkless_connect import AsyncSparklessServer, SparklessConnect` |
+| `from sparkless.server import SparklessConnect` when using DuckDB sources | `from sparkless_server_duckdb import SparklessConnect` to bind the owned helper to the DuckDB-source product |
 | `import sparkless.testing` | `import sparkless_testing` |
 | `pip install "sparkless[dev]"` for shared pytest helpers | `pip install "sparkless[testing]"` or `pip install sparkless-testing` |
 | `sparkless._native` | `sparkless_native._native` for internal extension integrations |
@@ -59,6 +60,13 @@ distribution are removed from the 4.19 package graph. Install
 the client-only `sparkless-connect[client]` install does not include a server or
 the local native engine. The `sparkless-testing` package has no runtime
 dependency on Sparkless, its native extension, or PySpark.
+
+When both server products are installed, choose the package import explicitly:
+`sparkless_server.SparklessConnect` owns a base server, while
+`sparkless_server_duckdb.SparklessConnect` owns the DuckDB-source product.
+`sparkless_connect` is the shared launcher for explicit executable/product
+selection and remote-client support. It does not guess which product to launch
+from the installed packages.
 
 Local scalar `F.udf` works with an explicit DataType return object in documented
 contexts. Public pandas/vectorized/grouped UDFs and remote Python execution are
