@@ -1049,6 +1049,9 @@ jobs:
           publish_one robin-sparkless-polars
           publish_one robin-sparkless
           publish_one sparkless-server-core
+          publish_one sparkless-server-runtime
+          publish_one sparkless-server-http
+          publish_one sparkless-server-connect
           publish_one sparkless-server-polars
           publish_one sparkless-server
           publish_one sparkless-server-duckdb

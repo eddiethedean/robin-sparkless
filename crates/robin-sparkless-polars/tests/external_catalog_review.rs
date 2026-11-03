@@ -516,8 +516,9 @@ fn review_external_miss_does_not_make_qualified_local_suffix_exist() {
     assert!(!session.table_exists("catalog.schema.orders"));
     assert!(session
         .sql("CREATE TABLE IF NOT EXISTS catalog.schema.orders (id BIGINT, age BIGINT, name STRING)")
-        .is_ok());
-    assert!(session.table("catalog.schema.orders").is_ok());
+        .is_err());
+    assert!(session.table("catalog.schema.orders").is_err());
+    assert_eq!(session.table("orders").unwrap().count().unwrap(), 1);
 }
 
 #[test]

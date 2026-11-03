@@ -81,6 +81,9 @@ CRATES = (
 PRODUCT_CRATES_419 = (
     "robin-sparkless-duckdb",
     "sparkless-server-core",
+    "sparkless-server-runtime",
+    "sparkless-server-http",
+    "sparkless-server-connect",
     "sparkless-server-polars",
     "sparkless-server-duckdb",
 )

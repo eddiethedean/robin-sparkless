@@ -5,13 +5,17 @@ search:
 
 # Repository-wide SOLID refactor for 4.19.0
 
-Status: adopted for 4.19.0. Phase 1–4 source work is implemented and the P3 targeted
-acceptance gate is complete. The P0 inventory, P1/P2 behavioral gates, and P4 storage
-behavioral gate remain pending.
+Status: adopted for 4.19.0. P0 inventory, P1/P2 contracts, and local P4 contract checks
+passed on 2026-11-02; live JDBC integration remains open, as does the protocol-neutral
+Connect execution boundary. P3's targeted acceptance gate is complete. P6/P7 work and
+exact-candidate release acceptance remain outstanding.
 
-Baseline: working tree inspected on 2026-11-02, based on commit `1292e3dd`, including
-existing uncommitted product/source changes. File sizes below describe that snapshot,
-not a clean release commit. Rebaseline before implementation.
+Initial source inventory: working tree inspected on 2026-11-02 at commit `1292e3dd`,
+including existing uncommitted product/source changes. File sizes below describe that
+snapshot, not a clean release commit. A pre-closeout implementation snapshot is
+described in the P0 addendum. A replacement reproducible snapshot, including the
+tracked patch and untracked files, is now retained there. No reset or checkout was
+performed.
 
 The release may introduce breaking changes. New Rust crates and Python packages are
 allowed. DuckDB writes are a future requirement; the 4.19 source remains read-only.
@@ -128,10 +132,10 @@ product constructors select concrete implementations.
 | **New** `robin-sparkless-jdbc-polars` | Feature-gated database connections and Polars row conversion | Core + JDBC policy + Polars + selected database drivers |
 | `robin-sparkless` | Local public composition and ergonomic Rust API | Explicitly Polars-backed; retain only useful wrappers rather than duplicate every method |
 | `sparkless-server-core` | Product/config types, request/result/error contracts, execution/session ports and capability descriptors | Core/plan; no Hyper, Tonic, Polars or database drivers |
-| **New** `sparkless-server-runtime` | Session and operation ownership, admission, mutation ordering, budgets, cancellation, replay retention, readiness/drain | Server core + async primitives; no wire DTOs or concrete engines |
-| **New** `sparkless-server-http` | HTTP routes, request decoding, response/status rendering and listener | Runtime/core; Hyper and HTTP-specific dependencies |
-| **New** `sparkless-server-connect` | Protobuf build, gRPC service, Connect validation/translation, analysis/config responses | Runtime/core/plan/SQL; Prost/Tonic isolated here |
-| `sparkless-server-polars` | Concrete execution/session adapter and result/schema conversion | Server core + Polars engine; transports compose it from above |
+| **New** `sparkless-server-runtime` | Execution-port dispatch, admission, connection permits, operation registry, and generic session registry | Server core + neutral core contracts + async primitives; no wire DTOs or concrete engines |
+| **New** `sparkless-server-http` | HTTP/1 listener, route dispatch, JSON header validation, and bounded request-body reads | Runtime/core; Hyper and HTTP-specific dependencies |
+| **New** `sparkless-server-connect` | Protobuf build, bounded wire decoding, generated gRPC service dispatch/listener, replay records, replay/session history, and transport drain state | Runtime/core + Prost/Tonic; no concrete engine or HTTP implementation |
+| `sparkless-server-polars` | Polars execution/session adapter and product-specific HTTP/Connect application and schema conversion | Server core + Polars engine; composes the transport crates |
 | `sparkless-server`, `sparkless-server-duckdb` | Product composition, binaries and product-specific capabilities | Runtime, selected transports, Polars adapter; only DuckDB product enables its source |
 | `sparkless-native` | Python ABI, argument/result conversion, exception mapping, callback/GIL ownership | Local facade and engine conversion boundary; no server dependency |
 
@@ -327,10 +331,9 @@ crate until P5.
 The Polars crate passes `cargo check --locked -p robin-sparkless-polars --all-features`,
 the native crate passes `cargo check --locked -p sparkless-native`, the server crate
 passes `cargo check --locked -p sparkless-server-polars --all-features`, and
-`cargo fmt --all --check` passes. Tests were not run in this implementation turn. The
-P1 targeted-test exit gate and P0 inventory closeout were still pending when P2 began
-at the user's direction. They remain open; Phase 2 implementation does not represent
-P1 behavioral acceptance.
+`cargo fmt --all --check` passes. Tests had not been run at this implementation
+checkpoint. The targeted behavioral gate was therefore pending at that time; it was
+closed later with the evidence in the gate-closure addendum.
 
 ### Phase 2 implementation record — 2026-11-02
 
@@ -351,10 +354,10 @@ code. First-party Rust and Python catalog providers now declare ownership. The
 4.19-specific API replacements and examples are in [the migration guide](../MIGRATION_4_19.md).
 
 `cargo fmt --all` and `cargo check --locked --workspace --all-features --all-targets`
-pass. All targets were compiled; test binaries were not executed. The Phase 2
-behavioral contract gate therefore remains open, as do the P1 targeted-test and P0
-inventory gates. Do not treat these source changes as release acceptance until those
-gates are recorded.
+pass. All targets were compiled; test binaries were not executed at this checkpoint.
+The P2 behavioral gate and the earlier P0/P1 gates were pending then; their later
+closure and evidence are recorded in the gate-closure addendum. This milestone record
+does not represent exact-candidate release acceptance.
 
 P4 and early Python module organization can progress independently after their
 prerequisites. This describes dependency order, not a request to start parallel agents.
@@ -398,8 +401,9 @@ Polars plan tests pass (9 tests), the Polars SQL tests pass (39 tests), and the 
 plan tests pass (23 tests). These targeted suites compile and exercise the new adapter
 paths. The P3 frontend-equivalence and malformed-plan gates are closed for this
 acceptance corpus. `cargo check --offline --locked --workspace --all-features` also
-passes. The P0 inventory and P1/P2 behavioral gates remain open, so this phase record
-does not represent full release acceptance.
+passes. The P0 inventory and P1/P2 gates were still open at this milestone; see the
+gate-closure addendum for their later closure. This phase record does not represent
+full release acceptance.
 
 ### Phase 4 implementation record — 2026-11-02
 
@@ -420,9 +424,181 @@ Python callback were removed, and first-party providers use `write_table_batches
 Release publishing and archive/consumer graph checks include the new JDBC adapter crate.
 
 `cargo fmt --all` and the all-feature/all-target compile check pass; test binaries were
-not executed. The P4 behavioral exit gate (driver behavior, external catalog ownership,
-rollback/receipt, DuckDB read-only behavior, and source budgets) remains pending along
-with the earlier P0/P1/P2 gates. Source implementation is not release acceptance.
+not executed at this checkpoint. The P4 and earlier P0/P1/P2 behavioral gates were
+pending then; see the gate-closure addendum for their later closure. Source
+implementation is not exact-candidate release acceptance.
+
+### Phase 5 implementation record — 2026-11-02
+
+Phase 5 adds engine-neutral SQL and Connect execution ports to `sparkless-server-core`,
+with the real Polars adapter implementing both ports. `sparkless-server-runtime` now
+owns execution dispatch, connection permits, shared admission, the retained operation
+registry, and the generic session registry. HTTP/1 connection handling, route dispatch,
+header checks, and bounded body reads are in `sparkless-server-http`. Connect protobuf
+generation, structural wire limits, generated gRPC service dispatch/listener, replay
+records, retained-session history, sender/replay byte accounting, drain state, and
+listener address are in `sparkless-server-connect`. The Polars composition supplies
+product-specific HTTP and Connect handlers, session construction, plan translation, and
+schema/Arrow conversion.
+Both HTTP SQL and Connect plan requests reach the runtime through the injected Polars
+ports.
+
+The transport crates are independent product features: HTTP-only has no dependency on
+the Connect crate, while Connect-only has no dependency on the HTTP crate. The
+base and DuckDB products both build in HTTP-only, Connect-only, and combined
+configurations. Dependency-graph checks confirm transport isolation and confirm that
+server core/runtime do not pull in concrete engines or transports. Validation passed:
+
+- `cargo fmt --all --check` and
+  `cargo check --offline --locked -p sparkless-server-polars --all-features --all-targets`.
+- Six `cargo check --offline --locked` commands covering `sparkless-server` and
+  `sparkless-server-duckdb`, each with `http`, `connect`, and `http,connect` features.
+- `cargo test --offline --locked -p sparkless-server-runtime` (3 tests) and
+  `cargo test --offline --locked -p sparkless-server-connect` (7 tests).
+- `cargo test --offline --locked -p sparkless-server-polars --no-default-features
+  --features connect --lib` (55 tests) and the corresponding `http,connect --lib`
+  command (89 tests).
+- `cargo test --offline --locked -p sparkless-server --no-default-features --features
+  http,connect --test control_protocol --test phase1_http` (5 tests).
+- `python3 scripts/test_check_release_versions.py` (13 tests) and
+  `python3 scripts/check_release_versions.py`.
+
+P5 product builds and behavior tests pass for the advertised feature matrix. At the time
+this phase record was written it did not close P0/P1/P2/P4; the later addendum records
+P0/P1/P2 and local P4 evidence. Live JDBC behavior remains open. Review also found the
+Connect execution-port request and result still carry serialized protobuf data; the
+required protocol-neutral typed-plan boundary remains unfinished. P6/P7 work and
+exact-candidate release acceptance remain outstanding.
+
+### Gate closure addendum (2026-11-02)
+
+This addendum records gate evidence for the 4.19 SOLID refactor. P0 inventory,
+reproducibility, P1/P2, and local P4 contract checks passed; live JDBC integration and
+the P5 typed Connect boundary remain open. It records implementation evidence, not final product
+release acceptance. Phase checkpoints above retain what had and had not been tested at
+the time they were written.
+
+#### P0 — baseline, inventory, decisions, and ownership
+
+The initial source inventory and file-size observations above are from commit
+`1292e3dd`. Before this closeout documentation was edited, the implementation snapshot
+was captured without resetting the working tree:
+
+| Snapshot field | Value |
+| --- | --- |
+| Branch / HEAD | `codex/release-4.19` / `8795dac27e47ceeac2ff37218f756cb8a2841629` |
+| Tracked worktree diff | SHA-256 `1858ab4618a66183db12206b26f6855da9142e9f05b8b2d1a56aa471aa262f7a` (`git diff HEAD --binary`) |
+| Worktree status records | 48 |
+| Untracked manifest | 24 sorted paths; SHA-256 `c1e0d99de9f8b43d034a18f88928ce223524d6174874140978eb85fe8b9c6e80` over each path and file SHA-256 |
+
+The pre-closeout hashes above identify an earlier snapshot whose payload was not
+retained. P0 reproducibility is now satisfied by the replacement artifact at
+[`docs/plans/evidence/solid-refactor-p0-snapshot-2026-11-02`](evidence/solid-refactor-p0-snapshot-2026-11-02).
+Its metadata pins HEAD and the tracked patch hash; the patch, sorted untracked manifest,
+untracked file archive, and status record reconstruct that snapshot. The artifact
+directory itself is excluded from the captured untracked paths.
+
+The public Rust/Python API breaks and runnable replacements are listed in the breaking
+change ledger in §7 and [the migration guide](../MIGRATION_4_19.md). Product imports,
+CLI/product selection, package contents, feature combinations, capability identity and
+control/capabilities protocol compatibility are inventoried in
+[SS-23](sparkless-server/23-product-and-package-separation.md),
+[D22](sparkless-server/DECISIONS.md#d22-product-and-package-separation-2026-11-02),
+the release plan, and the manifests/workflow verifiers. Engine and adapter ownership
+is mapped in [the architecture guide](../ENGINE_ARCHITECTURE.md). No baseline work was
+discarded; the recorded snapshot includes the then-dirty Phase 5 implementation and
+closeout fixes.
+
+The current lane-to-owner map is: core/provider contracts — `robin-sparkless-core`;
+portable plans and shared SQL — `robin-sparkless-plan` / `robin-sparkless-sql`;
+local execution and native/Python API — `robin-sparkless-polars` /
+`sparkless-native` and the `tests/` suites; storage behavior — Delta, JDBC,
+JDBC-Polars and DuckDB adapter crates with their crate and Polars integration suites;
+server lifecycle/transports — `sparkless-server-runtime`, `sparkless-server-http`,
+`sparkless-server-connect`, and the Polars/product integration suites; package and
+release lanes — `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and the
+release verification scripts. Section 8 retains the regression-area inventory and
+commands. D22/SS-23 now state the approved 4.19 product/runtime scope and architecture
+ownership.
+
+Baseline and retained benchmark results are recorded in the 4.19 plan and
+[release evidence](sparkless-server/RELEASE_4_19_EVIDENCE.md), including the repeated
+small-job p50/p95 guardrails, Connect scheduler/export comparisons, and source/RSS
+workloads. Historical measurements remain tied to their recorded revisions and hosts;
+the evidence does not convert provisional macOS RSS observations into portable limits.
+
+#### P1 — decomposition behavior
+
+The native extension was rebuilt from this checkout before Python results were trusted.
+The following regression lanes passed after the final fixes:
+
+- `cargo test --offline --locked -p robin-sparkless-core`: 33 tests passed across
+  unit and compatibility integration tests.
+- `cargo test --offline --locked -p robin-sparkless-polars --all-features`: 466 unit
+  tests passed, 2 ignored; DuckDB source integration: 9 passed, 1 ignored; external
+  catalog review: 17 passed; remaining integration targets and doctests passed.
+- `PYTHONPATH=python/connect:python/sparkless .venv/bin/python -m pytest tests
+  --ignore=tests/parity -m 'not delta and not integration' -n 4 -q`: 3,198 passed,
+  28 skipped, and 7 subtests passed. Connect launcher tests were included with both
+  package roots on the import path.
+- `PYTHONPATH=python/sparkless .venv/bin/python -m pytest -q
+  tests/unit/test_external_catalog_provider.py`: 79 passed against the rebuilt native
+  extension. The file-backed SQLite JDBC suite passed 32 tests with the SQLite feature.
+
+The two condition-join fixtures now assert the established contract that condition
+joins retain the right-side key columns; the existing parity fixture exercises the
+same behavior. String-key joins continue to coalesce their key columns. This reconciles
+stale assertions with the implemented and parity-tested distinction; it is not a new
+runtime semantic change. No broad visibility increase was introduced for the
+decomposed modules.
+
+#### P2 — core contracts, routing, errors, and outcomes
+
+The all-feature Polars suite above covers the Rust ownership, snapshot, cancellation,
+capability, and write-outcome paths; its 17-test external catalog review passes after
+the final SQL/catalog correction. The rebuilt Python provider suite passes all 79
+cases, including ownership, bounded batch writes, receipts, and structured callback
+errors. The explicit-provider error code is retained through Python mapping, while
+uncoded callback failures still map to the generic unknown-outcome code. Rust core
+unit and compatibility suites pass (33 tests). The 4.19 breaking contract and
+replacement APIs are documented in the migration guide.
+
+#### P4 — storage boundaries and behavior
+
+The all-feature adapter matrix passed:
+
+```sh
+cargo test --offline --locked --all-features \
+  -p robin-sparkless-delta -p robin-sparkless-jdbc \
+  -p robin-sparkless-jdbc-polars -p robin-sparkless-duckdb
+```
+
+Results: DuckDB 6 tests, JDBC 2, and JDBC-Polars 6 test functions returned successfully;
+Delta currently has no standalone tests. Four of the JDBC-Polars functions return early
+when their service URL is absent, so these counts are not six live driver roundtrips.
+The Polars all-feature suite passed its external catalog, Delta,
+JDBC, and DuckDB integration targets, including the read-only and bounded source
+paths. SQLite file-backed JDBC integration passed 32 tests. The DuckDB source target
+reported 9 passing and one optional Quack test ignored when no extension path was
+configured; the selected shared-owner Quack multi-table snapshot fixture has retained
+passing macOS evidence at source commit `d7727a4bfdbf0e3283912b81c977800e4d9a7e97`
+in [the release evidence](sparkless-server/RELEASE_4_19_EVIDENCE.md#quack-shared-owner-multi-table-snapshot-check-2026-11-02).
+
+Enforced source limits and the measured cohorts are recorded with their scope in the
+[release plan](sparkless-server/RELEASE_4_19.md) and evidence. The bounded writer,
+prepared commit outcomes, ownership-before-existence routing, and DuckDB read-only
+capability are exercised by the suites above. These results close the local
+storage-contract checks. Four of the six JDBC-Polars tests are `*_if_env` tests that
+return early without their service URL; the database roundtrips for those drivers were
+not exercised in this run. Live JDBC driver behavior therefore remains open. The
+evidence does not close D14/V35/V36, certify every platform, or establish a portable
+RSS ceiling.
+
+#### Checks rerun for closeout
+
+`cargo fmt --all -- --check` and `git diff --check` pass. The exact-candidate
+distribution, registry, supported-platform, full differential, and publication gates
+remain governed by the release plan and are not implied by closing P0/P1/P2/P4.
 
 ## 7. Breaking-change ledger
 

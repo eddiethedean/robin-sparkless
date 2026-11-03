@@ -3,9 +3,11 @@ name = "sparkless-server-core"
 version = "4.19.0"
 edition = "2024"
 rust-version = "1.93"
-description = "Engine-neutral product and capability contracts for Sparkless servers"
+description = "Engine-neutral product, capability, and execution contracts for Sparkless servers"
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/eddiethedean/robin-sparkless"
 
 [dependencies]
+robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
+serde_json = "1.0"

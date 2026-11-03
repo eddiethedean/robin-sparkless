@@ -311,6 +311,9 @@ fn to_py_err<E: std::fmt::Display + 'static>(e: E) -> PyErr {
         if let Some(callback_error) = external_catalog::engine_error_from_message(&message) {
             if structured.code() == "WRITE_OUTCOME_UNKNOWN" {
                 let mut detail = structured.detail().clone();
+                if callback_error.code() != "EXTERNAL_CATALOG_CALLBACK_FAILED" {
+                    detail.code = callback_error.code().to_string();
+                }
                 if let Some(operation) = callback_error.operation() {
                     detail = detail.with_operation(operation);
                 }

@@ -79,7 +79,8 @@ def consumer_manifest(source: str) -> str:
         '"crates/robin-sparkless-jdbc-polars", '
         '"crates/robin-sparkless-duckdb", "crates/robin-sparkless-polars", '
         '"crates/spark-sql-parser", "crates/sparkless-server-core", '
-        '"crates/sparkless-server-polars", "crates/sparkless-server", '
+        '"crates/sparkless-server-runtime", "crates/sparkless-server-http", '
+        '"crates/sparkless-server-connect", "crates/sparkless-server-polars", "crates/sparkless-server", '
         '"crates/sparkless-server-duckdb"]',
         manifest,
         count=1,

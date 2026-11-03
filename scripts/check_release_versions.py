@@ -73,6 +73,9 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
     duckdb = read_toml(root / "crates/robin-sparkless-duckdb/Cargo.toml")
     polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
     server_core = read_toml(root / "crates/sparkless-server-core/Cargo.toml")
+    server_runtime = read_toml(root / "crates/sparkless-server-runtime/Cargo.toml")
+    server_http = read_toml(root / "crates/sparkless-server-http/Cargo.toml")
+    server_connect = read_toml(root / "crates/sparkless-server-connect/Cargo.toml")
     server_polars = read_toml(root / "crates/sparkless-server-polars/Cargo.toml")
     server = read_toml(root / "crates/sparkless-server/Cargo.toml")
     server_duckdb = read_toml(root / "crates/sparkless-server-duckdb/Cargo.toml")
@@ -86,6 +89,9 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
             duckdb,
             polars,
             server_core,
+            server_runtime,
+            server_http,
+            server_connect,
             server_polars,
             server,
             server_duckdb,
@@ -109,6 +115,18 @@ def check_release(root: Path, tag: str | None = None) -> list[str]:
         "server/polars-adapter": server["dependencies"]["sparkless-server-polars"]["version"],
         "server-polars/facade": server_polars["dependencies"]["robin-sparkless"]["version"],
         "server-polars/core": server_polars["dependencies"]["sparkless-server-core"]["version"],
+        "server-polars/runtime": server_polars["dependencies"]["sparkless-server-runtime"]["version"],
+        "server-polars/http": server_polars["dependencies"]["sparkless-server-http"]["version"],
+        "server-polars/connect": server_polars["dependencies"]["sparkless-server-connect"]["version"],
+        "server-core/engine-core": server_core["dependencies"]["robin-sparkless-core"]["version"],
+        "server-runtime/server-core": server_runtime["dependencies"]["sparkless-server-core"]["version"],
+        "server-runtime/engine-core": server_runtime["dependencies"]["robin-sparkless-core"]["version"],
+        "server-http/runtime": server_http["dependencies"]["sparkless-server-runtime"]["version"],
+        "server-connect/server-core": server_connect["dependencies"]["sparkless-server-core"]["version"],
+        "server-connect/runtime": server_connect["dependencies"]["sparkless-server-runtime"]["version"],
+        "server-connect/engine-core": server_connect["dependencies"]["robin-sparkless-core"]["version"],
+        "server/runtime": server["dependencies"]["sparkless-server-runtime"]["version"],
+        "server-duckdb/runtime": server_duckdb["dependencies"]["sparkless-server-runtime"]["version"],
         "server-duckdb/polars-adapter": server_duckdb["dependencies"]["sparkless-server-polars"]["version"],
         "server-duckdb/core": server_duckdb["dependencies"]["sparkless-server-core"]["version"],
     }
@@ -164,6 +182,9 @@ def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
     polars = read_toml(root / "crates/robin-sparkless-polars/Cargo.toml")
     parser = read_toml(root / "crates/spark-sql-parser/Cargo.toml")
     server_core = read_toml(root / "crates/sparkless-server-core/Cargo.toml")
+    server_runtime = read_toml(root / "crates/sparkless-server-runtime/Cargo.toml")
+    server_http = read_toml(root / "crates/sparkless-server-http/Cargo.toml")
+    server_connect = read_toml(root / "crates/sparkless-server-connect/Cargo.toml")
     server_polars = read_toml(root / "crates/sparkless-server-polars/Cargo.toml")
     server = read_toml(root / "crates/sparkless-server/Cargo.toml")
     server_duckdb = read_toml(root / "crates/sparkless-server-duckdb/Cargo.toml")
@@ -188,6 +209,9 @@ def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
     for name, manifest in (
         ("robin-sparkless-duckdb", duckdb),
         ("sparkless-server-core", server_core),
+        ("sparkless-server-runtime", server_runtime),
+        ("sparkless-server-http", server_http),
+        ("sparkless-server-connect", server_connect),
         ("sparkless-server-polars", server_polars),
         ("sparkless-server", server),
         ("sparkless-server-duckdb", server_duckdb),
@@ -198,7 +222,19 @@ def validate_server_inventory(root: Path, tag: str | None = None) -> list[str]:
         ("sparkless-server/adapter", server, "sparkless-server-polars", expected),
         ("sparkless-server-polars/facade", server_polars, "robin-sparkless", expected),
         ("sparkless-server-polars/core", server_polars, "sparkless-server-core", expected),
+        ("sparkless-server-polars/runtime", server_polars, "sparkless-server-runtime", expected),
+        ("sparkless-server-polars/http", server_polars, "sparkless-server-http", expected),
+        ("sparkless-server-polars/connect", server_polars, "sparkless-server-connect", expected),
         ("sparkless-server-polars/parser", server_polars, "spark-sql-parser", expected),
+        ("sparkless-server-core/engine-core", server_core, "robin-sparkless-core", core["package"]["version"]),
+        ("sparkless-server-runtime/server-core", server_runtime, "sparkless-server-core", expected),
+        ("sparkless-server-runtime/engine-core", server_runtime, "robin-sparkless-core", core["package"]["version"]),
+        ("sparkless-server-http/runtime", server_http, "sparkless-server-runtime", expected),
+        ("sparkless-server-connect/core", server_connect, "sparkless-server-core", expected),
+        ("sparkless-server-connect/runtime", server_connect, "sparkless-server-runtime", expected),
+        ("sparkless-server-connect/engine-core", server_connect, "robin-sparkless-core", core["package"]["version"]),
+        ("sparkless-server/runtime", server, "sparkless-server-runtime", expected),
+        ("sparkless-server-duckdb/runtime", server_duckdb, "sparkless-server-runtime", expected),
         ("sparkless-server-duckdb/adapter", server_duckdb, "sparkless-server-polars", expected),
         ("sparkless-server-duckdb/core", server_duckdb, "sparkless-server-core", expected),
         ("robin-sparkless-polars/duckdb", polars, "robin-sparkless-duckdb", expected),

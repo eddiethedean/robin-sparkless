@@ -10,8 +10,8 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 
 [features]
 default = ["http"]
-http = ["sparkless-server-polars/http"]
-connect = ["sparkless-server-polars/connect"]
+http = ["dep:sparkless-server-http", "sparkless-server-polars/http"]
+connect = ["dep:sparkless-server-connect", "sparkless-server-polars/connect"]
 allocator-trace = ["sparkless-server-polars/allocator-trace"]
 
 [[bin]]
@@ -20,4 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 sparkless-server-core = { version = "4.19.0", path = "../sparkless-server-core" }
+sparkless-server-runtime = { version = "4.19.0", path = "../sparkless-server-runtime" }
+sparkless-server-http = { version = "4.19.0", path = "../sparkless-server-http", optional = true }
+sparkless-server-connect = { version = "4.19.0", path = "../sparkless-server-connect", optional = true }
 sparkless-server-polars = { version = "4.19.0", path = "../sparkless-server-polars", default-features = false, features = ["duckdb-source"] }

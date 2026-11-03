@@ -249,6 +249,45 @@ pub fn translate_with_cancellation(
     token: &CancellationToken,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     check_cancellation(token)?;
+    // Resolve CREATE TABLE existence before the mutation guard. IF NOT EXISTS is a
+    // no-op for an existing external table, while a missing table in any external
+    // namespace remains owned by that provider and cannot fall through locally.
+    if let Statement::CreateTable(create_table) = stmt {
+        let table_name = table_name_from_object_name(&create_table.name);
+        session.check_saved_table_database(&table_name)?;
+        if session.saved_table_exists(&table_name) {
+            if create_table.if_not_exists {
+                return Ok(DataFrame::from_polars_with_options(
+                    PlDataFrame::empty(),
+                    session.is_case_sensitive(),
+                ));
+            }
+            return Err(PolarsError::InvalidOperation(
+                format!("SQL: table already exists: {table_name}").into(),
+            ));
+        }
+        let (external, has_external_owner) =
+            session.resolve_external_table_descriptor(&table_name)?;
+        if external.is_some() {
+            if create_table.if_not_exists {
+                return Ok(DataFrame::from_polars_with_options(
+                    PlDataFrame::empty(),
+                    session.is_case_sensitive(),
+                ));
+            }
+            return Err(PolarsError::InvalidOperation(
+                format!("SQL: table already exists: {table_name}").into(),
+            ));
+        }
+        if has_external_owner {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "SQL: cannot create missing table '{table_name}' in an externally owned namespace"
+                )
+                .into(),
+            ));
+        }
+    }
     reject_read_only_external_mutation(session, stmt)?;
     if !crate::session::has_active_execution_context() {
         set_thread_udf_session(session.clone());
@@ -318,15 +357,10 @@ pub fn translate_with_cancellation(
         Statement::CreateTable(create_table) => {
             let table_name = table_name_from_object_name(&create_table.name);
             session.check_saved_table_database(&table_name)?;
-            // CREATE TABLE IF NOT EXISTS applies to saved tables, not session temp views.
-            // A temp view may shadow this name during unqualified lookup, but it is not a
-            // durable object in the default namespace and cannot satisfy this DDL.
-            let exists = session.saved_table_exists(&table_name)
-                || session
-                    .resolve_external_table_descriptor(&table_name)?
-                    .0
-                    .is_some();
-            if exists {
+            // CREATE TABLE IF NOT EXISTS and external-target ownership were handled
+            // before the general mutation guard above. Keep the ordinary conflict
+            // category for non-idempotent creation of a saved local table.
+            if session.saved_table_exists(&table_name) {
                 if create_table.if_not_exists {
                     return Ok(DataFrame::from_polars_with_options(
                         PlDataFrame::empty(),
@@ -595,9 +629,6 @@ fn reject_read_only_external_mutation(
 ) -> Result<(), PolarsError> {
     let mut targets = Vec::new();
     match statement {
-        Statement::CreateTable(create) => {
-            targets.push(table_name_from_object_name(&create.name));
-        }
         Statement::CreateView(create) => {
             targets.push(table_name_from_object_name(&create.name));
         }

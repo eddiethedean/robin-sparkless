@@ -22,13 +22,20 @@ root `robin-sparkless` crate composes those layers and exposes the familiar
 | `robin-sparkless-duckdb` | Configured DuckDB source resolution, read snapshots, bounded scans, and split connection lifecycle; reads only |
 | `robin-sparkless` | Concrete Polars-backed Rust facade and core/Polars exports |
 | `sparkless-native` | Python ABI, conversion, Python callback ownership, and Python exception mapping |
-| `sparkless-server-core` | Transport-independent server contracts and state records |
-| `sparkless-server-polars` | Existing runtime and HTTP/Connect composition over the Polars session adapter |
+| `sparkless-server-core` | Engine-neutral server configuration and SQL/Connect execution-port contracts |
+| `sparkless-server-runtime` | Execution-port dispatch, connection/admission permits, operation registry, and generic session registry |
+| `sparkless-server-http` | HTTP/1 listener, route dispatch, JSON header validation, and bounded body reads |
+| `sparkless-server-connect` | Protobuf build, bounded wire decoding, generated gRPC service dispatch/listener, replay/session history, sender accounting, and drain state |
+| `sparkless-server-polars` | Product-specific HTTP and Connect handlers, Polars execution adapters, schema conversion, and server composition |
 | `sparkless-server`, `sparkless-server-duckdb` | Product binaries and product-specific composition |
 
-The server runtime and transport extraction remains Phase 5 work. The DuckDB server
-product currently adds the read-only source capability; a source provider does not
-imply DuckDB writes or DuckDB query execution.
+HTTP and Connect requests reach the same engine-neutral runtime; it owns admission,
+operation accounting, and the generic session registry while product composition
+supplies the session adapter and product-specific RPC handlers. Connect's protocol
+build, wire limits, generated service dispatch, listener, replay records, session history, and transport budgets
+live in the Connect crate. The DuckDB server product still adds only the read-only
+source capability; a source provider does not imply DuckDB writes or DuckDB query
+execution.
 
 ## Core engine contracts
 
@@ -85,9 +92,12 @@ breaking-change details.
 
 ## Phase status
 
-Phase 1 module decomposition and Phase 2 contract source changes are implemented;
-their targeted behavioral gates and the P0 inventory closeout remain pending. Phase 3
-adds the portable plan and shared SQL crates. Its targeted corpus verifies matching
-values, schemas, and missing-column errors across JSON, local SQL, and Connect, plus
-rejection of malformed plans before Connect source scans. Runtime extraction and final
-release acceptance remain later phases of the 4.19 plan.
+P0 inventory, P1/P2, and local P4 contract checks passed on 2026-11-02. Live JDBC
+integration and the protocol-neutral typed Connect plan boundary remain open; see the
+[4.19 SOLID plan](plans/solid-refactor-4.19.md#gate-closure-addendum-2026-11-02).
+Phase 3's targeted corpus verifies matching values, schemas, and missing-column errors
+across JSON, local SQL, and Connect, plus rejection of malformed plans before Connect
+source scans. Phase 5's HTTP-only, Connect-only, and combined feature matrix has been
+checked, while its Connect execution port still carries serialized protobuf data. P6/P7
+and exact-candidate release acceptance remain tracked separately; D14/V35/V36 platform
+and source/resource acceptance is still open.

@@ -34,18 +34,14 @@ def test_issue_1554_join_list_with_range_predicates(spark) -> None:
 
 
 def test_issue_1554_join_list_multiple_equalities(spark) -> None:
-    """List of equality conditions is equivalent to ANDing them (#353-style)."""
+    """Multiple equality conditions retain both sides of their keys."""
     left = spark.createDataFrame([{"a": 1, "b": 2, "v": 10}], ["a", "b", "v"])
     right = spark.createDataFrame([{"a": 1, "b": 2, "w": 20}], ["a", "b", "w"])
-    from tests.utils import _row_to_dict, assert_rows_equal
-
     result = left.join(
         right,
         [left["a"] == right["a"], left["b"] == right["b"]],
         "inner",
     ).collect()
-    assert_rows_equal(
-        [_row_to_dict(r) for r in result],
-        [{"a": 1, "b": 2, "v": 10, "w": 20}],
-        order_matters=True,
-    )
+    assert [tuple(row.values()) if hasattr(row, "values") else tuple(row) for row in result] == [
+        (1, 2, 10, 1, 2, 20)
+    ]

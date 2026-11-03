@@ -12,6 +12,7 @@ import pytest
 from sparkless import (
     SparklessCancelledError,
     SparklessExternalCatalogError,
+    SparklessError,
     SparkSession,
 )
 from sparkless.external_catalog import (
@@ -394,9 +395,10 @@ def test_read_only_provider_and_invalid_receipts_fail_explicitly(session):
             return table
 
     session.set_external_catalog_provider(ReadOnly())
-    with pytest.raises(SparklessExternalCatalogError) as exc_info:
+    with pytest.raises(SparklessError) as exc_info:
         frame.write.mode("append").saveAsTable(IDENTIFIER)
-    assert exc_info.value.category == "unsupported_operation"
+    assert exc_info.value.category == "capability"
+    assert exc_info.value.code == "WRITE_CAPABILITY_DENIED"
     assert exc_info.value.retryability == "terminal"
 
     class InvalidReceipt(Provider):
@@ -404,7 +406,7 @@ def test_read_only_provider_and_invalid_receipts_fail_explicitly(session):
             return ExternalTableWriteResult(replace(request.table, version=9), 10)
 
     session.set_external_catalog_provider(InvalidReceipt(table))
-    with pytest.raises(Exception, match="committed version"):
+    with pytest.raises(Exception, match="receipt version"):
         frame.write.mode("append").saveAsTable(IDENTIFIER)
     session.set_external_catalog_provider(None)
     with pytest.raises(Exception, match="not found"):
@@ -884,8 +886,8 @@ def test_python_descriptor_validate_uses_native_rules(change, match):
         ({"table_id": "other"}, 5, "identity"),
         ({"canonical_location": "/other"}, 5, "identity"),
         ({"provider": "other"}, 5, "identity"),
-        ({"version": None}, 5, "committed version"),
-        ({"version": 6}, 5, "committed version"),
+        ({"version": None}, 5, "receipt version"),
+        ({"version": 6}, 5, "receipt version"),
         ({"version": -1}, -1, "negative"),
         ({"version": 3}, 3, "backwards"),
     ],
@@ -940,7 +942,7 @@ def test_python_ipc_preserves_remaining_native_primitive_types(session, source_k
     provider = Provider(descriptor(schema))
     session.set_external_catalog_provider(provider)
     frame.write.mode(ExternalTableSaveMode.APPEND).saveAsTable(IDENTIFIER)
-    table = pa.ipc.open_stream(provider.writes[0].data.bytes).read_all()
+    table = pa.Table.from_batches(provider.writes[0].batches)
     assert table.schema.types[:4] == [
         pa.int16(),
         pa.int32(),

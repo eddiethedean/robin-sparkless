@@ -1,30 +1,174 @@
 //! Spark Connect 4.0.5 gRPC adapter and bounded protobuf boundary.
 //!
-//! The bounded public service translates the frozen relation subset, serves schema/config
-//! analysis, streams native Arrow results, and retains bounded response history for reconnect
-//! while sharing the HTTP service's identity and admission registries.
+//! Product-specific RPC handlers translate the frozen relation subset and serve analysis/config
+//! against Polars sessions. The Connect crate owns generated gRPC dispatch and replay transport;
+//! this adapter shares the server runtime's session, operation, and admission registries.
 
 use crate::{ConnectReserveError, ConnectSessionIdentity, RequestFailure, Server, connect_proto};
-use bytes::Buf;
 use prost::Message;
-use prost_reflect::{DescriptorPool, Kind as ReflectKind, MessageDescriptor};
+use robin_sparkless_core::CancellationToken;
+use robin_sparkless_core::engine::ArrowIpcBatchStream;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(test)]
+use sparkless_server_connect::{
+    CONNECT_DETACHED_RETENTION, GoogleRpcErrorInfo, GoogleRpcStatus,
+    MAX_CONNECT_REPLAY_OPERATION_BYTES,
+};
+use sparkless_server_connect::{
+    ConnectApplication, ConnectGrpcService, ConnectResponseStream, MAX_CONNECT_PROTO_BYTES,
+    preflight_wire_message,
+};
+pub use sparkless_server_connect::{
+    ConnectOutcome, ConnectReplayRecord, MAX_CONNECT_ARROW_BATCH_ROWS,
+    MAX_CONNECT_ARROW_RESPONSE_BYTES, MAX_CONNECT_HISTORY_ENTRIES, MAX_CONNECT_LIVE_OPERATIONS,
+    MAX_CONNECT_LOCAL_DECODED_BYTES, MAX_CONNECT_LOCAL_IPC_BYTES, MAX_CONNECT_LOCAL_ROWS,
+    MAX_CONNECT_LOCAL_SCALAR_BYTES, MAX_CONNECT_RESULT_BYTES, MAX_CONNECT_RESULT_ROWS,
+    MAX_CONNECT_SCHEMA_FIELDS, MAX_CONNECT_STREAM_SENDERS, ReplayPoll,
+    status_with_standard_details,
+};
+use sparkless_server_core::{
+    ConnectExecutionPort, ConnectExecutionRequest, ConnectExecutionResult, EngineSessionHandle,
+    ExecutionError,
+};
+use std::collections::HashMap;
 use std::future::Future;
 use std::io;
-use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
-use tonic::codec::{BufferSettings, Codec, DecodeBuf, Decoder};
 use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
+
+pub(super) struct PolarsConnectExecution;
+
+impl ConnectExecutionPort for PolarsConnectExecution {
+    fn execute_connect_plan(
+        &self,
+        session: &EngineSessionHandle,
+        request: ConnectExecutionRequest,
+    ) -> Result<ConnectExecutionResult, ExecutionError> {
+        let session = session
+            .downcast_ref::<robin_sparkless::SparkSession>("polars")
+            .ok_or_else(|| ExecutionError {
+                code: "MismatchedExecutionSession",
+                message: "the session handle is not owned by the Polars execution adapter".into(),
+                details: None,
+            })?;
+        session.sync_thread_context();
+        let plan =
+            connect_proto::Plan::decode(request.serialized_plan.as_slice()).map_err(|error| {
+                ExecutionError {
+                    code: "CONNECT_PLAN_DECODE_FAILED",
+                    message: error.to_string(),
+                    details: None,
+                }
+            })?;
+        let translated = plan::translate_plan_for_execution(session, &plan, &request.cancellation)
+            .map_err(|status| ExecutionError {
+                code: "CONNECT_PLAN_TRANSLATION_FAILED",
+                message: status.message().to_string(),
+                details: Some(serde_json::json!({ "connect_status_code": status.code() as i32 })),
+            })?;
+        let schema =
+            plan::schema_to_proto(&translated.schema).map_err(|status| ExecutionError {
+                code: "CONNECT_SCHEMA_TRANSLATION_FAILED",
+                message: status.message().to_string(),
+                details: Some(serde_json::json!({ "connect_status_code": status.code() as i32 })),
+            })?;
+        let schema_bytes = schema.encode_to_vec();
+        let output_schema = translated.schema;
+        let deferred_count_input = translated.deferred_count_input;
+        let max_batch_bytes = request
+            .max_response_bytes
+            .checked_sub(schema.encoded_len())
+            .and_then(|bytes| bytes.checked_sub(512))
+            .filter(|bytes| *bytes > 0)
+            .ok_or_else(|| ExecutionError {
+                code: "CONNECT_ARROW_SCHEMA_LIMIT",
+                message: "Connect output schema leaves no room for a bounded Arrow response".into(),
+                details: None,
+            })?;
+        let batches = if let Some(count_input) = deferred_count_input {
+            deferred_count_batches(
+                session.clone(),
+                count_input,
+                output_schema,
+                request.cancellation,
+                request.max_batch_rows,
+                max_batch_bytes,
+            )
+        } else {
+            translated
+                .dataframe
+                .to_arrow_ipc_batches_with_schema_and_cancellation(
+                    request.max_batch_rows,
+                    max_batch_bytes,
+                    &request.cancellation,
+                    &output_schema,
+                )
+                .map_err(|error| ExecutionError {
+                    code: "CONNECT_ARROW_STREAM_FAILED",
+                    message: error.to_string(),
+                    details: None,
+                })?
+        };
+        Ok(ConnectExecutionResult {
+            schema: schema_bytes,
+            batches,
+        })
+    }
+}
+
+fn deferred_count_batches(
+    session: robin_sparkless::SparkSession,
+    count_input: robin_sparkless::DataFrame,
+    output_schema: robin_sparkless::StructType,
+    cancellation: CancellationToken,
+    max_rows: usize,
+    max_bytes: usize,
+) -> ArrowIpcBatchStream {
+    let mut batches = None;
+    let mut initialized = false;
+    ArrowIpcBatchStream::new(std::iter::from_fn(move || {
+        if !initialized {
+            initialized = true;
+            batches = Some(
+                count_input
+                    .count_with_cancellation(&cancellation)
+                    .and_then(|count| {
+                        i64::try_from(count).map_err(|_| {
+                            robin_sparkless::EngineError::invalid_input(
+                                "Connect count result exceeds the signed 64-bit range".into(),
+                            )
+                        })
+                    })
+                    .and_then(|count| {
+                        session.create_dataframe_from_i64_column("count(1)", vec![count])
+                    })
+                    .and_then(|frame| {
+                        frame.to_arrow_ipc_batches_with_schema_and_cancellation(
+                            max_rows,
+                            max_bytes,
+                            &cancellation,
+                            &output_schema,
+                        )
+                    }),
+            );
+        }
+        match batches.as_mut()? {
+            Ok(stream) => stream.next(),
+            Err(_) => batches.take().and_then(Result::err).map(Err),
+        }
+    }))
+}
 
 static CONNECT_PRODUCER_STARTS: AtomicU64 = AtomicU64::new(0);
 const CONNECT_GRACEFUL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -147,1032 +291,15 @@ mod analysis;
 mod config;
 mod plan;
 
-pub const MAX_CONNECT_PROTO_BYTES: usize = 4 * 1024 * 1024;
-pub const MAX_CONNECT_PROTO_DEPTH: usize = 64;
-pub const MAX_CONNECT_PROTO_NODES: usize = 10_000;
-pub const MAX_CONNECT_SCHEMA_FIELDS: usize = 256;
-pub const MAX_CONNECT_LOCAL_IPC_BYTES: usize = 1024 * 1024;
-pub const MAX_CONNECT_LOCAL_DECODED_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_CONNECT_LOCAL_ROWS: usize = 10_000;
-pub const MAX_CONNECT_LOCAL_SCALAR_BYTES: usize = 512 * 1024;
-pub const MAX_CONNECT_ARROW_BATCH_ROWS: usize = 16_384;
-pub const MAX_CONNECT_ARROW_RESPONSE_BYTES: usize = 1024 * 1024;
-pub const MAX_CONNECT_RESULT_ROWS: u64 = 1_000_000;
-pub const MAX_CONNECT_RESULT_BYTES: usize = 64 * 1024 * 1024;
-pub const MAX_CONNECT_LIVE_OPERATIONS: usize = 128;
-pub const MAX_CONNECT_STREAM_SENDERS: usize = 32;
-pub const MAX_CONNECT_HISTORY_ENTRIES: usize = 1024;
-pub const MAX_CONNECT_HISTORY_BYTES: usize = 4 * 1024 * 1024;
-pub const MAX_CONNECT_REPLAY_OPERATION_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_CONNECT_REPLAY_PROCESS_BYTES: usize = 32 * 1024 * 1024;
-pub const CONNECT_DETACHED_RETENTION: Duration = Duration::from_secs(60);
-
-struct StoredConnectResponse {
-    sequence: u64,
-    response: connect_proto::ExecutePlanResponse,
-    encoded_bytes: usize,
-}
-
-struct StoredConnectError {
-    id: String,
-    class: String,
-    message: String,
-    created_at: Instant,
-}
-
-struct ConnectReplayState {
-    responses: VecDeque<StoredConnectResponse>,
-    response_ids: HashMap<String, u64>,
-    released_response_ids: HashMap<String, u64>,
-    released_response_order: VecDeque<String>,
-    next_sequence: u64,
-    replay_bytes: usize,
-    sender_bytes: usize,
-    replay_headroom_bytes: usize,
-    sender_reservations: HashMap<u64, (usize, bool)>,
-    next_sender_reservation: u64,
-    history_bytes: usize,
-    terminal: Option<Result<(), Status>>,
-    attached: bool,
-    released: bool,
-    expired: bool,
-    detached_at: Option<Instant>,
-    sender: Option<tokio::sync::mpsc::Sender<()>>,
-    execution_waker: Option<tokio::sync::mpsc::UnboundedSender<()>>,
-    cancellation: robin_sparkless_core::engine::CancellationToken,
-    producer_stopped: bool,
-    producer_done: tokio::sync::watch::Sender<bool>,
-    error: Option<StoredConnectError>,
-}
-
-/// Bounded in-memory response history for one Connect operation. The producer owns this state
-/// after admission; transports only attach cursors and acknowledge response prefixes.
-pub(crate) struct ConnectReplayRecord {
-    pub(crate) operation_key: String,
-    pub(crate) session_key: String,
-    pub(crate) session_generation: u64,
-    pub(crate) reattachable: bool,
-    pub(crate) tags: HashSet<String>,
-    pub(crate) operation_id: String,
-    state: Mutex<ConnectReplayState>,
-    response_released: Condvar,
-    process_bytes: Arc<AtomicUsize>,
-    process_history_bytes: Arc<AtomicUsize>,
-}
-
-impl ConnectReplayRecord {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        operation_key: String,
-        session_key: String,
-        client_session_id: String,
-        server_side_session_id: String,
-        operation_id: String,
-        session_generation: u64,
-        reattachable: bool,
-        tags: Vec<String>,
-        process_bytes: Arc<AtomicUsize>,
-        process_history_bytes: Arc<AtomicUsize>,
-    ) -> Result<Self, ()> {
-        let (producer_done, _) = tokio::sync::watch::channel(false);
-        let tag_bytes = tags.iter().map(String::len).sum::<usize>();
-        let base_history_bytes = operation_key
-            .len()
-            .saturating_add(session_key.len())
-            .saturating_add(client_session_id.len())
-            .saturating_add(server_side_session_id.len())
-            .saturating_add(operation_id.len())
-            .saturating_add(tag_bytes)
-            .saturating_add(256);
-        if !reserve_history_bytes(&process_history_bytes, base_history_bytes) {
-            return Err(());
-        }
-        Ok(Self {
-            operation_key,
-            session_key,
-            session_generation,
-            reattachable,
-            tags: tags.into_iter().collect(),
-            operation_id,
-            state: Mutex::new(ConnectReplayState {
-                responses: VecDeque::new(),
-                response_ids: HashMap::new(),
-                released_response_ids: HashMap::new(),
-                released_response_order: VecDeque::new(),
-                next_sequence: 0,
-                replay_bytes: 0,
-                sender_bytes: 0,
-                replay_headroom_bytes: 0,
-                sender_reservations: HashMap::new(),
-                next_sender_reservation: 1,
-                history_bytes: base_history_bytes,
-                terminal: None,
-                attached: true,
-                released: false,
-                expired: false,
-                detached_at: None,
-                sender: None,
-                execution_waker: None,
-                cancellation: robin_sparkless_core::engine::CancellationToken::new(),
-                producer_stopped: false,
-                producer_done,
-                error: None,
-            }),
-            response_released: Condvar::new(),
-            process_bytes,
-            process_history_bytes,
-        })
-    }
-
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, ConnectReplayState>, Status> {
-        self.state
-            .lock()
-            .map_err(|_| Status::internal("Connect replay state is unavailable"))
-    }
-
-    pub(crate) fn is_producer_active(&self) -> bool {
-        self.state
-            .lock()
-            .map(|state| !state.producer_stopped)
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn retain_in_registry(&self) -> bool {
-        self.state
-            .lock()
-            .map(|state| {
-                state
-                    .error
-                    .as_ref()
-                    .is_some_and(|error| error.created_at.elapsed() < CONNECT_DETACHED_RETENTION)
-                    || (!state.released
-                        && !state.expired
-                        && (self.reattachable || !state.producer_stopped))
-            })
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn cancellation(&self) -> robin_sparkless_core::engine::CancellationToken {
-        self.state
-            .lock()
-            .map(|state| state.cancellation.clone())
-            .unwrap_or_default()
-    }
-
-    fn attach_execution_waker(&self) -> tokio::sync::mpsc::UnboundedReceiver<()> {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        if let Ok(mut state) = self.state.lock() {
-            state.execution_waker = Some(sender.clone());
-            if state.cancellation.is_cancelled() {
-                let _ = sender.send(());
-            }
-        }
-        receiver
-    }
-
-    fn clear_execution_waker(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.execution_waker = None;
-        }
-    }
-
-    fn cancellation_terminal_status(&self) -> Option<Status> {
-        let state = self.state.lock().ok()?;
-        if !state.cancellation.is_cancelled() {
-            return None;
-        }
-        state.terminal.as_ref()?.as_ref().err().cloned()
-    }
-
-    pub(crate) fn matches_session(&self, session_key: &str, generation: u64) -> bool {
-        self.session_key == session_key && self.session_generation == generation
-    }
-
-    fn notify(state: &ConnectReplayState) {
-        if let Some(sender) = state.sender.as_ref() {
-            let _ = sender.try_send(());
-        }
-    }
-
-    fn notify_execution(state: &ConnectReplayState) {
-        if let Some(sender) = state.execution_waker.as_ref() {
-            let _ = sender.send(());
-        }
-    }
-
-    fn reserve_process_bytes(&self, bytes: usize) -> bool {
-        let mut current = self.process_bytes.load(Ordering::Acquire);
-        loop {
-            let Some(next) = current.checked_add(bytes) else {
-                return false;
-            };
-            if next > MAX_CONNECT_REPLAY_PROCESS_BYTES {
-                return false;
-            }
-            match self.process_bytes.compare_exchange_weak(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => return true,
-                Err(actual) => current = actual,
-            }
-        }
-    }
-
-    fn release_process_bytes(&self, bytes: usize) {
-        if bytes != 0 {
-            self.process_bytes.fetch_sub(bytes, Ordering::AcqRel);
-        }
-    }
-
-    fn reserve_history_bytes(&self, bytes: usize) -> bool {
-        reserve_history_bytes(&self.process_history_bytes, bytes)
-    }
-
-    fn release_history_bytes(&self, bytes: usize) {
-        if bytes != 0 {
-            self.process_history_bytes
-                .fetch_sub(bytes, Ordering::AcqRel);
-        }
-    }
-
-    fn store_error(&self, state: &mut ConnectReplayState, status: Status) -> Status {
-        const ERROR_DETAIL_BASE_BYTES: usize = 96;
-        let message = status.message().chars().take(1024).collect::<String>();
-        let error_bytes = ERROR_DETAIL_BASE_BYTES.saturating_add(message.len());
-        if !self.reserve_history_bytes(error_bytes) {
-            return Status::new(status.code(), message);
-        }
-        state.history_bytes += error_bytes;
-        let error_id = Uuid::new_v4().to_string();
-        state.error = Some(StoredConnectError {
-            id: error_id.clone(),
-            class: "SPARKLESS_CONNECT_ERROR".to_string(),
-            message: message.clone(),
-            created_at: Instant::now(),
-        });
-        enrich_connect_status(Status::new(status.code(), message), &error_id)
-    }
-
-    fn append(&self, response: connect_proto::ExecutePlanResponse) -> Result<(), Status> {
-        self.append_inner(response, false)
-    }
-
-    fn append_completion(
-        &self,
-        response: connect_proto::ExecutePlanResponse,
-    ) -> Result<(), Status> {
-        self.append_inner(response, true)
-    }
-
-    fn append_inner(
-        &self,
-        response: connect_proto::ExecutePlanResponse,
-        completes_operation: bool,
-    ) -> Result<(), Status> {
-        if !self.reattachable {
-            return Ok(());
-        }
-        let encoded_bytes = response.encoded_len();
-        let mut state = self.lock()?;
-        if state.released || state.expired {
-            return Err(Status::cancelled("Connect operation was released"));
-        }
-        if let Some(Err(status)) = state.terminal.as_ref() {
-            return Err(status.clone());
-        }
-        if completes_operation && state.terminal.is_some() {
-            return Err(Status::failed_precondition(
-                "Connect operation already has a terminal outcome",
-            ));
-        }
-        let next_replay_bytes = state.replay_bytes.saturating_add(encoded_bytes);
-        let largest_response = state
-            .responses
-            .iter()
-            .map(|response| response.encoded_bytes)
-            .max()
-            .unwrap_or(0)
-            .max(encoded_bytes);
-        let next_headroom = largest_response;
-        let additional_headroom = next_headroom.saturating_sub(state.replay_headroom_bytes);
-        if next_replay_bytes
-            .saturating_add(state.sender_bytes)
-            .saturating_add(next_headroom)
-            > MAX_CONNECT_REPLAY_OPERATION_BYTES
-        {
-            return Err(Status::resource_exhausted(format!(
-                "Connect replay and sender buffers exceed {MAX_CONNECT_REPLAY_OPERATION_BYTES} bytes for one operation"
-            )));
-        }
-        if !self.reserve_process_bytes(encoded_bytes.saturating_add(additional_headroom)) {
-            return Err(Status::resource_exhausted(format!(
-                "Connect replay exceeds the {MAX_CONNECT_REPLAY_PROCESS_BYTES}-byte process budget"
-            )));
-        }
-        const RESPONSE_INDEX_BYTES: usize = 64;
-        if !self.reserve_history_bytes(RESPONSE_INDEX_BYTES) {
-            self.release_process_bytes(encoded_bytes.saturating_add(additional_headroom));
-            return Err(Status::resource_exhausted(format!(
-                "Connect response history exceeds the {MAX_CONNECT_HISTORY_BYTES}-byte metadata budget"
-            )));
-        }
-        let sequence = state.next_sequence;
-        state.next_sequence = state.next_sequence.checked_add(1).ok_or_else(|| {
-            self.release_process_bytes(encoded_bytes.saturating_add(additional_headroom));
-            self.release_history_bytes(RESPONSE_INDEX_BYTES);
-            Status::resource_exhausted("Connect response sequence overflow")
-        })?;
-        state.replay_bytes = next_replay_bytes;
-        state.replay_headroom_bytes = next_headroom;
-        state.history_bytes += RESPONSE_INDEX_BYTES;
-        state
-            .response_ids
-            .insert(response.response_id.clone(), sequence);
-        state.responses.push_back(StoredConnectResponse {
-            sequence,
-            response,
-            encoded_bytes,
-        });
-        if completes_operation {
-            state.terminal = Some(Ok(()));
-        }
-        Self::notify(&state);
-        Ok(())
-    }
-
-    fn reserve_sender_buffer(&self, bytes: usize) -> Result<u64, Status> {
-        if !self.reattachable {
-            return Ok(0);
-        }
-        let mut state = self.lock()?;
-        if state
-            .replay_bytes
-            .saturating_add(state.sender_bytes)
-            .saturating_add(state.replay_headroom_bytes)
-            .saturating_add(bytes)
-            > MAX_CONNECT_REPLAY_OPERATION_BYTES
-        {
-            return Err(Status::resource_exhausted(format!(
-                "Connect replay and sender buffers exceed {MAX_CONNECT_REPLAY_OPERATION_BYTES} bytes for one operation"
-            )));
-        }
-        let id = state.next_sender_reservation;
-        let next_id = state
-            .next_sender_reservation
-            .checked_add(1)
-            .ok_or_else(|| Status::resource_exhausted("Connect sender reservation id overflow"))?;
-        if !self.reserve_process_bytes(bytes) {
-            return Err(Status::resource_exhausted(format!(
-                "Connect replay and sender buffers exceed the {MAX_CONNECT_REPLAY_PROCESS_BYTES}-byte process budget"
-            )));
-        }
-        state.next_sender_reservation = next_id;
-        state.sender_bytes = state.sender_bytes.saturating_add(bytes);
-        state.sender_reservations.insert(id, (bytes, false));
-        Ok(id)
-    }
-
-    fn release_sender_buffer(&self, reservation_id: u64) {
-        if !self.reattachable {
-            return;
-        }
-        if let Ok(mut state) = self.state.lock() {
-            let Some((released, from_headroom)) = state.sender_reservations.remove(&reservation_id)
-            else {
-                return;
-            };
-            state.sender_bytes -= released;
-            if from_headroom && !state.released && !state.expired {
-                let required_headroom = state
-                    .responses
-                    .iter()
-                    .map(|response| response.encoded_bytes)
-                    .max()
-                    .unwrap_or(0);
-                let restored =
-                    released.min(required_headroom.saturating_sub(state.replay_headroom_bytes));
-                state.replay_headroom_bytes += restored;
-                self.release_process_bytes(released.saturating_sub(restored));
-            } else {
-                self.release_process_bytes(released);
-            }
-        }
-    }
-
-    pub(crate) fn finish(&self, outcome: ConnectOutcome) -> ConnectOutcome {
-        let Ok(mut state) = self.state.lock() else {
-            return outcome;
-        };
-        if let Some(terminal) = state.terminal.clone() {
-            return terminal;
-        }
-        let outcome = match outcome {
-            Ok(()) => Ok(()),
-            Err(status) => Err(self.store_error(&mut state, status)),
-        };
-        state.terminal = Some(outcome.clone());
-        Self::notify(&state);
-        self.response_released.notify_all();
-        outcome
-    }
-
-    pub(crate) fn mark_producer_stopped(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.producer_stopped = true;
-            state.producer_done.send_replace(true);
-            Self::notify(&state);
-        }
-    }
-
-    pub(crate) fn producer_done(&self) -> tokio::sync::watch::Receiver<bool> {
-        self.state
-            .lock()
-            .map(|state| state.producer_done.subscribe())
-            .unwrap_or_else(|_| tokio::sync::watch::channel(true).1)
-    }
-
-    pub(crate) fn detach(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.attached = false;
-            state.sender = None;
-            if self.reattachable && !state.released && !state.expired {
-                state.detached_at = Some(Instant::now());
-            } else if !self.reattachable {
-                state.cancellation.cancel();
-            }
-        }
-    }
-
-    fn attach(
-        self: &Arc<Self>,
-        last_response_id: Option<&str>,
-    ) -> Result<(u64, tokio::sync::mpsc::Receiver<()>), Status> {
-        if !self.reattachable {
-            return Err(Status::failed_precondition(
-                "INVALID_HANDLE.OPERATION_NOT_REATTACHABLE: operation is not reattachable",
-            ));
-        }
-        let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        let mut state = self.lock()?;
-        if state.released || state.expired {
-            return Err(Status::not_found(
-                "INVALID_HANDLE.OPERATION_NOT_FOUND: retained operation is unavailable",
-            ));
-        }
-        if state.attached {
-            return Err(Status::already_exists(
-                "Connect operation already has an attached response stream",
-            ));
-        }
-        let cursor = if let Some(response_id) = last_response_id {
-            if let Some(sequence) = state
-                .response_ids
-                .get(response_id)
-                .or_else(|| state.released_response_ids.get(response_id))
-            {
-                sequence.saturating_add(1)
-            } else {
-                return Err(Status::not_found(
-                    "INVALID_HANDLE.RESPONSE_NOT_FOUND: reattach cursor is not retained",
-                ));
-            }
-        } else {
-            0
-        };
-        let first_retained = state
-            .responses
-            .front()
-            .map(|response| response.sequence)
-            .unwrap_or(state.next_sequence);
-        if cursor < first_retained {
-            return Err(Status::out_of_range(
-                "INVALID_HANDLE.RESPONSE_NOT_FOUND: requested response prefix has been released",
-            ));
-        }
-        state.attached = true;
-        state.detached_at = None;
-        state.sender = Some(sender.clone());
-        if cursor < state.next_sequence || state.terminal.is_some() {
-            let _ = sender.try_send(());
-        }
-        Ok((cursor, receiver))
-    }
-
-    fn next_response_for_sender(&self, cursor: u64) -> Result<ReplayPoll, Status> {
-        self.next_response_inner(cursor, true)
-    }
-
-    fn next_response_inner(&self, cursor: u64, reserve_sender: bool) -> Result<ReplayPoll, Status> {
-        let mut state = self.lock()?;
-        if state.released {
-            return match state.terminal.clone() {
-                Some(Err(status)) => Ok(ReplayPoll::Error(status)),
-                Some(Ok(())) => Ok(ReplayPoll::Complete),
-                None => Ok(ReplayPoll::Error(Status::cancelled(
-                    "Connect operation was released",
-                ))),
-            };
-        }
-        let first_retained = state
-            .responses
-            .front()
-            .map(|response| response.sequence)
-            .unwrap_or(state.next_sequence);
-        if cursor < first_retained {
-            return Err(Status::out_of_range(
-                "INVALID_HANDLE.RESPONSE_NOT_FOUND: requested response prefix has been released",
-            ));
-        }
-        if let Some(index) = state
-            .responses
-            .iter()
-            .position(|response| response.sequence == cursor)
-        {
-            if reserve_sender {
-                let bytes = state.responses[index].encoded_bytes;
-                if bytes > state.replay_headroom_bytes {
-                    return Err(Status::resource_exhausted(
-                        "Connect replay headroom is unavailable",
-                    ));
-                }
-                if state
-                    .replay_bytes
-                    .saturating_add(state.sender_bytes)
-                    .saturating_add(state.replay_headroom_bytes)
-                    > MAX_CONNECT_REPLAY_OPERATION_BYTES
-                {
-                    return Err(Status::resource_exhausted(format!(
-                        "Connect replay and sender buffers exceed {MAX_CONNECT_REPLAY_OPERATION_BYTES} bytes for one operation"
-                    )));
-                }
-                let id = state.next_sender_reservation;
-                state.next_sender_reservation = state
-                    .next_sender_reservation
-                    .checked_add(1)
-                    .ok_or_else(|| {
-                        Status::resource_exhausted("Connect sender reservation id overflow")
-                    })?;
-                state.replay_headroom_bytes -= bytes;
-                state.sender_bytes = state.sender_bytes.saturating_add(bytes);
-                state.sender_reservations.insert(id, (bytes, true));
-                return Ok(ReplayPoll::Response(
-                    Box::new(state.responses[index].response.clone()),
-                    id,
-                ));
-            }
-            return Ok(ReplayPoll::Response(
-                Box::new(state.responses[index].response.clone()),
-                0,
-            ));
-        }
-        let outcome = state.terminal.clone();
-        if let Some(outcome) = outcome
-            && cursor >= state.next_sequence
-        {
-            return match outcome {
-                Ok(()) => Ok(ReplayPoll::Complete),
-                Err(status) => Ok(ReplayPoll::Error(status)),
-            };
-        }
-        Ok(ReplayPoll::Pending)
-    }
-
-    fn release_until(&self, response_id: &str) -> usize {
-        let Ok(mut state) = self.state.lock() else {
-            return 0;
-        };
-        let Some(sequence) = state.response_ids.get(response_id).copied() else {
-            return 0;
-        };
-        let mut released_bytes = 0usize;
-        while state
-            .responses
-            .front()
-            .is_some_and(|response| response.sequence <= sequence)
-        {
-            let Some(response) = state.responses.pop_front() else {
-                break;
-            };
-            released_bytes = released_bytes.saturating_add(response.encoded_bytes);
-            state.response_ids.remove(&response.response.response_id);
-            state
-                .released_response_ids
-                .insert(response.response.response_id.clone(), response.sequence);
-            state
-                .released_response_order
-                .push_back(response.response.response_id);
-        }
-        let mut evicted_indexes = 0usize;
-        while state.released_response_order.len() > MAX_CONNECT_HISTORY_ENTRIES {
-            if let Some(oldest) = state.released_response_order.pop_front() {
-                state.released_response_ids.remove(&oldest);
-                evicted_indexes += 1;
-            }
-        }
-        let evicted_metadata = evicted_indexes.saturating_mul(64);
-        state.history_bytes = state.history_bytes.saturating_sub(evicted_metadata);
-        self.release_history_bytes(evicted_metadata);
-        state.replay_bytes = state.replay_bytes.saturating_sub(released_bytes);
-        self.release_process_bytes(released_bytes);
-        let required_headroom = state
-            .responses
-            .iter()
-            .map(|response| response.encoded_bytes)
-            .max()
-            .unwrap_or(0);
-        if required_headroom < state.replay_headroom_bytes {
-            let released_headroom = state.replay_headroom_bytes - required_headroom;
-            state.replay_headroom_bytes = required_headroom;
-            self.release_process_bytes(released_headroom);
-        }
-        Self::notify(&state);
-        self.response_released.notify_all();
-        released_bytes
-    }
-
-    fn wait_for_response_release(
-        &self,
-        response_id: &str,
-        deadline: Instant,
-        cancellation: &robin_sparkless_core::engine::CancellationToken,
-    ) -> Result<(), Status> {
-        let mut state = self.lock()?;
-        loop {
-            if let Some(Err(status)) = state.terminal.as_ref() {
-                return Err(status.clone());
-            }
-            if cancellation.is_cancelled() {
-                return Err(Status::cancelled("Connect execution was cancelled"));
-            }
-            if !state.response_ids.contains_key(response_id) {
-                return Ok(());
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                return Err(Status::deadline_exceeded(
-                    "Connect response stream stalled waiting for client acknowledgment",
-                ));
-            }
-            let wait = (deadline - now).min(Duration::from_millis(100));
-            let (next_state, _) = self
-                .response_released
-                .wait_timeout(state, wait)
-                .map_err(|_| Status::internal("Connect replay state is unavailable"))?;
-            state = next_state;
-        }
-    }
-
-    fn wait_for_cancellation_grace(
-        &self,
-        duration: Duration,
-        deadline: Instant,
-        cancellation: &robin_sparkless_core::engine::CancellationToken,
-    ) -> Result<(), Status> {
-        let grace_deadline = (Instant::now() + duration).min(deadline);
-        let mut state = self.lock()?;
-        loop {
-            if let Some(Err(status)) = state.terminal.as_ref() {
-                return Err(status.clone());
-            }
-            if cancellation.is_cancelled() {
-                return Err(Status::cancelled("Connect execution was cancelled"));
-            }
-            let now = Instant::now();
-            if now >= grace_deadline {
-                return Ok(());
-            }
-            let (next_state, _) = self
-                .response_released
-                .wait_timeout(state, grace_deadline - now)
-                .map_err(|_| Status::internal("Connect replay state is unavailable"))?;
-            state = next_state;
-        }
-    }
-
-    pub(crate) fn release_all(&self) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        if state.released {
-            return;
-        }
-        state.released = true;
-        state.attached = false;
-        state.detached_at = None;
-        let released_bytes = state.replay_bytes;
-        state.replay_bytes = 0;
-        let released_headroom = state.replay_headroom_bytes;
-        state.replay_headroom_bytes = 0;
-        let released_indexes = state.response_ids.len() + state.released_response_ids.len();
-        let released_metadata = released_indexes.saturating_mul(64);
-        state.history_bytes = state.history_bytes.saturating_sub(released_metadata);
-        state.responses.clear();
-        state.response_ids.clear();
-        state.released_response_ids.clear();
-        state.released_response_order.clear();
-        if !state.producer_stopped {
-            state.cancellation.cancel();
-            Self::notify_execution(&state);
-        }
-        if state.terminal.is_none() {
-            let status = Status::cancelled("Connect operation was released");
-            state.terminal = Some(Err(self.store_error(&mut state, status)));
-        }
-        self.release_process_bytes(released_bytes.saturating_add(released_headroom));
-        self.release_history_bytes(released_metadata);
-        Self::notify(&state);
-        self.response_released.notify_all();
-        state.sender = None;
-    }
-
-    pub(crate) fn cancel(&self, message: &str) -> bool {
-        let Ok(mut state) = self.state.lock() else {
-            return false;
-        };
-        if state.producer_stopped || state.terminal.is_some() {
-            return false;
-        }
-        state.cancellation.cancel();
-        let status = Status::cancelled(message.to_string());
-        state.terminal = Some(Err(self.store_error(&mut state, status)));
-        Self::notify_execution(&state);
-        Self::notify(&state);
-        self.response_released.notify_all();
-        true
-    }
-
-    pub(crate) fn expire_if_detached(&self, now: Instant) -> bool {
-        let Ok(mut state) = self.state.lock() else {
-            return false;
-        };
-        if state.released
-            || state.expired
-            || state.attached
-            || state
-                .detached_at
-                .is_none_or(|detached| now.duration_since(detached) < CONNECT_DETACHED_RETENTION)
-        {
-            return false;
-        }
-        state.expired = true;
-        state.detached_at = None;
-        state.cancellation.cancel();
-        if state.terminal.is_none() {
-            let status = Status::deadline_exceeded("Connect detached execution expired");
-            state.terminal = Some(Err(self.store_error(&mut state, status)));
-        }
-        let released_bytes = state.replay_bytes;
-        state.replay_bytes = 0;
-        let released_headroom = state.replay_headroom_bytes;
-        state.replay_headroom_bytes = 0;
-        let released_indexes = state.response_ids.len() + state.released_response_ids.len();
-        let released_metadata = released_indexes.saturating_mul(64);
-        state.history_bytes = state.history_bytes.saturating_sub(released_metadata);
-        state.responses.clear();
-        state.response_ids.clear();
-        state.released_response_ids.clear();
-        state.released_response_order.clear();
-        Self::notify_execution(&state);
-        Self::notify(&state);
-        self.response_released.notify_all();
-        self.release_process_bytes(released_bytes.saturating_add(released_headroom));
-        self.release_history_bytes(released_metadata);
-        true
-    }
-
-    fn fail_if_detached_stalled(&self, now: Instant) -> bool {
-        let Ok(mut state) = self.state.lock() else {
-            return false;
-        };
-        if !self.reattachable
-            || state.producer_stopped
-            || state.terminal.is_some()
-            || state.attached
-            || state
-                .detached_at
-                .is_none_or(|detached| now.duration_since(detached) < Duration::from_secs(5))
-        {
-            return false;
-        }
-        state.cancellation.cancel();
-        let status = Status::deadline_exceeded(
-            "Connect detached response stream made no progress for 5 seconds",
-        );
-        state.terminal = Some(Err(self.store_error(&mut state, status)));
-        Self::notify_execution(&state);
-        Self::notify(&state);
-        self.response_released.notify_all();
-        true
-    }
-
-    pub(crate) fn error_details(
-        &self,
-        error_id: &str,
-    ) -> Option<connect_proto::fetch_error_details_response::Error> {
-        let state = self.state.lock().ok()?;
-        let error = state.error.as_ref().filter(|error| error.id == error_id)?;
-        Some(connect_proto::fetch_error_details_response::Error {
-            error_type_hierarchy: vec!["org.apache.spark.SparkException".to_string()],
-            message: error.message.clone(),
-            stack_trace: Vec::new(),
-            cause_idx: None,
-            spark_throwable: Some(
-                connect_proto::fetch_error_details_response::SparkThrowable {
-                    error_class: Some(error.class.clone()),
-                    message_parameters: HashMap::new(),
-                    query_contexts: Vec::new(),
-                    sql_state: None,
-                },
-            ),
-        })
-    }
-
-    pub(crate) fn session_identity(&self) -> (&str, u64) {
-        (&self.session_key, self.session_generation)
-    }
-
-    pub(crate) fn has_error(&self) -> bool {
-        self.state
-            .lock()
-            .map(|state| state.error.is_some())
-            .unwrap_or(false)
-    }
-}
-
-impl Drop for ConnectReplayRecord {
-    fn drop(&mut self) {
-        if let Ok(state) = self.state.get_mut() {
-            let retained_process_bytes = state
-                .replay_bytes
-                .saturating_add(state.sender_bytes)
-                .saturating_add(state.replay_headroom_bytes);
-            if retained_process_bytes != 0 {
-                self.process_bytes
-                    .fetch_sub(retained_process_bytes, Ordering::AcqRel);
-            }
-            if state.history_bytes != 0 {
-                self.process_history_bytes
-                    .fetch_sub(state.history_bytes, Ordering::AcqRel);
-            }
-        }
-    }
-}
-
-enum ReplayPoll {
-    Response(Box<connect_proto::ExecutePlanResponse>, u64),
-    Error(Status),
-    Complete,
-    Pending,
-}
-
 enum InterruptTarget {
     All,
     Tag(String),
     Operation(String),
 }
 
-fn reserve_history_bytes(counter: &AtomicUsize, bytes: usize) -> bool {
-    let mut current = counter.load(Ordering::Acquire);
-    loop {
-        let Some(next) = current.checked_add(bytes) else {
-            return false;
-        };
-        if next > MAX_CONNECT_HISTORY_BYTES {
-            return false;
-        }
-        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
-            Ok(_) => return true,
-            Err(actual) => current = actual,
-        }
-    }
-}
+use connect_proto::spark_connect_service_server::SparkConnectServiceServer;
 
-#[derive(prost::Message)]
-struct GoogleRpcStatus {
-    #[prost(int32, tag = "1")]
-    code: i32,
-    #[prost(string, tag = "2")]
-    message: String,
-    #[prost(message, repeated, tag = "3")]
-    details: Vec<prost_types::Any>,
-}
-
-#[derive(prost::Message)]
-struct GoogleRpcErrorInfo {
-    #[prost(string, tag = "1")]
-    reason: String,
-    #[prost(string, tag = "2")]
-    domain: String,
-    #[prost(map = "string, string", tag = "3")]
-    metadata: HashMap<String, String>,
-}
-
-fn enrich_connect_status(status: Status, error_id: &str) -> Status {
-    let mut metadata = HashMap::new();
-    metadata.insert(
-        "errorClass".to_string(),
-        "SPARKLESS_CONNECT_ERROR".to_string(),
-    );
-    metadata.insert("errorId".to_string(), error_id.to_string());
-    metadata.insert(
-        "classes".to_string(),
-        "[\"org.apache.spark.SparkException\"]".to_string(),
-    );
-    let details = GoogleRpcStatus {
-        code: status.code() as i32,
-        message: status.message().to_string(),
-        details: vec![prost_types::Any {
-            type_url: "type.googleapis.com/google.rpc.ErrorInfo".to_string(),
-            value: GoogleRpcErrorInfo {
-                reason: "SPARKLESS_CONNECT_ERROR".to_string(),
-                domain: "sparkless".to_string(),
-                metadata,
-            }
-            .encode_to_vec(),
-        }],
-    };
-    Status::with_details(
-        status.code(),
-        status.message().to_string(),
-        bytes::Bytes::from(details.encode_to_vec()),
-    )
-}
-
-fn status_with_standard_details(status: Status) -> Status {
-    let details = GoogleRpcStatus {
-        code: status.code() as i32,
-        message: status.message().to_string(),
-        details: Vec::new(),
-    };
-    Status::with_details(
-        status.code(),
-        status.message().to_string(),
-        bytes::Bytes::from(details.encode_to_vec()),
-    )
-}
-
-/// Tonic codec whose wire scanner rejects structurally excessive protobufs before Prost
-/// allocates their generated message trees.
-pub(crate) struct BoundedProstCodec<T, U>(PhantomData<(T, U)>);
-
-#[derive(Clone, Debug)]
-pub struct BoundedProstDecoder<T>(PhantomData<T>);
-
-impl<T, U> Default for BoundedProstCodec<T, U> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T, U> Codec for BoundedProstCodec<T, U>
-where
-    T: Message + Send + 'static,
-    U: Message + Default + Send + 'static,
-{
-    type Encode = T;
-    type Decode = U;
-    type Encoder = tonic_prost::ProstEncoder<T>;
-    type Decoder = BoundedProstDecoder<U>;
-
-    fn encoder(&mut self) -> Self::Encoder {
-        tonic_prost::ProstEncoder::default()
-    }
-
-    fn decoder(&mut self) -> Self::Decoder {
-        BoundedProstDecoder(PhantomData)
-    }
-}
-
-impl<T> Decoder for BoundedProstDecoder<T>
-where
-    T: Message + Default,
-{
-    type Item = T;
-    type Error = Status;
-
-    fn decode(&mut self, src: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
-        let message_name = std::any::type_name::<T>()
-            .rsplit("::")
-            .next()
-            .ok_or_else(|| Status::internal("could not name Connect protobuf request"))?;
-        preflight_wire_message(&format!("spark.connect.{message_name}"), src.chunk())?;
-        Message::decode(src)
-            .map(Some)
-            .map_err(|error: prost::DecodeError| Status::internal(error.to_string()))
-    }
-
-    fn buffer_settings(&self) -> BufferSettings {
-        BufferSettings::new(8 * 1024, 32 * 1024)
-    }
-}
-
-use connect_proto::spark_connect_service_server::{SparkConnectService, SparkConnectServiceServer};
-
-/// Shared native Spark Connect adapter. It owns no engine, catalog, session registry, or
-/// admission pool; requests are resolved through the supplied server instance.
+/// Product application hooks for the shared native Spark Connect transport.
 #[derive(Clone)]
 pub struct ConnectService {
     server: Server,
@@ -1184,25 +311,25 @@ impl Server {
     ) -> Result<tokio::sync::watch::Receiver<usize>, crate::ServerError> {
         let _lifecycle =
             self.inner
-                .connect_session_lifecycle
-                .lock()
+                .connect_runtime
+                .lifecycle_lock()
                 .map_err(|_| crate::ServerError {
                     message: "Connect session lifecycle state is unavailable".into(),
                 })?;
-        self.inner.connect_draining.store(true, Ordering::Release);
-        let operations = self
-            .inner
-            .connect_operations
-            .lock()
-            .map_err(|_| crate::ServerError {
-                message: "Connect operation state is unavailable".into(),
-            })?;
+        self.inner.connect_runtime.set_draining(true);
+        let operations =
+            self.inner
+                .connect_runtime
+                .operations()
+                .map_err(|_| crate::ServerError {
+                    message: "Connect operation state is unavailable".into(),
+                })?;
         for operation in operations.values() {
             // A terminal response can precede the blocking producer's actual return.
             operation.cancellation().cancel();
             operation.cancel("Spark Connect server is shutting down");
         }
-        Ok(self.inner.connect_active_operations.subscribe())
+        Ok(self.inner.connect_runtime.active_operations().subscribe())
     }
 
     async fn wait_for_connect_work_to_stop(
@@ -1227,10 +354,10 @@ impl Server {
 
     /// Construct the generated Spark Connect service with Sparkless' inbound and outbound
     /// protobuf message caps. Callers choose the listener address and lifecycle independently.
-    pub fn connect_service(&self) -> SparkConnectServiceServer<ConnectService> {
-        SparkConnectServiceServer::new(ConnectService {
+    pub fn connect_service(&self) -> SparkConnectServiceServer<ConnectGrpcService<ConnectService>> {
+        SparkConnectServiceServer::new(ConnectGrpcService::new(ConnectService {
             server: self.clone(),
-        })
+        }))
         .max_decoding_message_size(MAX_CONNECT_PROTO_BYTES)
         .max_encoding_message_size(MAX_CONNECT_PROTO_BYTES)
     }
@@ -1253,13 +380,13 @@ impl Server {
         let bound = listener.local_addr().map_err(crate::ServerError::from)?;
         *self
             .inner
-            .connect_address
-            .lock()
+            .connect_runtime
+            .address()
             .map_err(|_| crate::ServerError {
                 message: "Spark Connect listener address state is unavailable".into(),
             })? = Some(bound);
         let result = self.serve_connect_listener_until(listener, shutdown).await;
-        if let Ok(mut address) = self.inner.connect_address.lock()
+        if let Ok(mut address) = self.inner.connect_runtime.address()
             && *address == Some(bound)
         {
             *address = None;
@@ -1278,23 +405,25 @@ impl Server {
         {
             let _lifecycle =
                 self.inner
-                    .connect_session_lifecycle
-                    .lock()
+                    .connect_runtime
+                    .lifecycle_lock()
                     .map_err(|_| crate::ServerError {
                         message: "Connect session lifecycle state is unavailable".into(),
                     })?;
-            self.inner.connect_draining.store(false, Ordering::Release);
+            self.inner.connect_runtime.set_draining(false);
         }
         let connection_registry = Arc::new(ConnectConnectionRegistry::default());
         let incoming_registry = Arc::clone(&connection_registry);
         let incoming = TcpListenerStream::new(listener)
             .map(move |result| result.and_then(|stream| incoming_registry.track(stream)));
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        let serve = tonic::transport::Server::builder()
-            .add_service(self.connect_service())
-            .serve_with_incoming_shutdown(incoming, async move {
+        let serve = sparkless_server_connect::serve_with_incoming_shutdown(
+            self.connect_service(),
+            incoming,
+            async move {
                 let _ = shutdown_rx.await;
-            });
+            },
+        );
         tokio::pin!(serve);
         tokio::pin!(shutdown);
         let mut reaper = tokio::time::interval(Duration::from_secs(5));
@@ -1385,7 +514,7 @@ impl ConnectService {
         };
         let compute_permit = tokio::select! {
             _ = &mut cancellation_wait => return Err(Status::cancelled("Connect execution was cancelled while queued")),
-            result = tokio::time::timeout_at(queue_deadline, self.server.inner.admission.active.clone().acquire_owned()) => {
+            result = tokio::time::timeout_at(queue_deadline, self.server.inner.execution.admission().active.clone().acquire_owned()) => {
                 result.map_err(|_| Status::deadline_exceeded("timed out waiting for Connect compute admission"))?
                     .map_err(|_| Status::unavailable("Connect compute admission is closed"))?
             }
@@ -1452,8 +581,6 @@ fn connect_execution_failure(message: String) -> Status {
         Status::internal(format!("CONNECT_EXECUTION_FAILED: {message}"))
     }
 }
-
-type ConnectOutcome = Result<(), Status>;
 
 /// The terminal outcome has its own slot, so a full batch queue cannot discard an error.
 #[derive(Clone)]
@@ -1946,6 +1073,7 @@ impl Drop for ConnectProducerFinished {
 #[allow(clippy::too_many_arguments)]
 fn start_connect_producer(
     operation: crate::ConnectOperationLease,
+    execution: Arc<sparkless_server_runtime::ServerRuntime<crate::SessionLifetime>>,
     session: robin_sparkless::SparkSession,
     plan: connect_proto::Plan,
     planning_resources: (
@@ -2085,78 +1213,52 @@ fn start_connect_producer(
             response_rows: 0,
             response_bytes: 0,
         };
-        session.sync_thread_context();
+        let session_handle = EngineSessionHandle::new("polars", session);
         let planning_started = sender.trace_enabled.then(Instant::now);
-        let translated = plan::translate_plan_for_execution(&session, &plan, &cancellation)
-            .and_then(|translated| {
-                let schema = plan::schema_to_proto(&translated.schema)?;
-                Ok((translated, schema))
-            });
+        let translated = sparkless_server_connect::execute_plan(
+            &execution,
+            &session_handle,
+            ConnectExecutionRequest {
+                serialized_plan: plan.encode_to_vec(),
+                max_batch_rows: MAX_CONNECT_ARROW_BATCH_ROWS,
+                max_response_bytes: MAX_CONNECT_ARROW_RESPONSE_BYTES,
+                cancellation: cancellation.clone(),
+            },
+        );
         if let Some(started) = planning_started {
             sender.planning_time += started.elapsed();
         }
         drop(session_guard);
         let _session_compute_permit = session_compute_permit;
-        let (translated, schema) = match translated {
+        let translated = match translated {
             Ok(translated) => translated,
-            Err(status) => {
-                operation.reject("CONNECT_PLAN_TRANSLATION_FAILED", status.message());
-                let _ = sender.send(Err(status), &operation);
-                return;
-            }
-        };
-        let dataframe = if let Some(count_input) = translated.deferred_count_input {
-            let count_result = count_input
-                .count_with_cancellation(&cancellation)
-                .and_then(|count| {
-                    i64::try_from(count).map_err(|_| {
-                        robin_sparkless::EngineError::invalid_input(
-                            "Connect count result exceeds the signed 64-bit range".into(),
-                        )
-                    })
-                })
-                .and_then(|count| {
-                    session.create_dataframe_from_i64_column("count(1)", vec![count])
-                });
-            match count_result {
-                Ok(dataframe) => dataframe,
-                Err(error) => {
-                    let status = connect_execution_failure(error.to_string());
-                    operation.reject("CONNECT_COUNT_FAILED", status.message());
-                    let _ = sender.send(Err(status), &operation);
-                    return;
-                }
-            }
-        } else {
-            translated.dataframe
-        };
-        let schema_overhead = schema.encoded_len();
-        let Some(max_arrow_payload_bytes) = MAX_CONNECT_ARROW_RESPONSE_BYTES
-            .checked_sub(schema_overhead)
-            .and_then(|bytes| bytes.checked_sub(512))
-            .filter(|bytes| *bytes > 0)
-        else {
-            let status = Status::resource_exhausted(
-                "Connect output schema leaves no room for a bounded Arrow response",
-            );
-            operation.reject("CONNECT_ARROW_SCHEMA_LIMIT", status.message());
-            let _ = sender.send(Err(status), &operation);
-            return;
-        };
-        let mut batches = match dataframe.to_arrow_ipc_batches_with_schema_and_cancellation(
-            MAX_CONNECT_ARROW_BATCH_ROWS,
-            max_arrow_payload_bytes,
-            &cancellation,
-            &translated.schema,
-        ) {
-            Ok(batches) => batches,
             Err(error) => {
-                let status = connect_execution_failure(error.to_string());
-                operation.reject("CONNECT_ARROW_STREAM_FAILED", status.message());
+                operation.reject(error.code, &error.message);
+                let status_code = error
+                    .details
+                    .as_ref()
+                    .and_then(|value| value.get("connect_status_code"))
+                    .and_then(serde_json::Value::as_i64)
+                    .and_then(|value| i32::try_from(value).ok())
+                    .map(tonic::Code::from_i32)
+                    .unwrap_or(tonic::Code::Internal);
+                let status = Status::new(status_code, error.message);
                 let _ = sender.send(Err(status), &operation);
                 return;
             }
         };
+        let schema = match connect_proto::DataType::decode(translated.schema.as_slice()) {
+            Ok(schema) => schema,
+            Err(error) => {
+                let status = Status::internal(format!(
+                    "execution adapter returned an invalid schema: {error}"
+                ));
+                operation.reject("CONNECT_SCHEMA_TRANSLATION_FAILED", status.message());
+                let _ = sender.send(Err(status), &operation);
+                return;
+            }
+        };
+        let mut batches = translated.batches;
         let mut row_offset = 0u64;
         let mut response_bytes = 0usize;
         let mut first_batch = true;
@@ -2307,17 +1409,8 @@ fn start_connect_producer(
     outcome_rx
 }
 
-type ConnectResponseStream = std::pin::Pin<
-    Box<
-        dyn tonic::codegen::tokio_stream::Stream<
-                Item = Result<connect_proto::ExecutePlanResponse, Status>,
-            > + Send
-            + 'static,
-    >,
->;
-
 #[tonic::async_trait]
-impl SparkConnectService for ConnectService {
+impl ConnectApplication for ConnectService {
     type ExecutePlanStream = ConnectResponseStream;
     type ReattachExecuteStream = ConnectResponseStream;
 
@@ -2335,7 +1428,7 @@ impl SparkConnectService for ConnectService {
         }
         let reattachable = request_reattachable(&request.request_options)?;
         validate_operation_tags(&request.tags)?;
-        let sender_permit = Arc::clone(&self.server.inner.connect_stream_senders)
+        let sender_permit = Arc::clone(self.server.inner.connect_runtime.stream_senders())
             .try_acquire_owned()
             .map_err(|_| {
                 Status::resource_exhausted("Connect live-stream sender capacity is full")
@@ -2398,6 +1491,7 @@ impl SparkConnectService for ConnectService {
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         let outcome = start_connect_producer(
             operation,
+            Arc::clone(&self.server.inner.execution),
             session,
             plan,
             planning_resources,
@@ -2407,7 +1501,7 @@ impl SparkConnectService for ConnectService {
             reattachable,
             cancellation.clone(),
             sender,
-            Arc::clone(&self.server.inner.admission.active),
+            Arc::clone(&self.server.inner.execution.admission().active),
             self.server.inner.config.queue_timeout,
             deadline,
             planning_wait,
@@ -2625,7 +1719,7 @@ impl SparkConnectService for ConnectService {
             request.session_id,
             request.client_observed_server_side_session_id,
         )?;
-        let sender_permit = Arc::clone(&self.server.inner.connect_stream_senders)
+        let sender_permit = Arc::clone(self.server.inner.connect_runtime.stream_senders())
             .try_acquire_owned()
             .map_err(|_| {
                 Status::resource_exhausted("Connect live-stream sender capacity is full")
@@ -2726,7 +1820,7 @@ impl SparkConnectService for ConnectService {
                         }
                     }
                     if !operation.has_error()
-                        && let Ok(mut operations) = self.server.inner.connect_operations.lock()
+                        && let Ok(mut operations) = self.server.inner.connect_runtime.operations()
                     {
                         operations.remove(&operation.operation_key);
                     }
@@ -2865,186 +1959,6 @@ fn validate_request_budget<M: Message>(name: &str, request: &M) -> Result<(), St
     preflight_wire_message(&message_name, &bytes)
 }
 
-fn descriptor_pool() -> Result<&'static DescriptorPool, Status> {
-    static POOL: OnceLock<Result<DescriptorPool, String>> = OnceLock::new();
-    match POOL.get_or_init(|| {
-        DescriptorPool::decode(connect_proto::FILE_DESCRIPTOR_SET)
-            .map_err(|error| error.to_string())
-    }) {
-        Ok(pool) => Ok(pool),
-        Err(_) => Err(Status::internal("could not load Spark Connect descriptors")),
-    }
-}
-
-fn preflight_wire_message(message_name: &str, bytes: &[u8]) -> Result<(), Status> {
-    if bytes.len() > MAX_CONNECT_PROTO_BYTES {
-        return Err(Status::resource_exhausted(format!(
-            "Connect protobuf exceeds the {MAX_CONNECT_PROTO_BYTES}-byte limit"
-        )));
-    }
-    let descriptor = descriptor_pool()?
-        .get_message_by_name(message_name)
-        .ok_or_else(|| Status::internal("generated Connect request descriptor is missing"))?;
-    scan_wire_message(&descriptor, bytes, 1, &mut ProtoLimits::default())
-}
-
-fn scan_wire_message(
-    descriptor: &MessageDescriptor,
-    bytes: &[u8],
-    depth: usize,
-    limits: &mut ProtoLimits,
-) -> Result<(), Status> {
-    validate_depth(depth)?;
-    limits.nodes = limits.nodes.saturating_add(1);
-    if limits.nodes > MAX_CONNECT_PROTO_NODES {
-        return Err(Status::resource_exhausted(format!(
-            "Connect protobuf exceeds {MAX_CONNECT_PROTO_NODES} message nodes"
-        )));
-    }
-    if descriptor.full_name().ends_with(".StructField") {
-        limits.schema_fields = limits.schema_fields.saturating_add(1);
-        if limits.schema_fields > MAX_CONNECT_SCHEMA_FIELDS {
-            return Err(Status::resource_exhausted(format!(
-                "Connect schema exceeds {MAX_CONNECT_SCHEMA_FIELDS} fields"
-            )));
-        }
-    }
-
-    let mut cursor = 0;
-    while cursor < bytes.len() {
-        let key = read_varint(bytes, &mut cursor)?;
-        let field_number = u32::try_from(key >> 3)
-            .map_err(|_| Status::invalid_argument("protobuf field number is out of range"))?;
-        let wire_type = (key & 7) as u8;
-        if field_number == 0 || field_number > 536_870_911 {
-            return Err(Status::invalid_argument("protobuf field number is invalid"));
-        }
-        let nested = descriptor
-            .get_field(field_number)
-            .and_then(|field| match field.kind() {
-                ReflectKind::Message(message) => Some(message),
-                _ => None,
-            });
-        if wire_type == 2 {
-            let length = usize::try_from(read_varint(bytes, &mut cursor)?)
-                .map_err(|_| Status::invalid_argument("protobuf field length is out of range"))?;
-            let end = cursor
-                .checked_add(length)
-                .filter(|end| *end <= bytes.len())
-                .ok_or_else(|| {
-                    Status::invalid_argument("truncated protobuf length-delimited field")
-                })?;
-            if let Some(nested) = nested {
-                scan_wire_message(&nested, &bytes[cursor..end], depth + 1, limits)?;
-            }
-            cursor = end;
-        } else {
-            skip_wire_value(bytes, &mut cursor, wire_type, field_number, depth)?;
-        }
-    }
-    Ok(())
-}
-
-fn read_varint(bytes: &[u8], cursor: &mut usize) -> Result<u64, Status> {
-    let mut value = 0_u64;
-    for index in 0..10 {
-        let byte = *bytes
-            .get(*cursor)
-            .ok_or_else(|| Status::invalid_argument("truncated protobuf varint"))?;
-        *cursor += 1;
-        if index == 9 && byte > 1 {
-            return Err(Status::invalid_argument(
-                "protobuf varint overflows 64 bits",
-            ));
-        }
-        value |= u64::from(byte & 0x7f) << (index * 7);
-        if byte & 0x80 == 0 {
-            return Ok(value);
-        }
-    }
-    Err(Status::invalid_argument("protobuf varint is too long"))
-}
-
-fn skip_wire_value(
-    bytes: &[u8],
-    cursor: &mut usize,
-    wire_type: u8,
-    field_number: u32,
-    depth: usize,
-) -> Result<(), Status> {
-    match wire_type {
-        0 => {
-            read_varint(bytes, cursor)?;
-        }
-        1 => advance_wire_bytes(bytes, cursor, 8)?,
-        2 => {
-            let length = usize::try_from(read_varint(bytes, cursor)?)
-                .map_err(|_| Status::invalid_argument("protobuf field length is out of range"))?;
-            advance_wire_bytes(bytes, cursor, length)?;
-        }
-        3 => skip_group(bytes, cursor, field_number, depth + 1)?,
-        4 => {
-            return Err(Status::invalid_argument(
-                "unexpected protobuf end-group tag",
-            ));
-        }
-        5 => advance_wire_bytes(bytes, cursor, 4)?,
-        _ => return Err(Status::invalid_argument("protobuf wire type is invalid")),
-    }
-    Ok(())
-}
-
-fn skip_group(
-    bytes: &[u8],
-    cursor: &mut usize,
-    group_field_number: u32,
-    depth: usize,
-) -> Result<(), Status> {
-    validate_depth(depth)?;
-    loop {
-        let key = read_varint(bytes, cursor)?;
-        let field_number = u32::try_from(key >> 3)
-            .map_err(|_| Status::invalid_argument("protobuf field number is out of range"))?;
-        let wire_type = (key & 7) as u8;
-        if field_number == 0 || field_number > 536_870_911 {
-            return Err(Status::invalid_argument("protobuf field number is invalid"));
-        }
-        if wire_type == 4 {
-            if field_number != group_field_number {
-                return Err(Status::invalid_argument(
-                    "protobuf end-group field does not match",
-                ));
-            }
-            return Ok(());
-        }
-        skip_wire_value(bytes, cursor, wire_type, field_number, depth)?;
-    }
-}
-
-fn advance_wire_bytes(bytes: &[u8], cursor: &mut usize, length: usize) -> Result<(), Status> {
-    *cursor = cursor
-        .checked_add(length)
-        .filter(|end| *end <= bytes.len())
-        .ok_or_else(|| Status::invalid_argument("truncated protobuf field"))?;
-    Ok(())
-}
-
-#[derive(Default)]
-struct ProtoLimits {
-    nodes: usize,
-    schema_fields: usize,
-}
-
-fn validate_depth(depth: usize) -> Result<(), Status> {
-    if depth > MAX_CONNECT_PROTO_DEPTH {
-        Err(Status::resource_exhausted(format!(
-            "Connect protobuf nesting exceeds {MAX_CONNECT_PROTO_DEPTH}"
-        )))
-    } else {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3054,7 +1968,7 @@ mod tests {
 
     #[test]
     fn descriptor_set_has_the_public_service_and_bounds_nested_requests() {
-        let service = descriptor_pool()
+        let service = sparkless_server_connect::descriptor_pool()
             .unwrap()
             .get_service_by_name("spark.connect.SparkConnectService")
             .expect("public Spark service descriptor");
@@ -3077,7 +1991,7 @@ mod tests {
             assert!(methods.contains(required), "missing RPC {required}");
         }
 
-        let descriptor = descriptor_pool()
+        let descriptor = sparkless_server_connect::descriptor_pool()
             .unwrap()
             .get_message_by_name("spark.connect.ExecutePlanRequest")
             .unwrap();
@@ -3193,7 +2107,8 @@ mod tests {
         let server = Server::new(config).unwrap();
         let _compute = server
             .inner
-            .admission
+            .execution
+            .admission()
             .active
             .clone()
             .acquire_owned()
@@ -3229,7 +2144,8 @@ mod tests {
             loop {
                 if let Some(record) = server
                     .inner
-                    .operation_records
+                    .execution
+                    .operation_registry()
                     .lock()
                     .unwrap()
                     .records
@@ -3247,7 +2163,15 @@ mod tests {
 
         handle.abort();
         assert!(handle.await.is_err());
-        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+        assert_eq!(
+            server
+                .inner
+                .execution
+                .admission()
+                .accepted
+                .load(Ordering::Acquire),
+            0
+        );
         let record = record.lock().unwrap();
         assert_eq!(record.execution_state, "failed");
         assert_eq!(record.effect_outcome, "cancelled");
@@ -3478,7 +2402,8 @@ mod tests {
             service
                 .server
                 .inner
-                .connect_replay_bytes
+                .connect_runtime
+                .replay_bytes()
                 .load(Ordering::Acquire),
             0
         );
@@ -3514,7 +2439,13 @@ mod tests {
             .await
             .expect("non-reattachable query completes");
         {
-            let registry = service.server.inner.operation_records.lock().unwrap();
+            let registry = service
+                .server
+                .inner
+                .execution
+                .operation_registry()
+                .lock()
+                .unwrap();
             assert_eq!(registry.records.len(), 1);
             assert!(registry.bytes > 0);
         }
@@ -3531,8 +2462,8 @@ mod tests {
         service
             .server
             .inner
-            .connect_operations
-            .lock()
+            .connect_runtime
+            .operations()
             .unwrap()
             .remove(&operation_key);
 
@@ -3547,7 +2478,13 @@ mod tests {
             .expect("ReleaseAll is valid for a completed non-reattachable query");
         assert_eq!(released.into_inner().operation_id, execute.operation_id);
         {
-            let registry = service.server.inner.operation_records.lock().unwrap();
+            let registry = service
+                .server
+                .inner
+                .execution
+                .operation_registry()
+                .lock()
+                .unwrap();
             assert!(registry.records.is_empty());
             assert_eq!(registry.bytes, 0);
         }
@@ -3690,7 +2627,15 @@ mod tests {
                 .is_none()
         );
         drop(operation);
-        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+        assert_eq!(
+            server
+                .inner
+                .execution
+                .admission()
+                .accepted
+                .load(Ordering::Acquire),
+            0
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -3776,7 +2721,7 @@ mod tests {
         assert!(process_bytes.load(Ordering::Acquire) > 0);
         let cancellation = record.cancellation();
         record.detach();
-        let detached_at = record.lock().unwrap().detached_at.unwrap();
+        let detached_at = record.detached_at().unwrap();
         assert!(!record.expire_if_detached(
             detached_at + CONNECT_DETACHED_RETENTION - Duration::from_millis(1)
         ));
@@ -3895,12 +2840,12 @@ mod tests {
         };
 
         record.release_sender_buffer(old_sender);
-        assert_eq!(record.lock().unwrap().sender_bytes, bytes);
+        assert_eq!(record.reserved_sender_bytes(), bytes);
         record.release_all();
-        assert_eq!(record.lock().unwrap().sender_bytes, bytes);
+        assert_eq!(record.reserved_sender_bytes(), bytes);
         assert_eq!(process_bytes.load(Ordering::Acquire), bytes);
         record.release_sender_buffer(replay_sender);
-        assert_eq!(record.lock().unwrap().sender_bytes, 0);
+        assert_eq!(record.reserved_sender_bytes(), 0);
         drop(record);
         assert_eq!(process_bytes.load(Ordering::Acquire), 0);
         assert_eq!(history_bytes.load(Ordering::Acquire), 0);
@@ -3956,7 +2901,7 @@ mod tests {
                 if batch.data.len() == 900_000
         ));
         record.release_sender_buffer(reservation);
-        assert!(matches!(record.lock().unwrap().terminal, Some(Ok(()))));
+        assert!(record.completed_successfully());
         record.release_all();
         drop(record);
         assert_eq!(process_bytes.load(Ordering::Acquire), 0);
@@ -4008,7 +2953,15 @@ mod tests {
             assert_eq!(error.code(), Code::DeadlineExceeded);
             assert!(stream.next().await.is_none());
             tokio::time::timeout(Duration::from_secs(2), async {
-                while service.server.inner.admission.active.available_permits() != 2 {
+                while service
+                    .server
+                    .inner
+                    .execution
+                    .admission()
+                    .active
+                    .available_permits()
+                    != 2
+                {
                     tokio::task::yield_now().await;
                 }
             })
@@ -4030,7 +2983,8 @@ mod tests {
         let _busy = service
             .server
             .inner
-            .admission
+            .execution
+            .admission()
             .active
             .clone()
             .acquire_many_owned(2)
@@ -4367,7 +3321,7 @@ mod tests {
 
     #[test]
     fn recursive_schema_depth_and_schema_field_limits_are_rejected() {
-        let deep_type = nested_data_type(MAX_CONNECT_PROTO_DEPTH / 2 + 1);
+        let deep_type = nested_data_type(sparkless_server_connect::MAX_CONNECT_PROTO_DEPTH / 2 + 1);
         assert_eq!(
             preflight_wire_message("spark.connect.DataType", &deep_type.encode_to_vec())
                 .unwrap_err()
@@ -4375,7 +3329,7 @@ mod tests {
             Code::ResourceExhausted
         );
 
-        let fields = (0..MAX_CONNECT_SCHEMA_FIELDS + 1)
+        let fields = (0..sparkless_server_connect::MAX_CONNECT_SCHEMA_FIELDS + 1)
             .map(|index| StructField {
                 name: format!("c{index}"),
                 data_type: Some(connect_proto::DataType {
@@ -4415,7 +3369,7 @@ mod tests {
         );
 
         let many_nodes = connect_proto::ExecutePlanRequest {
-            request_options: (0..MAX_CONNECT_PROTO_NODES)
+            request_options: (0..sparkless_server_connect::MAX_CONNECT_PROTO_NODES)
                 .map(|_| connect_proto::execute_plan_request::RequestOption {
                     request_option: None,
                 })
@@ -4558,7 +3512,7 @@ mod tests {
             .inner
             .release_connect_session(&released_identity, false)
             .unwrap();
-        assert_eq!(server.inner.connect_operations.lock().unwrap().len(), 1);
+        assert_eq!(server.inner.connect_runtime.operations().unwrap().len(), 1);
 
         let active = server.cancel_connect_work_for_shutdown().unwrap();
         assert!(retained.replay.cancellation().is_cancelled());
@@ -4603,7 +3557,8 @@ mod tests {
         assert_eq!(
             server
                 .inner
-                .admission
+                .execution
+                .admission()
                 .accepted
                 .load(std::sync::atomic::Ordering::Acquire),
             1
@@ -4612,12 +3567,13 @@ mod tests {
         assert_eq!(
             server
                 .inner
-                .admission
+                .execution
+                .admission()
                 .accepted
                 .load(std::sync::atomic::Ordering::Acquire),
             0
         );
-        let tickets = (0..server.inner.admission.max_accepted)
+        let tickets = (0..server.inner.execution.admission().max_accepted)
             .map(|_| server.inner.reserve_admission().unwrap())
             .collect::<Vec<_>>();
         assert!(matches!(
@@ -4644,6 +3600,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "http")]
     fn connect_registry_prefixes_are_reserved_from_http_ids() {
         let identity = identity("user", &Uuid::new_v4().to_string(), None);
         assert!(crate::validate_http_session_identifier(&identity.registry_key()).is_err());
@@ -4692,7 +3649,8 @@ mod tests {
             assert!(
                 !server
                     .inner
-                    .sessions
+                    .execution
+                    .session_registry()
                     .lock()
                     .unwrap()
                     .contains_key(&session_key)
@@ -4749,7 +3707,8 @@ mod tests {
             assert!(
                 !server
                     .inner
-                    .sessions
+                    .execution
+                    .session_registry()
                     .lock()
                     .unwrap()
                     .contains_key(&operation_session_key)
@@ -4870,10 +3829,10 @@ mod tests {
         let status = client
             .server_streaming(
                 Request::new(request),
-                hyper::http::uri::PathAndQuery::from_static(
+                http::uri::PathAndQuery::from_static(
                     "/spark.connect.SparkConnectService/ExecutePlan",
                 ),
-                tonic_prost::ProstCodec::<
+                sparkless_server_connect::BoundedProstCodec::<
                     connect_proto::ExecutePlanRequest,
                     connect_proto::ExecutePlanResponse,
                 >::default(),

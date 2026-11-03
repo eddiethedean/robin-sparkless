@@ -1,0 +1,49 @@
+ M .github/workflows/ci.yml
+ M .github/workflows/release.yml
+ M Cargo.lock
+ M Cargo.toml
+ M crates/robin-sparkless-polars/src/sql/translator.rs
+ M crates/robin-sparkless-polars/tests/external_catalog_review.rs
+ M crates/sparkless-server-core/Cargo.toml
+ M crates/sparkless-server-core/README.md
+ M crates/sparkless-server-core/src/lib.rs
+ M crates/sparkless-server-duckdb/Cargo.toml
+ M crates/sparkless-server-polars/Cargo.toml
+ D crates/sparkless-server-polars/build.rs
+ D crates/sparkless-server-polars/proto/LICENSE-Apache-2.0
+ D crates/sparkless-server-polars/proto/README.md
+ D crates/sparkless-server-polars/proto/SHA256SUMS
+ D crates/sparkless-server-polars/proto/spark/connect/base.proto
+ D crates/sparkless-server-polars/proto/spark/connect/catalog.proto
+ D crates/sparkless-server-polars/proto/spark/connect/commands.proto
+ D crates/sparkless-server-polars/proto/spark/connect/common.proto
+ D crates/sparkless-server-polars/proto/spark/connect/example_plugins.proto
+ D crates/sparkless-server-polars/proto/spark/connect/expressions.proto
+ D crates/sparkless-server-polars/proto/spark/connect/ml.proto
+ D crates/sparkless-server-polars/proto/spark/connect/ml_common.proto
+ D crates/sparkless-server-polars/proto/spark/connect/relations.proto
+ D crates/sparkless-server-polars/proto/spark/connect/types.proto
+ M crates/sparkless-server-polars/src/connect.rs
+ M crates/sparkless-server-polars/src/lib.rs
+ M crates/sparkless-server-polars/src/state.rs
+ M crates/sparkless-server/Cargo.toml
+ M docs/ENGINE_ARCHITECTURE.md
+ M docs/plans/solid-refactor-4.19.md
+ M docs/plans/sparkless-server/23-product-and-package-separation.md
+ M docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md
+ M docs/plans/sparkless-server/DECISIONS.md
+ M docs/plans/sparkless-server/RELEASE_4_19.md
+ M python/native/src/lib.rs
+ M scripts/check_release_versions.py
+ M scripts/test_check_release_versions.py
+ M scripts/verify_public_release_416.py
+ M scripts/verify_rust_consumer_graph.py
+ M scripts/verify_rust_package_archives.py
+ M tests/dataframe/test_issue_1554_join_list_range_conditions.py
+ M tests/dataframe/test_issue_353_join_on_accept_column.py
+ M tests/unit/test_external_catalog_provider.py
+?? crates/sparkless-server-connect/
+?? crates/sparkless-server-core/src/execution.rs
+?? crates/sparkless-server-http/
+?? crates/sparkless-server-runtime/
+?? docs/plans/evidence/

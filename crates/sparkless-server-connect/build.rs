@@ -1,12 +1,4 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_CONNECT");
-    #[cfg(feature = "connect")]
-    generate_connect_bindings()?;
-    Ok(())
-}
-
-#[cfg(feature = "connect")]
-fn generate_connect_bindings() -> Result<(), Box<dyn std::error::Error>> {
     let proto_root = "proto";
     let protoc_include = protoc_bin_vendored::include_path()?;
     unsafe {
@@ -29,7 +21,7 @@ fn generate_connect_bindings() -> Result<(), Box<dyn std::error::Error>> {
     tonic_prost_build::configure()
         .build_server(true)
         .build_client(false)
-        .codec_path("crate::connect::BoundedProstCodec")
+        .codec_path("crate::BoundedProstCodec")
         .file_descriptor_set_path(
             std::path::PathBuf::from(std::env::var("OUT_DIR")?)
                 .join("spark_connect_descriptor.bin"),

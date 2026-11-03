@@ -6312,20 +6312,67 @@ name = "sparkless-server"
 version = "4.19.0"
 dependencies = [
  "serde_json",
+ "sparkless-server-connect",
+ "sparkless-server-http",
  "sparkless-server-polars",
+ "sparkless-server-runtime",
  "tokio",
+]
+
+[[package]]
+name = "sparkless-server-connect"
+version = "4.19.0"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body",
+ "prost",
+ "prost-reflect",
+ "prost-types",
+ "protoc-bin-vendored",
+ "robin-sparkless-core",
+ "serde_json",
+ "sparkless-server-core",
+ "sparkless-server-runtime",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+ "tower",
+ "uuid",
 ]
 
 [[package]]
 name = "sparkless-server-core"
 version = "4.19.0"
+dependencies = [
+ "robin-sparkless-core",
+ "serde_json",
+]
 
 [[package]]
 name = "sparkless-server-duckdb"
 version = "4.19.0"
 dependencies = [
+ "sparkless-server-connect",
  "sparkless-server-core",
+ "sparkless-server-http",
  "sparkless-server-polars",
+ "sparkless-server-runtime",
+]
+
+[[package]]
+name = "sparkless-server-http"
+version = "4.19.0"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde_json",
+ "sparkless-server-runtime",
+ "tokio",
 ]
 
 [[package]]
@@ -6333,13 +6380,12 @@ name = "sparkless-server-polars"
 version = "4.19.0"
 dependencies = [
  "bytes",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-util",
  "prost",
- "prost-reflect",
  "prost-types",
- "protoc-bin-vendored",
  "robin-sparkless",
  "robin-sparkless-core",
  "robin-sparkless-plan",
@@ -6349,13 +6395,24 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "spark-sql-parser",
+ "sparkless-server-connect",
  "sparkless-server-core",
+ "sparkless-server-http",
+ "sparkless-server-runtime",
  "tokio",
  "tokio-stream",
  "tonic",
- "tonic-prost",
- "tonic-prost-build",
  "uuid",
+]
+
+[[package]]
+name = "sparkless-server-runtime"
+version = "4.19.0"
+dependencies = [
+ "robin-sparkless-core",
+ "serde_json",
+ "sparkless-server-core",
+ "tokio",
 ]
 
 [[package]]

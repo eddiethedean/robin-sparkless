@@ -1,7 +1,12 @@
 //! Engine-neutral identity contracts shared by the server products and runtime.
 
 pub mod config;
+pub mod execution;
 pub use config::ServerConfig;
+pub use execution::{
+    ConnectExecutionPort, ConnectExecutionRequest, ConnectExecutionResult, EngineSessionHandle,
+    ExecutionError, ExecutionPort, SqlExecutionRequest, SqlExecutionResult,
+};
 
 pub const CONTROL_PROTOCOL_VERSION: u32 = 2;
 pub const CAPABILITIES_PROTOCOL_VERSION: u32 = 1;

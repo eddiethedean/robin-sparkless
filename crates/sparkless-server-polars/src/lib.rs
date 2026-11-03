@@ -1,15 +1,15 @@
-//! Native HTTP statement service for Robin Sparkless.
-//!
-//! The HTTP adapter owns transport/session/operation lifetimes and calls the Rust engine
-//! directly. It does not expose the engine's file readers, UDF registry, Python bindings,
-//! or Spark Connect transport.
+//! Polars-backed server application and product composition.
 
 mod cli;
 mod state;
 use state::{
-    Admission, AdmissionTicket, CatalogReceipt, OperationRecord, OperationRegistry,
-    OperationStatusRequest, PendingOperationGuard, RequestFailure, ReserveOperation, ServerInner,
-    SessionLease, SessionLifetime, SessionRequest, StatementClass, StatementRequest,
+    AdmissionTicket, OperationRecord, RequestFailure, ReserveOperation, ServerInner, SessionLease,
+    SessionLifetime,
+};
+#[cfg(feature = "http")]
+use state::{
+    CatalogReceipt, OperationStatusRequest, PendingOperationGuard, SessionRequest, StatementClass,
+    StatementRequest,
 };
 #[cfg(feature = "connect")]
 use state::{
@@ -26,35 +26,55 @@ pub use sparkless_server_core::{
     AGENT_PROTOCOL_VERSION, CAPABILITIES_PROTOCOL_VERSION, CONTROL_PROTOCOL_VERSION,
     MAX_CONTROL_FRAME_BYTES, MUTATION_PROTOCOL_VERSION, ServerProduct,
 };
-
-use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
-use hyper::header::{CONTENT_ENCODING, CONTENT_TYPE};
-use hyper::http::{HeaderValue, Method, Request, Response, StatusCode};
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
-use robin_sparkless::{
-    DataType, EngineError, LogicalField as StructField, SharedCatalog, SparkSession,
+use sparkless_server_core::{
+    EngineSessionHandle, ExecutionError, ExecutionPort, SqlExecutionRequest, SqlExecutionResult,
 };
+use sparkless_server_runtime::ServerRuntime;
+
+#[cfg(feature = "http")]
+use bytes::Bytes;
+use http::StatusCode;
+#[cfg(feature = "http")]
+use http::header::CONTENT_TYPE;
+#[cfg(feature = "http")]
+use http::{HeaderValue, Request, Response};
+#[cfg(feature = "http")]
+use http_body_util::Full;
+#[cfg(feature = "http")]
+use hyper::body::Incoming;
+use robin_sparkless::{DataType, LogicalField as StructField};
+use robin_sparkless::{EngineError, SharedCatalog, SparkSession};
 use robin_sparkless_core::CancellationToken;
 use robin_sparkless_core::engine::ExternalCatalog;
+#[cfg(feature = "http")]
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sha2::{Digest, Sha256};
 use spark_sql_parser::{SparkStatement, ast};
+#[cfg(feature = "http")]
+use sparkless_server_http::{HttpApplication, HttpResponse};
+#[cfg(feature = "http")]
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
+#[cfg(feature = "http")]
 use std::ops::ControlFlow;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+#[cfg(feature = "http")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use std::time::{Duration, Instant};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, Semaphore};
+#[cfg(feature = "http")]
+use std::time::Duration;
+use std::time::Instant;
+use tokio::net::TcpListener;
+#[cfg(feature = "http")]
+use tokio::net::TcpStream;
+#[cfg(feature = "connect")]
+use tokio::sync::Semaphore;
+#[cfg(feature = "http")]
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use tokio::task::JoinSet;
+#[cfg(feature = "http")]
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -65,11 +85,7 @@ pub(crate) mod connect;
 pub use connect::ConnectService;
 
 #[cfg(feature = "connect")]
-pub mod connect_proto {
-    tonic::include_proto!("spark.connect");
-    pub const FILE_DESCRIPTOR_SET: &[u8] =
-        tonic::include_file_descriptor_set!("spark_connect_descriptor");
-}
+pub use sparkless_server_connect::connect_proto;
 
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_ERROR_BYTES: usize = 1024;
@@ -80,9 +96,7 @@ const MAX_TABLE_ACCOUNTED_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CATALOG_ACCOUNTED_BYTES: usize = 256 * 1024 * 1024;
 const RESERVED_WAREHOUSE_SESSION: &str = "sql-warehouse";
 #[cfg(feature = "connect")]
-const MAX_CONNECT_SESSION_TOMBSTONES: usize = 1024;
-
-type HttpResponse = Response<Full<Bytes>>;
+use sparkless_server_connect::ConnectTombstoneError;
 
 #[derive(Debug, Clone)]
 pub struct ServerError {
@@ -105,8 +119,9 @@ impl From<std::io::Error> for ServerError {
     }
 }
 
-/// An HTTP service instance. Each instance owns its catalog, instance identity, session
-/// registry, and process-lifetime mutation records.
+/// A server application composed with one engine-neutral runtime and its product adapter.
+/// The runtime owns session and operation registries; this instance owns the catalog and
+/// product-specific session and mutation behavior.
 #[derive(Clone)]
 pub struct Server {
     inner: Arc<ServerInner>,
@@ -224,47 +239,37 @@ impl Server {
         let max_accepted = config
             .max_active_operations
             .saturating_add(config.max_pending_operations);
+        let execution = ServerRuntime::<SessionLifetime>::new(
+            Arc::new(PolarsSqlExecution),
+            128,
+            config.max_active_operations,
+            max_accepted,
+        );
+        #[cfg(feature = "connect")]
+        let execution = execution.with_connect_execution(Arc::new(connect::PolarsConnectExecution));
+        let execution = Arc::new(execution);
         let inner = Arc::new(ServerInner {
-            operation_records: Mutex::new(OperationRegistry::default()),
-            admission: Admission {
-                active: Arc::new(Semaphore::new(config.max_active_operations)),
-                accepted: Arc::new(AtomicUsize::new(0)),
-                max_accepted,
-            },
-            connections: Arc::new(Semaphore::new(128)),
             config,
             product,
             instance_id: Uuid::new_v4().to_string(),
+            #[cfg(feature = "http")]
             http_address: Mutex::new(None),
             root_session,
+            execution,
             external_catalog,
-            sessions: Mutex::new(HashMap::new()),
             #[cfg(feature = "connect")]
-            connect_tombstones: Mutex::new(HashMap::new()),
-            #[cfg(feature = "connect")]
-            connect_session_lifecycle: Mutex::new(()),
-            #[cfg(feature = "connect")]
-            connect_operations: Mutex::new(HashMap::new()),
-            #[cfg(feature = "connect")]
-            connect_active_operations: tokio::sync::watch::channel(0).0,
-            #[cfg(feature = "connect")]
-            connect_draining: AtomicBool::new(false),
-            #[cfg(feature = "connect")]
-            connect_replay_bytes: Arc::new(AtomicUsize::new(0)),
-            #[cfg(feature = "connect")]
-            connect_history_bytes: Arc::new(AtomicUsize::new(0)),
-            #[cfg(feature = "connect")]
-            connect_stream_senders: Arc::new(Semaphore::new(connect::MAX_CONNECT_STREAM_SENDERS)),
-            #[cfg(feature = "connect")]
-            connect_address: Mutex::new(None),
-            active_sessions: AtomicUsize::new(0),
-            next_session_generation: AtomicU64::new(1),
+            connect_runtime: sparkless_server_connect::ConnectRuntimeState::new(
+                connect::MAX_CONNECT_STREAM_SENDERS,
+            ),
+            #[cfg(feature = "http")]
             mutation_lane: Arc::new(AsyncMutex::new(())),
+            #[cfg(feature = "http")]
             catalog_receipts: Mutex::new(HashMap::new()),
+            #[cfg(feature = "http")]
             catalog_sequence: AtomicU64::new(1),
             draining: AtomicBool::new(false),
             ready: AtomicBool::new(false),
-            #[cfg(test)]
+            #[cfg(all(test, feature = "http"))]
             test_mutation_before_outcome_hook: Mutex::new(None),
         });
         Ok(Self { inner })
@@ -279,6 +284,7 @@ impl Server {
     }
 
     /// Bind, run a native startup witness, then serve until `shutdown` resolves.
+    #[cfg(feature = "http")]
     pub async fn serve_until<F>(self, shutdown: F) -> Result<(), ServerError>
     where
         F: Future<Output = ()> + Send + 'static,
@@ -289,6 +295,7 @@ impl Server {
     /// Bind, run a native startup witness, then invoke `on_ready` with the actual address before
     /// serving until `shutdown` resolves. Used by the owned-child control protocol so readiness
     /// is tied to this listener rather than an unrelated process on the configured port.
+    #[cfg(feature = "http")]
     pub async fn serve_until_with_ready<F, R>(
         self,
         shutdown: F,
@@ -304,6 +311,7 @@ impl Server {
 
     /// Bind HTTP and optionally Spark Connect before publishing a single readiness record.
     /// Both listeners share this server's session, catalog, and admission state.
+    #[cfg(feature = "http")]
     pub async fn serve_until_with_endpoints<F, R>(
         self,
         shutdown: F,
@@ -341,25 +349,31 @@ impl Server {
         F: Future<Output = ()> + Send + 'static,
         R: FnOnce(Option<SocketAddr>, Option<SocketAddr>) -> Result<(), ServerError>,
     {
-        #[cfg(not(feature = "http"))]
-        if http_bind.is_some() {
-            return Err(ServerError {
-                message: "HTTP serving requires the server http feature".into(),
-            });
-        }
         if http_bind.is_none() && connect_bind.is_none() {
             return Err(ServerError {
                 message: "at least one HTTP or Spark Connect listener must be enabled".into(),
             });
         }
+        #[cfg(feature = "http")]
         let http_listener = match http_bind {
             Some(address) => Some(TcpListener::bind(address).await?),
             None => None,
         };
+        #[cfg(not(feature = "http"))]
+        {
+            if http_bind.is_some() {
+                return Err(ServerError {
+                    message: "HTTP serving requires the server http feature".into(),
+                });
+            }
+        }
+        #[cfg(feature = "http")]
         let http_bound = http_listener
             .as_ref()
             .map(TcpListener::local_addr)
             .transpose()?;
+        #[cfg(not(feature = "http"))]
+        let http_bound = None;
         #[cfg(feature = "connect")]
         let connect_listener = match connect_bind {
             Some(address) => Some(TcpListener::bind(address).await?),
@@ -378,14 +392,21 @@ impl Server {
             .as_ref()
             .map(TcpListener::local_addr)
             .transpose()?;
-        *self.inner.http_address.lock().map_err(|_| ServerError {
-            message: "HTTP listener address state is unavailable".into(),
-        })? = http_bound;
+        #[cfg(feature = "http")]
+        {
+            *self.inner.http_address.lock().map_err(|_| ServerError {
+                message: "HTTP listener address state is unavailable".into(),
+            })? = http_bound;
+        }
         #[cfg(feature = "connect")]
         {
-            *self.inner.connect_address.lock().map_err(|_| ServerError {
-                message: "Spark Connect listener address state is unavailable".into(),
-            })? = connect_bound;
+            *self
+                .inner
+                .connect_runtime
+                .address()
+                .map_err(|_| ServerError {
+                    message: "Spark Connect listener address state is unavailable".into(),
+                })? = connect_bound;
         }
         self.startup_check().await?;
         self.inner.ready.store(true, Ordering::Release);
@@ -395,11 +416,14 @@ impl Server {
         );
         if let Err(error) = on_ready(http_bound, connect_bound) {
             self.inner.ready.store(false, Ordering::Release);
-            if let Ok(mut address) = self.inner.http_address.lock() {
-                *address = None;
+            #[cfg(feature = "http")]
+            {
+                if let Ok(mut address) = self.inner.http_address.lock() {
+                    *address = None;
+                }
             }
             #[cfg(feature = "connect")]
-            if let Ok(mut address) = self.inner.connect_address.lock() {
+            if let Ok(mut address) = self.inner.connect_runtime.address() {
                 *address = None;
             }
             return Err(error);
@@ -407,6 +431,7 @@ impl Server {
 
         let (shutdown_tx, _) = tokio::sync::watch::channel(false);
         let mut tasks = JoinSet::new();
+        #[cfg(feature = "http")]
         if let Some(listener) = http_listener {
             let http_server = self.clone();
             let mut http_shutdown = shutdown_tx.subscribe();
@@ -461,11 +486,14 @@ impl Server {
                 _ => {}
             }
         }
-        if let Ok(mut address) = self.inner.http_address.lock() {
-            *address = None;
+        #[cfg(feature = "http")]
+        {
+            if let Ok(mut address) = self.inner.http_address.lock() {
+                *address = None;
+            }
         }
         #[cfg(feature = "connect")]
-        if let Ok(mut address) = self.inner.connect_address.lock() {
+        if let Ok(mut address) = self.inner.connect_runtime.address() {
             *address = None;
         }
         if let Some(error) = first_error {
@@ -500,8 +528,8 @@ impl Server {
         #[cfg(feature = "connect")]
         {
             self.inner
-                .connect_address
-                .lock()
+                .connect_runtime
+                .address()
                 .ok()
                 .and_then(|address| *address)
                 .map(|address| format!("sc://{address}"))
@@ -512,6 +540,7 @@ impl Server {
         }
     }
 
+    #[cfg(feature = "http")]
     pub async fn serve(self) -> Result<(), ServerError> {
         self.serve_until(shutdown_signal()).await
     }
@@ -544,6 +573,7 @@ impl Server {
         })
     }
 
+    #[cfg(feature = "http")]
     async fn run_listener<F>(&self, listener: TcpListener, shutdown: F) -> Result<(), ServerError>
     where
         F: Future<Output = ()> + Send + 'static,
@@ -564,13 +594,8 @@ impl Server {
                 }
                 accept = listener.accept() => {
                     let (stream, _) = accept?;
-                    let Ok(connection_permit) = Arc::clone(&self.inner.connections).try_acquire_owned() else {
-                        drop(stream);
-                        continue;
-                    };
                     let server = self.clone();
                     connections.spawn(async move {
-                        let _connection_permit = connection_permit;
                         let _ = serve_connection(stream, server).await;
                     });
                 }
@@ -590,6 +615,7 @@ impl Server {
     }
 }
 
+#[cfg(feature = "http")]
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -616,9 +642,14 @@ impl ServerInner {
         Ok(session)
     }
 
+    #[cfg(feature = "http")]
     fn session_lease(self: &Arc<Self>, id: &str) -> Result<SessionLease, RequestFailure> {
         validate_identifier("session", id)?;
-        let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+        let mut sessions = self
+            .execution
+            .session_registry()
+            .lock()
+            .map_err(|_| internal_failure())?;
         if let Some(session) = sessions.get(id).cloned() {
             if session.closing.load(Ordering::Acquire) {
                 return Err(RequestFailure {
@@ -649,14 +680,14 @@ impl ServerInner {
             session.active.fetch_add(1, Ordering::AcqRel);
             return Ok(SessionLease(session));
         }
-        if self.active_sessions.load(Ordering::Acquire) >= self.config.max_sessions {
+        if self.execution.session_registry().active_count() >= self.config.max_sessions {
             return Err(RequestFailure {
                 status: StatusCode::TOO_MANY_REQUESTS,
                 name: "SessionCapacityExceeded",
                 message: "server session capacity is full".into(),
             });
         }
-        let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
+        let generation = self.execution.session_registry().next_generation();
         let lifetime = Arc::new(SessionLifetime {
             id: id.to_string(),
             session: self.new_logical_session().map_err(|_| internal_failure())?,
@@ -672,7 +703,7 @@ impl ServerInner {
             stopped: AtomicBool::new(false),
             server: Arc::downgrade(self),
         });
-        self.active_sessions.fetch_add(1, Ordering::AcqRel);
+        self.execution.session_registry().session_started();
         sessions.insert(id.to_string(), Arc::clone(&lifetime));
         Ok(SessionLease(lifetime))
     }
@@ -683,8 +714,8 @@ impl ServerInner {
         identity: &ConnectSessionIdentity,
     ) -> Result<SessionLease, RequestFailure> {
         let _lifecycle = self
-            .connect_session_lifecycle
-            .lock()
+            .connect_runtime
+            .lifecycle_lock()
             .map_err(|_| internal_failure())?;
         self.connect_session_lease_locked(identity)
     }
@@ -694,7 +725,7 @@ impl ServerInner {
         self: &Arc<Self>,
         identity: &ConnectSessionIdentity,
     ) -> Result<SessionLease, RequestFailure> {
-        if self.connect_draining.load(Ordering::Acquire) || self.draining.load(Ordering::Acquire) {
+        if self.connect_runtime.is_draining() || self.draining.load(Ordering::Acquire) {
             return Err(connect_request_failure(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "ServerDraining",
@@ -708,10 +739,10 @@ impl ServerInner {
         }
         let key = identity.registry_key();
         if self
-            .connect_tombstones
-            .lock()
+            .connect_runtime
+            .tombstone(&key)
             .map_err(|_| internal_failure())?
-            .contains_key(&key)
+            .is_some()
         {
             return Err(connect_request_failure(
                 StatusCode::GONE,
@@ -723,7 +754,11 @@ impl ServerInner {
         // Otherwise the TTL can pass between an expiration check and the generic
         // lease path, which would silently replace this Connect identity.
         let (expired_connect_session, lease) = {
-            let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            let mut sessions = self
+                .execution
+                .session_registry()
+                .lock()
+                .map_err(|_| internal_failure())?;
             match sessions.get(&key).cloned() {
                 Some(session) => {
                     if session.closing.load(Ordering::Acquire) {
@@ -741,22 +776,11 @@ impl ServerInner {
                             .elapsed()
                             >= self.config.session_idle_ttl;
                     if idle_expired {
-                        let mut tombstones = self
-                            .connect_tombstones
-                            .lock()
-                            .map_err(|_| internal_failure())?;
-                        if tombstones.len() >= MAX_CONNECT_SESSION_TOMBSTONES
-                            && !tombstones.contains_key(&key)
-                        {
-                            return Err(connect_request_failure(
-                                StatusCode::TOO_MANY_REQUESTS,
-                                "SessionHistoryCapacityExceeded",
-                                "Connect released-session history is full",
-                            ));
-                        }
+                        self.connect_runtime
+                            .record_tombstone(key.clone(), session.server_side_session_id.clone())
+                            .map_err(connect_tombstone_failure)?;
                         session.closing.store(true, Ordering::Release);
                         sessions.remove(&key);
-                        tombstones.insert(key.clone(), session.server_side_session_id.clone());
                         (Some(session), None)
                     } else {
                         if identity
@@ -786,14 +810,15 @@ impl ServerInner {
                             "the observed server-side session identity is stale or unknown",
                         ));
                     }
-                    if self.active_sessions.load(Ordering::Acquire) >= self.config.max_sessions {
+                    if self.execution.session_registry().active_count() >= self.config.max_sessions
+                    {
                         return Err(connect_request_failure(
                             StatusCode::TOO_MANY_REQUESTS,
                             "SessionCapacityExceeded",
                             "server session capacity is full",
                         ));
                     }
-                    let generation = self.next_session_generation.fetch_add(1, Ordering::Relaxed);
+                    let generation = self.execution.session_registry().next_generation();
                     let lifetime = Arc::new(SessionLifetime {
                         id: key.clone(),
                         session: self.new_logical_session().map_err(|_| internal_failure())?,
@@ -807,14 +832,14 @@ impl ServerInner {
                         stopped: AtomicBool::new(false),
                         server: Arc::downgrade(self),
                     });
-                    self.active_sessions.fetch_add(1, Ordering::AcqRel);
+                    self.execution.session_registry().session_started();
                     sessions.insert(key.clone(), Arc::clone(&lifetime));
                     (None, Some(SessionLease(lifetime)))
                 }
             }
         };
         if let Some(session) = expired_connect_session {
-            if let Ok(mut operations) = self.connect_operations.lock() {
+            if let Ok(mut operations) = self.connect_runtime.operations() {
                 let operation_keys = operations
                     .iter()
                     .filter(|(_, operation)| operation.matches_session(&key, session.generation))
@@ -844,8 +869,8 @@ impl ServerInner {
         allow_reconnect: bool,
     ) -> Result<String, RequestFailure> {
         let _lifecycle = self
-            .connect_session_lifecycle
-            .lock()
+            .connect_runtime
+            .lifecycle_lock()
             .map_err(|_| internal_failure())?;
         validate_connect_user_id(&identity.user_id)?;
         validate_connect_uuid("session_id", &identity.client_session_id)?;
@@ -858,34 +883,21 @@ impl ServerInner {
         }
         let key = identity.registry_key();
         let server_side_session_id = {
-            let sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            let sessions = self
+                .execution
+                .session_registry()
+                .lock()
+                .map_err(|_| internal_failure())?;
             sessions
                 .get(&key)
                 .map(|session| session.server_side_session_id.clone())
-                .or_else(|| {
-                    self.connect_tombstones
-                        .lock()
-                        .ok()
-                        .and_then(|tombstones| tombstones.get(&key).cloned())
-                })
+                .or_else(|| self.connect_runtime.tombstone(&key).ok().flatten())
                 .unwrap_or_else(|| Uuid::new_v4().to_string())
         };
-        {
-            let mut tombstones = self
-                .connect_tombstones
-                .lock()
-                .map_err(|_| internal_failure())?;
-            if !tombstones.contains_key(&key) && tombstones.len() >= MAX_CONNECT_SESSION_TOMBSTONES
-            {
-                return Err(connect_request_failure(
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "SessionHistoryCapacityExceeded",
-                    "Connect released-session history is full",
-                ));
-            }
-            tombstones.insert(key.clone(), server_side_session_id.clone());
-        }
-        if let Ok(mut operations) = self.connect_operations.lock() {
+        self.connect_runtime
+            .record_tombstone(key.clone(), server_side_session_id.clone())
+            .map_err(connect_tombstone_failure)?;
+        if let Ok(mut operations) = self.connect_runtime.operations() {
             let released = operations
                 .iter()
                 .filter(|(_, operation)| operation.session_identity().0 == key)
@@ -909,7 +921,7 @@ impl ServerInner {
         operation_id: &str,
     ) -> Option<Arc<connect::ConnectReplayRecord>> {
         let key = connect_operation_key(identity, operation_id);
-        self.connect_operations.lock().ok()?.get(&key).cloned()
+        self.connect_runtime.operations().ok()?.get(&key).cloned()
     }
 
     #[cfg(feature = "connect")]
@@ -918,8 +930,8 @@ impl ServerInner {
         identity: &ConnectSessionIdentity,
         generation: u64,
     ) -> Vec<Arc<connect::ConnectReplayRecord>> {
-        self.connect_operations
-            .lock()
+        self.connect_runtime
+            .operations()
             .map(|operations| {
                 operations
                     .values()
@@ -935,7 +947,7 @@ impl ServerInner {
     #[cfg(feature = "connect")]
     fn expire_detached_connect_operations(&self) -> usize {
         let now = Instant::now();
-        let Ok(mut operations) = self.connect_operations.lock() else {
+        let Ok(mut operations) = self.connect_runtime.operations() else {
             return 0;
         };
         let mut expired = 0usize;
@@ -951,7 +963,11 @@ impl ServerInner {
     fn close_session(&self, id: &str) -> Result<(), RequestFailure> {
         validate_identifier("session", id)?;
         let stop_now = {
-            let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            let mut sessions = self
+                .execution
+                .session_registry()
+                .lock()
+                .map_err(|_| internal_failure())?;
             let Some(session) = sessions.get(id).cloned() else {
                 return Ok(());
             };
@@ -972,13 +988,17 @@ impl ServerInner {
     fn expire_idle_sessions(&self) -> Result<usize, RequestFailure> {
         #[cfg(feature = "connect")]
         let _connect_lifecycle = self
-            .connect_session_lifecycle
-            .lock()
+            .connect_runtime
+            .lifecycle_lock()
             .map_err(|_| internal_failure())?;
         let now = Instant::now();
         let mut expired = Vec::new();
         {
-            let mut sessions = self.sessions.lock().map_err(|_| internal_failure())?;
+            let mut sessions = self
+                .execution
+                .session_registry()
+                .lock()
+                .map_err(|_| internal_failure())?;
             let mut expired_ids = Vec::new();
             for (id, session) in sessions.iter() {
                 if id == RESERVED_WAREHOUSE_SESSION || session.active.load(Ordering::Acquire) != 0 {
@@ -998,20 +1018,19 @@ impl ServerInner {
                     let Some(session) = sessions.get(&id) else {
                         continue;
                     };
-                    let mut tombstones = self
-                        .connect_tombstones
-                        .lock()
-                        .map_err(|_| internal_failure())?;
-                    if !tombstones.contains_key(&id)
-                        && tombstones.len() >= MAX_CONNECT_SESSION_TOMBSTONES
+                    match self
+                        .connect_runtime
+                        .record_tombstone(id.clone(), session.server_side_session_id.clone())
                     {
-                        continue;
+                        Ok(()) => {}
+                        Err(ConnectTombstoneError::CapacityExceeded) => continue,
+                        Err(ConnectTombstoneError::Unavailable) => {
+                            return Err(internal_failure());
+                        }
                     }
-                    tombstones.insert(id.clone(), session.server_side_session_id.clone());
-                    drop(tombstones);
                     let mut operations = self
-                        .connect_operations
-                        .lock()
+                        .connect_runtime
+                        .operations()
                         .map_err(|_| internal_failure())?;
                     let operation_keys = operations
                         .iter()
@@ -1039,7 +1058,7 @@ impl ServerInner {
     }
 
     fn remove_closed_session(&self, id: &str, generation: u64) {
-        if let Ok(mut sessions) = self.sessions.lock()
+        if let Ok(mut sessions) = self.execution.session_registry().lock()
             && sessions.get(id).is_some_and(|session| {
                 session.generation == generation
                     && session.closing.load(Ordering::Acquire)
@@ -1051,28 +1070,17 @@ impl ServerInner {
     }
 
     fn reserve_admission(&self) -> Result<AdmissionTicket, RequestFailure> {
-        let accepted = &self.admission.accepted;
-        let mut current = accepted.load(Ordering::Acquire);
-        loop {
-            if current >= self.admission.max_accepted {
-                return Err(RequestFailure {
-                    status: StatusCode::TOO_MANY_REQUESTS,
-                    name: "OperationCapacityExceeded",
-                    message: "active and pending operation capacity is full".into(),
-                });
-            }
-            match accepted.compare_exchange_weak(
-                current,
-                current + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => return Ok(AdmissionTicket(Arc::clone(accepted))),
-                Err(updated) => current = updated,
-            }
-        }
+        self.execution
+            .admission()
+            .reserve()
+            .map_err(|_| RequestFailure {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                name: "OperationCapacityExceeded",
+                message: "active and pending operation capacity is full".into(),
+            })
     }
 
+    #[cfg(feature = "http")]
     async fn acquire_mutation_lane(&self) -> Result<OwnedMutexGuard<()>, ()> {
         timeout(
             self.config.queue_timeout,
@@ -1089,7 +1097,7 @@ impl ServerInner {
         session: &str,
         generation: u64,
     ) -> ReserveOperation {
-        let Ok(mut registry) = self.operation_records.lock() else {
+        let Ok(mut registry) = self.execution.operation_registry().lock() else {
             return ReserveOperation::Full;
         };
         if let Some(existing) = registry.records.get(id) {
@@ -1097,7 +1105,8 @@ impl ServerInner {
                 return ReserveOperation::Conflict;
             };
             let current_generation = self
-                .sessions
+                .execution
+                .session_registry()
                 .lock()
                 .ok()
                 .and_then(|sessions| sessions.get(session).map(|entry| entry.generation));
@@ -1113,29 +1122,24 @@ impl ServerInner {
         let estimated_record_bytes = MUTATION_RECORD_BASE_BYTES
             .saturating_add(id.len())
             .saturating_add(session.len());
-        if registry.records.len() >= self.config.max_mutation_records
-            || registry.bytes.saturating_add(estimated_record_bytes)
-                > self.config.max_mutation_bytes
-        {
-            return ReserveOperation::Full;
-        }
-        let operation = Arc::new(Mutex::new(OperationRecord {
-            request_fingerprint,
-            semantic_fingerprint: None,
-            session: session.to_string(),
-            session_generation: generation,
-            reserved_bytes: estimated_record_bytes,
-            execution_state: "running",
-            effect_outcome: "pending",
-            receipt: None,
-            error: None,
-            error_detail: None,
-        }));
-        registry.bytes += estimated_record_bytes;
-        registry
-            .records
-            .insert(id.to_string(), Arc::clone(&operation));
-        ReserveOperation::New(operation)
+        registry.reserve_new(
+            id.to_string(),
+            OperationRecord {
+                request_fingerprint,
+                semantic_fingerprint: None,
+                session: session.to_string(),
+                session_generation: generation,
+                reserved_bytes: 0,
+                execution_state: "running",
+                effect_outcome: "pending",
+                receipt: None,
+                error: None,
+                error_detail: None,
+            },
+            estimated_record_bytes,
+            self.config.max_mutation_records,
+            self.config.max_mutation_bytes,
+        )
     }
 
     #[cfg(feature = "connect")]
@@ -1148,8 +1152,8 @@ impl ServerInner {
         tags: Vec<String>,
     ) -> Result<ConnectOperationLease, ConnectReserveError> {
         let _lifecycle = self
-            .connect_session_lifecycle
-            .lock()
+            .connect_runtime
+            .lifecycle_lock()
             .map_err(|_| ConnectReserveError::Request(internal_failure()))?;
         validate_connect_uuid("operation_id", operation_id)
             .map_err(ConnectReserveError::Request)?;
@@ -1167,8 +1171,8 @@ impl ServerInner {
             .map_err(ConnectReserveError::Request)?;
         {
             let mut operations = self
-                .connect_operations
-                .lock()
+                .connect_runtime
+                .operations()
                 .map_err(|_| ConnectReserveError::Request(internal_failure()))?;
             operations.retain(|_, operation| operation.retain_in_registry());
             let active = operations
@@ -1200,8 +1204,8 @@ impl ServerInner {
                 session.0.generation,
                 reattachable,
                 tags,
-                Arc::clone(&self.connect_replay_bytes),
-                Arc::clone(&self.connect_history_bytes),
+                Arc::clone(self.connect_runtime.replay_bytes()),
+                Arc::clone(self.connect_runtime.history_bytes()),
             )
             .map_err(|_| {
                 ConnectReserveError::Request(connect_request_failure(
@@ -1218,8 +1222,8 @@ impl ServerInner {
             session.0.generation,
         ) {
             ReserveOperation::New(record) => {
-                self.connect_operations
-                    .lock()
+                self.connect_runtime
+                    .operations()
                     .map_err(|_| ConnectReserveError::Request(internal_failure()))?
                     .insert(operation_key, Arc::clone(&replay));
                 Ok(ConnectOperationLease {
@@ -1227,7 +1231,7 @@ impl ServerInner {
                     _session: session,
                     _admission: admission,
                     replay,
-                    _active: ConnectActiveOperation::new(&self.connect_active_operations),
+                    _active: ConnectActiveOperation::new(&self.connect_runtime.active_operations()),
                 })
             }
             ReserveOperation::Existing(_) => Err(ConnectReserveError::Duplicate),
@@ -1240,13 +1244,20 @@ impl ServerInner {
         }
     }
 
+    #[cfg(feature = "http")]
     fn operation(&self, id: &str) -> Option<Arc<Mutex<OperationRecord>>> {
-        self.operation_records.lock().ok()?.records.get(id).cloned()
+        self.execution
+            .operation_registry()
+            .lock()
+            .ok()?
+            .records
+            .get(id)
+            .cloned()
     }
 
     #[cfg(feature = "connect")]
     fn release_operation_record(&self, id: &str, session: &str, generation: u64) {
-        let Ok(mut registry) = self.operation_records.lock() else {
+        let Ok(mut registry) = self.execution.operation_registry().lock() else {
             return;
         };
         let Some(record) = registry.records.get(id) else {
@@ -1270,13 +1281,14 @@ impl ServerInner {
         request_fingerprint: [u8; 32],
         session: &str,
     ) -> Result<Option<Arc<Mutex<OperationRecord>>>, ()> {
-        let registry = self.operation_records.lock().map_err(|_| ())?;
+        let registry = self.execution.operation_registry().lock().map_err(|_| ())?;
         let Some(existing) = registry.records.get(id) else {
             return Ok(None);
         };
         let record = existing.lock().map_err(|_| ())?;
         let current_generation = self
-            .sessions
+            .execution
+            .session_registry()
             .lock()
             .map_err(|_| ())?
             .get(session)
@@ -1291,6 +1303,7 @@ impl ServerInner {
         Ok(Some(Arc::clone(existing)))
     }
 
+    #[cfg(feature = "http")]
     fn bind_operation_semantics(
         &self,
         operation: &Arc<Mutex<OperationRecord>>,
@@ -1307,6 +1320,7 @@ impl ServerInner {
         Ok(())
     }
 
+    #[cfg(feature = "http")]
     fn operation_json(&self, id: &str, record: &OperationRecord) -> JsonValue {
         operation_json_from_record(&self.instance_id, id, record)
     }
@@ -1317,7 +1331,7 @@ impl SessionLifetime {
         if !self.stopped.swap(true, Ordering::AcqRel) {
             self.session.stop();
             if let Some(server) = self.server.upgrade() {
-                server.active_sessions.fetch_sub(1, Ordering::AcqRel);
+                server.execution.session_registry().session_stopped();
             }
         }
     }
@@ -1350,50 +1364,19 @@ impl Clone for SessionLease {
     }
 }
 
-impl Drop for AdmissionTicket {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
+#[cfg(feature = "http")]
 async fn serve_connection(stream: TcpStream, server: Server) -> Result<(), hyper::Error> {
-    let service = service_fn(move |request| {
-        let server = server.clone();
-        async move { Ok::<_, Infallible>(server.handle(request).await) }
-    });
-    http1::Builder::new()
-        .serve_connection(TokioIo::new(stream), service)
-        .await
+    sparkless_server_http::serve_connection(stream, server).await
 }
 
 impl Server {
-    async fn handle(&self, request: Request<Incoming>) -> HttpResponse {
-        match (request.method(), request.uri().path()) {
-            (&Method::GET, "/health") => {
-                if self.inner.ready.load(Ordering::Acquire)
-                    && !self.inner.draining.load(Ordering::Acquire)
-                {
-                    json_response(StatusCode::OK, json!({"status":"ready"}))
-                } else {
-                    json_response(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        json!({"status":"unavailable"}),
-                    )
-                }
-            }
-            (&Method::GET, "/capabilities") => self.capabilities(),
-            (&Method::POST, "/statements") => self.handle_statements(request).await,
-            (&Method::POST, "/close") => self.handle_close(request).await,
-            (&Method::POST, "/operations/status") => self.handle_operation_status(request).await,
-            _ => transport_error(StatusCode::NOT_FOUND, "NotFound", "route not found"),
-        }
-    }
-
+    #[cfg(feature = "http")]
     fn capabilities(&self) -> HttpResponse {
         json_response(StatusCode::OK, self.capabilities_json())
     }
 
     fn capabilities_json(&self) -> JsonValue {
+        #[cfg(feature = "http")]
         let http_url = self
             .inner
             .http_address
@@ -1401,6 +1384,8 @@ impl Server {
             .ok()
             .and_then(|address| *address)
             .map(|address| format!("http://{address}"));
+        #[cfg(not(feature = "http"))]
+        let http_url: Option<String> = None;
         let connect_url = self.connect_url();
         let mut transports = Vec::new();
         if http_url.is_some() {
@@ -1457,6 +1442,7 @@ impl Server {
         })
     }
 
+    #[cfg(feature = "http")]
     async fn handle_statements(&self, request: Request<Incoming>) -> HttpResponse {
         if self.inner.draining.load(Ordering::Acquire) {
             return transport_error(
@@ -1465,10 +1451,10 @@ impl Server {
                 "server is draining",
             );
         }
-        if let Err(error) = check_json_request_headers(request.headers()) {
-            return request_failure_response(error);
+        if let Err(error) = sparkless_server_http::validate_json_headers(request.headers()) {
+            return http_request_failure_response(error);
         }
-        let bytes = match read_bounded_body_with_timeout(
+        let bytes = match sparkless_server_http::read_bounded_body_with_timeout(
             request.into_body(),
             self.inner.config.max_request_bytes,
             self.inner.config.body_read_timeout,
@@ -1476,7 +1462,7 @@ impl Server {
         .await
         {
             Ok(bytes) => bytes,
-            Err(error) => return request_failure_response(error),
+            Err(error) => return http_request_failure_response(error),
         };
         let parsed: StatementRequest = match serde_json::from_slice(&bytes) {
             Ok(value) => value,
@@ -1521,7 +1507,7 @@ impl Server {
         };
         let planning_permit = match timeout(
             self.inner.config.queue_timeout,
-            Arc::clone(&self.inner.admission.active).acquire_owned(),
+            Arc::clone(&self.inner.execution.admission().active).acquire_owned(),
         )
         .await
         {
@@ -1723,7 +1709,7 @@ impl Server {
         };
         let permit = match timeout(
             self.inner.config.queue_timeout,
-            Arc::clone(&self.inner.admission.active).acquire_owned(),
+            Arc::clone(&self.inner.execution.admission().active).acquire_owned(),
         )
         .await
         {
@@ -1770,7 +1756,8 @@ impl Server {
             let _mutation_guard = mutation_guard;
             let _session_lease = lease;
             let result = if let StatementClass::Mutation { action, target } = &class_for_job {
-                execute_statement(
+                execute_through_runtime(
+                    &instance.execution,
                     &session,
                     &code,
                     action,
@@ -1784,8 +1771,16 @@ impl Server {
                     (response, receipt)
                 })
             } else {
-                execute_statement(&session, &code, "read", None, limits, &token_for_work)
-                    .map(|response| (response, None))
+                execute_through_runtime(
+                    &instance.execution,
+                    &session,
+                    &code,
+                    "read",
+                    None,
+                    limits,
+                    &token_for_work,
+                )
+                .map(|response| (response, None))
             };
             #[cfg(test)]
             if matches!(class_for_job, StatementClass::Mutation { .. })
@@ -1880,6 +1875,7 @@ impl Server {
         }
     }
 
+    #[cfg(feature = "http")]
     fn operation_json_by_record(
         &self,
         id: &str,
@@ -1891,11 +1887,12 @@ impl Server {
             .unwrap_or(JsonValue::Null)
     }
 
+    #[cfg(feature = "http")]
     async fn handle_close(&self, request: Request<Incoming>) -> HttpResponse {
-        if let Err(error) = check_json_request_headers(request.headers()) {
-            return request_failure_response(error);
+        if let Err(error) = sparkless_server_http::validate_json_headers(request.headers()) {
+            return http_request_failure_response(error);
         }
-        let bytes = match read_bounded_body_with_timeout(
+        let bytes = match sparkless_server_http::read_bounded_body_with_timeout(
             request.into_body(),
             16 * 1024,
             self.inner.config.body_read_timeout,
@@ -1903,7 +1900,7 @@ impl Server {
         .await
         {
             Ok(bytes) => bytes,
-            Err(error) => return request_failure_response(error),
+            Err(error) => return http_request_failure_response(error),
         };
         let request: SessionRequest = match serde_json::from_slice(&bytes) {
             Ok(value) => value,
@@ -1924,11 +1921,12 @@ impl Server {
         }
     }
 
+    #[cfg(feature = "http")]
     async fn handle_operation_status(&self, request: Request<Incoming>) -> HttpResponse {
-        if let Err(error) = check_json_request_headers(request.headers()) {
-            return request_failure_response(error);
+        if let Err(error) = sparkless_server_http::validate_json_headers(request.headers()) {
+            return http_request_failure_response(error);
         }
-        let bytes = match read_bounded_body_with_timeout(
+        let bytes = match sparkless_server_http::read_bounded_body_with_timeout(
             request.into_body(),
             16 * 1024,
             self.inner.config.body_read_timeout,
@@ -1936,7 +1934,7 @@ impl Server {
         .await
         {
             Ok(bytes) => bytes,
-            Err(error) => return request_failure_response(error),
+            Err(error) => return http_request_failure_response(error),
         };
         let request: OperationStatusRequest = match serde_json::from_slice(&bytes) {
             Ok(value) => value,
@@ -1974,6 +1972,36 @@ impl Server {
             .map(|record| self.inner.operation_json(&request.operation_id, &record))
             .unwrap_or_else(|_| json!({"error":"InternalError"}));
         json_response(StatusCode::OK, body)
+    }
+}
+
+#[cfg(feature = "http")]
+impl HttpApplication for Server {
+    fn connection_permit(&self) -> Option<sparkless_server_runtime::ConnectionPermit> {
+        self.inner.execution.try_connection()
+    }
+
+    fn ready(&self) -> bool {
+        self.inner.ready.load(Ordering::Acquire) && !self.inner.draining.load(Ordering::Acquire)
+    }
+
+    fn capabilities(&self) -> HttpResponse {
+        Server::capabilities(self)
+    }
+
+    fn statements(&self, request: Request<Incoming>) -> impl Future<Output = HttpResponse> + Send {
+        async move { self.handle_statements(request).await }
+    }
+
+    fn close(&self, request: Request<Incoming>) -> impl Future<Output = HttpResponse> + Send {
+        async move { self.handle_close(request).await }
+    }
+
+    fn operation_status(
+        &self,
+        request: Request<Incoming>,
+    ) -> impl Future<Output = HttpResponse> + Send {
+        async move { self.handle_operation_status(request).await }
     }
 }
 
@@ -2021,6 +2049,7 @@ fn append_utc_suffix_to_timestamp_cells(
     Ok(())
 }
 
+#[cfg(feature = "http")]
 fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String)> {
     let parsed = robin_sparkless_sql::parse_statement(sql)
         .map_err(|error| ("UnsupportedSql", error.to_string()))?;
@@ -2303,6 +2332,7 @@ fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String
     Ok(class)
 }
 
+#[cfg(feature = "http")]
 fn validate_query(query: &ast::Query) -> Result<(), (&'static str, String)> {
     if query.with.is_some()
         || query.fetch.is_some()
@@ -2357,6 +2387,7 @@ fn validate_query(query: &ast::Query) -> Result<(), (&'static str, String)> {
         .map(|_| ())
 }
 
+#[cfg(feature = "http")]
 fn validate_set_expr(expr: &ast::SetExpr) -> Result<(), (&'static str, String)> {
     match expr {
         ast::SetExpr::Select(select) => {
@@ -2438,6 +2469,7 @@ fn validate_set_expr(expr: &ast::SetExpr) -> Result<(), (&'static str, String)> 
     }
 }
 
+#[cfg(feature = "http")]
 fn validate_http_join(join: &ast::Join) -> Result<(), (&'static str, String)> {
     if join.global {
         return Err((
@@ -2460,6 +2492,7 @@ fn validate_http_join(join: &ast::Join) -> Result<(), (&'static str, String)> {
     }
 }
 
+#[cfg(feature = "http")]
 fn valid_http_join_condition(expression: &ast::Expr) -> bool {
     match expression {
         ast::Expr::BinaryOp {
@@ -2483,6 +2516,7 @@ fn valid_http_join_condition(expression: &ast::Expr) -> bool {
     }
 }
 
+#[cfg(feature = "http")]
 fn validate_table_factor(factor: &ast::TableFactor) -> Result<(), (&'static str, String)> {
     match factor {
         ast::TableFactor::Table {
@@ -2545,6 +2579,7 @@ fn validate_table_factor(factor: &ast::TableFactor) -> Result<(), (&'static str,
     }
 }
 
+#[cfg(feature = "http")]
 fn validate_create_table(create: &ast::CreateTable) -> Result<(), (&'static str, String)> {
     if create.or_replace
         || create.temporary
@@ -2646,6 +2681,7 @@ fn validate_create_table(create: &ast::CreateTable) -> Result<(), (&'static str,
     Ok(())
 }
 
+#[cfg(feature = "http")]
 fn validate_single_object_name(name: &ast::ObjectName) -> Result<String, (&'static str, String)> {
     let value = validate_object_name(name)?;
     if value.contains('.') {
@@ -2657,6 +2693,7 @@ fn validate_single_object_name(name: &ast::ObjectName) -> Result<String, (&'stat
     Ok(value)
 }
 
+#[cfg(feature = "http")]
 fn valid_decimal_type_name(dtype: &str) -> bool {
     let dtype = dtype.to_ascii_lowercase().replace(' ', "");
     let Some(arguments) = dtype
@@ -2675,6 +2712,7 @@ fn valid_decimal_type_name(dtype: &str) -> bool {
     (1..=38).contains(&precision) && scale <= precision
 }
 
+#[cfg(feature = "http")]
 fn supported_scalar_sql_type(dtype: &str) -> bool {
     let dtype = dtype.trim().to_ascii_lowercase();
     [
@@ -2695,6 +2733,7 @@ fn supported_scalar_sql_type(dtype: &str) -> bool {
         || valid_decimal_type_name(&dtype)
 }
 
+#[cfg(feature = "http")]
 fn validate_insert(insert: &ast::Insert) -> Result<(), (&'static str, String)> {
     if !insert.into
         || insert.or.is_some()
@@ -2764,6 +2803,7 @@ fn validate_insert(insert: &ast::Insert) -> Result<(), (&'static str, String)> {
     Ok(())
 }
 
+#[cfg(feature = "http")]
 fn is_supported_insert_literal(expression: &ast::Expr) -> bool {
     match expression {
         ast::Expr::Value(_) => true,
@@ -2781,6 +2821,7 @@ fn is_supported_insert_literal(expression: &ast::Expr) -> bool {
     }
 }
 
+#[cfg(feature = "http")]
 fn validate_object_name(name: &ast::ObjectName) -> Result<String, (&'static str, String)> {
     let parts: Vec<String> = name
         .0
@@ -2816,6 +2857,7 @@ fn validate_object_name(name: &ast::ObjectName) -> Result<String, (&'static str,
     Ok(parts.join("."))
 }
 
+#[cfg(feature = "http")]
 fn validate_simple_identifier(name: &str) -> Result<String, (&'static str, String)> {
     if name.is_empty()
         || name.len() > MAX_IDENTIFIER_BYTES
@@ -2931,6 +2973,74 @@ fn execute_statement(
         ));
     }
     Ok(response)
+}
+
+struct PolarsSqlExecution;
+
+impl ExecutionPort for PolarsSqlExecution {
+    fn execute_sql(
+        &self,
+        session: &EngineSessionHandle,
+        request: SqlExecutionRequest,
+    ) -> Result<SqlExecutionResult, ExecutionError> {
+        let session = session
+            .downcast_ref::<SparkSession>("polars")
+            .ok_or_else(|| ExecutionError {
+                code: "MismatchedExecutionSession",
+                message: "the session handle is not owned by the Polars execution adapter".into(),
+                details: None,
+            })?;
+        execute_statement(
+            session,
+            &request.sql,
+            &request.action,
+            request.target.as_deref(),
+            ExecutionLimits {
+                max_rows: request.max_rows,
+                max_result_bytes: request.max_result_bytes,
+                max_cell_bytes: request.max_cell_bytes,
+            },
+            &request.cancellation,
+        )
+        .map(|payload| SqlExecutionResult { payload })
+        .map_err(|error| ExecutionError {
+            code: error.name,
+            message: error.message,
+            details: error.error_detail,
+        })
+    }
+}
+
+#[cfg(feature = "http")]
+fn execute_through_runtime(
+    runtime: &ServerRuntime<SessionLifetime>,
+    session: &SparkSession,
+    sql: &str,
+    action: &str,
+    target: Option<&str>,
+    limits: ExecutionLimits,
+    cancellation: &CancellationToken,
+) -> Result<JsonValue, ExecutionFailure> {
+    let handle = EngineSessionHandle::new("polars", session.clone());
+    runtime
+        .execute_sql(
+            &handle,
+            SqlExecutionRequest {
+                sql: sql.to_string(),
+                action: action.to_string(),
+                target: target.map(str::to_string),
+                max_rows: limits.max_rows,
+                max_result_bytes: limits.max_result_bytes,
+                max_cell_bytes: limits.max_cell_bytes,
+                cancellation: cancellation.clone(),
+            },
+        )
+        .map(|response| response.payload)
+        .map_err(|error| ExecutionFailure {
+            name: error.code,
+            message: error.message,
+            error_detail: error.details,
+        })
 }
 
 fn apply_query_nullability(query: &ast::Query, fields: &mut [StructField]) {
@@ -3075,13 +3185,15 @@ fn empty_agent_success() -> JsonValue {
 
 fn map_engine_failure(error: EngineError) -> ExecutionFailure {
     let message = error.to_string();
+    let detail = error.detail();
     let name = match error.code() {
         "RESULT_LIMIT_EXCEEDED" => "ResultLimitExceeded",
         "CATALOG_CAPACITY_EXCEEDED" => "CatalogCapacityExceeded",
+        _ if detail.message.starts_with("ResultLimitExceeded:") => "ResultLimitExceeded",
+        _ if detail.message.starts_with("CatalogCapacityExceeded:") => "CatalogCapacityExceeded",
         _ if error.category() == robin_sparkless_core::ErrorCategory::Cancelled => "Cancelled",
         _ => "QueryError",
     };
-    let detail = error.detail();
     let detail_json = json!({
         "category": detail.category,
         "code": detail.code,
@@ -3108,6 +3220,7 @@ fn execution_failure(name: &'static str, message: &str) -> ExecutionFailure {
     }
 }
 
+#[cfg(feature = "http")]
 fn record_catalog_mutation(
     server: &ServerInner,
     target: Option<&str>,
@@ -3170,6 +3283,7 @@ fn record_catalog_mutation(
     )
 }
 
+#[cfg(feature = "http")]
 fn set_operation_committed(operation: &Arc<Mutex<OperationRecord>>, receipt: Option<JsonValue>) {
     if let Ok(mut record) = operation.lock() {
         record.execution_state = "succeeded";
@@ -3180,6 +3294,7 @@ fn set_operation_committed(operation: &Arc<Mutex<OperationRecord>>, receipt: Opt
     }
 }
 
+#[cfg(feature = "http")]
 fn set_operation_failure(
     operation: &Arc<Mutex<OperationRecord>>,
     name: &str,
@@ -3189,6 +3304,7 @@ fn set_operation_failure(
     set_operation_failure_with_detail(operation, name, message, outcome, None);
 }
 
+#[cfg(feature = "http")]
 fn set_operation_failure_with_detail(
     operation: &Arc<Mutex<OperationRecord>>,
     name: &str,
@@ -3208,6 +3324,7 @@ fn set_operation_failure_with_detail(
     }
 }
 
+#[cfg(feature = "http")]
 fn operation_json_from_record(instance: &str, id: &str, record: &OperationRecord) -> JsonValue {
     let error = record.error.as_ref().map(|(name, message)| {
         let mut error = json!({"ename":name,"evalue":message});
@@ -3226,6 +3343,7 @@ fn operation_json_from_record(instance: &str, id: &str, record: &OperationRecord
     })
 }
 
+#[cfg(feature = "http")]
 fn existing_operation_response(
     server: &ServerInner,
     id: &str,
@@ -3264,6 +3382,7 @@ fn existing_operation_response(
     }
 }
 
+#[cfg(feature = "http")]
 fn request_fingerprint(request: &StatementRequest) -> [u8; 32] {
     let mut hasher = Sha256::new();
     for part in [&request.session, &request.kind, &request.code] {
@@ -3273,6 +3392,7 @@ fn request_fingerprint(request: &StatementRequest) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+#[cfg(feature = "http")]
 fn semantic_operation_fingerprint(
     request_fingerprint: [u8; 32],
     session_generation: u64,
@@ -3307,6 +3427,7 @@ fn validate_identifier(name: &str, value: &str) -> Result<(), RequestFailure> {
     Ok(())
 }
 
+#[cfg(feature = "http")]
 fn validate_http_session_identifier(value: &str) -> Result<(), RequestFailure> {
     validate_identifier("session", value)?;
     #[cfg(feature = "connect")]
@@ -3320,6 +3441,7 @@ fn validate_http_session_identifier(value: &str) -> Result<(), RequestFailure> {
     Ok(())
 }
 
+#[cfg(feature = "http")]
 fn validate_http_operation_identifier(value: &str) -> Result<(), RequestFailure> {
     validate_identifier("operation_id", value)?;
     #[cfg(feature = "connect")]
@@ -3377,6 +3499,18 @@ fn connect_request_failure(
 }
 
 #[cfg(feature = "connect")]
+fn connect_tombstone_failure(error: ConnectTombstoneError) -> RequestFailure {
+    match error {
+        ConnectTombstoneError::CapacityExceeded => connect_request_failure(
+            StatusCode::TOO_MANY_REQUESTS,
+            "SessionHistoryCapacityExceeded",
+            "Connect released-session history is full",
+        ),
+        ConnectTombstoneError::Unavailable => internal_failure(),
+    }
+}
+
+#[cfg(feature = "connect")]
 fn connect_operation_key(identity: &ConnectSessionIdentity, operation_id: &str) -> String {
     let mut hasher = Sha256::new();
     for part in [identity.registry_key(), operation_id.to_string()] {
@@ -3397,81 +3531,6 @@ fn hex_digest(digest: [u8; 32]) -> String {
     encoded
 }
 
-fn check_json_request_headers(
-    headers: &hyper::HeaderMap<HeaderValue>,
-) -> Result<(), RequestFailure> {
-    if let Some(content_type) = headers.get(CONTENT_TYPE) {
-        let Ok(value) = content_type.to_str() else {
-            return Err(RequestFailure {
-                status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                name: "UnsupportedContentType",
-                message: "Content-Type must be application/json".into(),
-            });
-        };
-        if !value
-            .split(';')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .eq_ignore_ascii_case("application/json")
-        {
-            return Err(RequestFailure {
-                status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                name: "UnsupportedContentType",
-                message: "Content-Type must be application/json".into(),
-            });
-        }
-    }
-    if headers
-        .get(CONTENT_ENCODING)
-        .is_some_and(|value| !value.as_bytes().eq_ignore_ascii_case(b"identity"))
-    {
-        return Err(RequestFailure {
-            status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            name: "UnsupportedContentEncoding",
-            message: "compressed request bodies are not supported".into(),
-        });
-    }
-    Ok(())
-}
-
-async fn read_bounded_body(mut body: Incoming, limit: usize) -> Result<Vec<u8>, RequestFailure> {
-    let mut bytes = Vec::new();
-    while let Some(frame) = body.frame().await {
-        let frame = frame.map_err(|error| RequestFailure {
-            status: StatusCode::BAD_REQUEST,
-            name: "InvalidBody",
-            message: bound_text(&error.to_string(), MAX_ERROR_BYTES),
-        })?;
-        if let Ok(data) = frame.into_data() {
-            if bytes.len().saturating_add(data.len()) > limit {
-                return Err(RequestFailure {
-                    status: StatusCode::PAYLOAD_TOO_LARGE,
-                    name: "RequestTooLarge",
-                    message: "request body exceeds the configured byte limit".into(),
-                });
-            }
-            bytes.extend_from_slice(&data);
-        }
-    }
-    Ok(bytes)
-}
-
-async fn read_bounded_body_with_timeout(
-    body: Incoming,
-    limit: usize,
-    wait: Duration,
-) -> Result<Vec<u8>, RequestFailure> {
-    match timeout(wait, read_bounded_body(body, limit)).await {
-        Ok(result) => result,
-        Err(_) => Err(RequestFailure {
-            status: StatusCode::REQUEST_TIMEOUT,
-            name: "BodyReadTimeout",
-            message: "timed out while reading the request body".into(),
-        }),
-    }
-}
-
 fn internal_failure() -> RequestFailure {
     RequestFailure {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -3480,10 +3539,21 @@ fn internal_failure() -> RequestFailure {
     }
 }
 
+#[cfg(feature = "http")]
+fn http_request_failure_response(error: sparkless_server_http::HttpRequestError) -> HttpResponse {
+    request_failure_response(RequestFailure {
+        status: error.status,
+        name: error.code,
+        message: error.message,
+    })
+}
+
+#[cfg(feature = "http")]
 fn request_failure_response(error: RequestFailure) -> HttpResponse {
     transport_error(error.status, error.name, &error.message)
 }
 
+#[cfg(feature = "http")]
 fn transport_error(status: StatusCode, name: &'static str, message: &str) -> HttpResponse {
     json_response(
         status,
@@ -3491,10 +3561,12 @@ fn transport_error(status: StatusCode, name: &'static str, message: &str) -> Htt
     )
 }
 
+#[cfg(feature = "http")]
 fn agent_error(name: &'static str, message: &str, operation: Option<JsonValue>) -> HttpResponse {
     agent_error_dynamic(name, message, operation)
 }
 
+#[cfg(feature = "http")]
 fn agent_execution_error(error: &ExecutionFailure, operation: Option<JsonValue>) -> HttpResponse {
     let mut body = json!({
         "status": "error",
@@ -3510,6 +3582,7 @@ fn agent_execution_error(error: &ExecutionFailure, operation: Option<JsonValue>)
     json_response(StatusCode::OK, body)
 }
 
+#[cfg(feature = "http")]
 fn agent_error_dynamic(name: &str, message: &str, operation: Option<JsonValue>) -> HttpResponse {
     let mut body =
         json!({"status":"error","ename":name,"evalue":bound_text(message, MAX_ERROR_BYTES)});
@@ -3519,6 +3592,7 @@ fn agent_error_dynamic(name: &str, message: &str, operation: Option<JsonValue>) 
     json_response(StatusCode::OK, body)
 }
 
+#[cfg(feature = "http")]
 fn json_response(status: StatusCode, json: JsonValue) -> HttpResponse {
     let body = serde_json::to_vec(&json).unwrap_or_else(|_| b"{\"status\":\"error\",\"ename\":\"InternalError\",\"evalue\":\"response encoding failed\"}".to_vec());
     let mut response = Response::new(Full::new(Bytes::from(body)));
@@ -3540,7 +3614,7 @@ fn bound_text(value: &str, max_bytes: usize) -> String {
     value[..end].to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "http"))]
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -3851,7 +3925,13 @@ mod tests {
         assert_eq!(accepted["status"], "ok");
         assert_eq!(accepted["operation"]["effect_outcome"], "committed");
         assert_eq!(
-            server.inner.operation_records.lock().unwrap().bytes,
+            server
+                .inner
+                .execution
+                .operation_registry()
+                .lock()
+                .unwrap()
+                .bytes,
             MIN_MUTATION_RECORD_BYTES,
             "the smallest valid operation key consumes the exact minimum byte budget"
         );
@@ -4003,7 +4083,7 @@ mod tests {
             assert_eq!(response["operation"]["effect_outcome"], "committed");
         }
         {
-            let registry = server.inner.operation_records.lock().unwrap();
+            let registry = server.inner.execution.operation_registry().lock().unwrap();
             assert_eq!(registry.records.len(), 2);
             assert_eq!(registry.bytes, 2 * MIN_MUTATION_RECORD_BYTES);
         }
@@ -4040,7 +4120,13 @@ mod tests {
         assert_eq!(replay["status"], "ok", "{replay}");
         assert_eq!(replay["operation"]["effect_outcome"], "committed");
         assert_eq!(
-            server.inner.operation_records.lock().unwrap().bytes,
+            server
+                .inner
+                .execution
+                .operation_registry()
+                .lock()
+                .unwrap()
+                .bytes,
             2 * MIN_MUTATION_RECORD_BYTES,
             "replay must not reserve another record"
         );
@@ -4249,7 +4335,7 @@ mod tests {
         assert!(!server.inner.root_session.database_exists("over_limit"));
         assert!(server.inner.operation("over-limit").is_none());
         {
-            let registry = server.inner.operation_records.lock().unwrap();
+            let registry = server.inner.execution.operation_registry().lock().unwrap();
             assert_eq!(registry.records.len(), capacity);
             assert!(registry.bytes < server.inner.config.max_mutation_bytes);
         }
@@ -4368,17 +4454,19 @@ mod tests {
         let ordinary_generation = ordinary.0.generation;
         drop(ordinary);
         {
-            let session = server.inner.sessions.lock().unwrap()["idle-client"].clone();
+            let session =
+                server.inner.execution.session_registry().lock().unwrap()["idle-client"].clone();
             *session.last_activity.lock().unwrap() =
                 Instant::now() - server.inner.config.session_idle_ttl;
         }
 
         assert_eq!(server.inner.expire_idle_sessions().unwrap(), 1);
-        assert_eq!(server.inner.active_sessions.load(Ordering::Acquire), 0);
+        assert_eq!(server.inner.execution.session_registry().active_count(), 0);
         assert!(
             !server
                 .inner
-                .sessions
+                .execution
+                .session_registry()
                 .lock()
                 .unwrap()
                 .contains_key("idle-client")
@@ -4395,7 +4483,9 @@ mod tests {
         let reserved_generation = reserved.0.generation;
         drop(reserved);
         {
-            let session = server.inner.sessions.lock().unwrap()[RESERVED_WAREHOUSE_SESSION].clone();
+            let session = server.inner.execution.session_registry().lock().unwrap()
+                [RESERVED_WAREHOUSE_SESSION]
+                .clone();
             *session.last_activity.lock().unwrap() =
                 Instant::now() - server.inner.config.session_idle_ttl * 10;
         }
@@ -4425,7 +4515,8 @@ mod tests {
         assert!(
             server
                 .inner
-                .sessions
+                .execution
+                .session_registry()
                 .lock()
                 .unwrap()
                 .contains_key("active-client")
@@ -4535,12 +4626,14 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{response}");
-        let first_generation = server.inner.sessions.lock().unwrap()["ttl-http"].generation;
+        let first_generation =
+            server.inner.execution.session_registry().lock().unwrap()["ttl-http"].generation;
 
         timeout(Duration::from_secs(2), async {
             while server
                 .inner
-                .sessions
+                .execution
+                .session_registry()
                 .lock()
                 .unwrap()
                 .contains_key("ttl-http")
@@ -4566,7 +4659,8 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{response}");
         assert_eq!(response["status"], "ok", "{response}");
         assert_eq!(response["data"]["application/json"]["data"], json!([[42]]));
-        let second_generation = server.inner.sessions.lock().unwrap()["ttl-http"].generation;
+        let second_generation =
+            server.inner.execution.session_registry().lock().unwrap()["ttl-http"].generation;
         assert_ne!(first_generation, second_generation);
 
         let _ = shutdown_tx.send(());
@@ -4580,7 +4674,8 @@ mod tests {
         let generation = lease.0.generation;
 
         server.inner.close_session("closing-client").unwrap();
-        let current = server.inner.sessions.lock().unwrap()["closing-client"].clone();
+        let current =
+            server.inner.execution.session_registry().lock().unwrap()["closing-client"].clone();
         assert!(current.closing.load(Ordering::Acquire));
         assert_eq!(current.active.load(Ordering::Acquire), 1);
         assert!(matches!(
@@ -4596,12 +4691,13 @@ mod tests {
         assert!(
             !server
                 .inner
-                .sessions
+                .execution
+                .session_registry()
                 .lock()
                 .unwrap()
                 .contains_key("closing-client")
         );
-        assert_eq!(server.inner.active_sessions.load(Ordering::Acquire), 0);
+        assert_eq!(server.inner.execution.session_registry().active_count(), 0);
 
         let replacement = server.inner.session_lease("closing-client").unwrap();
         assert_ne!(replacement.0.generation, generation);
@@ -4642,7 +4738,7 @@ mod tests {
         .await;
         assert_eq!(retained["status"], "ok");
         let held_ticket = server.inner.reserve_admission().unwrap();
-        let held_permit = Arc::clone(&server.inner.admission.active)
+        let held_permit = Arc::clone(&server.inner.execution.admission().active)
             .acquire_owned()
             .await
             .unwrap();
@@ -4660,7 +4756,14 @@ mod tests {
             tokio::spawn(async move { request_json(address, "POST", "/statements", &body).await })
         };
         timeout(Duration::from_secs(2), async {
-            while server.inner.admission.accepted.load(Ordering::Acquire) != 2 {
+            while server
+                .inner
+                .execution
+                .admission()
+                .accepted
+                .load(Ordering::Acquire)
+                != 2
+            {
                 tokio::task::yield_now().await;
             }
         })
@@ -4699,7 +4802,15 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(response["ename"], "UnsupportedSql");
-        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+        assert_eq!(
+            server
+                .inner
+                .execution
+                .admission()
+                .accepted
+                .load(Ordering::Acquire),
+            0
+        );
         shutdown_tx.send(()).unwrap();
         server_task.await.unwrap().unwrap();
     }
@@ -4718,7 +4829,7 @@ mod tests {
         let waiting_writer = tokio::spawn(async move { inner.acquire_mutation_lane().await });
         tokio::task::yield_now().await;
 
-        let permit = Arc::clone(&server.inner.admission.active)
+        let permit = Arc::clone(&server.inner.execution.admission().active)
             .try_acquire_owned()
             .expect("a writer waiting on the async lane must not occupy compute admission");
         drop(permit);
@@ -4858,7 +4969,13 @@ mod tests {
         timeout(Duration::from_secs(1), async {
             loop {
                 if server.inner.operation("disconnect-create").is_some()
-                    && server.inner.admission.accepted.load(Ordering::Acquire) > 0
+                    && server
+                        .inner
+                        .execution
+                        .admission()
+                        .accepted
+                        .load(Ordering::Acquire)
+                        > 0
                 {
                     break;
                 }
@@ -4979,7 +5096,8 @@ mod tests {
         assert!(
             !server
                 .inner
-                .sessions
+                .execution
+                .session_registry()
                 .lock()
                 .unwrap()
                 .contains_key("close_active_writer"),
@@ -5055,7 +5173,7 @@ mod tests {
         };
 
         // Hold the sole compute slot to make the multi-client pending state deterministic.
-        let held_compute = Arc::clone(&server.inner.admission.active)
+        let held_compute = Arc::clone(&server.inner.execution.admission().active)
             .acquire_owned()
             .await
             .unwrap();
@@ -5082,13 +5200,28 @@ mod tests {
         start.wait().await;
 
         timeout(Duration::from_secs(2), async {
-            while server.inner.admission.accepted.load(Ordering::Acquire) != CLIENTS {
+            while server
+                .inner
+                .execution
+                .admission()
+                .accepted
+                .load(Ordering::Acquire)
+                != CLIENTS
+            {
                 tokio::task::yield_now().await;
             }
         })
         .await
         .expect("all independent clients should be retained as bounded pending operations");
-        assert_eq!(server.inner.admission.active.available_permits(), 0);
+        assert_eq!(
+            server
+                .inner
+                .execution
+                .admission()
+                .active
+                .available_permits(),
+            0
+        );
 
         let (health_status, health_response) = timeout(
             Duration::from_secs(1),
@@ -5109,7 +5242,15 @@ mod tests {
             assert_eq!(response["status"], "ok", "{response}");
             assert_eq!(response["data"]["application/json"]["data"], json!([[10]]));
         }
-        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+        assert_eq!(
+            server
+                .inner
+                .execution
+                .admission()
+                .accepted
+                .load(Ordering::Acquire),
+            0
+        );
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
@@ -5216,7 +5357,15 @@ mod tests {
             health_checks.load(Ordering::Acquire) >= 10,
             "health should progress repeatedly during the sustained request workload"
         );
-        assert_eq!(server.inner.admission.accepted.load(Ordering::Acquire), 0);
+        assert_eq!(
+            server
+                .inner
+                .execution
+                .admission()
+                .accepted
+                .load(Ordering::Acquire),
+            0
+        );
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap().unwrap();
@@ -5267,7 +5416,14 @@ mod tests {
             .await
         });
         timeout(Duration::from_secs(2), async {
-            while server.inner.admission.active.available_permits() != 0 {
+            while server
+                .inner
+                .execution
+                .admission()
+                .active
+                .available_permits()
+                != 0
+            {
                 assert!(
                     !query.is_finished(),
                     "count ended before holding compute admission"

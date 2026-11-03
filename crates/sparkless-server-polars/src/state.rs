@@ -2,54 +2,32 @@
 
 use super::*;
 use robin_sparkless_core::engine::ExternalCatalog;
+#[cfg(feature = "http")]
+pub(super) use sparkless_server_runtime::PendingOperationGuard;
+pub(super) use sparkless_server_runtime::{AdmissionTicket, OperationRecord, ReserveOperation};
 
 pub(super) struct ServerInner {
     pub(super) config: ServerConfig,
     pub(super) product: ServerProduct,
     pub(super) instance_id: String,
+    #[cfg(feature = "http")]
     pub(super) http_address: Mutex<Option<SocketAddr>>,
     pub(super) root_session: SparkSession,
+    pub(super) execution: Arc<sparkless_server_runtime::ServerRuntime<SessionLifetime>>,
     pub(super) external_catalog: Option<Arc<ExternalCatalog>>,
-    pub(super) sessions: Mutex<HashMap<String, Arc<SessionLifetime>>>,
     #[cfg(feature = "connect")]
-    pub(super) connect_tombstones: Mutex<HashMap<String, String>>,
-    #[cfg(feature = "connect")]
-    pub(super) connect_session_lifecycle: Mutex<()>,
-    #[cfg(feature = "connect")]
-    pub(super) connect_operations: Mutex<HashMap<String, Arc<connect::ConnectReplayRecord>>>,
-    #[cfg(feature = "connect")]
-    pub(super) connect_active_operations: tokio::sync::watch::Sender<usize>,
-    #[cfg(feature = "connect")]
-    pub(super) connect_draining: AtomicBool,
-    #[cfg(feature = "connect")]
-    pub(super) connect_replay_bytes: Arc<AtomicUsize>,
-    #[cfg(feature = "connect")]
-    pub(super) connect_history_bytes: Arc<AtomicUsize>,
-    #[cfg(feature = "connect")]
-    pub(super) connect_stream_senders: Arc<Semaphore>,
-    #[cfg(feature = "connect")]
-    pub(super) connect_address: Mutex<Option<SocketAddr>>,
-    pub(super) active_sessions: AtomicUsize,
-    pub(super) next_session_generation: AtomicU64,
-    pub(super) operation_records: Mutex<OperationRegistry>,
-    pub(super) admission: Admission,
-    pub(super) connections: Arc<Semaphore>,
+    pub(super) connect_runtime: sparkless_server_connect::ConnectRuntimeState,
+    #[cfg(feature = "http")]
     pub(super) mutation_lane: Arc<AsyncMutex<()>>,
+    #[cfg(feature = "http")]
     pub(super) catalog_receipts: Mutex<HashMap<String, CatalogReceipt>>,
+    #[cfg(feature = "http")]
     pub(super) catalog_sequence: AtomicU64,
     pub(super) draining: AtomicBool,
     pub(super) ready: AtomicBool,
-    #[cfg(test)]
+    #[cfg(all(test, feature = "http"))]
     pub(super) test_mutation_before_outcome_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
-
-pub(super) struct Admission {
-    pub(super) active: Arc<Semaphore>,
-    pub(super) accepted: Arc<AtomicUsize>,
-    pub(super) max_accepted: usize,
-}
-
-pub(super) struct AdmissionTicket(pub(super) Arc<AtomicUsize>);
 
 pub(super) struct SessionLifetime {
     pub(super) id: String,
@@ -65,35 +43,6 @@ pub(super) struct SessionLifetime {
     pub(super) closing: AtomicBool,
     pub(super) stopped: AtomicBool,
     pub(super) server: Weak<ServerInner>,
-}
-
-/// Settles a reserved operation if its request future is cancelled before handing execution to
-/// the independent blocking worker.
-pub(super) struct PendingOperationGuard(pub(super) Option<Arc<Mutex<OperationRecord>>>);
-
-impl PendingOperationGuard {
-    pub(super) fn disarm(&mut self) {
-        self.0 = None;
-    }
-}
-
-impl Drop for PendingOperationGuard {
-    fn drop(&mut self) {
-        let Some(operation) = self.0.take() else {
-            return;
-        };
-        if let Ok(mut record) = operation.lock()
-            && record.execution_state == "running"
-            && record.effect_outcome == "pending"
-        {
-            record.execution_state = "failed";
-            record.effect_outcome = "cancelled";
-            record.error = Some((
-                "Cancelled".to_string(),
-                "mutation request was cancelled before execution".to_string(),
-            ));
-        }
-    }
 }
 
 pub(super) struct SessionLease(pub(super) Arc<SessionLifetime>);
@@ -219,6 +168,7 @@ impl Drop for ConnectOperationLease {
     }
 }
 
+#[cfg(feature = "http")]
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct StatementRequest {
     pub(super) session: String,
@@ -230,17 +180,20 @@ pub(super) struct StatementRequest {
     pub(super) operation_id: Option<String>,
 }
 
+#[cfg(feature = "http")]
 #[derive(Debug, Deserialize)]
 pub(super) struct SessionRequest {
     pub(super) session: String,
 }
 
+#[cfg(feature = "http")]
 #[derive(Debug, Deserialize)]
 pub(super) struct OperationStatusRequest {
     pub(super) server_instance_id: String,
     pub(super) operation_id: String,
 }
 
+#[cfg(feature = "http")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum StatementClass {
     ReadOnly,
@@ -250,37 +203,11 @@ pub(super) enum StatementClass {
     },
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct OperationRecord {
-    pub(super) request_fingerprint: [u8; 32],
-    pub(super) semantic_fingerprint: Option<[u8; 32]>,
-    pub(super) session: String,
-    pub(super) session_generation: u64,
-    pub(super) reserved_bytes: usize,
-    pub(super) execution_state: &'static str,
-    pub(super) effect_outcome: &'static str,
-    pub(super) receipt: Option<JsonValue>,
-    pub(super) error: Option<(String, String)>,
-    pub(super) error_detail: Option<JsonValue>,
-}
-
-#[derive(Default)]
-pub(super) struct OperationRegistry {
-    pub(super) records: HashMap<String, Arc<Mutex<OperationRecord>>>,
-    pub(super) bytes: usize,
-}
-
+#[cfg(feature = "http")]
 #[derive(Debug, Clone)]
 pub(super) struct CatalogReceipt {
     pub(super) identity: String,
     pub(super) version: u64,
-}
-
-pub(super) enum ReserveOperation {
-    New(Arc<Mutex<OperationRecord>>),
-    Existing(Arc<Mutex<OperationRecord>>),
-    Conflict,
-    Full,
 }
 
 #[derive(Debug)]

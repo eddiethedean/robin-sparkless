@@ -267,6 +267,17 @@ jobs:
           key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Check isolated server transport builds
+        run: |
+          cargo check --locked -p sparkless-server --no-default-features --features http
+          cargo check --locked -p sparkless-server --no-default-features --features connect
+          cargo check --locked -p sparkless-server --no-default-features --features http,connect
+          cargo check --locked -p sparkless-server-duckdb --no-default-features --features http
+          cargo check --locked -p sparkless-server-duckdb --no-default-features --features connect
+          cargo check --locked -p sparkless-server-duckdb --no-default-features --features http,connect
+          cargo test --locked -p sparkless-server-runtime
+          cargo test --locked -p sparkless-server-connect
+          cargo test --locked -p sparkless-server-polars --no-default-features --features connect --lib
       - name: Run the combined server regression suite
         run: |
           cargo test --locked --release -p sparkless-server-polars --no-default-features --features http,connect
@@ -279,6 +290,16 @@ jobs:
           CARGO_TARGET_DIR=target/server-base cargo tree --locked -e features -p sparkless-server --no-default-features --features http,connect > "$RUNNER_TEMP/base-server-tree.txt"
           if grep -E 'robin-sparkless-duckdb|duckdb v|libduckdb-sys' "$RUNNER_TEMP/base-server-tree.txt"; then
             echo 'base server feature graph contains DuckDB dependencies'
+            exit 1
+          fi
+          CARGO_TARGET_DIR=target/server-http-only cargo tree --locked -e features -p sparkless-server --no-default-features --features http > "$RUNNER_TEMP/http-server-tree.txt"
+          if grep -q 'sparkless-server-connect' "$RUNNER_TEMP/http-server-tree.txt"; then
+            echo 'HTTP-only server feature graph contains the Connect transport crate'
+            exit 1
+          fi
+          CARGO_TARGET_DIR=target/server-connect-only cargo tree --locked -e features -p sparkless-server --no-default-features --features connect > "$RUNNER_TEMP/connect-server-tree.txt"
+          if grep -q 'sparkless-server-http' "$RUNNER_TEMP/connect-server-tree.txt"; then
+            echo 'Connect-only server feature graph contains the HTTP transport crate'
             exit 1
           fi
           CARGO_TARGET_DIR=target/server-duckdb cargo tree --locked -e features -p sparkless-server-duckdb --no-default-features --features http,connect > "$RUNNER_TEMP/duckdb-server-tree.txt"
