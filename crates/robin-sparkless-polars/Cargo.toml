@@ -9,7 +9,7 @@ repository = "https://github.com/eddiethedean/robin-sparkless"
 
 [features]
 default = []
-sql = ["dep:spark-sql-parser"]
+sql = ["dep:spark-sql-parser", "dep:robin-sparkless-sql"]
 # Deterministic concurrency hooks for integration tests that exercise the SQL path through
 # another crate. This feature is never enabled by normal package builds.
 test-hooks = []
@@ -36,6 +36,8 @@ duckdb-source = ["dep:robin-sparkless-duckdb"]
 
 [dependencies]
 robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
+robin-sparkless-plan = { version = "4.19.0", path = "../robin-sparkless-plan" }
+robin-sparkless-sql = { version = "4.19.0", path = "../robin-sparkless-sql", optional = true }
 polars = { version = "0.53", features = ["lazy", "async", "new_streaming", "csv", "parquet", "ipc_streaming", "json", "temporal", "timezones", "strings", "concat_str", "regex", "round_series", "abs", "dtype-categorical", "dtype-date", "dtype-datetime", "dtype-duration", "dtype-time", "dtype-decimal", "dtype-u128", "rank", "is_in", "list_eval", "list_drop_nulls", "list_any_all", "cum_agg", "string_pad", "string_reverse", "repeat_by", "log", "month_end", "describe", "cross_join", "semi_anti_join", "extract_jsonpath", "dtype-struct", "random", "product", "moment", "rolling_window"] }
 polars-plan = "0.53"
 num-bigint = "0.4"

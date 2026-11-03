@@ -1673,15 +1673,7 @@ impl DataFrame {
             .collect();
         // Unqualified name: check for multiple physical columns (e.g. duplicate "id" in schema).
         if !name.contains('.') {
-            let matches: Vec<&String> = if self.case_sensitive {
-                names.iter().filter(|n| n.as_str() == name).collect()
-            } else {
-                let name_lower = name.to_lowercase();
-                names
-                    .iter()
-                    .filter(|n| n.to_lowercase() == name_lower)
-                    .collect()
-            };
+            let matches = robin_sparkless_plan::matching_indices(&names, name, self.case_sensitive);
             if matches.len() > 1 {
                 return Err(PolarsError::ColumnNotFound(
                     format!("Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE", name).into(),
@@ -1689,7 +1681,10 @@ impl DataFrame {
             }
         }
         if self.case_sensitive {
-            if names.iter().any(|n| n == name) {
+            if robin_sparkless_plan::matching_indices(&names, name, true)
+                .first()
+                .is_some()
+            {
                 return Ok(name.to_string());
             }
         } else {
@@ -1700,11 +1695,9 @@ impl DataFrame {
             if let Some(exact) = names.iter().find(|n| n.as_str() == name) {
                 return Ok(exact.clone());
             }
-            let name_lower = name.to_lowercase();
-            for n in &names {
-                if n.to_lowercase() == name_lower {
-                    return Ok(n.clone());
-                }
+            if let Some(index) = robin_sparkless_plan::matching_indices(&names, name, false).first()
+            {
+                return Ok(names[*index].clone());
             }
         }
         // Qualified name (e.g. "sm.taxonomy_id" or "l.location_id" after multi-join): try suffix (#374).

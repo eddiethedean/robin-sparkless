@@ -359,6 +359,28 @@ Estimate work only after P0 inventories API use and baseline failures; line coun
 do not justify a credible calendar estimate. Do not cut 4.19 midway through an agreed
 contract migration merely to meet a date.
 
+### Phase 3 implementation record — 2026-11-02
+
+Phase 3 source implementation introduces `robin-sparkless-plan` with operation-specific
+payloads, validated expression trees, full-plan structural decoding and shared case-aware
+name resolution. The JSON facade decodes every operation before constructing its initial
+frame. The Polars adapter receives the typed operation and converts the validated payload
+to its engine-facing JSON representation only at the execution boundary. Connect numeric
+promotion now calls the shared core-type rule. Unsupported operation names retain a
+distinct error category and code.
+
+`robin-sparkless-sql` owns shared parsing, multipart identifier normalization, case-aware
+name rules, statement effects, explicit command plans and typed query lowering into
+engine-neutral relational nodes. Local Polars SQL consumes the normalized sort and limit
+operations; server SQL lowers accepted queries after applying the narrower HTTP policy.
+Connect uses the shared SQL expression parser, plan name resolver and numeric promotion
+rule while retaining protobuf relation lowering and feature policy in its adapter.
+
+Formatting and workspace compile checks pass. Test suites were not run. The P3
+frontend-equivalence and malformed-plan behavioral gates remain open, as do the P0
+inventory and P1/P2 behavioral gates. The source implementation does not represent
+release acceptance.
+
 ## 7. Breaking-change ledger
 
 Record exact removed symbols/signatures and replacement examples during P0/P2. The

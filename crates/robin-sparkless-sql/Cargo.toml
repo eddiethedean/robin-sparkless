@@ -1,0 +1,14 @@
+[package]
+name = "robin-sparkless-sql"
+version = "4.19.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Shared Spark SQL parsing and portable semantic utilities."
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[dependencies]
+robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
+robin-sparkless-plan = { version = "4.19.0", path = "../robin-sparkless-plan" }
+spark-sql-parser = { version = "4.19.0", path = "../spark-sql-parser" }
+serde = { version = "1.0", features = ["derive"] }

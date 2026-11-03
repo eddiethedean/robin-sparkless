@@ -2022,7 +2022,7 @@ fn append_utc_suffix_to_timestamp_cells(
 }
 
 fn validate_statement(sql: &str) -> Result<StatementClass, (&'static str, String)> {
-    let parsed = spark_sql_parser::parse_spark_sql(sql)
+    let parsed = robin_sparkless_sql::parse_statement(sql)
         .map_err(|error| ("UnsupportedSql", error.to_string()))?;
     let class = match &parsed {
         SparkStatement::Sqlparser(statement) => match statement.as_ref() {
@@ -2349,7 +2349,12 @@ fn validate_query(query: &ast::Query) -> Result<(), (&'static str, String)> {
             }
         }
     }
-    validate_set_expr(&query.body)
+    validate_set_expr(&query.body)?;
+    // Normalize after the transport-specific checks so its established unsupported-feature
+    // messages remain stable while accepted SQL uses the same shared plan contract.
+    robin_sparkless_sql::lower_query(query)
+        .map_err(|error| ("UnsupportedSql", error.to_string()))
+        .map(|_| ())
 }
 
 fn validate_set_expr(expr: &ast::SetExpr) -> Result<(), (&'static str, String)> {
@@ -2886,7 +2891,7 @@ fn execute_statement(
         .map_err(|error| execution_failure("QueryError", &error.to_string()))?
         .logical_fields()
         .to_vec();
-    if let Ok(SparkStatement::Sqlparser(statement)) = spark_sql_parser::parse_spark_sql(sql)
+    if let Ok(SparkStatement::Sqlparser(statement)) = robin_sparkless_sql::parse_statement(sql)
         && let ast::Statement::Query(query) = statement.as_ref()
     {
         apply_query_nullability(query, &mut fields);

@@ -19,6 +19,7 @@ pub use expr::PlanExprError;
 pub use logical::LogicalPlan;
 use polars::prelude::Expr;
 use polars::prelude::PolarsError;
+use robin_sparkless_plan::LogicalPlan as PortablePlan;
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -35,28 +36,36 @@ pub fn execute_plan(
     schema: Vec<(String, String)>,
     plan: &[Value],
 ) -> Result<DataFrame, PlanError> {
+    let plan = PortablePlan::decode(plan).map_err(|error| {
+        if error.code() == "UNSUPPORTED_PLAN_OPERATION" {
+            PlanError::UnsupportedOp(error.user_message().to_string())
+        } else {
+            PlanError::InvalidPlan(error.user_message().to_string())
+        }
+    })?;
+    execute_typed_plan(session, data, schema, plan)
+}
+
+/// Execute a decoded portable plan after validating every operation at the input boundary.
+pub fn execute_typed_plan(
+    session: &SparkSession,
+    data: Vec<Vec<Value>>,
+    schema: Vec<(String, String)>,
+    plan: PortablePlan,
+) -> Result<DataFrame, PlanError> {
     set_thread_udf_session(session.clone());
     let mut df = session
         .create_dataframe_from_rows(data, schema, false, false)
         .map_err(PlanError::Session)?
         .with_case_insensitive_column_resolution();
 
-    for op_value in plan {
-        let op_obj = op_value
-            .as_object()
-            .ok_or_else(|| PlanError::InvalidPlan("each plan step must be a JSON object".into()))?;
-        let op_name = op_obj
-            .get("op")
-            .and_then(Value::as_str)
-            .ok_or_else(|| PlanError::InvalidPlan("each plan step must have 'op' string".into()))?;
-        let mut payload = op_obj.get("payload").cloned().unwrap_or(Value::Null);
-        // Sparkless may put other_data/other_schema at op level (sibling to payload) or use camelCase.
-        // Merge into payload so apply_op finds them (issue #510).
-        if matches!(op_name, "join" | "union" | "unionByName" | "crossJoin") {
-            payload = merge_other_into_payload(payload, op_obj);
-        }
-
-        df = apply_op(session, df, op_name, payload)?;
+    for operation in plan.operations {
+        df = apply_op(
+            session,
+            df,
+            operation.kind().as_str(),
+            operation.payload_json(),
+        )?;
     }
 
     Ok(df)
@@ -83,36 +92,6 @@ impl std::fmt::Display for PlanError {
 }
 
 impl std::error::Error for PlanError {}
-
-/// Merge other_data/other_schema from op into payload if missing. Supports snake_case and camelCase.
-fn merge_other_into_payload(payload: Value, op: &serde_json::Map<String, Value>) -> Value {
-    fn get(obj: &serde_json::Map<String, Value>, snake: &str, camel: &str) -> Option<Value> {
-        obj.get(snake).or_else(|| obj.get(camel)).cloned()
-    }
-    let mut p = match payload {
-        Value::Object(m) => m,
-        _ => return payload,
-    };
-    if p.get("other_data").or_else(|| p.get("otherData")).is_none() {
-        if let Some(v) = get(op, "other_data", "otherData") {
-            p.insert("other_data".into(), v);
-        }
-    }
-    if p.get("other_schema")
-        .or_else(|| p.get("otherSchema"))
-        .is_none()
-    {
-        if let Some(v) = get(op, "other_schema", "otherSchema") {
-            p.insert("other_schema".into(), v);
-        }
-    }
-    if p.get("on").is_none() {
-        if let Some(v) = get(op, "on", "on") {
-            p.insert("on".into(), v);
-        }
-    }
-    Value::Object(p)
-}
 
 /// Get other_data from payload (snake_case or camelCase).
 fn get_other_data(payload: &Value) -> Option<&Vec<Value>> {
@@ -351,7 +330,10 @@ fn schema_field_to_pair(v: &Value) -> Option<(String, String)> {
         .and_then(Value::as_str)
         .or_else(|| {
             // dataType may be nested: {"type":"string"} or {"typeName":"string"}
-            obj.get("dataType")?.get("typeName").and_then(Value::as_str)
+            obj.get("dataType")?
+                .get("typeName")
+                .or_else(|| obj.get("dataType")?.get("type"))
+                .and_then(Value::as_str)
         })?
         .to_string();
     Some((name, ty))

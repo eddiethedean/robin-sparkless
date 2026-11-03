@@ -5663,6 +5663,7 @@ dependencies = [
  "rand_distr 0.4.3",
  "robin-sparkless-core",
  "robin-sparkless-duckdb",
+ "robin-sparkless-plan",
  "robin-sparkless-polars",
  "serde",
  "serde_json",
@@ -5686,6 +5687,15 @@ version = "4.19.0"
 dependencies = [
  "arrow 60.1.0",
  "duckdb",
+ "robin-sparkless-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "robin-sparkless-plan"
+version = "4.19.0"
+dependencies = [
  "robin-sparkless-core",
  "serde",
  "serde_json",
@@ -5730,6 +5740,8 @@ dependencies = [
  "regex",
  "robin-sparkless-core",
  "robin-sparkless-duckdb",
+ "robin-sparkless-plan",
+ "robin-sparkless-sql",
  "rusqlite",
  "serde",
  "serde_json",
@@ -5745,6 +5757,16 @@ dependencies = [
  "twox-hash 1.6.3",
  "url",
  "zstd",
+]
+
+[[package]]
+name = "robin-sparkless-sql"
+version = "4.19.0"
+dependencies = [
+ "robin-sparkless-core",
+ "robin-sparkless-plan",
+ "serde",
+ "spark-sql-parser",
 ]
 
 [[package]]
@@ -6286,7 +6308,9 @@ dependencies = [
  "protoc-bin-vendored",
  "robin-sparkless",
  "robin-sparkless-core",
+ "robin-sparkless-plan",
  "robin-sparkless-polars",
+ "robin-sparkless-sql",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -148,7 +148,7 @@ pub use spark_sql_parser::ast::Statement;
 /// Parse a single SQL statement using [spark_sql_parser]. Returns PolarsError for compatibility with session/translator.
 /// On parse failure, error message includes supported statements (#706, #701).
 fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {
-    spark_sql_parser::parse_sql(query).map_err(|e| {
+    robin_sparkless_sql::parse_query(query).map_err(|e| {
         let msg = e.to_string();
         let hint = " Only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA/DATABASE are supported for execution.";
         PolarsError::InvalidOperation(
@@ -159,7 +159,7 @@ fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {
 
 /// Parse Spark/PySpark SQL into a SparkStatement. Used by execute_sql.
 fn parse_spark_statement(query: &str) -> Result<SparkStatement, PolarsError> {
-    spark_sql_parser::parse_spark_sql(query).map_err(|e| {
+    robin_sparkless_sql::parse_statement(query).map_err(|e| {
         let msg = e.to_string();
         PolarsError::InvalidOperation(msg.into())
     })
@@ -191,7 +191,9 @@ pub fn execute_sql_with_cancellation(
     test_hooks::arm_for_query(query);
     token.check_cancelled()?;
     let statement = parse_spark_statement(query).map_err(polars_to_core_error)?;
-    let read_only = is_read_only_statement(&statement);
+    let statement_plan = robin_sparkless_sql::lower_statement(&statement)
+        .map_err(|error| EngineError::invalid_input(error.to_string()))?;
+    let read_only = statement_plan.effect() == robin_sparkless_sql::StatementEffect::ReadOnly;
     let staged_insert = is_staged_insert(&statement);
     let staged_temp_view = is_staged_temp_view(&statement);
     let _mutation_guard = if read_only {
@@ -220,7 +222,9 @@ fn execute_sql_inner(
     token: &CancellationToken,
 ) -> Result<DataFrame, PolarsError> {
     let statement = parse_spark_statement(query)?;
-    let read_only = is_read_only_statement(&statement);
+    let statement_plan = robin_sparkless_sql::lower_statement(&statement)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    let read_only = statement_plan.effect() == robin_sparkless_sql::StatementEffect::ReadOnly;
     let staged_insert = is_staged_insert(&statement);
     let staged_temp_view = is_staged_temp_view(&statement);
     let _mutation_guard = if read_only {
@@ -254,19 +258,6 @@ fn is_staged_temp_view(statement: &SparkStatement) -> bool {
         SparkStatement::Sqlparser(statement)
             if matches!(statement.as_ref(), Statement::CreateView(_))
     )
-}
-
-fn is_read_only_statement(statement: &SparkStatement) -> bool {
-    match statement {
-        SparkStatement::DescribeDetail { .. }
-        | SparkStatement::ShowDatabases
-        | SparkStatement::ShowTables { .. }
-        | SparkStatement::Describe { .. } => true,
-        SparkStatement::Sqlparser(statement) => {
-            matches!(statement.as_ref(), Statement::Query(_))
-        }
-        SparkStatement::CreateOrReplaceTableAs { .. } => false,
-    }
 }
 
 fn execute_sql_statement(

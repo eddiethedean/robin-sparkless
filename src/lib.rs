@@ -122,6 +122,10 @@ pub use robin_sparkless_polars::{SharedCatalog, SharedCatalogReadLease};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 
 // Root-owned traits (work with root DataFrame/SparkSession); plan re-export.
+pub use robin_sparkless_plan::{
+    BinaryInput, ExpressionKind, GroupInput, LogicalPlan, OperationKind, PlanExpression,
+    PlanOperation, PlanPayload, common_numeric_type,
+};
 pub use robin_sparkless_polars::plan::{PlanError, PlanExprError};
 pub use traits::{FromRobinDf, IntoRobinDf};
 
@@ -133,6 +137,16 @@ pub fn execute_plan(
     plan: &[serde_json::Value],
 ) -> Result<DataFrame, PlanError> {
     robin_sparkless_polars::plan::execute_plan(&session.0, data, schema, plan).map(DataFrame)
+}
+
+/// Execute an already decoded portable plan with the root session facade.
+pub fn execute_typed_plan(
+    session: &SparkSession,
+    data: Vec<Vec<serde_json::Value>>,
+    schema: Vec<(String, String)>,
+    plan: LogicalPlan,
+) -> Result<DataFrame, PlanError> {
+    robin_sparkless_polars::plan::execute_typed_plan(&session.0, data, schema, plan).map(DataFrame)
 }
 
 pub use config::SparklessConfig;

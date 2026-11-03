@@ -1,7 +1,7 @@
 # Migrating to Sparkless 4.19
 
 Sparkless 4.19 is a breaking release. This guide covers the Phase 2 core-contract
-changes. Later 4.19 refactor phases may add further migration notes here.
+changes and Phase 3 plan/SQL entry points.
 
 ## Rust engine contracts
 
@@ -110,3 +110,22 @@ Python exceptions expose `category`, `code`, `operation`, `retryability`, `metad
 `cause`, and `error_detail` attributes when the underlying boundary has structured
 error information. Continue catching `SparklessError` (or
 `SparklessExternalCatalogError` for provider callback failures) for broad handling.
+
+## Typed logical plans
+
+`execute_plan` remains the JSON compatibility boundary, and it decodes and validates
+every operation before execution. Rust callers that retain a plan can decode it once
+with `robin_sparkless_plan::LogicalPlan::decode` and pass it to `execute_typed_plan`.
+Unsupported operation names return `UNSUPPORTED_PLAN_OPERATION`; malformed operations
+return `INVALID_PLAN` before the Polars executor starts. Decoded operations expose an
+operation-specific `PlanPayload`; expressions are available as `PlanExpression` trees,
+while the executor-specific JSON spelling is available from `payload_json()`.
+
+The new `robin-sparkless-sql` crate owns SQL-to-relational normalization through
+`lower_query`. Its `SqlQueryPlan` uses engine-neutral relations, projections, filters,
+grouping keys, sort keys, limits and set operations. Adapters retain responsibility for
+expression execution and for enforcing their own supported subset. Local SQL now uses
+the normalized sort and limit clauses, and server SQL validation lowers the query before
+applying its HTTP-specific policy. `lower_statement` separates read queries, metadata
+commands and effectful commands. Shared identifier and numeric-promotion helpers live
+below the SQL and Connect adapters.

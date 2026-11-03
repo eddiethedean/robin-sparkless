@@ -35,11 +35,13 @@ prost-reflect = { version = "=0.16.5", optional = true }
 prost-types = { version = "=0.14.4", optional = true }
 robin-sparkless = { version = "4.19.0", path = "../..", features = ["sql"] }
 robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
+robin-sparkless-plan = { version = "4.19.0", path = "../robin-sparkless-plan" }
 sparkless-server-core = { version = "4.19.0", path = "../sparkless-server-core" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 spark-sql-parser = { version = "4.19.0", path = "../spark-sql-parser" }
+robin-sparkless-sql = { version = "4.19.0", path = "../robin-sparkless-sql" }
 tokio = { version = "1.53.3", features = ["macros", "rt-multi-thread", "net", "sync", "time", "signal", "io-util", "io-std"] }
 tonic = { version = "=0.14.8", features = ["transport"], optional = true }
 tonic-prost = { version = "=0.14.8", optional = true }

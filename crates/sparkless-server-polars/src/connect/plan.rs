@@ -870,21 +870,21 @@ fn resolve_logical_columns(
 ) -> Result<ExprIr, Status> {
     fn resolve(name: &str, input: &TranslatedRelation) -> Result<String, Status> {
         let physical_schema = input.dataframe.schema_engine().map_err(engine_failure)?;
-        let physical_matches = physical_schema
+        let physical_names = physical_schema
             .logical_fields()
             .iter()
-            .enumerate()
-            .filter(|(_, field)| field.name.eq_ignore_ascii_case(name))
-            .map(|(index, _)| index)
+            .map(|field| field.name.clone())
             .collect::<Vec<_>>();
-        let logical_matches = input
+        let logical_names = input
             .schema
             .logical_fields()
             .iter()
-            .enumerate()
-            .filter(|(_, field)| field.name.eq_ignore_ascii_case(name))
-            .map(|(index, _)| index)
+            .map(|field| field.name.clone())
             .collect::<Vec<_>>();
+        let physical_matches =
+            robin_sparkless_plan::matching_indices_ascii_case_insensitive(&physical_names, name);
+        let logical_matches =
+            robin_sparkless_plan::matching_indices_ascii_case_insensitive(&logical_names, name);
         // Public logical names take precedence over generated physical suffixes such as
         // `x_1`; this keeps an explicit alias `X_1` from binding to a duplicate `x` column.
         // Internal physical names remain resolvable when they do not have a logical match.
@@ -1658,7 +1658,7 @@ fn validate_comparison_types_with(
                         "CONNECT_PLAN_ANALYSIS_FAILED: arithmetic requires numeric operands, found {left:?} and {right:?}"
                     )));
                 }
-                Ok(connect_common_numeric_type(&left, &right))
+                Ok(robin_sparkless_plan::common_numeric_type(&left, &right))
             }
             ExprIr::Ge(left, right) | ExprIr::Gt(left, right) => {
                 let left_type = expression_type(left, field_type)?;
@@ -1721,21 +1721,6 @@ fn is_connect_numeric_type(data_type: &DataType) -> bool {
             | DataType::Double
             | DataType::Decimal(..)
     )
-}
-
-fn connect_common_numeric_type(left: &DataType, right: &DataType) -> DataType {
-    match (left, right) {
-        (DataType::Double, _) | (_, DataType::Double) => DataType::Double,
-        (DataType::Float, _) | (_, DataType::Float) => DataType::Float,
-        (DataType::Long, _) | (_, DataType::Long) => DataType::Long,
-        (DataType::Integer, _) | (_, DataType::Integer) => DataType::Integer,
-        (DataType::Short, _) | (_, DataType::Short) => DataType::Short,
-        (DataType::Byte, DataType::Byte) => DataType::Byte,
-        (DataType::Decimal(precision, scale), _) | (_, DataType::Decimal(precision, scale)) => {
-            DataType::Decimal(*precision, *scale)
-        }
-        _ => left.clone(),
-    }
 }
 
 fn same_orderable_connect_type(left: &DataType, right: &DataType) -> bool {
@@ -1998,7 +1983,7 @@ fn parse_filter_string(expression: &str) -> Result<ExprIr, Status> {
             "Connect filter expression exceeds {MAX_FILTER_EXPRESSION_BYTES} bytes"
         )));
     }
-    let expression = spark_sql_parser::parse_single_expression(expression).map_err(|error| {
+    let expression = robin_sparkless_sql::parse_expression(expression).map_err(|error| {
         Status::invalid_argument(format!("invalid Connect filter expression: {error}"))
     })?;
     let SqlExpr::BinaryOp { left, op, right } = expression else {

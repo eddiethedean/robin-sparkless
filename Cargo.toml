@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/robin-sparkless-core", "crates/robin-sparkless-polars", "crates/robin-sparkless-duckdb", "crates/sparkless-server-core", "crates/sparkless-server-polars", "crates/spark-sql-parser", "crates/sparkless-server", "crates/sparkless-server-duckdb", ".", "python/native"]
+members = ["crates/robin-sparkless-core", "crates/robin-sparkless-plan", "crates/robin-sparkless-sql", "crates/robin-sparkless-polars", "crates/robin-sparkless-duckdb", "crates/sparkless-server-core", "crates/sparkless-server-polars", "crates/spark-sql-parser", "crates/sparkless-server", "crates/sparkless-server-duckdb", ".", "python/native"]
 
 [package]
 name = "robin-sparkless"
@@ -52,6 +52,7 @@ duckdb-source = ["robin-sparkless-polars/duckdb-source", "dep:robin-sparkless-du
 
 [dependencies]
 robin-sparkless-core = { version = "4.19.0", path = "crates/robin-sparkless-core" }
+robin-sparkless-plan = { version = "4.19.0", path = "crates/robin-sparkless-plan" }
 robin-sparkless-polars = { version = "4.19.0", path = "crates/robin-sparkless-polars" }
 robin-sparkless-duckdb = { version = "4.19.0", path = "crates/robin-sparkless-duckdb", optional = true }
 serde_json = "1.0"

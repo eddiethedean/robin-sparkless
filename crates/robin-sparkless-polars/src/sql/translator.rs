@@ -17,9 +17,9 @@ use robin_sparkless_core::CancellationToken;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
     BinaryOperator, CastKind, ExactNumberInfo, Expr as SqlExpr, FromTable, Function, FunctionArg,
-    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
-    ObjectType, OrderByKind, Query, SchemaName, Select, SelectItem, SetExpr, SetOperator,
-    Statement, TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectType,
+    Query, SchemaName, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
+    TableFactor, TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -1425,52 +1425,45 @@ pub(crate) fn translate_query(
     session: &SparkSession,
     query: &Query,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    let portable_plan = robin_sparkless_sql::lower_query(query)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
     let mut df = translate_set_expr(session, query.body.as_ref())?;
-    if let Some(order_by) = &query.order_by {
-        if let OrderByKind::Expressions(exprs) = &order_by.kind {
-            if !exprs.is_empty() {
-                let orders: Vec<crate::functions::SortOrder> = exprs
-                    .iter()
-                    .map(|o| {
-                        let col_name = sql_expr_to_col_name(&o.expr)?;
-                        let resolved = df.resolve_column_name(&col_name)?;
-                        let ascending = o.options.asc.unwrap_or(true);
-                        let column = Column::new(resolved);
-                        let nulls_first = o.options.nulls_first.unwrap_or(ascending);
-                        Ok(match (ascending, nulls_first) {
-                            (true, true) => functions::asc_nulls_first(&column),
-                            (true, false) => functions::asc_nulls_last(&column),
-                            (false, true) => functions::desc_nulls_first(&column),
-                            (false, false) => functions::desc_nulls_last(&column),
-                        })
-                    })
-                    .collect::<Result<Vec<_>, PolarsError>>()?;
-                df = df.order_by_exprs(orders)?;
-            }
-        }
+    if !portable_plan.order_by.is_empty() {
+        let orders: Vec<crate::functions::SortOrder> = portable_plan
+            .order_by
+            .iter()
+            .map(|sort| {
+                let col_name = match &sort.expression.shape {
+                    robin_sparkless_sql::ExpressionShape::Identifier(parts) => {
+                        parts.last().ok_or_else(|| {
+                            PolarsError::InvalidOperation("SQL: empty compound identifier.".into())
+                        })?
+                    }
+                    _ => {
+                        return Err(PolarsError::InvalidOperation(
+                            format!("SQL: expected column name, got {}", sort.expression.debug)
+                                .into(),
+                        ));
+                    }
+                };
+                let resolved = df.resolve_column_name(col_name)?;
+                let ascending = sort.ascending.unwrap_or(true);
+                let column = Column::new(resolved);
+                let nulls_first = sort.nulls_first.unwrap_or(ascending);
+                Ok(match (ascending, nulls_first) {
+                    (true, true) => functions::asc_nulls_first(&column),
+                    (true, false) => functions::asc_nulls_last(&column),
+                    (false, true) => functions::desc_nulls_first(&column),
+                    (false, false) => functions::desc_nulls_last(&column),
+                })
+            })
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        df = df.order_by_exprs(orders)?;
     }
-    // LIMIT: sqlparser parses "LIMIT n" as limit_clause (LimitOffset) or FETCH (standard SQL).
-    let limit_expr = query
-        .limit_clause
-        .as_ref()
-        .and_then(|lc| limit_clause_to_expr(lc))
-        .or_else(|| query.fetch.as_ref().and_then(|f| f.quantity.as_ref()));
-    if let Some(limit_expr) = limit_expr {
-        let n = sql_limit_to_usize(limit_expr)?;
+    if let Some(n) = portable_plan.limit {
         df = df.limit(n)?;
     }
     Ok(df)
-}
-
-/// Extract the limit expression from LimitClause for LIMIT n (no OFFSET handling here).
-fn limit_clause_to_expr(lc: &LimitClause) -> Option<&SqlExpr> {
-    match lc {
-        LimitClause::LimitOffset {
-            limit: Some(expr), ..
-        } => Some(expr),
-        LimitClause::LimitOffset { limit: None, .. } => None,
-        LimitClause::OffsetCommaLimit { limit, .. } => Some(limit),
-    }
 }
 
 type SelectFromTranslation = (
@@ -1628,20 +1621,7 @@ fn translate_select_from(
 }
 
 pub(crate) fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
-    if name.0.len() >= 2 {
-        let parts: Vec<String> = name
-            .0
-            .iter()
-            .filter_map(|p| p.as_ident().map(|i| i.value.clone()))
-            .collect();
-        parts.join(".")
-    } else {
-        name.0
-            .last()
-            .and_then(|p| p.as_ident())
-            .map(|i| i.value.clone())
-            .unwrap_or_default()
-    }
+    robin_sparkless_sql::object_name(name)
 }
 
 #[allow(dead_code)]
@@ -3147,19 +3127,6 @@ fn sql_function_args_to_columns(
     Ok(cols)
 }
 
-fn sql_expr_to_col_name(expr: &SqlExpr) -> Result<String, PolarsError> {
-    match expr {
-        SqlExpr::Identifier(ident) => Ok(ident.value.clone()),
-        SqlExpr::CompoundIdentifier(parts) => parts
-            .last()
-            .map(|i| i.value.clone())
-            .ok_or_else(|| PolarsError::InvalidOperation("SQL: empty compound identifier.".into())),
-        _ => Err(PolarsError::InvalidOperation(
-            format!("SQL: expected column name, got {:?}", expr).into(),
-        )),
-    }
-}
-
 /// Column name for JOIN ON. When a table alias was applied (alias_opt is Some), use prefix_column form (e.g. "e_dept_id"); otherwise bare column (#152).
 fn sql_expr_to_qualified_col_name(
     expr: &SqlExpr,
@@ -4456,30 +4423,6 @@ fn projection_to_agg_exprs(
 
 fn having_group_expr_key(expr: &SqlExpr) -> (String, String) {
     ("__group_expression".to_string(), format!("{expr:?}"))
-}
-
-fn sql_limit_to_usize(expr: &SqlExpr) -> Result<usize, PolarsError> {
-    match expr {
-        SqlExpr::Value(ValueWithSpan {
-            value: Value::Number(s, _),
-            ..
-        }) => {
-            let n: i64 = s.parse().map_err(|_| {
-                PolarsError::InvalidOperation(
-                    format!("SQL: LIMIT must be a positive integer, got '{}'", s).into(),
-                )
-            })?;
-            if n < 0 {
-                return Err(PolarsError::InvalidOperation(
-                    "SQL: LIMIT must be non-negative.".into(),
-                ));
-            }
-            Ok(n as usize)
-        }
-        _ => Err(PolarsError::InvalidOperation(
-            "SQL: LIMIT must be a literal integer.".into(),
-        )),
-    }
 }
 
 #[cfg(test)]
