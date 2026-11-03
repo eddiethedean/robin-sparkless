@@ -16,7 +16,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_no_args_returns_empty_array(self, spark):
         """Exact scenario from issue #367: withColumn + F.array()."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"Name": "Alice"}, {"Name": "Bob"}])
@@ -28,7 +28,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_list_returns_empty_array(self, spark):
         """F.array([]) returns empty array [] (issue #367)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"Name": "Alice"}, {"Name": "Bob"}])
@@ -40,7 +40,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_show(self, spark):
         """Exact issue scenario: withColumn + F.array() + show()."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"Name": "Alice"}, {"Name": "Bob"}])
@@ -53,7 +53,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_in_select(self, spark):
         """F.array() in select statement."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"id": 1}, {"id": 2}, {"id": 3}])
@@ -66,7 +66,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_list_and_array_equivalent(self, spark):
         """F.array() and F.array([]) produce identical results."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"id": 1}, {"id": 2}])
@@ -84,7 +84,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_after_filter(self, spark):
         """F.array() works after filter."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame(
@@ -103,7 +103,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_in_union(self, spark):
         """F.array() works with union."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df1 = spark.createDataFrame([{"id": 1, "val": "a"}])
@@ -118,7 +118,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_tuple_raises_like_pyspark(self, spark):
         """F.array(()) raises in Sparkless (matches PySpark, which rejects tuple)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         with pytest.raises(
@@ -128,7 +128,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_multiple_times(self, spark):
         """Multiple F.array() in a single select."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"id": 1}])
@@ -146,7 +146,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_with_different_data_types(self, spark):
         """F.array() with DataFrames containing different data types."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df1 = spark.createDataFrame([{"name": "Alice"}])
@@ -160,7 +160,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_with_computed_columns(self, spark):
         """F.array() alongside computed columns."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"a": 10, "b": 20}])
@@ -177,7 +177,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_in_join(self, spark):
         """F.array() works in join operations."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df1 = spark.createDataFrame([{"id": 1, "name": "Alice"}])
@@ -192,7 +192,7 @@ class TestIssue367ArrayEmpty:
 
     def test_array_empty_two_equivalent(self, spark):
         """F.array() and F.array([]) produce identical results (PySpark parity)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"id": 1}, {"id": 2}])

@@ -7,7 +7,7 @@ Robin now exposes module-level posexplode and column.posexplode(); F.posexplode(
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 _imports = get_imports()

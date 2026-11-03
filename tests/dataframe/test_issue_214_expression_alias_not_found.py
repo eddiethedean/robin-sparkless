@@ -5,7 +5,7 @@ window functions, chained arithmetic) must not raise RuntimeError: not found: <a
 Fixed by the same resolve_expr_column_names behavior as #212 (#200).
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

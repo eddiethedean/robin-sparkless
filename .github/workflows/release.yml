@@ -154,10 +154,13 @@ jobs:
           RUSTUP_TOOLCHAIN: 1.93.1
         run: |
           python -m pip install build 'maturin>=1.4,<2'
+          rm -rf python/build python/sparkless/sparkless.egg-info \
+            python/connect/build python/connect/sparkless_connect.egg-info \
+            python/testing/build python/testing/sparkless_testing.egg-info
           python -m build --sdist --outdir dist/native python/native
           python -m build --outdir dist/api python
           python -m build --wheel --sdist --outdir dist/connect python/connect
-          python -m build --wheel --sdist --outdir dist/server-compat python/server-bin
+          python -m build --wheel --sdist --outdir dist/testing python/testing
           native_version="$(python -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
           python scripts/reuse_pypi_distributions.py --directory dist/native --project sparkless-native --version "$native_version"
           cargo package --locked --workspace --exclude sparkless-native --no-verify
@@ -179,8 +182,8 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: sparkless-server-compat-dist
-          path: dist/server-compat/*
+          name: sparkless-testing-dist
+          path: dist/testing/*
           if-no-files-found: error
 
   python-tests:
@@ -206,6 +209,10 @@ jobs:
         with:
           name: sparkless-connect-dist
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-testing-dist
+          path: dist
       - name: Install the exact publication wheel
         run: python -m pip install dist/*.whl
       - name: Install test tools and check wheel dependencies
@@ -214,6 +221,8 @@ jobs:
           python -m pip install pytest pytest-xdist hypothesis pytest-timeout
           python -m pip check
           python scripts/test_installed_package_version.py
+          python scripts/check_native_stub_exports.py
+          python scripts/check_testing_package_boundary.py
       - name: Run ordinary and parity Python suites
         run: |
           python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/ordinary.xml
@@ -736,11 +745,11 @@ jobs:
           path: dist
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ matrix.companion-wheel-artifact }}
+          name: sparkless-testing-dist
           path: dist
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: sparkless-server-compat-dist
+          name: ${{ matrix.companion-wheel-artifact }}
           path: dist
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: matrix.product == 'duckdb'
@@ -798,15 +807,16 @@ jobs:
           .venv-coinstall/bin/python -m pip install --no-index --find-links dist "sparkless-server==${version}" "sparkless-server-duckdb==${version}"
           .venv-coinstall/bin/python -m pip check
           .venv-coinstall/bin/python scripts/verify_server_extra_install.py "$version" --profile coinstall
-      - name: Exercise legacy accessor and import forwarding
+      - name: Exercise the standalone testing extra
         if: matrix.product == 'base'
         run: |
           version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
-          python -m venv .venv-legacy
-          .venv-legacy/bin/python -m pip install --no-index --find-links dist "sparkless==${version}" "sparkless-server-bin==${version}"
-          .venv-legacy/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
-          .venv-legacy/bin/python -m pip check
-          .venv-legacy/bin/python scripts/verify_server_extra_install.py "$version" --product base --api-extra --legacy-forwarder --mutations
+          python -m venv .venv-testing
+          .venv-testing/bin/python -m pip install 'pytest>=7'
+          .venv-testing/bin/python -m pip install --no-index --find-links dist "sparkless[testing]==${version}"
+          .venv-testing/bin/python -m pip check
+          .venv-testing/bin/python -c "from importlib.metadata import version; import sparkless_testing; assert version('sparkless-testing') == '${version}'"
+          .venv-testing/bin/python scripts/check_testing_package_boundary.py
       - name: Exercise DuckDB source modes
         if: matrix.product == 'duckdb'
         run: |
@@ -885,6 +895,10 @@ jobs:
           path: dist/sparkless
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          name: sparkless-testing-dist
+          path: dist/testing
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
           pattern: sparkless-server-base-*
           path: dist/server-base
           merge-multiple: true
@@ -897,10 +911,6 @@ jobs:
         with:
           name: sparkless-connect-dist
           path: dist/connect
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: sparkless-server-compat-dist
-          path: dist/server-compat
       - name: Verify complete wheel and source distribution inventory
         run: |
           set -euo pipefail
@@ -945,12 +955,12 @@ jobs:
             --directory dist/connect --project sparkless-connect --version "$engine_version" \
             --wheels 1 --sdists 1 --platform any
           python3 scripts/verify_release_distributions.py \
-            --directory dist/server-compat --project sparkless-server-bin --version "$engine_version" \
-            --wheels 1 --sdists 1 --platform any --requires "sparkless-server==$engine_version"
+            --directory dist/testing --project sparkless-testing --version "$engine_version" \
+            --wheels 1 --sdists 1 --platform any
       - name: Check candidate distributions
         run: |
           python3 -m pip install twine
-          python3 -m twine check dist/sparkless/* dist/native/* dist/server-base/* dist/server-duckdb/* dist/connect/* dist/server-compat/*
+          python3 -m twine check dist/sparkless/* dist/native/* dist/server-base/* dist/server-duckdb/* dist/connect/* dist/testing/*
       - name: Check current PyPI storage before publishing
         run: |
           python3 scripts/check_pypi_storage.py \
@@ -959,7 +969,7 @@ jobs:
             --distribution sparkless-server=dist/server-base \
             --distribution sparkless-server-duckdb=dist/server-duckdb \
             --distribution sparkless-connect=dist/connect \
-            --distribution sparkless-server-bin=dist/server-compat
+            --distribution sparkless-testing=dist/testing
       - name: Preserve checked distributions for publication
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -988,8 +998,8 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: verified-server-compat-candidate
-          path: dist/server-compat/*
+          name: verified-testing-candidate
+          path: dist/testing/*
           if-no-files-found: error
 
   publish:
@@ -1125,11 +1135,11 @@ jobs:
           attestations: false
           skip-existing: true
 
-  publish-server-compat:
-    name: Publish server binary compatibility accessors to PyPI
+  publish-testing:
+    name: Publish sparkless-testing to PyPI
     if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
-    needs: [release-metadata, release-validation-gate, publish-server-products]
+    needs: [release-metadata, release-validation-gate]
     environment:
       name: pypi
     permissions:
@@ -1138,9 +1148,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: verified-server-compat-candidate
+          name: verified-testing-candidate
           path: dist
-      - name: Publish compatibility distribution to PyPI
+      - name: Publish sparkless-testing to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
@@ -1202,7 +1212,7 @@ jobs:
     name: Publish sparkless distributions to PyPI
     if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
-    needs: [release-metadata, release-validation-gate, publish-native, publish-connect, publish-server-products, publish-server-compat, publish-server-container]
+    needs: [release-metadata, release-validation-gate, publish-native, publish-connect, publish-server-products, publish-server-container, publish-testing]
     environment:
       name: pypi
     permissions:
@@ -1224,8 +1234,8 @@ jobs:
           skip-existing: true
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: verified-server-compat-candidate
-          path: public-server-compat
+          name: verified-testing-candidate
+          path: public-testing
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-connect-candidate
@@ -1245,7 +1255,7 @@ jobs:
       - name: Verify public package inventory and hashes
         run: |
           python scripts/verify_public_release_416.py --version "${GITHUB_REF_NAME#v}" \
-            --sparkless-directory dist --server-bin-directory public-server-compat \
+            --sparkless-directory dist --testing-directory public-testing \
             --native-directory public-native \
             --connect-directory public-connect \
             --server-base-directory public-server-base \

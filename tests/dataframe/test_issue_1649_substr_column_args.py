@@ -1,6 +1,6 @@
 """Issue #1649: Column.substr() accepts Column expressions for position/length."""
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 SparkSession = imports.SparkSession

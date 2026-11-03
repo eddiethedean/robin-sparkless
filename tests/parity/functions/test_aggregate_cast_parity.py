@@ -1,7 +1,7 @@
 """PySpark parity test for aggregate function cast (Issue #265)."""
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestAggregateCastParity(ParityTestBase):

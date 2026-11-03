@@ -46,12 +46,13 @@ need the final candidate acceptance before a 4.19 install is supported.
 | `sparkless-server-duckdb` or `sparkless[server-duckdb]` | Polars server, read-only DuckDB sources, matching Quack extension |
 | `sparkless-server-duckdb[connect]` or `sparkless[connect-duckdb]` | DuckDB server plus pinned Connect client |
 | `sparkless-connect[client]` | Remote Connect client and shared launcher; no server binary or local engine |
-| `sparkless-server-bin` | Legacy universal accessor forwarding to the base server |
+| `sparkless-testing` or `sparkless[testing]` | Backend-independent test fixtures and comparison helpers |
 
 The server products use separate import names: `sparkless_server` and
-`sparkless_server_duckdb`. Installing both keeps `sparkless.server` and
-`sparkless_server_bin.executable_path()` on the base product. Source users should
-select `sparkless_server_duckdb.SparklessServer` explicitly. The 4.19 DuckDB
+`sparkless_server_duckdb`. The shared launcher is `sparkless_connect`; 4.19
+removes the older `sparkless.server` and `sparkless-server-bin` forwarding APIs.
+Source users should select `sparkless_server_duckdb.SparklessServer` explicitly.
+The 4.19 DuckDB
 product still executes transformations in Polars; DuckDB is a read-only source.
 Both server wheel sets currently target Linux x86_64 with glibc 2.28+ and macOS
 14+ ARM64. Product images are `ghcr.io/eddiethedean/sparkless-server` and

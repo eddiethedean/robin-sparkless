@@ -1719,9 +1719,9 @@ Collected year-month interval value (PySpark 4.0 shape).
 
 PySpark 4 year-month interval type (collect shape differs from 3.x).
 
-## server
+## sparkless_connect.server
 
-### `AsyncSparklessServer(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0) -> 'None'`
+### `AsyncSparklessServer(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0, product: 'str' = 'base') -> 'None'`
 
 An asyncio owner for one ``sparkless-server`` child process.
 
@@ -1729,7 +1729,7 @@ An asyncio owner for one ``sparkless-server`` child process.
 
 Own a Spark Connect server and one real pyspark-client session.
 
-### `SparklessServer(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0) -> 'None'`
+### `SparklessServer(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0, product: 'str' = 'base') -> 'None'`
 
 A synchronous owner for one ``sparkless-server`` child process.
 
@@ -1760,16 +1760,15 @@ Provider interface that consumes bounded PyArrow RecordBatches lazily.
 
 ### `ExternalCatalogOwnership(owner_id: 'str', read: 'bool' = True, write: 'bool' = False, batch_write: 'bool' = False) -> None`
 
-Namespace owner and the capabilities it advertises, even when a table is missing.
+Owner/capabilities for an identifier; return None when the local catalog owns it.
 
 ### `ExternalCatalogProvider(*args, **kwargs)`
 
-Required ``resolve_ownership(identifier)`` and ``resolve_table(identifier)`` methods.
-Return ``None`` from ``resolve_ownership`` only when the local catalog owns the name.
+Python catalog callback surface used to build separate Rust capabilities.
 
-Writable providers also implement ``write_table_batches(request:
-ExternalTableWriteRequest) -> ExternalTableWriteResult``. Read-only objects
-may omit that method.
+``resolve_ownership`` is called before table lookup. Return None only when Sparkless'
+local catalog should handle the identifier. Writable providers implement
+``write_table_batches``; read-only objects may omit it.
 
 ### `ExternalTableDescriptor(table_id: 'str', canonical_location: 'str', schema: 'T.StructType', provider: 'str', version: 'Optional[int]' = None, permissions_context: 'Optional[str]' = None, format: 'Union[ExternalTableFormat, str]' = <ExternalTableFormat.DELTA: 'delta'>) -> None`
 
@@ -1785,14 +1784,17 @@ Save modes accepted by DataFrameWriter.mode().
 
 ### `ExternalTableWriteRequest(operation_id: 'str', identifier: 'str', table: 'ExternalTableDescriptor', mode: 'Union[ExternalTableSaveMode, str]', format: 'Optional[str]', options: 'List[Tuple[str, str]]', partition_by: 'List[str]', batches: 'Iterator[Any]') -> None`
 
-A resolved write using a lazy iterator of bounded PyArrow RecordBatches.
-Closing or exhausting that iterator releases the producer; a callback may stop
-early by closing it. Options are ordered pairs so duplicate keys survive. A
-successful callback must commit the data it accepts before returning its receipt.
+A resolved write using a lazy sequence of bounded Arrow batches.
+
+``batches`` is a lazy iterator of PyArrow RecordBatches. Closing or exhausting
+it releases the producer; a callback may stop early by closing it. Options are ordered pairs
+so duplicate keys survive. A successful callback must commit the data it
+accepts before returning its receipt. A callback failure after it starts may have an
+unknown commit outcome and is retained as such by the native layer.
 
 ### `ExternalTableWriteResult(table: 'ExternalTableDescriptor', committed_version: 'Optional[int]' = None, provider_commit_id: 'Optional[str]' = None) -> None`
 
-Descriptor and provider-neutral identity of a completed provider commit.
+Descriptor and provider-specific identity of a completed commit.
 
 ### `SparklessExternalCatalogError(native signature unavailable)`
 

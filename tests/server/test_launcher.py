@@ -6,14 +6,13 @@ from types import ModuleType
 import pytest
 
 import sparkless
-import sparkless_connect.server as server_module
+import sparkless_connect._common as common_module
 from sparkless_connect.server import (
     AsyncSparklessServer,
     SparklessConnect,
     SparklessServer,
     SparklessServerError,
     UnsupportedSparkConnectError,
-    _validate_ready,
 )
 
 
@@ -72,7 +71,9 @@ def test_sparkless_connect_owns_session_and_server(monkeypatch):
     assert not owner._active
 
 
-def test_sparkless_connect_preserves_body_error_and_stops_server_after_session_error(monkeypatch):
+def test_sparkless_connect_preserves_body_error_and_stops_server_after_session_error(
+    monkeypatch,
+):
     class FakeSession:
         stop_calls = 0
 
@@ -120,13 +121,15 @@ def test_sparkless_connect_rejects_disabled_endpoint_before_starting():
 
 def test_sparkless_connect_rejects_use_after_fork(monkeypatch):
     owner = SparklessConnect()
-    owner._owner_pid = server_module.os.getpid() + 1
-    monkeypatch.setattr(server_module.os, "getpid", lambda: owner._owner_pid + 1)
+    owner._owner_pid = common_module.os.getpid() + 1
+    monkeypatch.setattr(common_module.os, "getpid", lambda: owner._owner_pid + 1)
     with pytest.raises(SparklessServerError, match="ownership changed after fork"):
         owner.__enter__()
 
 
-def test_sparkless_connect_retains_ownership_until_server_shutdown_succeeds(monkeypatch):
+def test_sparkless_connect_retains_ownership_until_server_shutdown_succeeds(
+    monkeypatch,
+):
     class FakeSession:
         stop_calls = 0
 
@@ -184,7 +187,9 @@ def test_sparkless_connect_missing_client_fails_before_server_construction(monke
     assert constructions == []
 
 
-def test_sparkless_connect_startup_failure_attempts_shutdown_and_keeps_primary(monkeypatch):
+def test_sparkless_connect_startup_failure_attempts_shutdown_and_keeps_primary(
+    monkeypatch,
+):
     servers = []
 
     _install_fake_pyspark_client(monkeypatch, object())
@@ -378,9 +383,7 @@ def test_sparkless_connect_supports_separate_nesting_and_sequential_reuse(monkey
         servers.append(server)
         return server
 
-    monkeypatch.setattr(
-        SparklessConnect, "server_class", staticmethod(create_server)
-    )
+    monkeypatch.setattr(SparklessConnect, "server_class", staticmethod(create_server))
     owner = SparklessConnect()
     with owner as first:
         with SparklessConnect() as nested:
@@ -453,7 +456,7 @@ def _write_fake_server(path, *, delay=0.0, stderr_bytes=0, version=None):
         delay=delay,
         stderr_bytes=stderr_bytes,
         version=version
-        or server_module._installed_product_version("base")
+        or common_module._installed_product_version("base")
         or sparkless.__version__,
     )
     path.write_text(source)
@@ -465,7 +468,7 @@ def _use_python_fake_server(monkeypatch):
     # The test child is a Python script, not a native executable. Windows cannot
     # launch a shebang script directly, so route it through the current interpreter.
     monkeypatch.setattr(
-        server_module,
+        common_module,
         "_command",
         lambda executable, _host, _port: (sys.executable, executable),
     )
@@ -521,10 +524,9 @@ def test_packaged_server_version_can_differ_from_api_patch(tmp_path, monkeypatch
     executable = _write_fake_server(tmp_path / "sparkless-server", version="4.18.0")
     package = ModuleType("sparkless_server")
     package.executable_path = lambda: executable
-    monkeypatch.setitem(sys.modules, "sparkless_server_bin", package)
     monkeypatch.setitem(sys.modules, "sparkless_server", package)
     monkeypatch.setattr(
-        server_module,
+        common_module,
         "_installed_product_version",
         lambda product: "4.18.0" if product == "base" else None,
     )
@@ -562,7 +564,7 @@ def test_launcher_rejects_wrong_control_protocol(tmp_path):
         },
     }
     with pytest.raises(SparklessServerError, match="control protocol"):
-        _validate_ready(record)
+        common_module._validate_ready(record)
 
 
 @pytest.mark.parametrize("phase", ["spawn", "diagnostics"])

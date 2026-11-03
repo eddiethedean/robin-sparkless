@@ -7,7 +7,7 @@ did not validate _original_column for aliased columns (same fix pattern as #435)
 https://github.com/eddiethedean/sparkless/issues/453
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _row_val(row, key):

@@ -4,7 +4,7 @@ Test for issue #138: Column reference error after drop(). Uses get_imports from 
 
 from datetime import datetime
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

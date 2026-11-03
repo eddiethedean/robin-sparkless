@@ -6,7 +6,7 @@ Uses get_imports from fixture only.
 
 from datetime import datetime, timedelta
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

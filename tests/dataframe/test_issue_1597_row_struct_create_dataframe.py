@@ -7,7 +7,7 @@ previously stringified Row and failed struct parsing.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 Row = get_imports().Row
 DoubleType = get_imports().DoubleType

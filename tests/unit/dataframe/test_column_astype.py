@@ -15,7 +15,7 @@ Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 from datetime import date
 
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 # Get imports based on backend
 imports = get_imports()

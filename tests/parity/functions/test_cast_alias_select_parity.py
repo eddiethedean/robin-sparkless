@@ -4,7 +4,7 @@ PySpark parity tests for Issue #332: Column resolution with cast+alias+select.
 These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestCastAliasSelectParity:

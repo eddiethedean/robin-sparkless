@@ -37,7 +37,7 @@ def release_metadata(project, version="4.16.0"):
         }
         for platform in suffixes
     ]
-    if project in {"sparkless", "sparkless-native"}:
+    if project in {"sparkless", "sparkless-native", "sparkless-testing"}:
         urls.append(
             {
                 "filename": "{}-{}.tar.gz".format(wheel_project, version),
@@ -84,6 +84,10 @@ class VerifyPublicRelease416Test(unittest.TestCase):
 
     def test_accepts_complete_sparkless_inventory(self):
         validate_pypi_release(release_metadata("sparkless"), "sparkless")
+
+    def test_accepts_the_419_backend_independent_testing_distribution(self):
+        metadata = release_metadata("sparkless-testing", "4.19.0")
+        validate_pypi_release(metadata, "sparkless-testing", version="4.19.0")
 
     def test_accepts_the_staged_417_server_binary_platforms(self):
         metadata = release_metadata("sparkless-server-bin", "4.17.0")

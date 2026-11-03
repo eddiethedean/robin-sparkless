@@ -1,9 +1,9 @@
-"""Pytest plugin for sparkless.testing.
+"""Pytest plugin for sparkless_testing.
 
 This module provides the pytest plugin entry point that registers
-all fixtures from sparkless.testing when users add:
+all fixtures from sparkless_testing when users add:
 
-    pytest_plugins = ["sparkless.testing"]
+    pytest_plugins = ["sparkless_testing"]
 
 to their conftest.py.
 """
@@ -107,8 +107,8 @@ def pytest_report_header(config: pytest.Config) -> list[str]:
     mode = get_mode()
     compat = get_compat_profile()
     return [
-        f"sparkless.testing mode: {mode.value}",
-        f"sparkless.testing compat: {compat}",
+        f"sparkless_testing mode: {mode.value}",
+        f"sparkless_testing compat: {compat}",
     ]
 
 

@@ -28,7 +28,7 @@ class TestIssue419FilterInOrParseException:
 
     def test_filter_in_or_string_literal_no_parse_exception(self, spark, spark_mode):
         """F.expr parses 'Value in ('1234') or (Name == 'Alice')' without ParseException."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports(spark_mode)
         F = imports.F

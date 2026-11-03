@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 from tests.security.conftest import SECURITY_ERROR, assert_security_error
 

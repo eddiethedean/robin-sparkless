@@ -271,7 +271,7 @@ def run_sparkless(
     pair: int,
     order: int,
 ) -> dict[str, Any]:
-    from sparkless.server import SparklessServer
+    from sparkless_connect import SparklessServer
 
     for key in tuple(os.environ):
         if key.startswith("SPARKLESS_") or key in {

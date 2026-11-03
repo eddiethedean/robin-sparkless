@@ -5,7 +5,7 @@ Issue #166 reports that the unix_timestamp() function is not supported in sparkl
 even though it's a standard PySpark function. Uses get_imports from fixture only.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

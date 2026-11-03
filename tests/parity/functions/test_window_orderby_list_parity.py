@@ -4,7 +4,7 @@ PySpark parity tests for Issue #335: Window().orderBy() should accept list of co
 These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestWindowOrderByListParity:

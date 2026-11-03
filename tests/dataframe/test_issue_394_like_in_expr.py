@@ -6,7 +6,7 @@ Sparkless SQLExprParser previously raised ParseException for these expressions.
 Now parses LIKE and NOT LIKE in F.expr() for PySpark parity.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestIssue394LikeInExpr:

@@ -294,6 +294,7 @@
   "external_catalog": {
     "ArrowIpcStream": "(native signature unavailable)",
     "BatchWritableExternalCatalogProvider": "(*args, **kwargs)",
+    "ExternalCatalogOwnership": "(owner_id: 'str', read: 'bool' = True, write: 'bool' = False, batch_write: 'bool' = False) -> None",
     "ExternalCatalogProvider": "(*args, **kwargs)",
     "ExternalTableDescriptor": "(table_id: 'str', canonical_location: 'str', schema: 'T.StructType', provider: 'str', version: 'Optional[int]' = None, permissions_context: 'Optional[str]' = None, format: 'Union[ExternalTableFormat, str]' = <ExternalTableFormat.DELTA: 'delta'>) -> None",
     "ExternalTableFormat": "(value, names=None, *, module=None, qualname=None, type=None, start=1, boundary=None)",
@@ -417,10 +418,10 @@
     "xxhash64": "(c: 'ColumnOrName') -> '_ColumnType'",
     "year": "(column)"
   },
-  "server": {
-    "AsyncSparklessServer": "(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0) -> 'None'",
+  "sparkless_connect.server": {
+    "AsyncSparklessServer": "(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0, product: 'str' = 'base') -> 'None'",
     "SparklessConnect": "(*, server_options: 'Optional[Mapping[str, Any]]' = None) -> 'None'",
-    "SparklessServer": "(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0) -> 'None'",
+    "SparklessServer": "(host: 'str' = '127.0.0.1', port: 'int' = 0, executable_path: 'Optional[str]' = None, startup_timeout: 'float' = 30.0, shutdown_timeout: 'float' = 10.0, kill_timeout: 'float' = 5.0, env: 'Optional[Dict[str, str]]' = None, connect_host: 'str' = '127.0.0.1', connect_port: 'Optional[int]' = 0, product: 'str' = 'base') -> 'None'",
     "SparklessServerError": "(native signature unavailable)",
     "UnsupportedServerPlatformError": "(native signature unavailable)",
     "UnsupportedSparkConnectError": "(native signature unavailable)"

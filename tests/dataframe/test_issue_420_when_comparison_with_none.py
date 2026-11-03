@@ -11,7 +11,7 @@ class TestIssue420WhenComparisonWithNone:
 
     def test_when_comparison_with_none_exact_issue(self, spark, spark_mode):
         """Exact scenario from issue #420 - col <= None and col >= None skip to otherwise."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports(spark_mode).F
         df = spark.createDataFrame(
@@ -35,7 +35,7 @@ class TestIssue420WhenComparisonWithNone:
 
     def test_when_comparison_with_none_and_show(self, spark, spark_mode):
         """when() with None comparison + show() - full pipeline."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports(spark_mode).F
         df = spark.createDataFrame([{"x": 1}, {"x": 2}])

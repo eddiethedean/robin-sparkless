@@ -14,7 +14,7 @@ Then run with Sparkless to verify parity:
 Uses get_imports from fixture only.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

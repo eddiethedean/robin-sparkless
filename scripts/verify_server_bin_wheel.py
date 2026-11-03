@@ -98,6 +98,7 @@ def _smoke_installed_binary(
         connect=connect,
         connect_client=connect_client,
         client_python=client_python,
+        product=product,
     )
 
 
@@ -165,16 +166,21 @@ def _verify_instance(
         if not isinstance(capabilities, dict):
             raise RuntimeError("installed server did not report capabilities")
         if capabilities.get("server_product") != product_id:
-            raise RuntimeError("installed capabilities reported the wrong product identity")
+            raise RuntimeError(
+                "installed capabilities reported the wrong product identity"
+            )
         if capabilities.get("execution_backend") != "polars":
-            raise RuntimeError("installed capabilities reported the wrong execution backend")
+            raise RuntimeError(
+                "installed capabilities reported the wrong execution backend"
+            )
         sources = capabilities.get("data_sources")
         owner_modes = capabilities.get("duckdb_owner_modes")
         if not isinstance(sources, list) or not isinstance(owner_modes, list):
             raise RuntimeError("installed server reported invalid source capabilities")
         if has_duckdb:
             if "duckdb" not in sources or not {
-                "standalone-read-only", "shared-quack-owner"
+                "standalone-read-only",
+                "shared-quack-owner",
             }.issubset(owner_modes):
                 raise RuntimeError("DuckDB product did not advertise both source modes")
         elif sources or owner_modes:
@@ -461,12 +467,19 @@ def verify_wheel(
         contents = set(archive.namelist())
     if product == "base":
         forbidden = [
-            name for name in contents
+            name
+            for name in contents
             if "quack" in name.lower() or "duckdb" in name.lower()
         ]
         if forbidden:
-            raise ValueError("base server wheel contains DuckDB/Quack files: {}".format(forbidden[:3]))
-        if not any(name.startswith("sparkless_server/sparkless-server") for name in contents):
+            raise ValueError(
+                "base server wheel contains DuckDB/Quack files: {}".format(
+                    forbidden[:3]
+                )
+            )
+        if not any(
+            name.startswith("sparkless_server/sparkless-server") for name in contents
+        ):
             raise ValueError("base server wheel has no packaged executable")
     else:
         required_payload = {
@@ -475,8 +488,12 @@ def verify_wheel(
             "sparkless_server_duckdb/NOTICE-quack.txt",
         }
         if not required_payload.issubset(contents):
-            raise ValueError("DuckDB server wheel is missing its executable, extension, or notice")
-        if any(name.startswith("sparkless_server/sparkless-server") for name in contents):
+            raise ValueError(
+                "DuckDB server wheel is missing its executable, extension, or notice"
+            )
+        if any(
+            name.startswith("sparkless_server/sparkless-server") for name in contents
+        ):
             raise ValueError("DuckDB wheel must not bundle the base product executable")
 
     with tempfile.TemporaryDirectory(prefix="sparkless-server-product-") as temporary:
@@ -485,7 +502,9 @@ def verify_wheel(
         python = venv_path / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         packages = [str(path.resolve()) for path in (dependency_wheels or [])]
         packages.append(str(wheel))
-        subprocess.run([str(python), "-m", "pip", "install", "--no-deps", *packages], check=True)
+        subprocess.run(
+            [str(python), "-m", "pip", "install", "--no-deps", *packages], check=True
+        )
         smoke_command = [
             str(python),
             str(Path(__file__).resolve()),
@@ -511,8 +530,7 @@ def main() -> int:
     parser.add_argument(
         "--project",
         type=Path,
-        default=Path(__file__).resolve().parents[1]
-        / "python/server-bin/pyproject.toml",
+        help="server product pyproject.toml (defaults based on --product)",
     )
     parser.add_argument("--smoke-installed", metavar="VERSION")
     parser.add_argument(
@@ -544,7 +562,10 @@ def main() -> int:
     parser.add_argument("--version", help="expected native binary version")
     parser.add_argument("--product", choices=tuple(PRODUCTS), default="base")
     parser.add_argument(
-        "--dependency-wheel", action="append", type=Path, default=[],
+        "--dependency-wheel",
+        action="append",
+        type=Path,
+        default=[],
         help="install this exact dependency wheel in the isolated verifier venv",
     )
     args = parser.parse_args()
@@ -584,7 +605,13 @@ def main() -> int:
             verify_wheel(
                 args.wheel,
                 args.platform,
-                args.project,
+                args.project
+                or Path(__file__).resolve().parents[1]
+                / (
+                    "python/server-duckdb/pyproject.toml"
+                    if args.product == "duckdb"
+                    else "python/server/pyproject.toml"
+                ),
                 connect=args.connect,
                 connect_client=args.connect_client,
                 duckdb_source=args.duckdb_source,

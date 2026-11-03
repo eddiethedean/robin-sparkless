@@ -11,7 +11,7 @@ Quick Start (for external projects):
 
 1. Add to your conftest.py:
 
-    pytest_plugins = ["sparkless.testing"]
+    pytest_plugins = ["sparkless_testing"]
 
 2. Use the `spark` fixture in your tests:
 
@@ -30,7 +30,7 @@ Quick Start (for external projects):
 
 For more control, use the module directly:
 
-    from sparkless.testing import Mode, create_session, get_imports
+    from sparkless_testing import Mode, create_session, get_imports
 
     spark = create_session(mode=Mode.SPARKLESS)
     imports = get_imports()
@@ -38,7 +38,7 @@ For more control, use the module directly:
 
 Example usage with comparison utilities:
 
-    from sparkless.testing import assert_dataframes_equal, assert_rows_equal
+    from sparkless_testing import assert_dataframes_equal, assert_rows_equal
 
     def test_transform(spark):
         df1 = transform_a(spark)

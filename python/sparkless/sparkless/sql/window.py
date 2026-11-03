@@ -45,7 +45,7 @@ def _partition_names(cols: PartitionOrOrderSpec) -> List[str]:
 
 def _normalize_sort_keys(cols: PartitionOrOrderSpec) -> List[_SortKey]:
     # Lazy import inside to avoid cycles
-    from sparkless.sql.functions import _SortKey as _FnSortKey
+    from sparkless.sql.functions._window import _SortKey as _FnSortKey
     from sparkless import (
         Column as _Column,
     )  # avoid circular import at module import time

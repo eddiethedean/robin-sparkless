@@ -7,7 +7,7 @@ Now parses REGEXP and RLIKE in F.expr() for PySpark parity.
 https://github.com/eddiethedean/sparkless/issues/433
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_filter_regexp_exact_issue_433(spark, spark_mode):

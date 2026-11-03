@@ -5,7 +5,7 @@ Tests validate that Sparkless groupBy operations behave identically to PySpark.
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestGroupByParity(ParityTestBase):

@@ -10,7 +10,7 @@ Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 # Get imports from fixture (same logic for both backends)
 imports = get_imports()
@@ -169,7 +169,7 @@ class TestNaFill:
 
     def test_na_fill_different_types(self, spark):
         """Test .na.fill() with different data types."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType
@@ -280,7 +280,7 @@ class TestNaFill:
 
     def test_na_fill_empty_dataframe(self, spark):
         """Test .na.fill() on empty DataFrame."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType
@@ -345,7 +345,7 @@ class TestNaFill:
 
     def test_na_fill_subset_string(self, spark):
         """Test .na.fill() with subset as string (single column)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType
@@ -376,7 +376,7 @@ class TestNaFill:
 
     def test_na_fill_subset_tuple(self, spark):
         """Test .na.fill() with subset as tuple."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType
@@ -406,7 +406,7 @@ class TestNaFill:
 
     def test_na_fill_all_nulls(self, spark):
         """Test .na.fill() when all values are null."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType

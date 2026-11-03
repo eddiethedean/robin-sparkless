@@ -9,7 +9,7 @@ class TestIssue294HourMinuteSecondStringTimestamps:
 
     def test_hour_minute_second_from_string_timestamps(self, spark):
         """Test hour/minute/second extraction from string timestamps (issue example)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -61,7 +61,7 @@ class TestIssue294HourMinuteSecondStringTimestamps:
 
     def test_hour_minute_second_with_different_timezone_formats(self, spark):
         """Test hour/minute/second with various timezone formats."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -113,7 +113,7 @@ class TestIssue294HourMinuteSecondStringTimestamps:
 
     def test_hour_minute_second_with_different_formats(self, spark):
         """Test hour/minute/second with different timestamp string formats."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -166,7 +166,7 @@ class TestIssue294HourMinuteSecondStringTimestamps:
 
     def test_hour_minute_second_in_select(self, spark):
         """Test hour/minute/second in select context."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -204,7 +204,7 @@ class TestIssue294HourMinuteSecondStringTimestamps:
 
     def test_hour_minute_second_with_filter(self, spark):
         """Test hour/minute/second with filter operations."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -237,7 +237,7 @@ class TestIssue294HourMinuteSecondStringTimestamps:
 
     def test_hour_minute_second_with_null_values(self, spark):
         """Test hour/minute/second with null timestamp values."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -280,7 +280,7 @@ class TestIssue294HourMinuteSecondStringTimestamps:
 
     def test_hour_minute_second_in_groupby_agg(self, spark):
         """Test hour/minute/second in groupBy aggregation context."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F

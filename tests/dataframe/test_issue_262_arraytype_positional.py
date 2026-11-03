@@ -6,7 +6,7 @@ like ArrayType(DoubleType(), True) without raising a TypeError about specifying
 both 'elementType' and 'element_type'.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 # Get imports based on backend
 imports = get_imports()

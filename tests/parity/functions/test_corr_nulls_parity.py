@@ -7,7 +7,7 @@ gives correlation 1.0, not ~0.53.
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestCorrNullsParity(ParityTestBase):

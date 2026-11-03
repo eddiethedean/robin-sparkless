@@ -5,7 +5,7 @@ Uses PySpark APIs only: when().otherwise(), arithmetic (+, -, *, /, %).
 PySpark & | ~ on Column are boolean; bitwise tests on numeric CaseWhen removed.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

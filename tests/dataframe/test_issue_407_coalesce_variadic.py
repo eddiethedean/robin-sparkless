@@ -6,7 +6,7 @@ PySpark F.coalesce(col1, col2, ...) accepts multiple Column arguments.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

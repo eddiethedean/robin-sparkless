@@ -1,3 +1,3 @@
 """Use the installed testing plugin for every public pytest example."""
 
-pytest_plugins = ["sparkless.testing.plugin"]
+pytest_plugins = ["sparkless_testing.plugin"]

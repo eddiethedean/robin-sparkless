@@ -11,7 +11,7 @@ class TestIssue291PowerNegativeExponent:
 
     def test_power_negative_exponent_exact_issue(self, spark, spark_mode):
         """Exact scenario from issue - 2.0 ** (-F.col("Value"))."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports(spark_mode).F
         df = spark.createDataFrame([{"Value": 2}, {"Value": 3}])
@@ -23,7 +23,7 @@ class TestIssue291PowerNegativeExponent:
 
     def test_power_negative_exponent_multiple_values(self, spark, spark_mode):
         """Power with negative exponent across more values."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports(spark_mode).F
         df = spark.createDataFrame(
@@ -40,7 +40,7 @@ class TestIssue291PowerNegativeExponent:
 
     def test_power_negative_exponent_in_select(self, spark, spark_mode):
         """Power with negative exponent in select()."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports(spark_mode).F
         df = spark.createDataFrame([{"Exp": 2}, {"Exp": 3}])
@@ -52,7 +52,7 @@ class TestIssue291PowerNegativeExponent:
 
     def test_power_negative_exponent_with_show(self, spark, spark_mode):
         """Power with negative exponent + show() - full pipeline."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports(spark_mode).F
         df = spark.createDataFrame([{"x": 1}, {"x": 2}])
@@ -65,7 +65,7 @@ class TestIssue291PowerNegativeExponent:
 
     def test_unary_minus_standalone_in_withcolumn(self, spark, spark_mode):
         """Standalone unary minus -(-F.col("Value")) to verify unary path works."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports(spark_mode).F
         df = spark.createDataFrame([{"Value": 5}, {"Value": -3}])

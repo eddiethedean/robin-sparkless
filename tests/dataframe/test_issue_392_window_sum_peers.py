@@ -11,7 +11,7 @@ Uses get_imports() for backend-aware F/Window - runs with both
 sparkless and PySpark (SPARKLESS_TEST_MODE=pyspark).
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _norm(val):

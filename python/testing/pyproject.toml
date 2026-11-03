@@ -1,0 +1,23 @@
+[project]
+name = "sparkless-testing"
+version = "4.19.0"
+description = "Backend-independent pytest helpers for Sparkless and PySpark test suites."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/eddiethedean/robin-sparkless"
+Documentation = "https://robin-sparkless.readthedocs.io/"
+Repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["sparkless_testing"]
+
+[tool.setuptools.package-data]
+sparkless_testing = ["py.typed"]

@@ -13,7 +13,7 @@ search:
 
 ## Outcome
 
-**Current 4.19 revision:** [SS-23](23-product-and-package-separation.md) requires extracting the implemented launcher/helper into `sparkless-connect`, dedicated base/DuckDB server distributions, and compatibility forwarding for existing imports. This supersedes the older helper/package placement below. Reuse the working lifecycle code and pass engine-free server/client installs and V59 candidate acceptance before release.
+**Current 4.19 revision:** [SS-23](23-product-and-package-separation.md) extracts the launcher/helper into `sparkless-connect` and uses dedicated base/DuckDB server distributions. Phase 6 retires `sparkless.server` and `sparkless-server-bin` forwarding during the approved breaking-change window. Reuse the working lifecycle code and pass the isolated product installs and V59 candidate acceptance before release.
 
 Add optional sync/async lifecycle support in the existing sparkless package for an owned native executable.
 

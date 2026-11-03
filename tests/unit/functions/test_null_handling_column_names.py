@@ -1,4 +1,4 @@
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_coalesce_column_name_matches_expected(spark) -> None:

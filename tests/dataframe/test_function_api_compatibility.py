@@ -6,7 +6,7 @@ class TestFunctionAPIs:
 
     def test_current_date_is_function_not_method(self, spark):
         """Test that current_date is a function, not DataFrame method."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -23,7 +23,7 @@ class TestFunctionAPIs:
 
     def test_current_timestamp_is_function_not_method(self, spark):
         """Test that current_timestamp is a function, not DataFrame method."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -40,7 +40,7 @@ class TestFunctionAPIs:
 
     def test_functions_are_static_methods(self, spark):
         """Test that functions are accessible as static methods."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -60,7 +60,7 @@ class TestFunctionAPIs:
 
     def test_function_signatures_match_pyspark(self, spark):
         """Test that function signatures match PySpark patterns."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F

@@ -255,10 +255,16 @@ def _timestamp_timezone_free_type(data_type, arrow_type, pa):
         fields = []
         for field in arrow_type:
             try:
-                declared = data_type[field.name].dataType
+                declared_field = data_type[field.name]
             except KeyError:
                 fields.append(field)
                 continue
+            if isinstance(declared_field, T.StructType):
+                # Spark-compatible indexing can return nested struct metadata for
+                # integer/slice keys; name lookup is a field in this loop.
+                fields.append(field)
+                continue
+            declared = declared_field.dataType
             child_type = _timestamp_timezone_free_type(declared, field.type, pa)
             fields.append(
                 pa.field(
@@ -390,7 +396,10 @@ def _write_result_to_parts(result):
         raise TypeError(
             "provider.write_table_batches must return ExternalTableWriteResult"
         )
-    if result.committed_version is not None and type(result.committed_version) is not int:
+    if (
+        result.committed_version is not None
+        and type(result.committed_version) is not int
+    ):
         raise TypeError("committed_version must be an integer or None")
     if result.provider_commit_id is not None and not isinstance(
         result.provider_commit_id, str

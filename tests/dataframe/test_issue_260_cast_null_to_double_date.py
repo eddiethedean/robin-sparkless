@@ -7,7 +7,7 @@ Robin (Polars) previously raised RuntimeError; we now support it.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

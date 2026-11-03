@@ -4,7 +4,7 @@ PySpark parity tests for Issue #330: Struct field selection with alias.
 These tests verify that Sparkless behavior matches PySpark behavior.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _struct_df_schema(imports):

@@ -34,7 +34,7 @@ precision/timezone/conversion semantics must be tested at those boundaries.
 | Cooperative cancellation | `sparkless.SparklessCancelledError`; wait for action termination |
 | External provider | `SparklessExternalCatalogError` with category, code, operation, retryability and safe context; follow provider contract |
 | Unsupported behavior | Explicit error, NotImplementedError, or absent API; consult support matrix |
-| Server startup/control | `sparkless.server.SparklessServerError`; include bounded diagnostics |
+| Server startup/control | `sparkless_connect.SparklessServerError`; include bounded diagnostics |
 | HTTP | Check HTTP status **and** JSON `status`; SQL errors can use HTTP200 |
 | Connect | gRPC status; client/session/operation identity constraints apply |
 

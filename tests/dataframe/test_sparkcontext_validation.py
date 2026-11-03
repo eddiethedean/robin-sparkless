@@ -8,7 +8,7 @@ for these when called from Python.)
 
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 SparkSession = imports.SparkSession

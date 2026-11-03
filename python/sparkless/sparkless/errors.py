@@ -1,7 +1,7 @@
 """Exception aliases for PySpark compatibility.
 
 These names are imported throughout the codebase and in tests. They expose
-native exception classes from `sparkless._native`. When the native module is
+native exception classes from `sparkless_native._native`. When the native module is
 unavailable (e.g. in some tooling contexts), they fall back to `RuntimeError`.
 """
 

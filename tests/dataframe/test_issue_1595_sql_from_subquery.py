@@ -7,7 +7,7 @@ previously rejected them with "only plain table names are supported in FROM".
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 F = get_imports().F
 

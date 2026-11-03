@@ -42,7 +42,7 @@ def convert(path: Path) -> bool:
 
     # 2) Add get_imports block after first import block if needed
     if (needs_F or needs_Window) and "get_imports" not in text:
-        block = "from sparkless.testing import get_imports\n\n_imports = get_imports()\nF = _imports.F\n"
+        block = "from sparkless_testing import get_imports\n\n_imports = get_imports()\nF = _imports.F\n"
         if needs_Window:
             block += "Window = _imports.Window\n"
         # Insert after first 'from tests.' or 'from __future__'

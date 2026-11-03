@@ -3,7 +3,7 @@
 These tests ensure that Sparkless's log() function behavior matches PySpark exactly.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestLogFloatConstantParity:

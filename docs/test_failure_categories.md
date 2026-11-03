@@ -16,7 +16,7 @@ Summary of **~605** failing tests (from `pytest tests/ -n 10` with package insta
 
 ## 1. Missing native API / bindings (≈33+ failures)
 
-**Error pattern:** `AttributeError: module 'sparkless._native' has no attribute '...'`
+**Error pattern:** `AttributeError: module 'sparkless_native._native' has no attribute '...'`
 
 | Missing API | Affected area | Test files (examples) |
 |-------------|----------------|------------------------|

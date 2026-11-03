@@ -7,7 +7,7 @@ filters like F.to_date(F.col("end_date"), "yyyy-MM-dd") == "9999-12-31".
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 F = get_imports().F
 

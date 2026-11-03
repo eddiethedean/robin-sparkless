@@ -9,7 +9,7 @@ This module tests that array() function accepts all parameter formats that PySpa
 Uses conftest spark fixture so PySpark mode gets correct backend (type coercion may differ).
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 import pytest
 

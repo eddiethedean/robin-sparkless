@@ -52,7 +52,7 @@ Then use `SparklessConnect`; it returns the actual `pyspark-client` session and 
 stop that session before shutting down the server:
 
 ```python
-from sparkless.server import SparklessConnect
+from sparkless_connect import SparklessConnect
 
 with SparklessConnect() as spark:
     assert spark.range(10).filter("id > 5").count() == 4
@@ -136,7 +136,7 @@ SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","quack_uri":"quack:localhost:949
 
 For an installed Python product, use `sparkless-server-duckdb[connect]` and
 `sparkless_server_duckdb.SparklessServer` (or its product-bound `SparklessConnect`). The legacy
-`sparkless.server` helper keeps the base default even when both products are installed.
+`sparkless_connect` helper keeps the base default even when both products are installed.
 
 Pass the JSON through the deployment's secret mechanism so the token does not appear in a shell
 history. Configure Quack authorization on the owner to restrict that token to the intended

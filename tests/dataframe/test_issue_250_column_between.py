@@ -7,7 +7,7 @@ now exposes between so df.filter(col("v").between(lit(20), lit(30))) works.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

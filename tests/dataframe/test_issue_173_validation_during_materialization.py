@@ -7,7 +7,7 @@ This issue occurs when:
 4. Validation uses the final schema (after select) instead of the schema at queue time
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

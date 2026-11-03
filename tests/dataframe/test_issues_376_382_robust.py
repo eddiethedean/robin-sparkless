@@ -16,7 +16,7 @@ multi-JOIN, compound join condition, select t1.id resolution).
 Uses get_imports from fixture only.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 _imports = get_imports()

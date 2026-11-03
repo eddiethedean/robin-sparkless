@@ -5,7 +5,7 @@ Issue #1481: months_between() was using total_days/31 instead of PySpark's
 formula: (year1-year2)*12 + (month1-month2) + (day1-day2)/31.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 F = get_imports().F
 

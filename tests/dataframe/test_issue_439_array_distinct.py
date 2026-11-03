@@ -11,7 +11,7 @@ Run with PySpark first: SPARKLESS_TEST_MODE=pyspark pytest tests/test_issue_439_
 Then mock: pytest tests/test_issue_439_array_distinct.py -v
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _row_val(row: object, key: str) -> object:

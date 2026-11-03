@@ -49,6 +49,7 @@ pyspark = ["pyspark>=3.5,<3.6", "delta-spark>=3.0,<4"]
 # PySpark 4.x oracle (Java 17, Python 3.11+)
 pyspark4 = ["pyspark>=4.0,<4.2", "delta-spark>=4.0,<5"]
 # Install the separately built, platform-specific native HTTP server executable.
+testing = ["sparkless-testing==4.19.0"]
 server = ["sparkless-server==4.19.0"]
 connect = ["sparkless-server[connect]==4.19.0"]
 server-duckdb = ["sparkless-server-duckdb==4.19.0"]
@@ -77,7 +78,7 @@ where = ["sparkless"]
 include = ["sparkless*"]
 
 [tool.setuptools.package-data]
-sparkless = ["py.typed", "*.pyi"]
+sparkless = ["py.typed"]
 
 [tool.mypy]
 python_version = "3.11"

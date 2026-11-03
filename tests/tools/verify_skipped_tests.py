@@ -13,7 +13,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from sparkless.testing import get_imports  # noqa: E402
+from sparkless_testing import get_imports  # noqa: E402
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

@@ -7,7 +7,7 @@ F.mean() on string columns. Sparkless now coerces string columns to numeric
 (PySpark parity).
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _norm(val):

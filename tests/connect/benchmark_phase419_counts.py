@@ -18,7 +18,7 @@ from typing import Any
 from pyspark.sql import functions as F
 from pyspark.sql.connect.session import SparkSession as ConnectSession
 
-from sparkless.server import SparklessConnect
+from sparkless_connect import SparklessConnect
 
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -7,7 +7,7 @@ PySpark allows arithmetic operations on window function results:
 This module tests that sparkless supports these operations.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestWindowFunctionArithmetic:

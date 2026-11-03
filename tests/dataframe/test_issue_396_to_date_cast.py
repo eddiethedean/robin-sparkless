@@ -6,7 +6,7 @@ DateNumber is LongType. Sparkless was rejecting it because validation checked
 the source column type instead of recognizing the cast-to-string.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestIssue396ToDateCast:

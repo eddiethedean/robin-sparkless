@@ -9,7 +9,7 @@ This test verifies that to_timestamp() actually parses string dates into
 timestamp values, not just returns None.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 F = imports.F

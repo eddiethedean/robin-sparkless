@@ -8,7 +8,7 @@ on "a,b,c" yields ['a', 'b,c'].
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 from tests.utils import _row_to_dict
 
 

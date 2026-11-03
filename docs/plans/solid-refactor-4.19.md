@@ -5,10 +5,9 @@ search:
 
 # Repository-wide SOLID refactor for 4.19.0
 
-Status: adopted for 4.19.0. P0 inventory, P1/P2 contracts, and local P4 contract checks
-passed on 2026-11-02; live JDBC integration remains open, as does the protocol-neutral
-Connect execution boundary. P3's targeted acceptance gate is complete. P6/P7 work and
-exact-candidate release acceptance remain outstanding.
+Status: adopted for 4.19.0. Phases 1–6 and their local implementation gates are closed;
+P7 exact-candidate release acceptance remains open. Live JDBC integration and the
+protocol-neutral Connect execution boundary remain open as separately tracked work.
 
 Initial source inventory: working tree inspected on 2026-11-02 at commit `1292e3dd`,
 including existing uncommitted product/source changes. File sizes below describe that
@@ -599,6 +598,48 @@ RSS ceiling.
 `cargo fmt --all -- --check` and `git diff --check` pass. The exact-candidate
 distribution, registry, supported-platform, full differential, and publication gates
 remain governed by the release plan and are not implied by closing P0/P1/P2/P4.
+
+### Phase 6 — Python API and package boundary closure (2026-11-03)
+
+The SQL functions API is now a package facade over private category modules; the
+supported `sparkless.sql.functions` import and exported name list remain stable.
+The shared server launcher is split into synchronous, asynchronous, client, and
+common lifecycle modules while `sparkless_connect.server` remains its public entry
+point. Testing helpers and the pytest plugin are independently packaged as
+`sparkless-testing` / `sparkless_testing`, with `sparkless[testing]` as the API
+extra. The canonical native extension is `sparkless_native._native`; the duplicate
+stub and `sparkless._native` alias are removed. The 4.19 graph no longer includes
+`sparkless.server` or `sparkless-server-bin`, and current docs/examples/tests have
+migrated to the owning packages.
+
+The local Phase 6 gates passed on 2026-11-03:
+
+- The ordinary Python suite passed (3,163 passed, 65 skipped, 7 subtests); the
+  parity suite passed (320 passed, 4 skipped). The release metadata, workflow,
+  public inventory, and server-wheel verifier tests passed.
+- The native wheel was rebuilt, and the canonical stub/export checker matched its
+  extension. Mypy passed across 46 API, testing, and Connect source files. Ruff,
+  documentation link checks (197 files), and generated API documentation checks
+  passed.
+- Fresh API/native, Connect, and testing wheels installed into clean targets, and
+  API, Connect, and testing source distributions built. The API runtime witness
+  passed SQL, Parquet, and Delta checks; installed version and retired-path checks
+  passed. `sparkless[testing]` resolved to the separate testing wheel, whose import
+  boundary passed with backend imports blocked.
+- Client-only and local-only install profiles passed. Base and DuckDB server wheels
+  passed separate product identity, HTTP, Connect, port-collision, and shutdown
+  checks. The base package passed synchronous and asynchronous launcher lifecycle
+  checks, and the combined base/DuckDB install profile passed. The base executable
+  was rebuilt in an isolated Cargo target directory; release automation builds both
+  server products in separate target directories and verifies their feature graphs.
+  The Quack extension matched the pinned DuckDB 2.0.0 archive digest.
+
+This closes the Phase 6 source and local packaging gates on the local macOS arm64
+runtime. Cross-platform exact-candidate wheel inventory, supported-platform
+installs, publication, and post-publication hash verification remain P7 release
+acceptance checks. DuckDB remains read-only in 4.19; DuckDB writes and execution,
+live JDBC service roundtrips, and the protocol-neutral typed Connect boundary remain
+outside this closure.
 
 ## 7. Breaking-change ledger
 

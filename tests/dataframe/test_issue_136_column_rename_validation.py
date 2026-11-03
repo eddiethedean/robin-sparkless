@@ -4,7 +4,7 @@ Test for issue #136: Column rename/transform validation. Uses get_imports from f
 
 from datetime import datetime
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

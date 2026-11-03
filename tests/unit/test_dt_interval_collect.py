@@ -7,7 +7,7 @@ from datetime import timedelta
 import pytest
 from sparkless.sql.types import DayTimeIntervalType, StructField, StructType
 
-pytest_plugins = ["sparkless.testing"]
+pytest_plugins = ["sparkless_testing"]
 
 # 1 day in microseconds (PySpark internal representation)
 ONE_DAY_MICROS = 86_400_000_000

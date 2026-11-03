@@ -5,7 +5,7 @@ Sparkless previously stored WindowFunction object instead of evaluating it,
 and select(edge.apples_div_count) failed with ColumnNotFoundError.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _get_col(row, *names):

@@ -14,7 +14,7 @@ https://github.com/eddiethedean/sparkless/issues/431
 import datetime
 
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_date_less_than_datetime(spark, spark_mode):

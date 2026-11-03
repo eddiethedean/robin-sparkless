@@ -5,7 +5,7 @@ Test for Issue #215: Row kwargs-style initialization. Uses get_imports from fixt
 import pytest
 from datetime import date
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

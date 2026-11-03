@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 DateType = get_imports().DateType
 IntegerType = get_imports().IntegerType

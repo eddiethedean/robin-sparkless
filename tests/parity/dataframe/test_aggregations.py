@@ -5,7 +5,7 @@ Tests validate that Sparkless aggregation operations behave identically to PySpa
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestAggregationsParity(ParityTestBase):

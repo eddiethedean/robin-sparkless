@@ -4,7 +4,7 @@ Alias output names (when().otherwise().alias('result'), rank().over([]).alias('r
 etc.) must not be resolved as input columns; they are preserved by resolve_expr_column_names (see #200).
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 _imports = get_imports()

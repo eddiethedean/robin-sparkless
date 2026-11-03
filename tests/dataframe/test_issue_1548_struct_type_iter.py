@@ -16,7 +16,7 @@ def test_dataframe_schema_is_iterable(spark) -> None:
 
 def test_struct_type_iter_and_len_direct() -> None:
     """StructType constructed directly supports iteration and len."""
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     T = get_imports()
     schema = T.StructType(

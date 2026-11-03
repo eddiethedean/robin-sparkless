@@ -19,7 +19,7 @@ class TestIssue371CastDecimal:
 
     def test_with_column_cast_decimal_10_0(self, spark):
         """Exact scenario from issue #371: withColumn + cast('Decimal(10,0)')."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame(
@@ -39,7 +39,7 @@ class TestIssue371CastDecimal:
 
     def test_cast_decimal_lowercase(self, spark):
         """cast('decimal(10,0)') also works (case insensitive)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"x": 5}])
@@ -49,7 +49,7 @@ class TestIssue371CastDecimal:
 
     def test_cast_decimal_in_select(self, spark):
         """Cast to Decimal inside select()."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"a": 1}, {"a": 2}, {"a": 3}])
@@ -60,7 +60,7 @@ class TestIssue371CastDecimal:
 
     def test_cast_decimal_different_precision_scale(self, spark):
         """Decimal(5,2) and Decimal(38,2) parse and apply."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"x": 100}, {"x": 200}])
@@ -76,7 +76,7 @@ class TestIssue371CastDecimal:
 
     def test_cast_decimal_after_filter(self, spark):
         """Cast to Decimal after filter()."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame(
@@ -92,7 +92,7 @@ class TestIssue371CastDecimal:
 
     def test_cast_decimal_with_nulls(self, spark):
         """Column with nulls cast to Decimal; nulls preserved."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"x": 1}, {"x": None}, {"x": 3}])
@@ -105,7 +105,7 @@ class TestIssue371CastDecimal:
 
     def test_cast_float_to_decimal(self, spark):
         """Float column cast to Decimal(10,1); first row exact, second row backend-dependent rounding."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"x": 10.5}, {"x": 20.25}])
@@ -119,7 +119,7 @@ class TestIssue371CastDecimal:
 
     def test_cast_decimal_show_then_collect(self, spark):
         """show() then collect() returns same data."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"a": 7}, {"a": 8}])
@@ -133,7 +133,7 @@ class TestIssue371CastDecimal:
 
     def test_cast_decimal_single_digit_precision(self, spark):
         """Decimal(1,0) parses and applies (single digit)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame([{"x": 9}])

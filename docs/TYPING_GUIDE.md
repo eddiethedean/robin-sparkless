@@ -3,7 +3,7 @@
 This project targets **Python 3.11+** and maintains type hints for both:
 
 - The public Python package `sparkless` (PySpark-like API), and
-- The Rust-backed native module exposed via `sparkless._native`.
+- The Rust-backed native module exposed via `sparkless_native._native`.
 
 Type checking is performed with **mypy** and **pyright**.
 
@@ -40,9 +40,9 @@ Type checking is performed with **mypy** and **pyright**.
 
 - Use `if TYPE_CHECKING:` for **heavy or circular imports**, especially:
   - `SparkSession`, `DataFrame`, `Column`, `WindowSpec`, and schema types.
-  - Native bindings in `sparkless._native` when only needed for hints.
+  - Native bindings in `sparkless_native._native` when only needed for hints.
 - At runtime, prefer importing:
-  - `sparkless._native` for low-level functions, and
+  - `sparkless_native._native` for low-level functions, and
   - High‑level APIs from `sparkless` or `sparkless.sql.*` for user-facing code.
 
 ### Common aliases and patterns

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.19.0] - 2026-11-01
 
+**Breaking changes:** 4.19 reorganizes Python package boundaries despite the minor-version number.
+
 ### Added
 
 - **Optional DuckDB table sources** — configured standalone and shared Quack owners can serve typed, read-only tables to Spark Connect through bounded, cancellable Arrow batches. The supported plan subset includes filtering, projection, limits, counts, same-owner inner joins, and grouped count/sum.
@@ -17,7 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Separate server products** — split the 4.19 server into a DuckDB-free `sparkless-server` product and a `sparkless-server-duckdb` product that owns the read-only DuckDB source and matching Quack extension. Both execute through Polars in 4.19 and report distinct product/source capabilities.
-- **Separate Python server packages** — move launcher helpers into `sparkless-connect`, keep local `sparkless` focused on the local engine, and retain `sparkless.server` and `sparkless-server-bin` as compatibility forwards. Existing source users select `sparkless_server_duckdb` explicitly.
+- **Separate Python server packages** — move launcher helpers into `sparkless-connect`, keep local `sparkless` focused on the local engine, and remove the `sparkless.server` and `sparkless-server-bin` compatibility forwards. Import shared helpers from `sparkless_connect`, or select a product-bound helper from `sparkless_server` or `sparkless_server_duckdb`.
+- **Standalone testing helpers** — publish the backend-independent pytest plugin and utilities as `sparkless-testing`; use `sparkless_testing` or install `sparkless[testing]`.
+- **Canonical native import** — remove the `sparkless._native` bridge and its duplicate typing stub. Direct extension consumers use `sparkless_native._native`; ordinary applications import the `sparkless` API.
+- **Private SQL function modules and launcher modules** — split implementations by responsibility while keeping the supported `sparkless.sql.functions` and `sparkless_connect.server` entry points.
 - **Arrow export and range counts** — consume range and local-relation batches in bounded columnar chunks and use an exact fast path for supported dynamic integer range counts.
 - **Connect operation cleanup** — `ReleaseAll` for a completed non-reattachable query now frees its idempotency and replay history.
 

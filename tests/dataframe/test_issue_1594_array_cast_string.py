@@ -7,7 +7,7 @@ PySpark stringifies arrays as `[elem1, elem2]`; sparkless previously raised
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 F = get_imports().F
 ArrayType = get_imports().ArrayType

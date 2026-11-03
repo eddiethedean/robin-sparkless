@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test script to verify notebook code works."""
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 import random
 from datetime import datetime, timedelta
 import time

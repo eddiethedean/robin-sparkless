@@ -59,7 +59,7 @@ PYPI_PLATFORMS_BY_VERSION = {
         "sparkless": PYPI_PLATFORMS["sparkless"],
     },
     "4.19.0": {
-        "sparkless-server-bin": {"any"},
+        "sparkless-testing": {"any"},
         "sparkless": {"any"},
     },
 }
@@ -69,7 +69,6 @@ SPLIT_PYPI_PLATFORMS = {
         PYPI_PLATFORMS["sparkless"] - {"manylinux_2_17_x86_64.manylinux2014_x86_64"}
         | {"manylinux2014_x86_64.manylinux_2_17_x86_64"}
     ),
-    "sparkless-server-bin": PYPI_PLATFORMS_BY_VERSION["4.18.0"]["sparkless-server-bin"],
 }
 CRATES = (
     "spark-sql-parser",
@@ -237,10 +236,7 @@ def validate_pypi_release(
             )
         )
     expected_sdists = (
-        1
-        if project in {"sparkless", "sparkless-native"}
-        or (project == "sparkless-server-bin" and tuple(map(int, version.split("."))) >= (4, 19, 0))
-        else 0
+        1 if project in {"sparkless", "sparkless-native", "sparkless-testing"} else 0
     )
     if sdist_count != expected_sdists:
         raise ValueError(
@@ -308,9 +304,15 @@ def verify_public_release(
     native_directory: Path | None = None,
     engine_version: str | None = None,
     product_directories: dict[str, Path] | None = None,
+    testing_directory: Path | None = None,
 ) -> None:
     component_version = engine_version or version
-    projects = ["sparkless-server-bin", "sparkless"]
+    is_split_graph = tuple(map(int, version.split("."))) >= (4, 19, 0)
+    projects = (
+        ["sparkless", "sparkless-testing"]
+        if is_split_graph
+        else ["sparkless-server-bin", "sparkless"]
+    )
     if native_directory is not None:
         projects.insert(1, "sparkless-native")
     for project in projects:
@@ -320,6 +322,7 @@ def verify_public_release(
             "sparkless-server-bin": server_bin_directory,
             "sparkless": sparkless_directory,
             "sparkless-native": native_directory,
+            "sparkless-testing": testing_directory,
         }[project]
 
         def check_pypi(
@@ -341,14 +344,23 @@ def verify_public_release(
         for project in PRODUCT_PYPI_PROJECTS_419:
             local_directory = product_directories.get(project)
             if local_directory is None:
-                raise ValueError("missing local candidate directory for {}".format(project))
+                raise ValueError(
+                    "missing local candidate directory for {}".format(project)
+                )
             url = "https://pypi.org/pypi/{}/{}/json".format(project, component_version)
 
-            def check_product(project=project, local_directory=local_directory, url=url):
+            def check_product(
+                project=project, local_directory=local_directory, url=url
+            ):
                 data = _fetch_json(url)
                 info = data.get("info", {})
-                if info.get("version") != component_version or info.get("name", "").lower().replace("_", "-") != project:
-                    raise ValueError("PyPI returned mismatched metadata for {}".format(project))
+                if (
+                    info.get("version") != component_version
+                    or info.get("name", "").lower().replace("_", "-") != project
+                ):
+                    raise ValueError(
+                        "PyPI returned mismatched metadata for {}".format(project)
+                    )
                 local_hashes = {
                     path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in local_directory.iterdir()
@@ -359,11 +371,19 @@ def verify_public_release(
                     for item in data.get("urls", [])
                 }
                 if not local_hashes or local_hashes != published_hashes:
-                    raise ValueError("{} published filenames or hashes differ from verified inputs".format(project))
+                    raise ValueError(
+                        "{} published filenames or hashes differ from verified inputs".format(
+                            project
+                        )
+                    )
 
             _retry(check_product)
 
-    crates = CRATES + (PRODUCT_CRATES_419 if tuple(map(int, component_version.split("."))) >= (4, 19, 0) else ())
+    crates = CRATES + (
+        PRODUCT_CRATES_419
+        if tuple(map(int, component_version.split("."))) >= (4, 19, 0)
+        else ()
+    )
     for crate in crates:
         url = "https://crates.io/api/v1/crates/{}/{}".format(crate, component_version)
 
@@ -378,19 +398,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", default=VERSION)
     parser.add_argument("--server-bin-directory", type=Path)
     parser.add_argument("--sparkless-directory", type=Path)
+    parser.add_argument("--testing-directory", type=Path)
     parser.add_argument("--native-directory", type=Path)
     parser.add_argument("--connect-directory", type=Path)
     parser.add_argument("--server-base-directory", type=Path)
     parser.add_argument("--server-duckdb-directory", type=Path)
     parser.add_argument("--engine-version")
     args = parser.parse_args(argv)
-    if (args.server_bin_directory is None) != (args.sparkless_directory is None):
+    is_split_graph = tuple(map(int, args.version.split("."))) >= (4, 19, 0)
+    if is_split_graph:
+        if args.server_bin_directory is not None:
+            parser.error("4.19+ no longer publishes sparkless-server-bin")
+        if args.testing_directory is None:
+            parser.error("4.19+ release verification requires --testing-directory")
+        if args.sparkless_directory is None:
+            parser.error("4.19+ release verification requires --sparkless-directory")
+    elif (args.server_bin_directory is None) != (args.sparkless_directory is None):
         parser.error("both local distribution directories must be provided together")
     try:
         product_directories = None
-        if args.connect_directory or args.server_base_directory or args.server_duckdb_directory:
-            if not (args.connect_directory and args.server_base_directory and args.server_duckdb_directory):
-                parser.error("the Connect, base-server, and DuckDB-server directories must be provided together")
+        if (
+            args.connect_directory
+            or args.server_base_directory
+            or args.server_duckdb_directory
+        ):
+            if not (
+                args.connect_directory
+                and args.server_base_directory
+                and args.server_duckdb_directory
+            ):
+                parser.error(
+                    "the Connect, base-server, and DuckDB-server directories must be provided together"
+                )
             product_directories = {
                 "sparkless-connect": args.connect_directory,
                 "sparkless-server": args.server_base_directory,
@@ -403,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
             args.native_directory,
             args.engine_version,
             product_directories,
+            testing_directory=args.testing_directory,
         )
     except (OSError, RuntimeError, ValueError, urllib.error.URLError) as error:
         print("public release verification failed: {}".format(error))

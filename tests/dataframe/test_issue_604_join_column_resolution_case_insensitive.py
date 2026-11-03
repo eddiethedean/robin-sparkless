@@ -6,7 +6,7 @@ The result must allow resolving the key column case-insensitively (e.g. select("
 when the column is named "id"), matching the Rust join_column_resolution_case_insensitive test.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

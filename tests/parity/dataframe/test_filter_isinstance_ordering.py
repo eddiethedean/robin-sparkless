@@ -11,7 +11,7 @@ returns True for ColumnOperation objects when checked before ColumnOperation.
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _table_format_and_options(spark):

@@ -6,7 +6,7 @@ Sparkless previously returned the literal value (1) instead of counting all rows
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 imports = get_imports()

@@ -8,7 +8,7 @@ These tests work with both sparkless (mock) and PySpark backends.
 Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 # Get imports based on backend
 imports = get_imports()
@@ -249,7 +249,7 @@ class TestNaFillRobust:
 
     def test_na_fill_numeric_types(self, spark):
         """Test .na.fill() with various numeric types."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType

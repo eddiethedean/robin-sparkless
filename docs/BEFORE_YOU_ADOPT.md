@@ -48,7 +48,7 @@ See [Production deployment](PRODUCTION.md) and [PySpark differences — Security
 | If you need… | Consider… |
 |--------------|-----------|
 | Fast PySpark tests in CI | **Sparkless** |
-| Exact production Spark behavior | **Real PySpark** (use `sparkless.testing` dual-mode) |
+| Exact production Spark behavior | **Real PySpark** (use `sparkless_testing` dual-mode) |
 | Maximum single-node performance, different API | **Polars Python** directly |
 | Embed DataFrames in Rust | **`robin-sparkless`** crate ([Quickstart](QUICKSTART.md)) |
 

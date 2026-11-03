@@ -5,7 +5,7 @@ PySpark accepts df.groupBy(F.col('Name').alias('Key')).agg(...).
 Sparkless previously raised SparkColumnNotFoundError: cannot resolve 'Key'.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestIssue397GroupByAlias:

@@ -4,7 +4,7 @@ This module tests the first() method which returns the first row of a DataFrame.
 Uses conftest's spark fixture for backend-aware execution (mock/PySpark).
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _imports():

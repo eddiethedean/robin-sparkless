@@ -8,7 +8,7 @@ All tests use backend-agnostic imports (spark fixture + get_imports).
 import pytest
 from datetime import datetime, date
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 SparkSession = imports.SparkSession

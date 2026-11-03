@@ -14,7 +14,7 @@ Run in PySpark mode first, then mock mode:
 https://github.com/eddiethedean/sparkless/issues/445
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_between_string_column_numeric_bounds_exact_issue_445(spark, spark_mode):

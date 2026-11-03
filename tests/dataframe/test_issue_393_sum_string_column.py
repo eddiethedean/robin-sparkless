@@ -6,7 +6,7 @@ InvalidOperationError: cum_sum operation not supported for dtype str.
 Sparkless now casts string/Utf8 columns to Float64 before sum/avg (PySpark parity).
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _norm(val):

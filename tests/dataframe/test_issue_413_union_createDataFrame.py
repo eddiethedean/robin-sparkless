@@ -9,7 +9,7 @@ These tests verify that:
 - union() matches by position and succeeds when schemas are compatible by position
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 StructType = imports.StructType

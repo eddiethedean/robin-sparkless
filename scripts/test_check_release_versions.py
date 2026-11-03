@@ -29,7 +29,7 @@ SERVER_INVENTORY_FILES = (
     "python/connect/pyproject.toml",
     "python/server/pyproject.toml",
     "python/server-duckdb/pyproject.toml",
-    "python/server-bin/pyproject.toml",
+    "python/testing/pyproject.toml",
 )
 
 
@@ -150,7 +150,10 @@ class ReleaseVersionsTest(unittest.TestCase):
             )
             errors = validate_server_inventory(root, f"v{candidate_version}")
             self.assertTrue(
-                any("robin-sparkless-polars/spark-sql-parser" in error for error in errors)
+                any(
+                    "robin-sparkless-polars/spark-sql-parser" in error
+                    for error in errors
+                )
             )
 
     def test_candidate_branch_requires_parser_manifest_and_lock_alignment(self):
@@ -171,7 +174,10 @@ class ReleaseVersionsTest(unittest.TestCase):
             )
             errors = validate_server_inventory(root, "v4.17.0")
             self.assertTrue(
-                any("sparkless-server-polars/spark-sql-parser" in error for error in errors),
+                any(
+                    "sparkless-server-polars/spark-sql-parser" in error
+                    for error in errors
+                ),
                 errors,
             )
             server_polars_manifest.write_text(

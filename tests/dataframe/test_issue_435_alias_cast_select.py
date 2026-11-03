@@ -7,7 +7,7 @@ PySpark supports this combination - alias is output name, validation should use 
 https://github.com/eddiethedean/sparkless/issues/435
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_alias_cast_select_exact_issue_435(spark, spark_mode):

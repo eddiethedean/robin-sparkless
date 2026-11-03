@@ -10,7 +10,7 @@ test_issue_201_type_strictness.py for implicit coercion tests.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

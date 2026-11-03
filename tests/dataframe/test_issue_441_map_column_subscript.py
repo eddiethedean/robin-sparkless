@@ -12,7 +12,7 @@ Run in PySpark mode first, then mock mode:
 https://github.com/eddiethedean/sparkless/issues/441
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_map_column_subscript_with_column_key_exact_issue_441(spark, spark_mode):

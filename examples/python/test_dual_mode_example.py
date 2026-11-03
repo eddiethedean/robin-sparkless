@@ -8,7 +8,7 @@ def test_backend_identity(spark, spark_imports):
     assert expected in {"sparkless", "pyspark"}, "Select an explicit documented backend"
     actual = spark
     # The testing plugin wraps real PySpark for JDBC compatibility.
-    while type(actual).__module__.startswith("sparkless.testing"):
+    while type(actual).__module__.startswith("sparkless_testing"):
         actual = actual._session
     assert isinstance(actual, spark_imports.SparkSession)
     module = type(actual).__module__

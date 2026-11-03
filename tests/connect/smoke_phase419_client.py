@@ -8,7 +8,7 @@ from pathlib import Path
 from pyspark.sql import functions as F
 from pyspark.sql.connect.session import SparkSession as ConnectSession
 
-from sparkless.server import SparklessConnect
+from sparkless_connect import SparklessConnect
 
 
 def main() -> None:

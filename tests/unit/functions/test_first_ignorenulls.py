@@ -8,7 +8,7 @@ These tests work with both sparkless (mock) and PySpark backends.
 Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 # Get imports based on backend
 imports = get_imports()
@@ -107,7 +107,7 @@ class TestFirstIgnoreNulls:
 
     def test_first_ignorenulls_all_nulls(self, spark):
         """Test first() with ignorenulls=True when all values are null."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType
@@ -332,7 +332,7 @@ class TestFirstIgnoreNulls:
 
     def test_first_ignorenulls_single_row_group(self, spark):
         """Test first() with ignorenulls on single row groups."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType
@@ -368,7 +368,7 @@ class TestFirstIgnoreNulls:
 
     def test_first_ignorenulls_empty_group(self, spark):
         """Test first() with ignorenulls on empty groups."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType
@@ -501,7 +501,7 @@ class TestFirstIgnoreNulls:
 
     def test_first_ignorenulls_type_preservation(self, spark):
         """Test that first() with ignorenulls preserves data types correctly."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         StructType = imports.StructType

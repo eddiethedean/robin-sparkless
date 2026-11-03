@@ -36,7 +36,8 @@ The optional native server has a smaller platform set: Linux x86_64 with glibc
 
 | Extra | Dependencies and purpose |
 | --- | --- |
-| `sparkless[dev]` | Development/tests: pytest, pandas, PyArrow, Polars, pytest-xdist, and other test tools |
+| `sparkless[dev]` | Development tools: pandas, PyArrow, Polars, pytest-xdist, and related test tools |
+| `sparkless[testing]` | Backend-independent pytest fixtures and helpers from `sparkless-testing` |
 | `sparkless[pyspark]` | PySpark 3.5 and its Delta integration; requires a compatible Java runtime |
 | `sparkless[pyspark4]` | PySpark 4 and its Delta integration; requires a compatible Java runtime |
 | `sparkless[server]` | The exactly matching base `sparkless-server` product |
@@ -49,7 +50,7 @@ The optional native server has a smaller platform set: Linux x86_64 with glibc
 For example:
 
 ```bash
-python -m pip install "sparkless[dev]>=4,<5"
+python -m pip install "sparkless[testing]>=4,<5"
 ```
 
 Use separate environments for `pyspark` and `pyspark4`; they require different
@@ -161,14 +162,14 @@ Transformations (filter, select, join, etc.) are queued; execution happens on **
 
 ## Testing with Sparkless v4
 
-The `sparkless.testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
+The `sparkless_testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
 
 ### Quick Setup
 
 Add to your `conftest.py`:
 
 ```python
-pytest_plugins = ["sparkless.testing.plugin"]
+pytest_plugins = ["sparkless_testing.plugin"]
 ```
 
 ### Unit Test Example
@@ -249,7 +250,7 @@ in Python, and bounded Arrow batches do not bound total query memory.
 
 ## Next Steps
 
-- [Testing Guide](TESTING_GUIDE.md) — Full guide to `sparkless.testing` (dual-mode testing, fixtures, comparison utilities)
+- [Testing Guide](TESTING_GUIDE.md) — Full guide to `sparkless_testing` (dual-mode testing, fixtures, comparison utilities)
 - [Python API reference](PYTHON_API_REFERENCE.md) — API overview and Arrow export
 - [Spark Connect](SPARK_CONNECT.md) — Native server and remote API contract
 - [PySpark differences](PYSPARK_DIFFERENCES.md) — Known divergences and caveats

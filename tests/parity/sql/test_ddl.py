@@ -7,7 +7,7 @@ Tests validate that Sparkless SQL DDL statements behave identically to PySpark.
 import pytest
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import is_pyspark_mode
+from sparkless_testing import is_pyspark_mode
 import uuid
 from pathlib import Path
 from urllib.parse import unquote

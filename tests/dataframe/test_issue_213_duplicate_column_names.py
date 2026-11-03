@@ -5,7 +5,7 @@ with the same name. We disambiguate with _1, _2, ... (PySpark/Sparkless parity).
 """
 
 from tests.utils import _row_to_dict
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

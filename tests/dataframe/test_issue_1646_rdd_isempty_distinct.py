@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 StructField = get_imports().StructField
 StructType = get_imports().StructType

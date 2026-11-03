@@ -187,7 +187,7 @@ class SparkImports:
         self.BinaryType = BinaryType
 
         # Sparkless native module
-        import sparkless._native as _native
+        import sparkless_native._native as _native
 
         self._native = _native
 

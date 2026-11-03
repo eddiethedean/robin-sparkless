@@ -11,17 +11,18 @@ commit and do not satisfy this publication check.
 
 **4.19 release gate:** this branch now implements [SS-23's product/package
 migration](plans/sparkless-server/23-product-and-package-separation.md), including
-separate base and DuckDB server products, the shared launcher, compatibility
-accessors, and both images. The release workflow builds distinct products and
-inventories. Native Linux/macOS builds, the split-product consumer matrix, and
-V59 still need to pass before tagging/publication; the public stage closes after
-publication. Published 4.18 artifacts remain unchanged.
+separate base and DuckDB server products, the shared launcher, a standalone
+`sparkless-testing` package, removal of the old server forwarding package, and
+both images. The release workflow builds distinct products and inventories.
+Native Linux/macOS builds, the split-product consumer matrix, and V59 still need
+to pass before tagging/publication; the public stage closes after publication.
+Published 4.18 artifacts remain unchanged.
 
 The Rust local facade, engine, DuckDB source, server core, Polars server adapter,
 and product crates share the engine version. Python `sparkless` pins the local
-native engine; the shared launcher, server products, and compatibility accessor
-use exact matching component pins. A Python-only patch can retain the tested
-engine/server versions. Change a component version whenever its published
+native engine and its optional testing package; the shared launcher and server
+products use exact matching component pins. A Python-only patch can retain the
+tested engine/server versions. Change a component version whenever its published
 contents need to change.
 
 For an engine change, update Cargo manifests, internal requirements, `Cargo.lock`,
@@ -58,8 +59,8 @@ If a tag was pushed before CI completed, rerun its failed release jobs after CI 
 
 ## What release checks
 
-The release workflow builds a small universal `sparkless` API wheel/source archive,
-the universal `sparkless-connect` and legacy accessor distributions, and all eight
+The release workflow builds small universal `sparkless`, `sparkless-connect`,
+and `sparkless-testing` distributions, and all eight
 `sparkless-native` `cp311-abi3` extension wheel targets:
 Linux glibc and musl on x86_64/ARM64, macOS Intel/ARM64, and Windows x64/ARM64.
 The native source archive includes the fixed Cargo dependency graph. The workflow
@@ -130,13 +131,13 @@ and the workflows define the current release process.
 
 ## Credentials
 
-Rust publication needs `CARGO_REGISTRY_TOKEN`. Existing PyPI projects
-`sparkless`, `sparkless-native`, and `sparkless-server-bin` use Trusted Publishing
-with owner `eddiethedean`, repository `robin-sparkless`, workflow `release.yml`,
-and environment `pypi`. New projects `sparkless-connect`, `sparkless-server`, and
-`sparkless-server-duckdb` publish with the repository secret `PYPI_API_TOKEN`.
-Those token-backed uploads disable PyPI attestations; the OIDC jobs keep them
-enabled. The token must be able to upload each new project. GHCR publication uses
+Rust publication needs `CARGO_REGISTRY_TOKEN`. The `sparkless`,
+`sparkless-native`, and `sparkless-testing` projects use Trusted Publishing with
+owner `eddiethedean`, repository `robin-sparkless`, workflow `release.yml`, and
+environment `pypi`. The `sparkless-connect`, `sparkless-server`, and
+`sparkless-server-duckdb` projects publish with the repository secret
+`PYPI_API_TOKEN`. Those token-backed uploads disable PyPI attestations; the OIDC
+jobs keep them enabled. The token must be able to upload each project. GHCR publication uses
 the workflow token's `packages: write` permission for
 `ghcr.io/eddiethedean/sparkless-server`.
 

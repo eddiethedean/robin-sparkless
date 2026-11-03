@@ -101,7 +101,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 )
                 self.assertIs(publish_step["with"].get("attestations"), False)
 
-        oidc_publishers = ("publish-native", "publish-server-compat", "publish-sparkless")
+        oidc_publishers = ("publish-native", "publish-testing", "publish-sparkless")
         for name in oidc_publishers:
             with self.subTest(publisher=name):
                 job = jobs[name]
@@ -123,28 +123,37 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 steps = jobs[job_name]["steps"]
                 self.assertTrue(
                     any(
-                        step.get("name") == "Fetch the signed DuckDB 2.0.0 Quack extension"
+                        step.get("name")
+                        == "Fetch the signed DuckDB 2.0.0 Quack extension"
                         for step in steps
                     )
                 )
                 base_build = next(
-                    step for step in steps if step.get("name") == "Build the base server without DuckDB"
+                    step
+                    for step in steps
+                    if step.get("name") == "Build the base server without DuckDB"
                 )
                 duckdb_build = next(
-                    step for step in steps if step.get("name") == "Build the DuckDB server product"
+                    step
+                    for step in steps
+                    if step.get("name") == "Build the DuckDB server product"
                 )
                 self.assertIn("-p sparkless-server ", base_build["run"])
                 self.assertIn("--features http,connect", base_build["run"])
                 self.assertNotIn("duckdb-source", base_build["run"])
                 self.assertIn("-p sparkless-server-duckdb ", duckdb_build["run"])
                 graph_step = next(
-                    step for step in steps if step.get("name") == "Record isolated product feature graphs"
+                    step
+                    for step in steps
+                    if step.get("name") == "Record isolated product feature graphs"
                 )
                 self.assertEqual(
                     graph_step.get("env", {}).get("RUSTUP_TOOLCHAIN"), "1.93.1"
                 )
                 wheel_step = next(
-                    step for step in steps if step.get("name", "").startswith("Build and verify separate")
+                    step
+                    for step in steps
+                    if step.get("name", "").startswith("Build and verify separate")
                 )
                 self.assertIn("SPARKLESS_QUACK_EXTENSION_BINARY", wheel_step["run"])
                 self.assertIn("--product duckdb", wheel_step["run"])
@@ -156,18 +165,24 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("duckdb-source-py311.lock", consumer)
         self.assertIn("smoke_phase419_duckdb_client.py", consumer)
         self.assertIn("quack_extension_path", consumer)
-        self.assertIn("duckdb-quack-fixture-owner", str(jobs["server-product-consumer"]))
+        self.assertIn(
+            "duckdb-quack-fixture-owner", str(jobs["server-product-consumer"])
+        )
         self.assertIn("--profile coinstall", consumer)
         self.assertIn("--profile client-only", consumer)
         self.assertIn("--profile local-only", consumer)
-        self.assertIn("--legacy-forwarder", consumer)
+        self.assertIn('"sparkless[testing]==${version}"', consumer)
+        self.assertIn("check_testing_package_boundary.py", consumer)
+        self.assertNotIn("--legacy-forwarder", consumer)
         container_build = "\n".join(
             step.get("run", "") for step in jobs["server-container"]["steps"]
         )
         self.assertIn("Dockerfile.release", container_build)
         self.assertIn("Dockerfile.duckdb.release", container_build)
         dockerfile = (ROOT / "crates/sparkless-server/Dockerfile.release").read_text()
-        duckdb_dockerfile = (ROOT / "crates/sparkless-server/Dockerfile.duckdb.release").read_text()
+        duckdb_dockerfile = (
+            ROOT / "crates/sparkless-server/Dockerfile.duckdb.release"
+        ).read_text()
         self.assertNotIn("quack.duckdb_extension", dockerfile)
         self.assertIn("COPY quack.duckdb_extension", duckdb_dockerfile)
         self.assertIn("NOTICE-quack.txt", duckdb_dockerfile)
@@ -215,9 +230,25 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "sparkless-server=dist/server-base",
             "sparkless-server-duckdb=dist/server-duckdb",
             "sparkless-connect=dist/connect",
-            "sparkless-server-bin=dist/server-compat",
+            "sparkless-testing=dist/testing",
         ):
             self.assertIn("--distribution " + distribution, storage_check)
+
+    def test_testing_package_is_staged_and_published_before_the_api(self):
+        jobs = workflow("release.yml")["jobs"]
+        self.assertIn("publish-testing", jobs)
+        self.assertIn("publish-testing", jobs["publish-sparkless"]["needs"])
+        gate = jobs["release-validation-gate"]["steps"]
+        downloads = [step.get("with", {}).get("name") for step in gate]
+        self.assertIn("sparkless-testing-dist", downloads)
+        self.assertIn(
+            "verified-testing-candidate",
+            [
+                step.get("with", {}).get("name")
+                for step in jobs["publish-testing"]["steps"]
+            ],
+        )
+        self.assertNotIn("publish-server-compat", jobs)
 
     def test_release_gate_rejects_failed_cancelled_and_skipped_jobs(self):
         gate = workflow("release.yml")["jobs"]["release-validation-gate"]
