@@ -2411,8 +2411,10 @@ mod tests {
 
     #[tokio::test]
     async fn release_all_clears_history_for_nonreattachable_operations() {
-        let mut config = ServerConfig::default();
-        config.max_mutation_records = 1;
+        let config = ServerConfig {
+            max_mutation_records: 1,
+            ..ServerConfig::default()
+        };
         let service = ConnectService {
             server: Server::new(config).unwrap(),
         };

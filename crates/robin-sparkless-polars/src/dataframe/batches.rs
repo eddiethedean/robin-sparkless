@@ -687,13 +687,12 @@ impl PolarsIpcBatchIterator {
                 if let Some(started) = rewrite_started {
                     self.schema_rewrite_time += started.elapsed();
                 }
-                rewritten.map(|rewritten| {
+                rewritten.inspect(|rewritten| {
                     if self.trace_enabled {
                         self.peak_ipc_rewrite_bytes_estimated = self
                             .peak_ipc_rewrite_bytes_estimated
                             .max(bytes.len().saturating_add(rewritten.len()));
                     }
-                    rewritten
                 })
             } else {
                 Ok(bytes)

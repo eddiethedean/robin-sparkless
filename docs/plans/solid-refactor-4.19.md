@@ -491,8 +491,8 @@ was captured without resetting the working tree:
 | Untracked manifest | 24 sorted paths; SHA-256 `c1e0d99de9f8b43d034a18f88928ce223524d6174874140978eb85fe8b9c6e80` over each path and file SHA-256 |
 
 The pre-closeout hashes above identify an earlier snapshot whose payload was not
-retained. P0 reproducibility is now satisfied by the replacement artifact at
-[`docs/plans/evidence/solid-refactor-p0-snapshot-2026-11-02`](evidence/solid-refactor-p0-snapshot-2026-11-02).
+retained. P0 reproducibility is now satisfied by the replacement artifact described
+in the [retained snapshot index](evidence/solid-refactor-p0-snapshot-2026-11-02/README.md).
 Its metadata pins HEAD and the tracked patch hash; the patch, sorted untracked manifest,
 untracked file archive, and status record reconstruct that snapshot. The artifact
 directory itself is excluded from the captured untracked paths.

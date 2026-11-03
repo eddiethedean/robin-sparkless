@@ -9,6 +9,23 @@ use std::time::{Duration, Instant};
 use tonic::Status;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectReplayError {
+    HistoryCapacityExceeded,
+}
+
+impl std::fmt::Display for ConnectReplayError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HistoryCapacityExceeded => {
+                formatter.write_str("Connect operation history capacity was exceeded")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConnectReplayError {}
+
 pub const MAX_CONNECT_LOCAL_IPC_BYTES: usize = 1024 * 1024;
 pub const MAX_CONNECT_LOCAL_DECODED_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_CONNECT_LOCAL_ROWS: usize = 10_000;
@@ -92,7 +109,7 @@ impl ConnectReplayRecord {
         tags: Vec<String>,
         process_bytes: Arc<AtomicUsize>,
         process_history_bytes: Arc<AtomicUsize>,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, ConnectReplayError> {
         let (producer_done, _) = tokio::sync::watch::channel(false);
         let tag_bytes = tags.iter().map(String::len).sum::<usize>();
         let base_history_bytes = operation_key
@@ -104,7 +121,7 @@ impl ConnectReplayRecord {
             .saturating_add(tag_bytes)
             .saturating_add(256);
         if !reserve_history_bytes(&process_history_bytes, base_history_bytes) {
-            return Err(());
+            return Err(ConnectReplayError::HistoryCapacityExceeded);
         }
         Ok(Self {
             operation_key,

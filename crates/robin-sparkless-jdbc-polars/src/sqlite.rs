@@ -317,10 +317,10 @@ fn sqlite_query_source_table(query: &str) -> Option<&str> {
     let from = lower[select + 6..].find("from")? + select + 6;
     let projection = query[select + 6..from].split(',').next()?.trim();
     let source = projection.split_whitespace().next()?;
-    if let Some((alias, _)) = source.split_once('.') {
-        if let Some(table) = sqlite_query_table_for_alias(query, alias) {
-            return Some(table);
-        }
+    if let Some((alias, _)) = source.split_once('.')
+        && let Some(table) = sqlite_query_table_for_alias(query, alias)
+    {
+        return Some(table);
     }
     let rest = query[from + 4..].trim_start();
     let table = rest.split_whitespace().next()?;

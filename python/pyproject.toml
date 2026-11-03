@@ -82,7 +82,7 @@ sparkless = ["py.typed"]
 
 [tool.mypy]
 python_version = "3.11"
-mypy_path = "native"
+mypy_path = "python/native"
 warn_return_any = true
 warn_unused_ignores = true
 exclude = ["tests/", ".*/tests/", "upstream_sparkless/"]

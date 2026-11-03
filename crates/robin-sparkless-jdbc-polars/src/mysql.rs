@@ -38,15 +38,15 @@ fn connect(opts: &JdbcOptions) -> Result<Conn, EngineError> {
         ))
     })?;
     let mut builder = OptsBuilder::from_opts(base);
-    if let Some(user) = &opts.user {
-        if !user.is_empty() {
-            builder = builder.user(Some(user.as_str()));
-        }
+    if let Some(user) = &opts.user
+        && !user.is_empty()
+    {
+        builder = builder.user(Some(user.as_str()));
     }
-    if let Some(password) = &opts.password {
-        if !password.is_empty() {
-            builder = builder.pass(Some(password.as_str()));
-        }
+    if let Some(password) = &opts.password
+        && !password.is_empty()
+    {
+        builder = builder.pass(Some(password.as_str()));
     }
 
     Conn::new(builder).map_err(|e| {

@@ -84,7 +84,7 @@ impl ErrorDetail {
 /// should branch on [`ErrorDetail::category`] and `code()` instead of parsing messages.
 #[derive(Debug)]
 pub struct EngineError {
-    detail: ErrorDetail,
+    detail: Box<ErrorDetail>,
     display_prefix: &'static str,
 }
 
@@ -92,7 +92,7 @@ impl EngineError {
     pub fn from_detail(detail: ErrorDetail) -> Self {
         let display_prefix = Self::display_prefix(detail.category);
         Self {
-            detail,
+            detail: Box::new(detail),
             display_prefix,
         }
     }
@@ -137,7 +137,7 @@ impl EngineError {
 
     pub fn with_detail(mut self, detail: ErrorDetail) -> Self {
         self.display_prefix = Self::display_prefix(detail.category);
-        self.detail = detail;
+        self.detail = Box::new(detail);
         self
     }
 

@@ -165,7 +165,7 @@ impl Server {
         let external_catalog: Option<Arc<ExternalCatalog>> = if product == ServerProduct::DuckDb {
             match config.duckdb_sources_json.as_deref() {
                 Some(source_json) => {
-                    let catalog = robin_sparkless::DuckDbCatalog::from_json(&source_json).map_err(
+                    let catalog = robin_sparkless::DuckDbCatalog::from_json(source_json).map_err(
                         |error| ServerError {
                             message: format!("invalid DuckDB source configuration: {error}"),
                         },
@@ -1231,7 +1231,7 @@ impl ServerInner {
                     _session: session,
                     _admission: admission,
                     replay,
-                    _active: ConnectActiveOperation::new(&self.connect_runtime.active_operations()),
+                    _active: ConnectActiveOperation::new(self.connect_runtime.active_operations()),
                 })
             }
             ReserveOperation::Existing(_) => Err(ConnectReserveError::Duplicate),
@@ -1989,19 +1989,16 @@ impl HttpApplication for Server {
         Server::capabilities(self)
     }
 
-    fn statements(&self, request: Request<Incoming>) -> impl Future<Output = HttpResponse> + Send {
-        async move { self.handle_statements(request).await }
+    async fn statements(&self, request: Request<Incoming>) -> HttpResponse {
+        self.handle_statements(request).await
     }
 
-    fn close(&self, request: Request<Incoming>) -> impl Future<Output = HttpResponse> + Send {
-        async move { self.handle_close(request).await }
+    async fn close(&self, request: Request<Incoming>) -> HttpResponse {
+        self.handle_close(request).await
     }
 
-    fn operation_status(
-        &self,
-        request: Request<Incoming>,
-    ) -> impl Future<Output = HttpResponse> + Send {
-        async move { self.handle_operation_status(request).await }
+    async fn operation_status(&self, request: Request<Incoming>) -> HttpResponse {
+        self.handle_operation_status(request).await
     }
 }
 

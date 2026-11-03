@@ -819,7 +819,6 @@ pub(super) fn delta_map_paths_for_sql_query(
 }
 
 /// #1344: module = "sparkless.sql.session" so type(spark).__module__ identifies engine (not builtins).
-
 /// Shareable cancellation control for a thread-bound SparkSession.
 #[pyclass(module = "sparkless.sql.session", frozen)]
 pub(super) struct PyCancellationHandle {

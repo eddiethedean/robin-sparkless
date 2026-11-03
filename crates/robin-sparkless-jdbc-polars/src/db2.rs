@@ -328,14 +328,11 @@ pub(crate) fn write_jdbc_db2(
             if let Some(batch) = row_cursor
                 .fetch()
                 .map_err(|e| EngineError::other(format!("JDBC write (DB2): fetch: {e}")))?
+                && batch.num_rows() > 0
+                && let Some(v) = batch.at(0, 0)
+                && let Ok(s) = std::str::from_utf8(v)
             {
-                if batch.num_rows() > 0 {
-                    if let Some(v) = batch.at(0, 0) {
-                        if let Ok(s) = std::str::from_utf8(v) {
-                            count = s.parse().unwrap_or(0);
-                        }
-                    }
-                }
+                count = s.parse().unwrap_or(0);
             }
             if count > 0 {
                 return Err(EngineError::invalid_input(format!(
@@ -363,14 +360,11 @@ pub(crate) fn write_jdbc_db2(
             if let Some(batch) = row_cursor
                 .fetch()
                 .map_err(|e| EngineError::other(format!("JDBC write (DB2): fetch: {e}")))?
+                && batch.num_rows() > 0
+                && let Some(v) = batch.at(0, 0)
+                && let Ok(s) = std::str::from_utf8(v)
             {
-                if batch.num_rows() > 0 {
-                    if let Some(v) = batch.at(0, 0) {
-                        if let Ok(s) = std::str::from_utf8(v) {
-                            count = s.parse().unwrap_or(0);
-                        }
-                    }
-                }
+                count = s.parse().unwrap_or(0);
             }
             if count > 0 {
                 return Ok(());

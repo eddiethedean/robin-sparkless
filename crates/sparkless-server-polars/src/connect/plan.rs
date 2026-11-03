@@ -14,6 +14,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tonic::{Code, Status};
 
+type OutputColumnNames = HashMap<String, String>;
+type JoinedOutputColumnNames = (OutputColumnNames, OutputColumnNames);
+
 const MAX_PLAN_DEPTH: usize = 64;
 const MAX_FILTER_EXPRESSION_BYTES: usize = 4096;
 
@@ -1026,7 +1029,7 @@ fn joined_output_columns(
     right: &TranslatedRelation,
     output: &robin_sparkless::DataFrame,
     coalesced_right_keys: &HashMap<String, String>,
-) -> Result<(HashMap<String, String>, HashMap<String, String>), Status> {
+) -> Result<JoinedOutputColumnNames, Status> {
     let left_names = left.dataframe.columns().map_err(|error| {
         Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
     })?;

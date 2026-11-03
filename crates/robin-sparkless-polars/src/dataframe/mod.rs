@@ -1681,10 +1681,7 @@ impl DataFrame {
             }
         }
         if self.case_sensitive {
-            if robin_sparkless_plan::matching_indices(&names, name, true)
-                .first()
-                .is_some()
-            {
+            if !robin_sparkless_plan::matching_indices(&names, name, true).is_empty() {
                 return Ok(name.to_string());
             }
         } else {

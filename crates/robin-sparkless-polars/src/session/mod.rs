@@ -67,6 +67,15 @@ type ResolvedExternalTable = (
     ExternalTableDescriptor,
 );
 
+struct TableLookupOptions<'a> {
+    resolve_external: bool,
+    provider_configured: bool,
+    source_snapshot: Option<Arc<dyn CatalogReadSnapshot>>,
+    token: CancellationToken,
+    materialize_external: bool,
+    source_owner: &'a mut Option<String>,
+}
+
 const MAX_CONNECT_ARROW_SCHEMA_DEPTH: usize = 64;
 const MAX_CONNECT_ARROW_SCHEMA_FIELDS: usize = 256;
 
@@ -1531,7 +1540,17 @@ impl SparkSession {
         name: &str,
         token: CancellationToken,
     ) -> Result<DataFrame, PolarsError> {
-        self.table_impl_with_source(name, true, false, None, token, false, &mut None)
+        self.table_impl_with_source(
+            name,
+            TableLookupOptions {
+                resolve_external: true,
+                provider_configured: false,
+                source_snapshot: None,
+                token,
+                materialize_external: false,
+                source_owner: &mut None,
+            },
+        )
     }
 
     fn empty_dataframe_with_schema(&self, schema: StructType) -> Result<DataFrame, PolarsError> {
@@ -1547,7 +1566,17 @@ impl SparkSession {
         snapshot: Arc<dyn CatalogReadSnapshot>,
         token: CancellationToken,
     ) -> Result<DataFrame, PolarsError> {
-        self.table_impl_with_source(name, true, true, Some(snapshot), token, true, &mut None)
+        self.table_impl_with_source(
+            name,
+            TableLookupOptions {
+                resolve_external: true,
+                provider_configured: true,
+                source_snapshot: Some(snapshot),
+                token,
+                materialize_external: true,
+                source_owner: &mut None,
+            },
+        )
     }
 
     /// Resolve a Connect table and report the DuckDB owner selected by the same lookup.
@@ -1562,12 +1591,14 @@ impl SparkSession {
         let mut source_owner = None;
         let frame = self.table_impl_with_source(
             name,
-            true,
-            snapshot.is_some(),
-            snapshot,
-            token,
-            materialize_external,
-            &mut source_owner,
+            TableLookupOptions {
+                resolve_external: true,
+                provider_configured: snapshot.is_some(),
+                source_snapshot: snapshot,
+                token,
+                materialize_external,
+                source_owner: &mut source_owner,
+            },
         )?;
         Ok((frame, source_owner))
     }
@@ -1597,25 +1628,30 @@ impl SparkSession {
             .unwrap_or_default();
         self.table_impl_with_source(
             name,
-            resolve_external,
-            provider_configured || source_snapshot.is_some(),
-            source_snapshot,
-            token,
-            true,
-            &mut None,
+            TableLookupOptions {
+                resolve_external,
+                provider_configured: provider_configured || source_snapshot.is_some(),
+                source_snapshot,
+                token,
+                materialize_external: true,
+                source_owner: &mut None,
+            },
         )
     }
 
     fn table_impl_with_source(
         &self,
         name: &str,
-        resolve_external: bool,
-        provider_configured: bool,
-        source_snapshot: Option<Arc<dyn CatalogReadSnapshot>>,
-        token: CancellationToken,
-        materialize_external: bool,
-        source_owner: &mut Option<String>,
+        options: TableLookupOptions<'_>,
     ) -> Result<DataFrame, PolarsError> {
+        let TableLookupOptions {
+            resolve_external,
+            provider_configured,
+            source_snapshot,
+            token,
+            materialize_external,
+            source_owner,
+        } = options;
         // global_temp.xyz -> global catalog only
         if let Some((_db, tbl)) = Self::parse_global_temp_name(name) {
             if let Some(df) = self

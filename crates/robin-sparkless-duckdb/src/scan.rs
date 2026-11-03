@@ -140,8 +140,8 @@ impl CatalogReadSnapshot for DuckDbReadSnapshot {
             };
             let sql = format!("SELECT * FROM {table_reference}");
             let mut statement = connection.prepare(&sql).map_err(duckdb_failure)?;
-            let mut batches = statement.stream_arrow([]).map_err(duckdb_failure)?;
-            while let Some(batch) = batches.next() {
+            let batches = statement.stream_arrow([]).map_err(duckdb_failure)?;
+            for batch in batches {
                 token.check_cancelled()?;
                 let batch = match batch {
                     Ok(batch) => batch,

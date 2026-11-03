@@ -67,10 +67,10 @@ impl PreparedCatalogWrite for ProviderWrite {
             format,
             options,
             partition_by,
-            mut batches,
+            batches,
             ..
         } = self.request;
-        while let Some(batch) = batches.next() {
+        for batch in batches {
             if let Err(error) = batch {
                 return ExternalTableWriteOutcome::NotCommitted(error);
             }

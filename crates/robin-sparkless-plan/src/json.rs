@@ -24,120 +24,6 @@ fn invalid(message: impl Into<String>) -> EngineError {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn decodes_supported_operations_into_operation_specific_payloads() {
-        let steps = vec![
-            json!({"op": "stop"}),
-            json!({"op": "filter", "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 1}}}),
-            json!({"op": "select", "payload": ["id"]}),
-            json!({"op": "limit", "payload": {"n": 0}}),
-            json!({"op": "offset", "payload": {}}),
-            json!({"op": "orderBy", "payload": {"columns": ["id DESC"], "nulls_last": [true]}}),
-            json!({"op": "distinct"}),
-            json!({"op": "drop", "payload": {"columns": ["unused"]}}),
-            json!({"op": "withColumnRenamed", "payload": {"old": "id", "new": "key"}}),
-            json!({"op": "withColumn", "payload": {"name": "next", "expr": {"op": "add", "left": {"col": "id"}, "right": {"lit": 1}}}}),
-            json!({"op": "groupBy", "payload": {"group_by": ["id"], "aggs": []}}),
-            json!({"op": "join", "payload": {"on": "id", "how": "inner", "other_data": [[2]], "other_schema": [{"name": "id", "type": "long"}]}}),
-            json!({"op": "union", "payload": {"other_data": [[2]], "other_schema": [{"name": "id", "type": "long"}]}}),
-            json!({"op": "unionByName", "payload": {"other_data": [[2]], "other_schema": [{"name": "id", "type": "long"}]}}),
-            json!({"op": "crossJoin", "payload": {"other_data": [[2]], "other_schema": [{"name": "id", "type": "long"}]}}),
-            json!({"op": "rollup", "payload": {"group_by": ["id"], "aggs": []}}),
-            json!({"op": "cube", "payload": {"group_by": ["id"], "aggs": []}}),
-        ];
-
-        let plan = LogicalPlan::decode(&steps).expect("all supported operation shapes decode");
-        assert_eq!(plan.operations.len(), steps.len());
-        assert!(matches!(plan.operations[0].payload(), PlanPayload::Empty));
-        assert!(matches!(
-            plan.operations[1].payload(),
-            PlanPayload::Expression(_)
-        ));
-        assert!(matches!(
-            plan.operations[2].payload(),
-            PlanPayload::Select(_)
-        ));
-        assert!(matches!(
-            plan.operations[3].payload(),
-            PlanPayload::Limit { n: 0 }
-        ));
-        assert!(matches!(
-            plan.operations[4].payload(),
-            PlanPayload::Offset { n: 0 }
-        ));
-        assert!(matches!(
-            plan.operations[5].payload(),
-            PlanPayload::OrderBy { .. }
-        ));
-        assert!(matches!(plan.operations[6].payload(), PlanPayload::Empty));
-        assert!(matches!(
-            plan.operations[7].payload(),
-            PlanPayload::Drop { .. }
-        ));
-        assert!(matches!(
-            plan.operations[8].payload(),
-            PlanPayload::Rename { .. }
-        ));
-        assert!(matches!(
-            plan.operations[9].payload(),
-            PlanPayload::WithColumn { .. }
-        ));
-        assert!(matches!(
-            plan.operations[10].payload(),
-            PlanPayload::GroupBy { .. }
-        ));
-        assert!(matches!(
-            plan.operations[11].payload(),
-            PlanPayload::Join(_)
-        ));
-        assert!(matches!(
-            plan.operations[12].payload(),
-            PlanPayload::Union(_)
-        ));
-        assert!(matches!(
-            plan.operations[13].payload(),
-            PlanPayload::UnionByName(_)
-        ));
-        assert!(matches!(
-            plan.operations[14].payload(),
-            PlanPayload::CrossJoin(_)
-        ));
-        assert!(matches!(
-            plan.operations[15].payload(),
-            PlanPayload::Rollup(_)
-        ));
-        assert!(matches!(
-            plan.operations[16].payload(),
-            PlanPayload::Cube(_)
-        ));
-    }
-
-    #[test]
-    fn rejects_a_malformed_late_operation_before_returning_any_plan() {
-        let error = LogicalPlan::decode(&[
-            json!({"op": "limit", "payload": {"n": 3}}),
-            json!({"op": "filter", "payload": {"op": "gt", "left": {"col": "id"}}}),
-        ])
-        .expect_err("the second operation is malformed");
-
-        assert_eq!(error.code(), "INVALID_PLAN");
-        assert!(error.user_message().contains("requires 'left' and 'right'"));
-    }
-
-    #[test]
-    fn keeps_unknown_operations_distinct_from_malformed_supported_operations() {
-        let error = LogicalPlan::decode(&[json!({"op": "collect"})])
-            .expect_err("unknown operations are rejected");
-
-        assert_eq!(error.code(), "UNSUPPORTED_PLAN_OPERATION");
-    }
-}
-
 fn decode_operation(index: usize, value: &Value) -> Result<PlanOperation, EngineError> {
     let object = value
         .as_object()
@@ -462,7 +348,7 @@ fn validate_select_item(value: &Value, path: &str) -> Result<(), EngineError> {
     if let Some(expression) = object.get("expr") {
         if object
             .get("name")
-            .is_some_and(|name| !name.as_str().is_some_and(|name| !name.is_empty()))
+            .is_some_and(|name| name.as_str().is_none_or(str::is_empty))
         {
             return Err(invalid(format!(
                 "{path}: select expression 'name' must be a nonempty string"
@@ -535,7 +421,7 @@ fn validate_aggregations(aggregations: &[Value], path: &str) -> Result<(), Engin
         if object
             .get("alias")
             .or_else(|| object.get("name"))
-            .is_some_and(|alias| !alias.as_str().is_some_and(|alias| !alias.is_empty()))
+            .is_some_and(|alias| alias.as_str().is_none_or(str::is_empty))
         {
             return Err(invalid(format!(
                 "{path}: aggregation alias must be a nonempty string"
@@ -1135,4 +1021,118 @@ fn validate_operator_operands(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn decodes_supported_operations_into_operation_specific_payloads() {
+        let steps = vec![
+            json!({"op": "stop"}),
+            json!({"op": "filter", "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 1}}}),
+            json!({"op": "select", "payload": ["id"]}),
+            json!({"op": "limit", "payload": {"n": 0}}),
+            json!({"op": "offset", "payload": {}}),
+            json!({"op": "orderBy", "payload": {"columns": ["id DESC"], "nulls_last": [true]}}),
+            json!({"op": "distinct"}),
+            json!({"op": "drop", "payload": {"columns": ["unused"]}}),
+            json!({"op": "withColumnRenamed", "payload": {"old": "id", "new": "key"}}),
+            json!({"op": "withColumn", "payload": {"name": "next", "expr": {"op": "add", "left": {"col": "id"}, "right": {"lit": 1}}}}),
+            json!({"op": "groupBy", "payload": {"group_by": ["id"], "aggs": []}}),
+            json!({"op": "join", "payload": {"on": "id", "how": "inner", "other_data": [[2]], "other_schema": [{"name": "id", "type": "long"}]}}),
+            json!({"op": "union", "payload": {"other_data": [[2]], "other_schema": [{"name": "id", "type": "long"}]}}),
+            json!({"op": "unionByName", "payload": {"other_data": [[2]], "other_schema": [{"name": "id", "type": "long"}]}}),
+            json!({"op": "crossJoin", "payload": {"other_data": [[2]], "other_schema": [{"name": "id", "type": "long"}]}}),
+            json!({"op": "rollup", "payload": {"group_by": ["id"], "aggs": []}}),
+            json!({"op": "cube", "payload": {"group_by": ["id"], "aggs": []}}),
+        ];
+
+        let plan = LogicalPlan::decode(&steps).expect("all supported operation shapes decode");
+        assert_eq!(plan.operations.len(), steps.len());
+        assert!(matches!(plan.operations[0].payload(), PlanPayload::Empty));
+        assert!(matches!(
+            plan.operations[1].payload(),
+            PlanPayload::Expression(_)
+        ));
+        assert!(matches!(
+            plan.operations[2].payload(),
+            PlanPayload::Select(_)
+        ));
+        assert!(matches!(
+            plan.operations[3].payload(),
+            PlanPayload::Limit { n: 0 }
+        ));
+        assert!(matches!(
+            plan.operations[4].payload(),
+            PlanPayload::Offset { n: 0 }
+        ));
+        assert!(matches!(
+            plan.operations[5].payload(),
+            PlanPayload::OrderBy { .. }
+        ));
+        assert!(matches!(plan.operations[6].payload(), PlanPayload::Empty));
+        assert!(matches!(
+            plan.operations[7].payload(),
+            PlanPayload::Drop { .. }
+        ));
+        assert!(matches!(
+            plan.operations[8].payload(),
+            PlanPayload::Rename { .. }
+        ));
+        assert!(matches!(
+            plan.operations[9].payload(),
+            PlanPayload::WithColumn { .. }
+        ));
+        assert!(matches!(
+            plan.operations[10].payload(),
+            PlanPayload::GroupBy { .. }
+        ));
+        assert!(matches!(
+            plan.operations[11].payload(),
+            PlanPayload::Join(_)
+        ));
+        assert!(matches!(
+            plan.operations[12].payload(),
+            PlanPayload::Union(_)
+        ));
+        assert!(matches!(
+            plan.operations[13].payload(),
+            PlanPayload::UnionByName(_)
+        ));
+        assert!(matches!(
+            plan.operations[14].payload(),
+            PlanPayload::CrossJoin(_)
+        ));
+        assert!(matches!(
+            plan.operations[15].payload(),
+            PlanPayload::Rollup(_)
+        ));
+        assert!(matches!(
+            plan.operations[16].payload(),
+            PlanPayload::Cube(_)
+        ));
+    }
+
+    #[test]
+    fn rejects_a_malformed_late_operation_before_returning_any_plan() {
+        let error = LogicalPlan::decode(&[
+            json!({"op": "limit", "payload": {"n": 3}}),
+            json!({"op": "filter", "payload": {"op": "gt", "left": {"col": "id"}}}),
+        ])
+        .expect_err("the second operation is malformed");
+
+        assert_eq!(error.code(), "INVALID_PLAN");
+        assert!(error.user_message().contains("requires 'left' and 'right'"));
+    }
+
+    #[test]
+    fn keeps_unknown_operations_distinct_from_malformed_supported_operations() {
+        let error = LogicalPlan::decode(&[json!({"op": "collect"})])
+            .expect_err("unknown operations are rejected");
+
+        assert_eq!(error.code(), "UNSUPPORTED_PLAN_OPERATION");
+    }
 }

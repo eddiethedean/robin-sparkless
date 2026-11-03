@@ -30,7 +30,7 @@ pub struct CtePlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RelationalNode {
-    Select(SelectPlan),
+    Select(Box<SelectPlan>),
     SetOperation {
         operator: SetOperator,
         quantifier: SetQuantifier,
@@ -299,7 +299,7 @@ fn lower_set_expr(expr: &SetExpr) -> Result<RelationalNode, SqlPlanError> {
                     modifiers: modifiers.iter().map(ToString::to_string).collect(),
                 },
             };
-            RelationalNode::Select(SelectPlan {
+            RelationalNode::Select(Box::new(SelectPlan {
                 source_sql: select.to_string(),
                 distinct: select.distinct.as_ref().map(ToString::to_string),
                 projection,
@@ -307,7 +307,7 @@ fn lower_set_expr(expr: &SetExpr) -> Result<RelationalNode, SqlPlanError> {
                 filter: select.selection.as_ref().map(lower_expression),
                 group_by,
                 having: select.having.as_ref().map(lower_expression),
-            })
+            }))
         }
         SetExpr::Query(query) => RelationalNode::Nested(Box::new(lower_query(query)?)),
         SetExpr::SetOperation {
@@ -436,10 +436,10 @@ fn lower_expression(expr: &Expr) -> SqlExpression {
                         FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
                             Some(lower_expression(expr))
                         }
-                        FunctionArg::Named { arg, .. } => match arg {
-                            FunctionArgExpr::Expr(expr) => Some(lower_expression(expr)),
-                            _ => None,
-                        },
+                        FunctionArg::Named {
+                            arg: FunctionArgExpr::Expr(expr),
+                            ..
+                        } => Some(lower_expression(expr)),
                         _ => None,
                     })
                     .collect(),

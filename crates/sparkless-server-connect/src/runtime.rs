@@ -2,6 +2,7 @@
 
 use crate::ConnectReplayRecord;
 use std::collections::HashMap;
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -14,6 +15,21 @@ pub enum ConnectTombstoneError {
     CapacityExceeded,
     Unavailable,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectRuntimeError {
+    Unavailable,
+}
+
+impl fmt::Display for ConnectRuntimeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unavailable => formatter.write_str("Connect runtime state is unavailable"),
+        }
+    }
+}
+
+impl std::error::Error for ConnectRuntimeError {}
 
 /// State shared by the Connect listener and product session adapter.
 ///
@@ -47,11 +63,11 @@ impl ConnectRuntimeState {
         }
     }
 
-    pub fn tombstone(&self, key: &str) -> Result<Option<String>, ()> {
+    pub fn tombstone(&self, key: &str) -> Result<Option<String>, ConnectRuntimeError> {
         self.tombstones
             .lock()
             .map(|tombstones| tombstones.get(key).cloned())
-            .map_err(|_| ())
+            .map_err(|_| ConnectRuntimeError::Unavailable)
     }
 
     pub fn record_tombstone(
@@ -70,14 +86,19 @@ impl ConnectRuntimeState {
         Ok(())
     }
 
-    pub fn lifecycle_lock(&self) -> Result<MutexGuard<'_, ()>, ()> {
-        self.lifecycle.lock().map_err(|_| ())
+    pub fn lifecycle_lock(&self) -> Result<MutexGuard<'_, ()>, ConnectRuntimeError> {
+        self.lifecycle
+            .lock()
+            .map_err(|_| ConnectRuntimeError::Unavailable)
     }
 
     pub fn operations(
         &self,
-    ) -> Result<MutexGuard<'_, HashMap<String, Arc<ConnectReplayRecord>>>, ()> {
-        self.operations.lock().map_err(|_| ())
+    ) -> Result<MutexGuard<'_, HashMap<String, Arc<ConnectReplayRecord>>>, ConnectRuntimeError>
+    {
+        self.operations
+            .lock()
+            .map_err(|_| ConnectRuntimeError::Unavailable)
     }
 
     pub fn active_operations(&self) -> &watch::Sender<usize> {
@@ -105,8 +126,10 @@ impl ConnectRuntimeState {
         &self.stream_senders
     }
 
-    pub fn address(&self) -> Result<MutexGuard<'_, Option<SocketAddr>>, ()> {
-        self.address.lock().map_err(|_| ())
+    pub fn address(&self) -> Result<MutexGuard<'_, Option<SocketAddr>>, ConnectRuntimeError> {
+        self.address
+            .lock()
+            .map_err(|_| ConnectRuntimeError::Unavailable)
     }
 }
 

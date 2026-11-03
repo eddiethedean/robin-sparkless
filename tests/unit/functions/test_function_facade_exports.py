@@ -1,7 +1,5 @@
 """Guard the SQL function facade while implementations live in private modules."""
 
-import pytest
-
 from sparkless_testing import get_imports
 
 
@@ -25,8 +23,13 @@ def test_facade_keeps_historical_callable_attributes():
     assert not missing
 
 
-@pytest.mark.sparkless_only
-def test_facade_keeps_native_window_helper():
-    F = get_imports().F
+def test_facade_window_helper_supports_over(spark):
+    imports = get_imports()
+    F = imports.F
+    Window = imports.Window
 
-    assert callable(getattr(F, "_window_spec_to_partition_order", None))
+    df = spark.createDataFrame([(1,), (2,)], ["id"])
+    rows = df.select(F.row_number().over(Window.orderBy("id")).alias("row"))
+    actual = [row["row"] for row in rows.orderBy("row").collect()]
+
+    assert actual == [1, 2]

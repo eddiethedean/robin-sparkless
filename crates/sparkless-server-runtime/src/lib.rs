@@ -15,6 +15,10 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+pub type SessionEntries<T> = HashMap<String, Arc<T>>;
+pub type SessionEntriesLockResult<'a, T> =
+    std::sync::LockResult<std::sync::MutexGuard<'a, SessionEntries<T>>>;
+
 pub struct ServerRuntime<S = ()> {
     execution: Arc<dyn ExecutionPort>,
     connect_execution: Option<Arc<dyn ConnectExecutionPort>>,
@@ -189,7 +193,7 @@ pub struct OperationRegistry {
 
 /// Owns the active session map while leaving engine-specific session values in their adapter.
 pub struct SessionRegistry<T> {
-    entries: Mutex<HashMap<String, Arc<T>>>,
+    entries: Mutex<SessionEntries<T>>,
     active_sessions: AtomicUsize,
     next_generation: AtomicU64,
 }
@@ -219,12 +223,7 @@ impl<T> SessionRegistry<T> {
         self.next_generation.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn lock(
-        &self,
-    ) -> Result<
-        std::sync::MutexGuard<'_, HashMap<String, Arc<T>>>,
-        std::sync::PoisonError<std::sync::MutexGuard<'_, HashMap<String, Arc<T>>>>,
-    > {
+    pub fn lock(&self) -> SessionEntriesLockResult<'_, T> {
         self.entries.lock()
     }
 }
