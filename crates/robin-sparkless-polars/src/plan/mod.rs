@@ -54,6 +54,7 @@ pub fn execute_typed_plan(
     plan: PortablePlan,
 ) -> Result<DataFrame, PlanError> {
     set_thread_udf_session(session.clone());
+    validate_plan_expressions(&plan)?;
     let mut df = session
         .create_dataframe_from_rows(data, schema, false, false)
         .map_err(PlanError::Session)?
@@ -64,6 +65,86 @@ pub fn execute_typed_plan(
     }
 
     Ok(df)
+}
+
+fn validate_plan_expressions(plan: &PortablePlan) -> Result<(), PlanError> {
+    for operation in &plan.operations {
+        match operation.payload() {
+            PlanPayload::Expression(expression) => {
+                validate_expression_value(&expression.to_json_value())?;
+            }
+            PlanPayload::Select(items) => {
+                for item in items {
+                    validate_expression_candidate(item)?;
+                }
+            }
+            PlanPayload::WithColumn { expression, .. } => {
+                validate_with_column_expression(&expression.to_json_value())?;
+            }
+            PlanPayload::GroupBy { keys, aggregations } => {
+                for key in keys {
+                    validate_expression_candidate(key)?;
+                }
+                for aggregation in aggregations {
+                    validate_expression_candidate(aggregation)?;
+                }
+            }
+            PlanPayload::Join(input) => {
+                if let Some(on) = &input.on {
+                    validate_expression_candidate(on)?;
+                }
+            }
+            PlanPayload::Rollup(input) | PlanPayload::Cube(input) => {
+                for key in &input.keys {
+                    validate_expression_candidate(key)?;
+                }
+                for aggregation in &input.aggregations {
+                    validate_expression_candidate(aggregation)?;
+                }
+            }
+            PlanPayload::Empty
+            | PlanPayload::Limit { .. }
+            | PlanPayload::Offset { .. }
+            | PlanPayload::OrderBy { .. }
+            | PlanPayload::Drop { .. }
+            | PlanPayload::Rename { .. }
+            | PlanPayload::Union(_)
+            | PlanPayload::UnionByName(_)
+            | PlanPayload::CrossJoin(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_expression_candidate(value: &Value) -> Result<(), PlanError> {
+    if let Some(expression) = value.get("expr") {
+        return validate_expression_value(expression);
+    }
+    if value.as_object().is_some_and(|object| {
+        ["fn", "function", "op", "udf"]
+            .iter()
+            .any(|key| object.contains_key(*key))
+    }) {
+        return validate_expression_value(value);
+    }
+    if let Some(items) = value.as_array() {
+        for item in items {
+            validate_expression_candidate(item)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_expression_value(value: &Value) -> Result<(), PlanError> {
+    expr_from_value(value).map(|_| ()).map_err(PlanError::Expr)
+}
+
+fn validate_with_column_expression(value: &Value) -> Result<(), PlanError> {
+    if let Some(column) = try_column_from_udf_value(value) {
+        column.map(|_| ()).map_err(PlanError::Expr)
+    } else {
+        validate_expression_value(value)
+    }
 }
 
 /// Errors from plan execution.

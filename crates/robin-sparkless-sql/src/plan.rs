@@ -497,7 +497,9 @@ fn lower_limit(query: &Query) -> Result<(Option<usize>, Option<usize>), SqlPlanE
                 limit = Some(nonnegative_integer(clause_limit, "LIMIT")?);
             }
         }
-    } else if let Some(fetch) = &query.fetch
+    }
+    if limit.is_none()
+        && let Some(fetch) = &query.fetch
         && let Some(quantity) = &fetch.quantity
     {
         limit = Some(nonnegative_integer(quantity, "LIMIT")?);

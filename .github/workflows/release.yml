@@ -1040,6 +1040,8 @@ jobs:
 
           publish_one spark-sql-parser
           publish_one robin-sparkless-core
+          publish_one robin-sparkless-plan
+          publish_one robin-sparkless-sql
           publish_one robin-sparkless-duckdb
           publish_one robin-sparkless-polars
           publish_one robin-sparkless

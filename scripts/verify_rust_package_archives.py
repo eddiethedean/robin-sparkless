@@ -13,6 +13,8 @@ import tomllib
 PUBLISHABLE_MANIFESTS = (
     "Cargo.toml",
     "crates/robin-sparkless-core/Cargo.toml",
+    "crates/robin-sparkless-plan/Cargo.toml",
+    "crates/robin-sparkless-sql/Cargo.toml",
     "crates/robin-sparkless-duckdb/Cargo.toml",
     "crates/robin-sparkless-polars/Cargo.toml",
     "crates/spark-sql-parser/Cargo.toml",

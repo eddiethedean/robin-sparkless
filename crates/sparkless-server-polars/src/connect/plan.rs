@@ -11,7 +11,7 @@ use robin_sparkless::{
 use robin_sparkless_core::engine::{CancellationToken, CatalogReadSnapshot};
 use spark_sql_parser::ast::{BinaryOperator, Expr as SqlExpr, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tonic::{Code, Status};
 
 const MAX_PLAN_DEPTH: usize = 64;
@@ -63,6 +63,7 @@ pub(super) fn translate_plan_for_analysis(
             source_snapshot: None,
             token: token.clone(),
             materialize_sources: false,
+            decoded_local_relations: Arc::new(Mutex::new(HashMap::new())),
         },
     )
 }
@@ -75,6 +76,7 @@ pub(super) fn translate_plan_for_execution(
     let source_snapshot = session
         .begin_external_catalog_read_snapshot(token)
         .map_err(engine_failure)?;
+    let decoded_local_relations = Arc::new(Mutex::new(HashMap::new()));
     // Validate the complete plan against metadata before scanning rows, including source
     // ownership across nested joins. Run this even for metadata-only external catalogs: their
     // lack of a reader must not bypass plan validation or let an earlier source scan happen.
@@ -85,6 +87,7 @@ pub(super) fn translate_plan_for_execution(
             source_snapshot: source_snapshot.clone(),
             token: token.clone(),
             materialize_sources: false,
+            decoded_local_relations: decoded_local_relations.clone(),
         },
     )?;
     translate_plan_with_context(
@@ -94,6 +97,7 @@ pub(super) fn translate_plan_for_execution(
             source_snapshot,
             token: token.clone(),
             materialize_sources: true,
+            decoded_local_relations,
         },
     )
 }
@@ -103,6 +107,7 @@ struct TranslationContext {
     source_snapshot: Option<Arc<dyn CatalogReadSnapshot>>,
     token: CancellationToken,
     materialize_sources: bool,
+    decoded_local_relations: Arc<Mutex<HashMap<usize, (robin_sparkless::DataFrame, StructType)>>>,
 }
 
 impl TranslationContext {
@@ -112,6 +117,7 @@ impl TranslationContext {
             source_snapshot: None,
             token: CancellationToken::new(),
             materialize_sources: false,
+            decoded_local_relations: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -190,41 +196,59 @@ fn translate_relation_with_context(
             (dataframe, schema, HashSet::new())
         }
         Some(RelType::LocalRelation(local)) => {
-            if local
-                .data
-                .as_ref()
-                .is_some_and(|data| data.len() > super::MAX_CONNECT_LOCAL_IPC_BYTES)
-            {
-                return Err(Status::resource_exhausted(format!(
-                    "Connect local Arrow IPC data exceeds {} bytes",
-                    super::MAX_CONNECT_LOCAL_IPC_BYTES
-                )));
+            // Both passes traverse this same protobuf plan, so the relation address is a stable
+            // cache key for the decoded inline frame during this request.
+            let relation_key = std::ptr::from_ref(relation) as usize;
+            let cached = context
+                .decoded_local_relations
+                .lock()
+                .map_err(|_| Status::internal("Connect local relation cache is unavailable"))?
+                .get(&relation_key)
+                .cloned();
+            if let Some((dataframe, schema)) = cached {
+                (dataframe, schema, HashSet::new())
+            } else {
+                if local
+                    .data
+                    .as_ref()
+                    .is_some_and(|data| data.len() > super::MAX_CONNECT_LOCAL_IPC_BYTES)
+                {
+                    return Err(Status::resource_exhausted(format!(
+                        "Connect local Arrow IPC data exceeds {} bytes",
+                        super::MAX_CONNECT_LOCAL_IPC_BYTES
+                    )));
+                }
+                let schema = local
+                    .schema
+                    .as_deref()
+                    .map(parse_local_schema)
+                    .transpose()?;
+                if local.data.is_none() && schema.is_none() {
+                    return Err(Status::invalid_argument(
+                        "Connect LocalRelation requires data or a schema",
+                    ));
+                }
+                if let Some(schema) = schema.as_ref() {
+                    validate_connect_scalar_schema(schema)?;
+                }
+                let (dataframe, schema) = session
+                    .create_dataframe_from_arrow_ipc(
+                        local.data.as_deref(),
+                        schema,
+                        super::MAX_CONNECT_LOCAL_IPC_BYTES,
+                        super::MAX_CONNECT_LOCAL_ROWS,
+                        super::MAX_CONNECT_LOCAL_DECODED_BYTES,
+                        super::MAX_CONNECT_LOCAL_SCALAR_BYTES,
+                    )
+                    .map_err(local_relation_failure)?;
+                validate_connect_scalar_schema(&schema)?;
+                context
+                    .decoded_local_relations
+                    .lock()
+                    .map_err(|_| Status::internal("Connect local relation cache is unavailable"))?
+                    .insert(relation_key, (dataframe.clone(), schema.clone()));
+                (dataframe, schema, HashSet::new())
             }
-            let schema = local
-                .schema
-                .as_deref()
-                .map(parse_local_schema)
-                .transpose()?;
-            if local.data.is_none() && schema.is_none() {
-                return Err(Status::invalid_argument(
-                    "Connect LocalRelation requires data or a schema",
-                ));
-            }
-            if let Some(schema) = schema.as_ref() {
-                validate_connect_scalar_schema(schema)?;
-            }
-            let (dataframe, schema) = session
-                .create_dataframe_from_arrow_ipc(
-                    local.data.as_deref(),
-                    schema,
-                    super::MAX_CONNECT_LOCAL_IPC_BYTES,
-                    super::MAX_CONNECT_LOCAL_ROWS,
-                    super::MAX_CONNECT_LOCAL_DECODED_BYTES,
-                    super::MAX_CONNECT_LOCAL_SCALAR_BYTES,
-                )
-                .map_err(local_relation_failure)?;
-            validate_connect_scalar_schema(&schema)?;
-            (dataframe, schema, HashSet::new())
         }
         Some(RelType::CachedLocalRelation(_)) => {
             return Err(Status::unimplemented(

@@ -1427,25 +1427,29 @@ pub(crate) fn translate_query(
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let portable_plan = robin_sparkless_sql::lower_query(query)
         .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    let order_columns = portable_plan
+        .order_by
+        .iter()
+        .map(|sort| match &sort.expression.shape {
+            robin_sparkless_sql::ExpressionShape::Identifier(parts) => parts
+                .last()
+                .filter(|name| !name.is_empty())
+                .map(String::as_str)
+                .ok_or_else(|| {
+                    PolarsError::InvalidOperation("SQL: empty compound identifier.".into())
+                }),
+            _ => Err(PolarsError::InvalidOperation(
+                format!("SQL: expected column name, got {}", sort.expression.debug).into(),
+            )),
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
     let mut df = translate_set_expr(session, query.body.as_ref())?;
     if !portable_plan.order_by.is_empty() {
         let orders: Vec<crate::functions::SortOrder> = portable_plan
             .order_by
             .iter()
-            .map(|sort| {
-                let col_name = match &sort.expression.shape {
-                    robin_sparkless_sql::ExpressionShape::Identifier(parts) => {
-                        parts.last().ok_or_else(|| {
-                            PolarsError::InvalidOperation("SQL: empty compound identifier.".into())
-                        })?
-                    }
-                    _ => {
-                        return Err(PolarsError::InvalidOperation(
-                            format!("SQL: expected column name, got {}", sort.expression.debug)
-                                .into(),
-                        ));
-                    }
-                };
+            .zip(order_columns)
+            .map(|(sort, col_name)| {
                 let resolved = df.resolve_column_name(col_name)?;
                 let ascending = sort.ascending.unwrap_or(true);
                 let column = Column::new(resolved);
