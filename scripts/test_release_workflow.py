@@ -83,6 +83,10 @@ class ReleaseContextTests(unittest.TestCase):
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_server_ci_job_allows_time_for_cold_builds(self):
+        job = workflow("ci.yml")["jobs"]["server-tests"]
+        self.assertGreaterEqual(job["timeout-minutes"], 90)
+
     def test_python_catalog_writer_test_jobs_install_pyarrow(self):
         test_jobs = (
             ("ci.yml", "python"),
