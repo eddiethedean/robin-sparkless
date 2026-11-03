@@ -251,8 +251,8 @@ jobs:
       - name: Run default-feature core tests
         run: cargo test --locked -p robin-sparkless-core --lib --tests
 
-  server-tests:
-    name: Server HTTP and Spark Connect tests
+  server-base-tests:
+    name: Base server HTTP and Spark Connect tests
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -271,14 +271,13 @@ jobs:
           key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Check isolated server transport builds
+      - name: Check base server transport builds
         run: |
           cargo check --locked -p sparkless-server --no-default-features --features http
           cargo check --locked -p sparkless-server --no-default-features --features connect
           cargo check --locked -p sparkless-server --no-default-features --features http,connect
-          cargo check --locked -p sparkless-server-duckdb --no-default-features --features http
-          cargo check --locked -p sparkless-server-duckdb --no-default-features --features connect
-          cargo check --locked -p sparkless-server-duckdb --no-default-features --features http,connect
+      - name: Test shared server runtime and Connect crates
+        run: |
           cargo test --locked -p sparkless-server-runtime
           cargo test --locked -p sparkless-server-connect
           cargo test --locked -p sparkless-server-polars --no-default-features --features connect --lib
@@ -288,9 +287,34 @@ jobs:
           cargo test --locked --release -p sparkless-server --no-default-features --features http,connect --test control_protocol --test phase1_http
         env:
           CARGO_BUILD_JOBS: 1
-      - name: Check product feature isolation
+
+  server-duckdb-tests:
+    name: DuckDB server feature checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
+        with:
+          toolchain: 1.93.1
+      - name: Cache cargo
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Check isolated DuckDB server transport builds
         run: |
-          python scripts/verify_server_feature_graphs.py --output-dir "$RUNNER_TEMP/server-feature-graphs"
+          cargo check --locked -p sparkless-server-duckdb --no-default-features --features http
+          cargo check --locked -p sparkless-server-duckdb --no-default-features --features connect
+          cargo check --locked -p sparkless-server-duckdb --no-default-features --features http,connect
+      - name: Check product feature isolation
+        run: python scripts/verify_server_feature_graphs.py --output-dir "$RUNNER_TEMP/server-feature-graphs"
 
   python-build:
     name: Build one Linux CI wheel
@@ -562,7 +586,8 @@ jobs:
       - test
       - test-delta
       - test-default-core
-      - server-tests
+      - server-base-tests
+      - server-duckdb-tests
       - python-build
       - python
       - python-delta

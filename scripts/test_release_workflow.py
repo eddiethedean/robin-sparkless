@@ -84,8 +84,19 @@ class ReleaseContextTests(unittest.TestCase):
 
 class ReleaseWorkflowTests(unittest.TestCase):
     def test_server_ci_job_allows_time_for_cold_builds(self):
-        job = workflow("ci.yml")["jobs"]["server-tests"]
-        self.assertGreaterEqual(job["timeout-minutes"], 90)
+        jobs = workflow("ci.yml")["jobs"]
+        self.assertGreaterEqual(jobs["server-base-tests"]["timeout-minutes"], 90)
+        self.assertGreaterEqual(jobs["server-duckdb-tests"]["timeout-minutes"], 90)
+        base_steps = "\n".join(
+            step.get("run", "") for step in jobs["server-base-tests"]["steps"]
+        )
+        duckdb_steps = "\n".join(
+            step.get("run", "") for step in jobs["server-duckdb-tests"]["steps"]
+        )
+        self.assertIn("-p sparkless-server ", base_steps)
+        self.assertNotIn("-p sparkless-server-duckdb ", base_steps)
+        self.assertIn("-p sparkless-server-duckdb ", duckdb_steps)
+        self.assertNotIn("-p sparkless-server ", duckdb_steps)
 
     def test_python_catalog_writer_test_jobs_install_pyarrow(self):
         test_jobs = (
@@ -138,49 +149,102 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
     def test_419_server_products_are_built_and_verified_separately(self):
         jobs = workflow("release.yml")["jobs"]
-        for job_name in (
-            "server-products-manylinux-x86_64",
-            "server-products-macos-arm64",
-        ):
+        products = {
+            "server-base-manylinux-x86_64": (
+                "sparkless-server",
+                "sparkless-server-base-manylinux-2-28-x86_64",
+            ),
+            "server-duckdb-manylinux-x86_64": (
+                "sparkless-server-duckdb",
+                "sparkless-server-duckdb-manylinux-2-28-x86_64",
+            ),
+            "server-base-macos-arm64": (
+                "sparkless-server",
+                "sparkless-server-base-macosx-14-0-arm64",
+            ),
+            "server-duckdb-macos-arm64": (
+                "sparkless-server-duckdb",
+                "sparkless-server-duckdb-macosx-14-0-arm64",
+            ),
+        }
+        for job_name, (crate, artifact) in products.items():
             with self.subTest(job=job_name):
-                steps = jobs[job_name]["steps"]
-                self.assertTrue(
-                    any(
-                        step.get("name")
-                        == "Fetch the signed DuckDB 2.0.0 Quack extension"
-                        for step in steps
+                job = jobs[job_name]
+                steps = job["steps"]
+                commands = "\n".join(step.get("run", "") for step in steps)
+                builds = [
+                    step
+                    for step in steps
+                    if (
+                        step.get("name", "").startswith("Build the ")
+                        and "server product" in step.get("name", "")
                     )
+                    or step.get("name") == "Build the base server without DuckDB"
+                ]
+                self.assertEqual(len(builds), 1)
+                build = builds[0]
+                self.assertIn(f"-p {crate} ", build["run"])
+                self.assertIn("--features http,connect", build["run"])
+                product_flag = "duckdb" if crate.endswith("duckdb") else "base"
+                project_path = (
+                    "python/server-duckdb/pyproject.toml"
+                    if crate.endswith("duckdb")
+                    else "python/server/pyproject.toml"
                 )
-                base_build = next(
-                    step
+                self.assertIn(f"--product {product_flag}", commands)
+                self.assertIn(project_path, commands)
+                uploads = [
+                    step.get("with", {}).get("name")
                     for step in steps
-                    if step.get("name") == "Build the base server without DuckDB"
+                    if step.get("uses", "").startswith("actions/upload-artifact@")
+                ]
+                self.assertIn(artifact, uploads)
+                other_crate = (
+                    "sparkless-server-duckdb"
+                    if crate == "sparkless-server"
+                    else "sparkless-server"
                 )
-                duckdb_build = next(
-                    step
-                    for step in steps
-                    if step.get("name") == "Build the DuckDB server product"
-                )
-                self.assertIn("-p sparkless-server ", base_build["run"])
-                self.assertIn("--features http,connect", base_build["run"])
-                self.assertNotIn("duckdb-source", base_build["run"])
-                self.assertIn("-p sparkless-server-duckdb ", duckdb_build["run"])
-                graph_step = next(
-                    step
-                    for step in steps
-                    if step.get("name") == "Record isolated product feature graphs"
-                )
-                self.assertEqual(
-                    graph_step.get("env", {}).get("RUSTUP_TOOLCHAIN"), "1.93.1"
-                )
-                wheel_step = next(
-                    step
-                    for step in steps
-                    if step.get("name", "").startswith("Build and verify separate")
-                )
-                self.assertIn("SPARKLESS_QUACK_EXTENSION_BINARY", wheel_step["run"])
-                self.assertIn("--product duckdb", wheel_step["run"])
-                self.assertIn("python/server-duckdb/pyproject.toml", wheel_step["run"])
+                self.assertNotIn(f"-p {other_crate} ", commands)
+                if crate.endswith("duckdb"):
+                    self.assertIn(
+                        "Fetch the signed DuckDB 2.0.0 Quack extension",
+                        [step.get("name") for step in steps],
+                    )
+                    self.assertIn("SPARKLESS_QUACK_EXTENSION_BINARY", commands)
+                    self.assertIn(
+                        "Build the DuckDB source owner fixture",
+                        [step.get("name") for step in steps],
+                    )
+                else:
+                    self.assertNotIn("SPARKLESS_QUACK_EXTENSION_BINARY", commands)
+                    self.assertNotIn("duckdb_quack_fixture_owner", commands)
+
+        graph_job = jobs["server-feature-graphs"]
+        graph_step = next(
+            step
+            for step in graph_job["steps"]
+            if step.get("name") == "Record isolated product feature graphs"
+        )
+        self.assertEqual(graph_step.get("env", {}).get("RUSTUP_TOOLCHAIN"), "1.93.1")
+        self.assertIn("server-feature-graphs", str(graph_job))
+        self.assertNotIn(
+            "server-feature-graphs", str(jobs["server-base-manylinux-x86_64"])
+        )
+        self.assertEqual(
+            set(jobs["server-container"]["needs"]),
+            {"server-base-manylinux-x86_64", "server-duckdb-manylinux-x86_64"},
+        )
+        self.assertEqual(
+            set(jobs["server-product-consumer"]["needs"]),
+            {
+                "build-wheels",
+                "source-dist",
+                "server-base-manylinux-x86_64",
+                "server-duckdb-manylinux-x86_64",
+                "server-base-macos-arm64",
+                "server-duckdb-macos-arm64",
+            },
+        )
 
         consumer = "\n".join(
             step.get("run", "") for step in jobs["server-product-consumer"]["steps"]
