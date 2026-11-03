@@ -45,18 +45,13 @@ impl CatalogCapabilities {
     pub const READ_WRITE: Self = Self {
         read: true,
         write: true,
-        batch_write: false,
-    };
-    pub const READ_WRITE_BATCH: Self = Self {
-        read: true,
-        write: true,
         batch_write: true,
     };
 
     pub fn validate(self) -> Result<(), EngineError> {
-        if self.batch_write && !self.write {
+        if self.batch_write != self.write {
             return Err(EngineError::invalid_input(
-                "batch-write capability requires write capability".into(),
+                "external writes require the bounded batch-write capability".into(),
             ));
         }
         Ok(())
@@ -196,18 +191,6 @@ pub enum ExternalTableSaveMode {
     Ignore,
 }
 
-#[derive(Debug, Clone)]
-pub struct ExternalTableWriteRequest {
-    pub operation_id: String,
-    pub identifier: String,
-    pub table: ExternalTableDescriptor,
-    pub data: ArrowIpcStream,
-    pub mode: ExternalTableSaveMode,
-    pub format: Option<String>,
-    pub options: Vec<(String, String)>,
-    pub partition_by: Vec<String>,
-}
-
 pub struct ExternalTableWriteBatchRequest {
     pub operation_id: String,
     pub identifier: String,
@@ -246,15 +229,7 @@ pub trait PreparedCatalogWrite: Send {
     fn commit(self: Box<Self>, token: &CancellationToken) -> ExternalTableWriteOutcome;
 }
 
-/// Optional materialized-write capability. A read-only catalog has no writer object.
-pub trait CatalogWriter: Send + Sync {
-    fn prepare_write(
-        &self,
-        request: ExternalTableWriteRequest,
-    ) -> Result<Box<dyn PreparedCatalogWrite>, EngineError>;
-}
-
-/// Optional bounded-batch write capability; independent from materialized writes.
+/// Optional bounded-batch write capability. A read-only catalog has no writer object.
 pub trait CatalogBatchWriter: Send + Sync {
     fn prepare_write_batches(
         &self,
@@ -267,7 +242,6 @@ pub trait CatalogBatchWriter: Send + Sync {
 pub struct ExternalCatalog {
     resolver: Arc<dyn CatalogResolver>,
     reader: Option<Arc<dyn CatalogReader>>,
-    writer: Option<Arc<dyn CatalogWriter>>,
     batch_writer: Option<Arc<dyn CatalogBatchWriter>>,
 }
 
@@ -275,7 +249,6 @@ impl std::fmt::Debug for ExternalCatalog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExternalCatalog")
             .field("has_reader", &self.reader.is_some())
-            .field("has_writer", &self.writer.is_some())
             .field("has_batch_writer", &self.batch_writer.is_some())
             .finish_non_exhaustive()
     }
@@ -285,13 +258,11 @@ impl ExternalCatalog {
     pub fn new(
         resolver: Arc<dyn CatalogResolver>,
         reader: Option<Arc<dyn CatalogReader>>,
-        writer: Option<Arc<dyn CatalogWriter>>,
         batch_writer: Option<Arc<dyn CatalogBatchWriter>>,
     ) -> Self {
         Self {
             resolver,
             reader,
-            writer,
             batch_writer,
         }
     }
@@ -354,17 +325,6 @@ impl ExternalCatalog {
         Ok(())
     }
 
-    pub fn has_materialized_writer(&self) -> bool {
-        self.writer.is_some()
-    }
-
-    pub fn has_materialized_writer_for(&self, ownership: &CatalogOwnership) -> bool {
-        ownership
-            .capabilities()
-            .is_some_and(|capabilities| capabilities.write)
-            && self.writer.is_some()
-    }
-
     pub fn has_reader(&self) -> bool {
         self.reader.is_some()
     }
@@ -396,25 +356,6 @@ impl ExternalCatalog {
             && self.batch_writer.is_some()
     }
 
-    pub fn write_table(
-        &self,
-        ownership: &CatalogOwnership,
-        request: ExternalTableWriteRequest,
-        token: &CancellationToken,
-    ) -> Result<ExternalTableWriteOutcome, EngineError> {
-        self.require_write_ownership(ownership)?;
-        let writer = self.writer.as_ref().ok_or_else(|| {
-            EngineError::capability(
-                "MATERIALIZED_WRITE_CAPABILITY_MISSING",
-                "external catalog has no materialized write capability",
-            )
-        })?;
-        token.check_cancelled()?;
-        let prepared = writer.prepare_write(request)?;
-        token.check_cancelled()?;
-        Ok(prepared.commit(token))
-    }
-
     pub fn write_table_batches(
         &self,
         ownership: &CatalogOwnership,
@@ -422,15 +363,11 @@ impl ExternalCatalog {
         token: &CancellationToken,
     ) -> Result<ExternalTableWriteOutcome, EngineError> {
         self.require_write_ownership(ownership)?;
-        if !ownership
-            .capabilities()
-            .is_some_and(|capabilities| capabilities.batch_write)
-        {
-            return Err(EngineError::capability(
-                "BATCH_WRITE_CAPABILITY_DENIED",
-                "external catalog owner does not permit batch writes",
-            ));
-        }
+        debug_assert!(
+            ownership
+                .capabilities()
+                .is_some_and(|capabilities| capabilities.batch_write)
+        );
         let writer = self.batch_writer.as_ref().ok_or_else(|| {
             EngineError::capability(
                 "BATCH_WRITE_CAPABILITY_MISSING",
@@ -459,10 +396,10 @@ impl ExternalCatalog {
                 ),
             ));
         }
-        if self.writer.is_none() && self.batch_writer.is_none() {
+        if !capabilities.batch_write || self.batch_writer.is_none() {
             return Err(EngineError::capability(
                 "WRITE_CAPABILITY_MISSING",
-                "external catalog owner advertises writes but no writer capability is registered",
+                "external catalog owner advertises writes but no bounded batch writer is registered",
             ));
         }
         Ok(())

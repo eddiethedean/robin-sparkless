@@ -1,6 +1,6 @@
 //! SQL identifier validation and dialect-specific quoting for JDBC.
 
-use crate::error::EngineError;
+use robin_sparkless_core::EngineError;
 
 /// Safe unquoted identifier: letter/underscore start, then alphanumeric/underscore.
 fn is_valid_ident_part(part: &str) -> bool {

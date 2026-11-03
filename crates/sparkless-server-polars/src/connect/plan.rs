@@ -2755,9 +2755,7 @@ mod tests {
         let session = session();
         let resolver: Arc<dyn CatalogResolver> = Arc::new(MetadataOnlyCatalog);
         session
-            .set_external_catalog(Some(Arc::new(ExternalCatalog::new(
-                resolver, None, None, None,
-            ))))
+            .set_external_catalog(Some(Arc::new(ExternalCatalog::new(resolver, None, None))))
             .unwrap();
         session.register_table("managed", session.range(0, 3, 1).unwrap());
 
@@ -3956,7 +3954,6 @@ mod tests {
             .set_external_catalog(Some(Arc::new(ExternalCatalog::new(
                 resolver,
                 Some(reader),
-                None,
                 None,
             ))))
             .unwrap();

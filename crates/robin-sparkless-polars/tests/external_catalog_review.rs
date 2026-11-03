@@ -4,13 +4,12 @@ use polars::prelude::{
     DataFrame as PlDataFrame, IntoSeries, NamedFrom, Series as PlSeries, TimeUnit, TimeZone,
 };
 use robin_sparkless_core::engine::{
-    CatalogCapabilities, CatalogOwnership, CatalogResolver, CatalogWriter,
-    ExternalTableWriteOutcome, PreparedCatalogWrite,
+    CatalogBatchWriter, CatalogCapabilities, CatalogOwnership, CatalogResolver,
+    ExternalTableWriteBatchRequest, ExternalTableWriteOutcome, PreparedCatalogWrite,
 };
 use robin_sparkless_polars::{
     DataType, EngineError, ExternalCatalog, ExternalTableDescriptor, ExternalTableFormat,
-    ExternalTableWriteRequest, ExternalTableWriteResult, SaveMode, SparkSession, StructField,
-    StructType, WriteFormat,
+    ExternalTableWriteResult, SaveMode, SparkSession, StructField, StructType, WriteFormat,
 };
 use serde_json::json;
 use std::sync::{
@@ -23,7 +22,7 @@ struct Provider {
     table: Arc<Mutex<ExternalTableDescriptor>>,
     calls: Arc<AtomicUsize>,
     miss_first: bool,
-    writes: Arc<Mutex<Vec<ExternalTableWriteRequest>>>,
+    writes: Arc<Mutex<Vec<RecordedWrite>>>,
 }
 impl CatalogResolver for Provider {
     fn resolve_ownership(&self, _: &str) -> Result<CatalogOwnership, EngineError> {
@@ -43,10 +42,16 @@ impl CatalogResolver for Provider {
     }
 }
 
+struct RecordedWrite {
+    format: Option<String>,
+    options: Vec<(String, String)>,
+    partition_by: Vec<String>,
+}
+
 struct ProviderWrite {
     table: Arc<Mutex<ExternalTableDescriptor>>,
-    writes: Arc<Mutex<Vec<ExternalTableWriteRequest>>>,
-    request: ExternalTableWriteRequest,
+    writes: Arc<Mutex<Vec<RecordedWrite>>>,
+    request: ExternalTableWriteBatchRequest,
 }
 
 impl PreparedCatalogWrite for ProviderWrite {
@@ -57,9 +62,25 @@ impl PreparedCatalogWrite for ProviderWrite {
         if let Err(error) = token.check_cancelled() {
             return ExternalTableWriteOutcome::NotCommitted(error);
         }
-        let mut table = self.request.table.clone();
+        let ExternalTableWriteBatchRequest {
+            mut table,
+            format,
+            options,
+            partition_by,
+            mut batches,
+            ..
+        } = self.request;
+        while let Some(batch) = batches.next() {
+            if let Err(error) = batch {
+                return ExternalTableWriteOutcome::NotCommitted(error);
+            }
+        }
         table.version = Some(table.version.unwrap_or(0) + 1);
-        self.writes.lock().unwrap().push(self.request);
+        self.writes.lock().unwrap().push(RecordedWrite {
+            format,
+            options,
+            partition_by,
+        });
         *self.table.lock().unwrap() = table.clone();
         ExternalTableWriteOutcome::Committed(ExternalTableWriteResult {
             committed_version: table.version,
@@ -69,10 +90,10 @@ impl PreparedCatalogWrite for ProviderWrite {
     }
 }
 
-impl CatalogWriter for Provider {
-    fn prepare_write(
+impl CatalogBatchWriter for Provider {
+    fn prepare_write_batches(
         &self,
-        request: ExternalTableWriteRequest,
+        request: ExternalTableWriteBatchRequest,
     ) -> Result<Box<dyn PreparedCatalogWrite>, EngineError> {
         Ok(Box::new(ProviderWrite {
             table: Arc::clone(&self.table),
@@ -84,12 +105,12 @@ impl CatalogWriter for Provider {
 
 fn external_catalog(provider: Arc<Provider>) -> Arc<ExternalCatalog> {
     let resolver: Arc<dyn CatalogResolver> = provider.clone();
-    let writer: Arc<dyn CatalogWriter> = provider;
-    Arc::new(ExternalCatalog::new(resolver, None, Some(writer), None))
+    let writer: Arc<dyn CatalogBatchWriter> = provider;
+    Arc::new(ExternalCatalog::new(resolver, None, Some(writer)))
 }
 
 fn read_only_catalog(resolver: Arc<dyn CatalogResolver>) -> Arc<ExternalCatalog> {
-    Arc::new(ExternalCatalog::new(resolver, None, None, None))
+    Arc::new(ExternalCatalog::new(resolver, None, None))
 }
 fn attach(
     session: &SparkSession,

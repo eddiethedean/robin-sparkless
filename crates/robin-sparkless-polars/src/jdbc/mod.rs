@@ -1,10 +1,10 @@
-//! JDBC-style options and helpers for database IO.
+//! Thin Polars-engine integration for JDBC storage drivers.
 //!
-//! This module parses JDBC-like option maps (as used by
-//! `DataFrameReader::format("jdbc").options(...)` and `DataFrameWriter::options(...)`)
-//! and dispatches read/write to database backends based on the connection URL (and
-//! optionally the `driver` hint, mirroring PySpark's JDBC conventions).
+//! Driver-neutral option parsing and SQL identifier policy live in
+//! `robin-sparkless-jdbc`; concrete database connections and Polars conversion live in
+//! `robin-sparkless-jdbc-polars`.
 
+#[cfg(test)]
 use std::collections::HashMap;
 
 use crate::error::EngineError;
@@ -20,299 +20,19 @@ use crate::error::EngineError;
 ))]
 use polars::prelude::DataFrame as PlDataFrame;
 
-#[cfg(feature = "jdbc")]
-mod postgres;
-#[cfg(feature = "sqlite")]
-mod sqlite;
+pub use robin_sparkless_jdbc::sql_ident;
 
-#[cfg(feature = "jdbc_db2")]
-mod db2;
-#[cfg(feature = "jdbc_mariadb")]
-mod mariadb;
-#[cfg(feature = "jdbc_mssql")]
-mod mssql;
-#[cfg(any(feature = "jdbc_mysql", feature = "jdbc_mariadb"))]
-mod mysql;
-#[cfg(feature = "jdbc_oracle")]
-mod oracle;
+pub use robin_sparkless_jdbc::{
+    JdbcOptions, is_db2_url, is_mariadb_url, is_mssql_url, is_mysql_url, is_oracle_url,
+    is_postgres_url, is_sqlite_url, jdbc_allow_arbitrary_sql,
+};
 
-mod sql_ident;
-
-/// JDBC-style options modeled after PySpark's JDBC DataSource V1 options.
-#[derive(Debug, Clone)]
-pub struct JdbcOptions {
-    /// Connection URL, typically a JDBC URL.
-    pub url: String,
-
-    /// Table name or subquery (PySpark: `dbtable`).
-    pub dbtable: Option<String>,
-
-    /// Explicit SQL query (PySpark: `query`). Mutually exclusive with `dbtable`
-    /// for reads; writers generally require `dbtable`.
-    pub query: Option<String>,
-
-    /// Username for authentication (PySpark: `user`).
-    pub user: Option<String>,
-
-    /// Password for authentication (PySpark: `password`).
-    pub password: Option<String>,
-
-    /// Optional driver class / dialect hint (PySpark: `driver`).
-    pub driver: Option<String>,
-
-    /// Column used for partitioned reads (PySpark: `partitionColumn`).
-    pub partition_column: Option<String>,
-
-    /// Lower bound for partitioning (PySpark: `lowerBound`).
-    pub lower_bound: Option<i64>,
-
-    /// Upper bound for partitioning (PySpark: `upperBound`).
-    pub upper_bound: Option<i64>,
-
-    /// Number of partitions (PySpark: `numPartitions`).
-    pub num_partitions: Option<i32>,
-
-    /// JDBC fetch size (PySpark: `fetchsize`).
-    pub fetch_size: Option<i32>,
-
-    /// Batch size for writes (PySpark: `batchsize`).
-    pub batch_size: Option<i32>,
-
-    // --- New PySpark JDBC options ---
-    /// SQL to execute after opening connection (PySpark: `sessionInitStatement`).
-    pub session_init_statement: Option<String>,
-
-    /// Query timeout in seconds (PySpark: `queryTimeout`).
-    pub query_timeout: Option<i32>,
-
-    /// SQL to execute before the main query, e.g. CTEs or temp tables (PySpark: `prepareQuery`).
-    pub prepare_query: Option<String>,
-
-    /// Custom schema for reads, e.g. "id DECIMAL(38,0), name STRING" (PySpark: `customSchema`).
-    pub custom_schema: Option<String>,
-
-    /// Use TRUNCATE instead of DELETE for Overwrite mode (PySpark: `truncate`).
-    pub truncate: Option<bool>,
-
-    /// Use CASCADE with TRUNCATE (PySpark: `cascadeTruncate`).
-    pub cascade_truncate: Option<bool>,
-
-    /// Transaction isolation level: NONE, READ_UNCOMMITTED, READ_COMMITTED,
-    /// REPEATABLE_READ, SERIALIZABLE (PySpark: `isolationLevel`).
-    pub isolation_level: Option<String>,
-
-    /// Extra options for CREATE TABLE, e.g. "ENGINE=InnoDB" (PySpark: `createTableOptions`).
-    pub create_table_options: Option<String>,
-
-    /// Column types for CREATE TABLE, e.g. "name CHAR(64)" (PySpark: `createTableColumnTypes`).
-    pub create_table_column_types: Option<String>,
-
-    /// Raw options map so implementations can inspect additional keys without
-    /// round-tripping through this struct.
-    pub raw_options: HashMap<String, String>,
-}
-
-impl JdbcOptions {
-    /// Construct `JdbcOptions` from a generic options map, following PySpark's
-    /// JDBC conventions where possible.
-    ///
-    /// Required keys:
-    /// - `url`
-    ///
-    /// For reads at least one of `dbtable` or `query` is typically required;
-    /// writers require `dbtable`. That validation is performed by the
-    /// higher-level read/write helpers so this function only enforces the
-    /// presence of `url`.
-    pub fn from_options_map(options: &HashMap<String, String>) -> Result<JdbcOptions, EngineError> {
-        let url = options.get("url").cloned().ok_or_else(|| {
-            EngineError::invalid_input("JDBC options: missing required option 'url'".to_string())
-        })?;
-
-        // Helper to parse an integer option with a clear error message.
-        fn parse_i64_opt(
-            options: &HashMap<String, String>,
-            key: &str,
-        ) -> Result<Option<i64>, EngineError> {
-            if let Some(v) = options.get(key) {
-                v.parse::<i64>().map(Some).map_err(|e| {
-                    EngineError::invalid_input(format!(
-                        "JDBC options: could not parse '{key}'='{}' as i64: {e}",
-                        v
-                    ))
-                })
-            } else {
-                Ok(None)
-            }
-        }
-
-        fn parse_i32_opt(
-            options: &HashMap<String, String>,
-            key: &str,
-        ) -> Result<Option<i32>, EngineError> {
-            if let Some(v) = options.get(key) {
-                v.parse::<i32>().map(Some).map_err(|e| {
-                    EngineError::invalid_input(format!(
-                        "JDBC options: could not parse '{key}'='{}' as i32: {e}",
-                        v
-                    ))
-                })
-            } else {
-                Ok(None)
-            }
-        }
-
-        fn parse_bool_opt(options: &HashMap<String, String>, key: &str) -> Option<bool> {
-            options.get(key).map(|v| v.eq_ignore_ascii_case("true"))
-        }
-
-        let dbtable = options.get("dbtable").cloned();
-        let query = options.get("query").cloned();
-        let user = options.get("user").cloned();
-        let password = options.get("password").cloned();
-        let driver = options.get("driver").cloned();
-
-        let partition_column = options.get("partitionColumn").cloned();
-        let lower_bound = parse_i64_opt(options, "lowerBound")?;
-        let upper_bound = parse_i64_opt(options, "upperBound")?;
-        let num_partitions = parse_i32_opt(options, "numPartitions")?;
-        let fetch_size = parse_i32_opt(options, "fetchsize")?;
-        let batch_size = parse_i32_opt(options, "batchsize")?;
-
-        // New PySpark JDBC options
-        let session_init_statement = options.get("sessionInitStatement").cloned();
-        let query_timeout = parse_i32_opt(options, "queryTimeout")?;
-        let prepare_query = options.get("prepareQuery").cloned();
-        let custom_schema = options.get("customSchema").cloned();
-        let truncate = parse_bool_opt(options, "truncate");
-        let cascade_truncate = parse_bool_opt(options, "cascadeTruncate");
-        let isolation_level = options.get("isolationLevel").cloned();
-        let create_table_options = options.get("createTableOptions").cloned();
-        let create_table_column_types = options.get("createTableColumnTypes").cloned();
-
-        Ok(JdbcOptions {
-            url,
-            dbtable,
-            query,
-            user,
-            password,
-            driver,
-            partition_column,
-            lower_bound,
-            upper_bound,
-            num_partitions,
-            fetch_size,
-            batch_size,
-            session_init_statement,
-            query_timeout,
-            prepare_query,
-            custom_schema,
-            truncate,
-            cascade_truncate,
-            isolation_level,
-            create_table_options,
-            create_table_column_types,
-            raw_options: options.clone(),
-        })
-    }
-
-    /// Convenience constructor from the common `.jdbc(url, table, properties)`
-    /// signature used by PySpark.
-    pub fn from_url_dbtable_and_properties(
-        url: String,
-        dbtable: String,
-        properties: &HashMap<String, String>,
-    ) -> Result<JdbcOptions, EngineError> {
-        let mut opts = properties.clone();
-        opts.insert("url".to_string(), url);
-        opts.insert("dbtable".to_string(), dbtable);
-        JdbcOptions::from_options_map(&opts)
-    }
-
-    /// Whether this options set looks like a "query"-based read (has `query`
-    /// but no `dbtable`).
-    pub fn is_query_based_read(&self) -> bool {
-        self.query.is_some() && self.dbtable.is_none()
-    }
-
-    /// Whether this options set has a `dbtable` specified.
-    pub fn has_dbtable(&self) -> bool {
-        self.dbtable.is_some()
-    }
-
-    /// Reject arbitrary SQL options when hardened (see `SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL`).
-    pub fn enforce_sql_trust_boundary(&self) -> Result<(), EngineError> {
-        if jdbc_allow_arbitrary_sql() {
-            return Ok(());
-        }
-        if self.query.is_some()
-            || self.session_init_statement.is_some()
-            || self.prepare_query.is_some()
-        {
-            return Err(EngineError::invalid_input(
-                "JDBC query/sessionInitStatement/prepareQuery disabled. \
-                 Set SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL=true or use dbtable only."
-                    .to_string(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-/// Whether JDBC `query` / `sessionInitStatement` / `prepareQuery` are permitted.
-pub fn jdbc_allow_arbitrary_sql() -> bool {
-    if std::env::var("SPARKLESS_HARDENED")
-        .ok()
-        .is_some_and(|v| v == "1")
-    {
-        return std::env::var("SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL")
-            .ok()
-            .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
-    }
-    std::env::var("SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL")
-        .ok()
-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(true)
-}
-
-/// True if the URL is for SQLite (e.g. `jdbc:sqlite:/path` or `jdbc:sqlite:file:path`).
-pub fn is_sqlite_url(url: &str) -> bool {
-    url.starts_with("jdbc:sqlite") || url.starts_with("sqlite:")
-}
-
-/// True if the URL is for PostgreSQL (e.g. `jdbc:postgresql://...` or `postgres://...`).
-pub fn is_postgres_url(url: &str) -> bool {
-    url.starts_with("jdbc:postgresql")
-        || url.starts_with("postgres://")
-        || url.starts_with("postgresql://")
-}
-
-pub fn is_mysql_url(url: &str) -> bool {
-    url.starts_with("jdbc:mysql:")
-}
-
-pub fn is_mariadb_url(url: &str) -> bool {
-    url.starts_with("jdbc:mariadb:")
-}
-
-pub fn is_mssql_url(url: &str) -> bool {
-    url.starts_with("jdbc:sqlserver:")
-}
-
-pub fn is_oracle_url(url: &str) -> bool {
-    url.starts_with("jdbc:oracle:")
-}
-
-pub fn is_db2_url(url: &str) -> bool {
-    url.starts_with("jdbc:db2:")
-}
-
+#[cfg(test)]
 fn driver_hint_is(driver: &Option<String>, expected: &str) -> bool {
-    driver
-        .as_ref()
-        .is_some_and(|d| d.eq_ignore_ascii_case(expected))
+    robin_sparkless_jdbc::driver_hint_matches(driver.as_deref(), expected)
 }
 
-/// Write a Polars `DataFrame` to a JDBC destination using the given options and save mode.
+/// Write a Polars frame through the configured JDBC driver.
 #[cfg(any(
     feature = "jdbc",
     feature = "sqlite",
@@ -323,76 +43,25 @@ fn driver_hint_is(driver: &Option<String>, expected: &str) -> bool {
     feature = "jdbc_db2"
 ))]
 pub fn write_jdbc_from_polars(
-    df: &PlDataFrame,
-    opts: &JdbcOptions,
+    frame: &PlDataFrame,
+    options: &JdbcOptions,
     mode: crate::dataframe::SaveMode,
 ) -> Result<(), EngineError> {
-    if is_sqlite_url(&opts.url) || driver_hint_is(&opts.driver, "org.sqlite.JDBC") {
-        #[cfg(feature = "sqlite")]
-        return sqlite::write_jdbc_sqlite(df, opts, mode);
-        #[cfg(not(feature = "sqlite"))]
-        return Err(EngineError::invalid_input(
-            "JDBC write: SQLite URL/driver requires the 'sqlite' feature".to_string(),
-        ));
-    }
-    if is_postgres_url(&opts.url) || driver_hint_is(&opts.driver, "org.postgresql.Driver") {
-        #[cfg(feature = "jdbc")]
-        return postgres::write_jdbc_postgres(df, opts, mode);
-        #[cfg(not(feature = "jdbc"))]
-        return Err(EngineError::invalid_input(
-            "JDBC write: PostgreSQL URL/driver requires the 'jdbc' feature".to_string(),
-        ));
-    }
-    if is_mysql_url(&opts.url) || driver_hint_is(&opts.driver, "com.mysql.cj.jdbc.Driver") {
-        #[cfg(feature = "jdbc_mysql")]
-        return mysql::write_jdbc_mysql(df, opts, mode);
-        #[cfg(not(feature = "jdbc_mysql"))]
-        return Err(EngineError::invalid_input(
-            "JDBC write: MySQL URL/driver requires the 'jdbc_mysql' feature".to_string(),
-        ));
-    }
-    if is_mariadb_url(&opts.url) || driver_hint_is(&opts.driver, "org.mariadb.jdbc.Driver") {
-        #[cfg(feature = "jdbc_mariadb")]
-        return mariadb::write_jdbc_mariadb(df, opts, mode);
-        #[cfg(not(feature = "jdbc_mariadb"))]
-        return Err(EngineError::invalid_input(
-            "JDBC write: MariaDB URL/driver requires the 'jdbc_mariadb' feature".to_string(),
-        ));
-    }
-    if is_mssql_url(&opts.url)
-        || driver_hint_is(&opts.driver, "com.microsoft.sqlserver.jdbc.SQLServerDriver")
-    {
-        #[cfg(feature = "jdbc_mssql")]
-        return mssql::write_jdbc_mssql(df, opts, mode);
-        #[cfg(not(feature = "jdbc_mssql"))]
-        return Err(EngineError::invalid_input(
-            "JDBC write: SQL Server URL/driver requires the 'jdbc_mssql' feature".to_string(),
-        ));
-    }
-    if is_oracle_url(&opts.url) || driver_hint_is(&opts.driver, "oracle.jdbc.OracleDriver") {
-        #[cfg(feature = "jdbc_oracle")]
-        return oracle::write_jdbc_oracle(df, opts, mode);
-        #[cfg(not(feature = "jdbc_oracle"))]
-        return Err(EngineError::invalid_input(
-            "JDBC write: Oracle URL/driver requires the 'jdbc_oracle' feature".to_string(),
-        ));
-    }
-    if is_db2_url(&opts.url) || driver_hint_is(&opts.driver, "com.ibm.db2.jcc.DB2Driver") {
-        #[cfg(feature = "jdbc_db2")]
-        return db2::write_jdbc_db2(df, opts, mode);
-        #[cfg(not(feature = "jdbc_db2"))]
-        return Err(EngineError::invalid_input(
-            "JDBC write: DB2 URL/driver requires the 'jdbc_db2' feature".to_string(),
-        ));
-    }
-
-    Err(EngineError::invalid_input(format!(
-        "JDBC write: unsupported URL scheme in '{}'",
-        sql_ident::redact_jdbc_url(&opts.url)
-    )))
+    let runtime = crate::udf_context::get_thread_runtime_config();
+    let mode = match mode {
+        crate::dataframe::SaveMode::ErrorIfExists => {
+            robin_sparkless_jdbc_polars::JdbcSaveMode::ErrorIfExists
+        }
+        crate::dataframe::SaveMode::Overwrite => {
+            robin_sparkless_jdbc_polars::JdbcSaveMode::Overwrite
+        }
+        crate::dataframe::SaveMode::Append => robin_sparkless_jdbc_polars::JdbcSaveMode::Append,
+        crate::dataframe::SaveMode::Ignore => robin_sparkless_jdbc_polars::JdbcSaveMode::Ignore,
+    };
+    robin_sparkless_jdbc_polars::write_jdbc_from_polars(frame, options, mode, &runtime)
 }
 
-/// Read from a JDBC source into a Polars `DataFrame`.
+/// Read a JDBC source into a Polars frame using the active session settings.
 #[cfg(any(
     feature = "jdbc",
     feature = "sqlite",
@@ -402,71 +71,9 @@ pub fn write_jdbc_from_polars(
     feature = "jdbc_oracle",
     feature = "jdbc_db2"
 ))]
-pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
-    opts.enforce_sql_trust_boundary()?;
-    if is_sqlite_url(&opts.url) || driver_hint_is(&opts.driver, "org.sqlite.JDBC") {
-        #[cfg(feature = "sqlite")]
-        return sqlite::read_jdbc_sqlite(opts);
-        #[cfg(not(feature = "sqlite"))]
-        return Err(EngineError::invalid_input(
-            "JDBC read: SQLite URL/driver requires the 'sqlite' feature".to_string(),
-        ));
-    }
-    if is_postgres_url(&opts.url) || driver_hint_is(&opts.driver, "org.postgresql.Driver") {
-        #[cfg(feature = "jdbc")]
-        return postgres::read_jdbc_postgres(opts);
-        #[cfg(not(feature = "jdbc"))]
-        return Err(EngineError::invalid_input(
-            "JDBC read: PostgreSQL URL/driver requires the 'jdbc' feature".to_string(),
-        ));
-    }
-    if is_mysql_url(&opts.url) || driver_hint_is(&opts.driver, "com.mysql.cj.jdbc.Driver") {
-        #[cfg(feature = "jdbc_mysql")]
-        return mysql::read_jdbc_mysql(opts);
-        #[cfg(not(feature = "jdbc_mysql"))]
-        return Err(EngineError::invalid_input(
-            "JDBC read: MySQL URL/driver requires the 'jdbc_mysql' feature".to_string(),
-        ));
-    }
-    if is_mariadb_url(&opts.url) || driver_hint_is(&opts.driver, "org.mariadb.jdbc.Driver") {
-        #[cfg(feature = "jdbc_mariadb")]
-        return mariadb::read_jdbc_mariadb(opts);
-        #[cfg(not(feature = "jdbc_mariadb"))]
-        return Err(EngineError::invalid_input(
-            "JDBC read: MariaDB URL/driver requires the 'jdbc_mariadb' feature".to_string(),
-        ));
-    }
-    if is_mssql_url(&opts.url)
-        || driver_hint_is(&opts.driver, "com.microsoft.sqlserver.jdbc.SQLServerDriver")
-    {
-        #[cfg(feature = "jdbc_mssql")]
-        return mssql::read_jdbc_mssql(opts);
-        #[cfg(not(feature = "jdbc_mssql"))]
-        return Err(EngineError::invalid_input(
-            "JDBC read: SQL Server URL/driver requires the 'jdbc_mssql' feature".to_string(),
-        ));
-    }
-    if is_oracle_url(&opts.url) || driver_hint_is(&opts.driver, "oracle.jdbc.OracleDriver") {
-        #[cfg(feature = "jdbc_oracle")]
-        return oracle::read_jdbc_oracle(opts);
-        #[cfg(not(feature = "jdbc_oracle"))]
-        return Err(EngineError::invalid_input(
-            "JDBC read: Oracle URL/driver requires the 'jdbc_oracle' feature".to_string(),
-        ));
-    }
-    if is_db2_url(&opts.url) || driver_hint_is(&opts.driver, "com.ibm.db2.jcc.DB2Driver") {
-        #[cfg(feature = "jdbc_db2")]
-        return db2::read_jdbc_db2(opts);
-        #[cfg(not(feature = "jdbc_db2"))]
-        return Err(EngineError::invalid_input(
-            "JDBC read: DB2 URL/driver requires the 'jdbc_db2' feature".to_string(),
-        ));
-    }
-
-    Err(EngineError::invalid_input(format!(
-        "JDBC read: unsupported URL scheme in '{}'",
-        sql_ident::redact_jdbc_url(&opts.url)
-    )))
+pub fn read_jdbc_to_polars(options: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
+    let runtime = crate::udf_context::get_thread_runtime_config();
+    robin_sparkless_jdbc_polars::read_jdbc_to_polars(options, &runtime)
 }
 
 #[cfg(test)]

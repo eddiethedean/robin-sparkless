@@ -352,63 +352,30 @@ impl<'a> DataFrameWriter<'a> {
             .map(|column| self.df.resolve_column_name(column))
             .collect::<Result<Vec<_>, _>>()?;
 
-        if catalog.has_batch_writer_for(ownership) {
-            let max_rows = external_arrow_batch_limit(
-                options,
-                "sparkless.writer.maxRowsPerBatch",
-                DEFAULT_EXTERNAL_ARROW_BATCH_ROWS,
-            )?;
-            let max_bytes = external_arrow_batch_limit(
-                options,
-                "sparkless.writer.maxBytesPerBatch",
-                DEFAULT_EXTERNAL_ARROW_BATCH_BYTES,
-            )?;
-            let batches = self
-                .df
-                .to_arrow_ipc_batches_with_cancellation(max_rows, max_bytes, token)
-                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-            let request = ExternalTableWriteBatchRequest {
-                operation_id: next_external_write_id(),
-                identifier: name.to_string(),
-                table: descriptor.clone(),
-                batches,
-                mode: external_mode,
-                format: table_format,
-                options: writer_options,
-                partition_by,
-            };
-            let outcome = catalog
-                .write_table_batches(ownership, request, token)
-                .map_err(|error| external_write_failure(name, error))?;
-            return validate_external_write_outcome(name, outcome, descriptor);
-        }
-
-        if !catalog.has_materialized_writer_for(ownership) {
+        if !catalog.has_batch_writer_for(ownership) {
             return Err(PolarsError::InvalidOperation(
-                "external namespace has no materialized writer capability".into(),
+                "external namespace has no bounded batch writer capability".into(),
             ));
         }
-
-        let mut materialized = self
+        let max_rows = external_arrow_batch_limit(
+            options,
+            "sparkless.writer.maxRowsPerBatch",
+            DEFAULT_EXTERNAL_ARROW_BATCH_ROWS,
+        )?;
+        let max_bytes = external_arrow_batch_limit(
+            options,
+            "sparkless.writer.maxBytesPerBatch",
+            DEFAULT_EXTERNAL_ARROW_BATCH_BYTES,
+        )?;
+        let batches = self
             .df
-            .collect_with_cancellation(token)
-            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
-            .as_ref()
-            .clone();
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        {
-            use polars::io::ipc::IpcStreamWriter;
-            use polars::prelude::SerWriter;
-            IpcStreamWriter::new(&mut cursor).finish(&mut materialized)?;
-        }
-        let request = ExternalTableWriteRequest {
+            .to_arrow_ipc_batches_with_cancellation(max_rows, max_bytes, token)
+            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+        let request = ExternalTableWriteBatchRequest {
             operation_id: next_external_write_id(),
             identifier: name.to_string(),
             table: descriptor.clone(),
-            data: ArrowIpcStream {
-                bytes: cursor.into_inner(),
-                row_count: materialized.height() as u64,
-            },
+            batches,
             mode: external_mode,
             format: table_format,
             options: writer_options,
@@ -418,7 +385,7 @@ impl<'a> DataFrameWriter<'a> {
             .check_cancelled()
             .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
         let outcome = catalog
-            .write_table(ownership, request, token)
+            .write_table_batches(ownership, request, token)
             .map_err(|error| external_write_failure(name, error))?;
         validate_external_write_outcome(name, outcome, descriptor)
     }

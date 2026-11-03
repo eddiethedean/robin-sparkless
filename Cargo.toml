@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/robin-sparkless-core", "crates/robin-sparkless-plan", "crates/robin-sparkless-sql", "crates/robin-sparkless-polars", "crates/robin-sparkless-duckdb", "crates/sparkless-server-core", "crates/sparkless-server-polars", "crates/spark-sql-parser", "crates/sparkless-server", "crates/sparkless-server-duckdb", ".", "python/native"]
+members = ["crates/robin-sparkless-core", "crates/robin-sparkless-plan", "crates/robin-sparkless-sql", "crates/robin-sparkless-polars", "crates/robin-sparkless-duckdb", "crates/robin-sparkless-delta", "crates/robin-sparkless-jdbc", "crates/robin-sparkless-jdbc-polars", "crates/sparkless-server-core", "crates/sparkless-server-polars", "crates/spark-sql-parser", "crates/sparkless-server", "crates/sparkless-server-duckdb", ".", "python/native"]
 
 [package]
 name = "robin-sparkless"

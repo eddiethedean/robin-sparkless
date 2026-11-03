@@ -36,9 +36,6 @@ pub fn logical_map_paths_with_version(
     path: impl AsRef<Path>,
     version: Option<i64>,
 ) -> Result<Vec<String>, PolarsError> {
-    use deltalake::DeltaTableBuilder;
-    use tokio::runtime::Runtime;
-
     let normalized = normalize_delta_path(path.as_ref())?;
     let path = robin_sparkless_core::maybe_confine_files_path(&normalized).map_err(|e| {
         PolarsError::InvalidOperation(format!("read_delta path confinement: {e}").into())
@@ -49,36 +46,17 @@ pub fn logical_map_paths_with_version(
         return Ok(Vec::new());
     }
     let table_uri = path_to_table_uri(path.as_path())?;
-    let url = Url::parse(table_uri.as_str()).map_err(|e| {
-        PolarsError::ComputeError(format!("read_delta: invalid table URI: {e}").into())
-    })?;
-    let runtime = Runtime::new().map_err(|e| {
-        PolarsError::ComputeError(format!("read_delta: failed to create runtime: {e}").into())
-    })?;
-    let version = version
-        .map(|version| {
-            u64::try_from(version).map_err(|_| {
-                PolarsError::ComputeError(format!("read_delta: invalid version {version}").into())
-            })
-        })
-        .transpose()?;
-    let table = match runtime.block_on(async {
-        let builder = DeltaTableBuilder::from_url(url)?;
-        if let Some(version) = version {
-            builder.with_version(version).load().await
-        } else {
-            builder.load().await
-        }
-    }) {
-        Ok(table) => table,
-        Err(error) if is_not_a_table(&error) => return Ok(Vec::new()),
-        Err(error) => {
+    let snapshot = match robin_sparkless_delta::load_snapshot_uri(&table_uri, version) {
+        Ok(snapshot) => snapshot,
+        Err(robin_sparkless_delta::DeltaLoadError::NotATable) => return Ok(Vec::new()),
+        Err(robin_sparkless_delta::DeltaLoadError::Failure(error)) => {
             return Err(PolarsError::ComputeError(
                 format!("read_delta: {error}").into(),
             ));
         }
     };
-    let schema = table
+    let schema = snapshot
+        .table
         .snapshot()
         .map_err(|e| PolarsError::ComputeError(format!("read_delta: snapshot: {e}").into()))?
         .metadata()
@@ -497,9 +475,6 @@ fn read_delta_with_version_and_parquet_fallback(
     case_sensitive: bool,
     allow_parquet_fallback: bool,
 ) -> Result<DataFrame, PolarsError> {
-    use deltalake::DeltaTableBuilder;
-    use tokio::runtime::Runtime;
-
     let normalized = normalize_delta_path(path.as_ref())?;
     let path = normalized.as_path();
 
@@ -507,37 +482,16 @@ fn read_delta_with_version_and_parquet_fallback(
         let table_uri = path_to_table_uri(path)?;
         let table_root = uri_to_parquet_path(&table_uri)?;
         reject_symlinks_recursively(&table_root.join("_delta_log"), "read_delta")?;
-        let rt = Runtime::new().map_err(|e| {
-            PolarsError::ComputeError(format!("read_delta: failed to create runtime: {}", e).into())
-        })?;
-        let url = Url::parse(table_uri.as_str()).map_err(|e| {
-            PolarsError::ComputeError(format!("read_delta: invalid table URI: {}", e).into())
-        })?;
-        let table = rt.block_on(async {
-            let builder = DeltaTableBuilder::from_url(url.clone()).map_err(
-                |e: deltalake::DeltaTableError| {
-                    PolarsError::ComputeError(format!("read_delta: {}", e).into())
-                },
-            )?;
-            let result = if let Some(v) = version {
-                let version = u64::try_from(v).map_err(|_| {
-                    PolarsError::ComputeError(format!("read_delta: invalid version {v}").into())
-                })?;
-                builder.with_version(version).load().await
-            } else {
-                builder.load().await
-            };
-            result.map_err(|e: deltalake::DeltaTableError| {
-                PolarsError::ComputeError(format!("read_delta: {}", e).into())
-            })
-        })?;
+        let driver_snapshot = robin_sparkless_delta::load_snapshot_uri(&table_uri, version)
+            .map_err(|error| PolarsError::ComputeError(format!("read_delta: {error}").into()))?;
+        let table = &driver_snapshot.table;
         let snapshot = table.snapshot().map_err(|e: deltalake::DeltaTableError| {
             PolarsError::ComputeError(format!("read_delta: snapshot: {e}").into())
         })?;
         use futures::TryStreamExt;
         let eager_snapshot = snapshot.snapshot();
         let log_store = table.log_store();
-        let files = rt
+        let files = driver_snapshot
             .block_on(async {
                 eager_snapshot
                     .file_views(log_store.as_ref(), None)
@@ -760,57 +714,14 @@ fn read_delta_with_version_and_parquet_fallback(
 
 #[cfg(feature = "delta")]
 fn path_to_table_uri(path: &Path) -> Result<String, PolarsError> {
-    let s = path.to_string_lossy();
-    if s.starts_with("file://") {
-        return Ok(s.to_string());
-    }
-    // Resolve to absolute path; support paths that don't exist yet (e.g. for write_delta).
-    let abs_path = if path.exists() {
-        path.canonicalize().map_err(|e| {
-            PolarsError::ComputeError(format!("path_to_table_uri: canonicalize: {}", e).into())
-        })?
-    } else {
-        let base = path.parent().unwrap_or(Path::new("."));
-        let name = path.file_name().unwrap_or(std::ffi::OsStr::new("."));
-        if base.exists() {
-            base.canonicalize()
-                .map_err(|e| {
-                    PolarsError::ComputeError(
-                        format!("path_to_table_uri: canonicalize parent: {}", e).into(),
-                    )
-                })?
-                .join(name)
-        } else {
-            std::env::current_dir()
-                .unwrap_or_else(|_| Path::new(".").to_path_buf())
-                .join(path)
-        }
-    };
-    Url::from_file_path(&abs_path)
-        .map(|url| url.to_string())
-        .map_err(|_| {
-            PolarsError::ComputeError(
-                format!(
-                    "path_to_table_uri: invalid path for file URL: {}",
-                    abs_path.display()
-                )
-                .into(),
-            )
-        })
+    robin_sparkless_delta::path_to_table_uri(path)
+        .map_err(|error| PolarsError::ComputeError(format!("path_to_table_uri: {error}").into()))
 }
 
 #[cfg(feature = "delta")]
 pub(crate) fn normalize_delta_path(path: &Path) -> Result<std::path::PathBuf, PolarsError> {
-    let raw = path.to_string_lossy();
-    if raw.starts_with("file:") {
-        let url = Url::parse(&raw).map_err(|error| {
-            PolarsError::InvalidOperation(format!("invalid Delta file URL: {error}").into())
-        })?;
-        return url
-            .to_file_path()
-            .map_err(|()| PolarsError::InvalidOperation("invalid Delta file URL path".into()));
-    }
-    Ok(path.to_path_buf())
+    robin_sparkless_delta::normalize_path(path)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))
 }
 
 #[cfg(feature = "delta")]
@@ -952,34 +863,14 @@ pub fn describe_delta_detail(
     table_display_name: Option<&str>,
     case_sensitive: bool,
 ) -> Result<DataFrame, PolarsError> {
-    use deltalake::DeltaTableBuilder;
     use polars::prelude::*;
-    use tokio::runtime::Runtime;
 
     let path = path.as_ref();
     let table_uri = path_to_table_uri(path)?;
-
-    let rt = Runtime::new().map_err(|e| {
-        PolarsError::ComputeError(format!("describe_delta_detail: runtime: {}", e).into())
+    let snapshot = robin_sparkless_delta::load_snapshot_uri(&table_uri, None).map_err(|error| {
+        PolarsError::ComputeError(format!("describe_delta_detail: {error}").into())
     })?;
-
-    let url = Url::parse(table_uri.as_str()).map_err(|e| {
-        PolarsError::ComputeError(format!("describe_delta_detail: invalid URI: {}", e).into())
-    })?;
-
-    let table = rt.block_on(async {
-        let builder =
-            DeltaTableBuilder::from_url(url.clone()).map_err(|e: deltalake::DeltaTableError| {
-                PolarsError::ComputeError(format!("describe_delta_detail: {}", e).into())
-            })?;
-        let t = builder
-            .load()
-            .await
-            .map_err(|e: deltalake::DeltaTableError| {
-                PolarsError::ComputeError(format!("describe_delta_detail: load: {}", e).into())
-            })?;
-        Ok::<_, PolarsError>(t)
-    })?;
+    let table = snapshot.table;
 
     let snapshot = table.snapshot().map_err(|e: deltalake::DeltaTableError| {
         PolarsError::ComputeError(format!("describe_delta_detail: snapshot: {}", e).into())
@@ -1030,11 +921,6 @@ pub fn describe_delta_detail(
         df,
         case_sensitive,
     ))
-}
-
-#[cfg(feature = "delta")]
-fn is_not_a_table(err: &deltalake::DeltaTableError) -> bool {
-    matches!(err, deltalake::DeltaTableError::NotATable(_))
 }
 
 /// Write a single parquet part file under `path` and return its path.
@@ -2702,36 +2588,6 @@ fn parquet_file_to_add_action(
     Ok(deltalake::kernel::Action::Add(add))
 }
 
-/// Commit actions to an existing Delta table (append or overwrite).
-#[cfg(feature = "delta")]
-async fn commit_delta_actions(
-    table: &mut deltalake::DeltaTable,
-    actions: Vec<deltalake::kernel::Action>,
-    mode: deltalake::protocol::SaveMode,
-    partition_columns: &[String],
-) -> Result<(), deltalake::DeltaTableError> {
-    use deltalake::kernel::transaction::CommitBuilder;
-    use deltalake::protocol::DeltaOperation;
-
-    let table_state = table.snapshot()?;
-    let partition_cols = partition_columns.to_vec();
-    let operation = DeltaOperation::Write {
-        mode,
-        partition_by: if partition_cols.is_empty() {
-            None
-        } else {
-            Some(partition_cols)
-        },
-        predicate: None,
-    };
-    let finalized = CommitBuilder::default()
-        .with_actions(actions)
-        .build(Some(table_state), table.log_store().clone(), operation)
-        .await?;
-    table.state = Some(finalized.snapshot());
-    Ok(())
-}
-
 /// Write parquet + convert_to_delta for a path that is not yet a Delta table.
 #[cfg(feature = "delta")]
 async fn write_delta_bootstrap_parquet(
@@ -2740,8 +2596,6 @@ async fn write_delta_bootstrap_parquet(
     table_uri: &str,
     logical_map_paths: &[String],
 ) -> Result<(), PolarsError> {
-    use deltalake::operations::create::CreateBuilder;
-
     let existing_files = collect_parquet_paths_under(path)?;
     let schema_files = existing_files.clone();
     let incoming_for_schema = df.clone();
@@ -2779,14 +2633,15 @@ async fn write_delta_bootstrap_parquet(
         .map_err(|e| {
             PolarsError::ComputeError(format!("write_delta: add bootstrap parquet: {e}").into())
         })?;
-    CreateBuilder::new()
-        .with_location(table_uri)
-        .with_columns(schema.fields().cloned())
-        .with_actions(actions)
-        .await
-        .map_err(|e: deltalake::DeltaTableError| {
-            PolarsError::ComputeError(format!("write_delta: create table: {e}").into())
-        })?;
+    robin_sparkless_delta::create_table(
+        table_uri.to_string(),
+        schema.fields().cloned().collect(),
+        actions,
+    )
+    .await
+    .map_err(|e: deltalake::DeltaTableError| {
+        PolarsError::ComputeError(format!("write_delta: create table: {e}").into())
+    })?;
     Ok(())
 }
 
@@ -3094,21 +2949,11 @@ fn write_delta_with_save_options_inner(
         PolarsError::ComputeError(format!("write_delta: failed to create runtime: {}", e).into())
     })?;
 
-    let url = Url::parse(table_uri.as_str()).map_err(|e| {
-        PolarsError::ComputeError(format!("write_delta: invalid table URI: {}", e).into())
-    })?;
-
+    let load_result = robin_sparkless_delta::load_snapshot_uri(&table_uri, None);
     rt.block_on(async {
-        let builder = deltalake::DeltaTableBuilder::from_url(url.clone()).map_err(
-            |e: deltalake::DeltaTableError| {
-                PolarsError::ComputeError(format!("write_delta: {}", e).into())
-            },
-        )?;
-
-        let load_result = builder.load().await;
-
         match load_result {
-            Ok(mut table) => {
+            Ok(snapshot) => {
+                let (mut table, _driver_runtime) = snapshot.into_parts();
                 match save_mode {
                     crate::dataframe::SaveMode::Ignore => return Ok(()),
                     crate::dataframe::SaveMode::ErrorIfExists => {
@@ -3340,19 +3185,19 @@ fn write_delta_with_save_options_inner(
                 } else {
                     deltalake::protocol::SaveMode::Append
                 };
-                commit_delta_actions(
+                robin_sparkless_delta::commit_actions(
                     &mut table,
                     actions,
                     mode,
                     &effective_partition_columns,
                 )
                     .await
-                    .map_err(|e: deltalake::DeltaTableError| {
+                .map_err(|e: deltalake::DeltaTableError| {
                         PolarsError::ComputeError(format!("write_delta: commit: {}", e).into())
                     })?;
                 Ok(())
             }
-            Err(e) if is_not_a_table(&e) => {
+            Err(robin_sparkless_delta::DeltaLoadError::NotATable) => {
                 if df.height() == 0 && df.width() == 0 {
                     return Ok(());
                 }
@@ -3369,9 +3214,9 @@ fn write_delta_with_save_options_inner(
                     .await
                 }
             }
-            Err(e) => Err(PolarsError::ComputeError(
-                format!("write_delta: {}", e).into(),
-            )),
+            Err(robin_sparkless_delta::DeltaLoadError::Failure(error)) => Err(
+                PolarsError::ComputeError(format!("write_delta: {error}").into()),
+            ),
         }
     })
 }

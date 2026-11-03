@@ -16,6 +16,8 @@ test-hooks = []
 # deltalake 0.32.4 / buoyant_kernel 0.22.2 uses the 1.0 derive-macro API.
 # Keep Cargo from resolving the semver-compatible but incompatible 1.2 release.
 delta = [
+    "dep:robin-sparkless-delta",
+    "robin-sparkless-delta/driver",
     "dep:deltalake",
     "dep:tokio",
     "dep:futures",
@@ -25,13 +27,13 @@ delta = [
     "dep:indexmap",
     "dep:delta_kernel_derive",
 ]
-jdbc = ["dep:postgres"]
-jdbc_mysql = ["dep:mysql"]
-jdbc_mariadb = ["dep:mysql"]
-jdbc_mssql = ["dep:tiberius", "dep:tokio", "dep:tokio-util", "dep:futures-util"]
-jdbc_oracle = ["dep:oracle-rs", "dep:tokio"]
-jdbc_db2 = ["dep:odbc-api"]
-sqlite = ["dep:rusqlite"]
+jdbc = ["dep:robin-sparkless-jdbc-polars", "robin-sparkless-jdbc-polars/postgres"]
+jdbc_mysql = ["dep:robin-sparkless-jdbc-polars", "robin-sparkless-jdbc-polars/mysql"]
+jdbc_mariadb = ["dep:robin-sparkless-jdbc-polars", "robin-sparkless-jdbc-polars/mariadb"]
+jdbc_mssql = ["dep:robin-sparkless-jdbc-polars", "robin-sparkless-jdbc-polars/mssql"]
+jdbc_oracle = ["dep:robin-sparkless-jdbc-polars", "robin-sparkless-jdbc-polars/oracle"]
+jdbc_db2 = ["dep:robin-sparkless-jdbc-polars", "robin-sparkless-jdbc-polars/db2"]
+sqlite = ["dep:robin-sparkless-jdbc-polars", "robin-sparkless-jdbc-polars/sqlite"]
 duckdb-source = ["dep:robin-sparkless-duckdb"]
 
 [dependencies]
@@ -76,18 +78,14 @@ arrow-array = { version = "57", optional = true, features = ["ffi"] }
 arrow-schema = { version = "57", optional = true, features = ["ffi"] }
 indexmap = { version = "2", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "io-util"] }
-postgres = { version = "0.19.14", optional = true }
-rusqlite = { version = "0.32", optional = true }
-mysql = { version = "28.0.4", optional = true }
-tiberius = { version = "0.13.0", optional = true, default-features = false, features = ["tds73", "rustls", "chrono", "tokio", "sql-browser-tokio"] }
-tokio-util = { version = "0.7", optional = true, features = ["compat"] }
-futures-util = { version = "0.3", optional = true }
-oracle-rs = { version = "0.1.5", package = "oracle-rs", optional = true }
-odbc-api = { version = "21.0", optional = true }
 robin-sparkless-duckdb = { version = "4.19.0", path = "../robin-sparkless-duckdb", optional = true }
+robin-sparkless-delta = { version = "4.19.0", path = "../robin-sparkless-delta", optional = true }
+robin-sparkless-jdbc = { version = "4.19.0", path = "../robin-sparkless-jdbc" }
+robin-sparkless-jdbc-polars = { version = "4.19.0", path = "../robin-sparkless-jdbc-polars", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+rusqlite = "0.32"
 duckdb = { version = "=1.20000.1", default-features = false, features = ["bundled"] }
 polars-parquet = { version = "0.53", default-features = false, features = ["zstd"] }
 zstd = { version = "=0.14.3", default-features = false }

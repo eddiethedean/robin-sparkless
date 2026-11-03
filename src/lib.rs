@@ -55,12 +55,11 @@ pub mod traits;
 pub mod engine {
     pub use robin_sparkless_core::engine::{
         ArrowIpcBatchStream, ArrowIpcStream, CatalogCapabilities, CatalogOwnership,
-        CatalogReadSnapshot, CatalogReader, CatalogResolver, CatalogWriter, CollectedRows,
-        DataFrameReaderBackend, ExecutionConfigSnapshot, ExecutionContext, ExternalCatalog,
-        ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
-        ExternalTableWriteBatchRequest, ExternalTableWriteOutcome, ExternalTableWriteRequest,
-        ExternalTableWriteResult, FrameActions, FrameSchema, FrameTransform, GroupedData, JoinType,
-        SparkSessionBackend, begin_catalog_read_snapshot,
+        CatalogReadSnapshot, CatalogReader, CatalogResolver, CollectedRows, DataFrameReaderBackend,
+        ExecutionConfigSnapshot, ExecutionContext, ExternalCatalog, ExternalTableDescriptor,
+        ExternalTableFormat, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
+        ExternalTableWriteOutcome, ExternalTableWriteResult, FrameActions, FrameSchema,
+        FrameTransform, GroupedData, JoinType, SparkSessionBackend, begin_catalog_read_snapshot,
     };
     pub use robin_sparkless_core::expr::{
         ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,

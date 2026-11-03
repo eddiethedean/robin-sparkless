@@ -47,7 +47,7 @@ use polars_plan::prelude::DynLiteralValue;
 use robin_sparkless_core::engine::{
     ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, CatalogOwnership, ExternalCatalog,
     ExternalTableDescriptor, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
-    ExternalTableWriteOutcome, ExternalTableWriteRequest,
+    ExternalTableWriteOutcome,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};

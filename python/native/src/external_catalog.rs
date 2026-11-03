@@ -5,10 +5,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyModule, PyString};
 use pyo3::IntoPyObjectExt;
 use robin_sparkless_core::engine::{
-    ArrowIpcBatchStream, CatalogBatchWriter, CatalogOwnership, CatalogResolver, CatalogWriter,
-    ExternalCatalog, ExternalTableDescriptor, ExternalTableSaveMode,
-    ExternalTableWriteBatchRequest, ExternalTableWriteOutcome, ExternalTableWriteRequest,
-    ExternalTableWriteResult, PreparedCatalogWrite,
+    ArrowIpcBatchStream, CatalogBatchWriter, CatalogOwnership, CatalogResolver, ExternalCatalog,
+    ExternalTableDescriptor, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
+    ExternalTableWriteOutcome, ExternalTableWriteResult, PreparedCatalogWrite,
 };
 use robin_sparkless_core::{EngineError, ErrorCategory, ErrorDetail, ErrorRetryability};
 use serde::{Deserialize, Serialize};
@@ -59,13 +58,13 @@ pub(crate) struct PythonExternalCatalogProvider {
     // Py owns a strong reference and may cross Rust threads; every access acquires the GIL.
     provider: Arc<Py<PyAny>>,
     tables: ResolvedTables,
-    materialized_writer: bool,
     batch_writer: bool,
 }
 
 #[pyclass(module = "sparkless.external_catalog", unsendable)]
 pub(crate) struct PyArrowIpcBatchIterator {
     batches: Option<ArrowIpcBatchStream>,
+    table: Py<PyAny>,
 }
 
 #[pymethods]
@@ -97,10 +96,14 @@ impl PyArrowIpcBatchIterator {
         };
         let batch = (|| {
             let pyarrow = PyModule::import(py, "pyarrow")?;
+            let normalization = PyModule::import(py, "sparkless.external_catalog")?
+                .getattr("_normalize_python_provider_timestamp_ipc")?;
+            let payload =
+                normalization.call1((PyBytes::new(py, &stream.bytes), self.table.bind(py)))?;
             let reader = pyarrow
                 .getattr("ipc")?
                 .getattr("open_stream")?
-                .call1((PyBytes::new(py, &stream.bytes),))?;
+                .call1((payload,))?;
             reader.call_method0("read_next_batch")?.into_py_any(py)
         })();
         if batch.is_err() {
@@ -138,16 +141,6 @@ impl PythonExternalCatalogProvider {
                 "provider.resolve_table must be callable",
             ));
         }
-        let materialized_writer = match provider.bind(py).getattr("write_table") {
-            Ok(method) if !method.is_callable() => {
-                return Err(PyTypeError::new_err(
-                    "provider.write_table must be callable",
-                ));
-            }
-            Ok(_) => true,
-            Err(error) if !error.is_instance_of::<PyAttributeError>(py) => return Err(error),
-            Err(_) => false,
-        };
         let batch_writer = match provider.bind(py).getattr("write_table_batches") {
             Ok(method) if !method.is_callable() => {
                 return Err(PyTypeError::new_err(
@@ -170,7 +163,6 @@ impl PythonExternalCatalogProvider {
         Ok(Self {
             provider: Arc::new(provider),
             tables,
-            materialized_writer,
             batch_writer,
         })
     }
@@ -178,15 +170,11 @@ impl PythonExternalCatalogProvider {
     pub(crate) fn into_external_catalog(self) -> Arc<ExternalCatalog> {
         let provider = Arc::new(self);
         let resolver: Arc<dyn CatalogResolver> = provider.clone();
-        let writer = provider.materialized_writer.then(|| {
-            let writer: Arc<dyn CatalogWriter> = provider.clone();
-            writer
-        });
         let batch_writer = provider.batch_writer.then(|| {
             let writer: Arc<dyn CatalogBatchWriter> = provider.clone();
             writer
         });
-        Arc::new(ExternalCatalog::new(resolver, None, writer, batch_writer))
+        Arc::new(ExternalCatalog::new(resolver, None, batch_writer))
     }
 }
 
@@ -595,72 +583,6 @@ impl CatalogResolver for PythonExternalCatalogProvider {
 }
 
 impl PythonExternalCatalogProvider {
-    fn write_table_request(
-        &self,
-        request: ExternalTableWriteRequest,
-    ) -> Result<ExternalTableWriteResult, EngineError> {
-        let failure_identifier = request.identifier.clone();
-        let failure_version = request.table.version;
-        Python::attach(|py| -> PyResult<_> {
-            let method = self
-                .provider
-                .bind(py)
-                .getattr("write_table")
-                .map_err(|error| {
-                    if error.is_instance_of::<PyAttributeError>(py) {
-                        pyo3::exceptions::PyNotImplementedError::new_err(
-                            "external catalog provider does not support table writes",
-                        )
-                    } else {
-                        error
-                    }
-                })?;
-            let module = PyModule::import(py, "sparkless.external_catalog")?;
-            let descriptor_json = serde_json::to_string(&request.table)
-                .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
-            let table = module
-                .getattr("_descriptor_from_json")?
-                .call1((descriptor_json,))?;
-            let payload = module
-                .getattr("_normalize_python_provider_timestamp_ipc")?
-                .call1((PyBytes::new(py, &request.data.bytes), &table))?;
-            let mode = match request.mode {
-                ExternalTableSaveMode::ErrorIfExists => "errorifexists",
-                ExternalTableSaveMode::Overwrite => "overwrite",
-                ExternalTableSaveMode::Append => "append",
-                ExternalTableSaveMode::Ignore => "ignore",
-            };
-            let kwargs = PyDict::new(py);
-            kwargs.set_item("operation_id", request.operation_id)?;
-            kwargs.set_item("identifier", request.identifier)?;
-            kwargs.set_item("table", table)?;
-            kwargs.set_item("data", module.getattr("ArrowIpcStream")?.call1((payload,))?)?;
-            kwargs.set_item(
-                "mode",
-                module.getattr("ExternalTableSaveMode")?.call1((mode,))?,
-            )?;
-            kwargs.set_item("format", request.format)?;
-            kwargs.set_item("options", request.options)?;
-            kwargs.set_item("partition_by", request.partition_by)?;
-            let value = module
-                .getattr("ExternalTableWriteRequest")?
-                .call((), Some(&kwargs))?;
-            let result = method.call1((value,))?;
-            write_result_from_python(&result)
-        })
-        .map_err(|error| {
-            Python::attach(|py| {
-                callback_error(
-                    py,
-                    "write_table",
-                    &failure_identifier,
-                    failure_version,
-                    error,
-                )
-            })
-        })
-    }
-
     fn write_table_batches_request(
         &self,
         request: ExternalTableWriteBatchRequest,
@@ -685,13 +607,13 @@ impl PythonExternalCatalogProvider {
                 py,
                 PyArrowIpcBatchIterator {
                     batches: Some(request.batches),
+                    table: table.clone().unbind(),
                 },
             )?;
             let kwargs = PyDict::new(py);
             kwargs.set_item("operation_id", request.operation_id)?;
             kwargs.set_item("identifier", request.identifier)?;
             kwargs.set_item("table", table)?;
-            kwargs.set_item("data", py.None())?;
             kwargs.set_item("batches", batches.bind(py))?;
             kwargs.set_item(
                 "mode",
@@ -726,14 +648,9 @@ impl PythonExternalCatalogProvider {
     }
 }
 
-enum PythonWriteRequest {
-    Materialized(ExternalTableWriteRequest),
-    Batches(ExternalTableWriteBatchRequest),
-}
-
 struct PythonPreparedWrite {
     provider: Arc<Py<PyAny>>,
-    request: PythonWriteRequest,
+    request: ExternalTableWriteBatchRequest,
 }
 
 impl PreparedCatalogWrite for PythonPreparedWrite {
@@ -744,32 +661,14 @@ impl PreparedCatalogWrite for PythonPreparedWrite {
         if let Err(error) = token.check_cancelled() {
             return ExternalTableWriteOutcome::NotCommitted(error);
         }
-        let (operation_id, provider_name, result) = match self.request {
-            PythonWriteRequest::Materialized(request) => {
-                let operation_id = request.operation_id.clone();
-                let provider_name = request.table.provider.clone();
-                let helper = PythonExternalCatalogProvider {
-                    provider: Arc::clone(&self.provider),
-                    tables: Arc::new(Mutex::new(HashMap::new())),
-                    materialized_writer: true,
-                    batch_writer: false,
-                };
-                let result = helper.write_table_request(request);
-                (operation_id, provider_name, result)
-            }
-            PythonWriteRequest::Batches(request) => {
-                let operation_id = request.operation_id.clone();
-                let provider_name = request.table.provider.clone();
-                let helper = PythonExternalCatalogProvider {
-                    provider: Arc::clone(&self.provider),
-                    tables: Arc::new(Mutex::new(HashMap::new())),
-                    materialized_writer: false,
-                    batch_writer: true,
-                };
-                let result = helper.write_table_batches_request(request);
-                (operation_id, provider_name, result)
-            }
+        let operation_id = self.request.operation_id.clone();
+        let provider_name = self.request.table.provider.clone();
+        let helper = PythonExternalCatalogProvider {
+            provider: Arc::clone(&self.provider),
+            tables: Arc::new(Mutex::new(HashMap::new())),
+            batch_writer: true,
         };
+        let result = helper.write_table_batches_request(self.request);
         match result {
             Ok(receipt) => ExternalTableWriteOutcome::Committed(receipt),
             // The provider callback is the irreversible phase. Its retryability advice does
@@ -780,24 +679,6 @@ impl PreparedCatalogWrite for PythonPreparedWrite {
                 message: error.to_string(),
             },
         }
-    }
-}
-
-impl CatalogWriter for PythonExternalCatalogProvider {
-    fn prepare_write(
-        &self,
-        request: ExternalTableWriteRequest,
-    ) -> Result<Box<dyn PreparedCatalogWrite>, EngineError> {
-        if !self.materialized_writer {
-            return Err(EngineError::capability(
-                "MATERIALIZED_WRITE_UNAVAILABLE",
-                "Python catalog provider does not implement write_table",
-            ));
-        }
-        Ok(Box::new(PythonPreparedWrite {
-            provider: Arc::clone(&self.provider),
-            request: PythonWriteRequest::Materialized(request),
-        }))
     }
 }
 
@@ -814,7 +695,7 @@ impl CatalogBatchWriter for PythonExternalCatalogProvider {
         }
         Ok(Box::new(PythonPreparedWrite {
             provider: Arc::clone(&self.provider),
-            request: PythonWriteRequest::Batches(request),
+            request,
         }))
     }
 }

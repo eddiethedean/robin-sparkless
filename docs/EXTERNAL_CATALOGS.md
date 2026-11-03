@@ -2,7 +2,7 @@
 
 Sparkless exposes engine-neutral catalog ownership, snapshot-read, and write
 capabilities. The Polars backend reads local Delta snapshots and delegates writes
-only to providers that advertise and implement the corresponding writer capability.
+only to providers that advertise and implement the bounded batch-writer capability.
 
 ## Public contract
 
@@ -26,10 +26,10 @@ pub trait CatalogReader: Send + Sync {
     ) -> Result<Arc<dyn CatalogReadSnapshot>, EngineError>;
 }
 
-pub trait CatalogWriter: Send + Sync {
-    fn prepare_write(
+pub trait CatalogBatchWriter: Send + Sync {
+    fn prepare_write_batches(
         &self,
-        request: ExternalTableWriteRequest,
+        request: ExternalTableWriteBatchRequest,
     ) -> Result<Box<dyn PreparedCatalogWrite>, EngineError>;
 }
 
@@ -52,13 +52,13 @@ Callers resolve namespace ownership before looking up table metadata. Return
 `CatalogOwnership::Local` only when Sparkless' local catalog may handle the identifier.
 An external owner remains authoritative even when `resolve_table` returns `Ok(None)`;
 this prevents a local table with the same name from shadowing a missing external table.
-Provider errors are never treated as misses. `CatalogCapabilities` advertises read,
-write, and batch-write support separately, and the composed `ExternalCatalog` holds
-optional `CatalogReader`, `CatalogWriter`, and `CatalogBatchWriter` implementations.
+Provider errors are never treated as misses. `CatalogCapabilities` advertises read
+access and bounded batch-write access, and the composed `ExternalCatalog` holds
+optional `CatalogReader` and `CatalogBatchWriter` implementations.
 
-The write ports receive an Arrow IPC stream or a back-pressured sequence of batches,
-plus save mode, writer options, partition columns, and an operation ID. Providers stage
-work in `prepare_write`; commit reports `Committed`, `NotCommitted`, or `OutcomeUnknown`.
+The write port receives a back-pressured sequence of bounded Arrow IPC batches, plus
+save mode, writer options, partition columns, and an operation ID. Providers stage
+work in `prepare_write_batches`; commit reports `Committed`, `NotCommitted`, or `OutcomeUnknown`.
 A successful receipt keeps the stable table ID, canonical location, provider, and format
 and identifies the committed version or provider commit ID. Never retry an unknown
 outcome until the provider has reconciled that operation ID. `DataFrameWriter.saveAsTable()`
@@ -69,12 +69,11 @@ Rust callers that need to distinguish an external provider error from a miss can
 `SparkSession::try_table_exists`; the legacy boolean `table_exists` remains best-effort.
 Python `catalog.tableExists()` and `catalog.getTable()` surface provider errors.
 
-Providers that opt in to batch writes receive a back-pressured sequence of bounded
-Arrow IPC batches. The producer begins on the first read, and dropping it stops query
-production after the current batch. Providers without batch-write support keep the
-existing behavior: Sparkless materializes the DataFrame and buffers one complete Arrow
-IPC stream before calling `write_table`. Python providers use the PyO3 adapter described
-below. There is no async transport. Path-based `DataFrameWriter.save()`, `insertInto()`, SQL
+All external writes use a back-pressured sequence of bounded Arrow IPC batches. The
+producer begins on the first read, and dropping it stops query production after the
+current batch. There is no materialized whole-frame fallback. Python providers use the
+PyO3 adapter described below. There is no async transport. Path-based
+`DataFrameWriter.save()`, `insertInto()`, SQL
 `UPDATE`/`DELETE`, and logical Map writes are not delegated by this hook. Logical Map
 reads can match the Polars array-of-key/value-struct representation; writes carrying
 Sparkless' logical Map metadata fail explicitly.
@@ -108,8 +107,8 @@ the provider's responsibility.
 
 Python sessions expose `set_external_catalog_provider(provider)` and the camelCase
 alias `setExternalCatalogProvider(provider)`. Pass `None` to detach. Providers implement
-`resolve_ownership(identifier)` and `resolve_table(identifier)` and may implement either
-`write_table(request)` or `write_table_batches(request)`:
+`resolve_ownership(identifier)` and `resolve_table(identifier)`. Writable providers
+also implement `write_table_batches(request)`:
 
 ```python
 from sparkless.external_catalog import (
@@ -140,28 +139,24 @@ orders = spark.table("main.analytics.orders")
 ```
 
 `sparkless.external_catalog` exports `ExternalCatalogOwnership`, the
-`ExternalCatalogProvider`,
-`WritableExternalCatalogProvider`, and `BatchWritableExternalCatalogProvider` typing
+`ExternalCatalogProvider` and `BatchWritableExternalCatalogProvider` typing
 protocols, the `ExternalTableFormat` and
 `ExternalTableSaveMode` string enums, `ArrowIpcStream`, and the
 `ExternalTableDescriptor`, `ExternalTableWriteRequest`, and `ExternalTableWriteResult`
 dataclasses. It also exports `SparklessExternalCatalogError`, available from
 `sparkless` and `sparkless.errors`. A read-only provider returns ownership with
-`write=False` and may omit both writer methods; attempted writes then raise a capability
+`write=False` and may omit the batch writer; attempted writes then raise a capability
 error. Callback failures carry their structured category, code, operation and
 retryability to Python. A failed callback after it starts can have an unknown commit
 outcome; use `request.operation_id` to reconcile it before retrying.
 
-The materializing `write_table` callback receives the exact identifier, resolved descriptor, save mode
-(`"append"` or `"overwrite"`), optional format, ordered option pairs (including
-duplicates), and partition column names. `request.data` is an `ArrowIpcStream`, a
-Python `bytes` subclass with a `.bytes` property matching the Rust payload field.
-For example, `pyarrow.ipc.open_stream(request.data).read_all()`
-decodes it without a JSON row conversion. PyArrow is optional and is not imported by
-the adapter on this compatibility path. Batch writers receive `request.data is None`
-and a lazy `request.batches` iterator yielding `pyarrow.RecordBatch` values. Iteration
-starts query execution; calling `request.batches.close()` (or returning from the
-callback) stops an early read. Batches default to 10,000 rows and 64 MiB; set
+The `write_table_batches` callback receives the exact identifier, resolved descriptor,
+save mode (`"append"` or `"overwrite"`), optional format, ordered option pairs
+(including duplicates), and partition column names. `request.batches` is a lazy
+iterator yielding `pyarrow.RecordBatch` values. Iteration starts query execution;
+calling `request.batches.close()` (or returning from the callback) stops an early
+read. PyArrow is required by Python write callbacks. Batches default to 10,000 rows
+and 64 MiB; set
 `sparkless.writer.maxRowsPerBatch` and `sparkless.writer.maxBytesPerBatch` writer options
 to change these limits. A single row larger than the byte limit raises an error.
 For example, a provider can process only up to its row budget and then close the source:
@@ -188,8 +183,8 @@ a Sparkless error and never triggers a local fallback. A Python callback excepti
 surfaced as `SparklessExternalCatalogError`, a subclass of `SparklessError`. The public
 exception has `operation`, `category`, `code`, `identifier`, `version`,
 `expected_version`, `actual_version`, `retryability`, and `provider_error_type`
-attributes. `operation` is `resolve_table`, `write_table`, or
-`write_table_batches`. Provider exceptions may set `category`, `code`, `retryability`,
+attributes. `operation` is `resolve_table` or `write_table_batches`. Provider
+exceptions may set `category`, `code`, `retryability`,
 `expected_version`, and `actual_version` as plain instance attributes. Categories and
 codes must be stable, non-sensitive tokens; `retryability` accepts `"retryable"`,
 `"terminal"`, or `"uncertain"`. If no category is provided, a custom exception class
@@ -230,14 +225,13 @@ Every public catalog operation introduced by this PR has a Python counterpart:
 | --- | --- |
 | `CatalogResolver::resolve_ownership` | Required `resolve_ownership(identifier)`; return `None` for local ownership |
 | `CatalogResolver::resolve_table` | Required `resolve_table(identifier)` after external ownership is established |
-| `CatalogWriter::prepare_write` | Optional `write_table(request)`, typed by `WritableExternalCatalogProvider` |
 | `CatalogBatchWriter::prepare_write_batches` | Optional `write_table_batches(request)`, typed by `BatchWritableExternalCatalogProvider` |
 | `ExternalTableDescriptor` and every field | `ExternalTableDescriptor` dataclass, using `StructType` for the schema |
 | `ExternalTableDescriptor::validate` | `descriptor.validate()`, invoking the Rust validator |
 | `ExternalTableFormat::Delta` | `ExternalTableFormat.DELTA` (also accepts `"delta"`) |
 | All four `ExternalTableSaveMode` variants | `ExternalTableSaveMode.ERROR_IF_EXISTS`, `.OVERWRITE`, `.APPEND`, `.IGNORE` via `df.write.mode(mode)` |
-| `ArrowIpcStream::bytes` | `request.data.bytes` for materialized writes; `request.batches` yields RecordBatches for streaming writes |
-| Every `ExternalTableWriteRequest` and `ExternalTableWriteResult` field | Corresponding dataclass attributes |
+| `ArrowIpcBatchStream` | `request.batches` yields bounded RecordBatches |
+| Every `ExternalTableWriteBatchRequest` and `ExternalTableWriteResult` field | Corresponding dataclass attributes |
 | `ExternalTableWriteResult::validate_against` | `receipt.validate_against(previous)`, invoking the Rust validator |
 | Attach/replace/remove provider | `spark.set_external_catalog_provider(provider_or_none)` and `setExternalCatalogProvider(...)` |
 | Native catalog reads | `spark.table(name)`, `spark.read.table(name)`, and SQL relations |

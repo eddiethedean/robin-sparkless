@@ -1,6 +1,7 @@
-use crate::error::EngineError;
-use crate::jdbc::JdbcOptions;
-use crate::jdbc::sql_ident::{self, JdbcDialect};
+use crate::JdbcSaveMode;
+use robin_sparkless_core::EngineError;
+use robin_sparkless_jdbc::JdbcOptions;
+use robin_sparkless_jdbc::sql_ident::{self, JdbcDialect};
 
 use oracle_rs::{ColumnInfo, Connection, OracleType, Value};
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
@@ -192,9 +193,9 @@ fn oracle_empty_series(name: &str, metadata: &ColumnInfo) -> Series {
 pub(crate) fn write_jdbc_oracle(
     df: &PlDataFrame,
     opts: &JdbcOptions,
-    mode: crate::dataframe::SaveMode,
+    mode: JdbcSaveMode,
 ) -> Result<(), EngineError> {
-    use crate::dataframe::SaveMode as Sm;
+    use crate::JdbcSaveMode as Sm;
 
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::invalid_input(

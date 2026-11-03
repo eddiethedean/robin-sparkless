@@ -1,7 +1,7 @@
 # Migrating to Sparkless 4.19
 
-Sparkless 4.19 is a breaking release. This guide covers the Phase 2 core-contract
-changes and Phase 3 plan/SQL entry points.
+Sparkless 4.19 is a breaking release. This guide covers the Phase 2 core-contract,
+Phase 3 plan/SQL, and Phase 4 storage-boundary changes.
 
 ## Rust engine contracts
 
@@ -30,15 +30,16 @@ session.create_dataframe_from_rows(
 
 ## Catalog ownership and capabilities
 
-The combined `ExternalCatalogProvider` trait is removed. Compose an ownership/table
-`CatalogResolver` with optional `CatalogReader`, `CatalogWriter`, and
-`CatalogBatchWriter` capabilities:
+The combined `ExternalCatalogProvider` trait and materialized writer are removed.
+Compose an ownership/table `CatalogResolver` with optional `CatalogReader` and
+`CatalogBatchWriter` capabilities. Every write capability uses bounded Arrow IPC
+batches:
 
 ```rust,ignore
 let resolver: Arc<dyn CatalogResolver> = Arc::new(my_resolver);
 let reader: Option<Arc<dyn CatalogReader>> = Some(Arc::new(my_reader));
-let writer: Option<Arc<dyn CatalogWriter>> = Some(Arc::new(my_writer));
-let catalog = Arc::new(ExternalCatalog::new(resolver, reader, writer, None));
+let writer: Option<Arc<dyn CatalogBatchWriter>> = Some(Arc::new(my_writer));
+let catalog = Arc::new(ExternalCatalog::new(resolver, reader, writer));
 session.set_external_catalog(Some(catalog))?;
 ```
 
@@ -48,18 +49,30 @@ return `CatalogOwnership::external(owner_id, capabilities)` for every identifier
 inside a provider-owned namespace, even when that particular table does not exist.
 The latter prevents a local table from shadowing a missing external table. Missing
 tables use `Ok(None)`; provider failures remain errors. Read and write capability
-absence is represented explicitly, and write preparation now returns a
+absence is represented explicitly. `write=true` requires `batch_write=true`, and
+write preparation now returns a
 `PreparedCatalogWrite` whose commit reports `Committed`, `NotCommitted`, or
 `OutcomeUnknown`.
 
 Existing DuckDB source registrations remain read-only. DuckDB write support is a
 future capability and is not enabled by this contract migration.
 
+## Storage crate boundaries
+
+Delta path handling, snapshot loading, table creation, and transaction commits now live
+in `robin-sparkless-delta`; Polars continues to own schema and Arrow/Polars conversion.
+JDBC options and SQL identifier policy live in `robin-sparkless-jdbc`, while concrete
+database connections and Polars conversion live in `robin-sparkless-jdbc-polars`.
+The existing JDBC feature names remain on `robin-sparkless-polars` and forward to the
+driver adapter. Direct users of the new adapter crate select its matching database
+feature (`postgres`, `sqlite`, `mysql`, `mariadb`, `mssql`, `oracle`, or `db2`).
+
 ## Python catalog providers
 
 Python providers must now implement `resolve_ownership` as well as `resolve_table`.
 Return `None` to delegate an identifier to the local catalog. Return
-`ExternalCatalogOwnership` to claim it and advertise capabilities:
+`ExternalCatalogOwnership` to claim it and advertise capabilities. A writable owner
+sets both `write=True` and `batch_write=True`:
 
 ```python
 from sparkless.external_catalog import ExternalCatalogOwnership
@@ -71,6 +84,7 @@ class Catalog:
                 owner_id="analytics",
                 read=True,
                 write=True,
+                batch_write=True,
             )
         return None
 
@@ -79,9 +93,10 @@ class Catalog:
         ...
 ```
 
-`write_table` and `write_table_batches` remain optional and are exposed as separate
-capabilities. A callback exception after the provider call starts has an unknown
-commit outcome; reconcile it with the supplied `operation_id` before retrying.
+`write_table_batches` is the only write callback. It receives a lazy, bounded
+`request.batches` iterator; materialized `write_table` callbacks are removed. A
+callback exception after the provider call starts has an unknown commit outcome;
+reconcile it with the supplied `operation_id` before retrying.
 
 ## Execution context and errors
 

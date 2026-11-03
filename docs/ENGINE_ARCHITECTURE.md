@@ -15,8 +15,11 @@ root `robin-sparkless` crate composes those layers and exposes the familiar
 | `robin-sparkless-core` | Schemas, expression IR, cancellation, `ExecutionContext`, structured `EngineError`, typed frame/session/reader contracts, catalog ownership/read/write ports |
 | `robin-sparkless-plan` | Portable DataFrame operations, structural JSON decoding, expression validation, shared name resolution, numeric promotion |
 | `robin-sparkless-sql` | Shared SQL parser entry points, relational and command plans, statement effects, identifier rules |
-| `robin-sparkless-polars` | Concrete Polars frames and readers, Polars query compilation/execution, Delta/JDBC access, Polars error conversion, source composition |
-| `robin-sparkless-duckdb` | Configured DuckDB source resolution, read snapshots, bounded scans, source connection lifecycle; reads only |
+| `robin-sparkless-polars` | Concrete Polars frames and readers, Polars query compilation/execution and conversion, Polars error conversion, source composition |
+| `robin-sparkless-delta` | Delta path normalization, snapshot loading, table creation, and transaction commits; no Polars dependency |
+| `robin-sparkless-jdbc` | Driver-neutral JDBC option parsing, URL matching, SQL identifier/dialect policy, and credential redaction |
+| `robin-sparkless-jdbc-polars` | Feature-gated database connections, JDBC reads/writes, and database-to-Polars conversion |
+| `robin-sparkless-duckdb` | Configured DuckDB source resolution, read snapshots, bounded scans, and split connection lifecycle; reads only |
 | `robin-sparkless` | Concrete Polars-backed Rust facade and core/Polars exports |
 | `sparkless-native` | Python ABI, conversion, Python callback ownership, and Python exception mapping |
 | `sparkless-server-core` | Transport-independent server contracts and state records |
@@ -59,10 +62,11 @@ read/write/batch-write capabilities. An external miss or provider error never fa
 through to a local name with the same suffix.
 
 `CatalogReader` starts a snapshot; the snapshot resolves metadata and scans under that
-view. `CatalogWriter` and `CatalogBatchWriter` are optional, separate ports. Writes
-prepare before commit and return `Committed`, `NotCommitted`, or `OutcomeUnknown`, so
-callers do not treat a lost response as rollback. Python callbacks use the same
-operation ID and outcome contract. DuckDB source owners advertise read only.
+view. `CatalogBatchWriter` is the optional write port and accepts bounded typed Arrow
+IPC batches only. Writes prepare before commit and return `Committed`, `NotCommitted`,
+or `OutcomeUnknown`, so callers do not treat a lost response as rollback. Python
+callbacks use the same operation ID and outcome contract. DuckDB source owners
+advertise read only.
 
 See [external catalogs](EXTERNAL_CATALOGS.md), [4.19 migration](MIGRATION_4_19.md),
 and the [4.19 SOLID plan](plans/solid-refactor-4.19.md) for implementation and

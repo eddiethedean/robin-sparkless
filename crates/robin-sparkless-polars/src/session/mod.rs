@@ -47,9 +47,11 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread_local;
 
 mod catalog;
+#[cfg(feature = "sql")]
+use catalog::deduplicated_catalog_bytes;
 use catalog::{
-    DatabaseCatalog, SharedCatalogMutationWriterGuards, TableCatalog, deduplicated_catalog_bytes,
-    global_temp_catalog, next_temp_view_scope_id,
+    DatabaseCatalog, SharedCatalogMutationWriterGuards, TableCatalog, global_temp_catalog,
+    next_temp_view_scope_id,
 };
 pub use catalog::{SharedCatalog, SharedCatalogReadLease, TempViewCatalog};
 mod input;
@@ -474,10 +476,7 @@ impl SparkSession {
         let Some(capabilities) = ownership.capabilities() else {
             return Ok(());
         };
-        if !capabilities.write
-            || (!catalog.has_materialized_writer_for(ownership)
-                && !catalog.has_batch_writer_for(ownership))
-        {
+        if !capabilities.write || !catalog.has_batch_writer_for(ownership) {
             return Err(PolarsError::InvalidOperation(
                 format!(
                     "WRITE_CAPABILITY_DENIED: external namespace '{}' has no write capability",
@@ -757,7 +756,7 @@ impl SparkSession {
         Ok(frames)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "sql"))]
     fn catalog_auxiliary_bytes(&self) -> Result<usize, PolarsError> {
         deduplicated_catalog_bytes(&self.catalog_auxiliary_frames()?)
     }
@@ -3974,9 +3973,11 @@ impl Default for SparkSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use robin_sparkless_core::engine::CatalogResolver;
     #[cfg(feature = "delta")]
     use robin_sparkless_core::engine::ExternalTableSaveMode;
+    use robin_sparkless_core::engine::{
+        ArrowIpcStream, CatalogResolver, ExternalTableWriteBatchRequest, ExternalTableWriteResult,
+    };
     use serde_json::json;
 
     #[test]
@@ -4018,6 +4019,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "sql")]
     fn catalog_test_frame() -> DataFrame {
         let values = vec!["x".repeat(128); 64];
         let physical = PlDataFrame::new(
@@ -4028,6 +4030,7 @@ mod tests {
         DataFrame::from_eager_with_options(physical, false)
     }
 
+    #[cfg(feature = "sql")]
     fn catalog_test_session_with_limits(
         max_catalog_bytes: usize,
         max_table_bytes: usize,
@@ -4045,6 +4048,7 @@ mod tests {
             .with_shared_catalog(SharedCatalog::new())
     }
 
+    #[cfg(feature = "sql")]
     fn catalog_test_session(max_catalog_bytes: usize) -> SparkSession {
         catalog_test_session_with_limits(max_catalog_bytes, usize::MAX)
     }
@@ -4052,6 +4056,7 @@ mod tests {
     /// Manual resource witness for staged and snapshot-pinned table versions.
     /// Run with SPARKLESS_CATALOG_BENCH_ROWS set for separate increasing-cardinality processes.
     #[test]
+    #[cfg(feature = "sql")]
     #[ignore = "manual V17 retained/staged catalog memory measurement"]
     fn shared_catalog_retention_and_staging_memory_measurement() {
         let rows = std::env::var("SPARKLESS_CATALOG_BENCH_ROWS")
@@ -4122,6 +4127,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_cancelled_insert_before_execution_has_no_effect() {
         let session = SparkSession::new(Some("cancelled-insert-test".into()), None, HashMap::new())
             .with_shared_catalog(SharedCatalog::new());
@@ -4155,6 +4161,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_database_limit_includes_default_without_losing_last_slot() {
         let mut config = HashMap::new();
         config.insert(
@@ -4175,6 +4182,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_saved_table_limit_rejects_new_tables_but_allows_replacement() {
         let mut config = HashMap::new();
         config.insert("sparkless.server.max_tables".to_string(), "1".to_string());
@@ -4212,6 +4220,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_per_table_byte_limit_accepts_exact_boundary_and_rejects_before_publish() {
         let candidate = catalog_test_frame();
         let candidate_bytes = candidate.estimated_size().unwrap();
@@ -4240,6 +4249,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_temp_view_limit_is_per_session_and_allows_replacement() {
         let mut config = HashMap::new();
         config.insert(
@@ -4282,6 +4292,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_temp_view_limit_serializes_competing_publications() {
         let mut config = HashMap::new();
         config.insert(
@@ -4319,6 +4330,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_reader_keeps_resolved_table_version_across_publication() {
         let session = catalog_test_session(usize::MAX);
         let make_frame = |values: Vec<i64>| {
@@ -4371,6 +4383,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_join_keeps_one_snapshot_across_table_resolutions() {
         let session = catalog_test_session(usize::MAX);
         let make_frame = |id| {
@@ -4424,6 +4437,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_drop_keeps_resolved_reader_alive_until_lease_release() {
         let session = catalog_test_session(usize::MAX);
         let id = Series::new("id".into(), [4_i64, 5_i64]);
@@ -4452,6 +4466,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_charges_pinned_versions_until_last_read_finishes() {
         let original = catalog_test_frame();
         let bytes = original.estimated_size().unwrap();
@@ -4486,6 +4501,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_charges_temp_view_snapshots_and_releases_dropped_views() {
         let table = catalog_test_frame();
         let bytes = table.estimated_size().unwrap();
@@ -4514,6 +4530,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_temp_view_replacement_reserves_a_pinned_version() {
         let table = catalog_test_frame();
         let bytes = table.estimated_size().unwrap();
@@ -4547,6 +4564,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_deduplicates_shared_arrow_chunks_across_views() {
         let table = catalog_test_frame();
         let bytes = table.estimated_size().unwrap();
@@ -4572,6 +4590,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "sql")]
     fn shared_catalog_serializes_concurrent_growth_at_the_byte_limit() {
         let frame = catalog_test_frame();
         let bytes = frame.estimated_size().unwrap();
@@ -4743,13 +4762,24 @@ mod tests {
     }
 
     #[derive(Clone)]
+    struct RecordedExternalWrite {
+        identifier: String,
+        table: ExternalTableDescriptor,
+        data: ArrowIpcStream,
+        mode: robin_sparkless_core::engine::ExternalTableSaveMode,
+        format: Option<String>,
+        options: Vec<(String, String)>,
+        partition_by: Vec<String>,
+    }
+
+    #[derive(Clone)]
     struct TestExternalCatalog {
         identifier: String,
         descriptor: Arc<Mutex<Option<ExternalTableDescriptor>>>,
         error: Option<String>,
         write_error: Arc<Mutex<Option<String>>>,
         resolutions: Arc<Mutex<Vec<String>>>,
-        writes: Arc<Mutex<Vec<robin_sparkless_core::engine::ExternalTableWriteRequest>>>,
+        writes: Arc<Mutex<Vec<RecordedExternalWrite>>>,
     }
 
     impl CatalogResolver for TestExternalCatalog {
@@ -4796,14 +4826,10 @@ mod tests {
     }
 
     impl TestExternalCatalog {
-        fn write_table_request(
+        fn write_table_batches_request(
             &self,
-            request: robin_sparkless_core::engine::ExternalTableWriteRequest,
-        ) -> Result<robin_sparkless_core::engine::ExternalTableWriteResult, EngineError> {
-            self.writes
-                .lock()
-                .expect("test write lock")
-                .push(request.clone());
+            request: ExternalTableWriteBatchRequest,
+        ) -> Result<ExternalTableWriteResult, EngineError> {
             if let Some(error) = self
                 .write_error
                 .lock()
@@ -4816,14 +4842,40 @@ mod tests {
             #[cfg(feature = "delta")]
             {
                 use polars::io::ipc::IpcStreamReader;
-                use polars::prelude::SerReader;
+                use polars::io::ipc::IpcStreamWriter;
+                use polars::prelude::{SerReader, SerWriter};
 
-                let input = IpcStreamReader::new(std::io::Cursor::new(request.data.bytes))
+                let ExternalTableWriteBatchRequest {
+                    operation_id: _,
+                    identifier,
+                    table,
+                    batches,
+                    mode,
+                    format,
+                    options,
+                    partition_by,
+                } = request;
+                let mut batches = batches.collect::<Result<Vec<_>, _>>()?.into_iter();
+                let first = batches.next().ok_or_else(|| {
+                    EngineError::invalid_input("test writer received no typed Arrow batches".into())
+                })?;
+                let mut input = IpcStreamReader::new(std::io::Cursor::new(first.bytes))
                     .finish()
                     .map_err(|error| {
                         EngineError::invalid_input(format!("decode Arrow IPC: {error}"))
                     })?;
-                let mode = match request.mode {
+                for batch in batches {
+                    let batch = IpcStreamReader::new(std::io::Cursor::new(batch.bytes))
+                        .finish()
+                        .map_err(|error| {
+                            EngineError::invalid_input(format!("decode Arrow IPC: {error}"))
+                        })?;
+                    input.vstack_mut(&batch).map_err(|error| {
+                        EngineError::invalid_input(format!("combine Arrow batches: {error}"))
+                    })?;
+                }
+                let external_mode = mode;
+                let mode = match external_mode {
                     robin_sparkless_core::engine::ExternalTableSaveMode::Append => {
                         crate::dataframe::SaveMode::Append
                     }
@@ -4838,28 +4890,50 @@ mod tests {
                     }
                 };
                 let option_is_true = |name: &str| {
-                    request.options.iter().rev().any(|(key, value)| {
+                    options.iter().rev().any(|(key, value)| {
                         key.eq_ignore_ascii_case(name) && value.eq_ignore_ascii_case("true")
                     })
                 };
                 crate::delta::write_delta_with_save_options_and_logical_map_paths_for_catalog(
                     &input,
-                    &request.table.canonical_location,
+                    &table.canonical_location,
                     mode,
                     option_is_true("mergeSchema"),
                     option_is_true("overwriteSchema"),
-                    &request.partition_by,
+                    &partition_by,
                     &[],
                 )
                 .map_err(|error| {
                     EngineError::invalid_input(format!("write local Delta fixture: {error}"))
                 })?;
 
-                let committed_version = request.table.version.unwrap_or(0) + 1;
-                let mut table = request.table;
+                let mut cursor = std::io::Cursor::new(Vec::new());
+                IpcStreamWriter::new(&mut cursor)
+                    .finish(&mut input)
+                    .map_err(|error| {
+                        EngineError::invalid_input(format!("encode captured Arrow IPC: {error}"))
+                    })?;
+                let data = ArrowIpcStream {
+                    bytes: cursor.into_inner(),
+                    row_count: input.height() as u64,
+                };
+                let committed_version = table.version.unwrap_or(0) + 1;
+                let mut table = table;
                 table.version = Some(committed_version);
                 *self.descriptor.lock().expect("test descriptor lock") = Some(table.clone());
-                Ok(robin_sparkless_core::engine::ExternalTableWriteResult {
+                self.writes
+                    .lock()
+                    .expect("test write lock")
+                    .push(RecordedExternalWrite {
+                        identifier,
+                        table: table.clone(),
+                        data,
+                        mode: external_mode,
+                        format,
+                        options,
+                        partition_by,
+                    });
+                Ok(ExternalTableWriteResult {
                     table,
                     committed_version: Some(committed_version),
                     provider_commit_id: None,
@@ -4877,7 +4951,7 @@ mod tests {
 
     struct TestPreparedWrite {
         provider: TestExternalCatalog,
-        request: robin_sparkless_core::engine::ExternalTableWriteRequest,
+        request: ExternalTableWriteBatchRequest,
     }
 
     impl robin_sparkless_core::engine::PreparedCatalogWrite for TestPreparedWrite {
@@ -4890,7 +4964,7 @@ mod tests {
                     error,
                 );
             }
-            match self.provider.write_table_request(self.request) {
+            match self.provider.write_table_batches_request(self.request) {
                 Ok(receipt) => {
                     robin_sparkless_core::engine::ExternalTableWriteOutcome::Committed(receipt)
                 }
@@ -4901,10 +4975,10 @@ mod tests {
         }
     }
 
-    impl robin_sparkless_core::engine::CatalogWriter for TestExternalCatalog {
-        fn prepare_write(
+    impl robin_sparkless_core::engine::CatalogBatchWriter for TestExternalCatalog {
+        fn prepare_write_batches(
             &self,
-            request: robin_sparkless_core::engine::ExternalTableWriteRequest,
+            request: ExternalTableWriteBatchRequest,
         ) -> Result<Box<dyn robin_sparkless_core::engine::PreparedCatalogWrite>, EngineError>
         {
             Ok(Box::new(TestPreparedWrite {
@@ -4916,8 +4990,8 @@ mod tests {
 
     fn catalog_for_test(provider: Arc<TestExternalCatalog>) -> Arc<ExternalCatalog> {
         let resolver: Arc<dyn CatalogResolver> = provider.clone();
-        let writer: Arc<dyn robin_sparkless_core::engine::CatalogWriter> = provider;
-        Arc::new(ExternalCatalog::new(resolver, None, Some(writer), None))
+        let writer: Arc<dyn robin_sparkless_core::engine::CatalogBatchWriter> = provider;
+        Arc::new(ExternalCatalog::new(resolver, None, Some(writer)))
     }
 
     fn external_descriptor(path: &std::path::Path, schema: StructType) -> ExternalTableDescriptor {

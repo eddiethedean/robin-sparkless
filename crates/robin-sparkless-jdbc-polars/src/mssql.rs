@@ -1,6 +1,7 @@
-use crate::error::EngineError;
-use crate::jdbc::JdbcOptions;
-use crate::jdbc::sql_ident::{self, JdbcDialect};
+use crate::JdbcSaveMode;
+use robin_sparkless_core::{EngineError, SessionRuntimeConfig};
+use robin_sparkless_jdbc::JdbcOptions;
+use robin_sparkless_jdbc::sql_ident::{self, JdbcDialect};
 
 use futures_util::TryStreamExt;
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
@@ -131,7 +132,10 @@ fn kind_from_column_type(ty: ColumnType, use_v4: bool) -> ColKind {
     }
 }
 
-pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
+pub(crate) fn read_jdbc_mssql(
+    opts: &JdbcOptions,
+    runtime: &SessionRuntimeConfig,
+) -> Result<PlDataFrame, EngineError> {
     let sql = if let Some(query) = &opts.query {
         query.clone()
     } else if let Some(table) = &opts.dbtable {
@@ -189,8 +193,7 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         })?;
 
         let column_names: Vec<String> = columns.iter().map(|c| c.name().to_string()).collect();
-        let cfg = crate::udf_context::get_thread_runtime_config();
-        let use_v4 = robin_sparkless_core::mssql_v4_type_mapping(&cfg);
+        let use_v4 = robin_sparkless_core::mssql_v4_type_mapping(runtime);
         let column_kinds: Vec<ColKind> = columns
             .iter()
             .map(|c| kind_from_column_type(c.column_type(), use_v4))
@@ -319,9 +322,9 @@ fn cells_to_series(name: &str, cells: &[Cell], kind: ColKind) -> Series {
 pub(crate) fn write_jdbc_mssql(
     df: &PlDataFrame,
     opts: &JdbcOptions,
-    mode: crate::dataframe::SaveMode,
+    mode: JdbcSaveMode,
 ) -> Result<(), EngineError> {
-    use crate::dataframe::SaveMode as Sm;
+    use crate::JdbcSaveMode as Sm;
 
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::invalid_input(
@@ -519,7 +522,11 @@ mod tests {
         }).unwrap();
 
         opts.dbtable = Some("sparkless_jdbc_test".to_string());
-        let df = read_jdbc_mssql(&opts).unwrap();
+        let df = read_jdbc_mssql(
+            &opts,
+            &robin_sparkless_core::SessionRuntimeConfig::default(),
+        )
+        .unwrap();
         assert!(df.height() >= 2);
 
         let write_df = PlDataFrame::new_infer_height(vec![
@@ -529,14 +536,19 @@ mod tests {
         .unwrap();
         let mut write_opts = opts.clone();
         write_opts.dbtable = Some("sparkless_jdbc_writeread_test".to_string());
-        crate::jdbc::write_jdbc_from_polars(
+        crate::write_jdbc_from_polars(
             &write_df,
             &write_opts,
-            crate::dataframe::SaveMode::Overwrite,
+            crate::JdbcSaveMode::Overwrite,
+            &robin_sparkless_core::SessionRuntimeConfig::default(),
         )
         .unwrap();
 
-        let read_df = crate::jdbc::read_jdbc_to_polars(&write_opts).unwrap();
+        let read_df = crate::read_jdbc_to_polars(
+            &write_opts,
+            &robin_sparkless_core::SessionRuntimeConfig::default(),
+        )
+        .unwrap();
         assert_eq!(read_df.height(), 2);
     }
 }

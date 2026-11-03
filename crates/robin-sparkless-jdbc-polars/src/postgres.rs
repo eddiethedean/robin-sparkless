@@ -1,6 +1,7 @@
-use crate::error::EngineError;
-use crate::jdbc::JdbcOptions;
-use crate::jdbc::sql_ident::{self, JdbcDialect};
+use crate::JdbcSaveMode;
+use robin_sparkless_core::{EngineError, SessionRuntimeConfig};
+use robin_sparkless_jdbc::JdbcOptions;
+use robin_sparkless_jdbc::sql_ident::{self, JdbcDialect};
 
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
 
@@ -10,9 +11,9 @@ use postgres::{Client, NoTls};
 pub(crate) fn write_jdbc_postgres(
     df: &PlDataFrame,
     opts: &JdbcOptions,
-    mode: crate::dataframe::SaveMode,
+    mode: JdbcSaveMode,
 ) -> Result<(), EngineError> {
-    use crate::dataframe::SaveMode as Sm;
+    use crate::JdbcSaveMode as Sm;
 
     let mut url = opts.url.clone();
     if let Some(stripped) = url.strip_prefix("jdbc:") {
@@ -155,7 +156,10 @@ pub(crate) fn write_jdbc_postgres(
     Ok(())
 }
 
-pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
+pub(crate) fn read_jdbc_postgres(
+    opts: &JdbcOptions,
+    runtime: &SessionRuntimeConfig,
+) -> Result<PlDataFrame, EngineError> {
     let mut url = opts.url.clone();
     if let Some(stripped) = url.strip_prefix("jdbc:") {
         url = stripped.to_string();
@@ -215,8 +219,7 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
         .query(&statement, &[])
         .map_err(|e| EngineError::sql(format!("JDBC read: query failed: {e}")))?;
 
-    let cfg = crate::udf_context::get_thread_runtime_config();
-    let use_v4_datetime = robin_sparkless_core::postgres_v4_datetime_mapping(&cfg);
+    let use_v4_datetime = robin_sparkless_core::postgres_v4_datetime_mapping(runtime);
 
     let mut series_vec: Vec<Series> = Vec::with_capacity(columns.len());
     for (idx, col) in columns.iter().enumerate() {

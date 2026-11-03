@@ -14,12 +14,11 @@ pub use config::SparklessConfig;
 pub use engine::{
     ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, CatalogBatchWriter,
     CatalogCapabilities, CatalogOwnership, CatalogReadSnapshot, CatalogReader, CatalogResolution,
-    CatalogResolver, CatalogWriter, CollectedRows, DataFrameReaderBackend, ExecutionConfigSnapshot,
+    CatalogResolver, CollectedRows, DataFrameReaderBackend, ExecutionConfigSnapshot,
     ExecutionContext, ExternalCatalog, ExternalTableDescriptor, ExternalTableFormat,
     ExternalTableSaveMode, ExternalTableWriteBatchRequest, ExternalTableWriteOutcome,
-    ExternalTableWriteRequest, ExternalTableWriteResult, FrameActions, FrameSchema, FrameTransform,
-    GroupedData, JoinType, SparkSessionBackend, begin_catalog_read_snapshot,
-    resolve_catalog_identifier,
+    ExternalTableWriteResult, FrameActions, FrameSchema, FrameTransform, GroupedData, JoinType,
+    SparkSessionBackend, begin_catalog_read_snapshot, resolve_catalog_identifier,
 };
 pub use error::{
     EngineError, ErrorCategory, ErrorDetail, ErrorRetryability, normalize_unresolved_column_message,

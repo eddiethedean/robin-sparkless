@@ -1767,7 +1767,7 @@ Namespace owner and the capabilities it advertises, even when a table is missing
 Required ``resolve_ownership(identifier)`` and ``resolve_table(identifier)`` methods.
 Return ``None`` from ``resolve_ownership`` only when the local catalog owns the name.
 
-Writable providers also implement ``write_table(request:
+Writable providers also implement ``write_table_batches(request:
 ExternalTableWriteRequest) -> ExternalTableWriteResult``. Read-only objects
 may omit that method.
 
@@ -1783,16 +1783,12 @@ Storage formats supported by the native external catalog contract.
 
 Save modes accepted by DataFrameWriter.mode().
 
-### `ExternalTableWriteRequest(operation_id: 'str', identifier: 'str', table: 'ExternalTableDescriptor', data: 'Optional[ArrowIpcStream]', mode: 'Union[ExternalTableSaveMode, str]', format: 'Optional[str]', options: 'List[Tuple[str, str]]', partition_by: 'List[str]', batches: 'Optional[Iterator[Any]]' = None) -> None`
+### `ExternalTableWriteRequest(operation_id: 'str', identifier: 'str', table: 'ExternalTableDescriptor', mode: 'Union[ExternalTableSaveMode, str]', format: 'Optional[str]', options: 'List[Tuple[str, str]]', partition_by: 'List[str]', batches: 'Iterator[Any]') -> None`
 
-A resolved write using either a materialized or lazy Arrow payload.
-
-``write_table`` receives ``data`` as an Arrow IPC stream and ``batches=None``.
-``write_table_batches`` receives ``data=None`` and a lazy ``batches`` iterator
-of PyArrow RecordBatches. Closing or exhausting that iterator releases the
-producer; a callback may stop early by closing it. Options are ordered pairs
-so duplicate keys survive. A successful callback must commit the data it
-accepts before returning its receipt.
+A resolved write using a lazy iterator of bounded PyArrow RecordBatches.
+Closing or exhausting that iterator releases the producer; a callback may stop
+early by closing it. Options are ordered pairs so duplicate keys survive. A
+successful callback must commit the data it accepts before returning its receipt.
 
 ### `ExternalTableWriteResult(table: 'ExternalTableDescriptor', committed_version: 'Optional[int]' = None, provider_commit_id: 'Optional[str]' = None) -> None`
 
@@ -1801,7 +1797,3 @@ Descriptor and provider-neutral identity of a completed provider commit.
 ### `SparklessExternalCatalogError(native signature unavailable)`
 
 External catalog provider callback failed
-
-### `WritableExternalCatalogProvider(*args, **kwargs)`
-
-Provider interface including the optional native write hook.

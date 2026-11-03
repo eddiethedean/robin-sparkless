@@ -1,16 +1,17 @@
-use crate::error::EngineError;
-use crate::jdbc::JdbcOptions;
-use crate::jdbc::sql_ident::{self, JdbcDialect};
+use crate::JdbcSaveMode;
+use robin_sparkless_core::EngineError;
 use robin_sparkless_core::resolve_path_under_base;
+use robin_sparkless_jdbc::JdbcOptions;
+use robin_sparkless_jdbc::sql_ident::{self, JdbcDialect};
 
 use polars::prelude::{DataFrame as PlDataFrame, NamedFrom, Series};
 
 pub(crate) fn write_jdbc_sqlite(
     df: &PlDataFrame,
     opts: &JdbcOptions,
-    mode: crate::dataframe::SaveMode,
+    mode: JdbcSaveMode,
 ) -> Result<(), EngineError> {
-    use crate::dataframe::SaveMode as Sm;
+    use crate::JdbcSaveMode as Sm;
 
     let path = sqlite_url_to_path(&opts.url)?;
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {

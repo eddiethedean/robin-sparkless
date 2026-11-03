@@ -75,6 +75,8 @@ def consumer_manifest(source: str) -> str:
         r"(?m)^members\s*=\s*\[[^\]]*\]",
         'members = [".", "crates/robin-sparkless-core", '
         '"crates/robin-sparkless-plan", "crates/robin-sparkless-sql", '
+        '"crates/robin-sparkless-delta", "crates/robin-sparkless-jdbc", '
+        '"crates/robin-sparkless-jdbc-polars", '
         '"crates/robin-sparkless-duckdb", "crates/robin-sparkless-polars", '
         '"crates/spark-sql-parser", "crates/sparkless-server-core", '
         '"crates/sparkless-server-polars", "crates/sparkless-server", '

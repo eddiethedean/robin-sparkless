@@ -1,6 +1,7 @@
-use crate::error::EngineError;
-use crate::jdbc::JdbcOptions;
-use crate::jdbc::sql_ident::{self, JdbcDialect};
+use crate::JdbcSaveMode;
+use robin_sparkless_core::EngineError;
+use robin_sparkless_jdbc::JdbcOptions;
+use robin_sparkless_jdbc::sql_ident::{self, JdbcDialect};
 
 use odbc_api::DataType as OdbcDataType;
 use odbc_api::{
@@ -277,9 +278,9 @@ fn db2_values_to_series(name: &str, values: &[Option<String>], data_type: OdbcDa
 pub(crate) fn write_jdbc_db2(
     df: &PlDataFrame,
     opts: &JdbcOptions,
-    mode: crate::dataframe::SaveMode,
+    mode: JdbcSaveMode,
 ) -> Result<(), EngineError> {
-    use crate::dataframe::SaveMode as Sm;
+    use crate::JdbcSaveMode as Sm;
 
     let dsn = normalize_db2_dsn(&opts.url, opts)?;
 

@@ -1,6 +1,7 @@
-use crate::error::EngineError;
-use crate::jdbc::JdbcOptions;
-use crate::jdbc::sql_ident::{self, JdbcDialect};
+use crate::JdbcSaveMode;
+use robin_sparkless_core::{EngineError, SessionRuntimeConfig};
+use robin_sparkless_jdbc::JdbcOptions;
+use robin_sparkless_jdbc::sql_ident::{self, JdbcDialect};
 
 use mysql::prelude::Queryable;
 use mysql::{Conn, Opts, OptsBuilder, Params, Value};
@@ -59,9 +60,10 @@ fn connect(opts: &JdbcOptions) -> Result<Conn, EngineError> {
 pub(crate) fn write_jdbc_mysql(
     df: &PlDataFrame,
     opts: &JdbcOptions,
-    mode: crate::dataframe::SaveMode,
+    mode: JdbcSaveMode,
+    runtime: &SessionRuntimeConfig,
 ) -> Result<(), EngineError> {
-    use crate::dataframe::SaveMode as Sm;
+    use crate::JdbcSaveMode as Sm;
 
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
         EngineError::invalid_input(
@@ -160,8 +162,7 @@ pub(crate) fn write_jdbc_mysql(
                     polars::prelude::AnyValue::Int32(i) => Value::Int(i as i64),
                     polars::prelude::AnyValue::Int16(i) => Value::Int(i as i64),
                     polars::prelude::AnyValue::Float64(f) => {
-                        let cfg = crate::udf_context::get_thread_runtime_config();
-                        if robin_sparkless_core::mysql_v4_type_mapping(&cfg) {
+                        if robin_sparkless_core::mysql_v4_type_mapping(runtime) {
                             Value::Float(f as f32)
                         } else {
                             Value::Double(f)
@@ -187,7 +188,10 @@ pub(crate) fn write_jdbc_mysql(
     Ok(())
 }
 
-pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
+pub(crate) fn read_jdbc_mysql(
+    opts: &JdbcOptions,
+    runtime: &SessionRuntimeConfig,
+) -> Result<PlDataFrame, EngineError> {
     let sql = if let Some(query) = &opts.query {
         query.clone()
     } else if let Some(table) = &opts.dbtable {
@@ -257,8 +261,7 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         }
     }
 
-    let cfg = crate::udf_context::get_thread_runtime_config();
-    let use_v4 = robin_sparkless_core::mysql_v4_type_mapping(&cfg);
+    let use_v4 = robin_sparkless_core::mysql_v4_type_mapping(runtime);
 
     let mut series_vec: Vec<Series> = Vec::with_capacity(ncols);
     for ((name, col_data), col_type) in column_names
@@ -497,7 +500,11 @@ mod tests {
 
         // Read (dbtable)
         opts.dbtable = Some("sparkless_jdbc_test".to_string());
-        let df = read_jdbc_mysql(&opts).unwrap();
+        let df = read_jdbc_mysql(
+            &opts,
+            &robin_sparkless_core::SessionRuntimeConfig::default(),
+        )
+        .unwrap();
         assert!(df.height() >= 2);
 
         // Write overwrite + read back
@@ -511,14 +518,19 @@ mod tests {
         .unwrap();
         let mut write_opts = opts.clone();
         write_opts.dbtable = Some("sparkless_jdbc_writeread_test".to_string());
-        crate::jdbc::write_jdbc_from_polars(
+        crate::write_jdbc_from_polars(
             &write_df,
             &write_opts,
-            crate::dataframe::SaveMode::Overwrite,
+            crate::JdbcSaveMode::Overwrite,
+            &robin_sparkless_core::SessionRuntimeConfig::default(),
         )
         .unwrap();
 
-        let read_df = crate::jdbc::read_jdbc_to_polars(&write_opts).unwrap();
+        let read_df = crate::read_jdbc_to_polars(
+            &write_opts,
+            &robin_sparkless_core::SessionRuntimeConfig::default(),
+        )
+        .unwrap();
         assert_eq!(read_df.height(), 2);
     }
 }

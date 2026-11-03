@@ -4,9 +4,8 @@ Attach a provider with ``spark.set_external_catalog_provider(provider)``. Its
 ``resolve_ownership(identifier)`` method returns ``None`` for local identifiers or
 an ``ExternalCatalogOwnership`` for identifiers owned by the provider. The separate
 ``resolve_table(identifier)`` method returns an ExternalTableDescriptor or None.
-Providers can implement ``write_table(request)`` for materialized Arrow IPC bytes,
-or ``write_table_batches(request)`` to consume PyArrow RecordBatches on demand.
-Callbacks are synchronous and run with the Python GIL.
+Writable providers implement ``write_table_batches(request)`` to consume bounded
+PyArrow RecordBatches on demand. Callbacks are synchronous and run with the Python GIL.
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from sparkless.sql import types as T
 __all__ = [
     "ExternalCatalogOwnership",
     "ExternalCatalogProvider",
-    "WritableExternalCatalogProvider",
     "ArrowIpcStream",
     "ExternalTableFormat",
     "ExternalTableSaveMode",
@@ -98,12 +96,10 @@ class ExternalTableDescriptor:
 
 @dataclass
 class ExternalTableWriteRequest:
-    """A resolved write using either a materialized or lazy Arrow payload.
+    """A resolved write using a lazy sequence of bounded Arrow batches.
 
-    ``write_table`` receives ``data`` as an Arrow IPC stream and ``batches=None``.
-    ``write_table_batches`` receives ``data=None`` and a lazy ``batches`` iterator
-    of PyArrow RecordBatches. Closing or exhausting that iterator releases the
-    producer; a callback may stop early by closing it. Options are ordered pairs
+    ``batches`` is a lazy iterator of PyArrow RecordBatches. Closing or exhausting
+    it releases the producer; a callback may stop early by closing it. Options are ordered pairs
     so duplicate keys survive. A successful callback must commit the data it
     accepts before returning its receipt. A callback failure after it starts may have an
     unknown commit outcome and is retained as such by the native layer.
@@ -112,12 +108,11 @@ class ExternalTableWriteRequest:
     operation_id: str
     identifier: str
     table: ExternalTableDescriptor
-    data: Optional[ArrowIpcStream]
     mode: Union[ExternalTableSaveMode, str]
     format: Optional[str]
     options: List[Tuple[str, str]]
     partition_by: List[str]
-    batches: Optional[Iterator[Any]] = None
+    batches: Iterator[Any]
 
 
 @dataclass
@@ -139,12 +134,8 @@ class ExternalCatalogProvider(Protocol):
     """Python catalog callback surface used to build separate Rust capabilities.
 
     ``resolve_ownership`` is called before table lookup. Return None only when Sparkless'
-    local catalog should handle the identifier. Writable providers implement ``write_table``
-    and may separately implement ``write_table_batches``.
-
-    ``write_table(request:
-    ExternalTableWriteRequest) -> ExternalTableWriteResult``. Read-only objects
-    may omit writer methods.
+    local catalog should handle the identifier. Writable providers implement
+    ``write_table_batches``; read-only objects may omit it.
     """
 
     def resolve_ownership(
@@ -152,14 +143,6 @@ class ExternalCatalogProvider(Protocol):
     ) -> Optional[ExternalCatalogOwnership]: ...
 
     def resolve_table(self, identifier: str) -> Optional[ExternalTableDescriptor]: ...
-
-
-class WritableExternalCatalogProvider(ExternalCatalogProvider, Protocol):
-    """Provider interface including the optional native write hook."""
-
-    def write_table(
-        self, request: ExternalTableWriteRequest
-    ) -> ExternalTableWriteResult: ...
 
 
 class BatchWritableExternalCatalogProvider(ExternalCatalogProvider, Protocol):
@@ -394,7 +377,9 @@ def _descriptor_from_json(value):
 
 def _write_result_to_parts(result):
     if not isinstance(result, ExternalTableWriteResult):
-        raise TypeError("provider.write_table must return ExternalTableWriteResult")
+        raise TypeError(
+            "provider.write_table_batches must return ExternalTableWriteResult"
+        )
     if result.committed_version is not None and type(result.committed_version) is not int:
         raise TypeError("committed_version must be an integer or None")
     if result.provider_commit_id is not None and not isinstance(
@@ -422,8 +407,8 @@ def _ownership_to_json(ownership):
     for capability in (ownership.read, ownership.write, ownership.batch_write):
         if not isinstance(capability, bool):
             raise TypeError("external ownership capabilities must be bool values")
-    if ownership.batch_write and not ownership.write:
-        raise ValueError("batch_write requires write=True")
+    if ownership.batch_write != ownership.write:
+        raise ValueError("external writes require batch_write=True")
     return json.dumps(
         {
             "kind": "external",

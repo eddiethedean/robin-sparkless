@@ -1042,6 +1042,9 @@ jobs:
           publish_one robin-sparkless-core
           publish_one robin-sparkless-plan
           publish_one robin-sparkless-sql
+          publish_one robin-sparkless-delta
+          publish_one robin-sparkless-jdbc
+          publish_one robin-sparkless-jdbc-polars
           publish_one robin-sparkless-duckdb
           publish_one robin-sparkless-polars
           publish_one robin-sparkless

@@ -5,8 +5,9 @@ search:
 
 # Repository-wide SOLID refactor for 4.19.0
 
-Status: adopted for 4.19.0. Phase 1–3 source work and the P3 targeted acceptance gate
-are complete. The P0 inventory and P1/P2 behavioral gates remain pending.
+Status: adopted for 4.19.0. Phase 1–4 source work is implemented and the P3 targeted
+acceptance gate is complete. The P0 inventory, P1/P2 behavioral gates, and P4 storage
+behavioral gate remain pending.
 
 Baseline: working tree inspected on 2026-11-02, based on commit `1292e3dd`, including
 existing uncommitted product/source changes. File sizes below describe that snapshot,
@@ -120,9 +121,11 @@ product constructors select concrete implementations.
 | **New** `robin-sparkless-plan` | Typed relational operations, JSON plan decoding and structural validation | Core + serialization; no Polars, protobuf or SQL-parser AST in public contracts |
 | **New** `robin-sparkless-sql` | SQL normalization, supported AST-to-plan lowering, identifiers and semantic analysis shared by local/server consumers | Parser + plan + core; physical execution remains in engine adapters |
 | `spark-sql-parser` | Spark SQL syntax and AST production | No engine, catalog, IO or execution policy |
-| `robin-sparkless-polars` | Plan lowering, expression kernels, execution, native conversion and Polars session/frame state | Core/plan/SQL; optional driver integration modules use provider contracts |
+| `robin-sparkless-polars` | Plan lowering, expression kernels, execution, native conversion and Polars session/frame state | Core/plan/SQL; composes optional storage adapters |
 | `robin-sparkless-duckdb` | DuckDB source ownership, snapshots, bounded IPC and future write adapter | Core + DuckDB; future execution lowering may depend on plan; no server dependency |
-| **New** `robin-sparkless-delta`, `robin-sparkless-jdbc` | Provider/driver connection, metadata, storage IO and transaction behavior | Core + respective drivers; Polars conversion remains in Polars integration modules |
+| **New** `robin-sparkless-delta` | Delta paths, snapshots, storage IO and transaction commits | Core + Delta driver; no Polars dependency |
+| **New** `robin-sparkless-jdbc` | Driver-neutral JDBC options, URL policy, identifiers and dialect rules | Core only; no database drivers or Polars dependency |
+| **New** `robin-sparkless-jdbc-polars` | Feature-gated database connections and Polars row conversion | Core + JDBC policy + Polars + selected database drivers |
 | `robin-sparkless` | Local public composition and ergonomic Rust API | Explicitly Polars-backed; retain only useful wrappers rather than duplicate every method |
 | `sparkless-server-core` | Product/config types, request/result/error contracts, execution/session ports and capability descriptors | Core/plan; no Hyper, Tonic, Polars or database drivers |
 | **New** `sparkless-server-runtime` | Session and operation ownership, admission, mutation ordering, budgets, cancellation, replay retention, readiness/drain | Server core + async primitives; no wire DTOs or concrete engines |
@@ -220,7 +223,7 @@ contract names are design labels to settle in the first contract PR:
 | `FrameTransform`, `FrameActions`, `FrameSchema` | Typed local operations; query construction does not require collection or catalog mutation methods |
 | `CatalogResolver` | Namespace ownership and table metadata; used by planning and mutation routing |
 | `CatalogReadSnapshot` | Statement-consistent metadata and bounded batch scans; used by execution |
-| `CatalogWriter` | Explicit writable-target capability and bounded writes; used by existing external writes and future DuckDB writes |
+| `CatalogBatchWriter` | Explicit writable-target capability with bounded writes; used by current external writes and future DuckDB writes |
 | `ExecutionSession` | Analyze/prepare supported plans and execute through an owned handle; server-facing, no Polars or wire types |
 | `ExecutionFactory` | Create isolated execution sessions and report capabilities; used by runtime composition |
 | `ResultStream` | Schema plus bounded typed IPC batches and cancellation/drop behavior; no requirement to collect all rows |
@@ -398,6 +401,29 @@ acceptance corpus. `cargo check --offline --locked --workspace --all-features` a
 passes. The P0 inventory and P1/P2 behavioral gates remain open, so this phase record
 does not represent full release acceptance.
 
+### Phase 4 implementation record — 2026-11-02
+
+Phase 4 source work extracts Delta path normalization, snapshot loading, table creation,
+and transaction commits into `robin-sparkless-delta`; Polars retains Delta schema and
+Arrow/Polars conversion. JDBC option parsing, URL classification, identifier quoting,
+and credential redaction live in the driver-neutral `robin-sparkless-jdbc` crate. The
+feature-gated database connection, read/write, and Polars conversion modules now live in
+`robin-sparkless-jdbc-polars`, with runtime compatibility configuration passed from the
+Polars session instead of reaching through thread-local engine state. JDBC feature names
+remain available on `robin-sparkless-polars` and forward into the adapter crate.
+
+The DuckDB source's configuration, owner resolution, snapshot, scan, connection, and
+pool lifecycle are separate modules. It remains a read-only provider and is composed
+through the same owner-aware catalog contract. External catalog writes now have one
+bounded batch-writer capability in Rust and Python; the materialized IPC writer and
+Python callback were removed, and first-party providers use `write_table_batches`.
+Release publishing and archive/consumer graph checks include the new JDBC adapter crate.
+
+`cargo fmt --all` and the all-feature/all-target compile check pass; test binaries were
+not executed. The P4 behavioral exit gate (driver behavior, external catalog ownership,
+rollback/receipt, DuckDB read-only behavior, and source budgets) remains pending along
+with the earlier P0/P1/P2 gates. Source implementation is not release acceptance.
+
 ## 7. Breaking-change ledger
 
 Record exact removed symbols/signatures and replacement examples during P0/P2. The
@@ -410,6 +436,7 @@ inventory rather than an automatic requirement to preserve compatibility:
 | Backend implementation traits | Remove `DataFrameBackend`, boxed frame returns, `as_any` frame matching, and tuple-only `SparkSessionBackend::create_dataframe`; add associated typed frames and `create_dataframe_from_rows` | Implement `FrameTransform`, `FrameActions`, `FrameSchema`, associated reader/frame types, and the JSON row constructor |
 | Rust session catalog setter | Remove `SparkSessionBackend::set_external_catalog_provider`; add `set_external_catalog(Option<Arc<ExternalCatalog>>)` | Compose the resolver and optional reader/writer ports, then attach the catalog |
 | External catalogs | Remove `ExternalCatalogProvider`, `supports_batch_writes`, and the combined read/write trait; `ExternalCatalog::resolve_table` now takes the resolved `&CatalogOwnership` | Resolve ownership first, use separate reader/writer capabilities, and implement prepared-write outcomes |
+| External catalog writes | Remove materialized `CatalogWriter`, `ExternalTableWriteRequest.data`, and Python `write_table`; every write uses `CatalogBatchWriter` and a required `request.batches` iterator | Implement `write_table_batches(request)` and set both `write=True` and `batch_write=True` |
 | Python external catalogs | Require `resolve_ownership(identifier)`; add `ExternalCatalogOwnership`; add `operation_id` and provider commit identity to write request/receipt types | Return `None` for local ownership or an owner with capabilities; use `request.operation_id` to reconcile ambiguous commits |
 | Plan API | Replace unvalidated JSON throughout execution with a typed plan boundary | JSON callers use decoder then typed executor; unsupported/legacy aliases get explicit migration errors |
 | Errors | Replace enum-shaped `EngineError::{User,Internal,Io,Sql,NotFound,Cancelled,Other}` with the structured `EngineError` type and lower-case constructors | Use `invalid_input`, `internal`, `io`, `sql`, `not_found`, `cancelled`, `other`, then branch on category/code and inspect `detail()` |

@@ -66,10 +66,9 @@ pub use expression::{column_to_expr, lit_bool, lit_f64, lit_i32, lit_i64, lit_st
 pub use functions::*;
 pub use robin_sparkless_core::engine::{
     ArrowIpcBatchStream, ArrowIpcStream, CatalogBatchWriter, CatalogCapabilities, CatalogOwnership,
-    CatalogReadSnapshot, CatalogReader, CatalogResolver, CatalogWriter, ExternalCatalog,
-    ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
-    ExternalTableWriteBatchRequest, ExternalTableWriteOutcome, ExternalTableWriteRequest,
-    ExternalTableWriteResult, PreparedCatalogWrite,
+    CatalogReadSnapshot, CatalogReader, CatalogResolver, ExternalCatalog, ExternalTableDescriptor,
+    ExternalTableFormat, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
+    ExternalTableWriteOutcome, ExternalTableWriteResult, PreparedCatalogWrite,
 };
 #[cfg(feature = "duckdb-source")]
 pub use robin_sparkless_duckdb::{

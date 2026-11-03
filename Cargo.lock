@@ -5682,6 +5682,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "robin-sparkless-delta"
+version = "4.19.0"
+dependencies = [
+ "deltalake",
+ "robin-sparkless-core",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "robin-sparkless-duckdb"
 version = "4.19.0"
 dependencies = [
@@ -5690,6 +5700,33 @@ dependencies = [
  "robin-sparkless-core",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "robin-sparkless-jdbc"
+version = "4.19.0"
+dependencies = [
+ "robin-sparkless-core",
+]
+
+[[package]]
+name = "robin-sparkless-jdbc-polars"
+version = "4.19.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "mysql",
+ "odbc-api",
+ "oracle-rs",
+ "polars",
+ "postgres",
+ "robin-sparkless-core",
+ "robin-sparkless-jdbc",
+ "rusqlite",
+ "tempfile",
+ "tiberius",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -5718,28 +5755,26 @@ dependencies = [
  "duckdb",
  "fancy-regex",
  "futures",
- "futures-util",
  "hex",
  "indexmap",
  "md5",
  "murmur3",
- "mysql",
  "num-bigint 0.4.6",
  "num-traits",
- "odbc-api",
- "oracle-rs",
  "parquet 57.2.0",
  "percent-encoding",
  "polars",
  "polars-arrow",
  "polars-parquet",
  "polars-plan",
- "postgres",
  "rand 0.8.5",
  "rand_distr 0.4.3",
  "regex",
  "robin-sparkless-core",
+ "robin-sparkless-delta",
  "robin-sparkless-duckdb",
+ "robin-sparkless-jdbc",
+ "robin-sparkless-jdbc-polars",
  "robin-sparkless-plan",
  "robin-sparkless-sql",
  "rusqlite",
@@ -5751,9 +5786,7 @@ dependencies = [
  "spark-sql-parser",
  "strsim",
  "tempfile",
- "tiberius",
  "tokio",
- "tokio-util",
  "twox-hash 1.6.3",
  "url",
  "zstd",

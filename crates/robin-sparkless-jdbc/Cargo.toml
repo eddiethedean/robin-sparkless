@@ -1,0 +1,11 @@
+[package]
+name = "robin-sparkless-jdbc"
+version = "4.19.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Driver-neutral JDBC configuration and SQL identifier contracts."
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[dependencies]
+robin-sparkless-core = { version = "4.19.0", path = "../robin-sparkless-core" }
