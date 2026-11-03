@@ -124,8 +124,10 @@ while the executor-specific JSON spelling is available from `payload_json()`.
 The new `robin-sparkless-sql` crate owns SQL-to-relational normalization through
 `lower_query`. Its `SqlQueryPlan` uses engine-neutral relations, projections, filters,
 grouping keys, sort keys, limits and set operations. Adapters retain responsibility for
-expression execution and for enforcing their own supported subset. Local SQL now uses
+expression execution and for enforcing their own supported subset. Local SQL consumes
 the normalized sort and limit clauses, and server SQL validation lowers the query before
-applying its HTTP-specific policy. `lower_statement` separates read queries, metadata
-commands and effectful commands. Shared identifier and numeric-promotion helpers live
-below the SQL and Connect adapters.
+applying its HTTP-specific policy. `lower_statement` separates read queries and metadata
+commands from effectful commands; command plans classify DDL/DML families, retain targets
+and nested queries where available, and preserve the canonical SQL for adapter-specific
+options. Shared identifier and numeric-promotion helpers live below the SQL and Connect
+adapters.

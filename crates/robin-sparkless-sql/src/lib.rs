@@ -43,12 +43,28 @@ pub enum MetadataCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CommandKind {
+    CreateTable,
+    CreateView,
+    CreateSchema,
+    CreateDatabase,
+    CreateOrReplaceTableAs,
+    Drop { object_type: String },
+    Insert,
+    Update,
+    Delete,
+    Other(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandPlan {
-    pub command: String,
-    pub target: Option<String>,
+    pub kind: CommandKind,
+    pub targets: Vec<String>,
     pub format: Option<String>,
     pub effect: StatementEffect,
     pub query: Option<SqlQueryPlan>,
+    /// Canonical AST spelling retains command options not modeled as separate fields.
+    pub source_sql: String,
 }
 
 impl StatementPlan {
@@ -98,28 +114,137 @@ pub fn lower_statement(statement: &SparkStatement) -> Result<StatementPlan, SqlP
             format,
             query,
         } => StatementPlan::Command(CommandPlan {
-            command: "create_or_replace_table_as".into(),
-            target: Some(object_name(table)),
+            kind: CommandKind::CreateOrReplaceTableAs,
+            targets: vec![object_name(table)],
             format: Some(format.clone()),
             effect: StatementEffect::Mutation,
             query: Some(lower_query(query)?),
+            source_sql: format!(
+                "CREATE OR REPLACE TABLE {} USING {} AS {}",
+                object_name(table),
+                format,
+                query
+            ),
         }),
         SparkStatement::Sqlparser(statement) => match statement.as_ref() {
             ast::Statement::Query(query) => StatementPlan::Query(lower_query(query)?),
-            command => StatementPlan::Command(CommandPlan {
-                command: command
+            ast::Statement::ShowDatabases { .. } => {
+                StatementPlan::Metadata(MetadataCommand::ShowDatabases)
+            }
+            ast::Statement::ShowTables { .. } => {
+                StatementPlan::Metadata(MetadataCommand::ShowTables { database: None })
+            }
+            ast::Statement::ExplainTable {
+                table_name,
+                hive_format,
+                ..
+            } => StatementPlan::Metadata(MetadataCommand::Describe {
+                table: object_name(table_name),
+                column: None,
+                extended: hive_format.is_some(),
+            }),
+            command => lower_command(command)?,
+        },
+    })
+}
+
+fn lower_command(statement: &ast::Statement) -> Result<StatementPlan, SqlPlanError> {
+    let (kind, targets, query) = match statement {
+        ast::Statement::CreateTable(create) => (
+            CommandKind::CreateTable,
+            vec![object_name(&create.name)],
+            create.query.as_deref().map(lower_query).transpose()?,
+        ),
+        ast::Statement::CreateView(create) => (
+            CommandKind::CreateView,
+            vec![object_name(&create.name)],
+            Some(lower_query(create.query.as_ref())?),
+        ),
+        ast::Statement::CreateSchema { schema_name, .. } => (
+            CommandKind::CreateSchema,
+            vec![schema_name_string(schema_name)],
+            None,
+        ),
+        ast::Statement::CreateDatabase { db_name, .. } => (
+            CommandKind::CreateDatabase,
+            vec![object_name(db_name)],
+            None,
+        ),
+        ast::Statement::Drop {
+            object_type, names, ..
+        } => (
+            CommandKind::Drop {
+                object_type: object_type.to_string(),
+            },
+            names.iter().map(object_name).collect(),
+            None,
+        ),
+        ast::Statement::Insert(insert) => (
+            CommandKind::Insert,
+            match &insert.table {
+                ast::TableObject::TableName(name) => vec![object_name(name)],
+                _ => Vec::new(),
+            },
+            insert.source.as_deref().map(lower_query).transpose()?,
+        ),
+        ast::Statement::Update(update) => (
+            CommandKind::Update,
+            table_factor_name(&update.table.relation)
+                .into_iter()
+                .collect(),
+            None,
+        ),
+        ast::Statement::Delete(delete) => {
+            let tables = match &delete.from {
+                ast::FromTable::WithFromKeyword(tables)
+                | ast::FromTable::WithoutKeyword(tables) => tables,
+            };
+            (
+                CommandKind::Delete,
+                tables
+                    .iter()
+                    .filter_map(|table| table_factor_name(&table.relation))
+                    .collect(),
+                None,
+            )
+        }
+        other => (
+            CommandKind::Other(
+                other
                     .to_string()
                     .split_whitespace()
                     .next()
                     .unwrap_or("unknown")
                     .to_ascii_lowercase(),
-                target: None,
-                format: None,
-                effect: statement_effect(&SparkStatement::Sqlparser(Box::new(command.clone()))),
-                query: None,
-            }),
-        },
-    })
+            ),
+            Vec::new(),
+            None,
+        ),
+    };
+    let effect = statement_effect(&SparkStatement::Sqlparser(Box::new(statement.clone())));
+    Ok(StatementPlan::Command(CommandPlan {
+        kind,
+        targets,
+        format: None,
+        effect,
+        query,
+        source_sql: statement.to_string(),
+    }))
+}
+
+fn schema_name_string(name: &ast::SchemaName) -> String {
+    match name {
+        ast::SchemaName::Simple(name) => object_name(name),
+        ast::SchemaName::UnnamedAuthorization(identifier) => identifier.value.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn table_factor_name(factor: &ast::TableFactor) -> Option<String> {
+    match factor {
+        ast::TableFactor::Table { name, .. } => Some(object_name(name)),
+        _ => None,
+    }
 }
 
 /// Lower syntax variants to the shared effect class used by local and remote executors.
@@ -130,9 +255,13 @@ pub fn statement_effect(statement: &SparkStatement) -> StatementEffect {
         | SparkStatement::ShowDatabases
         | SparkStatement::ShowTables { .. }
         | SparkStatement::Describe { .. } => true,
-        SparkStatement::Sqlparser(statement) => {
-            matches!(statement.as_ref(), ast::Statement::Query(_))
-        }
+        SparkStatement::Sqlparser(statement) => matches!(
+            statement.as_ref(),
+            ast::Statement::Query(_)
+                | ast::Statement::ShowDatabases { .. }
+                | ast::Statement::ShowTables { .. }
+                | ast::Statement::ExplainTable { .. }
+        ),
         SparkStatement::CreateOrReplaceTableAs { .. } => false,
     };
     if read_only {

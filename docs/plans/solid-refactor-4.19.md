@@ -5,8 +5,8 @@ search:
 
 # Repository-wide SOLID refactor for 4.19.0
 
-Status: adopted for 4.19.0. Phase 1 source decomposition is implemented; its targeted-test
-gate and the P0 inventory closeout remain pending.
+Status: adopted for 4.19.0. Phase 1–3 source work is implemented. The P0 inventory and
+P1–P3 behavioral gates remain pending.
 
 Baseline: working tree inspected on 2026-11-02, based on commit `1292e3dd`, including
 existing uncommitted product/source changes. File sizes below describe that snapshot,
@@ -370,16 +370,20 @@ promotion now calls the shared core-type rule. Unsupported operation names retai
 distinct error category and code.
 
 `robin-sparkless-sql` owns shared parsing, multipart identifier normalization, case-aware
-name rules, statement effects, explicit command plans and typed query lowering into
-engine-neutral relational nodes. Local Polars SQL consumes the normalized sort and limit
-operations; server SQL lowers accepted queries after applying the narrower HTTP policy.
-Connect uses the shared SQL expression parser, plan name resolver and numeric promotion
-rule while retaining protobuf relation lowering and feature policy in its adapter.
+name rules, statement effects, typed DDL/DML command plans and query lowering into
+engine-neutral relational nodes. Command plans retain classified command kinds, targets,
+nested queries and source SQL for options owned by adapters. Local Polars SQL consumes the
+normalized sort and limit clauses; server SQL lowers accepted queries after applying the
+narrower HTTP policy. Connect uses the shared SQL expression parser, ASCII-compatible
+identifier matcher, and numeric promotion rule while retaining protobuf relation lowering
+and feature policy in its adapter.
 
-Formatting and workspace compile checks pass. Test suites were not run. The P3
-frontend-equivalence and malformed-plan behavioral gates remain open, as do the P0
-inventory and P1/P2 behavioral gates. The source implementation does not represent
-release acceptance.
+Formatting and the offline `robin-sparkless-sql` crate compile pass after the final
+command-plan changes. A locked all-features workspace check passed before that final
+SQL API expansion; its attempted rerun stalled while reading the Cargo cache and was
+stopped. Test suites were not run. The P3 frontend-equivalence and malformed-plan
+behavioral gates remain open, as do the P0 inventory and P1/P2 behavioral gates. The
+source implementation does not represent release acceptance.
 
 ## 7. Breaking-change ledger
 
