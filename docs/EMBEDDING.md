@@ -39,7 +39,7 @@ Where a method still returns `PolarsError`, convert with **`robin_sparkless::to_
 
 ## Error handling
 
-- **`EngineError`** — Unified error type with variants: `User`, `Internal`, `Io`, `Sql`, `NotFound`, `Cancelled`, `Other`. Use `*_engine()` and `*_expr_ir` methods to get `Result<_, EngineError>` directly. For APIs that still return `PolarsError`, use **`robin_sparkless::to_engine_error(e)`** (the root crate does not implement `From<PolarsError>` for `EngineError`).
+- **`EngineError`** — Structured error type with category, code, retryability, operation, metadata, and cause. Use `category()` and `code()` to branch, and `detail()` to inspect context. The lower-case constructors (`invalid_input`, `internal`, `io`, `sql`, `not_found`, `cancelled`, `other`) replace the old enum-shaped API. For APIs that still return `PolarsError`, use **`robin_sparkless::to_engine_error(e)`**.
 - **`DataFrame::to_json_rows()`** — Returns `Result<String, EngineError>`: collects rows as a JSON array of objects.
 
 ## Examples

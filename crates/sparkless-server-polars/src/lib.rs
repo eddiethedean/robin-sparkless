@@ -5,17 +5,27 @@
 //! or Spark Connect transport.
 
 mod cli;
+mod state;
+use state::{
+    Admission, AdmissionTicket, CatalogReceipt, OperationRecord, OperationRegistry,
+    OperationStatusRequest, PendingOperationGuard, RequestFailure, ReserveOperation, ServerInner,
+    SessionLease, SessionLifetime, SessionRequest, StatementClass, StatementRequest,
+};
+#[cfg(feature = "connect")]
+use state::{
+    ConnectActiveOperation, ConnectOperationLease, ConnectReserveError, ConnectSessionIdentity,
+};
 
 #[cfg(feature = "allocator-trace")]
 mod allocation_metrics;
 
+pub use cli::run_cli_for;
 pub use sparkless_server_core::ServerConfig;
+use sparkless_server_core::config::{MIN_MUTATION_RECORD_BYTES, MUTATION_RECORD_BASE_BYTES};
 pub use sparkless_server_core::{
     AGENT_PROTOCOL_VERSION, CAPABILITIES_PROTOCOL_VERSION, CONTROL_PROTOCOL_VERSION,
-    MAX_CONTROL_FRAME_BYTES, MUTATION_PROTOCOL_VERSION,
+    MAX_CONTROL_FRAME_BYTES, MUTATION_PROTOCOL_VERSION, ServerProduct,
 };
-pub use cli::run_cli_for;
-use sparkless_server_core::config::{MIN_MUTATION_RECORD_BYTES, MUTATION_RECORD_BASE_BYTES};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -29,8 +39,7 @@ use robin_sparkless::{
     DataType, EngineError, LogicalField as StructField, SharedCatalog, SparkSession,
 };
 use robin_sparkless_core::CancellationToken;
-use robin_sparkless_core::engine::ExternalCatalogProvider;
-use sparkless_server_core::ServerProduct;
+use robin_sparkless_core::engine::ExternalCatalog;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 use sha2::{Digest, Sha256};
@@ -62,10 +71,6 @@ pub mod connect_proto {
         tonic::include_file_descriptor_set!("spark_connect_descriptor");
 }
 
-#[cfg(feature = "duckdb-source")]
-const SERVER_PRODUCT: ServerProduct = ServerProduct::DuckDb;
-#[cfg(not(feature = "duckdb-source"))]
-const SERVER_PRODUCT: ServerProduct = ServerProduct::Base;
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_ERROR_BYTES: usize = 1024;
 const MAX_CATALOG_DATABASES: usize = 128;
@@ -107,293 +112,17 @@ pub struct Server {
     inner: Arc<ServerInner>,
 }
 
-struct ServerInner {
-    config: ServerConfig,
-    instance_id: String,
-    http_address: Mutex<Option<SocketAddr>>,
-    root_session: SparkSession,
-    external_catalog_provider: Option<Arc<dyn ExternalCatalogProvider>>,
-    sessions: Mutex<HashMap<String, Arc<SessionLifetime>>>,
-    #[cfg(feature = "connect")]
-    connect_tombstones: Mutex<HashMap<String, String>>,
-    #[cfg(feature = "connect")]
-    connect_session_lifecycle: Mutex<()>,
-    #[cfg(feature = "connect")]
-    connect_operations: Mutex<HashMap<String, Arc<connect::ConnectReplayRecord>>>,
-    #[cfg(feature = "connect")]
-    connect_active_operations: tokio::sync::watch::Sender<usize>,
-    #[cfg(feature = "connect")]
-    connect_draining: AtomicBool,
-    #[cfg(feature = "connect")]
-    connect_replay_bytes: Arc<AtomicUsize>,
-    #[cfg(feature = "connect")]
-    connect_history_bytes: Arc<AtomicUsize>,
-    #[cfg(feature = "connect")]
-    connect_stream_senders: Arc<Semaphore>,
-    #[cfg(feature = "connect")]
-    connect_address: Mutex<Option<SocketAddr>>,
-    active_sessions: AtomicUsize,
-    next_session_generation: AtomicU64,
-    operation_records: Mutex<OperationRegistry>,
-    admission: Admission,
-    connections: Arc<Semaphore>,
-    mutation_lane: Arc<AsyncMutex<()>>,
-    catalog_receipts: Mutex<HashMap<String, CatalogReceipt>>,
-    catalog_sequence: AtomicU64,
-    draining: AtomicBool,
-    ready: AtomicBool,
-    #[cfg(test)]
-    test_mutation_before_outcome_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-}
-
-struct Admission {
-    active: Arc<Semaphore>,
-    accepted: Arc<AtomicUsize>,
-    max_accepted: usize,
-}
-
-struct AdmissionTicket(Arc<AtomicUsize>);
-
-struct SessionLifetime {
-    id: String,
-    session: SparkSession,
-    generation: u64,
-    #[cfg(feature = "connect")]
-    server_side_session_id: String,
-    #[cfg(feature = "connect")]
-    connect_execution: Arc<Semaphore>,
-    serial: Arc<tokio::sync::Mutex<()>>,
-    active: AtomicUsize,
-    last_activity: Mutex<Instant>,
-    closing: AtomicBool,
-    stopped: AtomicBool,
-    server: Weak<ServerInner>,
-}
-
-/// Settles a reserved operation if its request future is cancelled before handing execution to
-/// the independent blocking worker.
-struct PendingOperationGuard(Option<Arc<Mutex<OperationRecord>>>);
-
-impl PendingOperationGuard {
-    fn disarm(&mut self) {
-        self.0 = None;
-    }
-}
-
-impl Drop for PendingOperationGuard {
-    fn drop(&mut self) {
-        let Some(operation) = self.0.take() else {
-            return;
-        };
-        if let Ok(mut record) = operation.lock()
-            && record.execution_state == "running"
-            && record.effect_outcome == "pending"
-        {
-            record.execution_state = "failed";
-            record.effect_outcome = "cancelled";
-            record.error = Some((
-                "Cancelled".to_string(),
-                "mutation request was cancelled before execution".to_string(),
-            ));
-        }
-    }
-}
-
-struct SessionLease(Arc<SessionLifetime>);
-
-#[cfg(feature = "connect")]
-struct ConnectSessionIdentity {
-    user_id: String,
-    client_session_id: String,
-    observed_server_session_id: Option<String>,
-}
-
-#[cfg(feature = "connect")]
-impl ConnectSessionIdentity {
-    fn registry_key(&self) -> String {
-        let mut hasher = Sha256::new();
-        for part in [
-            "connect",
-            self.user_id.as_str(),
-            self.client_session_id.as_str(),
-        ] {
-            hasher.update((part.len() as u64).to_be_bytes());
-            hasher.update(part.as_bytes());
-        }
-        format!("connect:{}", hex_digest(hasher.finalize().into()))
-    }
-}
-
-#[cfg(feature = "connect")]
-struct ConnectOperationLease {
-    record: Arc<Mutex<OperationRecord>>,
-    _session: SessionLease,
-    _admission: AdmissionTicket,
-    replay: Arc<connect::ConnectReplayRecord>,
-    _active: ConnectActiveOperation,
-}
-
-#[cfg(feature = "connect")]
-struct ConnectActiveOperation(tokio::sync::watch::Sender<usize>);
-
-#[cfg(feature = "connect")]
-impl ConnectActiveOperation {
-    fn new(active: &tokio::sync::watch::Sender<usize>) -> Self {
-        active.send_modify(|count| *count += 1);
-        Self(active.clone())
-    }
-}
-
-#[cfg(feature = "connect")]
-impl Drop for ConnectActiveOperation {
-    fn drop(&mut self) {
-        self.0.send_modify(|count| *count -= 1);
-    }
-}
-
-#[cfg(feature = "connect")]
-#[derive(Debug)]
-enum ConnectReserveError {
-    Request(RequestFailure),
-    Duplicate,
-    Conflict,
-}
-
-#[cfg(feature = "connect")]
-impl ConnectOperationLease {
-    fn deadline_marker(&self) -> impl FnOnce() + Send + 'static {
-        let record = Arc::clone(&self.record);
-        move || {
-            if let Ok(mut record) = record.lock()
-                && record.execution_state == "running"
-                && record.effect_outcome == "pending"
-            {
-                record.execution_state = "failed";
-                record.effect_outcome = "rejected";
-                record.error = Some((
-                    "CONNECT_RESPONSE_DEADLINE".to_string(),
-                    "Connect execution exceeded its response deadline".to_string(),
-                ));
-            }
-        }
-    }
-
-    fn complete(&self) {
-        if let Ok(mut record) = self.record.lock()
-            && record.execution_state == "running"
-            && record.effect_outcome == "pending"
-        {
-            record.execution_state = "completed";
-            record.effect_outcome = "committed";
-            record.error = None;
-        }
-    }
-
-    fn reject(&self, code: &'static str, message: &str) {
-        if let Ok(mut record) = self.record.lock()
-            && record.execution_state == "running"
-            && record.effect_outcome == "pending"
-        {
-            record.execution_state = "failed";
-            record.effect_outcome = "rejected";
-            record.error = Some((code.to_string(), bound_text(message, MAX_ERROR_BYTES)));
-        }
-    }
-}
-
-#[cfg(feature = "connect")]
-impl Drop for ConnectOperationLease {
-    fn drop(&mut self) {
-        self.replay.mark_producer_stopped();
-        if let Ok(mut record) = self.record.lock()
-            && record.execution_state == "running"
-            && record.effect_outcome == "pending"
-        {
-            record.execution_state = "failed";
-            record.effect_outcome = "cancelled";
-            record.error = Some((
-                "Cancelled".to_string(),
-                "Connect plan request was cancelled before planning completed".to_string(),
-            ));
-            let _ = self.replay.finish(Err(tonic::Status::cancelled(
-                "Connect plan request was cancelled before planning completed",
-            )));
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct StatementRequest {
-    session: String,
-    kind: String,
-    code: String,
-    #[serde(default)]
-    server_instance_id: Option<String>,
-    #[serde(default)]
-    operation_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SessionRequest {
-    session: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct OperationStatusRequest {
-    server_instance_id: String,
-    operation_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum StatementClass {
-    ReadOnly,
-    Mutation {
-        target: Option<String>,
-        action: &'static str,
-    },
-}
-
-#[derive(Debug, Clone)]
-struct OperationRecord {
-    request_fingerprint: [u8; 32],
-    semantic_fingerprint: Option<[u8; 32]>,
-    session: String,
-    session_generation: u64,
-    reserved_bytes: usize,
-    execution_state: &'static str,
-    effect_outcome: &'static str,
-    receipt: Option<JsonValue>,
-    error: Option<(String, String)>,
-}
-
-#[derive(Default)]
-struct OperationRegistry {
-    records: HashMap<String, Arc<Mutex<OperationRecord>>>,
-    bytes: usize,
-}
-
-#[derive(Debug, Clone)]
-struct CatalogReceipt {
-    identity: String,
-    version: u64,
-}
-
-enum ReserveOperation {
-    New(Arc<Mutex<OperationRecord>>),
-    Existing(Arc<Mutex<OperationRecord>>),
-    Conflict,
-    Full,
-}
-
-#[derive(Debug)]
-struct RequestFailure {
-    status: StatusCode,
-    name: &'static str,
-    message: String,
-}
-
 impl Server {
     pub fn new(config: ServerConfig) -> Result<Self, ServerError> {
+        Self::new_for_product(config, ServerProduct::Base)
+    }
+
+    /// Construct one packaged product explicitly. Cargo feature unification can enable optional
+    /// source code in a shared process, so runtime identity must come from the binary wrapper.
+    pub fn new_for_product(
+        config: ServerConfig,
+        product: ServerProduct,
+    ) -> Result<Self, ServerError> {
         let limits_valid = config.max_request_bytes > 0
             && config.max_sql_bytes > 0
             && config.max_sql_bytes <= config.max_request_bytes
@@ -418,7 +147,7 @@ impl Server {
             });
         }
         #[cfg(feature = "duckdb-source")]
-        let external_catalog_provider: Option<Arc<dyn ExternalCatalogProvider>> =
+        let external_catalog: Option<Arc<ExternalCatalog>> = if product == ServerProduct::DuckDb {
             match config.duckdb_sources_json.as_deref() {
                 Some(source_json) => {
                     let catalog = robin_sparkless::DuckDbCatalog::from_json(&source_json).map_err(
@@ -426,15 +155,32 @@ impl Server {
                             message: format!("invalid DuckDB source configuration: {error}"),
                         },
                     )?;
-                    Some(Arc::new(catalog))
+                    Some(Arc::new(catalog).into_external_catalog())
                 }
                 None => None,
-            };
-        #[cfg(not(feature = "duckdb-source"))]
-        let external_catalog_provider: Option<Arc<dyn ExternalCatalogProvider>> = {
+            }
+        } else {
             if config.duckdb_sources_json.is_some() {
                 return Err(ServerError {
-                    message: "SPARKLESS_DUCKDB_SOURCES requires the sparkless-server-duckdb product".into(),
+                    message:
+                        "SPARKLESS_DUCKDB_SOURCES requires the sparkless-server-duckdb product"
+                            .into(),
+                });
+            }
+            None
+        };
+        #[cfg(not(feature = "duckdb-source"))]
+        let external_catalog: Option<Arc<ExternalCatalog>> = {
+            if product == ServerProduct::DuckDb {
+                return Err(ServerError {
+                    message: "the sparkless-server-duckdb product was built without DuckDB source support".into(),
+                });
+            }
+            if config.duckdb_sources_json.is_some() {
+                return Err(ServerError {
+                    message:
+                        "SPARKLESS_DUCKDB_SOURCES requires the sparkless-server-duckdb product"
+                            .into(),
                 });
             }
             None
@@ -467,9 +213,9 @@ impl Server {
             )
             .shared_catalog(catalog)
             .get_or_create();
-        if let Some(provider) = external_catalog_provider.as_ref() {
+        if let Some(external_catalog) = external_catalog.as_ref() {
             root_session
-                .set_external_catalog_provider(Some(Arc::clone(provider)))
+                .set_external_catalog(Some(Arc::clone(external_catalog)))
                 .map_err(|error| ServerError {
                     message: format!("cannot configure the external catalog: {error}"),
                 })?;
@@ -487,10 +233,11 @@ impl Server {
             },
             connections: Arc::new(Semaphore::new(128)),
             config,
+            product,
             instance_id: Uuid::new_v4().to_string(),
             http_address: Mutex::new(None),
             root_session,
-            external_catalog_provider,
+            external_catalog,
             sessions: Mutex::new(HashMap::new()),
             #[cfg(feature = "connect")]
             connect_tombstones: Mutex::new(HashMap::new()),
@@ -738,8 +485,8 @@ impl Server {
             "type": "ready",
             "control_protocol_version": CONTROL_PROTOCOL_VERSION,
             "capabilities_protocol_version": CAPABILITIES_PROTOCOL_VERSION,
-            "server_product": SERVER_PRODUCT.id(),
-            "execution_backend": SERVER_PRODUCT.execution_backend(),
+            "server_product": self.inner.product.id(),
+            "execution_backend": self.inner.product.execution_backend(),
             "server_version": env!("CARGO_PKG_VERSION"),
             "agent_protocol_version": AGENT_PROTOCOL_VERSION,
             "server_instance_id": self.inner.instance_id,
@@ -782,7 +529,7 @@ impl Server {
             let (names, rows, _) =
                 df.collect_as_positional_json_with_cancellation(1, &Default::default(), &token)?;
             if names != ["ready"] || rows != [vec![json!(1)]] {
-                return Err(EngineError::Internal(
+                return Err(EngineError::internal(
                     "native startup witness mismatch".into(),
                 ));
             }
@@ -863,8 +610,8 @@ async fn shutdown_signal() {
 impl ServerInner {
     fn new_logical_session(&self) -> Result<SparkSession, EngineError> {
         let session = self.root_session.new_session();
-        if let Some(provider) = self.external_catalog_provider.as_ref() {
-            session.set_external_catalog_provider(Some(Arc::clone(provider)))?;
+        if let Some(external_catalog) = self.external_catalog.as_ref() {
+            session.set_external_catalog(Some(Arc::clone(external_catalog)))?;
         }
         Ok(session)
     }
@@ -1382,6 +1129,7 @@ impl ServerInner {
             effect_outcome: "pending",
             receipt: None,
             error: None,
+            error_detail: None,
         }));
         registry.bytes += estimated_record_bytes;
         registry
@@ -1664,10 +1412,10 @@ impl Server {
         let primary_transport = transports.first().copied().unwrap_or("http");
         json!({
             "capabilities_protocol_version": CAPABILITIES_PROTOCOL_VERSION,
-            "server_product": SERVER_PRODUCT.id(),
-            "execution_backend": SERVER_PRODUCT.execution_backend(),
-            "data_sources": SERVER_PRODUCT.data_sources(),
-            "duckdb_owner_modes": SERVER_PRODUCT.quack_owner_modes(),
+            "server_product": self.inner.product.id(),
+            "execution_backend": self.inner.product.execution_backend(),
+            "data_sources": self.inner.product.data_sources(),
+            "duckdb_owner_modes": self.inner.product.quack_owner_modes(),
             "agent_protocol_version": AGENT_PROTOCOL_VERSION,
             "mutation_protocol_version": MUTATION_PROTOCOL_VERSION,
             "server_instance_id": self.inner.instance_id,
@@ -2052,7 +1800,7 @@ impl Server {
             if let Some(record) = &operation_record_for_job {
                 match &result {
                     Ok((_, receipt)) => set_operation_committed(record, receipt.clone()),
-                    Err(error) => set_operation_failure(
+                    Err(error) => set_operation_failure_with_detail(
                         record,
                         error.name,
                         &error.message,
@@ -2061,6 +1809,7 @@ impl Server {
                         } else {
                             "failed"
                         },
+                        error.error_detail.clone(),
                     ),
                 }
             }
@@ -2088,9 +1837,8 @@ impl Server {
         pending_operation.disarm();
         match timeout(timeout_duration, work).await {
             Ok(Ok(Ok(response))) => json_response(StatusCode::OK, response),
-            Ok(Ok(Err(error))) => agent_error(
-                error.name,
-                &error.message,
+            Ok(Ok(Err(error))) => agent_execution_error(
+                &error,
                 operation_id
                     .as_deref()
                     .zip(operation.as_ref())
@@ -2233,6 +1981,7 @@ impl Server {
 struct ExecutionFailure {
     name: &'static str,
     message: String,
+    error_detail: Option<JsonValue>,
 }
 
 #[derive(Clone, Copy)]
@@ -3321,31 +3070,36 @@ fn empty_agent_success() -> JsonValue {
 
 fn map_engine_failure(error: EngineError) -> ExecutionFailure {
     let message = error.to_string();
-    let name = match error {
-        EngineError::Cancelled(_) => "Cancelled",
-        EngineError::NotFound(_) => "QueryError",
-        EngineError::User(_)
-            if message.contains("row limit")
-                || message.contains("configured byte limit")
-                || message.contains("configured serialized byte limit") =>
-        {
-            "ResultLimitExceeded"
-        }
-        EngineError::Internal(_) if message.contains("CatalogCapacityExceeded") => {
-            "CatalogCapacityExceeded"
-        }
-        EngineError::User(_) if message.contains("CatalogCapacityExceeded") => {
-            "CatalogCapacityExceeded"
-        }
+    let name = match error.code() {
+        "RESULT_LIMIT_EXCEEDED" => "ResultLimitExceeded",
+        "CATALOG_CAPACITY_EXCEEDED" => "CatalogCapacityExceeded",
+        _ if error.category() == robin_sparkless_core::ErrorCategory::Cancelled => "Cancelled",
         _ => "QueryError",
     };
-    execution_failure(name, &message)
+    let detail = error.detail();
+    let detail_json = json!({
+        "category": detail.category,
+        "code": detail.code,
+        "message": bound_text(&detail.message, MAX_ERROR_BYTES / 2),
+        "operation": detail.operation,
+        "retryability": detail.retryability,
+    });
+    let error_detail = serde_json::to_vec(&detail_json)
+        .ok()
+        .filter(|bytes| bytes.len() <= MAX_ERROR_BYTES)
+        .map(|_| detail_json);
+    ExecutionFailure {
+        name,
+        message: bound_text(&message, MAX_ERROR_BYTES),
+        error_detail,
+    }
 }
 
 fn execution_failure(name: &'static str, message: &str) -> ExecutionFailure {
     ExecutionFailure {
         name,
         message: bound_text(message, MAX_ERROR_BYTES),
+        error_detail: None,
     }
 }
 
@@ -3417,6 +3171,7 @@ fn set_operation_committed(operation: &Arc<Mutex<OperationRecord>>, receipt: Opt
         record.effect_outcome = "committed";
         record.receipt = receipt;
         record.error = None;
+        record.error_detail = None;
     }
 }
 
@@ -3426,6 +3181,16 @@ fn set_operation_failure(
     message: &str,
     outcome: &'static str,
 ) {
+    set_operation_failure_with_detail(operation, name, message, outcome, None);
+}
+
+fn set_operation_failure_with_detail(
+    operation: &Arc<Mutex<OperationRecord>>,
+    name: &str,
+    message: &str,
+    outcome: &'static str,
+    error_detail: Option<JsonValue>,
+) {
     if let Ok(mut record) = operation.lock() {
         record.execution_state = if outcome == "pending" {
             "running"
@@ -3434,17 +3199,25 @@ fn set_operation_failure(
         };
         record.effect_outcome = outcome;
         record.error = Some((name.to_string(), bound_text(message, MAX_ERROR_BYTES)));
+        record.error_detail = error_detail;
     }
 }
 
 fn operation_json_from_record(instance: &str, id: &str, record: &OperationRecord) -> JsonValue {
+    let error = record.error.as_ref().map(|(name, message)| {
+        let mut error = json!({"ename":name,"evalue":message});
+        if let Some(detail) = &record.error_detail {
+            error["error_detail"] = detail.clone();
+        }
+        error
+    });
     json!({
         "server_instance_id":instance,
         "operation_id":id,
         "execution_state":record.execution_state,
         "effect_outcome":record.effect_outcome,
         "receipt":record.receipt,
-        "error":record.error.as_ref().map(|(name,message)| json!({"ename":name,"evalue":message}))
+        "error":error
     })
 }
 
@@ -3715,6 +3488,21 @@ fn transport_error(status: StatusCode, name: &'static str, message: &str) -> Htt
 
 fn agent_error(name: &'static str, message: &str, operation: Option<JsonValue>) -> HttpResponse {
     agent_error_dynamic(name, message, operation)
+}
+
+fn agent_execution_error(error: &ExecutionFailure, operation: Option<JsonValue>) -> HttpResponse {
+    let mut body = json!({
+        "status": "error",
+        "ename": error.name,
+        "evalue": bound_text(&error.message, MAX_ERROR_BYTES),
+    });
+    if let Some(detail) = &error.error_detail {
+        body["error_detail"] = detail.clone();
+    }
+    if let Some(operation) = operation {
+        body["operation"] = operation;
+    }
+    json_response(StatusCode::OK, body)
 }
 
 fn agent_error_dynamic(name: &str, message: &str, operation: Option<JsonValue>) -> HttpResponse {

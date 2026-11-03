@@ -11,7 +11,7 @@ fn parse_oracle_jdbc_url(url: &str) -> Result<String, EngineError> {
     //   jdbc:oracle:thin:@host:1521:SID  (treated as host:port/SID)
     let u = url.strip_prefix("jdbc:").unwrap_or(url);
     let rest = u.strip_prefix("oracle:thin:@").ok_or_else(|| {
-        EngineError::User(format!(
+        EngineError::invalid_input(format!(
             "JDBC Oracle: URL must start with jdbc:oracle:thin:@ (got '{url}')"
         ))
     })?;
@@ -33,7 +33,7 @@ fn with_runtime<T>(
     fut: impl std::future::Future<Output = Result<T, EngineError>>,
 ) -> Result<T, EngineError> {
     tokio::runtime::Runtime::new()
-        .map_err(|e| EngineError::Internal(format!("JDBC Oracle: failed to create runtime: {e}")))?
+        .map_err(|e| EngineError::internal(format!("JDBC Oracle: failed to create runtime: {e}")))?
         .block_on(fut)
 }
 
@@ -42,13 +42,13 @@ async fn connect_async(opts: &JdbcOptions) -> Result<Connection, EngineError> {
     let user = opts.user.clone().unwrap_or_default();
     let password = opts.password.clone().unwrap_or_default();
     if user.is_empty() {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC Oracle: missing 'user' option".to_string(),
         ));
     }
     Connection::connect(&connect_string, &user, &password)
         .await
-        .map_err(|e| EngineError::Io(format!("JDBC Oracle: connect failed: {e}")))
+        .map_err(|e| EngineError::io(format!("JDBC Oracle: connect failed: {e}")))
 }
 
 pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, EngineError> {
@@ -58,7 +58,7 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         let q = sql_ident::quoted_table(JdbcDialect::Oracle, table)?;
         format!("SELECT * FROM {q}")
     } else {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
         ));
     };
@@ -69,7 +69,7 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         // Execute session initialization statement if provided
         if let Some(init_sql) = &opts.session_init_statement {
             conn.execute(init_sql, &[]).await.map_err(|e| {
-                EngineError::Sql(format!(
+                EngineError::sql(format!(
                     "JDBC read (Oracle): sessionInitStatement failed: {e}"
                 ))
             })?;
@@ -89,14 +89,14 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         // Execute prepare query if provided
         if let Some(prep_sql) = &opts.prepare_query {
             conn.execute(prep_sql, &[]).await.map_err(|e| {
-                EngineError::Sql(format!("JDBC read (Oracle): prepareQuery failed: {e}"))
+                EngineError::sql(format!("JDBC read (Oracle): prepareQuery failed: {e}"))
             })?;
         }
 
         let result = conn
             .query(&sql, &[])
             .await
-            .map_err(|e| EngineError::Sql(format!("JDBC read (Oracle): query failed: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC read (Oracle): query failed: {e}")))?;
 
         let names: Vec<String> = result
             .columns
@@ -119,7 +119,7 @@ pub(crate) fn read_jdbc_oracle(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         }
         let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
         PlDataFrame::new_infer_height(cols)
-            .map_err(|e| EngineError::Internal(format!("JDBC read (Oracle): build DataFrame: {e}")))
+            .map_err(|e| EngineError::internal(format!("JDBC read (Oracle): build DataFrame: {e}")))
     })
 }
 
@@ -197,7 +197,7 @@ pub(crate) fn write_jdbc_oracle(
     use crate::dataframe::SaveMode as Sm;
 
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
-        EngineError::User(
+        EngineError::invalid_input(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
@@ -209,7 +209,7 @@ pub(crate) fn write_jdbc_oracle(
         // Execute session initialization statement if provided
         if let Some(init_sql) = &opts.session_init_statement {
             conn.execute(init_sql, &[]).await.map_err(|e| {
-                EngineError::Sql(format!(
+                EngineError::sql(format!(
                     "JDBC write (Oracle): sessionInitStatement failed: {e}"
                 ))
             })?;
@@ -221,7 +221,7 @@ pub(crate) fn write_jdbc_oracle(
                     .query(&format!("SELECT COUNT(*) FROM {table}"), &[])
                     .await
                     .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write (Oracle): check table: {e}"))
+                        EngineError::sql(format!("JDBC write (Oracle): check table: {e}"))
                     })?;
                 let count = result
                     .rows
@@ -230,7 +230,7 @@ pub(crate) fn write_jdbc_oracle(
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0);
                 if count > 0 {
-                    return Err(EngineError::User(format!(
+                    return Err(EngineError::invalid_input(format!(
                         "Table '{table}' already has data. SaveMode is ErrorIfExists."
                     )));
                 }
@@ -240,7 +240,7 @@ pub(crate) fn write_jdbc_oracle(
                     .query(&format!("SELECT COUNT(*) FROM {table}"), &[])
                     .await
                     .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write (Oracle): check table: {e}"))
+                        EngineError::sql(format!("JDBC write (Oracle): check table: {e}"))
                     })?;
                 let count = result
                     .rows
@@ -259,7 +259,7 @@ pub(crate) fn write_jdbc_oracle(
                         conn.execute(&format!("TRUNCATE TABLE {table} CASCADE"), &[])
                             .await
                             .map_err(|e| {
-                                EngineError::Sql(format!(
+                                EngineError::sql(format!(
                                     "JDBC write (Oracle): truncate table cascade: {e}"
                                 ))
                             })?;
@@ -267,7 +267,7 @@ pub(crate) fn write_jdbc_oracle(
                         conn.execute(&format!("TRUNCATE TABLE {table}"), &[])
                             .await
                             .map_err(|e| {
-                                EngineError::Sql(format!(
+                                EngineError::sql(format!(
                                     "JDBC write (Oracle): truncate table: {e}"
                                 ))
                             })?;
@@ -276,7 +276,7 @@ pub(crate) fn write_jdbc_oracle(
                     conn.execute(&format!("DELETE FROM {table}"), &[])
                         .await
                         .map_err(|e| {
-                            EngineError::Sql(format!("JDBC write (Oracle): delete from table: {e}"))
+                            EngineError::sql(format!("JDBC write (Oracle): delete from table: {e}"))
                         })?;
                 }
                 conn.commit().await.ok();
@@ -315,7 +315,7 @@ pub(crate) fn write_jdbc_oracle(
                 for col in df.columns() {
                     let v = col
                         .get(row_idx)
-                        .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                        .map_err(|e| EngineError::internal(format!("JDBC write: get cell: {e}")))?;
                     let oracle_v = match v {
                         polars::prelude::AnyValue::Null => Value::Null,
                         polars::prelude::AnyValue::Boolean(b) => b.into(),
@@ -332,7 +332,7 @@ pub(crate) fn write_jdbc_oracle(
                     params.push(oracle_v);
                 }
                 conn.execute(&insert_sql, &params).await.map_err(|e| {
-                    EngineError::Sql(format!("JDBC write (Oracle): insert failed: {e}"))
+                    EngineError::sql(format!("JDBC write (Oracle): insert failed: {e}"))
                 })?;
             }
 

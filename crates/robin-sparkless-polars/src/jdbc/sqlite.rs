@@ -14,19 +14,19 @@ pub(crate) fn write_jdbc_sqlite(
 
     let path = sqlite_url_to_path(&opts.url)?;
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
-        EngineError::User(
+        EngineError::invalid_input(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
     let table = sql_ident::quoted_table(JdbcDialect::Sqlite, table_raw)?;
 
     let conn = rusqlite::Connection::open(&path)
-        .map_err(|e| EngineError::Io(format!("JDBC write (SQLite): failed to open: {e}")))?;
+        .map_err(|e| EngineError::io(format!("JDBC write (SQLite): failed to open: {e}")))?;
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
         conn.execute_batch(init_sql).map_err(|e| {
-            EngineError::Sql(format!(
+            EngineError::sql(format!(
                 "JDBC write (SQLite): sessionInitStatement failed: {e}"
             ))
         })?;
@@ -38,9 +38,9 @@ pub(crate) fn write_jdbc_sqlite(
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                     row.get(0)
                 })
-                .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): check table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write (SQLite): check table: {e}")))?;
             if count > 0 {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "Table '{table}' already has data. SaveMode is ErrorIfExists."
                 )));
             }
@@ -50,7 +50,7 @@ pub(crate) fn write_jdbc_sqlite(
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                     row.get(0)
                 })
-                .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): check table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write (SQLite): check table: {e}")))?;
             if count > 0 {
                 return Ok(());
             }
@@ -59,7 +59,7 @@ pub(crate) fn write_jdbc_sqlite(
             // SQLite doesn't support TRUNCATE, always use DELETE
             conn.execute(&format!("DELETE FROM {table}"), [])
                 .map_err(|e| {
-                    EngineError::Sql(format!("JDBC write (SQLite): delete from table: {e}"))
+                    EngineError::sql(format!("JDBC write (SQLite): delete from table: {e}"))
                 })?;
         }
         Sm::Append => {}
@@ -93,19 +93,19 @@ pub(crate) fn write_jdbc_sqlite(
 
         // Start a transaction for this batch
         conn.execute_batch("BEGIN TRANSACTION").map_err(|e| {
-            EngineError::Sql(format!("JDBC write (SQLite): begin transaction: {e}"))
+            EngineError::sql(format!("JDBC write (SQLite): begin transaction: {e}"))
         })?;
 
         let mut stmt = conn
             .prepare(&insert_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): prepare failed: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC write (SQLite): prepare failed: {e}")))?;
 
         for row_idx in batch_start..batch_end {
             let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(col_names.len());
             for col in df.columns() {
                 let v = col
                     .get(row_idx)
-                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                    .map_err(|e| EngineError::internal(format!("JDBC write: get cell: {e}")))?;
                 let boxed: Box<dyn rusqlite::ToSql> = match v {
                     polars::prelude::AnyValue::Null => Box::new(rusqlite::types::Value::Null),
                     polars::prelude::AnyValue::Boolean(b) => Box::new(if b { 1i32 } else { 0 }),
@@ -123,7 +123,7 @@ pub(crate) fn write_jdbc_sqlite(
             }
             let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
             stmt.execute(refs.as_slice()).map_err(|e| {
-                EngineError::Sql(format!("JDBC write (SQLite): insert failed: {e}"))
+                EngineError::sql(format!("JDBC write (SQLite): insert failed: {e}"))
             })?;
         }
 
@@ -131,7 +131,7 @@ pub(crate) fn write_jdbc_sqlite(
 
         // Commit this batch
         conn.execute_batch("COMMIT")
-            .map_err(|e| EngineError::Sql(format!("JDBC write (SQLite): commit batch: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC write (SQLite): commit batch: {e}")))?;
     }
     Ok(())
 }
@@ -146,18 +146,18 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
         let q = sql_ident::quoted_table(JdbcDialect::Sqlite, table)?;
         format!("SELECT * FROM {q}")
     } else {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
         ));
     };
 
     let conn = rusqlite::Connection::open(&path)
-        .map_err(|e| EngineError::Io(format!("JDBC read (SQLite): failed to open: {e}")))?;
+        .map_err(|e| EngineError::io(format!("JDBC read (SQLite): failed to open: {e}")))?;
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
         conn.execute_batch(init_sql).map_err(|e| {
-            EngineError::Sql(format!(
+            EngineError::sql(format!(
                 "JDBC read (SQLite): sessionInitStatement failed: {e}"
             ))
         })?;
@@ -167,7 +167,7 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     if let Some(timeout_secs) = opts.query_timeout {
         conn.busy_timeout(std::time::Duration::from_secs(timeout_secs as u64))
             .map_err(|e| {
-                EngineError::Sql(format!(
+                EngineError::sql(format!(
                     "JDBC read (SQLite): failed to set queryTimeout: {e}"
                 ))
             })?;
@@ -176,13 +176,13 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     // Execute prepare query if provided
     if let Some(prep_sql) = &opts.prepare_query {
         conn.execute_batch(prep_sql).map_err(|e| {
-            EngineError::Sql(format!("JDBC read (SQLite): prepareQuery failed: {e}"))
+            EngineError::sql(format!("JDBC read (SQLite): prepareQuery failed: {e}"))
         })?;
     }
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): prepare failed: {e}")))?;
+        .map_err(|e| EngineError::sql(format!("JDBC read (SQLite): prepare failed: {e}")))?;
 
     let column_names: Vec<String> = stmt
         .column_names()
@@ -231,7 +231,7 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
             Ok::<_, rusqlite::Error>((table.clone(), types))
         })
         .collect::<Result<Vec<(String, Vec<(String, String)>)>, _>>()
-        .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): schema query: {e}")))?;
+        .map_err(|e| EngineError::sql(format!("JDBC read (SQLite): schema query: {e}")))?;
     let declared_types: Vec<Option<String>> = column_names
         .iter()
         .map(|name| {
@@ -280,15 +280,15 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
 
     let mut rows = stmt
         .query([])
-        .map_err(|e| EngineError::Sql(format!("JDBC read (SQLite): query failed: {e}")))?;
+        .map_err(|e| EngineError::sql(format!("JDBC read (SQLite): query failed: {e}")))?;
 
     while let Some(row) = rows
         .next()
-        .map_err(|e| EngineError::Other(format!("JDBC read (SQLite): row: {e}")))?
+        .map_err(|e| EngineError::other(format!("JDBC read (SQLite): row: {e}")))?
     {
         for (c, col_data) in columns_data.iter_mut().enumerate() {
             let v: Option<Value> = row.get(c).map_err(|e| {
-                EngineError::Other(format!(
+                EngineError::other(format!(
                     "JDBC read (SQLite): column {}: {e}",
                     column_names[c]
                 ))
@@ -304,7 +304,7 @@ pub(crate) fn read_jdbc_sqlite(opts: &JdbcOptions) -> Result<PlDataFrame, Engine
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
-        .map_err(|e| EngineError::Internal(format!("JDBC read (SQLite): build DataFrame: {e}")))
+        .map_err(|e| EngineError::internal(format!("JDBC read (SQLite): build DataFrame: {e}")))
 }
 
 /// Return the source table for a simple SELECT query.  A qualified projection
@@ -457,18 +457,20 @@ fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {
         .strip_prefix("jdbc:sqlite:")
         .or_else(|| url.strip_prefix("sqlite:"))
         .ok_or_else(|| {
-            EngineError::User("SQLite URL must start with jdbc:sqlite: or sqlite:".to_string())
+            EngineError::invalid_input(
+                "SQLite URL must start with jdbc:sqlite: or sqlite:".to_string(),
+            )
         })?;
     let path_str = rest.strip_prefix("file:").unwrap_or(rest);
     if path_str.contains("..") {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "SQLite path must not contain '..'".to_string(),
         ));
     }
     let path = std::path::PathBuf::from(path_str);
     for component in path.components() {
         if matches!(component, Component::ParentDir) {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "SQLite path must not contain '..'".to_string(),
             ));
         }
@@ -477,18 +479,18 @@ fn sqlite_url_to_path(url: &str) -> Result<std::path::PathBuf, EngineError> {
         let name = path
             .file_name()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| EngineError::User("invalid SQLite path".to_string()))?;
+            .ok_or_else(|| EngineError::invalid_input("invalid SQLite path".to_string()))?;
         return resolve_path_under_base(&base, name);
     }
     if path.is_absolute() {
         return path
             .canonicalize()
-            .map_err(|e| EngineError::Io(format!("SQLite path canonicalize failed: {e}")));
+            .map_err(|e| EngineError::io(format!("SQLite path canonicalize failed: {e}")));
     }
-    let cwd = std::env::current_dir().map_err(|e| EngineError::Io(format!("current_dir: {e}")))?;
+    let cwd = std::env::current_dir().map_err(|e| EngineError::io(format!("current_dir: {e}")))?;
     cwd.join(&path)
         .canonicalize()
-        .map_err(|e| EngineError::Io(format!("SQLite path canonicalize failed: {e}")))
+        .map_err(|e| EngineError::io(format!("SQLite path canonicalize failed: {e}")))
 }
 
 fn sqlite_values_to_series(

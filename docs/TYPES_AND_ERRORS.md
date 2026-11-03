@@ -1,6 +1,6 @@
 # Types, schemas, and errors
 
-Contract: local Sparkless 4.18.0. For the narrower remote type set, use the
+Contract: local Sparkless 4.19.0. For the narrower remote type set, use the
 [Connect matrix](SPARK_CONNECT.md) and [HTTP result schema](HTTP_API.md).
 
 ## Explicit schema first
@@ -32,15 +32,21 @@ precision/timezone/conversion semantics must be tested at those boundaries.
 | Python argument/type validation | TypeError/ValueError; fix input or schema |
 | Native execution | `sparkless.SparklessError`; inspect cause/message |
 | Cooperative cancellation | `sparkless.SparklessCancelledError`; wait for action termination |
-| External provider | `SparklessExternalCatalogError` / provider receipt; follow provider contract |
+| External provider | `SparklessExternalCatalogError` with category, code, operation, retryability and safe context; follow provider contract |
 | Unsupported behavior | Explicit error, NotImplementedError, or absent API; consult support matrix |
 | Server startup/control | `sparkless.server.SparklessServerError`; include bounded diagnostics |
 | HTTP | Check HTTP status **and** JSON `status`; SQL errors can use HTTP200 |
 | Connect | gRPC status; client/session/operation identity constraints apply |
 
+Rust `EngineError` is a structured type rather than an enum. Branch on `category()`
+and `code()`; inspect `detail()` for operation, retryability, metadata and cause.
+Python exceptions expose the corresponding `error_detail` object when the lower
+boundary has structured error information. HTTP engine failures include the same
+detail object in the response. Connect maps categories to gRPC status codes and
+includes the stable engine code in the status message.
+
 Exact error wording and classes can differ from PySpark. Avoid matching complete
-messages as an application protocol. Rust `EngineError` variants are User,
-Internal, Io, Sql, NotFound, Cancelled, Other; use structured variants where
+messages as an application protocol. Use structured categories and codes where
 available ([embedding](EMBEDDING.md)).
 
 Cancellation is cooperative, not a hard execution deadline. Python UDF callbacks

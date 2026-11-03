@@ -32,7 +32,7 @@ The local cargo doc route is the fallback even after artifacts expire.
 | Full Column expression API | `robin_sparkless::prelude::*`, `robin_sparkless::functions`; [user guide](USER_GUIDE.md) |
 | Lazy actions | `collect_rows`, `count`, `to_json_rows`; return Results and may fail at execution |
 | Schema | `StructType`, `StructField`, `schema_from_json`; [types/errors](TYPES_AND_ERRORS.md) |
-| Native providers | Core ExternalCatalogProvider contract; [external catalogs](EXTERNAL_CATALOGS.md) |
+| Native providers | Core resolver/read/write capability contracts; [external catalogs](EXTERNAL_CATALOGS.md) |
 | Execution control | CancellationToken/backend actions; [cancellation](EXECUTION_CANCELLATION.md) |
 
 Start with the complete [quickstart](QUICKSTART.md). Feature flags are part of

@@ -1758,9 +1758,14 @@ keep working. ``data.bytes`` exposes the Rust payload's named field as well.
 
 Provider interface that consumes bounded PyArrow RecordBatches lazily.
 
+### `ExternalCatalogOwnership(owner_id: 'str', read: 'bool' = True, write: 'bool' = False, batch_write: 'bool' = False) -> None`
+
+Namespace owner and the capabilities it advertises, even when a table is missing.
+
 ### `ExternalCatalogProvider(*args, **kwargs)`
 
-Required provider interface.
+Required ``resolve_ownership(identifier)`` and ``resolve_table(identifier)`` methods.
+Return ``None`` from ``resolve_ownership`` only when the local catalog owns the name.
 
 Writable providers also implement ``write_table(request:
 ExternalTableWriteRequest) -> ExternalTableWriteResult``. Read-only objects
@@ -1778,7 +1783,7 @@ Storage formats supported by the native external catalog contract.
 
 Save modes accepted by DataFrameWriter.mode().
 
-### `ExternalTableWriteRequest(identifier: 'str', table: 'ExternalTableDescriptor', data: 'Optional[ArrowIpcStream]', mode: 'Union[ExternalTableSaveMode, str]', format: 'Optional[str]', options: 'List[Tuple[str, str]]', partition_by: 'List[str]', batches: 'Optional[Iterator[Any]]' = None) -> None`
+### `ExternalTableWriteRequest(operation_id: 'str', identifier: 'str', table: 'ExternalTableDescriptor', data: 'Optional[ArrowIpcStream]', mode: 'Union[ExternalTableSaveMode, str]', format: 'Optional[str]', options: 'List[Tuple[str, str]]', partition_by: 'List[str]', batches: 'Optional[Iterator[Any]]' = None) -> None`
 
 A resolved write using either a materialized or lazy Arrow payload.
 
@@ -1789,9 +1794,9 @@ producer; a callback may stop early by closing it. Options are ordered pairs
 so duplicate keys survive. A successful callback must commit the data it
 accepts before returning its receipt.
 
-### `ExternalTableWriteResult(table: 'ExternalTableDescriptor', committed_version: 'int') -> None`
+### `ExternalTableWriteResult(table: 'ExternalTableDescriptor', committed_version: 'Optional[int]' = None, provider_commit_id: 'Optional[str]' = None) -> None`
 
-Descriptor and exact version of a completed provider commit.
+Descriptor and provider-neutral identity of a completed provider commit.
 
 ### `SparklessExternalCatalogError(native signature unavailable)`
 

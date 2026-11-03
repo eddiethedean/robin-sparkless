@@ -1,4 +1,4 @@
-use crate::{CONTROL_PROTOCOL_VERSION, Server, ServerConfig};
+use crate::{CONTROL_PROTOCOL_VERSION, Server, ServerConfig, ServerProduct};
 use serde::Deserialize;
 use std::io::{self, Write};
 use std::net::{IpAddr, SocketAddr};
@@ -15,6 +15,11 @@ pub fn run_cli_for(product: &'static str) -> Result<(), Box<dyn std::error::Erro
 }
 
 fn run(product: &'static str) -> Result<(), Box<dyn std::error::Error>> {
+    let product_identity = if product == "sparkless-server-duckdb" {
+        ServerProduct::DuckDb
+    } else {
+        ServerProduct::Base
+    };
     let mut args = std::env::args().skip(1);
     let mode = match args.next().as_deref() {
         Some("serve") => false,
@@ -121,7 +126,7 @@ fn run(product: &'static str) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let server = Server::new(config)?;
+    let server = Server::new_for_product(config, product_identity)?;
     if mode {
         runtime.block_on(serve_control(server, http_bind, connect_bind))?;
     } else {

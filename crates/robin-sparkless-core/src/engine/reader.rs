@@ -1,13 +1,15 @@
-//! Engine-agnostic DataFrameReader backend trait.
+//! Typed reader capability.
 
-use crate::engine::DataFrameBackend;
+use crate::engine::{FrameActions, FrameSchema, FrameTransform};
 use crate::error::EngineError;
 use std::path::Path;
 
-/// Backend for reading files into a DataFrame.
+/// Reads files or catalog tables into a frame owned by the same backend.
 pub trait DataFrameReaderBackend: Send + Sync {
-    fn csv(&self, path: &Path) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn parquet(&self, path: &Path) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn json(&self, path: &Path) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn table(&self, name: &str) -> Result<Box<dyn DataFrameBackend>, EngineError>;
+    type Frame: FrameTransform + FrameActions + FrameSchema;
+
+    fn csv(&self, path: &Path) -> Result<Self::Frame, EngineError>;
+    fn parquet(&self, path: &Path) -> Result<Self::Frame, EngineError>;
+    fn json(&self, path: &Path) -> Result<Self::Frame, EngineError>;
+    fn table(&self, name: &str) -> Result<Self::Frame, EngineError>;
 }

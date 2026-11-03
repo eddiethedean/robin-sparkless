@@ -61,17 +61,19 @@ pub use dataframe::{
     CubeRollupData, DataFrame, DataFrameBatches, GroupBySpec, GroupedData, JoinType,
     PivotedGroupedData, SaveMode, SelectItem, WriteFormat, WriteMode, broadcast,
 };
-#[cfg(feature = "duckdb-source")]
-pub use robin_sparkless_duckdb::{
-    DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
-};
 pub use error::{EngineError, polars_to_core_error};
 pub use expression::{column_to_expr, lit_bool, lit_f64, lit_i32, lit_i64, lit_str};
 pub use functions::*;
 pub use robin_sparkless_core::engine::{
-    ArrowIpcBatchStream, ArrowIpcStream, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
+    ArrowIpcBatchStream, ArrowIpcStream, CatalogBatchWriter, CatalogCapabilities, CatalogOwnership,
+    CatalogReadSnapshot, CatalogReader, CatalogResolver, CatalogWriter, ExternalCatalog,
     ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
-    ExternalTableWriteBatchRequest, ExternalTableWriteRequest, ExternalTableWriteResult,
+    ExternalTableWriteBatchRequest, ExternalTableWriteOutcome, ExternalTableWriteRequest,
+    ExternalTableWriteResult, PreparedCatalogWrite,
+};
+#[cfg(feature = "duckdb-source")]
+pub use robin_sparkless_duckdb::{
+    DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
 };
 pub use schema::{DataType, StructField, StructType, StructTypePolarsExt, schema_from_json};
 pub use session::{

@@ -7,7 +7,7 @@ use robin_sparkless_core::{EngineError, ExprIr, LiteralValue};
 pub fn expr_ir_to_expr(ir: &ExprIr) -> Result<Expr, EngineError> {
     match ir {
         ExprIr::Column(name) => Ok(col(name)),
-        ExprIr::Lit(lv) => lit_from_core(lv).map_err(EngineError::Internal),
+        ExprIr::Lit(lv) => lit_from_core(lv).map_err(EngineError::internal),
 
         ExprIr::Eq(a, b) => {
             let l = expr_ir_to_expr(a)?;
@@ -43,7 +43,7 @@ pub fn expr_ir_to_expr(ir: &ExprIr) -> Result<Expr, EngineError> {
             let l = expr_ir_to_expr(a)?;
             let r = expr_ir_to_expr(b)?;
             let (left_c, right_c) = crate::type_coercion::coerce_for_pyspark_eq_null_safe(l, r)
-                .map_err(|e| EngineError::Internal(e.to_string()))?;
+                .map_err(|e| EngineError::internal(e.to_string()))?;
             let left_null = left_c.clone().is_null();
             let right_null = right_c.clone().is_null();
             let both_null = left_null.clone().and(right_null.clone());
@@ -164,7 +164,7 @@ fn lit_to_i64(ir: &ExprIr) -> Result<i64, EngineError> {
         ExprIr::Lit(LiteralValue::I64(n)) => Ok(*n),
         ExprIr::Lit(LiteralValue::F64(n)) => Ok(*n as i64),
         ExprIr::Lit(LiteralValue::I32(n)) => Ok(*n as i64),
-        _ => Err(EngineError::User(
+        _ => Err(EngineError::invalid_input(
             "expected integer literal (i64, i32, or f64)".into(),
         )),
     }
@@ -175,7 +175,7 @@ fn lit_to_f64(ir: &ExprIr) -> Result<f64, EngineError> {
         ExprIr::Lit(LiteralValue::F64(n)) => Ok(*n),
         ExprIr::Lit(LiteralValue::I64(n)) => Ok(*n as f64),
         ExprIr::Lit(LiteralValue::I32(n)) => Ok(*n as f64),
-        _ => Err(EngineError::User(
+        _ => Err(EngineError::invalid_input(
             "expected numeric literal (f64, i64, or i32)".into(),
         )),
     }
@@ -195,7 +195,7 @@ fn call_to_expr(name: &str, args: &[ExprIr]) -> Result<Expr, EngineError> {
         return Ok(expr);
     }
 
-    Err(EngineError::User(format!(
+    Err(EngineError::invalid_input(format!(
         "ExprIr::Call '{name}' is not supported in the engine-agnostic expression API; use the Polars Column API or logical plan interpreter"
     )))
 }
@@ -276,7 +276,7 @@ fn cast_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, Engine
             let alias = match &args[1] {
                 ExprIr::Lit(LiteralValue::Str(s)) => s.as_str(),
                 _ => {
-                    return Err(EngineError::User(
+                    return Err(EngineError::invalid_input(
                         "alias second arg must be string literal".into(),
                     ));
                 }
@@ -287,28 +287,30 @@ fn cast_call_to_expr(name: &str, args: &[ExprIr]) -> Result<Option<Expr>, Engine
             let type_name = match &args[1] {
                 ExprIr::Lit(LiteralValue::Str(s)) => s.as_str(),
                 _ => {
-                    return Err(EngineError::User(
+                    return Err(EngineError::invalid_input(
                         "cast second arg must be string literal (type name)".into(),
                     ));
                 }
             };
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
-            let out = crate::functions::cast(&col, type_name).map_err(EngineError::User)?;
+            let out =
+                crate::functions::cast(&col, type_name).map_err(EngineError::invalid_input)?;
             Some(out.into_expr())
         }
         ("try_cast", [a, _b]) => {
             let type_name = match &args[1] {
                 ExprIr::Lit(LiteralValue::Str(s)) => s.as_str(),
                 _ => {
-                    return Err(EngineError::User(
+                    return Err(EngineError::invalid_input(
                         "try_cast second arg must be string literal (type name)".into(),
                     ));
                 }
             };
             let e = expr_ir_to_expr(a)?;
             let col = crate::column::Column::from_expr(e, None);
-            let out = crate::functions::try_cast(&col, type_name).map_err(EngineError::User)?;
+            let out =
+                crate::functions::try_cast(&col, type_name).map_err(EngineError::invalid_input)?;
             Some(out.into_expr())
         }
         _ => None,

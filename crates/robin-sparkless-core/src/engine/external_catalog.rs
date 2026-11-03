@@ -1,66 +1,174 @@
-//! Engine-neutral descriptors and lookup contract for external catalog tables.
+//! Owner-aware external catalog contracts with separate resolver, reader, and writer ports.
 
 use crate::EngineError;
 use crate::engine::CancellationToken;
 use crate::schema::StructType;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// A storage format that a Sparkless backend can materialize for an external table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ExternalTableFormat {
-    /// A Delta Lake table readable by the selected Sparkless backend.
     Delta,
-    /// A read-only table exposed by the optional DuckDB source connector.
     DuckDb,
 }
 
 /// A stable catalog result that identifies a table snapshot independently of a catalog service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalTableDescriptor {
-    /// Stable identity assigned by the owning catalog.
     pub table_id: String,
-    /// Canonical storage location accepted by the backend's native reader.
     pub canonical_location: String,
-    /// Schema declared by the owning catalog for this snapshot.
     pub schema: StructType,
-    /// Requested snapshot version; `None` selects the latest committed version.
     pub version: Option<i64>,
-    /// Name of the native provider that owns the table.
     pub provider: String,
-    /// Optional opaque caller context. This must not contain credentials or secrets.
+    /// Opaque provider context; credentials and secrets must not be included.
     pub permissions_context: Option<String>,
-    /// Storage format used to materialize this table.
     pub format: ExternalTableFormat,
 }
 
+/// Permissions advertised for a configured namespace owner, even if a requested table is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogCapabilities {
+    pub read: bool,
+    pub write: bool,
+    pub batch_write: bool,
+}
+
+impl CatalogCapabilities {
+    pub const READ_ONLY: Self = Self {
+        read: true,
+        write: false,
+        batch_write: false,
+    };
+    pub const READ_WRITE: Self = Self {
+        read: true,
+        write: true,
+        batch_write: false,
+    };
+    pub const READ_WRITE_BATCH: Self = Self {
+        read: true,
+        write: true,
+        batch_write: true,
+    };
+
+    pub fn validate(self) -> Result<(), EngineError> {
+        if self.batch_write && !self.write {
+            return Err(EngineError::invalid_input(
+                "batch-write capability requires write capability".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The owner for an identifier is resolved before looking up a table. `Local` permits the local
+/// catalog to handle the identifier; `External` pins routing and forbids local fallthrough.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CatalogOwnership {
+    Local,
+    External {
+        owner_id: String,
+        capabilities: CatalogCapabilities,
+    },
+}
+
+impl CatalogOwnership {
+    pub fn external(owner_id: impl Into<String>, capabilities: CatalogCapabilities) -> Self {
+        Self::External {
+            owner_id: owner_id.into(),
+            capabilities,
+        }
+    }
+
+    pub fn owner_id(&self) -> Option<&str> {
+        match self {
+            Self::Local => None,
+            Self::External { owner_id, .. } => Some(owner_id),
+        }
+    }
+
+    pub fn capabilities(&self) -> Option<CatalogCapabilities> {
+        match self {
+            Self::Local => None,
+            Self::External { capabilities, .. } => Some(*capabilities),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), EngineError> {
+        if let Self::External {
+            owner_id,
+            capabilities,
+        } = self
+        {
+            if owner_id.trim().is_empty() {
+                return Err(EngineError::invalid_input(
+                    "external catalog owner_id must not be empty".into(),
+                ));
+            }
+            capabilities.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// Ownership and metadata resolution are available without scanning rows or starting a write.
+pub trait CatalogResolver: Send + Sync {
+    /// Determine ownership before table existence. `Local` is the only result that permits
+    /// fallback into Sparkless' local catalog.
+    fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError>;
+
+    /// Resolve metadata after ownership is known. A missing table is `Ok(None)`; provider errors
+    /// remain errors and must never be interpreted as a local-catalog miss.
+    fn resolve_table(
+        &self,
+        identifier: &str,
+    ) -> Result<Option<ExternalTableDescriptor>, EngineError>;
+}
+
+/// One statement's catalog view. Implementations may hold a transaction, lease, or connection
+/// snapshot until the handle is dropped. Metadata lookup must not scan table rows.
+pub trait CatalogReadSnapshot: Send + Sync {
+    fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError>;
+    fn resolve_table(
+        &self,
+        identifier: &str,
+    ) -> Result<Option<ExternalTableDescriptor>, EngineError>;
+    fn scan_table(
+        &self,
+        table: &ExternalTableDescriptor,
+        token: &CancellationToken,
+        consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError>;
+
+    fn charge_decoded_bytes(&self, _bytes: usize) -> Result<(), EngineError> {
+        Ok(())
+    }
+}
+
+/// Optional read capability. Absence is represented by `None` on [`ExternalCatalog`].
+pub trait CatalogReader: Send + Sync {
+    fn begin_snapshot(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Arc<dyn CatalogReadSnapshot>, EngineError>;
+}
+
 /// Materialized Arrow IPC streaming-format bytes passed to a native table writer.
-///
-/// The payload is an Apache Arrow IPC stream, not an IPC file. This representation is
-/// engine-neutral so a catalog/table provider can consume typed values without decoding
-/// JSON rows or depending on Polars types.
 #[derive(Debug, Clone)]
 pub struct ArrowIpcStream {
     pub bytes: Vec<u8>,
-    /// Number of rows in the single record batch encoded by this stream.
-    ///
-    /// Keeping this beside the bytes lets transports validate their row-count envelope without
-    /// decoding a second copy of the batch.
     pub row_count: u64,
 }
 
 /// A back-pressured sequence of independently readable Arrow IPC batch streams.
-///
-/// Each item contains one RecordBatch in Arrow IPC streaming format. Dropping the
-/// iterator closes the producer, allowing it to stop execution when a consumer
-/// reads only a prefix.
 pub struct ArrowIpcBatchStream {
     inner: Box<dyn Iterator<Item = Result<ArrowIpcStream, EngineError>> + Send>,
 }
 
 impl ArrowIpcBatchStream {
-    /// Wrap a lazy IPC batch producer.
     pub fn new<I>(inner: I) -> Self
     where
         I: Iterator<Item = Result<ArrowIpcStream, EngineError>> + Send + 'static,
@@ -79,7 +187,6 @@ impl Iterator for ArrowIpcBatchStream {
     }
 }
 
-/// Save mode for a write to a table already resolved by an external catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalTableSaveMode {
@@ -89,23 +196,20 @@ pub enum ExternalTableSaveMode {
     Ignore,
 }
 
-/// Typed data and the exact writer settings for one resolved external table.
 #[derive(Debug, Clone)]
 pub struct ExternalTableWriteRequest {
-    /// Identifier supplied to `saveAsTable`; the descriptor provides stable target identity.
+    pub operation_id: String,
     pub identifier: String,
     pub table: ExternalTableDescriptor,
     pub data: ArrowIpcStream,
     pub mode: ExternalTableSaveMode,
-    /// Format selected by the caller, if one was specified.
     pub format: Option<String>,
-    /// Caller-specified writer options, preserving order and duplicate keys.
     pub options: Vec<(String, String)>,
     pub partition_by: Vec<String>,
 }
 
-/// Metadata and a lazy Arrow batch source for providers that can consume writes incrementally.
 pub struct ExternalTableWriteBatchRequest {
+    pub operation_id: String,
     pub identifier: String,
     pub table: ExternalTableDescriptor,
     pub batches: ArrowIpcBatchStream,
@@ -115,86 +219,303 @@ pub struct ExternalTableWriteBatchRequest {
     pub partition_by: Vec<String>,
 }
 
-/// The catalog state observed after a successful delegated write.
-#[derive(Debug, Clone)]
+/// Provider-neutral identity for a committed table write. Delta-style versions remain exact;
+/// adapters with another commit model supply a provider-specific identity instead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalTableWriteResult {
-    /// Descriptor for the committed table snapshot.
     pub table: ExternalTableDescriptor,
-    /// Exact version committed by the provider.
-    pub committed_version: i64,
+    pub committed_version: Option<i64>,
+    pub provider_commit_id: Option<String>,
 }
 
-/// One operation's view of an external catalog. Implementations may keep a database
-/// transaction or snapshot lease alive while resolving and scanning several relations.
-pub trait ExternalCatalogReadSnapshot: Send + Sync {
-    /// Resolve a name against this operation's catalog view without scanning table rows.
-    fn resolve_table(
+/// Write completion is explicit so a lost response is never mistaken for a rollback.
+#[derive(Debug)]
+pub enum ExternalTableWriteOutcome {
+    Committed(ExternalTableWriteResult),
+    NotCommitted(EngineError),
+    OutcomeUnknown {
+        provider: String,
+        operation_id: String,
+        message: String,
+    },
+}
+
+/// A fully validated/staged write. `commit` is the point where the provider may accept an
+/// irreversible operation; cancellation is checked by the catalog before this call.
+pub trait PreparedCatalogWrite: Send {
+    fn commit(self: Box<Self>, token: &CancellationToken) -> ExternalTableWriteOutcome;
+}
+
+/// Optional materialized-write capability. A read-only catalog has no writer object.
+pub trait CatalogWriter: Send + Sync {
+    fn prepare_write(
         &self,
+        request: ExternalTableWriteRequest,
+    ) -> Result<Box<dyn PreparedCatalogWrite>, EngineError>;
+}
+
+/// Optional bounded-batch write capability; independent from materialized writes.
+pub trait CatalogBatchWriter: Send + Sync {
+    fn prepare_write_batches(
+        &self,
+        request: ExternalTableWriteBatchRequest,
+    ) -> Result<Box<dyn PreparedCatalogWrite>, EngineError>;
+}
+
+/// Composed provider capabilities for one logical session.
+#[derive(Clone)]
+pub struct ExternalCatalog {
+    resolver: Arc<dyn CatalogResolver>,
+    reader: Option<Arc<dyn CatalogReader>>,
+    writer: Option<Arc<dyn CatalogWriter>>,
+    batch_writer: Option<Arc<dyn CatalogBatchWriter>>,
+}
+
+impl std::fmt::Debug for ExternalCatalog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExternalCatalog")
+            .field("has_reader", &self.reader.is_some())
+            .field("has_writer", &self.writer.is_some())
+            .field("has_batch_writer", &self.batch_writer.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ExternalCatalog {
+    pub fn new(
+        resolver: Arc<dyn CatalogResolver>,
+        reader: Option<Arc<dyn CatalogReader>>,
+        writer: Option<Arc<dyn CatalogWriter>>,
+        batch_writer: Option<Arc<dyn CatalogBatchWriter>>,
+    ) -> Self {
+        Self {
+            resolver,
+            reader,
+            writer,
+            batch_writer,
+        }
+    }
+
+    pub fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError> {
+        let ownership = self.resolver.resolve_ownership(identifier)?;
+        ownership.validate()?;
+        Ok(ownership)
+    }
+
+    pub fn resolve_table(
+        &self,
+        ownership: &CatalogOwnership,
         identifier: &str,
-    ) -> Result<Option<ExternalTableDescriptor>, EngineError>;
+    ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+        ownership.validate()?;
+        match ownership {
+            CatalogOwnership::Local => Ok(None),
+            CatalogOwnership::External { .. } => {
+                let table = self.resolver.resolve_table(identifier)?;
+                if let Some(table) = &table {
+                    table.validate()?;
+                }
+                Ok(table)
+            }
+        }
+    }
 
-    /// Deliver typed, independently readable Arrow IPC batches to the consumer.
-    /// Returning early from the consumer stops the scan and drops provider resources.
-    fn scan_table(
+    pub fn begin_snapshot(
         &self,
-        table: &ExternalTableDescriptor,
+        ownership: &CatalogOwnership,
         token: &CancellationToken,
-        consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
-    ) -> Result<(), EngineError>;
+    ) -> Result<Arc<dyn CatalogReadSnapshot>, EngineError> {
+        self.require_read_capability(ownership)?;
+        let reader = self.reader.as_ref().ok_or_else(|| {
+            EngineError::capability(
+                "READ_CAPABILITY_MISSING",
+                "external catalog has no read capability",
+            )
+        })?;
+        reader.begin_snapshot(token)
+    }
 
-    /// Account for decoded source data retained by the execution engine. Snapshot-capable
-    /// providers can enforce a statement-wide decoded-byte budget across several tables.
-    fn charge_decoded_bytes(&self, _bytes: usize) -> Result<(), EngineError> {
+    pub fn require_read_capability(&self, ownership: &CatalogOwnership) -> Result<(), EngineError> {
+        ownership.validate()?;
+        let capabilities = ownership.capabilities().ok_or_else(|| {
+            EngineError::invalid_input(
+                "a local catalog namespace has no external read snapshot".into(),
+            )
+        })?;
+        if !capabilities.read {
+            return Err(EngineError::capability(
+                "READ_CAPABILITY_DENIED",
+                format!(
+                    "external namespace '{}' does not support reads",
+                    ownership.owner_id().unwrap_or_default()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn has_materialized_writer(&self) -> bool {
+        self.writer.is_some()
+    }
+
+    pub fn has_materialized_writer_for(&self, ownership: &CatalogOwnership) -> bool {
+        ownership
+            .capabilities()
+            .is_some_and(|capabilities| capabilities.write)
+            && self.writer.is_some()
+    }
+
+    pub fn has_reader(&self) -> bool {
+        self.reader.is_some()
+    }
+
+    pub fn begin_operation_snapshot(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Arc<dyn CatalogReadSnapshot>, EngineError> {
+        token.check_cancelled()?;
+        self.reader
+            .as_ref()
+            .ok_or_else(|| {
+                EngineError::capability(
+                    "READ_CAPABILITY_MISSING",
+                    "external catalog has no read capability",
+                )
+            })?
+            .begin_snapshot(token)
+    }
+
+    pub fn has_batch_writer(&self) -> bool {
+        self.batch_writer.is_some()
+    }
+
+    pub fn has_batch_writer_for(&self, ownership: &CatalogOwnership) -> bool {
+        ownership
+            .capabilities()
+            .is_some_and(|capabilities| capabilities.batch_write)
+            && self.batch_writer.is_some()
+    }
+
+    pub fn write_table(
+        &self,
+        ownership: &CatalogOwnership,
+        request: ExternalTableWriteRequest,
+        token: &CancellationToken,
+    ) -> Result<ExternalTableWriteOutcome, EngineError> {
+        self.require_write_ownership(ownership)?;
+        let writer = self.writer.as_ref().ok_or_else(|| {
+            EngineError::capability(
+                "MATERIALIZED_WRITE_CAPABILITY_MISSING",
+                "external catalog has no materialized write capability",
+            )
+        })?;
+        token.check_cancelled()?;
+        let prepared = writer.prepare_write(request)?;
+        token.check_cancelled()?;
+        Ok(prepared.commit(token))
+    }
+
+    pub fn write_table_batches(
+        &self,
+        ownership: &CatalogOwnership,
+        request: ExternalTableWriteBatchRequest,
+        token: &CancellationToken,
+    ) -> Result<ExternalTableWriteOutcome, EngineError> {
+        self.require_write_ownership(ownership)?;
+        if !ownership
+            .capabilities()
+            .is_some_and(|capabilities| capabilities.batch_write)
+        {
+            return Err(EngineError::capability(
+                "BATCH_WRITE_CAPABILITY_DENIED",
+                "external catalog owner does not permit batch writes",
+            ));
+        }
+        let writer = self.batch_writer.as_ref().ok_or_else(|| {
+            EngineError::capability(
+                "BATCH_WRITE_CAPABILITY_MISSING",
+                "external catalog has no batch-write capability",
+            )
+        })?;
+        token.check_cancelled()?;
+        let prepared = writer.prepare_write_batches(request)?;
+        token.check_cancelled()?;
+        Ok(prepared.commit(token))
+    }
+
+    fn require_write_ownership(&self, ownership: &CatalogOwnership) -> Result<(), EngineError> {
+        ownership.validate()?;
+        let Some(capabilities) = ownership.capabilities() else {
+            return Err(EngineError::invalid_input(
+                "cannot write an external table owned by the local catalog".into(),
+            ));
+        };
+        if !capabilities.write {
+            return Err(EngineError::capability(
+                "WRITE_CAPABILITY_DENIED",
+                format!(
+                    "external namespace '{}' is read-only",
+                    ownership.owner_id().unwrap_or_default()
+                ),
+            ));
+        }
+        if self.writer.is_none() && self.batch_writer.is_none() {
+            return Err(EngineError::capability(
+                "WRITE_CAPABILITY_MISSING",
+                "external catalog owner advertises writes but no writer capability is registered",
+            ));
+        }
         Ok(())
     }
 }
 
-struct ProviderReadSnapshot {
-    provider: std::sync::Arc<dyn ExternalCatalogProvider>,
+/// Resolve a table and its namespace owner without scanning. A missing table in an external
+/// namespace remains externally owned and cannot be looked up in the local catalog.
+#[derive(Debug, Clone)]
+pub struct CatalogResolution {
+    pub ownership: CatalogOwnership,
+    pub table: Option<ExternalTableDescriptor>,
 }
 
-impl ExternalCatalogReadSnapshot for ProviderReadSnapshot {
-    fn resolve_table(
-        &self,
-        identifier: &str,
-    ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
-        self.provider.resolve_table(identifier)
-    }
-
-    fn scan_table(
-        &self,
-        table: &ExternalTableDescriptor,
-        token: &CancellationToken,
-        consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
-    ) -> Result<(), EngineError> {
-        self.provider.scan_table(table, token, consume)
-    }
+pub fn resolve_catalog_identifier(
+    catalog: &ExternalCatalog,
+    identifier: &str,
+) -> Result<CatalogResolution, EngineError> {
+    let ownership = catalog.resolve_ownership(identifier)?;
+    let table = catalog.resolve_table(&ownership, identifier)?;
+    Ok(CatalogResolution { ownership, table })
 }
 
-/// Start a provider-specific operation snapshot, or wrap a provider that uses the legacy
-/// independent resolver contract.
-pub fn begin_external_catalog_read_snapshot(
-    provider: std::sync::Arc<dyn ExternalCatalogProvider>,
+pub fn begin_catalog_read_snapshot(
+    catalog: &ExternalCatalog,
     token: &CancellationToken,
-) -> Result<std::sync::Arc<dyn ExternalCatalogReadSnapshot>, EngineError> {
-    match provider.begin_read_snapshot(token)? {
-        Some(snapshot) => Ok(snapshot),
-        None => Ok(std::sync::Arc::new(ProviderReadSnapshot { provider })),
-    }
+) -> Result<Arc<dyn CatalogReadSnapshot>, EngineError> {
+    catalog.begin_operation_snapshot(token)
 }
 
 impl ExternalTableWriteResult {
-    /// Validate that the receipt keeps the target identity stable and reports its commit.
     pub fn validate_against(&self, previous: &ExternalTableDescriptor) -> Result<(), EngineError> {
         self.table.validate()?;
-        if self.committed_version < 0 {
-            return Err(EngineError::User(
-                "external table write result version must not be negative".into(),
+        if self.committed_version.is_none() && self.provider_commit_id.is_none() {
+            return Err(EngineError::invalid_input(
+                "external write receipt must include a version or provider commit identity".into(),
             ));
         }
-        if self.table.version != Some(self.committed_version) {
-            return Err(EngineError::User(
-                "external table write result descriptor must identify its committed version".into(),
+        if self
+            .committed_version
+            .is_some_and(|version| version < 0 || self.table.version != Some(version))
+        {
+            return Err(EngineError::invalid_input(
+                "external write receipt version must match its committed descriptor".into(),
+            ));
+        }
+        if self
+            .provider_commit_id
+            .as_ref()
+            .is_some_and(|identity| identity.trim().is_empty())
+        {
+            return Err(EngineError::invalid_input(
+                "external write receipt provider identity must not be empty".into(),
             ));
         }
         if self.table.table_id != previous.table_id
@@ -202,15 +523,16 @@ impl ExternalTableWriteResult {
             || self.table.provider != previous.provider
             || self.table.format != previous.format
         {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "external table write result changed the resolved table identity".into(),
             ));
         }
-        if previous
-            .version
-            .is_some_and(|version| self.committed_version < version)
+        if self
+            .committed_version
+            .zip(previous.version)
+            .is_some_and(|(committed, previous)| committed < previous)
         {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "external table write result moved the committed version backwards".into(),
             ));
         }
@@ -219,208 +541,27 @@ impl ExternalTableWriteResult {
 }
 
 impl ExternalTableDescriptor {
-    /// Reject incomplete or invalid identity/snapshot fields before storage access.
     pub fn validate(&self) -> Result<(), EngineError> {
         if self.table_id.trim().is_empty() {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "external table descriptor table_id must not be empty".into(),
             ));
         }
         if self.canonical_location.trim().is_empty() {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "external table descriptor canonical_location must not be empty".into(),
             ));
         }
         if self.provider.trim().is_empty() {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "external table descriptor provider must not be empty".into(),
             ));
         }
         if self.version.is_some_and(|version| version < 0) {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "external table descriptor version must not be negative".into(),
             ));
         }
         Ok(())
-    }
-}
-
-/// Resolves an exact table identifier to metadata needed for native relation reads.
-///
-/// The identifier is passed as received by the Sparkless API; implementations own any
-/// namespace parsing and case rules. A missing table is `Ok(None)`. Provider failures
-/// must be returned as errors and are never treated as a missing table.
-pub trait ExternalCatalogProvider: Send + Sync {
-    /// Resolve `identifier` to the table's stable identity and committed snapshot.
-    fn resolve_table(
-        &self,
-        identifier: &str,
-    ) -> Result<Option<ExternalTableDescriptor>, EngineError>;
-
-    /// Report whether writes to this configured namespace are forbidden, including when the
-    /// named table does not exist. This prevents DDL or DML from falling through to a local
-    /// catalog when an external provider owns the target namespace.
-    fn is_read_only_target(&self, _identifier: &str) -> Result<bool, EngineError> {
-        Ok(false)
-    }
-
-    /// Start an operation-scoped source view. Existing providers receive a lightweight
-    /// adapter; snapshot-capable providers override this to retain a transaction/lease.
-    fn begin_read_snapshot(
-        &self,
-        _token: &CancellationToken,
-    ) -> Result<Option<std::sync::Arc<dyn ExternalCatalogReadSnapshot>>, EngineError> {
-        Ok(None)
-    }
-
-    /// Scan one table as bounded IPC batches. Read-only catalog providers override this method.
-    fn scan_table(
-        &self,
-        _table: &ExternalTableDescriptor,
-        _token: &CancellationToken,
-        _consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
-    ) -> Result<(), EngineError> {
-        Err(EngineError::User(
-            "external catalog provider does not support table reads".into(),
-        ))
-    }
-
-    /// Commit a write to a table previously resolved by this provider.
-    ///
-    /// Providers that are read-only keep the explicit default error. Returning a successful
-    /// receipt means the provider has committed `data` and the descriptor identifies that
-    /// exact version. Sparkless never falls back to a local write after a provider error.
-    fn write_table(
-        &self,
-        _request: ExternalTableWriteRequest,
-    ) -> Result<ExternalTableWriteResult, EngineError> {
-        Err(EngineError::User(
-            "external catalog provider does not support table writes".into(),
-        ))
-    }
-
-    /// Whether this provider supports consuming a write as batches.
-    ///
-    /// The default is false so existing implementations keep using the materialized
-    /// `write_table` callback unchanged.
-    fn supports_batch_writes(&self) -> bool {
-        false
-    }
-
-    /// Commit a table write from a lazy sequence of Arrow IPC batches.
-    fn write_table_batches(
-        &self,
-        _request: ExternalTableWriteBatchRequest,
-    ) -> Result<ExternalTableWriteResult, EngineError> {
-        Err(EngineError::User(
-            "external catalog provider does not support batch writes".into(),
-        ))
-    }
-
-    /// Batch-write variant with a caller-owned cancellation token.
-    fn write_table_batches_with_cancellation(
-        &self,
-        request: ExternalTableWriteBatchRequest,
-        token: &CancellationToken,
-    ) -> Result<ExternalTableWriteResult, EngineError> {
-        token.check_cancelled()?;
-        self.write_table_batches(request)
-    }
-
-    /// Commit a write while honoring cancellation before commit acceptance.
-    ///
-    /// Providers may override this method to add safe points before their commit. Returning
-    /// [`EngineError::Cancelled`] promises that the provider did not accept the commit. Once
-    /// the provider's commit path begins, a successful receipt or provider error is returned
-    /// unchanged even if cancellation is requested concurrently; this keeps the caller's
-    /// outcome truthful when commit state is known only to the provider.
-    fn write_table_with_cancellation(
-        &self,
-        request: ExternalTableWriteRequest,
-        token: &CancellationToken,
-    ) -> Result<ExternalTableWriteResult, EngineError> {
-        token.check_cancelled()?;
-        self.write_table(request)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn descriptor() -> ExternalTableDescriptor {
-        ExternalTableDescriptor {
-            table_id: "table-123".into(),
-            canonical_location: "/workspace/tables/table-123".into(),
-            schema: StructType::new(Vec::new()),
-            version: Some(0),
-            provider: "delta-rs".into(),
-            permissions_context: None,
-            format: ExternalTableFormat::Delta,
-        }
-    }
-
-    #[test]
-    fn external_table_descriptor_requires_stable_identity_and_nonnegative_version() {
-        let mut valid = descriptor();
-        assert!(valid.validate().is_ok());
-
-        valid.table_id.clear();
-        assert!(
-            matches!(valid.validate(), Err(EngineError::User(message)) if message.contains("table_id"))
-        );
-
-        let mut valid = descriptor();
-        valid.canonical_location.clear();
-        assert!(
-            matches!(valid.validate(), Err(EngineError::User(message)) if message.contains("canonical_location"))
-        );
-
-        let mut valid = descriptor();
-        valid.provider.clear();
-        assert!(
-            matches!(valid.validate(), Err(EngineError::User(message)) if message.contains("provider"))
-        );
-
-        let mut valid = descriptor();
-        valid.version = Some(-1);
-        assert!(
-            matches!(valid.validate(), Err(EngineError::User(message)) if message.contains("version"))
-        );
-    }
-
-    #[test]
-    fn external_table_write_receipt_keeps_identity_and_reports_exact_monotonic_version() {
-        let mut previous = descriptor();
-        previous.version = Some(4);
-        let mut table = previous.clone();
-        table.version = Some(5);
-        let valid = ExternalTableWriteResult {
-            table: table.clone(),
-            committed_version: 5,
-        };
-        assert!(valid.validate_against(&previous).is_ok());
-
-        let mut changed_identity = valid.clone();
-        changed_identity.table.table_id = "another-table".into();
-        assert!(matches!(
-            changed_identity.validate_against(&previous),
-            Err(EngineError::User(message)) if message.contains("identity")
-        ));
-
-        let mut mismatched_version = valid.clone();
-        mismatched_version.table.version = Some(6);
-        assert!(matches!(
-            mismatched_version.validate_against(&previous),
-            Err(EngineError::User(message)) if message.contains("committed version")
-        ));
-
-        let mut backwards = valid;
-        backwards.committed_version = 3;
-        backwards.table.version = Some(3);
-        assert!(matches!(
-            backwards.validate_against(&previous),
-            Err(EngineError::User(message)) if message.contains("backwards")
-        ));
     }
 }

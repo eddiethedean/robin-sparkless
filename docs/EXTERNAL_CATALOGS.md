@@ -1,40 +1,40 @@
-# External catalog lookup
+# External catalogs
 
-Sparkless exposes an engine-neutral catalog lookup contract for a backend that owns
-external table registrations. The Polars backend reads local Delta snapshots and can
-delegate table writes to a provider that implements the write hook.
+Sparkless exposes engine-neutral catalog ownership, snapshot-read, and write
+capabilities. The Polars backend reads local Delta snapshots and delegates writes
+only to providers that advertise and implement the corresponding writer capability.
 
 ## Public contract
 
-The API is available from `robin_sparkless::engine` and `robin_sparkless_core::engine`:
+The contracts are available from `robin_sparkless::engine` and
+`robin_sparkless_core::engine`:
 
 ```rust
-pub trait ExternalCatalogProvider: Send + Sync {
+pub trait CatalogResolver: Send + Sync {
+    fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError>;
     fn resolve_table(
         &self,
         identifier: &str,
     ) -> Result<Option<ExternalTableDescriptor>, EngineError>;
 
-    fn write_table(
-        &self,
-        _request: ExternalTableWriteRequest,
-    ) -> Result<ExternalTableWriteResult, EngineError> {
-        Err(EngineError::User(
-            "external catalog provider does not support table writes".into(),
-        ))
-    }
+}
 
-    fn supports_batch_writes(&self) -> bool {
-        false
-    }
-
-    fn write_table_batches(
+pub trait CatalogReader: Send + Sync {
+    fn begin_snapshot(
         &self,
-        request: ExternalTableWriteBatchRequest,
-    ) -> Result<ExternalTableWriteResult, EngineError> {
-        // Consume request.batches lazily. Dropping it stops the producer.
-        todo!()
-    }
+        token: &CancellationToken,
+    ) -> Result<Arc<dyn CatalogReadSnapshot>, EngineError>;
+}
+
+pub trait CatalogWriter: Send + Sync {
+    fn prepare_write(
+        &self,
+        request: ExternalTableWriteRequest,
+    ) -> Result<Box<dyn PreparedCatalogWrite>, EngineError>;
+}
+
+pub trait PreparedCatalogWrite: Send {
+    fn commit(self: Box<Self>, token: &CancellationToken) -> ExternalTableWriteOutcome;
 }
 
 pub struct ExternalTableDescriptor {
@@ -48,14 +48,22 @@ pub struct ExternalTableDescriptor {
 }
 ```
 
-The optional `write_table` hook receives an Arrow IPC stream, save mode, writer options,
-and partition columns. Its default implementation returns an unsupported error. A
-provider must commit the write before returning a receipt for the committed snapshot.
-The receipt must keep the stable table ID, canonical location, provider, and format and
-identify a nondecreasing exact committed version. `DataFrameWriter.saveAsTable()` and
-SQL `INSERT INTO` delegate writes when the identifier resolves externally. Session-local
-tables and views shadow the external provider. A provider miss allows Sparkless' local
-table path; provider errors and unsupported write hooks are surfaced without fallback.
+Callers resolve namespace ownership before looking up table metadata. Return
+`CatalogOwnership::Local` only when Sparkless' local catalog may handle the identifier.
+An external owner remains authoritative even when `resolve_table` returns `Ok(None)`;
+this prevents a local table with the same name from shadowing a missing external table.
+Provider errors are never treated as misses. `CatalogCapabilities` advertises read,
+write, and batch-write support separately, and the composed `ExternalCatalog` holds
+optional `CatalogReader`, `CatalogWriter`, and `CatalogBatchWriter` implementations.
+
+The write ports receive an Arrow IPC stream or a back-pressured sequence of batches,
+plus save mode, writer options, partition columns, and an operation ID. Providers stage
+work in `prepare_write`; commit reports `Committed`, `NotCommitted`, or `OutcomeUnknown`.
+A successful receipt keeps the stable table ID, canonical location, provider, and format
+and identifies the committed version or provider commit ID. Never retry an unknown
+outcome until the provider has reconciled that operation ID. `DataFrameWriter.saveAsTable()`
+and SQL `INSERT INTO` delegate writes to the external owner when its capability permits
+it. Session-local tables and views still shadow the external catalog.
 `ErrorIfExists` rejects a resolved external table and `Ignore` leaves it unchanged.
 Rust callers that need to distinguish an external provider error from a miss can use
 `SparkSession::try_table_exists`; the legacy boolean `table_exists` remains best-effort.
@@ -71,18 +79,17 @@ below. There is no async transport. Path-based `DataFrameWriter.save()`, `insert
 reads can match the Polars array-of-key/value-struct representation; writes carrying
 Sparkless' logical Map metadata fail explicitly.
 
-Attach a provider to a Rust `SparkSession` with
-`session.set_external_catalog_provider(Some(Arc::new(provider)))`. Passing `None`
-removes it. The provider receives the exact identifier supplied to `table()` or the
-identifier resolved from a SQL relation. It owns namespace parsing and case rules.
-Return `Ok(None)` only for a genuine miss; errors are surfaced and never retried as
-local-name fallbacks.
+Compose the provider capabilities and attach an `Arc<ExternalCatalog>` with
+`session.set_external_catalog(Some(catalog))`. Passing `None` removes it. Resolver
+callbacks receive the exact identifier supplied to `table()` or derived from a SQL
+relation. The resolver owns namespace parsing and case rules. A local owner is the only
+result that permits lookup through Sparkless' local catalog.
 
 Resolution checks existing global temporary views and exact session-local tables
-first, then calls the provider, then tries the configured warehouse. When a provider
-is installed, a missing multipart name does not fall back to a local table with the
-same final component. `DataFrameReader.table()` and SQL relation reads use the same
-session lookup path.
+first, then asks the external resolver for ownership, then tries the configured
+warehouse only for local-owned identifiers. When a provider owns a multipart name, a
+missing table does not fall back to a local table with the same final component.
+`DataFrameReader.table()` and SQL relation reads use the same session lookup path.
 
 The descriptor must have a nonempty table ID, location, and provider name, plus a
 nonnegative optional version. A Delta descriptor is read through Sparkless' native
@@ -101,14 +108,22 @@ the provider's responsibility.
 
 Python sessions expose `set_external_catalog_provider(provider)` and the camelCase
 alias `setExternalCatalogProvider(provider)`. Pass `None` to detach. Providers implement
-`resolve_table(identifier)` and may implement either `write_table(request)` or
-`write_table_batches(request)`:
+`resolve_ownership(identifier)` and `resolve_table(identifier)` and may implement either
+`write_table(request)` or `write_table_batches(request)`:
 
 ```python
-from sparkless.external_catalog import ExternalTableDescriptor
+from sparkless.external_catalog import (
+    ExternalCatalogOwnership,
+    ExternalTableDescriptor,
+)
 from sparkless.sql.types import LongType, StructField, StructType
 
 class Catalog:
+    def resolve_ownership(self, identifier):
+        if identifier.startswith("main.analytics."):
+            return ExternalCatalogOwnership("main.analytics", read=True)
+        return None
+
     def resolve_table(self, identifier):
         if identifier != "main.analytics.orders":
             return None
@@ -124,14 +139,18 @@ spark.set_external_catalog_provider(Catalog())
 orders = spark.table("main.analytics.orders")
 ```
 
-`sparkless.external_catalog` exports the `ExternalCatalogProvider`,
+`sparkless.external_catalog` exports `ExternalCatalogOwnership`, the
+`ExternalCatalogProvider`,
 `WritableExternalCatalogProvider`, and `BatchWritableExternalCatalogProvider` typing
 protocols, the `ExternalTableFormat` and
 `ExternalTableSaveMode` string enums, `ArrowIpcStream`, and the
 `ExternalTableDescriptor`, `ExternalTableWriteRequest`, and `ExternalTableWriteResult`
 dataclasses. It also exports `SparklessExternalCatalogError`, available from
-`sparkless` and `sparkless.errors`. A read-only object may omit both write methods;
-attempted writes then raise an explicit unsupported error.
+`sparkless` and `sparkless.errors`. A read-only provider returns ownership with
+`write=False` and may omit both writer methods; attempted writes then raise a capability
+error. Callback failures carry their structured category, code, operation and
+retryability to Python. A failed callback after it starts can have an unknown commit
+outcome; use `request.operation_id` to reconcile it before retrying.
 
 The materializing `write_table` callback receives the exact identifier, resolved descriptor, save mode
 (`"append"` or `"overwrite"`), optional format, ordered option pairs (including
@@ -185,11 +204,13 @@ The default retryability describes the current operation with the same request: 
 snapshot, schema mismatch, or unsupported operation is `terminal`; a failed lookup is
 `retryable` because it has no write side effect; and an unclassified write failure is
 `uncertain` because the provider may have committed before raising. A terminal stale
-snapshot can be retried after resolving a fresh descriptor and building a new write. For
-an uncertain write, inspect or reconcile provider state before retrying. Sparkless does
-not retry provider callbacks automatically. Providers can set `retryability` when they
-know a more specific outcome, or set the boolean `retryable` attribute (`True` maps to
-`retryable`; `False` maps to `terminal`).
+snapshot can be retried after resolving a fresh descriptor and building a new write. A
+raised write callback always has an unknown commit outcome because it may fail after
+applying an effect. Its declared retryability remains available as `provider_retryability`
+metadata for retry policy. Inspect or reconcile provider state before retrying. Sparkless
+does not retry provider callbacks automatically. Providers can set `retryability` when
+they know a more specific retry policy, or set the boolean `retryable` attribute (`True`
+maps to `retryable`; `False` maps to `terminal`).
 
 Descriptor schemas use Sparkless `StructType` objects and preserve integer widths,
 decimal precision/scale, nested arrays/maps/structs, and field nullability through
@@ -207,9 +228,10 @@ Every public catalog operation introduced by this PR has a Python counterpart:
 
 | Rust API or behavior | Python API |
 | --- | --- |
-| `ExternalCatalogProvider::resolve_table` | `ExternalCatalogProvider.resolve_table(identifier)` |
-| `ExternalCatalogProvider::write_table` | Optional `write_table(request)`, typed by `WritableExternalCatalogProvider` |
-| `ExternalCatalogProvider::write_table_batches` | Optional `write_table_batches(request)`, typed by `BatchWritableExternalCatalogProvider` |
+| `CatalogResolver::resolve_ownership` | Required `resolve_ownership(identifier)`; return `None` for local ownership |
+| `CatalogResolver::resolve_table` | Required `resolve_table(identifier)` after external ownership is established |
+| `CatalogWriter::prepare_write` | Optional `write_table(request)`, typed by `WritableExternalCatalogProvider` |
+| `CatalogBatchWriter::prepare_write_batches` | Optional `write_table_batches(request)`, typed by `BatchWritableExternalCatalogProvider` |
 | `ExternalTableDescriptor` and every field | `ExternalTableDescriptor` dataclass, using `StructType` for the schema |
 | `ExternalTableDescriptor::validate` | `descriptor.validate()`, invoking the Rust validator |
 | `ExternalTableFormat::Delta` | `ExternalTableFormat.DELTA` (also accepts `"delta"`) |

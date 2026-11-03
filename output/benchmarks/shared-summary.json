@@ -1,0 +1,120 @@
+{
+  "suites": {
+    "startup_first_action_seconds": {
+      "sparkless": 0.08960666693747044,
+      "jvm": 3.4028937499970198
+    },
+    "startup_and_cold_pytest_seconds": {
+      "sparkless": 2.957602750044316,
+      "jvm": 5.106539125088602
+    },
+    "warm_pytest_seconds": {
+      "sparkless": 2.6989712498616427,
+      "jvm": 1.3779647499322891
+    }
+  },
+  "workloads": {
+    "ingest_10": {
+      "sparkless": 16.199937439523637,
+      "jvm": 13.212874997407198
+    },
+    "ingest_100": {
+      "sparkless": 16.148583381436765,
+      "jvm": 13.257374987006187
+    },
+    "ingest_1000": {
+      "sparkless": 16.373791499063373,
+      "jvm": 25.200103991664946
+    },
+    "ingest_10000": {
+      "sparkless": 19.094582996331155,
+      "jvm": 30.668583000078797
+    },
+    "orders_pipeline": {
+      "sparkless": 16.803333186544478,
+      "jvm": 8.337458013556898
+    },
+    "nullable_orders": {
+      "sparkless": 19.36518691945821,
+      "jvm": 7.501916843466461
+    },
+    "scalar_roundtrip": {
+      "sparkless": 20.037687616422772,
+      "jvm": 7.409416954033077
+    },
+    "wide_projection": {
+      "sparkless": 30.90360341593623,
+      "jvm": 13.978458475321531
+    },
+    "string_payload": {
+      "sparkless": 25.31804156024009,
+      "jvm": 7.138229557313025
+    },
+    "empty_result": {
+      "sparkless": 42.05537447705865,
+      "jvm": 8.388104499317706
+    },
+    "selectivity_none": {
+      "sparkless": 19.15614597965032,
+      "jvm": 23.140020901337266
+    },
+    "selectivity_one": {
+      "sparkless": 19.096333533525467,
+      "jvm": 22.468333481810987
+    },
+    "selectivity_half": {
+      "sparkless": 19.006895483471453,
+      "jvm": 22.522478830069304
+    },
+    "selectivity_all": {
+      "sparkless": 19.10693757236004,
+      "jvm": 22.830062545835972
+    },
+    "arithmetic_pipeline": {
+      "sparkless": 27.53093745559454,
+      "jvm": 25.41629155166447
+    },
+    "preview_limit": {
+      "sparkless": 15.656041912734509,
+      "jvm": 16.31991658359766
+    },
+    "collect_10000": {
+      "sparkless": 114.13749936036766,
+      "jvm": 22.705062641762197
+    },
+    "collect_100000": {
+      "sparkless": 1029.6687294030562,
+      "jvm": 131.78935437463224
+    },
+    "schema_100_columns": {
+      "sparkless": 6.889167008921504,
+      "jvm": 8.97770852316171
+    },
+    "orders_string_1000": {
+      "sparkless": 16.512979054823518,
+      "jvm": 24.7740630293265
+    },
+    "filtered_range_1000000": {
+      "sparkless": 18.797375028952956,
+      "jvm": 22.478187107481062
+    },
+    "filtered_range_10000000": {
+      "sparkless": 47.26649995427579,
+      "jvm": 26.23877103906125
+    }
+  },
+  "mixed_concurrency": {
+    "1": {
+      "sparkless": 24.090151428844173,
+      "jvm": 55.99580944770381
+    },
+    "4": {
+      "sparkless": 46.93357535434064,
+      "jvm": 135.97526567339384
+    },
+    "8": {
+      "sparkless": 52.10768808166223,
+      "jvm": 142.24585072038354
+    }
+  }
+}

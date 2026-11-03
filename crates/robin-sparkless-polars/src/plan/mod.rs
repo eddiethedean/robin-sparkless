@@ -19,8 +19,6 @@ pub use expr::PlanExprError;
 pub use logical::LogicalPlan;
 use polars::prelude::Expr;
 use polars::prelude::PolarsError;
-use robin_sparkless_core::engine::{DataFrameBackend, PlanExecutor as CorePlanExecutor};
-use robin_sparkless_core::error::EngineError;
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -62,27 +60,6 @@ pub fn execute_plan(
     }
 
     Ok(df)
-}
-
-/// Polars-backed implementation of the core [`PlanExecutor`] trait.
-///
-/// This adapter allows high-level code (e.g. the root crate) to execute JSON plans using
-/// the engine-agnostic [`DataFrameBackend`] and [`EngineError`] types, while reusing the
-/// existing Polars plan interpreter.
-pub struct PolarsPlanExecutor;
-
-impl CorePlanExecutor<SparkSession> for PolarsPlanExecutor {
-    fn execute_plan(
-        session: &SparkSession,
-        data: Vec<Vec<Value>>,
-        schema: Vec<(String, String)>,
-        plan: &[Value],
-    ) -> Result<Box<dyn DataFrameBackend>, EngineError> {
-        // Delegate to the existing JSON plan interpreter and then box the backend DataFrame.
-        let df = execute_plan(session, data, schema, plan)
-            .map_err(|e| EngineError::Internal(e.to_string()))?;
-        Ok(Box::new(df))
-    }
 }
 
 /// Errors from plan execution.
@@ -1291,37 +1268,5 @@ mod tests {
         let rows = df.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("value"), Some(&serde_json::Value::Null));
         assert_eq!(rows[1].get("name"), Some(&serde_json::Value::Null));
-    }
-
-    /// Ensure the core PlanExecutor trait implementation stays in sync with execute_plan.
-    #[test]
-    fn test_plan_executor_trait_matches_execute_plan() {
-        use robin_sparkless_core::engine::PlanExecutor as _;
-
-        let session = crate::session::SparkSession::builder()
-            .app_name("plan_executor_trait")
-            .get_or_create();
-        let data = vec![vec![json!(1)], vec![json!(2)]];
-        let schema = vec![("x".to_string(), "bigint".to_string())];
-        let plan = vec![json!({
-            "op": "filter",
-            "payload": {"op": "gt", "left": {"col": "x"}, "right": {"lit": 1}}
-        })];
-
-        // Direct call.
-        let df_direct = execute_plan(&session, data.clone(), schema.clone(), &plan).unwrap();
-
-        // Trait-based call returns boxed backend; downcast to DataFrame and compare.
-        let boxed = PolarsPlanExecutor::execute_plan(&session, data, schema, &plan).unwrap();
-        let backend_df = boxed
-            .as_any()
-            .downcast_ref::<crate::dataframe::DataFrame>()
-            .expect("expected Polars DataFrame backend")
-            .clone();
-
-        assert_eq!(
-            df_direct.collect_inner().unwrap(),
-            backend_df.collect_inner().unwrap()
-        );
     }
 }

@@ -24,7 +24,7 @@ import duckdb
 from pyspark.sql import functions as F
 from pyspark.sql.connect.session import SparkSession as ConnectSession
 
-from sparkless.server import SparklessConnect, SparklessServer
+from sparkless_server_duckdb import SparklessConnect, SparklessServer
 
 
 def send_quack_owner_command(owner: subprocess.Popen[str], command: str) -> None:

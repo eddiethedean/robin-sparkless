@@ -5,7 +5,6 @@
 //! catalog source; it does not select DuckDB as a query execution engine.
 
 pub use sparkless_server_polars::*;
-pub use sparkless_server_core::ServerProduct;
 
 /// Run the shared CLI while identifying this product in diagnostics and `--version` output.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {

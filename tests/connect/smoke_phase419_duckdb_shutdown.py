@@ -14,7 +14,7 @@ from typing import Any
 
 from pyspark.sql.connect.session import SparkSession
 
-from sparkless.server import SparklessServer
+from sparkless_server_duckdb import SparklessServer
 
 
 def read_owner_line(owner: subprocess.Popen[str], timeout: float) -> str:

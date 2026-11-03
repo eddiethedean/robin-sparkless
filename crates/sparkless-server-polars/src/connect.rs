@@ -32,6 +32,14 @@ const CONNECT_FORCE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECT_RESPONSE_STALL_TIMEOUT: Duration = Duration::from_secs(5);
 const CONNECT_FIRST_BATCH_ACK_GRACE: Duration = Duration::from_millis(50);
 
+struct CancelTokenOnDrop(robin_sparkless_core::engine::CancellationToken);
+
+impl Drop for CancelTokenOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
 #[derive(Default)]
 struct ConnectConnectionRegistry {
     next_id: AtomicU64,
@@ -2102,7 +2110,7 @@ fn start_connect_producer(
                 .count_with_cancellation(&cancellation)
                 .and_then(|count| {
                     i64::try_from(count).map_err(|_| {
-                        robin_sparkless::EngineError::User(
+                        robin_sparkless::EngineError::invalid_input(
                             "Connect count result exceeds the signed 64-bit range".into(),
                         )
                     })
@@ -2442,16 +2450,15 @@ impl SparkConnectService for ConnectService {
             .inner
             .connect_session_lease(&identity)
             .map_err(status_from_failure)?;
+        let analysis_token = robin_sparkless_core::engine::CancellationToken::new();
+        let _cancel_on_drop = CancelTokenOnDrop(analysis_token.clone());
         let planning_resources = self
-            .acquire_planning_resources(
-                &session,
-                deadline,
-                robin_sparkless_core::engine::CancellationToken::new(),
-            )
+            .acquire_planning_resources(&session, deadline, analysis_token.clone())
             .await?;
         let session_id = identity.client_session_id;
         let server_side_session_id = session.0.server_side_session_id.clone();
-        let planning = tokio::task::spawn_blocking(move || {
+        let worker_token = analysis_token.clone();
+        let mut planning = tokio::task::spawn_blocking(move || {
             let _admission = admission;
             let (_session_guard, _compute_permit, _session_compute_permit) = planning_resources;
             session.0.session.sync_thread_context();
@@ -2460,18 +2467,24 @@ impl SparkConnectService for ConnectService {
                 &server_side_session_id,
                 &session.0.session,
                 request.analyze,
+                &worker_token,
             )?;
             Ok::<_, Status>(response)
         });
-        match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), planning).await {
+        match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), &mut planning).await
+        {
             Ok(Ok(Ok(response))) => Ok(Response::new(response)),
             Ok(Ok(Err(status))) => Err(status),
             Ok(Err(error)) => Err(Status::internal(format!(
                 "Connect analysis worker failed: {error}"
             ))),
-            Err(_) => Err(Status::deadline_exceeded(
-                "Connect analysis exceeded its deadline",
-            )),
+            Err(_) => {
+                analysis_token.cancel();
+                let _ = planning.await;
+                Err(Status::deadline_exceeded(
+                    "Connect analysis exceeded its deadline",
+                ))
+            }
         }
     }
 

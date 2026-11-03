@@ -16,6 +16,7 @@ from sparkless import (
 )
 from sparkless.external_catalog import (
     ArrowIpcStream,
+    ExternalCatalogOwnership,
     ExternalTableDescriptor,
     ExternalTableFormat,
     ExternalTableSaveMode,
@@ -28,6 +29,22 @@ from sparkless.sql import types as T
 
 pytestmark = pytest.mark.sparkless_only
 IDENTIFIER = "catalog.schema.orders"
+
+
+class _OwnershipMixin:
+    """Keep test providers explicit about the namespace they own."""
+
+    def resolve_ownership(self, identifier):
+        if identifier != IDENTIFIER:
+            return None
+        has_materialized_writer = callable(getattr(self, "write_table", None))
+        has_batch_writer = callable(getattr(self, "write_table_batches", None))
+        return ExternalCatalogOwnership(
+            owner_id="catalog.schema",
+            read=True,
+            write=has_materialized_writer or has_batch_writer,
+            batch_write=has_batch_writer,
+        )
 
 
 def test_external_catalog_error_defaults_are_present():
@@ -53,7 +70,7 @@ def session():
     spark.stop()
 
 
-class Provider:
+class Provider(_OwnershipMixin):
     def __init__(self, table):
         self.table = table
         self.lookups = []
@@ -154,7 +171,7 @@ def test_python_batch_writer_receives_bounded_record_batches(session):
     schema = T.StructType([T.StructField("id", T.LongType(), False)])
     table = descriptor(schema)
 
-    class BatchProvider:
+    class BatchProvider(_OwnershipMixin):
         received = None
 
         def resolve_table(self, identifier):
@@ -243,7 +260,7 @@ def test_external_writer_preserves_null_struct_parent_validity(session, ingress)
     else:
         data = [(row["details"], row["items"]) for row in expected]
 
-    class CaptureThenFail:
+    class CaptureThenFail(_OwnershipMixin):
         received = None
 
         def resolve_table(self, identifier):
@@ -260,7 +277,7 @@ def test_external_writer_preserves_null_struct_parent_validity(session, ingress)
         frame.write.mode("append").saveAsTable(IDENTIFIER)
     assert exc_info.value.operation == "write_table"
     assert exc_info.value.category == "provider_failure"
-    assert exc_info.value.retryability == "uncertain"
+    assert exc_info.value.retryability == "outcome_unknown"
     assert "intentional capture stop before commit" not in str(exc_info.value)
 
     assert provider.received == expected
@@ -353,7 +370,7 @@ def test_read_only_provider_and_invalid_receipts_fail_explicitly(session):
     frame = session.createDataFrame([(1,)], ["id"])
     table = descriptor(frame.schema)
 
-    class ReadOnly:
+    class ReadOnly(_OwnershipMixin):
         def resolve_table(self, identifier):
             return table
 
@@ -402,7 +419,7 @@ def test_python_write_failures_do_not_fall_back_to_local(session, failure):
             frame.write.mode("append").saveAsTable(IDENTIFIER)
         assert exc_info.value.operation == "write_table"
         assert exc_info.value.category == "provider_failure"
-        assert exc_info.value.retryability == "uncertain"
+        assert exc_info.value.retryability == "outcome_unknown"
     session.set_external_catalog_provider(None)
     with pytest.raises(Exception, match="not found"):
         session.table(IDENTIFIER)
@@ -410,7 +427,7 @@ def test_python_write_failures_do_not_fall_back_to_local(session, failure):
 
 @pytest.mark.parametrize("result", [{}, "bad descriptor", False])
 def test_invalid_python_descriptors_do_not_become_misses(session, result):
-    class Invalid:
+    class Invalid(_OwnershipMixin):
         def resolve_table(self, identifier):
             return result
 
@@ -545,7 +562,7 @@ def test_python_sql_local_map_view_shadows_cached_external_columns(session, tmp_
 
 
 def test_python_catalog_existence_checks_surface_provider_errors(session):
-    class UnavailableProvider:
+    class UnavailableProvider(_OwnershipMixin):
         def resolve_table(self, identifier):
             raise RuntimeError("catalog service unavailable")
 
@@ -590,7 +607,9 @@ def test_typed_provider_write_errors_preserve_safe_structured_context(session):
     assert error.version == 3
     assert error.expected_version == 3
     assert error.actual_version == 4
-    assert error.retryability == "terminal"
+    # The provider marks the stale request terminal for retry policy, but a raised write
+    # callback cannot prove whether its commit took effect.
+    assert error.retryability == "outcome_unknown"
     assert "do-not-leak" not in str(error)
 
 
@@ -621,9 +640,9 @@ def test_unknown_provider_write_error_remains_uncertain_and_generic(session):
     error = exc_info.value
     assert error.operation == "write_table"
     assert error.category == "provider_failure"
-    assert error.code is None
+    assert error.code == "WRITE_OUTCOME_UNKNOWN"
     assert error.provider_error_type == "RuntimeError"
-    assert error.retryability == "uncertain"
+    assert error.retryability == "outcome_unknown"
     assert "do-not-leak" not in str(error)
 
 
@@ -1055,10 +1074,22 @@ def test_cancel_during_catalog_resolution_prevents_local_save_as_table():
     continue_resolve = Event()
 
     class Provider:
+        def resolve_ownership(self, identifier):
+            if identifier == "cancelled_local":
+                return ExternalCatalogOwnership(
+                    owner_id="cancelled-local",
+                    read=True,
+                    write=True,
+                )
+            return None
+
         def resolve_table(self, identifier):
             entered_resolve.set()
             assert continue_resolve.wait(timeout=5)
             return None
+
+        def write_table(self, request):
+            raise AssertionError("cancellation must happen before the writer callback")
 
     spark.set_external_catalog_provider(Provider())
     frame = spark.createDataFrame([(1,)], ["id"])
@@ -1203,6 +1234,11 @@ def test_cancellation_during_sql_delta_metadata_processing_is_reported(tmp_path)
     class Provider:
         calls = 0
 
+        def resolve_ownership(self, identifier):
+            if identifier == "external_source":
+                return ExternalCatalogOwnership(owner_id="external_source", read=True)
+            return None
+
         def resolve_table(self, identifier):
             self.calls += 1
             if self.calls == 2:
@@ -1261,9 +1297,21 @@ def test_save_as_table_registers_with_active_target_session():
     handle = target.cancellation_handle()
 
     class Provider:
+        def resolve_ownership(self, identifier):
+            if identifier == "cancelled_in_target":
+                return ExternalCatalogOwnership(
+                    owner_id="cancelled-in-target",
+                    read=True,
+                    write=True,
+                )
+            return None
+
         def resolve_table(self, identifier):
             assert handle.cancel_all_active_actions() == 1
             return None
+
+        def write_table(self, request):
+            raise AssertionError("cancellation must happen before the writer callback")
 
     target.set_external_catalog_provider(Provider())
     try:

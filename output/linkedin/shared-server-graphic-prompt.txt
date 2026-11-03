@@ -1,0 +1,97 @@
+Generated with built-in image_gen.
+
+Edit the latest navy Sparkless three-example LinkedIn graphic into a marketing graphic featuring ONLY verified Sparkless wins from a fair shared-server comparison. Preserve the elegant navy/teal/yellow developer style, readable exact Python and shared test. Expand canvas as needed. These are selected workload-specific wins: DO NOT claim universal superiority. Replace old metrics 4.7x and 2.2x completely. Critical: both measured engines now use one shared Spark Connect server and the identical pyspark-client 4.0.5; no separate JVM per pytest worker in these results.
+
+Header brand "Sparkless"
+Title "Faster startup. Faster order tests."
+Subtitle "Real PySpark client. One shared server per engine."
+
+Shared test heading "THE TEST · 1,000 orders"
+Exact code:
+def check_orders(spark):
+    orders = spark.createDataFrame(
+        [(i, i % 200) for i in range(1000)],
+        "order_id LONG, total LONG",
+    )
+    assert orders.filter("total > 99").count() == 500
+
+Card 1 heading "1 · Sparkless directly"
+INSTALL strip exactly these two lines, with literal trailing backslash on first:
+pip install \
+    "sparkless==4.18.1"
+Python code, preserve parentheses so every import is valid:
+from sparkless.sql import (
+    SparkSession,
+)
+
+with (
+    SparkSession.builder.app_name("test")
+    .get_or_create()
+) as spark:
+    check_orders(spark)
+
+Card 2 heading "2 · PySpark + Sparkless Connect"
+INSTALL strip exactly two lines with trailing backslash:
+pip install "sparkless[server]==4.18.1" \
+    "pyspark-client==4.0.5"
+Python code:
+from pyspark.sql import SparkSession
+from sparkless import SparklessServer
+
+limits = {
+    "SPARKLESS_MAX_ACTIVE_OPERATIONS": "4"
+}
+with SparklessServer(env=limits) as server:
+    spark = SparkSession.builder.remote(
+        server.spark_connect_url
+    ).create()
+    try:
+        check_orders(spark)
+    finally:
+        spark.stop()
+
+Card 3 heading "3 · PySpark + shared JVM"
+INSTALL strip exactly two lines with trailing backslash:
+pip install \
+    "pyspark-client==4.0.5"
+Small prerequisite note "Running Spark 4.0.5 Connect server · Java 17+"
+Exact code:
+from pyspark.sql import (
+    SparkSession,
+)
+
+spark = SparkSession.builder.remote(
+    "sc://localhost:15002"
+).create()
+try:
+    check_orders(spark)
+finally:
+    spark.stop()
+
+Do not show classic .master("local[4]").getOrCreate() in Card 3: clients connect to a separate shared JVM server. The server uses local[4], as explained below.
+
+Results area heading "VERIFIED WINS · SHARED-SERVER BENCHMARKS"
+Two prominent stylish metric cards, only these figures:
+"1.7× faster"
+"Server startup + first 38-test suite"
+"Sparkless Connect 2.96 s"
+"JVM Spark Connect 5.11 s"
+
+"1.5× faster"
+"1,000-order test · warm execution"
+"Sparkless Connect 16.5 ms"
+"JVM Spark Connect 24.8 ms"
+
+Clear readable methodology footer exact text in lines:
+"Same pyspark-client 4.0.5 · One shared server per engine"
+"38-test suite: 4 pytest-xdist workers; 3 runs per engine."
+"Startup includes a successful readiness query; shutdown excluded."
+"Order test: median of 30 actions across 3 warm servers."
+"JVM: local[4], FAIR scheduling, 4 partitions."
+"Sparkless: 4 active operations; native thread pools capped at 4."
+"Apple M4 Pro · Python 3.11 · Java 17"
+"Sparkless API 4.18.1 · native/server 4.18.0 · Spark 4.0.5"
+"Selected measured workloads. Results vary by workload."
+"Sparkless Connect supports a focused DataFrame subset."
+
+Composition can be taller to preserve readable code. No broken Python line wrapping, no bare module import split over lines; use only the exact parenthesized imports supplied. Preserve all code indentation and dependencies. The direct Sparkless card has NO speed metric since it was not part of the measured server comparison. No fictitious benchmarks, no old four-JVM baseline, no universal faster claim. User wants to showcase true advantages, and each metric is explicitly scoped.

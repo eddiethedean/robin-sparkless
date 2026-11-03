@@ -1,9 +1,12 @@
 #![cfg(feature = "duckdb-source")]
 
-use robin_sparkless_core::engine::{CancellationToken, begin_external_catalog_read_snapshot};
+use robin_sparkless_core::engine::{
+    CancellationToken, CatalogOwnership, CatalogResolver, ExternalCatalog,
+    begin_catalog_read_snapshot,
+};
 use robin_sparkless_polars::{
     DataType, DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
-    ExternalCatalogProvider, SparkSession,
+    SparkSession,
 };
 use std::sync::Arc;
 
@@ -85,7 +88,7 @@ fn duckdb_read_only_catalog_resolves_schema_and_streams_typed_batches() {
     let provider = source(&database);
     let session = SparkSession::builder().get_or_create();
     session
-        .set_external_catalog_provider(Some(provider))
+        .set_external_catalog(Some(provider.into_external_catalog()))
         .expect("attach external catalog");
 
     // Schema analysis returns a schema-bearing empty relation without reading table rows.
@@ -137,7 +140,7 @@ fn duckdb_empty_tables_keep_their_declared_schema_and_unknown_aliases_fail() {
     let (_directory, database) = fixture_database();
     let session = SparkSession::builder().get_or_create();
     session
-        .set_external_catalog_provider(Some(source(&database)))
+        .set_external_catalog(Some(source(&database).into_external_catalog()))
         .expect("attach external catalog");
 
     let empty = session
@@ -162,7 +165,7 @@ fn duckdb_decimal_precision_and_scale_boundaries_keep_exact_values() {
     let (_directory, database) = fixture_database();
     let session = SparkSession::builder().get_or_create();
     session
-        .set_external_catalog_provider(Some(source(&database)))
+        .set_external_catalog(Some(source(&database).into_external_catalog()))
         .expect("attach external catalog");
 
     let decimals = session
@@ -214,7 +217,7 @@ fn duckdb_integer_extrema_keep_exact_values_and_non_null_schema() {
     let (_directory, database) = fixture_database();
     let session = SparkSession::builder().get_or_create();
     session
-        .set_external_catalog_provider(Some(source(&database)))
+        .set_external_catalog(Some(source(&database).into_external_catalog()))
         .expect("attach external catalog");
 
     let extrema = session
@@ -284,23 +287,18 @@ fn duckdb_source_write_targets_are_read_only_even_when_the_table_is_missing() {
     let (_directory, database) = fixture_database();
     let provider = source(&database);
 
-    assert!(
-        provider
-            .is_read_only_target("warehouse.main.events")
-            .unwrap()
-    );
-    assert!(
-        provider
-            .is_read_only_target("WAREHOUSE.main.not_created")
-            .unwrap()
-    );
-    assert!(provider.is_read_only_target("warehouse.main").unwrap());
-    assert!(
-        !provider
-            .is_read_only_target("unconfigured.main.events")
-            .unwrap()
-    );
-    assert!(!provider.is_read_only_target("warehouse.bad-name").unwrap());
+    let is_read_only_owner = |identifier: &str| {
+        matches!(
+            provider.resolve_ownership(identifier).unwrap(),
+            CatalogOwnership::External { capabilities, .. }
+                if capabilities.read && !capabilities.write && !capabilities.batch_write
+        )
+    };
+    assert!(is_read_only_owner("warehouse.main.events"));
+    assert!(is_read_only_owner("WAREHOUSE.main.not_created"));
+    assert!(is_read_only_owner("warehouse.main"));
+    assert!(!is_read_only_owner("unconfigured.main.events"));
+    assert!(!is_read_only_owner("warehouse.bad-name"));
 }
 
 #[test]
@@ -364,10 +362,9 @@ fn duckdb_quack_configuration_can_omit_the_packaged_extension_path() {
 #[test]
 fn duckdb_read_snapshot_reuses_one_database_owner_for_multiple_tables() {
     let (_directory, database) = fixture_database();
-    let provider: Arc<dyn ExternalCatalogProvider> = source(&database);
+    let provider: Arc<ExternalCatalog> = source(&database).into_external_catalog();
     let token = CancellationToken::new();
-    let snapshot = begin_external_catalog_read_snapshot(Arc::clone(&provider), &token)
-        .expect("begin source snapshot");
+    let snapshot = begin_catalog_read_snapshot(&provider, &token).expect("begin source snapshot");
     assert!(
         snapshot
             .resolve_table("warehouse.events")
@@ -444,11 +441,12 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
         "extension_path": extension_path,
         "disable_ssl": true,
     }]);
-    let provider: Arc<dyn ExternalCatalogProvider> = Arc::new(
+    let provider: Arc<ExternalCatalog> = Arc::new(
         DuckDbCatalog::from_json(&catalog_json.to_string()).expect("configure Quack source"),
-    );
+    )
+    .into_external_catalog();
     let cancellation = CancellationToken::new();
-    let first_snapshot = begin_external_catalog_read_snapshot(Arc::clone(&provider), &cancellation)
+    let first_snapshot = begin_catalog_read_snapshot(&provider, &cancellation)
         .expect("begin first shared-owner snapshot");
     let descriptor = first_snapshot
         .resolve_table("warehouse.events")
@@ -486,9 +484,8 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
     assert_eq!(first_snapshot_label_rows, 1);
     drop(first_snapshot);
 
-    let second_snapshot =
-        begin_external_catalog_read_snapshot(Arc::clone(&provider), &cancellation)
-            .expect("begin second shared-owner snapshot");
+    let second_snapshot = begin_catalog_read_snapshot(&provider, &cancellation)
+        .expect("begin second shared-owner snapshot");
     let descriptor = second_snapshot
         .resolve_table("warehouse.events")
         .expect("resolve table in second snapshot")
@@ -518,7 +515,7 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
     // Cancelling after the first remote batch must stop work on the shared DuckDB owner, not
     // only interrupt DuckDB's local HTTP client connection.
     let cancel_token = CancellationToken::new();
-    let cancel_snapshot = begin_external_catalog_read_snapshot(provider, &cancel_token)
+    let cancel_snapshot = begin_catalog_read_snapshot(&provider, &cancel_token)
         .expect("begin cancellable shared-owner snapshot");
     let slow_table = cancel_snapshot
         .resolve_table("warehouse.slow_events")
@@ -533,7 +530,7 @@ fn quack_shared_owner_pins_read_snapshot_and_observes_writer_commit_next_stateme
     });
     assert!(matches!(
         cancelled,
-        Err(robin_sparkless_core::EngineError::Cancelled(_))
+        Err(error) if error.category() == robin_sparkless_core::ErrorCategory::Cancelled
     ));
     assert!(cancel_started.elapsed() < std::time::Duration::from_secs(8));
     let owner_states_after_cancel: String = server

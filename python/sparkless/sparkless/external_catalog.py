@@ -1,6 +1,8 @@
 """Python providers for Sparkless external catalog reads and table writes.
 
 Attach a provider with ``spark.set_external_catalog_provider(provider)``. Its
+``resolve_ownership(identifier)`` method returns ``None`` for local identifiers or
+an ``ExternalCatalogOwnership`` for identifiers owned by the provider. The separate
 ``resolve_table(identifier)`` method returns an ExternalTableDescriptor or None.
 Providers can implement ``write_table(request)`` for materialized Arrow IPC bytes,
 or ``write_table_batches(request)`` to consume PyArrow RecordBatches on demand.
@@ -18,6 +20,7 @@ from sparkless.errors import SparklessExternalCatalogError
 from sparkless.sql import types as T
 
 __all__ = [
+    "ExternalCatalogOwnership",
     "ExternalCatalogProvider",
     "WritableExternalCatalogProvider",
     "ArrowIpcStream",
@@ -38,6 +41,16 @@ class ExternalTableFormat(str, Enum):
 
     def __str__(self) -> str:
         return self.value
+
+
+@dataclass(frozen=True)
+class ExternalCatalogOwnership:
+    """Owner/capabilities for an identifier; return None when the local catalog owns it."""
+
+    owner_id: str
+    read: bool = True
+    write: bool = False
+    batch_write: bool = False
 
 
 class ExternalTableSaveMode(str, Enum):
@@ -92,9 +105,11 @@ class ExternalTableWriteRequest:
     of PyArrow RecordBatches. Closing or exhausting that iterator releases the
     producer; a callback may stop early by closing it. Options are ordered pairs
     so duplicate keys survive. A successful callback must commit the data it
-    accepts before returning its receipt.
+    accepts before returning its receipt. A callback failure after it starts may have an
+    unknown commit outcome and is retained as such by the native layer.
     """
 
+    operation_id: str
     identifier: str
     table: ExternalTableDescriptor
     data: Optional[ArrowIpcStream]
@@ -107,10 +122,11 @@ class ExternalTableWriteRequest:
 
 @dataclass
 class ExternalTableWriteResult:
-    """Descriptor and exact version of a completed provider commit."""
+    """Descriptor and provider-specific identity of a completed commit."""
 
     table: ExternalTableDescriptor
-    committed_version: int
+    committed_version: Optional[int] = None
+    provider_commit_id: Optional[str] = None
 
     def validate_against(self, previous: ExternalTableDescriptor) -> None:
         """Run the native identity and committed-version receipt checks."""
@@ -120,12 +136,20 @@ class ExternalTableWriteResult:
 
 
 class ExternalCatalogProvider(Protocol):
-    """Required provider interface.
+    """Python catalog callback surface used to build separate Rust capabilities.
 
-    Writable providers also implement ``write_table(request:
+    ``resolve_ownership`` is called before table lookup. Return None only when Sparkless'
+    local catalog should handle the identifier. Writable providers implement ``write_table``
+    and may separately implement ``write_table_batches``.
+
+    ``write_table(request:
     ExternalTableWriteRequest) -> ExternalTableWriteResult``. Read-only objects
-    may omit that method.
+    may omit writer methods.
     """
+
+    def resolve_ownership(
+        self, identifier: str
+    ) -> Optional[ExternalCatalogOwnership]: ...
 
     def resolve_table(self, identifier: str) -> Optional[ExternalTableDescriptor]: ...
 
@@ -371,6 +395,43 @@ def _descriptor_from_json(value):
 def _write_result_to_parts(result):
     if not isinstance(result, ExternalTableWriteResult):
         raise TypeError("provider.write_table must return ExternalTableWriteResult")
-    if type(result.committed_version) is not int:
-        raise TypeError("committed_version must be an integer")
-    return _descriptor_to_json(result.table), result.committed_version
+    if result.committed_version is not None and type(result.committed_version) is not int:
+        raise TypeError("committed_version must be an integer or None")
+    if result.provider_commit_id is not None and not isinstance(
+        result.provider_commit_id, str
+    ):
+        raise TypeError("provider_commit_id must be a string or None")
+    if result.committed_version is None and result.provider_commit_id is None:
+        raise ValueError("write receipt must include a version or provider_commit_id")
+    return (
+        _descriptor_to_json(result.table),
+        result.committed_version,
+        result.provider_commit_id,
+    )
+
+
+def _ownership_to_json(ownership):
+    if ownership is None:
+        return json.dumps({"kind": "local"})
+    if not isinstance(ownership, ExternalCatalogOwnership):
+        raise TypeError(
+            "resolve_ownership must return ExternalCatalogOwnership or None"
+        )
+    if not isinstance(ownership.owner_id, str) or not ownership.owner_id.strip():
+        raise ValueError("external owner_id must not be empty")
+    for capability in (ownership.read, ownership.write, ownership.batch_write):
+        if not isinstance(capability, bool):
+            raise TypeError("external ownership capabilities must be bool values")
+    if ownership.batch_write and not ownership.write:
+        raise ValueError("batch_write requires write=True")
+    return json.dumps(
+        {
+            "kind": "external",
+            "owner_id": ownership.owner_id,
+            "capabilities": {
+                "read": ownership.read,
+                "write": ownership.write,
+                "batch_write": ownership.batch_write,
+            },
+        }
+    )

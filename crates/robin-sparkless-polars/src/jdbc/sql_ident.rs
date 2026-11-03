@@ -18,18 +18,18 @@ fn is_valid_ident_part(part: &str) -> bool {
 /// Validate `dbtable` / schema-qualified table name (no SQL injection via identifiers).
 pub fn validate_dbtable(table: &str) -> Result<(), EngineError> {
     if table.trim().is_empty() {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC dbtable must not be empty".to_string(),
         ));
     }
     if table.contains(';') || table.contains("--") || table.contains("/*") {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC dbtable contains disallowed SQL characters".to_string(),
         ));
     }
     for part in table.split('.') {
         if !is_valid_ident_part(part) {
-            return Err(EngineError::User(format!(
+            return Err(EngineError::invalid_input(format!(
                 "JDBC dbtable '{table}' contains invalid identifier segment '{part}'"
             )));
         }
@@ -40,7 +40,7 @@ pub fn validate_dbtable(table: &str) -> Result<(), EngineError> {
 /// Validate column names used in INSERT statements.
 pub fn validate_column_ident(name: &str) -> Result<(), EngineError> {
     if !is_valid_ident_part(name) {
-        return Err(EngineError::User(format!(
+        return Err(EngineError::invalid_input(format!(
             "JDBC column name '{name}' is not a safe SQL identifier"
         )));
     }

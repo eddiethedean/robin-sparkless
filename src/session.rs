@@ -1,9 +1,7 @@
 //! Root-owned Session API; delegates to robin-sparkless-polars for execution.
 
 use crate::EngineError;
-use robin_sparkless_core::engine::{
-    CancellationToken, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
-};
+use robin_sparkless_core::engine::{CancellationToken, CatalogReadSnapshot, ExternalCatalog};
 use robin_sparkless_core::{SessionRuntimeConfig, SparklessConfig};
 use robin_sparkless_polars::{
     DataFrameReader as PolarsDataFrameReader, PlDataFrame, PolarsError, SharedCatalog,
@@ -13,8 +11,11 @@ use robin_sparkless_polars::{
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::dataframe::DataFrame;
+
+static NEXT_LOCAL_OPERATION_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Root-owned SparkSession; delegates to the Polars backend.
 #[derive(Clone)]
@@ -120,22 +121,22 @@ impl SparkSession {
         self.0.register_table(name, df.0)
     }
 
-    /// Attach or remove this logical session's external catalog resolver.
+    /// Attach or remove this logical session's external catalog capabilities.
     ///
     /// Resolver implementations receive exact identifiers from table lookups and return a
     /// stable table descriptor. A new logical session starts without this resolver.
-    pub fn set_external_catalog_provider(
+    pub fn set_external_catalog(
         &self,
-        provider: Option<Arc<dyn ExternalCatalogProvider>>,
+        catalog: Option<Arc<ExternalCatalog>>,
     ) -> Result<(), EngineError> {
-        self.0.set_external_catalog_provider(provider)
+        self.0.set_external_catalog(catalog)
     }
 
     /// Begin one external-source snapshot for a statement, if a provider is configured.
     pub fn begin_external_catalog_read_snapshot(
         &self,
         token: &CancellationToken,
-    ) -> Result<Option<Arc<dyn ExternalCatalogReadSnapshot>>, EngineError> {
+    ) -> Result<Option<Arc<dyn CatalogReadSnapshot>>, EngineError> {
         self.0.begin_external_catalog_read_snapshot(token)
     }
 
@@ -229,11 +230,35 @@ impl SparkSession {
         self.0.table_schema_only(name).map(DataFrame)
     }
 
+    /// Resolve table schemas without scanning external source rows, honoring cancellation.
+    pub fn table_schema_only_with_cancellation(
+        &self,
+        name: &str,
+        token: CancellationToken,
+    ) -> Result<DataFrame, PolarsError> {
+        self.0
+            .table_schema_only_with_cancellation(name, token)
+            .map(DataFrame)
+    }
+
+    /// Resolve a Connect table and report the DuckDB owner chosen by that lookup.
+    pub fn table_for_connect(
+        &self,
+        name: &str,
+        snapshot: Option<Arc<dyn CatalogReadSnapshot>>,
+        token: CancellationToken,
+        materialize_external: bool,
+    ) -> Result<(DataFrame, Option<String>), PolarsError> {
+        self.0
+            .table_for_connect(name, snapshot, token, materialize_external)
+            .map(|(frame, owner)| (DataFrame(frame), owner))
+    }
+
     /// Resolve and scan an external table in the statement-wide source snapshot.
     pub fn table_in_read_snapshot(
         &self,
         name: &str,
-        snapshot: Arc<dyn ExternalCatalogReadSnapshot>,
+        snapshot: Arc<dyn CatalogReadSnapshot>,
         token: CancellationToken,
     ) -> Result<DataFrame, PolarsError> {
         self.0
@@ -395,7 +420,17 @@ impl SparkSession {
     }
 
     pub fn sql(&self, query: &str) -> Result<DataFrame, PolarsError> {
-        self.0.sql(query).map(DataFrame)
+        let context = self
+            .execution_context(
+                format!(
+                    "local-sql-{}",
+                    NEXT_LOCAL_OPERATION_ID.fetch_add(1, Ordering::Relaxed)
+                ),
+                CancellationToken::new(),
+            )
+            .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+        self.sql_with_context(query, &context)
+            .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))
     }
 
     pub fn sql_with_cancellation(
@@ -403,7 +438,30 @@ impl SparkSession {
         query: &str,
         token: &robin_sparkless_core::CancellationToken,
     ) -> Result<DataFrame, EngineError> {
-        self.0.sql_with_cancellation(query, token).map(DataFrame)
+        let context = self.execution_context(
+            format!(
+                "local-sql-{}",
+                NEXT_LOCAL_OPERATION_ID.fetch_add(1, Ordering::Relaxed)
+            ),
+            token.clone(),
+        )?;
+        self.sql_with_context(query, &context)
+    }
+
+    pub fn execution_context(
+        &self,
+        operation_id: impl Into<Arc<str>>,
+        token: CancellationToken,
+    ) -> Result<robin_sparkless_core::ExecutionContext, EngineError> {
+        self.0.execution_context(operation_id, token)
+    }
+
+    pub fn sql_with_context(
+        &self,
+        query: &str,
+        context: &robin_sparkless_core::ExecutionContext,
+    ) -> Result<DataFrame, EngineError> {
+        self.0.sql_with_context(query, context).map(DataFrame)
     }
 
     pub fn table_engine(&self, name: &str) -> Result<DataFrame, EngineError> {

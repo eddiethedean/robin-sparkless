@@ -4,15 +4,17 @@ use crate::connect_proto as proto;
 use proto::analyze_plan_request::Analyze;
 use proto::analyze_plan_response::Result as AnalyzeResult;
 use robin_sparkless::SparkSession;
+use robin_sparkless_core::engine::CancellationToken;
 use tonic::Status;
 
-use super::plan::{parse_ddl_schema, schema_to_proto, translate_plan};
+use super::plan::{parse_ddl_schema, schema_to_proto, translate_plan_for_analysis};
 
 pub(super) fn response(
     session_id: &str,
     server_side_session_id: &str,
     session: &SparkSession,
     analyze: Option<Analyze>,
+    token: &CancellationToken,
 ) -> Result<proto::AnalyzePlanResponse, Status> {
     let analyze = analyze
         .ok_or_else(|| Status::invalid_argument("AnalyzePlanRequest.analyze is required"))?;
@@ -22,7 +24,7 @@ pub(super) fn response(
                 .plan
                 .as_ref()
                 .ok_or_else(|| Status::invalid_argument("AnalyzePlan.Schema.plan is required"))?;
-            let translated = translate_plan(session, plan)?;
+            let translated = translate_plan_for_analysis(session, plan, token)?;
             AnalyzeResult::Schema(proto::analyze_plan_response::Schema {
                 schema: Some(schema_to_proto(&translated.schema)?),
             })
@@ -43,7 +45,7 @@ pub(super) fn response(
                 .plan
                 .as_ref()
                 .ok_or_else(|| Status::invalid_argument("AnalyzePlan.IsLocal.plan is required"))?;
-            let translated = translate_plan(session, plan)?;
+            let translated = translate_plan_for_analysis(session, plan, token)?;
             translated.dataframe.schema_engine().map_err(|error| {
                 Status::failed_precondition(format!("CONNECT_SCHEMA_ANALYSIS_FAILED: {error}"))
             })?;
@@ -53,7 +55,7 @@ pub(super) fn response(
             let plan = is_streaming.plan.as_ref().ok_or_else(|| {
                 Status::invalid_argument("AnalyzePlan.IsStreaming.plan is required")
             })?;
-            let translated = translate_plan(session, plan)?;
+            let translated = translate_plan_for_analysis(session, plan, token)?;
             translated.dataframe.schema_engine().map_err(|error| {
                 Status::failed_precondition(format!("CONNECT_SCHEMA_ANALYSIS_FAILED: {error}"))
             })?;
@@ -65,7 +67,7 @@ pub(super) fn response(
             let plan = input_files.plan.as_ref().ok_or_else(|| {
                 Status::invalid_argument("AnalyzePlan.InputFiles.plan is required")
             })?;
-            let translated = translate_plan(session, plan)?;
+            let translated = translate_plan_for_analysis(session, plan, token)?;
             translated.dataframe.schema_engine().map_err(|error| {
                 Status::failed_precondition(format!("CONNECT_SCHEMA_ANALYSIS_FAILED: {error}"))
             })?;

@@ -1,0 +1,27 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+Using Spark's default log4j profile: org/apache/spark/log4j2-defaults.properties
+Setting default log level to "WARN".
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+26/10/31 17:11:21 WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+[Stage 0:>                                                          (0 + 4) / 4]                                                                                ingest_10 pass
+ingest_100 pass
+ingest_1000 pass
+ingest_10000 pass
+orders_pipeline pass
+nullable_orders pass
+scalar_roundtrip pass
+wide_projection pass
+string_payload pass
+empty_result pass
+selectivity_none pass
+selectivity_one pass
+selectivity_half pass
+selectivity_all pass
+arithmetic_pipeline pass
+preview_limit pass
+collect_10000 pass
+collect_100000 pass
+schema_100_columns pass
+mixed clients 1 pass
+mixed clients 4 pass
+mixed clients 8 pass

@@ -20,14 +20,14 @@ pub(crate) fn write_jdbc_postgres(
     }
 
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
-        EngineError::User(
+        EngineError::invalid_input(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
     let table = sql_ident::quoted_table(JdbcDialect::Postgres, table_raw)?;
 
     let mut client = Client::connect(&url, NoTls).map_err(|e| {
-        EngineError::Io(format!(
+        EngineError::io(format!(
             "JDBC write: failed to connect to {}: {e}",
             sql_ident::redact_jdbc_url(&url)
         ))
@@ -36,7 +36,7 @@ pub(crate) fn write_jdbc_postgres(
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
         client.batch_execute(init_sql).map_err(|e| {
-            EngineError::Sql(format!("JDBC write: sessionInitStatement failed: {e}"))
+            EngineError::sql(format!("JDBC write: sessionInitStatement failed: {e}"))
         })?;
     }
 
@@ -44,10 +44,10 @@ pub(crate) fn write_jdbc_postgres(
         Sm::ErrorIfExists => {
             let row = client
                 .query_one(&format!("SELECT COUNT(*) FROM {table}"), &[])
-                .map_err(|e| EngineError::Sql(format!("JDBC write: check table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write: check table: {e}")))?;
             let count: i64 = row.get(0);
             if count > 0 {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "Table '{table}' already has data. SaveMode is ErrorIfExists."
                 )));
             }
@@ -55,7 +55,7 @@ pub(crate) fn write_jdbc_postgres(
         Sm::Ignore => {
             let row = client
                 .query_one(&format!("SELECT COUNT(*) FROM {table}"), &[])
-                .map_err(|e| EngineError::Sql(format!("JDBC write: check table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write: check table: {e}")))?;
             let count: i64 = row.get(0);
             if count > 0 {
                 return Ok(());
@@ -68,19 +68,19 @@ pub(crate) fn write_jdbc_postgres(
                     client
                         .execute(&format!("TRUNCATE TABLE ONLY {table} CASCADE"), &[])
                         .map_err(|e| {
-                            EngineError::Sql(format!("JDBC write: truncate table cascade: {e}"))
+                            EngineError::sql(format!("JDBC write: truncate table cascade: {e}"))
                         })?;
                 } else {
                     client
                         .execute(&format!("TRUNCATE TABLE {table}"), &[])
                         .map_err(|e| {
-                            EngineError::Sql(format!("JDBC write: truncate table: {e}"))
+                            EngineError::sql(format!("JDBC write: truncate table: {e}"))
                         })?;
                 }
             } else {
                 client
                     .execute(&format!("DELETE FROM {table}"), &[])
-                    .map_err(|e| EngineError::Sql(format!("JDBC write: delete from table: {e}")))?;
+                    .map_err(|e| EngineError::sql(format!("JDBC write: delete from table: {e}")))?;
             }
         }
         Sm::Append => {}
@@ -112,7 +112,7 @@ pub(crate) fn write_jdbc_postgres(
         // Start a transaction for this batch
         client
             .batch_execute("BEGIN")
-            .map_err(|e| EngineError::Sql(format!("JDBC write: begin transaction: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC write: begin transaction: {e}")))?;
 
         for row_idx in batch_start..batch_end {
             let mut params: Vec<Box<dyn postgres::types::ToSql + Sync>> =
@@ -120,7 +120,7 @@ pub(crate) fn write_jdbc_postgres(
             for col in df.columns() {
                 let v = col
                     .get(row_idx)
-                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                    .map_err(|e| EngineError::internal(format!("JDBC write: get cell: {e}")))?;
                 let boxed: Box<dyn postgres::types::ToSql + Sync> = match v {
                     polars::prelude::AnyValue::Null => Box::new(Option::<i32>::None),
                     polars::prelude::AnyValue::Boolean(b) => Box::new(Some(b)),
@@ -144,13 +144,13 @@ pub(crate) fn write_jdbc_postgres(
             }
             client
                 .execute(&insert_sql, &param_refs)
-                .map_err(|e| EngineError::Sql(format!("JDBC write: insert failed: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write: insert failed: {e}")))?;
         }
 
         // Commit this batch
         client
             .batch_execute("COMMIT")
-            .map_err(|e| EngineError::Sql(format!("JDBC write: commit batch: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC write: commit batch: {e}")))?;
     }
     Ok(())
 }
@@ -167,13 +167,13 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
         let q = sql_ident::quoted_table(JdbcDialect::Postgres, table)?;
         format!("SELECT * FROM {q}")
     } else {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
         ));
     };
 
     let mut client = Client::connect(&url, NoTls).map_err(|e| {
-        EngineError::Io(format!(
+        EngineError::io(format!(
             "JDBC read: failed to connect to {}: {e}",
             sql_ident::redact_jdbc_url(&url)
         ))
@@ -182,7 +182,7 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
         client.batch_execute(init_sql).map_err(|e| {
-            EngineError::Sql(format!("JDBC read: sessionInitStatement failed: {e}"))
+            EngineError::sql(format!("JDBC read: sessionInitStatement failed: {e}"))
         })?;
     }
 
@@ -191,29 +191,29 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
         let timeout_ms = timeout_secs * 1000;
         client
             .batch_execute(&format!("SET statement_timeout = {timeout_ms}"))
-            .map_err(|e| EngineError::Sql(format!("JDBC read: failed to set queryTimeout: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC read: failed to set queryTimeout: {e}")))?;
     }
 
     if let Some(fetch) = opts.fetch_size {
         client
             .simple_query(&format!("SET SESSION FETCH_COUNT = {fetch}"))
-            .map_err(|e| EngineError::Other(format!("JDBC read: failed to set fetchsize: {e}")))?;
+            .map_err(|e| EngineError::other(format!("JDBC read: failed to set fetchsize: {e}")))?;
     }
 
     // Execute prepare query if provided (for CTEs, temp tables, etc.)
     if let Some(prep_sql) = &opts.prepare_query {
         client
             .batch_execute(prep_sql)
-            .map_err(|e| EngineError::Sql(format!("JDBC read: prepareQuery failed: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC read: prepareQuery failed: {e}")))?;
     }
 
     let statement = client
         .prepare(&sql)
-        .map_err(|e| EngineError::Sql(format!("JDBC read: prepare query failed: {e}")))?;
+        .map_err(|e| EngineError::sql(format!("JDBC read: prepare query failed: {e}")))?;
     let columns = statement.columns();
     let rows = client
         .query(&statement, &[])
-        .map_err(|e| EngineError::Sql(format!("JDBC read: query failed: {e}")))?;
+        .map_err(|e| EngineError::sql(format!("JDBC read: query failed: {e}")))?;
 
     let cfg = crate::udf_context::get_thread_runtime_config();
     let use_v4_datetime = robin_sparkless_core::postgres_v4_datetime_mapping(&cfg);
@@ -227,7 +227,7 @@ pub(crate) fn read_jdbc_postgres(opts: &JdbcOptions) -> Result<PlDataFrame, Engi
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
-        .map_err(|e| EngineError::Internal(format!("JDBC read: failed to build DataFrame: {e}")))
+        .map_err(|e| EngineError::internal(format!("JDBC read: failed to build DataFrame: {e}")))
 }
 
 fn build_series_for_column(
@@ -237,15 +237,13 @@ fn build_series_for_column(
     rows: &[postgres::Row],
     use_v4_datetime: bool,
 ) -> Result<Series, EngineError> {
-    use EngineError::*;
-
     match *ty {
         PgType::BOOL => {
             let mut vals: Vec<Option<bool>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let v: Option<bool> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: bool column '{name}': {e}")))?;
+                let v: Option<bool> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: bool column '{name}': {e}"))
+                })?;
                 vals.push(v);
             }
             Ok(Series::new(name.into(), vals))
@@ -253,9 +251,9 @@ fn build_series_for_column(
         PgType::INT2 => {
             let mut vals: Vec<Option<i16>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let v: Option<i16> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: int2 column '{name}': {e}")))?;
+                let v: Option<i16> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: int2 column '{name}': {e}"))
+                })?;
                 vals.push(v);
             }
             Ok(Series::new(name.into(), vals))
@@ -263,9 +261,9 @@ fn build_series_for_column(
         PgType::INT4 => {
             let mut vals: Vec<Option<i32>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let v: Option<i32> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: int4 column '{name}': {e}")))?;
+                let v: Option<i32> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: int4 column '{name}': {e}"))
+                })?;
                 vals.push(v);
             }
             Ok(Series::new(name.into(), vals))
@@ -273,9 +271,9 @@ fn build_series_for_column(
         PgType::INT8 => {
             let mut vals: Vec<Option<i64>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let v: Option<i64> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: int8 column '{name}': {e}")))?;
+                let v: Option<i64> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: int8 column '{name}': {e}"))
+                })?;
                 vals.push(v);
             }
             Ok(Series::new(name.into(), vals))
@@ -283,9 +281,9 @@ fn build_series_for_column(
         PgType::FLOAT4 => {
             let mut vals: Vec<Option<f32>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let v: Option<f32> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: float4 column '{name}': {e}")))?;
+                let v: Option<f32> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: float4 column '{name}': {e}"))
+                })?;
                 vals.push(v);
             }
             Ok(Series::new(name.into(), vals))
@@ -293,9 +291,9 @@ fn build_series_for_column(
         PgType::FLOAT8 => {
             let mut vals: Vec<Option<f64>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let v: Option<f64> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: float8 column '{name}': {e}")))?;
+                let v: Option<f64> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: float8 column '{name}': {e}"))
+                })?;
                 vals.push(v);
             }
             Ok(Series::new(name.into(), vals))
@@ -303,9 +301,9 @@ fn build_series_for_column(
         PgType::TEXT | PgType::VARCHAR | PgType::BPCHAR | PgType::NAME => {
             let mut vals: Vec<Option<String>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let v: Option<String> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: text-like column '{name}': {e}")))?;
+                let v: Option<String> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: text-like column '{name}': {e}"))
+                })?;
                 vals.push(v);
             }
             Ok(Series::new(name.into(), vals))
@@ -315,7 +313,7 @@ fn build_series_for_column(
                 let mut vals: Vec<Option<String>> = Vec::with_capacity(rows.len());
                 for row in rows {
                     let s: Option<String> = row.try_get(index).map_err(|e| {
-                        Other(format!("JDBC read: timestamptz column '{name}': {e}"))
+                        EngineError::other(format!("JDBC read: timestamptz column '{name}': {e}"))
                     })?;
                     vals.push(s);
                 }
@@ -323,9 +321,9 @@ fn build_series_for_column(
             } else {
                 let mut vals: Vec<Option<chrono::NaiveDateTime>> = Vec::with_capacity(rows.len());
                 for row in rows {
-                    let s: Option<String> = row
-                        .try_get(index)
-                        .map_err(|e| Other(format!("JDBC read: timestamp column '{name}': {e}")))?;
+                    let s: Option<String> = row.try_get(index).map_err(|e| {
+                        EngineError::other(format!("JDBC read: timestamp column '{name}': {e}"))
+                    })?;
                     let v = s.and_then(|s| {
                         chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.f")
                             .ok()
@@ -343,9 +341,9 @@ fn build_series_for_column(
         PgType::DATE => {
             let mut vals: Vec<Option<chrono::NaiveDate>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let s: Option<String> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: date column '{name}': {e}")))?;
+                let s: Option<String> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: date column '{name}': {e}"))
+                })?;
                 let v = s.and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
                 vals.push(v);
             }
@@ -354,9 +352,9 @@ fn build_series_for_column(
         PgType::NUMERIC => {
             let mut vals: Vec<Option<f64>> = Vec::with_capacity(rows.len());
             for row in rows {
-                let s: Option<String> = row
-                    .try_get(index)
-                    .map_err(|e| Other(format!("JDBC read: numeric column '{name}': {e}")))?;
+                let s: Option<String> = row.try_get(index).map_err(|e| {
+                    EngineError::other(format!("JDBC read: numeric column '{name}': {e}"))
+                })?;
                 let f = s.and_then(|s| s.parse::<f64>().ok());
                 vals.push(f);
             }
@@ -369,7 +367,7 @@ fn build_series_for_column(
                 match cell {
                     Ok(v) => vals.push(v),
                     Err(e) => {
-                        return Err(Other(format!(
+                        return Err(EngineError::other(format!(
                             "JDBC read: unsupported column '{name}' type {ty:?}: {e}"
                         )));
                     }

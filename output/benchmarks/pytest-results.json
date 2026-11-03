@@ -1,0 +1,110 @@
+[
+  {
+    "engine": "connect",
+    "xdist_workers": 0,
+    "repetition": 0,
+    "wall_seconds": 4.186681125080213,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "local",
+    "xdist_workers": 0,
+    "repetition": 0,
+    "wall_seconds": 7.421113665914163,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "connect",
+    "xdist_workers": 4,
+    "repetition": 0,
+    "wall_seconds": 3.2305624580476433,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "local",
+    "xdist_workers": 4,
+    "repetition": 0,
+    "wall_seconds": 6.773483917117119,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "local",
+    "xdist_workers": 4,
+    "repetition": 1,
+    "wall_seconds": 6.598347958177328,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "connect",
+    "xdist_workers": 4,
+    "repetition": 1,
+    "wall_seconds": 2.9279397500213236,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "local",
+    "xdist_workers": 0,
+    "repetition": 1,
+    "wall_seconds": 6.9870701669715345,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "connect",
+    "xdist_workers": 0,
+    "repetition": 1,
+    "wall_seconds": 3.4636695000808686,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "connect",
+    "xdist_workers": 0,
+    "repetition": 2,
+    "wall_seconds": 3.4458858750294894,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "local",
+    "xdist_workers": 0,
+    "repetition": 2,
+    "wall_seconds": 6.965381290996447,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "connect",
+    "xdist_workers": 4,
+    "repetition": 2,
+    "wall_seconds": 3.038162208162248,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  },
+  {
+    "engine": "local",
+    "xdist_workers": 4,
+    "repetition": 2,
+    "wall_seconds": 6.432732707820833,
+    "testcases": 38,
+    "failures": 0,
+    "exit_code": 0
+  }
+]

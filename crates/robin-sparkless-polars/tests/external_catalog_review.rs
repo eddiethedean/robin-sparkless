@@ -3,8 +3,12 @@
 use polars::prelude::{
     DataFrame as PlDataFrame, IntoSeries, NamedFrom, Series as PlSeries, TimeUnit, TimeZone,
 };
+use robin_sparkless_core::engine::{
+    CatalogCapabilities, CatalogOwnership, CatalogResolver, CatalogWriter,
+    ExternalTableWriteOutcome, PreparedCatalogWrite,
+};
 use robin_sparkless_polars::{
-    DataType, EngineError, ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
+    DataType, EngineError, ExternalCatalog, ExternalTableDescriptor, ExternalTableFormat,
     ExternalTableWriteRequest, ExternalTableWriteResult, SaveMode, SparkSession, StructField,
     StructType, WriteFormat,
 };
@@ -14,33 +18,78 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+#[derive(Clone)]
 struct Provider {
-    table: ExternalTableDescriptor,
-    calls: AtomicUsize,
+    table: Arc<Mutex<ExternalTableDescriptor>>,
+    calls: Arc<AtomicUsize>,
     miss_first: bool,
-    writes: Mutex<Vec<ExternalTableWriteRequest>>,
+    writes: Arc<Mutex<Vec<ExternalTableWriteRequest>>>,
 }
-impl ExternalCatalogProvider for Provider {
+impl CatalogResolver for Provider {
+    fn resolve_ownership(&self, _: &str) -> Result<CatalogOwnership, EngineError> {
+        Ok(CatalogOwnership::external(
+            "catalog.schema",
+            CatalogCapabilities::READ_WRITE,
+        ))
+    }
+
     fn resolve_table(&self, _: &str) -> Result<Option<ExternalTableDescriptor>, EngineError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(if self.miss_first && call == 0 {
             None
         } else {
-            Some(self.table.clone())
+            Some(self.table.lock().unwrap().clone())
         })
     }
-    fn write_table(
-        &self,
-        request: ExternalTableWriteRequest,
-    ) -> Result<ExternalTableWriteResult, EngineError> {
-        let mut table = request.table.clone();
+}
+
+struct ProviderWrite {
+    table: Arc<Mutex<ExternalTableDescriptor>>,
+    writes: Arc<Mutex<Vec<ExternalTableWriteRequest>>>,
+    request: ExternalTableWriteRequest,
+}
+
+impl PreparedCatalogWrite for ProviderWrite {
+    fn commit(
+        self: Box<Self>,
+        token: &robin_sparkless_core::CancellationToken,
+    ) -> ExternalTableWriteOutcome {
+        if let Err(error) = token.check_cancelled() {
+            return ExternalTableWriteOutcome::NotCommitted(error);
+        }
+        let mut table = self.request.table.clone();
         table.version = Some(table.version.unwrap_or(0) + 1);
-        self.writes.lock().unwrap().push(request);
-        Ok(ExternalTableWriteResult {
-            committed_version: table.version.unwrap(),
+        self.writes.lock().unwrap().push(self.request);
+        *self.table.lock().unwrap() = table.clone();
+        ExternalTableWriteOutcome::Committed(ExternalTableWriteResult {
+            committed_version: table.version,
+            provider_commit_id: None,
             table,
         })
     }
+}
+
+impl CatalogWriter for Provider {
+    fn prepare_write(
+        &self,
+        request: ExternalTableWriteRequest,
+    ) -> Result<Box<dyn PreparedCatalogWrite>, EngineError> {
+        Ok(Box::new(ProviderWrite {
+            table: Arc::clone(&self.table),
+            writes: Arc::clone(&self.writes),
+            request,
+        }))
+    }
+}
+
+fn external_catalog(provider: Arc<Provider>) -> Arc<ExternalCatalog> {
+    let resolver: Arc<dyn CatalogResolver> = provider.clone();
+    let writer: Arc<dyn CatalogWriter> = provider;
+    Arc::new(ExternalCatalog::new(resolver, None, Some(writer), None))
+}
+
+fn read_only_catalog(resolver: Arc<dyn CatalogResolver>) -> Arc<ExternalCatalog> {
+    Arc::new(ExternalCatalog::new(resolver, None, None, None))
 }
 fn attach(
     session: &SparkSession,
@@ -50,7 +99,7 @@ fn attach(
     miss_first: bool,
 ) -> Arc<Provider> {
     let provider = Arc::new(Provider {
-        table: ExternalTableDescriptor {
+        table: Arc::new(Mutex::new(ExternalTableDescriptor {
             table_id: "review-id".into(),
             canonical_location: path.to_string_lossy().into_owned(),
             schema,
@@ -58,13 +107,13 @@ fn attach(
             provider: "test".into(),
             permissions_context: None,
             format: ExternalTableFormat::Delta,
-        },
-        calls: AtomicUsize::new(0),
+        })),
+        calls: Arc::new(AtomicUsize::new(0)),
         miss_first,
-        writes: Mutex::new(Vec::new()),
+        writes: Arc::new(Mutex::new(Vec::new())),
     });
     session
-        .set_external_catalog_provider(Some(provider.clone()))
+        .set_external_catalog(Some(external_catalog(provider.clone())))
         .unwrap();
     provider
 }
@@ -425,7 +474,14 @@ fn review_global_temp_write_does_not_call_external_provider() {
 #[test]
 fn review_external_miss_does_not_make_qualified_local_suffix_exist() {
     struct Missing;
-    impl ExternalCatalogProvider for Missing {
+    impl CatalogResolver for Missing {
+        fn resolve_ownership(&self, _: &str) -> Result<CatalogOwnership, EngineError> {
+            Ok(CatalogOwnership::external(
+                "catalog.schema",
+                CatalogCapabilities::READ_ONLY,
+            ))
+        }
+
         fn resolve_table(&self, _: &str) -> Result<Option<ExternalTableDescriptor>, EngineError> {
             Ok(None)
         }
@@ -434,7 +490,7 @@ fn review_external_miss_does_not_make_qualified_local_suffix_exist() {
     let session = SparkSession::default();
     session.create_or_replace_temp_view("orders", frame(&session, 1));
     session
-        .set_external_catalog_provider(Some(Arc::new(Missing)))
+        .set_external_catalog(Some(read_only_catalog(Arc::new(Missing))))
         .unwrap();
     assert!(!session.table_exists("catalog.schema.orders"));
     assert!(session
@@ -446,15 +502,24 @@ fn review_external_miss_does_not_make_qualified_local_suffix_exist() {
 #[test]
 fn review_table_exists_surfaces_provider_errors() {
     struct Unavailable;
-    impl ExternalCatalogProvider for Unavailable {
+    impl CatalogResolver for Unavailable {
+        fn resolve_ownership(&self, _: &str) -> Result<CatalogOwnership, EngineError> {
+            Ok(CatalogOwnership::external(
+                "catalog.schema",
+                CatalogCapabilities::READ_ONLY,
+            ))
+        }
+
         fn resolve_table(&self, _: &str) -> Result<Option<ExternalTableDescriptor>, EngineError> {
-            Err(EngineError::User("catalog service unavailable".into()))
+            Err(EngineError::invalid_input(
+                "catalog service unavailable".into(),
+            ))
         }
     }
 
     let session = SparkSession::default();
     session
-        .set_external_catalog_provider(Some(Arc::new(Unavailable)))
+        .set_external_catalog(Some(read_only_catalog(Arc::new(Unavailable))))
         .unwrap();
     let error = session
         .try_table_exists("catalog.schema.orders")
@@ -507,13 +572,17 @@ struct ErrorThenHit {
     inner: Arc<Provider>,
     calls: AtomicUsize,
 }
-impl ExternalCatalogProvider for ErrorThenHit {
+impl CatalogResolver for ErrorThenHit {
+    fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError> {
+        self.inner.resolve_ownership(identifier)
+    }
+
     fn resolve_table(
         &self,
         identifier: &str,
     ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            Err(EngineError::User("catalog denied the read".into()))
+            Err(EngineError::invalid_input("catalog denied the read".into()))
         } else {
             self.inner.resolve_table(identifier)
         }
@@ -534,10 +603,10 @@ fn review_named_delta_read_surfaces_provider_error() {
         false,
     );
     session
-        .set_external_catalog_provider(Some(Arc::new(ErrorThenHit {
+        .set_external_catalog(Some(read_only_catalog(Arc::new(ErrorThenHit {
             inner,
             calls: AtomicUsize::new(0),
-        })))
+        }))))
         .unwrap();
     assert!(
         session.read_delta("catalog.schema.orders").is_err(),
@@ -563,7 +632,11 @@ fn review_cancel_during_read_only_sql_planning_is_reported() {
         inner: Arc<Provider>,
         token: robin_sparkless_core::CancellationToken,
     }
-    impl ExternalCatalogProvider for CancellingProvider {
+    impl CatalogResolver for CancellingProvider {
+        fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError> {
+            self.inner.resolve_ownership(identifier)
+        }
+
         fn resolve_table(
             &self,
             identifier: &str,
@@ -573,17 +646,20 @@ fn review_cancel_during_read_only_sql_planning_is_reported() {
         }
     }
     session
-        .set_external_catalog_provider(Some(Arc::new(CancellingProvider {
+        .set_external_catalog(Some(read_only_catalog(Arc::new(CancellingProvider {
             inner,
             token: token.clone(),
-        })))
+        }))))
         .unwrap();
 
     let error = match session.sql_with_cancellation("SELECT * FROM catalog.schema.orders", &token) {
         Ok(_) => panic!("cancellation during read-only SQL planning must be reported"),
         Err(error) => error,
     };
-    assert!(matches!(error, EngineError::Cancelled(_)));
+    assert_eq!(
+        error.category(),
+        robin_sparkless_core::ErrorCategory::Cancelled
+    );
 }
 
 #[test]

@@ -99,7 +99,7 @@ pub fn mul_expr(left: Expr, right: Expr) -> Expr {
 
 /// Map EngineError for ANSI violations (for eager paths).
 pub fn ansi_err(msg: impl Into<String>) -> EngineError {
-    EngineError::User(format!("[ARITHMETIC_OVERFLOW] {}", msg.into()))
+    EngineError::invalid_input(format!("[ARITHMETIC_OVERFLOW] {}", msg.into()))
 }
 
 #[cfg(test)]

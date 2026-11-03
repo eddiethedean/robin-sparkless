@@ -37,16 +37,16 @@ fn parse_sqlserver_jdbc_url(url: &str) -> Result<(String, u16, Option<String>), 
         u = stripped.to_string();
     }
     let rest = u.strip_prefix("sqlserver://").ok_or_else(|| {
-        EngineError::User(format!(
+        EngineError::invalid_input(format!(
             "JDBC SQL Server: URL must start with jdbc:sqlserver:// (got '{url}')"
         ))
     })?;
 
     let (host_port, params) = rest.split_once(';').unwrap_or((rest, ""));
     let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
-        let port = p
-            .parse::<u16>()
-            .map_err(|e| EngineError::User(format!("JDBC SQL Server: invalid port '{p}': {e}")))?;
+        let port = p.parse::<u16>().map_err(|e| {
+            EngineError::invalid_input(format!("JDBC SQL Server: invalid port '{p}': {e}"))
+        })?;
         (h.to_string(), port)
     } else {
         (host_port.to_string(), 1433)
@@ -71,7 +71,7 @@ async fn connect_async(
     let user = opts.user.clone().unwrap_or_default();
     let password = opts.password.clone().unwrap_or_default();
     if user.is_empty() {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC SQL Server: missing 'user' option".to_string(),
         ));
     }
@@ -89,12 +89,12 @@ async fn connect_async(
     let addr = config.get_addr();
     let tcp = TcpStream::connect(addr)
         .await
-        .map_err(|e| EngineError::Io(format!("JDBC SQL Server: connect tcp failed: {e}")))?;
+        .map_err(|e| EngineError::io(format!("JDBC SQL Server: connect tcp failed: {e}")))?;
     tcp.set_nodelay(true).ok();
 
     Client::connect(config, tcp.compat_write())
         .await
-        .map_err(|e| EngineError::Io(format!("JDBC SQL Server: connect failed: {e}")))
+        .map_err(|e| EngineError::io(format!("JDBC SQL Server: connect failed: {e}")))
 }
 
 fn with_runtime<T>(
@@ -102,7 +102,7 @@ fn with_runtime<T>(
 ) -> Result<T, EngineError> {
     tokio::runtime::Runtime::new()
         .map_err(|e| {
-            EngineError::Internal(format!("JDBC SQL Server: failed to create runtime: {e}"))
+            EngineError::internal(format!("JDBC SQL Server: failed to create runtime: {e}"))
         })?
         .block_on(fut)
 }
@@ -138,7 +138,7 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         let q = sql_ident::quoted_table(JdbcDialect::Mssql, table)?;
         format!("SELECT * FROM {q}")
     } else {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
         ));
     };
@@ -149,7 +149,7 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         // Execute session initialization statement if provided
         if let Some(init_sql) = &opts.session_init_statement {
             client.execute(init_sql.as_str(), &[]).await.map_err(|e| {
-                EngineError::Sql(format!(
+                EngineError::sql(format!(
                     "JDBC read (SQL Server): sessionInitStatement failed: {e}"
                 ))
             })?;
@@ -162,7 +162,7 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
                 .execute(format!("SET LOCK_TIMEOUT {timeout_ms}").as_str(), &[])
                 .await
                 .map_err(|e| {
-                    EngineError::Sql(format!(
+                    EngineError::sql(format!(
                         "JDBC read (SQL Server): failed to set queryTimeout: {e}"
                     ))
                 })?;
@@ -171,21 +171,21 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         // Execute prepare query if provided
         if let Some(prep_sql) = &opts.prepare_query {
             client.execute(prep_sql.as_str(), &[]).await.map_err(|e| {
-                EngineError::Sql(format!("JDBC read (SQL Server): prepareQuery failed: {e}"))
+                EngineError::sql(format!("JDBC read (SQL Server): prepareQuery failed: {e}"))
             })?;
         }
 
         let mut stream = client
             .query(sql, &[])
             .await
-            .map_err(|e| EngineError::Sql(format!("JDBC read (SQL Server): query failed: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC read (SQL Server): query failed: {e}")))?;
 
         let columns_opt = stream
             .columns()
             .await
-            .map_err(|e| EngineError::Other(format!("JDBC read (SQL Server): columns: {e}")))?;
+            .map_err(|e| EngineError::other(format!("JDBC read (SQL Server): columns: {e}")))?;
         let columns = columns_opt.ok_or_else(|| {
-            EngineError::Internal("JDBC read (SQL Server): missing columns metadata".to_string())
+            EngineError::internal("JDBC read (SQL Server): missing columns metadata".to_string())
         })?;
 
         let column_names: Vec<String> = columns.iter().map(|c| c.name().to_string()).collect();
@@ -202,7 +202,7 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         while let Some(item) = stream
             .try_next()
             .await
-            .map_err(|e| EngineError::Other(format!("JDBC read (SQL Server): stream: {e}")))?
+            .map_err(|e| EngineError::other(format!("JDBC read (SQL Server): stream: {e}")))?
         {
             if let QueryItem::Row(row) = item {
                 for c in 0..ncols {
@@ -228,7 +228,7 @@ pub(crate) fn read_jdbc_mssql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         }
         let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
         PlDataFrame::new_infer_height(cols).map_err(|e| {
-            EngineError::Internal(format!("JDBC read (SQL Server): build DataFrame: {e}"))
+            EngineError::internal(format!("JDBC read (SQL Server): build DataFrame: {e}"))
         })
     })
 }
@@ -324,7 +324,7 @@ pub(crate) fn write_jdbc_mssql(
     use crate::dataframe::SaveMode as Sm;
 
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
-        EngineError::User(
+        EngineError::invalid_input(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
@@ -352,7 +352,7 @@ pub(crate) fn write_jdbc_mssql(
         // Execute session initialization statement if provided
         if let Some(init_sql) = &opts.session_init_statement {
             client.execute(init_sql.as_str(), &[]).await.map_err(|e| {
-                EngineError::Sql(format!(
+                EngineError::sql(format!(
                     "JDBC write (SQL Server): sessionInitStatement failed: {e}"
                 ))
             })?;
@@ -364,7 +364,7 @@ pub(crate) fn write_jdbc_mssql(
                     .query(format!("SELECT COUNT(*) FROM {table}"), &[])
                     .await
                     .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write (SQL Server): check table: {e}"))
+                        EngineError::sql(format!("JDBC write (SQL Server): check table: {e}"))
                     })?;
                 let mut count: i64 = 0;
                 while let Some(item) = stream.try_next().await.ok().flatten() {
@@ -373,7 +373,7 @@ pub(crate) fn write_jdbc_mssql(
                     }
                 }
                 if count > 0 {
-                    return Err(EngineError::User(format!(
+                    return Err(EngineError::invalid_input(format!(
                         "Table '{table}' already has data. SaveMode is ErrorIfExists."
                     )));
                 }
@@ -383,7 +383,7 @@ pub(crate) fn write_jdbc_mssql(
                     .query(format!("SELECT COUNT(*) FROM {table}"), &[])
                     .await
                     .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write (SQL Server): check table: {e}"))
+                        EngineError::sql(format!("JDBC write (SQL Server): check table: {e}"))
                     })?;
                 let mut count: i64 = 0;
                 while let Some(item) = stream.try_next().await.ok().flatten() {
@@ -402,7 +402,7 @@ pub(crate) fn write_jdbc_mssql(
                         .execute(format!("TRUNCATE TABLE {table}"), &[])
                         .await
                         .map_err(|e| {
-                            EngineError::Sql(format!(
+                            EngineError::sql(format!(
                                 "JDBC write (SQL Server): truncate table: {e}"
                             ))
                         })?;
@@ -411,7 +411,7 @@ pub(crate) fn write_jdbc_mssql(
                         .execute(format!("DELETE FROM {table}"), &[])
                         .await
                         .map_err(|e| {
-                            EngineError::Sql(format!(
+                            EngineError::sql(format!(
                                 "JDBC write (SQL Server): delete from table: {e}"
                             ))
                         })?;
@@ -436,7 +436,7 @@ pub(crate) fn write_jdbc_mssql(
             for col in df.columns() {
                 let v = col
                     .get(row_idx)
-                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                    .map_err(|e| EngineError::internal(format!("JDBC write: get cell: {e}")))?;
                 match v {
                     polars::prelude::AnyValue::Null => q.bind(Option::<String>::None),
                     polars::prelude::AnyValue::Boolean(b) => q.bind(b),
@@ -450,7 +450,7 @@ pub(crate) fn write_jdbc_mssql(
                 };
             }
             q.execute(&mut client).await.map_err(|e| {
-                EngineError::Sql(format!("JDBC write (SQL Server): insert failed: {e}"))
+                EngineError::sql(format!("JDBC write (SQL Server): insert failed: {e}"))
             })?;
 
             // Log progress for large writes (every batch_size rows)
@@ -508,13 +508,13 @@ mod tests {
             let mut client = connect_async(&opts).await?;
             let _ = client.execute("IF OBJECT_ID('sparkless_jdbc_test','U') IS NOT NULL DROP TABLE sparkless_jdbc_test", &[]).await;
             client.execute("CREATE TABLE sparkless_jdbc_test (id BIGINT PRIMARY KEY, name NVARCHAR(255))", &[]).await
-                .map_err(|e| EngineError::Sql(format!("create table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("create table: {e}")))?;
             client.execute("INSERT INTO sparkless_jdbc_test (id, name) VALUES (1, N'a'), (2, N'b')", &[]).await
-                .map_err(|e| EngineError::Sql(format!("seed: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("seed: {e}")))?;
 
             let _ = client.execute("IF OBJECT_ID('sparkless_jdbc_writeread_test','U') IS NOT NULL DROP TABLE sparkless_jdbc_writeread_test", &[]).await;
             client.execute("CREATE TABLE sparkless_jdbc_writeread_test (id BIGINT, name NVARCHAR(255))", &[]).await
-                .map_err(|e| EngineError::Sql(format!("create table 2: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("create table 2: {e}")))?;
             Ok(())
         }).unwrap();
 

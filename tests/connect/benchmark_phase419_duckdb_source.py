@@ -30,7 +30,7 @@ except ImportError:  # Windows has no getrusage module.
 import duckdb
 from pyspark.sql.connect.session import SparkSession as ConnectSession
 
-from sparkless.server import SparklessConnect
+from sparkless_server_duckdb import SparklessConnect
 
 
 SOURCE_LIMITS = {

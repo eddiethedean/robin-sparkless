@@ -8,7 +8,7 @@ use proto::relation::RelType;
 use robin_sparkless::{
     DataType, EngineError, ExprIr, LiteralValue, LogicalField, SparkSession, StructType,
 };
-use robin_sparkless_core::engine::{CancellationToken, ExternalCatalogReadSnapshot};
+use robin_sparkless_core::engine::{CancellationToken, CatalogReadSnapshot};
 use spark_sql_parser::ast::{BinaryOperator, Expr as SqlExpr, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -30,7 +30,10 @@ struct TranslatedRelation {
     schema: StructType,
     plan_ids: HashSet<i64>,
     plan_columns: HashMap<i64, HashMap<String, String>>,
+    qualifier_columns: HashMap<String, HashMap<String, Vec<String>>>,
     deferred_count_input: Option<robin_sparkless::DataFrame>,
+    /// None for managed/local inputs; otherwise the owner selected by table resolution.
+    source_owner: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -47,6 +50,22 @@ pub(super) fn translate_plan(
     translate_plan_with_context(session, plan, TranslationContext::analysis())
 }
 
+pub(super) fn translate_plan_for_analysis(
+    session: &SparkSession,
+    plan: &proto::Plan,
+    token: &CancellationToken,
+) -> Result<TranslatedPlan, Status> {
+    translate_plan_with_context(
+        session,
+        plan,
+        TranslationContext {
+            source_snapshot: None,
+            token: token.clone(),
+            materialize_sources: false,
+        },
+    )
+}
+
 pub(super) fn translate_plan_for_execution(
     session: &SparkSession,
     plan: &proto::Plan,
@@ -55,6 +74,19 @@ pub(super) fn translate_plan_for_execution(
     let source_snapshot = session
         .begin_external_catalog_read_snapshot(token)
         .map_err(engine_failure)?;
+    // Validate the complete plan against metadata in the execution snapshot before
+    // scanning rows, including source ownership across nested joins.
+    if source_snapshot.is_some() {
+        translate_plan_with_context(
+            session,
+            plan,
+            TranslationContext {
+                source_snapshot: source_snapshot.clone(),
+                token: token.clone(),
+                materialize_sources: false,
+            },
+        )?;
+    }
     translate_plan_with_context(
         session,
         plan,
@@ -68,7 +100,7 @@ pub(super) fn translate_plan_for_execution(
 
 #[derive(Clone)]
 struct TranslationContext {
-    source_snapshot: Option<Arc<dyn ExternalCatalogReadSnapshot>>,
+    source_snapshot: Option<Arc<dyn CatalogReadSnapshot>>,
     token: CancellationToken,
     materialize_sources: bool,
 }
@@ -129,6 +161,8 @@ fn translate_relation_with_context(
     let common = relation.common.as_ref();
     let mut deferred_count_input = None;
     let mut plan_columns = HashMap::new();
+    let mut qualifier_columns = HashMap::new();
+    let mut source_owner = None;
     let (dataframe, schema, mut plan_ids) = match relation.rel_type.as_ref() {
         Some(RelType::Range(range)) => {
             if let Some(partitions) = range.num_partitions
@@ -218,25 +252,24 @@ fn translate_relation_with_context(
                     "named-table reads require a simple qualified table identifier",
                 ));
             }
-            let dataframe = if context.materialize_sources {
-                match context.source_snapshot.as_ref() {
-                    Some(snapshot) => session.table_in_read_snapshot(
-                        &named_table.unparsed_identifier,
-                        Arc::clone(snapshot),
-                        context.token.clone(),
-                    ),
-                    None => session.table(&named_table.unparsed_identifier),
+            let resolved = session.table_for_connect(
+                &named_table.unparsed_identifier,
+                context.source_snapshot.clone(),
+                context.token.clone(),
+                context.materialize_sources,
+            );
+            let dataframe = match resolved {
+                Ok((dataframe, owner)) => {
+                    source_owner = owner;
+                    dataframe
                 }
-            } else {
-                session.table_schema_only(&named_table.unparsed_identifier)
-            };
-            let dataframe = match dataframe {
-                Ok(dataframe) => dataframe,
                 Err(_) if context.token.is_cancelled() => {
                     return Err(Status::cancelled("Connect source read was cancelled"));
                 }
                 Err(error) => {
-                    return Err(engine_failure(EngineError::User(error.to_string())));
+                    return Err(engine_failure(EngineError::invalid_input(
+                        error.to_string(),
+                    )));
                 }
             };
             let schema = dataframe.schema_engine().map_err(engine_failure)?;
@@ -259,12 +292,19 @@ fn translate_relation_with_context(
                 depth,
                 context,
             )?;
+            source_owner = input.source_owner.clone();
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
                     "aliases over a global aggregate are unsupported",
                 ));
             }
             plan_columns = input.plan_columns;
+            qualifier_columns = input.qualifier_columns;
+            let mut alias_bindings = HashMap::new();
+            for (name, physical) in relation_column_bindings(&input.dataframe, &input.schema)? {
+                alias_bindings.insert(name.to_ascii_lowercase(), vec![physical]);
+            }
+            qualifier_columns.insert(alias.alias.to_ascii_lowercase(), alias_bindings);
             (
                 input.dataframe.alias(&alias.alias),
                 input.schema,
@@ -279,12 +319,14 @@ fn translate_relation_with_context(
                 depth,
                 context,
             )?;
+            source_owner = input.source_owner.clone();
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
                     "filters over a global aggregate are outside the 4.19 subset",
                 ));
             }
             plan_columns = input.plan_columns.clone();
+            qualifier_columns = input.qualifier_columns.clone();
             let condition = filter
                 .condition
                 .as_ref()
@@ -305,7 +347,7 @@ fn translate_relation_with_context(
                     "filter conditions require a captured comparison expression",
                 ));
             }
-            validate_comparison_types(&input.schema, &expr)?;
+            validate_relation_comparison_types(&input, &expr)?;
             let expr = resolve_logical_columns(&input, expr)?;
             let schema = input.schema.clone();
             let dataframe = input
@@ -322,6 +364,7 @@ fn translate_relation_with_context(
                 depth,
                 context,
             )?;
+            source_owner = input.source_owner.clone();
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
                     "projections over a global aggregate are outside the 4.19 subset",
@@ -350,7 +393,7 @@ fn translate_relation_with_context(
             let expressions = expressions
                 .into_iter()
                 .map(|expression| {
-                    validate_comparison_types(&input.schema, &expression)?;
+                    validate_relation_comparison_types(&input, &expression)?;
                     resolve_logical_columns(&input, expression)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -359,6 +402,11 @@ fn translate_relation_with_context(
                 .select_expr_ir(&expressions)
                 .map_err(engine_failure)?;
             let schema = projected_schema(&project.expressions, &input.schema, &dataframe)?;
+            let output_columns = dataframe.columns().map_err(|error| {
+                Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+            })?;
+            plan_columns = project_plan_columns(&input, &expressions, &output_columns);
+            qualifier_columns = project_qualifier_columns(&input, &expressions, &output_columns);
             (dataframe, schema, input.plan_ids)
         }
         Some(RelType::Limit(limit)) => {
@@ -369,6 +417,7 @@ fn translate_relation_with_context(
                 depth,
                 context,
             )?;
+            source_owner = input.source_owner.clone();
             if input.deferred_count_input.is_some() {
                 return Err(unsupported(
                     "limits over a global aggregate are outside the 4.19 subset",
@@ -378,6 +427,7 @@ fn translate_relation_with_context(
                 return Err(Status::invalid_argument("Limit.limit must be nonnegative"));
             }
             plan_columns = input.plan_columns.clone();
+            qualifier_columns = input.qualifier_columns.clone();
             let limit_value = usize::try_from(limit.limit)
                 .map_err(|_| Status::invalid_argument("Limit.limit is out of range"))?;
             let dataframe = input.dataframe.limit(limit_value).map_err(|error| {
@@ -394,11 +444,18 @@ fn translate_relation_with_context(
             let left = translate_child(session, join.left.as_deref(), "Join.left", depth, context)?;
             let right =
                 translate_child(session, join.right.as_deref(), "Join.right", depth, context)?;
+            if left.source_owner != right.source_owner {
+                return Err(unsupported(
+                    "DuckDB joins require both inputs to use the same source owner; joins with managed/local inputs or another owner are unsupported",
+                ));
+            }
+            source_owner = left.source_owner.clone();
             if left.deferred_count_input.is_some() || right.deferred_count_input.is_some() {
                 return Err(unsupported("joins over a global aggregate are unsupported"));
             }
             let join_type = proto::join::JoinType::try_from(join.join_type)
                 .map_err(|_| Status::invalid_argument("Join.join_type is unknown"))?;
+            let mut coalesced_right_keys = HashMap::new();
             let how = match join_type {
                 proto::join::JoinType::Inner => Some(robin_sparkless::JoinType::Inner),
                 proto::join::JoinType::LeftOuter => Some(robin_sparkless::JoinType::Left),
@@ -427,16 +484,38 @@ fn translate_relation_with_context(
                     .iter()
                     .map(|name| resolve_join_key(&right, name))
                     .collect::<Result<Vec<_>, _>>()?;
+                let keys_coalesce = left_keys.len() == right_keys.len()
+                    && left_keys
+                        .iter()
+                        .zip(&right_keys)
+                        .all(|(left, right)| left.eq_ignore_ascii_case(right));
+                if keys_coalesce {
+                    for (left_key, right_key) in left_keys.iter().zip(&right_keys) {
+                        coalesced_right_keys.insert(right_key.clone(), left_key.clone());
+                    }
+                }
                 validate_connect_join_key_types(&left, &right, &left_keys, &right_keys)?;
                 let left_refs = left_keys.iter().map(String::as_str).collect();
                 let right_refs = right_keys.iter().map(String::as_str).collect();
-                left.dataframe
-                    .join_with_keys(&right.dataframe, left_refs, right_refs, how.unwrap(), false)
-                    .map_err(|error| {
-                        Status::failed_precondition(format!(
-                            "CONNECT_PLAN_ANALYSIS_FAILED: {error}"
-                        ))
-                    })?
+                if join_type == proto::join::JoinType::FullOuter && keys_coalesce {
+                    left.dataframe.join_with_keys_using(
+                        &right.dataframe,
+                        left_refs,
+                        right_refs,
+                        how.unwrap(),
+                    )
+                } else {
+                    left.dataframe.join_with_keys(
+                        &right.dataframe,
+                        left_refs,
+                        right_refs,
+                        how.unwrap(),
+                        false,
+                    )
+                }
+                .map_err(|error| {
+                    Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+                })?
             } else if how.is_none() {
                 if join.join_condition.is_some() {
                     return Err(unsupported(
@@ -473,8 +552,24 @@ fn translate_relation_with_context(
                         ))
                     })?
             };
-            let schema = dataframe.schema_engine().map_err(engine_failure)?;
-            plan_columns = joined_plan_columns(&left, &right, &dataframe, &join.using_columns)?;
+            let (left_output_columns, right_output_columns) =
+                joined_output_columns(&left, &right, &dataframe, &coalesced_right_keys)?;
+            let schema = joined_logical_schema(
+                &left,
+                &right,
+                &dataframe,
+                join_type,
+                &left_output_columns,
+                &right_output_columns,
+            )?;
+            plan_columns =
+                joined_plan_columns(&left, &right, &left_output_columns, &right_output_columns);
+            qualifier_columns = joined_qualifier_columns(
+                &left,
+                &right,
+                &left_output_columns,
+                &right_output_columns,
+            );
             let mut ids = left.plan_ids;
             for id in right.plan_ids {
                 if !ids.insert(id) {
@@ -493,6 +588,7 @@ fn translate_relation_with_context(
                 depth,
                 context,
             )?;
+            source_owner = input.source_owner.clone();
             let group_type = proto::aggregate::GroupType::try_from(aggregate.group_type)
                 .map_err(|_| Status::invalid_argument("Aggregate.group_type is unknown"))?;
             if group_type != proto::aggregate::GroupType::Groupby
@@ -528,8 +624,7 @@ fn translate_relation_with_context(
                     .and_then(|expression| resolve_logical_columns(&input, expression))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let physical_schema = input.dataframe.schema_engine().map_err(engine_failure)?;
-            validate_connect_aggregate_types(&physical_schema, &expressions)?;
+            validate_connect_aggregate_types(&input, &expressions)?;
             if aggregate.grouping_expressions.is_empty() {
                 let [expression] = expressions.as_slice() else {
                     return Err(unsupported(
@@ -585,6 +680,16 @@ fn translate_relation_with_context(
                     .group_by_engine(group_refs)
                     .map_err(engine_failure)?;
                 let dataframe = grouped.agg_expr_ir(&expressions).map_err(engine_failure)?;
+                let grouping_ir = grouping_names
+                    .iter()
+                    .cloned()
+                    .map(ExprIr::Column)
+                    .collect::<Vec<_>>();
+                let output_columns = dataframe.columns().map_err(|error| {
+                    Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+                })?;
+                qualifier_columns =
+                    project_qualifier_columns(&input, &grouping_ir, &output_columns);
                 let native_schema = dataframe.schema_engine().map_err(engine_failure)?;
                 let mut output_names = aggregate
                     .grouping_expressions
@@ -609,17 +714,7 @@ fn translate_relation_with_context(
                     .take(aggregate.grouping_expressions.len())
                     .enumerate()
                 {
-                    let source_fields = input
-                        .schema
-                        .logical_fields()
-                        .iter()
-                        .filter(|field| field.name.eq_ignore_ascii_case(name))
-                        .collect::<Vec<_>>();
-                    let [source] = source_fields.as_slice() else {
-                        return Err(Status::invalid_argument(format!(
-                            "CONNECT_PLAN_ANALYSIS_FAILED: grouping column {name:?} is unresolved or ambiguous"
-                        )));
-                    };
+                    let source = logical_field_for_physical(&input, &grouping_names[index])?;
                     fields[index].name = name.clone();
                     fields[index].nullable = source.nullable;
                     fields[index].metadata = source.metadata.clone();
@@ -672,7 +767,9 @@ fn translate_relation_with_context(
         schema,
         plan_ids,
         plan_columns,
+        qualifier_columns,
         deferred_count_input,
+        source_owner,
     })
 }
 
@@ -871,90 +968,296 @@ fn relation_column_bindings(
         .collect())
 }
 
-fn joined_plan_columns(
+fn logical_field_for_physical<'a>(
+    input: &'a TranslatedRelation,
+    name: &str,
+) -> Result<&'a LogicalField, Status> {
+    let columns = input.dataframe.columns().map_err(|error| {
+        Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+    })?;
+    let matches = columns
+        .iter()
+        .enumerate()
+        .filter(|(_, column)| column.eq_ignore_ascii_case(name))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [index] => input.schema.logical_fields().get(*index).ok_or_else(|| {
+            Status::failed_precondition(
+                "Connect logical schema does not match its physical dataframe",
+            )
+        }),
+        [] => Err(Status::invalid_argument(format!(
+            "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
+        ))),
+        _ => Err(Status::invalid_argument(format!(
+            "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
+        ))),
+    }
+}
+
+fn joined_output_columns(
     left: &TranslatedRelation,
     right: &TranslatedRelation,
     output: &robin_sparkless::DataFrame,
-    using_columns: &[String],
-) -> Result<HashMap<i64, HashMap<String, String>>, Status> {
+    coalesced_right_keys: &HashMap<String, String>,
+) -> Result<(HashMap<String, String>, HashMap<String, String>), Status> {
     let left_names = left.dataframe.columns().map_err(|error| {
         Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
     })?;
     let output_names = output.columns().map_err(|error| {
         Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
     })?;
-    let contains = |names: &[String], name: &str| {
-        names
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(name))
-    };
-    let output_name = |name: &str, is_right: bool| -> Option<String> {
-        if is_right && contains(&left_names, name) {
-            let base = format!("{name}_right");
-            if contains(&output_names, &base) {
-                return output_names
-                    .iter()
-                    .find(|candidate| candidate.eq_ignore_ascii_case(&base))
-                    .cloned();
-            }
-            for suffix in 1..=output_names.len() {
-                let candidate = format!("{base}_{suffix}");
-                if contains(&output_names, &candidate) {
-                    return output_names
-                        .iter()
-                        .find(|name| name.eq_ignore_ascii_case(&candidate))
-                        .cloned();
-                }
-            }
-            return None;
-        }
-        output_names
+    let mut left_map = HashMap::new();
+    let mut used = HashSet::new();
+    for name in &left_names {
+        if let Some(output_name) = output_names
             .iter()
             .find(|candidate| candidate.eq_ignore_ascii_case(name))
-            .cloned()
-    };
-    let mut coalesced_right_keys = HashMap::new();
-    for key in using_columns {
-        let left_key = resolve_join_key(left, key)?;
-        let right_key = resolve_join_key(right, key)?;
-        coalesced_right_keys.insert(right_key, left_key);
+        {
+            left_map.insert(name.clone(), output_name.clone());
+            used.insert(name.to_ascii_lowercase());
+        }
     }
-    let mut result = HashMap::new();
-    for (is_right, relation) in [(false, left), (true, right)] {
-        for (plan_id, bindings) in &relation.plan_columns {
-            let mut remapped = HashMap::new();
-            for (source_name, current_name) in bindings {
-                let joined_name = if is_right {
-                    coalesced_right_keys
-                        .get(current_name)
-                        .cloned()
-                        .or_else(|| output_name(current_name, true))
-                } else {
-                    output_name(current_name, false)
-                };
-                if let Some(joined_name) = joined_name {
-                    remapped.insert(source_name.clone(), joined_name);
-                }
+    let right_names = right.dataframe.columns().map_err(|error| {
+        Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+    })?;
+    let left_set = left_names
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let untouched_right_names = right_names
+        .iter()
+        .filter(|name| !left_set.contains(&name.to_ascii_lowercase()))
+        .filter(|name| {
+            output_names
+                .iter()
+                .any(|output| output.eq_ignore_ascii_case(name))
+        })
+        .map(|name| name.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let mut right_map = HashMap::new();
+    for name in right_names {
+        if let Some(left_key) = coalesced_right_keys.get(&name) {
+            let output_name = left_map.get(left_key).unwrap_or(left_key);
+            right_map.insert(name.clone(), output_name.clone());
+            continue;
+        }
+        let candidates = if used.contains(&name.to_ascii_lowercase()) {
+            std::iter::once(format!("{name}_right"))
+                .chain((1..=output_names.len()).map(|index| format!("{name}_right_{index}")))
+                .collect::<Vec<_>>()
+        } else {
+            vec![name.clone()]
+        };
+        if let Some(output_name) = candidates.iter().find_map(|candidate| {
+            output_names.iter().find(|output_name| {
+                output_name.eq_ignore_ascii_case(candidate)
+                    && !used.contains(&output_name.to_ascii_lowercase())
+                    && (candidate.eq_ignore_ascii_case(&name)
+                        || !untouched_right_names.contains(&output_name.to_ascii_lowercase()))
+            })
+        }) {
+            used.insert(output_name.to_ascii_lowercase());
+            right_map.insert(name, output_name.clone());
+        }
+    }
+    Ok((left_map, right_map))
+}
+
+fn joined_logical_schema(
+    left: &TranslatedRelation,
+    right: &TranslatedRelation,
+    output: &robin_sparkless::DataFrame,
+    join_type: proto::join::JoinType,
+    left_columns: &HashMap<String, String>,
+    right_columns: &HashMap<String, String>,
+) -> Result<StructType, Status> {
+    let output_columns = output.columns().map_err(|error| {
+        Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+    })?;
+    let mut used_names = HashSet::new();
+    let mut fields = Vec::with_capacity(output_columns.len());
+    for output_column in output_columns {
+        let left_source = left_columns
+            .iter()
+            .find(|(_, joined)| joined.eq_ignore_ascii_case(&output_column))
+            .map(|(source, _)| (left, source.as_str(), false));
+        let source = left_source.or_else(|| {
+            right_columns
+                .iter()
+                .find(|(_, joined)| joined.eq_ignore_ascii_case(&output_column))
+                .map(|(source, _)| (right, source.as_str(), true))
+        });
+        let Some((relation, source_column, is_right)) = source else {
+            return Err(Status::failed_precondition(format!(
+                "Connect join output column {output_column:?} has no input lineage"
+            )));
+        };
+        let mut field = logical_field_for_physical(relation, source_column)?.clone();
+        if is_right {
+            let base = field.name.clone();
+            if used_names
+                .iter()
+                .any(|name: &String| name.eq_ignore_ascii_case(&base))
+            {
+                // The engine chooses one suffix for every overlapping right column. Preserve
+                // that exact physical output name in the logical schema as well.
+                field.name = output_column.clone();
             }
+            if matches!(
+                join_type,
+                proto::join::JoinType::LeftOuter | proto::join::JoinType::FullOuter
+            ) {
+                field.nullable = true;
+            }
+        } else if matches!(
+            join_type,
+            proto::join::JoinType::RightOuter | proto::join::JoinType::FullOuter
+        ) {
+            field.nullable = true;
+        }
+        used_names.insert(field.name.to_ascii_lowercase());
+        fields.push(field);
+    }
+    Ok(StructType::from_logical_fields(fields))
+}
+
+fn joined_plan_columns(
+    left: &TranslatedRelation,
+    right: &TranslatedRelation,
+    left_columns: &HashMap<String, String>,
+    right_columns: &HashMap<String, String>,
+) -> HashMap<i64, HashMap<String, String>> {
+    let mut result = HashMap::new();
+    for (relation, output_columns) in [(left, left_columns), (right, right_columns)] {
+        for (plan_id, bindings) in &relation.plan_columns {
+            let remapped = bindings
+                .iter()
+                .filter_map(|(source, current)| {
+                    output_columns
+                        .get(current)
+                        .map(|output| (source.clone(), output.clone()))
+                })
+                .collect();
             result.insert(*plan_id, remapped);
         }
     }
-    Ok(result)
+    result
+}
+
+fn joined_qualifier_columns(
+    left: &TranslatedRelation,
+    right: &TranslatedRelation,
+    left_columns: &HashMap<String, String>,
+    right_columns: &HashMap<String, String>,
+) -> HashMap<String, HashMap<String, Vec<String>>> {
+    let mut result = HashMap::new();
+    for (relation, output_columns) in [(left, left_columns), (right, right_columns)] {
+        for (qualifier, columns) in &relation.qualifier_columns {
+            let output = result.entry(qualifier.clone()).or_insert_with(HashMap::new);
+            for (name, current_names) in columns {
+                for current in current_names {
+                    if let Some(joined_name) = output_columns.get(current) {
+                        let names: &mut Vec<String> = output.entry(name.clone()).or_default();
+                        if !names
+                            .iter()
+                            .any(|value| value.eq_ignore_ascii_case(joined_name))
+                        {
+                            names.push(joined_name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+fn project_plan_columns(
+    input: &TranslatedRelation,
+    expressions: &[ExprIr],
+    output_columns: &[String],
+) -> HashMap<i64, HashMap<String, String>> {
+    let mut result = HashMap::new();
+    for (plan_id, bindings) in &input.plan_columns {
+        let remapped = bindings
+            .iter()
+            .filter_map(|(source, current)| {
+                expressions
+                    .iter()
+                    .zip(output_columns)
+                    .find(|(expression, _)| expression_references_column(expression, current))
+                    .map(|(_, output)| (source.clone(), output.clone()))
+            })
+            .collect();
+        result.insert(*plan_id, remapped);
+    }
+    result
+}
+
+fn project_qualifier_columns(
+    input: &TranslatedRelation,
+    expressions: &[ExprIr],
+    output_columns: &[String],
+) -> HashMap<String, HashMap<String, Vec<String>>> {
+    let mut result = HashMap::new();
+    for (qualifier, columns) in &input.qualifier_columns {
+        let mut remapped = HashMap::new();
+        for (name, current_names) in columns {
+            let projected = current_names
+                .iter()
+                .flat_map(|current| {
+                    expressions
+                        .iter()
+                        .zip(output_columns)
+                        .filter(|(expression, _)| expression_references_column(expression, current))
+                        .map(|(_, output)| output.clone())
+                })
+                .collect::<Vec<_>>();
+            if !projected.is_empty() {
+                remapped.insert(name.clone(), projected);
+            }
+        }
+        result.insert(qualifier.clone(), remapped);
+    }
+    result
+}
+
+fn expression_references_column(expression: &ExprIr, column: &str) -> bool {
+    match expression {
+        ExprIr::Column(name) => name.eq_ignore_ascii_case(column),
+        ExprIr::Call { name, args } if name == "alias" => {
+            matches!(args.as_slice(), [value, ExprIr::Lit(LiteralValue::Str(_))]
+                if expression_references_column(value, column))
+        }
+        _ => false,
+    }
 }
 
 fn resolve_join_key(input: &TranslatedRelation, name: &str) -> Result<String, Status> {
     let parts = name.split('.').collect::<Vec<_>>();
     let column = match parts.as_slice() {
         [column] if is_simple_identifier(column) => *column,
-        [qualifier, column]
-            if is_simple_identifier(qualifier)
-                && is_simple_identifier(column)
-                && input
-                    .dataframe
-                    .get_alias()
-                    .is_some_and(|alias| alias.eq_ignore_ascii_case(qualifier)) =>
-        {
-            *column
+        [qualifier, column] if is_simple_identifier(qualifier) && is_simple_identifier(column) => {
+            let matches = input
+                .qualifier_columns
+                .get(&qualifier.to_ascii_lowercase())
+                .and_then(|columns| columns.get(&column.to_ascii_lowercase()))
+                .ok_or_else(|| {
+                    Status::invalid_argument(format!(
+                        "CONNECT_PLAN_ANALYSIS_FAILED: unresolved join key {name:?}"
+                    ))
+                })?;
+            return match matches.as_slice() {
+                [resolved] => Ok(resolved.clone()),
+                [] => Err(Status::invalid_argument(format!(
+                    "CONNECT_PLAN_ANALYSIS_FAILED: unresolved join key {name:?}"
+                ))),
+                _ => Err(Status::invalid_argument(format!(
+                    "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous join key {name:?}"
+                ))),
+            };
         }
         _ => {
             return Err(unsupported(
@@ -977,23 +1280,13 @@ fn validate_connect_join_key_types(
     if left_keys.is_empty() || left_keys.len() != right_keys.len() {
         return Err(unsupported("joins require matching non-empty key lists"));
     }
-    let left_schema = left.dataframe.schema_engine().map_err(engine_failure)?;
-    let right_schema = right.dataframe.schema_engine().map_err(engine_failure)?;
     for (left_key, right_key) in left_keys.iter().zip(right_keys) {
-        let field_type = |schema: &StructType, name: &str| {
-            schema
-                .logical_fields()
-                .iter()
-                .find(|field| field.name.eq_ignore_ascii_case(name))
-                .map(|field| field.data_type.clone())
-                .ok_or_else(|| {
-                    Status::failed_precondition(format!(
-                        "Connect join key {name:?} disappeared from its input schema"
-                    ))
-                })
-        };
-        let left_type = field_type(&left_schema, left_key)?;
-        let right_type = field_type(&right_schema, right_key)?;
+        let left_type = logical_field_for_physical(left, left_key)?
+            .data_type
+            .clone();
+        let right_type = logical_field_for_physical(right, right_key)?
+            .data_type
+            .clone();
         if !matches!(
             (left_type.clone(), right_type.clone()),
             (DataType::Integer, DataType::Integer) | (DataType::Long, DataType::Long)
@@ -1205,7 +1498,7 @@ fn aggregate_function_name(expression: &proto::Expression) -> Result<&str, Statu
 }
 
 fn validate_connect_aggregate_types(
-    input_schema: &StructType,
+    input: &TranslatedRelation,
     expressions: &[ExprIr],
 ) -> Result<(), Status> {
     for expression in expressions {
@@ -1224,16 +1517,7 @@ fn validate_connect_aggregate_types(
             let [ExprIr::Column(column)] = args.as_slice() else {
                 return Err(unsupported("sum requires one column reference"));
             };
-            let fields = input_schema
-                .logical_fields()
-                .iter()
-                .filter(|field| field.name.eq_ignore_ascii_case(column))
-                .collect::<Vec<_>>();
-            let [field] = fields.as_slice() else {
-                return Err(Status::invalid_argument(format!(
-                    "CONNECT_PLAN_ANALYSIS_FAILED: sum column {column:?} is unresolved or ambiguous"
-                )));
-            };
+            let field = logical_field_for_physical(input, column)?;
             if !matches!(&field.data_type, DataType::Integer | DataType::Long) {
                 return Err(unsupported(format!(
                     "4.19 Connect sum supports INT and BIGINT columns; found {:?}",
@@ -1269,25 +1553,95 @@ fn is_global_count_column(expression: &ExprIr) -> bool {
     }
 }
 
+#[cfg(test)]
 fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> Result<(), Status> {
-    fn expression_type(input_schema: &StructType, expression: &ExprIr) -> Result<DataType, Status> {
-        match expression {
-            ExprIr::Column(name) => {
-                let matches = input_schema
-                    .logical_fields()
-                    .iter()
-                    .filter(|field| field.name.eq_ignore_ascii_case(name))
-                    .collect::<Vec<_>>();
-                match matches.as_slice() {
-                    [field] => Ok(field.data_type.clone()),
-                    [] => Err(Status::invalid_argument(format!(
-                        "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
-                    ))),
-                    _ => Err(Status::invalid_argument(format!(
-                        "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
-                    ))),
-                }
+    validate_comparison_types_with(expression, &|name| field_type_by_name(input_schema, name))
+}
+
+fn validate_relation_comparison_types(
+    input: &TranslatedRelation,
+    expression: &ExprIr,
+) -> Result<(), Status> {
+    let physical_columns = input.dataframe.columns().map_err(|error| {
+        Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+    })?;
+    if physical_columns.len() != input.schema.logical_fields().len() {
+        return Err(Status::failed_precondition(
+            "Connect logical schema does not match its physical dataframe",
+        ));
+    }
+    validate_comparison_types_with(expression, &|name| {
+        let logical_matches = input
+            .schema
+            .logical_fields()
+            .iter()
+            .filter(|field| field.name.eq_ignore_ascii_case(name))
+            .collect::<Vec<_>>();
+        match logical_matches.as_slice() {
+            [field] => return Ok(field.data_type.clone()),
+            [_, _, ..] => {
+                return Err(Status::invalid_argument(format!(
+                    "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
+                )));
             }
+            [] => {}
+        }
+        let physical_matches = physical_columns
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| column.eq_ignore_ascii_case(name))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        match physical_matches.as_slice() {
+            [index] => input
+                .schema
+                .logical_fields()
+                .get(*index)
+                .filter(|field| field.name.eq_ignore_ascii_case(name))
+                .map(|field| field.data_type.clone())
+                .ok_or_else(|| {
+                    Status::invalid_argument(format!(
+                        "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
+                    ))
+                }),
+            [] => Err(Status::invalid_argument(format!(
+                "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
+            ))),
+            _ => Err(Status::invalid_argument(format!(
+                "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
+            ))),
+        }
+    })
+}
+
+#[cfg(test)]
+fn field_type_by_name(input_schema: &StructType, name: &str) -> Result<DataType, Status> {
+    let matches = input_schema
+        .logical_fields()
+        .iter()
+        .filter(|field| field.name.eq_ignore_ascii_case(name))
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [field] => Ok(field.data_type.clone()),
+        [] => Err(Status::invalid_argument(format!(
+            "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
+        ))),
+        _ => Err(Status::invalid_argument(format!(
+            "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
+        ))),
+    }
+}
+
+fn validate_comparison_types_with(
+    expression: &ExprIr,
+    field_type: &dyn Fn(&str) -> Result<DataType, Status>,
+) -> Result<(), Status> {
+    fn expression_type(
+        expression: &ExprIr,
+        field_type: &dyn Fn(&str) -> Result<DataType, Status>,
+    ) -> Result<DataType, Status> {
+        match expression {
+            ExprIr::Column(name) => field_type(name),
             ExprIr::Lit(LiteralValue::I32(_)) => Ok(DataType::Integer),
             ExprIr::Lit(LiteralValue::I64(_)) => Ok(DataType::Long),
             ExprIr::Lit(LiteralValue::F64(_)) => Ok(DataType::Double),
@@ -1297,8 +1651,8 @@ fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> 
                 "untyped null comparison operands are outside the 4.19 subset",
             )),
             ExprIr::Add(left, right) => {
-                let left = expression_type(input_schema, left)?;
-                let right = expression_type(input_schema, right)?;
+                let left = expression_type(left, field_type)?;
+                let right = expression_type(right, field_type)?;
                 if !is_connect_numeric_type(&left) || !is_connect_numeric_type(&right) {
                     return Err(Status::invalid_argument(format!(
                         "CONNECT_PLAN_ANALYSIS_FAILED: arithmetic requires numeric operands, found {left:?} and {right:?}"
@@ -1307,8 +1661,8 @@ fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> 
                 Ok(connect_common_numeric_type(&left, &right))
             }
             ExprIr::Ge(left, right) | ExprIr::Gt(left, right) => {
-                let left_type = expression_type(input_schema, left)?;
-                let right_type = expression_type(input_schema, right)?;
+                let left_type = expression_type(left, field_type)?;
+                let right_type = expression_type(right, field_type)?;
                 if compatible_comparison_types(&left_type, &right_type, left, right) {
                     Ok(DataType::Boolean)
                 } else {
@@ -1321,7 +1675,7 @@ fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> 
                 let [value, ExprIr::Lit(LiteralValue::Str(_))] = args.as_slice() else {
                     return Err(unsupported("malformed projection alias expression"));
                 };
-                expression_type(input_schema, value)
+                expression_type(value, field_type)
             }
             _ => Err(unsupported(
                 "comparison operand type cannot be analyzed in the 4.19 subset",
@@ -1329,7 +1683,7 @@ fn validate_comparison_types(input_schema: &StructType, expression: &ExprIr) -> 
         }
     }
 
-    expression_type(input_schema, expression).map(|_| ())
+    expression_type(expression, field_type).map(|_| ())
 }
 
 fn compatible_comparison_types(
@@ -1450,12 +1804,14 @@ fn translate_expression(
                 ));
             }
             validate_expression_plan_id(attribute.plan_id, input_plan_ids)?;
-            let identifier = attribute
-                .unparsed_identifier
-                .rsplit('.')
-                .next()
-                .expect("non-empty validated identifier");
-            let resolved = attribute
+            let mut identifier_parts = attribute.unparsed_identifier.split('.');
+            let first = identifier_parts.next().expect("identifier is non-empty");
+            let second = identifier_parts.next();
+            let (qualifier, identifier) = match second {
+                Some(column) => (Some(first), column),
+                None => (None, first),
+            };
+            let plan_column = attribute
                 .plan_id
                 .and_then(|plan_id| input.and_then(|input| input.plan_columns.get(&plan_id)))
                 .and_then(|columns| {
@@ -1463,8 +1819,42 @@ fn translate_expression(
                         .iter()
                         .find(|(name, _)| name.eq_ignore_ascii_case(identifier))
                         .map(|(_, output_name)| output_name.clone())
+                });
+            let qualified_column = qualifier
+                .and_then(|qualifier| input.map(|input| (qualifier, input)))
+                .and_then(|(qualifier, input)| {
+                    input
+                        .qualifier_columns
+                        .get(&qualifier.to_ascii_lowercase())
+                        .and_then(|columns| columns.get(&identifier.to_ascii_lowercase()))
                 })
-                .unwrap_or_else(|| identifier.to_string());
+                .map(|names| names.as_slice());
+            let resolved = if let Some(name) = plan_column {
+                name
+            } else if let Some(names) = qualified_column {
+                match names {
+                    [name] => name.clone(),
+                    [] => {
+                        return Err(Status::invalid_argument(format!(
+                            "CONNECT_PLAN_ANALYSIS_FAILED: unresolved qualified column {:?}",
+                            attribute.unparsed_identifier
+                        )));
+                    }
+                    _ => {
+                        return Err(Status::invalid_argument(format!(
+                            "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous qualified column {:?}",
+                            attribute.unparsed_identifier
+                        )));
+                    }
+                }
+            } else if qualifier.is_some() {
+                return Err(Status::invalid_argument(format!(
+                    "CONNECT_PLAN_ANALYSIS_FAILED: unresolved qualifier in {:?}",
+                    attribute.unparsed_identifier
+                )));
+            } else {
+                identifier.to_string()
+            };
             Ok(ExprIr::Column(resolved))
         }
         Some(ExprType::UnresolvedFunction(function)) => {
@@ -2104,13 +2494,24 @@ fn data_type_to_proto(data_type: &DataType) -> Result<proto::DataType, Status> {
 }
 
 fn engine_failure(error: EngineError) -> Status {
-    let code = match &error {
-        EngineError::Cancelled(_) => Code::Cancelled,
-        EngineError::User(_) => Code::InvalidArgument,
-        EngineError::NotFound(_) => Code::NotFound,
+    let code = match error.category() {
+        robin_sparkless_core::ErrorCategory::Cancelled => Code::Cancelled,
+        robin_sparkless_core::ErrorCategory::InvalidInput
+        | robin_sparkless_core::ErrorCategory::Capability => Code::InvalidArgument,
+        robin_sparkless_core::ErrorCategory::NotFound => Code::NotFound,
+        robin_sparkless_core::ErrorCategory::Conflict => Code::Aborted,
+        robin_sparkless_core::ErrorCategory::Provider | robin_sparkless_core::ErrorCategory::Io => {
+            Code::Unavailable
+        }
         _ => Code::FailedPrecondition,
     };
-    Status::new(code, format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
+    Status::new(
+        code,
+        format!(
+            "SPARKLESS_ERROR[{}]: CONNECT_PLAN_ANALYSIS_FAILED: {error}",
+            error.code()
+        ),
+    )
 }
 
 fn unsupported(message: impl Into<String>) -> Status {
@@ -2230,6 +2631,176 @@ mod tests {
         assert!(!is_qualified_identifier("catalog..table"));
         assert!(!is_qualified_identifier("table; DROP TABLE x"));
         assert!(!is_qualified_identifier("2starts_with_digit"));
+    }
+
+    #[test]
+    fn using_join_key_case_preserves_right_values_through_connect() {
+        let session = session();
+        session.register_table(
+            "left_items",
+            session
+                .create_dataframe(
+                    vec![(1, 10, "left".into()), (2, 20, "left-only".into())],
+                    vec!["id", "value", "label"],
+                )
+                .unwrap(),
+        );
+        session.register_table(
+            "right_items",
+            session
+                .create_dataframe(
+                    vec![(1, 100, "right".into()), (3, 300, "right-only".into())],
+                    vec!["ID", "value", "tag"],
+                )
+                .unwrap(),
+        );
+        for join_type in [
+            proto::join::JoinType::Inner,
+            proto::join::JoinType::LeftOuter,
+            proto::join::JoinType::RightOuter,
+        ] {
+            let relation = proto::Relation {
+                common: None,
+                rel_type: Some(RelType::Join(Box::new(proto::Join {
+                    left: Some(Box::new(named_table_relation("left_items", None))),
+                    right: Some(Box::new(named_table_relation("right_items", None))),
+                    join_condition: None,
+                    using_columns: vec!["id".into()],
+                    join_type: join_type as i32,
+                    join_data_type: None,
+                }))),
+            };
+            let translated = translate_relation(&session, &relation, 1).unwrap();
+            assert_eq!(translated.schema.logical_fields().len(), 5);
+            let rows = translated.dataframe.collect_rows().unwrap();
+            assert_eq!(
+                rows.len(),
+                if join_type == proto::join::JoinType::Inner {
+                    1
+                } else {
+                    2
+                }
+            );
+            for row in rows {
+                let id = row["id"].as_i64().unwrap();
+                assert_eq!(
+                    row["value_right"],
+                    match id {
+                        1 => serde_json::json!(100),
+                        2 => serde_json::Value::Null,
+                        3 => serde_json::json!(300),
+                        other => panic!("unexpected join key {other}"),
+                    },
+                    "{join_type:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn duckdb_join_ownership_survives_wrappers_and_rejects_mixed_sources_before_scan() {
+        use robin_sparkless_core::engine::{
+            CatalogCapabilities, CatalogOwnership, CatalogResolver, ExternalCatalog,
+            ExternalTableDescriptor, ExternalTableFormat,
+        };
+
+        struct MetadataOnlyCatalog;
+        impl CatalogResolver for MetadataOnlyCatalog {
+            fn resolve_ownership(&self, name: &str) -> Result<CatalogOwnership, EngineError> {
+                let owner = match name {
+                    "source.items" | "source.second" => "owner-one",
+                    "other.items" => "owner-two",
+                    _ => return Ok(CatalogOwnership::Local),
+                };
+                Ok(CatalogOwnership::external(
+                    owner,
+                    CatalogCapabilities::READ_ONLY,
+                ))
+            }
+
+            fn resolve_table(
+                &self,
+                name: &str,
+            ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+                let owner = match name {
+                    "source.items" | "source.second" => "owner-one",
+                    "other.items" => "owner-two",
+                    _ => return Ok(None),
+                };
+                Ok(Some(ExternalTableDescriptor {
+                    table_id: name.into(),
+                    canonical_location: owner.into(),
+                    schema: StructType::from_logical_fields(vec![LogicalField::new(
+                        "id".into(),
+                        DataType::Long,
+                        false,
+                    )]),
+                    version: None,
+                    provider: "test-duckdb".into(),
+                    permissions_context: None,
+                    format: ExternalTableFormat::DuckDb,
+                }))
+            }
+        }
+        let session = session();
+        let resolver: Arc<dyn CatalogResolver> = Arc::new(MetadataOnlyCatalog);
+        session
+            .set_external_catalog(Some(Arc::new(ExternalCatalog::new(
+                resolver, None, None, None,
+            ))))
+            .unwrap();
+        session.register_table("managed", session.range(0, 3, 1).unwrap());
+
+        let wrapped = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Limit(Box::new(proto::Limit {
+                input: Some(Box::new(proto::Relation {
+                    common: None,
+                    rel_type: Some(RelType::Project(Box::new(proto::Project {
+                        input: Some(Box::new(alias_relation(
+                            named_table_relation("source.items", None),
+                            "s",
+                            101,
+                        ))),
+                        expressions: vec![connect_attribute("id", None)],
+                    }))),
+                })),
+                limit: 1,
+            }))),
+        };
+        let join = |right: &str| proto::Plan {
+            op_type: Some(PlanOp::Root(proto::Relation {
+                common: None,
+                rel_type: Some(RelType::Join(Box::new(proto::Join {
+                    left: Some(Box::new(wrapped.clone())),
+                    right: Some(Box::new(named_table_relation(right, None))),
+                    join_condition: None,
+                    using_columns: vec!["id".into()],
+                    join_type: proto::join::JoinType::Inner as i32,
+                    join_data_type: None,
+                }))),
+            })),
+        };
+        // Schema-only analysis needs no source row reader, and permits one owner.
+        assert!(translate_plan(&session, &join("source.second")).is_ok());
+        for right in ["managed", "other.items"] {
+            let plan = join(right);
+            let analysis_error = translate_plan(&session, &plan).err().unwrap();
+            assert_eq!(analysis_error.code(), Code::Unimplemented);
+            let execution_error =
+                translate_plan_for_execution(&session, &plan, &CancellationToken::new())
+                    .err()
+                    .unwrap();
+            assert_eq!(execution_error.code(), Code::Unimplemented);
+            assert!(execution_error.message().contains("same source owner"));
+        }
+
+        // A local table that shadows an external name must keep its local identity.
+        session.register_table("source.items", session.range(0, 3, 1).unwrap());
+        assert!(
+            translate_plan_for_execution(&session, &join("managed"), &CancellationToken::new())
+                .is_ok()
+        );
     }
 
     #[test]

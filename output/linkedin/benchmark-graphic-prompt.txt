@@ -1,0 +1,98 @@
+Mode: built-in image_gen; edit of the earlier LinkedIn graphic.
+
+Redesign the existing navy Sparkless LinkedIn graphic into a polished tall high-resolution code-and-benchmark infographic. Use the latest image as style reference. Retain navy, white, teal/yellow syntax colors, rounded cards, large perfectly legible monospaced Python, careful indentation. Expand canvas vertically to fit; no cropped text. User wants three code examples plus real benchmark results. Use a shared test block followed by three compact setup cards so code is readable. All exact text/code below must be reproduced accurately. No invented metrics, no implied benchmark for direct in-process Sparkless.
+
+Top brand: "Sparkless"
+Title: "Test PySpark code with Sparkless"
+Subtitle: "Three ways to run the same test."
+
+Shared test card heading: "THE TEST · 1,000 orders"
+Exact code:
+def check_orders(spark):
+    orders = spark.createDataFrame(
+        [(i, i % 200) for i in range(1000)],
+        "order_id LONG, total LONG",
+    )
+    assert orders.filter("total > 99").count() == 500
+
+Card 1 heading: "1 · Sparkless directly"
+Install strip, exact: pip install "sparkless==4.18.1"
+Exact code:
+from sparkless.sql import SparkSession
+
+with (
+    SparkSession.builder.app_name("test")
+    .get_or_create()
+) as spark:
+    check_orders(spark)
+
+Card 2 heading: "2 · PySpark + Sparkless Connect"
+Install strip in two lines, first ends in a literal shell continuation backslash:
+pip install "sparkless[server]==4.18.1" \
+    "pyspark-client==4.0.5"
+Exact code:
+from pyspark.sql import SparkSession
+from sparkless import SparklessServer
+
+with SparklessServer() as server:
+    spark = SparkSession.builder.remote(
+        server.spark_connect_url
+    ).create()
+    try:
+        check_orders(spark)
+    finally:
+        spark.stop()
+
+Card 3 heading: "3 · PySpark + local JVM"
+Install strip: pip install "pyspark==4.0.5"
+Small prerequisite: "Java 17+"
+Exact code:
+from pyspark.sql import SparkSession
+
+with (
+    SparkSession.builder.master("local[4]")
+    .appName("test").getOrCreate()
+) as spark:
+    check_orders(spark)
+
+Prominent results area heading: "MEASURED SPEED ADVANTAGES"
+Two clean metric tiles with clearly scoped comparison, exact text:
+"4.7× faster"
+"1,000-order test · warm execution"
+"Sparkless Connect 16.3 ms"
+"Local PySpark 76.2 ms"
+
+"2.2× faster"
+"38-test suite · 4 pytest-xdist workers"
+"Sparkless Connect 3.04 s"
+"Local PySpark 6.60 s"
+
+Readable methodology footer, exact text in several short lines:
+"Apple M4 Pro · Python 3.11 · Spark / client 4.0.5"
+"Sparkless API 4.18.1 · native/server 4.18.0"
+"Warm test: 30 samples across 3 runs; local[4]."
+"Pytest: median of 3 runs including startup and cleanup;"
+"one shared Sparkless server vs. one local[1] JVM per worker."
+"Python 3.11+ · Server: macOS Apple Silicon or Linux x86_64"
+"Results are workload-specific. Connect supports a focused DataFrame subset."
+
+Do not add generic parallel-worker promotional lines from earlier graphics. The pytest tile is specifically measured suite performance. No performance number attached to Card 1. Title must not claim all workloads faster. Use professional typography, tidy spacing; perhaps compact side-by-side cards 1 and 3 with larger Connect card between, but clear numbered reading order 1,2,3. Prioritize code legibility. High resolution portrait marketing graphic suitable to upload to LinkedIn.
+
+Final correction prompt:
+Correct ONLY code formatting in the latest three-column Sparkless benchmark graphic. Keep every metric, layout, color, heading, footer and all other code unchanged. Two import statements were incorrectly wrapped into invalid Python. In left card replace the two lines "from sparkless.sql" and "import SparkSession" with these THREE valid Python lines:
+from sparkless.sql import (
+    SparkSession,
+)
+In right card replace the two lines "from pyspark.sql" and "import SparkSession" with:
+from pyspark.sql import (
+    SparkSession,
+)
+Keep these parenthesis characters and comma exact. Never wrap after a bare module name.
+
+Also fix shell line wrapping in the left and right INSTALL strips. Left must be these two lines, first with visible trailing backslash:
+pip install \
+    "sparkless==4.18.1"
+Right must be these two lines, first with visible trailing backslash:
+pip install \
+    "pyspark==4.0.5"
+The middle install already has its backslash and must stay unchanged. Expand card heights slightly if necessary to retain all code. No dropped lines or new changes. Output at highest practical resolution for easy reading.

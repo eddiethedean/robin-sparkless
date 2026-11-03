@@ -1,0 +1,15 @@
+{
+  "engine": "connect",
+  "phase": "startup",
+  "python": "3.11.15",
+  "machine": "arm64",
+  "pyspark": "4.0.5",
+  "cpu_threads": 4,
+  "warmup_iterations": 2,
+  "measured_iterations": 10,
+  "sparkless": "4.18.1",
+  "server_binary": "4.18.0",
+  "startup_to_session_seconds": 0.31755545805208385,
+  "first_job_seconds": 0.020895083900541067,
+  "startup_through_first_job_seconds": 0.33845233311876655
+}

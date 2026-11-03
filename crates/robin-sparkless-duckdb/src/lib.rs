@@ -7,8 +7,8 @@
 
 use duckdb::{AccessMode, Config, Connection, InterruptHandle};
 use robin_sparkless_core::engine::{
-    ArrowIpcStream, CancellationToken, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
-    ExternalTableDescriptor, ExternalTableFormat,
+    ArrowIpcStream, CancellationToken, CatalogCapabilities, CatalogOwnership, CatalogReadSnapshot,
+    CatalogReader, CatalogResolver, ExternalCatalog, ExternalTableDescriptor, ExternalTableFormat,
 };
 use robin_sparkless_core::{DataType, EngineError, LogicalField, StructType};
 use serde::{Deserialize, Serialize};
@@ -185,13 +185,13 @@ impl DuckDbCatalog {
                 DuckDbSourceSpec::Local(config) => {
                     let database_path =
                         std::fs::canonicalize(&config.database_path).map_err(|error| {
-                            EngineError::User(format!(
+                            EngineError::invalid_input(format!(
                                 "DuckDB source '{}' database path is unavailable: {error}",
                                 config.alias
                             ))
                         })?;
                     if !database_path.is_file() {
-                        return Err(EngineError::User(format!(
+                        return Err(EngineError::invalid_input(format!(
                             "DuckDB source '{}' path is not a database file",
                             config.alias
                         )));
@@ -201,20 +201,20 @@ impl DuckDbCatalog {
                 DuckDbSourceSpec::Quack(config) => {
                     validate_quack_uri(&config.quack_uri)?;
                     if config.token.trim().len() < 4 {
-                        return Err(EngineError::User(format!(
+                        return Err(EngineError::invalid_input(format!(
                             "DuckDB Quack source '{}' requires a token of at least four characters",
                             config.alias
                         )));
                     }
                     if config.disable_ssl == Some(true) && config.ssl_fingerprint.is_some() {
-                        return Err(EngineError::User(format!(
+                        return Err(EngineError::invalid_input(format!(
                             "DuckDB Quack source '{}' cannot set an SSL fingerprint when SSL is disabled",
                             config.alias
                         )));
                     }
                     let extension_path = resolve_quack_extension_path(&config.extension_path)
                         .map_err(|error| {
-                            EngineError::User(format!(
+                            EngineError::invalid_input(format!(
                                 "DuckDB Quack source '{}' extension path is unavailable: {error}",
                                 config.alias
                             ))
@@ -223,7 +223,7 @@ impl DuckDbCatalog {
                         || extension_path.file_name().and_then(|name| name.to_str())
                             != Some("quack.duckdb_extension")
                     {
-                        return Err(EngineError::User(format!(
+                        return Err(EngineError::invalid_input(format!(
                             "DuckDB Quack source '{}' extension path must name quack.duckdb_extension",
                             config.alias
                         )));
@@ -246,27 +246,27 @@ impl DuckDbCatalog {
                         && !configured.owner.same_quack_connection(&owner)
                 })
             {
-                return Err(EngineError::User(
+                return Err(EngineError::invalid_input(
                     "DuckDB Quack aliases for one endpoint must use the same token and transport settings"
                         .into(),
                 ));
             }
             if !valid_identifier(&alias_value) {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "DuckDB source alias {:?} must be a simple identifier",
                     alias_value
                 )));
             }
             let alias = alias_value.to_ascii_lowercase();
             if sources.contains_key(&alias) {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "duplicate DuckDB source alias '{alias}'"
                 )));
             }
             sources.insert(alias.clone(), Arc::new(ConfiguredSource { alias, owner }));
         }
         if sources.is_empty() {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "at least one DuckDB source alias is required".into(),
             ));
         }
@@ -279,13 +279,33 @@ impl DuckDbCatalog {
     /// Parse the JSON value used by `SPARKLESS_DUCKDB_SOURCES`.
     pub fn from_json(json: &str) -> Result<Self, EngineError> {
         let configs: Vec<DuckDbSourceSpec> = serde_json::from_str(json).map_err(|error| {
-            EngineError::User(format!("invalid SPARKLESS_DUCKDB_SOURCES JSON: {error}"))
+            EngineError::invalid_input(format!("invalid SPARKLESS_DUCKDB_SOURCES JSON: {error}"))
         })?;
         Self::new_with_sources(configs)
     }
 }
 
-impl ExternalCatalogProvider for DuckDbCatalog {
+impl CatalogResolver for DuckDbCatalog {
+    fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError> {
+        let parts = identifier.split('.').collect::<Vec<_>>();
+        let Some(alias) = parts.first() else {
+            return Ok(CatalogOwnership::Local);
+        };
+        if !(2..=3).contains(&parts.len()) || !parts.iter().all(|part| valid_identifier(part)) {
+            return Ok(CatalogOwnership::Local);
+        }
+        let alias = alias.to_ascii_lowercase();
+        Ok(self
+            .sources
+            .get(&alias)
+            .map_or(CatalogOwnership::Local, |source| {
+                CatalogOwnership::external(
+                    format!("duckdb:{}", source.alias),
+                    CatalogCapabilities::READ_ONLY,
+                )
+            }))
+    }
+
     fn resolve_table(
         &self,
         identifier: &str,
@@ -301,39 +321,31 @@ impl ExternalCatalogProvider for DuckDbCatalog {
         let mut state = snapshot
             .state
             .lock()
-            .map_err(|_| EngineError::Internal("DuckDB snapshot lock poisoned".into()))?;
+            .map_err(|_| EngineError::internal("DuckDB snapshot lock poisoned".into()))?;
         snapshot.resolve_in_source(&mut state, source, &schema_name, &table_name)
     }
+}
 
-    fn is_read_only_target(&self, identifier: &str) -> Result<bool, EngineError> {
-        let parts = identifier.split('.').collect::<Vec<_>>();
-        if !(1..=3).contains(&parts.len()) || !parts.iter().all(|part| valid_identifier(part)) {
-            return Ok(false);
-        }
-        Ok(self.sources.contains_key(&parts[0].to_ascii_lowercase()))
-    }
-
-    fn begin_read_snapshot(
+impl CatalogReader for DuckDbCatalog {
+    fn begin_snapshot(
         &self,
         token: &CancellationToken,
-    ) -> Result<Option<Arc<dyn ExternalCatalogReadSnapshot>>, EngineError> {
+    ) -> Result<Arc<dyn CatalogReadSnapshot>, EngineError> {
         token.check_cancelled()?;
-        Ok(Some(Arc::new(DuckDbReadSnapshot::new(
+        Ok(Arc::new(DuckDbReadSnapshot::new(
             self.sources.clone(),
             Arc::clone(&self.pool),
             token.clone(),
-        ))))
+        )))
     }
+}
 
-    fn scan_table(
-        &self,
-        table: &ExternalTableDescriptor,
-        token: &CancellationToken,
-        consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
-    ) -> Result<(), EngineError> {
-        let snapshot =
-            DuckDbReadSnapshot::new(self.sources.clone(), Arc::clone(&self.pool), token.clone());
-        snapshot.scan_table(table, token, consume)
+impl DuckDbCatalog {
+    /// Compose the configured source as a read-only external catalog capability.
+    pub fn into_external_catalog(self: Arc<Self>) -> Arc<ExternalCatalog> {
+        let resolver: Arc<dyn CatalogResolver> = self.clone();
+        let reader: Arc<dyn CatalogReader> = self;
+        Arc::new(ExternalCatalog::new(resolver, Some(reader), None, None))
     }
 }
 
@@ -389,17 +401,17 @@ impl SourceConnectionPool {
     ) -> Result<SourceConnectionPermit, EngineError> {
         token.check_cancelled()?;
         if slots == 0 || slots > DUCKDB_SOURCE_MAX_CONNECTIONS {
-            return Err(EngineError::Internal(
+            return Err(EngineError::internal(
                 "invalid DuckDB source connection reservation".into(),
             ));
         }
         let mut state = self
             .state
             .lock()
-            .map_err(|_| EngineError::Internal("DuckDB source pool lock poisoned".into()))?;
+            .map_err(|_| EngineError::internal("DuckDB source pool lock poisoned".into()))?;
         if state.active + slots > DUCKDB_SOURCE_MAX_CONNECTIONS {
             if state.waiting >= DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "DuckDB source connection queue is full ({DUCKDB_SOURCE_MAX_QUEUED_CONNECTIONS} waiting operations)"
                 )));
             }
@@ -408,13 +420,13 @@ impl SourceConnectionPool {
                 if token.is_cancelled() {
                     state.waiting -= 1;
                     self.available.notify_all();
-                    return Err(EngineError::Cancelled("operation cancelled".into()));
+                    return Err(EngineError::cancelled("operation cancelled".into()));
                 }
                 let (next_state, _) = self
                     .available
                     .wait_timeout(state, Duration::from_millis(10))
                     .map_err(|_| {
-                        EngineError::Internal("DuckDB source pool lock poisoned".into())
+                        EngineError::internal("DuckDB source pool lock poisoned".into())
                     })?;
                 state = next_state;
             }
@@ -485,7 +497,9 @@ impl DuckDbReadSnapshot {
             .get(&alias.to_ascii_lowercase())
             .cloned()
             .ok_or_else(|| {
-                EngineError::User(format!("DuckDB source alias '{alias}' is not configured"))
+                EngineError::invalid_input(format!(
+                    "DuckDB source alias '{alias}' is not configured"
+                ))
             })
     }
 
@@ -497,7 +511,7 @@ impl DuckDbReadSnapshot {
         let owner_identity = source.owner.identity();
         if let Some(existing_owner) = state.owner_identity.as_ref() {
             if existing_owner != &owner_identity {
-                return Err(EngineError::User(
+                return Err(EngineError::invalid_input(
                     "one Connect statement cannot read DuckDB tables from different database owners"
                         .into(),
                 ));
@@ -515,7 +529,9 @@ impl DuckDbReadSnapshot {
             1
         };
         let permit = self.pool.acquire(&self.token, slots)?;
-        let connection = open_source(&source.owner)?;
+        self.token.check_cancelled()?;
+        let connection = open_source_for_snapshot(&source.owner)?;
+        self.token.check_cancelled()?;
         connection
             .execute_batch("BEGIN TRANSACTION")
             .map_err(duckdb_failure)?;
@@ -532,7 +548,20 @@ impl DuckDbReadSnapshot {
         schema_name: &str,
         table_name: &str,
     ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+        self.token.check_cancelled()?;
         let connection = self.ensure_connection(state, &source)?;
+        let quack_cancel = match &source.owner {
+            ConfiguredOwner::Local { .. } => None,
+            ConfiguredOwner::Quack { .. } => Some(QuackCancellation {
+                owner: source.owner.clone(),
+                connection_id: quack_connection_id(connection)?,
+            }),
+        };
+        let _watchdog = CancellationWatchdog::new(
+            self.token.clone(),
+            connection.interrupt_handle(),
+            quack_cancel,
+        )?;
         let sql = match &source.owner {
             ConfiguredOwner::Local { .. } => format!(
                 "SELECT column_name, data_type, is_nullable FROM information_schema.columns \
@@ -561,6 +590,7 @@ impl DuckDbReadSnapshot {
         let mut rows = statement.query([]).map_err(duckdb_failure)?;
         let mut fields = Vec::new();
         while let Some(row) = rows.next().map_err(duckdb_failure)? {
+            self.token.check_cancelled()?;
             let name: String = row.get(0).map_err(duckdb_failure)?;
             let type_name: String = row.get(1).map_err(duckdb_failure)?;
             let nullability: String = row.get(2).map_err(duckdb_failure)?;
@@ -570,11 +600,9 @@ impl DuckDbReadSnapshot {
                 !nullability.eq_ignore_ascii_case("NO"),
             ));
         }
+        self.token.check_cancelled()?;
         if fields.is_empty() {
-            return Err(EngineError::NotFound(format!(
-                "DuckDB table '{}.{}.{}' was not found",
-                source.alias, schema_name, table_name
-            )));
+            return Ok(None);
         }
         let descriptor = ExternalTableDescriptor {
             table_id: format!("duckdb:{}:{schema_name}:{table_name}", source.alias),
@@ -593,7 +621,27 @@ impl DuckDbReadSnapshot {
     }
 }
 
-impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
+impl CatalogReadSnapshot for DuckDbReadSnapshot {
+    fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError> {
+        let parts = identifier.split('.').collect::<Vec<_>>();
+        let Some(alias) = parts.first() else {
+            return Ok(CatalogOwnership::Local);
+        };
+        if !(2..=3).contains(&parts.len()) || !parts.iter().all(|part| valid_identifier(part)) {
+            return Ok(CatalogOwnership::Local);
+        }
+        let alias = alias.to_ascii_lowercase();
+        Ok(self
+            .sources
+            .get(&alias)
+            .map_or(CatalogOwnership::Local, |source| {
+                CatalogOwnership::external(
+                    format!("duckdb:{}", source.alias),
+                    CatalogCapabilities::READ_ONLY,
+                )
+            }))
+    }
+
     fn resolve_table(
         &self,
         identifier: &str,
@@ -613,8 +661,12 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
         let mut state = self
             .state
             .lock()
-            .map_err(|_| EngineError::Internal("DuckDB snapshot lock poisoned".into()))?;
-        self.resolve_in_source(&mut state, source, schema, table)
+            .map_err(|_| EngineError::internal("DuckDB snapshot lock poisoned".into()))?;
+        let result = self.resolve_in_source(&mut state, source, schema, table);
+        if result.is_err() {
+            self.failed.store(true, Ordering::Release);
+        }
+        result
     }
 
     fn scan_table(
@@ -626,44 +678,48 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
         let result = (|| {
             table.validate()?;
             if table.format != ExternalTableFormat::DuckDb {
-                return Err(EngineError::User(
+                return Err(EngineError::invalid_input(
                     "DuckDB source received a descriptor for another table format".into(),
                 ));
             }
             let context: serde_json::Value =
                 serde_json::from_str(table.permissions_context.as_deref().ok_or_else(|| {
-                    EngineError::User("DuckDB table descriptor is incomplete".into())
+                    EngineError::invalid_input("DuckDB table descriptor is incomplete".into())
                 })?)
                 .map_err(|error| {
-                    EngineError::User(format!("invalid DuckDB table context: {error}"))
+                    EngineError::invalid_input(format!("invalid DuckDB table context: {error}"))
                 })?;
             let alias = context["alias"].as_str().ok_or_else(|| {
-                EngineError::User("DuckDB table descriptor is missing its source alias".into())
+                EngineError::invalid_input(
+                    "DuckDB table descriptor is missing its source alias".into(),
+                )
             })?;
             let schema = context["schema"].as_str().ok_or_else(|| {
-                EngineError::User("DuckDB table descriptor is missing its schema".into())
+                EngineError::invalid_input("DuckDB table descriptor is missing its schema".into())
             })?;
             let table_name = context["table"].as_str().ok_or_else(|| {
-                EngineError::User("DuckDB table descriptor is missing its table name".into())
+                EngineError::invalid_input(
+                    "DuckDB table descriptor is missing its table name".into(),
+                )
             })?;
             if !valid_identifier(alias)
                 || !valid_identifier(schema)
                 || !valid_identifier(table_name)
             {
-                return Err(EngineError::User(
+                return Err(EngineError::invalid_input(
                     "DuckDB table descriptor contains an invalid identifier".into(),
                 ));
             }
             let source = self.source_for(alias)?;
             if table.canonical_location != source.owner.identity() {
-                return Err(EngineError::User(
+                return Err(EngineError::invalid_input(
                     "DuckDB table descriptor does not match its configured source owner".into(),
                 ));
             }
             let mut state = self
                 .state
                 .lock()
-                .map_err(|_| EngineError::Internal("DuckDB snapshot lock poisoned".into()))?;
+                .map_err(|_| EngineError::internal("DuckDB snapshot lock poisoned".into()))?;
             let connection = self.ensure_connection(&mut state, &source)?;
             token.check_cancelled()?;
             let quack_cancel = match &source.owner {
@@ -705,7 +761,7 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
                 };
                 if batch.num_rows() > DUCKDB_SOURCE_MAX_BATCH_ROWS {
                     self.failed.store(true, Ordering::Release);
-                    return Err(EngineError::User(format!(
+                    return Err(EngineError::invalid_input(format!(
                         "DuckDB source batch exceeds {DUCKDB_SOURCE_MAX_BATCH_ROWS} rows"
                     )));
                 }
@@ -713,7 +769,7 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
                 let bytes = encode_batch(&batch)?;
                 if bytes.len() > DUCKDB_SOURCE_MAX_BATCH_BYTES {
                     self.failed.store(true, Ordering::Release);
-                    return Err(EngineError::User(format!(
+                    return Err(EngineError::invalid_input(format!(
                         "DuckDB source batch exceeds {DUCKDB_SOURCE_MAX_BATCH_BYTES} IPC bytes"
                     )));
                 }
@@ -721,23 +777,25 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
                     .rows
                     .load(Ordering::Acquire)
                     .checked_add(batch.num_rows() as u64)
-                    .ok_or_else(|| EngineError::User("DuckDB source row count overflow".into()))?;
+                    .ok_or_else(|| {
+                        EngineError::invalid_input("DuckDB source row count overflow".into())
+                    })?;
                 let next_bytes = self
                     .ipc_bytes
                     .load(Ordering::Acquire)
                     .checked_add(bytes.len())
                     .ok_or_else(|| {
-                        EngineError::User("DuckDB source IPC byte count overflow".into())
+                        EngineError::invalid_input("DuckDB source IPC byte count overflow".into())
                     })?;
                 if next_rows > DUCKDB_SOURCE_MAX_ROWS {
                     self.failed.store(true, Ordering::Release);
-                    return Err(EngineError::User(format!(
+                    return Err(EngineError::invalid_input(format!(
                         "DuckDB source exceeds the {DUCKDB_SOURCE_MAX_ROWS}-row operation limit"
                     )));
                 }
                 if next_bytes > DUCKDB_SOURCE_MAX_IPC_BYTES {
                     self.failed.store(true, Ordering::Release);
-                    return Err(EngineError::User(format!(
+                    return Err(EngineError::invalid_input(format!(
                         "DuckDB source exceeds the {DUCKDB_SOURCE_MAX_IPC_BYTES}-byte operation limit"
                     )));
                 }
@@ -767,7 +825,7 @@ impl ExternalCatalogReadSnapshot for DuckDbReadSnapshot {
             Ok(_) => Ok(()),
             Err(_) => {
                 self.failed.store(true, Ordering::Release);
-                Err(EngineError::User(format!(
+                Err(EngineError::invalid_input(format!(
                     "DuckDB source decoded data exceeds the {DUCKDB_SOURCE_MAX_DECODED_BYTES}-byte statement limit"
                 )))
             }
@@ -835,7 +893,7 @@ impl CancellationWatchdog {
                 }
             })
             .map_err(|error| {
-                EngineError::Internal(format!("cannot start DuckDB cancellation watcher: {error}"))
+                EngineError::internal(format!("cannot start DuckDB cancellation watcher: {error}"))
             })?;
         Ok(Self {
             stop,
@@ -888,6 +946,21 @@ fn open_source(owner: &ConfiguredOwner) -> Result<Connection, EngineError> {
     open_source_with_http_timeout(owner, None)
 }
 
+fn open_source_for_snapshot(owner: &ConfiguredOwner) -> Result<Connection, EngineError> {
+    match owner {
+        ConfiguredOwner::Local { .. } => open_source(owner),
+        ConfiguredOwner::Quack { .. } => {
+            // Bound extension attachment while opening a snapshot, then restore DuckDB's
+            // configured default so long-running remote scans are not capped by startup time.
+            let connection = open_source_with_http_timeout(owner, Some(3))?;
+            connection
+                .execute_batch("RESET http_timeout")
+                .map_err(duckdb_failure)?;
+            Ok(connection)
+        }
+    }
+}
+
 fn open_source_with_http_timeout(
     owner: &ConfiguredOwner,
     http_timeout_seconds: Option<u64>,
@@ -909,7 +982,9 @@ fn open_source_with_http_timeout(
                     .map_err(duckdb_failure)?;
             }
             let extension_path = extension_path.to_str().ok_or_else(|| {
-                EngineError::User("DuckDB Quack extension paths must be valid UTF-8".into())
+                EngineError::invalid_input(
+                    "DuckDB Quack extension paths must be valid UTF-8".into(),
+                )
             })?;
             connection
                 .execute_batch(&format!("LOAD {}", quote_literal(extension_path)))
@@ -963,7 +1038,7 @@ fn cancel_quack_query(owner: &ConfiguredOwner, connection_id: &str) -> Result<bo
     let row = rows
         .next()
         .map_err(duckdb_failure)?
-        .ok_or_else(|| EngineError::Internal("DuckDB Quack cancel returned no result".into()))?;
+        .ok_or_else(|| EngineError::internal("DuckDB Quack cancel returned no result".into()))?;
     row.get(1).map_err(duckdb_failure)
 }
 
@@ -979,7 +1054,7 @@ fn validate_quack_uri(uri: &str) -> Result<(), EngineError> {
         .strip_prefix("quack://")
         .or_else(|| uri.strip_prefix("quack:"));
     let Some(address) = address else {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "DuckDB Quack source URI must use the quack: scheme".into(),
         ));
     };
@@ -989,7 +1064,7 @@ fn validate_quack_uri(uri: &str) -> Result<(), EngineError> {
                 || matches!(character, '\'' | '"' | '@' | '/' | '?' | '#' | '\\' | '\0')
         });
     if invalid {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "DuckDB Quack source URI must contain only a host and optional port".into(),
         ));
     }
@@ -1016,15 +1091,62 @@ fn resolve_quack_extension_path(configured_path: &Path) -> Result<PathBuf, std::
 fn validate_batch_scalars(
     batch: &duckdb::arrow::record_batch::RecordBatch,
 ) -> Result<(), EngineError> {
-    use arrow60::array::{Array, Float64Array, StringArray};
+    use arrow60::array::{
+        Array, Date32Array, Float64Array, StringArray, TimestampMicrosecondArray,
+    };
     for (field, array) in batch.schema().fields().iter().zip(batch.columns()) {
         match field.data_type() {
+            arrow60::datatypes::DataType::Date32 => {
+                let values = array
+                    .as_any()
+                    .downcast_ref::<Date32Array>()
+                    .ok_or_else(|| {
+                        EngineError::invalid_input(format!(
+                            "DuckDB DATE column {:?} has an unexpected Arrow representation",
+                            field.name()
+                        ))
+                    })?;
+                if (0..values.len()).any(|index| {
+                    let value = values.value(index);
+                    !values.is_null(index)
+                        && (value == i32::MIN || value == i32::MIN + 1 || value == i32::MAX)
+                }) {
+                    return Err(EngineError::invalid_input(format!(
+                        "DuckDB DATE column {:?} contains an infinite value",
+                        field.name()
+                    )));
+                }
+            }
+            arrow60::datatypes::DataType::Timestamp(
+                arrow60::datatypes::TimeUnit::Microsecond,
+                _,
+            ) => {
+                let values = array
+                    .as_any()
+                    .downcast_ref::<TimestampMicrosecondArray>()
+                    .ok_or_else(|| {
+                        EngineError::invalid_input(format!(
+                            "DuckDB TIMESTAMP column {:?} has an unexpected Arrow representation",
+                            field.name()
+                        ))
+                    })?;
+                if (0..values.len()).any(|index| {
+                    let value = values.value(index);
+                    !values.is_null(index)
+                        && (value == i64::MIN || value == i64::MIN + 1 || value == i64::MAX)
+                }) {
+                    return Err(EngineError::invalid_input(format!(
+                        "DuckDB TIMESTAMP column {:?} contains an infinite value",
+                        field.name()
+                    )));
+                }
+            }
             arrow60::datatypes::DataType::Float64 => {
                 let values = array
                     .as_any()
                     .downcast_ref::<Float64Array>()
                     .ok_or_else(|| {
-                        EngineError::User(format!(
+                        EngineError::invalid_input(format!(
                             "DuckDB DOUBLE column {:?} has an unexpected Arrow representation",
                             field.name()
                         ))
@@ -1032,7 +1154,7 @@ fn validate_batch_scalars(
                 if (0..values.len())
                     .any(|index| !values.is_null(index) && !values.value(index).is_finite())
                 {
-                    return Err(EngineError::User(format!(
+                    return Err(EngineError::invalid_input(format!(
                         "DuckDB DOUBLE column {:?} contains a non-finite value",
                         field.name()
                     )));
@@ -1043,7 +1165,7 @@ fn validate_batch_scalars(
                     .as_any()
                     .downcast_ref::<StringArray>()
                     .ok_or_else(|| {
-                        EngineError::User(format!(
+                        EngineError::invalid_input(format!(
                             "DuckDB VARCHAR column {:?} has an unexpected Arrow representation",
                             field.name()
                         ))
@@ -1051,7 +1173,7 @@ fn validate_batch_scalars(
                 if (0..values.len())
                     .any(|index| !values.is_null(index) && values.value(index).len() > 512 * 1024)
                 {
-                    return Err(EngineError::User(format!(
+                    return Err(EngineError::invalid_input(format!(
                         "DuckDB VARCHAR column {:?} contains a value larger than 512 KiB",
                         field.name()
                     )));
@@ -1077,22 +1199,22 @@ fn duckdb_type_to_spark(type_name: &str) -> Result<DataType, EngineError> {
         _ if normalized.starts_with("DECIMAL(") && normalized.ends_with(')') => {
             let inner = &normalized[8..normalized.len() - 1];
             let (precision, scale) = inner.split_once(',').ok_or_else(|| {
-                EngineError::User(format!("unsupported DuckDB decimal type '{type_name}'"))
+                EngineError::invalid_input(format!("unsupported DuckDB decimal type '{type_name}'"))
             })?;
             let precision: u8 = precision.trim().parse().map_err(|_| {
-                EngineError::User(format!("unsupported DuckDB decimal type '{type_name}'"))
+                EngineError::invalid_input(format!("unsupported DuckDB decimal type '{type_name}'"))
             })?;
             let scale: u8 = scale.trim().parse().map_err(|_| {
-                EngineError::User(format!("unsupported DuckDB decimal type '{type_name}'"))
+                EngineError::invalid_input(format!("unsupported DuckDB decimal type '{type_name}'"))
             })?;
             if precision == 0 || precision > 38 || scale > precision {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "DuckDB decimal type '{type_name}' is outside the supported precision/scale range"
                 )));
             }
             Ok(DataType::Decimal(precision, scale))
         }
-        _ => Err(EngineError::User(format!(
+        _ => Err(EngineError::invalid_input(format!(
             "DuckDB type '{type_name}' is not in the supported source type set"
         ))),
     }
@@ -1103,13 +1225,13 @@ fn encode_batch(batch: &duckdb::arrow::record_batch::RecordBatch) -> Result<Vec<
     let mut bytes = Vec::new();
     {
         let mut writer = StreamWriter::try_new(&mut bytes, &batch.schema()).map_err(|error| {
-            EngineError::User(format!("cannot encode DuckDB Arrow schema: {error}"))
+            EngineError::invalid_input(format!("cannot encode DuckDB Arrow schema: {error}"))
         })?;
         writer.write(batch).map_err(|error| {
-            EngineError::User(format!("cannot encode DuckDB Arrow batch: {error}"))
+            EngineError::invalid_input(format!("cannot encode DuckDB Arrow batch: {error}"))
         })?;
         writer.finish().map_err(|error| {
-            EngineError::User(format!("cannot finish DuckDB Arrow batch: {error}"))
+            EngineError::invalid_input(format!("cannot finish DuckDB Arrow batch: {error}"))
         })?;
     }
     Ok(bytes)
@@ -1132,12 +1254,12 @@ fn valid_identifier(identifier: &str) -> bool {
 }
 
 fn duckdb_failure(error: impl std::fmt::Display) -> EngineError {
-    EngineError::User(format!("DuckDB source operation failed: {error}"))
+    EngineError::invalid_input(format!("DuckDB source operation failed: {error}"))
 }
 
 fn duckdb_quack_failure(error: impl std::fmt::Display, token: &str) -> EngineError {
     let message = error.to_string().replace(token, "[redacted]");
-    EngineError::User(format!("DuckDB Quack source operation failed: {message}"))
+    EngineError::invalid_input(format!("DuckDB Quack source operation failed: {message}"))
 }
 
 #[cfg(test)]
@@ -1181,7 +1303,7 @@ mod source_pool_tests {
         assert!(snapshot.charge_decoded_bytes(1).is_ok());
         assert!(matches!(
             snapshot.charge_decoded_bytes(1),
-            Err(EngineError::User(message)) if message.contains("decoded data exceeds")
+            Err(error) if error.user_message().contains("decoded data exceeds")
         ));
         assert_eq!(
             snapshot.decoded_bytes.load(Ordering::Acquire),
@@ -1220,7 +1342,7 @@ mod source_pool_tests {
 
         assert!(matches!(
             pool.acquire(&token, 1),
-            Err(EngineError::User(message)) if message.contains("queue is full")
+            Err(error) if error.user_message().contains("queue is full")
         ));
         drop(active);
         for waiter in waiters {
@@ -1243,7 +1365,7 @@ mod source_pool_tests {
         token.cancel();
         assert!(matches!(
             waiter.join().unwrap(),
-            Err(EngineError::Cancelled(_))
+            Err(error) if error.category() == robin_sparkless_core::ErrorCategory::Cancelled
         ));
         assert_eq!(pool.state.lock().unwrap().waiting, 0);
         drop(active);

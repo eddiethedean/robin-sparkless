@@ -18,7 +18,7 @@ fn normalize_mysql_url(url: &str) -> Result<String, EngineError> {
         // Treat MariaDB protocol as MySQL for the mysql crate.
         Ok(format!("mysql://{}", u.trim_start_matches("mariadb://")))
     } else {
-        Err(EngineError::User(format!(
+        Err(EngineError::invalid_input(format!(
             "JDBC MySQL: URL must start with jdbc:mysql: or mysql:// (got '{}')",
             sql_ident::redact_jdbc_url(url)
         )))
@@ -31,7 +31,7 @@ fn connect(opts: &JdbcOptions) -> Result<Conn, EngineError> {
     // Prefer explicit user/password properties when provided; otherwise rely on URL.
     // The mysql crate supports `mysql://user:pass@host:port/db`.
     let base = Opts::from_url(&url).map_err(|e| {
-        EngineError::User(format!(
+        EngineError::invalid_input(format!(
             "JDBC MySQL: invalid url '{}': {e}",
             sql_ident::redact_jdbc_url(&url)
         ))
@@ -49,7 +49,7 @@ fn connect(opts: &JdbcOptions) -> Result<Conn, EngineError> {
     }
 
     Conn::new(builder).map_err(|e| {
-        EngineError::Io(format!(
+        EngineError::io(format!(
             "JDBC MySQL: connect failed for {}: {e}",
             sql_ident::redact_jdbc_url(&url)
         ))
@@ -64,7 +64,7 @@ pub(crate) fn write_jdbc_mysql(
     use crate::dataframe::SaveMode as Sm;
 
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
-        EngineError::User(
+        EngineError::invalid_input(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
@@ -75,7 +75,7 @@ pub(crate) fn write_jdbc_mysql(
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
         conn.query_drop(init_sql).map_err(|e| {
-            EngineError::Sql(format!(
+            EngineError::sql(format!(
                 "JDBC write (MySQL): sessionInitStatement failed: {e}"
             ))
         })?;
@@ -85,9 +85,9 @@ pub(crate) fn write_jdbc_mysql(
         Sm::ErrorIfExists => {
             let count: Option<i64> = conn
                 .query_first(format!("SELECT COUNT(*) FROM {table}"))
-                .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): check table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write (MySQL): check table: {e}")))?;
             if count.unwrap_or(0) > 0 {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "Table '{table}' already has data. SaveMode is ErrorIfExists."
                 )));
             }
@@ -95,7 +95,7 @@ pub(crate) fn write_jdbc_mysql(
         Sm::Ignore => {
             let count: Option<i64> = conn
                 .query_first(format!("SELECT COUNT(*) FROM {table}"))
-                .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): check table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write (MySQL): check table: {e}")))?;
             if count.unwrap_or(0) > 0 {
                 return Ok(());
             }
@@ -105,12 +105,12 @@ pub(crate) fn write_jdbc_mysql(
             if use_truncate {
                 conn.query_drop(format!("TRUNCATE TABLE {table}"))
                     .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write (MySQL): truncate table: {e}"))
+                        EngineError::sql(format!("JDBC write (MySQL): truncate table: {e}"))
                     })?;
             } else {
                 conn.query_drop(format!("DELETE FROM {table}"))
                     .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write (MySQL): delete from table: {e}"))
+                        EngineError::sql(format!("JDBC write (MySQL): delete from table: {e}"))
                     })?;
             }
         }
@@ -145,14 +145,14 @@ pub(crate) fn write_jdbc_mysql(
 
         // Start a transaction for this batch
         conn.query_drop("START TRANSACTION")
-            .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): start transaction: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC write (MySQL): start transaction: {e}")))?;
 
         for row_idx in batch_start..batch_end {
             let mut params: Vec<Value> = Vec::with_capacity(col_names.len());
             for col in df.columns() {
                 let v = col
                     .get(row_idx)
-                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                    .map_err(|e| EngineError::internal(format!("JDBC write: get cell: {e}")))?;
                 let mysql_v = match v {
                     polars::prelude::AnyValue::Null => Value::NULL,
                     polars::prelude::AnyValue::Boolean(b) => Value::Int(if b { 1 } else { 0 }),
@@ -177,12 +177,12 @@ pub(crate) fn write_jdbc_mysql(
                 params.push(mysql_v);
             }
             conn.exec_drop(&insert_sql, Params::Positional(params))
-                .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): insert failed: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write (MySQL): insert failed: {e}")))?;
         }
 
         // Commit this batch
         conn.query_drop("COMMIT")
-            .map_err(|e| EngineError::Sql(format!("JDBC write (MySQL): commit batch: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC write (MySQL): commit batch: {e}")))?;
     }
     Ok(())
 }
@@ -194,7 +194,7 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         let q = sql_ident::quoted_table(JdbcDialect::Mysql, table)?;
         format!("SELECT * FROM {q}")
     } else {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
         ));
     };
@@ -204,7 +204,7 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
         conn.query_drop(init_sql).map_err(|e| {
-            EngineError::Sql(format!(
+            EngineError::sql(format!(
                 "JDBC read (MySQL): sessionInitStatement failed: {e}"
             ))
         })?;
@@ -215,7 +215,7 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
         let timeout_ms = timeout_secs * 1000;
         conn.query_drop(format!("SET max_execution_time = {timeout_ms}"))
             .map_err(|e| {
-                EngineError::Sql(format!(
+                EngineError::sql(format!(
                     "JDBC read (MySQL): failed to set queryTimeout: {e}"
                 ))
             })?;
@@ -224,13 +224,13 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     // Execute prepare query if provided
     if let Some(prep_sql) = &opts.prepare_query {
         conn.query_drop(prep_sql).map_err(|e| {
-            EngineError::Sql(format!("JDBC read (MySQL): prepareQuery failed: {e}"))
+            EngineError::sql(format!("JDBC read (MySQL): prepareQuery failed: {e}"))
         })?;
     }
 
     let result = conn
         .query_iter(sql)
-        .map_err(|e| EngineError::Sql(format!("JDBC read (MySQL): query failed: {e}")))?;
+        .map_err(|e| EngineError::sql(format!("JDBC read (MySQL): query failed: {e}")))?;
 
     let column_names: Vec<String> = result
         .columns()
@@ -250,7 +250,7 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
 
     for row_res in result {
         let row: mysql::Row =
-            row_res.map_err(|e| EngineError::Other(format!("JDBC read (MySQL): row: {e}")))?;
+            row_res.map_err(|e| EngineError::other(format!("JDBC read (MySQL): row: {e}")))?;
         for (idx, col_data) in columns_data.iter_mut().enumerate() {
             let v: Option<Value> = row.get(idx);
             col_data.push(v);
@@ -270,7 +270,7 @@ pub(crate) fn read_jdbc_mysql(opts: &JdbcOptions) -> Result<PlDataFrame, EngineE
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
-        .map_err(|e| EngineError::Internal(format!("JDBC read (MySQL): build DataFrame: {e}")))
+        .map_err(|e| EngineError::internal(format!("JDBC read (MySQL): build DataFrame: {e}")))
 }
 
 fn mysql_values_to_series(

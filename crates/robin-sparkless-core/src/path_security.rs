@@ -7,24 +7,24 @@ use crate::EngineError;
 /// Reject table/path names that could escape a base directory via `..` or absolute paths.
 pub fn validate_table_name(name: &str) -> Result<(), EngineError> {
     if name.is_empty() {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "table name must not be empty".to_string(),
         ));
     }
     if name.contains('\0') {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "table name contains NUL byte".to_string(),
         ));
     }
     for component in Path::new(name).components() {
         match component {
             Component::ParentDir => {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "table name '{name}' must not contain '..'"
                 )));
             }
             Component::RootDir | Component::Prefix(_) => {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "table name '{name}' must be relative (no absolute path)"
                 )));
             }
@@ -40,31 +40,31 @@ pub fn resolve_path_under_base(base: impl AsRef<Path>, name: &str) -> Result<Pat
     let base = base.as_ref();
     let joined = base.join(name);
     let canonical_base = base.canonicalize().map_err(|e| {
-        EngineError::Io(format!(
+        EngineError::io(format!(
             "failed to canonicalize base directory '{}': {e}",
             base.display()
         ))
     })?;
     let canonical = if joined.exists() {
         joined.canonicalize().map_err(|e| {
-            EngineError::Io(format!(
+            EngineError::io(format!(
                 "failed to canonicalize path '{}': {e}",
                 joined.display()
             ))
         })?
     } else {
         let parent = joined.parent().ok_or_else(|| {
-            EngineError::User(format!(
+            EngineError::invalid_input(format!(
                 "invalid table path '{}': missing parent",
                 joined.display()
             ))
         })?;
         let file_name = joined
             .file_name()
-            .ok_or_else(|| EngineError::User("invalid table path".to_string()))?;
+            .ok_or_else(|| EngineError::invalid_input("invalid table path".to_string()))?;
         let canonical_parent = if parent.exists() {
             parent.canonicalize().map_err(|e| {
-                EngineError::Io(format!(
+                EngineError::io(format!(
                     "failed to canonicalize parent '{}': {e}",
                     parent.display()
                 ))
@@ -75,7 +75,7 @@ pub fn resolve_path_under_base(base: impl AsRef<Path>, name: &str) -> Result<Pat
         canonical_parent.join(file_name)
     };
     if !canonical.starts_with(&canonical_base) {
-        return Err(EngineError::User(format!(
+        return Err(EngineError::invalid_input(format!(
             "path '{}' escapes base directory '{}'",
             canonical.display(),
             canonical_base.display()
@@ -104,7 +104,7 @@ pub fn confine_user_path_under_base(
     let base = base.as_ref();
     let user_path = user_path.as_ref();
     let canonical_base = base.canonicalize().map_err(|e| {
-        EngineError::Io(format!(
+        EngineError::io(format!(
             "failed to canonicalize files base '{}': {e}",
             base.display()
         ))
@@ -116,7 +116,7 @@ pub fn confine_user_path_under_base(
     };
     let canonical = if joined.exists() {
         joined.canonicalize().map_err(|e| {
-            EngineError::Io(format!(
+            EngineError::io(format!(
                 "failed to canonicalize path '{}': {e}",
                 joined.display()
             ))
@@ -125,16 +125,16 @@ pub fn confine_user_path_under_base(
         let parent = joined.parent().unwrap_or(&canonical_base);
         let file_name = joined
             .file_name()
-            .ok_or_else(|| EngineError::User("invalid path".to_string()))?;
+            .ok_or_else(|| EngineError::invalid_input("invalid path".to_string()))?;
         if parent.exists() {
             let canonical_parent = parent.canonicalize().map_err(|e| {
-                EngineError::Io(format!(
+                EngineError::io(format!(
                     "failed to canonicalize parent '{}': {e}",
                     parent.display()
                 ))
             })?;
             if !canonical_parent.starts_with(&canonical_base) {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "path '{}' escapes files base directory '{}'",
                     joined.display(),
                     canonical_base.display()
@@ -142,7 +142,7 @@ pub fn confine_user_path_under_base(
             }
             canonical_parent.join(file_name)
         } else {
-            return Err(EngineError::User(format!(
+            return Err(EngineError::invalid_input(format!(
                 "path '{}' escapes files base directory '{}'",
                 joined.display(),
                 canonical_base.display()
@@ -152,10 +152,10 @@ pub fn confine_user_path_under_base(
         let parent = joined.parent().unwrap_or(&canonical_base);
         let file_name = joined
             .file_name()
-            .ok_or_else(|| EngineError::User("invalid path".to_string()))?;
+            .ok_or_else(|| EngineError::invalid_input("invalid path".to_string()))?;
         let canonical_parent = if parent.exists() {
             parent.canonicalize().map_err(|e| {
-                EngineError::Io(format!(
+                EngineError::io(format!(
                     "failed to canonicalize parent '{}': {e}",
                     parent.display()
                 ))
@@ -166,7 +166,7 @@ pub fn confine_user_path_under_base(
         canonical_parent.join(file_name)
     };
     if !canonical.starts_with(&canonical_base) {
-        return Err(EngineError::User(format!(
+        return Err(EngineError::invalid_input(format!(
             "path '{}' escapes files base directory '{}'",
             canonical.display(),
             canonical_base.display()

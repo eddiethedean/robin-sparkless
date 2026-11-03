@@ -12,7 +12,7 @@ fn normalize_db2_dsn(url: &str, opts: &JdbcOptions) -> Result<String, EngineErro
     // The url can be `jdbc:db2://host:port/db` which we translate into an ODBC connection string.
     let url = url.strip_prefix("jdbc:").unwrap_or(url);
     let rest = url.strip_prefix("db2://").ok_or_else(|| {
-        EngineError::User(format!(
+        EngineError::invalid_input(format!(
             "JDBC DB2: URL must start with jdbc:db2:// (got '{url}')"
         ))
     })?;
@@ -89,17 +89,17 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
         let q = sql_ident::quoted_table(JdbcDialect::Db2, table)?;
         format!("SELECT * FROM {q}")
     } else {
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: either 'dbtable' or 'query' option is required".to_string(),
         ));
     };
 
     let env = Environment::new()
-        .map_err(|e| EngineError::Internal(format!("JDBC DB2: ODBC env: {e}")))?;
+        .map_err(|e| EngineError::internal(format!("JDBC DB2: ODBC env: {e}")))?;
     let conn = env
         .connect_with_connection_string(&dsn, ConnectionOptions::default())
         .map_err(|_e| {
-            EngineError::Io(format!(
+            EngineError::io(format!(
                 "JDBC DB2: connect failed for {}",
                 redact_db2_dsn(&dsn)
             ))
@@ -108,7 +108,7 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
         conn.execute(init_sql, (), None).map_err(|e| {
-            EngineError::Sql(format!("JDBC read (DB2): sessionInitStatement failed: {e}"))
+            EngineError::sql(format!("JDBC read (DB2): sessionInitStatement failed: {e}"))
         })?;
     }
 
@@ -118,48 +118,48 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
     // Execute prepare query if provided
     if let Some(prep_sql) = &opts.prepare_query {
         conn.execute(prep_sql, (), None)
-            .map_err(|e| EngineError::Sql(format!("JDBC read (DB2): prepareQuery failed: {e}")))?;
+            .map_err(|e| EngineError::sql(format!("JDBC read (DB2): prepareQuery failed: {e}")))?;
     }
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| EngineError::Sql(format!("JDBC DB2: prepare failed: {e}")))?;
+        .map_err(|e| EngineError::sql(format!("JDBC DB2: prepare failed: {e}")))?;
 
     let mut cursor = stmt
         .execute(())
-        .map_err(|e| EngineError::Sql(format!("JDBC DB2: execute failed: {e}")))?
+        .map_err(|e| EngineError::sql(format!("JDBC DB2: execute failed: {e}")))?
         .ok_or_else(|| {
-            EngineError::Internal("JDBC DB2: statement did not return a result set".to_string())
+            EngineError::internal("JDBC DB2: statement did not return a result set".to_string())
         })?;
 
     let ncols = cursor
         .num_result_cols()
-        .map_err(|e| EngineError::Other(format!("JDBC DB2: ncols: {e}")))? as usize;
+        .map_err(|e| EngineError::other(format!("JDBC DB2: ncols: {e}")))? as usize;
 
     let mut column_names: Vec<String> = Vec::with_capacity(ncols);
     for idx in 1..=ncols as u16 {
         let desc = cursor
             .col_name(idx)
-            .map_err(|e| EngineError::Other(format!("JDBC DB2: col_name: {e}")))?;
+            .map_err(|e| EngineError::other(format!("JDBC DB2: col_name: {e}")))?;
         column_names.push(desc);
     }
     let column_types: Vec<OdbcDataType> = (1..=ncols as u16)
         .map(|idx| cursor.col_data_type(idx))
         .collect::<Result<_, _>>()
-        .map_err(|e| EngineError::Other(format!("JDBC DB2: col_data_type: {e}")))?;
+        .map_err(|e| EngineError::other(format!("JDBC DB2: col_data_type: {e}")))?;
 
     const BATCH_SIZE: usize = 1024;
     let buffers = TextRowSet::for_cursor(BATCH_SIZE, &mut cursor, Some(4096))
-        .map_err(|e| EngineError::Other(format!("JDBC DB2: buffer: {e}")))?;
+        .map_err(|e| EngineError::other(format!("JDBC DB2: buffer: {e}")))?;
     let mut row_cursor = cursor
         .bind_buffer(buffers)
-        .map_err(|e| EngineError::Other(format!("JDBC DB2: bind_buffer: {e}")))?;
+        .map_err(|e| EngineError::other(format!("JDBC DB2: bind_buffer: {e}")))?;
 
     let mut columns: Vec<Vec<Option<String>>> = (0..ncols).map(|_| Vec::new()).collect();
 
     while let Some(batch) = row_cursor
         .fetch()
-        .map_err(|e| EngineError::Other(format!("JDBC DB2: fetch: {e}")))?
+        .map_err(|e| EngineError::other(format!("JDBC DB2: fetch: {e}")))?
     {
         for row_idx in 0..batch.num_rows() {
             for (col_idx, col) in columns.iter_mut().enumerate().take(ncols) {
@@ -177,7 +177,7 @@ pub(crate) fn read_jdbc_db2(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErr
     }
     let cols: Vec<polars::prelude::Column> = series_vec.into_iter().map(|s| s.into()).collect();
     PlDataFrame::new_infer_height(cols)
-        .map_err(|e| EngineError::Internal(format!("JDBC read (DB2): build DataFrame: {e}")))
+        .map_err(|e| EngineError::internal(format!("JDBC read (DB2): build DataFrame: {e}")))
 }
 
 fn db2_values_to_series(name: &str, values: &[Option<String>], data_type: OdbcDataType) -> Series {
@@ -284,22 +284,22 @@ pub(crate) fn write_jdbc_db2(
     let dsn = normalize_db2_dsn(&opts.url, opts)?;
 
     let table_raw = opts.dbtable.as_deref().ok_or_else(|| {
-        EngineError::User(
+        EngineError::invalid_input(
             "JDBC write: 'dbtable' option is required for writes (target table name)".to_string(),
         )
     })?;
     let table = sql_ident::quoted_table(JdbcDialect::Db2, table_raw)?;
 
     let env = Environment::new()
-        .map_err(|e| EngineError::Internal(format!("JDBC DB2: ODBC env: {e}")))?;
+        .map_err(|e| EngineError::internal(format!("JDBC DB2: ODBC env: {e}")))?;
     let conn = env
         .connect_with_connection_string(&dsn, ConnectionOptions::default())
-        .map_err(|e| EngineError::Io(format!("JDBC DB2: connect failed: {e}")))?;
+        .map_err(|e| EngineError::io(format!("JDBC DB2: connect failed: {e}")))?;
 
     // Execute session initialization statement if provided
     if let Some(init_sql) = &opts.session_init_statement {
         conn.execute(init_sql, (), None).map_err(|e| {
-            EngineError::Sql(format!(
+            EngineError::sql(format!(
                 "JDBC write (DB2): sessionInitStatement failed: {e}"
             ))
         })?;
@@ -311,22 +311,22 @@ pub(crate) fn write_jdbc_db2(
             let check_sql = format!("SELECT COUNT(*) FROM {table}");
             let mut stmt = conn
                 .prepare(&check_sql)
-                .map_err(|e| EngineError::Sql(format!("JDBC write (DB2): check table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write (DB2): check table: {e}")))?;
             let mut cursor = stmt
                 .execute(())
-                .map_err(|e| EngineError::Sql(format!("JDBC write (DB2): check table: {e}")))?
+                .map_err(|e| EngineError::sql(format!("JDBC write (DB2): check table: {e}")))?
                 .ok_or_else(|| {
-                    EngineError::Internal("DB2: count query returned no result".to_string())
+                    EngineError::internal("DB2: count query returned no result".to_string())
                 })?;
             let buffers = TextRowSet::for_cursor(1, &mut cursor, Some(256))
-                .map_err(|e| EngineError::Other(format!("JDBC write (DB2): buffer: {e}")))?;
+                .map_err(|e| EngineError::other(format!("JDBC write (DB2): buffer: {e}")))?;
             let mut row_cursor = cursor
                 .bind_buffer(buffers)
-                .map_err(|e| EngineError::Other(format!("JDBC write (DB2): bind: {e}")))?;
+                .map_err(|e| EngineError::other(format!("JDBC write (DB2): bind: {e}")))?;
             let mut count: i64 = 0;
             if let Some(batch) = row_cursor
                 .fetch()
-                .map_err(|e| EngineError::Other(format!("JDBC write (DB2): fetch: {e}")))?
+                .map_err(|e| EngineError::other(format!("JDBC write (DB2): fetch: {e}")))?
             {
                 if batch.num_rows() > 0 {
                     if let Some(v) = batch.at(0, 0) {
@@ -337,7 +337,7 @@ pub(crate) fn write_jdbc_db2(
                 }
             }
             if count > 0 {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "Table '{table}' already has data. SaveMode is ErrorIfExists."
                 )));
             }
@@ -346,22 +346,22 @@ pub(crate) fn write_jdbc_db2(
             let check_sql = format!("SELECT COUNT(*) FROM {table}");
             let mut stmt = conn
                 .prepare(&check_sql)
-                .map_err(|e| EngineError::Sql(format!("JDBC write (DB2): check table: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write (DB2): check table: {e}")))?;
             let mut cursor = stmt
                 .execute(())
-                .map_err(|e| EngineError::Sql(format!("JDBC write (DB2): check table: {e}")))?
+                .map_err(|e| EngineError::sql(format!("JDBC write (DB2): check table: {e}")))?
                 .ok_or_else(|| {
-                    EngineError::Internal("DB2: count query returned no result".to_string())
+                    EngineError::internal("DB2: count query returned no result".to_string())
                 })?;
             let buffers = TextRowSet::for_cursor(1, &mut cursor, Some(256))
-                .map_err(|e| EngineError::Other(format!("JDBC write (DB2): buffer: {e}")))?;
+                .map_err(|e| EngineError::other(format!("JDBC write (DB2): buffer: {e}")))?;
             let mut row_cursor = cursor
                 .bind_buffer(buffers)
-                .map_err(|e| EngineError::Other(format!("JDBC write (DB2): bind: {e}")))?;
+                .map_err(|e| EngineError::other(format!("JDBC write (DB2): bind: {e}")))?;
             let mut count: i64 = 0;
             if let Some(batch) = row_cursor
                 .fetch()
-                .map_err(|e| EngineError::Other(format!("JDBC write (DB2): fetch: {e}")))?
+                .map_err(|e| EngineError::other(format!("JDBC write (DB2): fetch: {e}")))?
             {
                 if batch.num_rows() > 0 {
                     if let Some(v) = batch.at(0, 0) {
@@ -380,12 +380,12 @@ pub(crate) fn write_jdbc_db2(
             if use_truncate {
                 conn.execute(&format!("TRUNCATE TABLE {table} IMMEDIATE"), (), None)
                     .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write (DB2): truncate table: {e}"))
+                        EngineError::sql(format!("JDBC write (DB2): truncate table: {e}"))
                     })?;
             } else {
                 conn.execute(&format!("DELETE FROM {table}"), (), None)
                     .map_err(|e| {
-                        EngineError::Sql(format!("JDBC write (DB2): delete from table: {e}"))
+                        EngineError::sql(format!("JDBC write (DB2): delete from table: {e}"))
                     })?;
             }
         }
@@ -417,7 +417,7 @@ pub(crate) fn write_jdbc_db2(
 
     let mut prepared = conn
         .prepare(&insert_sql)
-        .map_err(|e| EngineError::Sql(format!("JDBC write (DB2): prepare: {e}")))?;
+        .map_err(|e| EngineError::sql(format!("JDBC write (DB2): prepare: {e}")))?;
 
     for batch_start in (0..total_rows).step_by(batch_size) {
         let batch_end = (batch_start + batch_size).min(total_rows);
@@ -427,7 +427,7 @@ pub(crate) fn write_jdbc_db2(
             for col in df.columns() {
                 let v = col
                     .get(row_idx)
-                    .map_err(|e| EngineError::Internal(format!("JDBC write: get cell: {e}")))?;
+                    .map_err(|e| EngineError::internal(format!("JDBC write: get cell: {e}")))?;
                 let s = match v {
                     polars::prelude::AnyValue::Null => None,
                     other => Some(other.to_string()),
@@ -441,7 +441,7 @@ pub(crate) fn write_jdbc_db2(
                 .collect();
             prepared
                 .execute(&param_refs[..])
-                .map_err(|e| EngineError::Sql(format!("JDBC write (DB2): insert failed: {e}")))?;
+                .map_err(|e| EngineError::sql(format!("JDBC write (DB2): insert failed: {e}")))?;
         }
 
         // Note: DB2 auto-commits by default in ODBC unless autocommit is disabled

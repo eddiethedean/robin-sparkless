@@ -13,7 +13,7 @@ search:
 
 ## Outcome
 
-**Current 4.19 revision:** [SS-23](23-product-and-package-separation.md) supersedes the original single-product packaging below. The candidate now has distinct base/DuckDB Rust and Python products, with the shared 4.19 runtime remaining Polars-backed and the DuckDB source in its own crate. A used backend-neutral runtime interface is due before Phase 4 adds a second executor. Pass 419-12–419-15 / V59 candidate acceptance before release. Retain earlier API/CLI behavior and evidence; the old binary-wheel inventory is not the final 4.19 inventory.
+**Current 4.19 revision:** [SS-23](23-product-and-package-separation.md) supersedes the original single-product packaging below. The candidate has distinct base/DuckDB Rust and Python products, with the DuckDB source in its own crate. The adopted [SOLID plan](../solid-refactor-4.19.md) requires a used backend-neutral server runtime and separate HTTP/Connect transports in 4.19, implemented through the existing Polars adapter; this supersedes the earlier wait for a second executor. Pass 419-12–419-15 / V59 and the SOLID plan's runtime-extraction gate before release. Retain earlier API/CLI behavior and evidence; the old binary-wheel inventory is not the final 4.19 inventory.
 
 Build a separately installable Rust service without adding transport dependencies to embedded engine consumers.
 

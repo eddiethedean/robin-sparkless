@@ -36,7 +36,7 @@ impl CancellationToken {
     /// Return the specific cancellation outcome when this token has been cancelled.
     pub fn check_cancelled(&self) -> Result<(), EngineError> {
         if self.is_cancelled() {
-            Err(EngineError::Cancelled("operation cancelled".into()))
+            Err(EngineError::cancelled("operation cancelled".into()))
         } else {
             Ok(())
         }

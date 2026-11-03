@@ -1,38 +1,26 @@
-//! Engine traits: backend-agnostic session, reader, dataframe, grouped, and plan.
-//!
-//! This module defines the **engine-facing abstraction layer** used by the root crate
-//! and by backend implementations such as `robin-sparkless-polars`:
-//! - [`SparkSessionBackend`] creates readers, tables, and engine-owned DataFrames.
-//! - [`DataFrameReaderBackend`] loads data from CSV/Parquet/JSON or existing tables.
-//! - [`DataFrameBackend`] and [`GroupedDataBackend`] perform core DataFrame and grouped
-//!   operations in terms of the engine-agnostic [`crate::expr::ExprIr`] expression IR.
-//! - [`PlanExecutor`] executes JSON logical plans and returns boxed [`DataFrameBackend`]
-//!   trait objects.
-//!
-//! Backends implement these traits (usually in their own `engine_backend` module) so that
-//! high-level APIs in the root crate can depend on **traits and IR** instead of concrete
-//! execution engines. This keeps core logic open for new backends without changing the
-//! public engine interfaces.
+//! Engine-neutral execution and storage capabilities.
 
 mod cancellation;
 mod collected;
+mod context;
 mod dataframe;
 mod external_catalog;
 mod join;
-mod plan;
 mod reader;
 mod session;
 
 pub use cancellation::CancellationToken;
 pub use collected::CollectedRows;
-pub use dataframe::{DataFrameBackend, GroupedDataBackend};
+pub use context::{ExecutionConfigSnapshot, ExecutionContext};
+pub use dataframe::{FrameActions, FrameSchema, FrameTransform, GroupedData};
 pub use external_catalog::{
-    ArrowIpcBatchStream, ArrowIpcStream, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
-    ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
-    ExternalTableWriteBatchRequest, ExternalTableWriteRequest, ExternalTableWriteResult,
-    begin_external_catalog_read_snapshot,
+    ArrowIpcBatchStream, ArrowIpcStream, CatalogBatchWriter, CatalogCapabilities, CatalogOwnership,
+    CatalogReadSnapshot, CatalogReader, CatalogResolution, CatalogResolver, CatalogWriter,
+    ExternalCatalog, ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
+    ExternalTableWriteBatchRequest, ExternalTableWriteOutcome, ExternalTableWriteRequest,
+    ExternalTableWriteResult, PreparedCatalogWrite, begin_catalog_read_snapshot,
+    resolve_catalog_identifier,
 };
 pub use join::JoinType;
-pub use plan::PlanExecutor;
 pub use reader::DataFrameReaderBackend;
 pub use session::SparkSessionBackend;

@@ -125,7 +125,7 @@ impl JdbcOptions {
     /// presence of `url`.
     pub fn from_options_map(options: &HashMap<String, String>) -> Result<JdbcOptions, EngineError> {
         let url = options.get("url").cloned().ok_or_else(|| {
-            EngineError::User("JDBC options: missing required option 'url'".to_string())
+            EngineError::invalid_input("JDBC options: missing required option 'url'".to_string())
         })?;
 
         // Helper to parse an integer option with a clear error message.
@@ -135,7 +135,7 @@ impl JdbcOptions {
         ) -> Result<Option<i64>, EngineError> {
             if let Some(v) = options.get(key) {
                 v.parse::<i64>().map(Some).map_err(|e| {
-                    EngineError::User(format!(
+                    EngineError::invalid_input(format!(
                         "JDBC options: could not parse '{key}'='{}' as i64: {e}",
                         v
                     ))
@@ -151,7 +151,7 @@ impl JdbcOptions {
         ) -> Result<Option<i32>, EngineError> {
             if let Some(v) = options.get(key) {
                 v.parse::<i32>().map(Some).map_err(|e| {
-                    EngineError::User(format!(
+                    EngineError::invalid_input(format!(
                         "JDBC options: could not parse '{key}'='{}' as i32: {e}",
                         v
                     ))
@@ -248,7 +248,7 @@ impl JdbcOptions {
             || self.session_init_statement.is_some()
             || self.prepare_query.is_some()
         {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "JDBC query/sessionInitStatement/prepareQuery disabled. \
                  Set SPARKLESS_JDBC_ALLOW_ARBITRARY_SQL=true or use dbtable only."
                     .to_string(),
@@ -331,7 +331,7 @@ pub fn write_jdbc_from_polars(
         #[cfg(feature = "sqlite")]
         return sqlite::write_jdbc_sqlite(df, opts, mode);
         #[cfg(not(feature = "sqlite"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC write: SQLite URL/driver requires the 'sqlite' feature".to_string(),
         ));
     }
@@ -339,7 +339,7 @@ pub fn write_jdbc_from_polars(
         #[cfg(feature = "jdbc")]
         return postgres::write_jdbc_postgres(df, opts, mode);
         #[cfg(not(feature = "jdbc"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC write: PostgreSQL URL/driver requires the 'jdbc' feature".to_string(),
         ));
     }
@@ -347,7 +347,7 @@ pub fn write_jdbc_from_polars(
         #[cfg(feature = "jdbc_mysql")]
         return mysql::write_jdbc_mysql(df, opts, mode);
         #[cfg(not(feature = "jdbc_mysql"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC write: MySQL URL/driver requires the 'jdbc_mysql' feature".to_string(),
         ));
     }
@@ -355,7 +355,7 @@ pub fn write_jdbc_from_polars(
         #[cfg(feature = "jdbc_mariadb")]
         return mariadb::write_jdbc_mariadb(df, opts, mode);
         #[cfg(not(feature = "jdbc_mariadb"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC write: MariaDB URL/driver requires the 'jdbc_mariadb' feature".to_string(),
         ));
     }
@@ -365,7 +365,7 @@ pub fn write_jdbc_from_polars(
         #[cfg(feature = "jdbc_mssql")]
         return mssql::write_jdbc_mssql(df, opts, mode);
         #[cfg(not(feature = "jdbc_mssql"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC write: SQL Server URL/driver requires the 'jdbc_mssql' feature".to_string(),
         ));
     }
@@ -373,7 +373,7 @@ pub fn write_jdbc_from_polars(
         #[cfg(feature = "jdbc_oracle")]
         return oracle::write_jdbc_oracle(df, opts, mode);
         #[cfg(not(feature = "jdbc_oracle"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC write: Oracle URL/driver requires the 'jdbc_oracle' feature".to_string(),
         ));
     }
@@ -381,12 +381,12 @@ pub fn write_jdbc_from_polars(
         #[cfg(feature = "jdbc_db2")]
         return db2::write_jdbc_db2(df, opts, mode);
         #[cfg(not(feature = "jdbc_db2"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC write: DB2 URL/driver requires the 'jdbc_db2' feature".to_string(),
         ));
     }
 
-    Err(EngineError::User(format!(
+    Err(EngineError::invalid_input(format!(
         "JDBC write: unsupported URL scheme in '{}'",
         sql_ident::redact_jdbc_url(&opts.url)
     )))
@@ -408,7 +408,7 @@ pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErro
         #[cfg(feature = "sqlite")]
         return sqlite::read_jdbc_sqlite(opts);
         #[cfg(not(feature = "sqlite"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: SQLite URL/driver requires the 'sqlite' feature".to_string(),
         ));
     }
@@ -416,7 +416,7 @@ pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErro
         #[cfg(feature = "jdbc")]
         return postgres::read_jdbc_postgres(opts);
         #[cfg(not(feature = "jdbc"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: PostgreSQL URL/driver requires the 'jdbc' feature".to_string(),
         ));
     }
@@ -424,7 +424,7 @@ pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErro
         #[cfg(feature = "jdbc_mysql")]
         return mysql::read_jdbc_mysql(opts);
         #[cfg(not(feature = "jdbc_mysql"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: MySQL URL/driver requires the 'jdbc_mysql' feature".to_string(),
         ));
     }
@@ -432,7 +432,7 @@ pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErro
         #[cfg(feature = "jdbc_mariadb")]
         return mariadb::read_jdbc_mariadb(opts);
         #[cfg(not(feature = "jdbc_mariadb"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: MariaDB URL/driver requires the 'jdbc_mariadb' feature".to_string(),
         ));
     }
@@ -442,7 +442,7 @@ pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErro
         #[cfg(feature = "jdbc_mssql")]
         return mssql::read_jdbc_mssql(opts);
         #[cfg(not(feature = "jdbc_mssql"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: SQL Server URL/driver requires the 'jdbc_mssql' feature".to_string(),
         ));
     }
@@ -450,7 +450,7 @@ pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErro
         #[cfg(feature = "jdbc_oracle")]
         return oracle::read_jdbc_oracle(opts);
         #[cfg(not(feature = "jdbc_oracle"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: Oracle URL/driver requires the 'jdbc_oracle' feature".to_string(),
         ));
     }
@@ -458,12 +458,12 @@ pub fn read_jdbc_to_polars(opts: &JdbcOptions) -> Result<PlDataFrame, EngineErro
         #[cfg(feature = "jdbc_db2")]
         return db2::read_jdbc_db2(opts);
         #[cfg(not(feature = "jdbc_db2"))]
-        return Err(EngineError::User(
+        return Err(EngineError::invalid_input(
             "JDBC read: DB2 URL/driver requires the 'jdbc_db2' feature".to_string(),
         ));
     }
 
-    Err(EngineError::User(format!(
+    Err(EngineError::invalid_input(format!(
         "JDBC read: unsupported URL scheme in '{}'",
         sql_ident::redact_jdbc_url(&opts.url)
     )))

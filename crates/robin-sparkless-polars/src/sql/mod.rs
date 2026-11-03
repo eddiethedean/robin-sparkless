@@ -207,13 +207,7 @@ pub fn execute_sql_with_cancellation(
     } else {
         session.shared_catalog_guard()?
     };
-    let result = execute_sql_statement(session, statement, token).map_err(|error| {
-        if error.to_string().starts_with("cancelled: ") {
-            EngineError::Cancelled("operation cancelled".into())
-        } else {
-            polars_to_core_error(error)
-        }
-    })?;
+    let result = execute_sql_statement(session, statement, token).map_err(polars_to_core_error)?;
     if read_only {
         token.check_cancelled()?;
     }
@@ -346,7 +340,7 @@ fn execute_sql_statement(
             query,
         } => {
             let table_name = translator::table_name_from_object_name(&table);
-            session.reject_read_only_external_target(&table_name)?;
+            session.reject_external_namespace_target(&table_name)?;
             let format_lower = format.to_lowercase();
 
             // Execute the SELECT query to get the result DataFrame

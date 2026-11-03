@@ -54,12 +54,13 @@ pub mod traits;
 /// Prefer these for engine-generic code and embeddings that should not depend on Polars.
 pub mod engine {
     pub use robin_sparkless_core::engine::{
-        ArrowIpcBatchStream, ArrowIpcStream, CollectedRows, DataFrameBackend,
-        DataFrameReaderBackend, ExternalCatalogProvider, ExternalCatalogReadSnapshot,
+        ArrowIpcBatchStream, ArrowIpcStream, CatalogCapabilities, CatalogOwnership,
+        CatalogReadSnapshot, CatalogReader, CatalogResolver, CatalogWriter, CollectedRows,
+        DataFrameReaderBackend, ExecutionConfigSnapshot, ExecutionContext, ExternalCatalog,
         ExternalTableDescriptor, ExternalTableFormat, ExternalTableSaveMode,
-        ExternalTableWriteBatchRequest, ExternalTableWriteRequest, ExternalTableWriteResult,
-        GroupedDataBackend, JoinType, PlanExecutor, SparkSessionBackend,
-        begin_external_catalog_read_snapshot,
+        ExternalTableWriteBatchRequest, ExternalTableWriteOutcome, ExternalTableWriteRequest,
+        ExternalTableWriteResult, FrameActions, FrameSchema, FrameTransform, GroupedData, JoinType,
+        SparkSessionBackend, begin_catalog_read_snapshot,
     };
     pub use robin_sparkless_core::expr::{
         ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
@@ -68,7 +69,10 @@ pub mod engine {
         lit_i64, lit_null, lit_str, lt, max, mean, median, min, mode, ne, not_, or_, skewness, std,
         stddev, stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance, when,
     };
-    pub use robin_sparkless_core::{DataType, EngineError, LogicalField, StructField, StructType};
+    pub use robin_sparkless_core::{
+        DataType, EngineError, ErrorCategory, ErrorDetail, ErrorRetryability, LogicalField,
+        StructField, StructType,
+    };
 }
 
 /// Polars-backed types and helper functions re-exported from `robin-sparkless-polars`.
@@ -109,9 +113,11 @@ pub use dataframe::{
     SelectItem, WriteFormat, WriteMode, expr_contains_only_join_key_equalities,
     try_extract_join_eq_columns, try_extract_join_eq_columns_all,
 };
-pub use robin_sparkless_polars::dataframe::DropColumnSpec;
 #[cfg(feature = "duckdb-source")]
-pub use robin_sparkless_duckdb::{DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec};
+pub use robin_sparkless_duckdb::{
+    DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
+};
+pub use robin_sparkless_polars::dataframe::DropColumnSpec;
 pub use robin_sparkless_polars::{SharedCatalog, SharedCatalogReadLease};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 
@@ -126,15 +132,7 @@ pub fn execute_plan(
     schema: Vec<(String, String)>,
     plan: &[serde_json::Value],
 ) -> Result<DataFrame, PlanError> {
-    use robin_sparkless_core::engine::PlanExecutor as _;
-
-    // Execute via the engine-generic PlanExecutor trait implemented by the Polars backend.
-    let boxed = robin_sparkless_polars::plan::PolarsPlanExecutor::execute_plan(
-        &session.0, data, schema, plan,
-    )
-    .map_err(|e| PlanError::InvalidPlan(e.to_string()))?;
-
-    crate::dataframe::from_backend(boxed).map_err(|e| PlanError::InvalidPlan(e.to_string()))
+    robin_sparkless_polars::plan::execute_plan(&session.0, data, schema, plan).map(DataFrame)
 }
 
 pub use config::SparklessConfig;

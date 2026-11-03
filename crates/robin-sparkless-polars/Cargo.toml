@@ -86,5 +86,6 @@ robin-sparkless-duckdb = { version = "4.19.0", path = "../robin-sparkless-duckdb
 
 [dev-dependencies]
 tempfile = "3"
+duckdb = { version = "=1.20000.1", default-features = false, features = ["bundled"] }
 polars-parquet = { version = "0.53", default-features = false, features = ["zstd"] }
 zstd = { version = "=0.14.3", default-features = false }

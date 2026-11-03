@@ -1,0 +1,966 @@
+{
+  "engine": "connect",
+  "pyspark": "4.0.5",
+  "active_operations": "2 (default)",
+  "workloads": {
+    "ingest_10": {
+      "status": "pass",
+      "samples_seconds": [
+        0.016723250038921833,
+        0.01657029101625085,
+        0.01652291603386402,
+        0.016686125192791224,
+        0.013634083792567253,
+        0.01673224987462163,
+        0.016669416800141335,
+        0.016499500023201108
+      ],
+      "median_ms": 16.61985390819609,
+      "p95_ms": 16.73224987462163
+    },
+    "ingest_100": {
+      "status": "pass",
+      "samples_seconds": [
+        0.012028041994199157,
+        0.01703270780853927,
+        0.011997416149824858,
+        0.016261165961623192,
+        0.01201312500052154,
+        0.014232999878004193,
+        0.01633620890788734,
+        0.016200167126953602
+      ],
+      "median_ms": 15.216583502478898,
+      "p95_ms": 17.03270780853927
+    },
+    "ingest_1000": {
+      "status": "pass",
+      "samples_seconds": [
+        0.01651400001719594,
+        0.017013875069096684,
+        0.016422375105321407,
+        0.012043124996125698,
+        0.012036124942824244,
+        0.0165502920281142,
+        0.016609540907666087,
+        0.016493333969265223
+      ],
+      "median_ms": 16.50366699323058,
+      "p95_ms": 17.013875069096684
+    },
+    "ingest_10000": {
+      "status": "pass",
+      "samples_seconds": [
+        0.01903483411297202,
+        0.019618249963968992,
+        0.019106582971289754,
+        0.01906054187566042,
+        0.019072917057201266,
+        0.019118625205010176,
+        0.027949125040322542,
+        0.018975208047777414
+      ],
+      "median_ms": 19.08975001424551,
+      "p95_ms": 27.949125040322542
+    },
+    "orders_pipeline": {
+      "status": "pass",
+      "samples_seconds": [
+        0.016321750124916434,
+        0.017824083101004362,
+        0.016942332964390516,
+        0.01678945799358189,
+        0.012031540973111987,
+        0.0168809168972075,
+        0.016842416021972895,
+        0.01688912487588823
+      ],
+      "median_ms": 16.861666459590197,
+      "p95_ms": 17.824083101004362
+    },
+    "nullable_orders": {
+      "status": "pass",
+      "samples_seconds": [
+        0.019799374975264072,
+        0.024336791830137372,
+        0.019837999949231744,
+        0.019627583911642432,
+        0.019736374961212277,
+        0.01980508305132389,
+        0.019620167091488838,
+        0.019760665949434042
+      ],
+      "median_ms": 19.780020462349057,
+      "p95_ms": 24.336791830137372
+    },
+    "scalar_roundtrip": {
+      "status": "pass",
+      "samples_seconds": [
+        0.020844999933615327,
+        0.021811540937051177,
+        0.02037091599777341,
+        0.021091582952067256,
+        0.02057362487539649,
+        0.020560459000989795,
+        0.020342167001217604,
+        0.02037079189904034
+      ],
+      "median_ms": 20.567041938193142,
+      "p95_ms": 21.811540937051177
+    },
+    "wide_projection": {
+      "status": "pass",
+      "samples_seconds": [
+        0.027667416958138347,
+        0.03773254086263478,
+        0.03146574995480478,
+        0.03558087511919439,
+        0.03165200003422797,
+        0.027552125044167042,
+        0.03203020803630352,
+        0.03246691613458097
+      ],
+      "median_ms": 31.841104035265744,
+      "p95_ms": 37.73254086263478
+    },
+    "string_payload": {
+      "status": "pass",
+      "samples_seconds": [
+        0.027305624913424253,
+        0.03365987492725253,
+        0.02681783400475979,
+        0.02685966598801315,
+        0.02425820892676711,
+        0.027258957969024777,
+        0.0269164580386132,
+        0.0297753750346601
+      ],
+      "median_ms": 27.08770800381899,
+      "p95_ms": 33.65987492725253
+    },
+    "empty_result": {
+      "status": "pass",
+      "samples_seconds": [
+        0.04796295799314976,
+        0.043907416984438896,
+        0.05231091706082225,
+        0.04905000003054738,
+        0.04930920898914337,
+        0.04967170814052224,
+        0.05143225006759167,
+        0.05035487492568791
+      ],
+      "median_ms": 49.49045856483281,
+      "p95_ms": 52.31091706082225
+    },
+    "selectivity_none": {
+      "status": "pass",
+      "samples_seconds": [
+        0.019821333000436425,
+        0.021808334160596132,
+        0.019856292055919766,
+        0.019561083987355232,
+        0.019680459052324295,
+        0.019807499833405018,
+        0.01966487499885261,
+        0.01950874994508922
+      ],
+      "median_ms": 19.743979442864656,
+      "p95_ms": 21.808334160596132
+    },
+    "selectivity_one": {
+      "status": "pass",
+      "samples_seconds": [
+        0.019629708025604486,
+        0.019208542071282864,
+        0.019481291994452477,
+        0.01985979196615517,
+        0.019790666876360774,
+        0.01964808302000165,
+        0.01549258315935731,
+        0.019502209033817053
+      ],
+      "median_ms": 19.56595852971077,
+      "p95_ms": 19.85979196615517
+    },
+    "selectivity_half": {
+      "status": "pass",
+      "samples_seconds": [
+        0.019462957978248596,
+        0.019049375085160136,
+        0.017771124839782715,
+        0.019558207830414176,
+        0.01916687493212521,
+        0.019589792005717754,
+        0.01958487485535443,
+        0.019889082992449403
+      ],
+      "median_ms": 19.510582904331386,
+      "p95_ms": 19.889082992449403
+    },
+    "selectivity_all": {
+      "status": "pass",
+      "samples_seconds": [
+        0.019480624934658408,
+        0.01907758298330009,
+        0.019690250046551228,
+        0.019848249852657318,
+        0.019687833031639457,
+        0.019667915999889374,
+        0.019891874864697456,
+        0.01988166687078774
+      ],
+      "median_ms": 19.689041539095342,
+      "p95_ms": 19.891874864697456
+    },
+    "arithmetic_pipeline": {
+      "status": "pass",
+      "samples_seconds": [
+        0.027620417065918446,
+        0.02833008416928351,
+        0.02790429093874991,
+        0.02791608404368162,
+        0.027997791999951005,
+        0.028221832821145654,
+        0.028121584095060825,
+        0.02450145804323256
+      ],
+      "median_ms": 27.956938021816313,
+      "p95_ms": 28.33008416928351
+    },
+    "preview_limit": {
+      "status": "pass",
+      "samples_seconds": [
+        0.015733417123556137,
+        0.017326500033959746,
+        0.015697791008278728,
+        0.012053207959979773,
+        0.015708083054050803,
+        0.015702290926128626,
+        0.01595179201103747,
+        0.015715625137090683
+      ],
+      "median_ms": 15.711854095570743,
+      "p95_ms": 17.326500033959746
+    },
+    "collect_10000": {
+      "status": "pass",
+      "samples_seconds": [
+        0.12078216695226729,
+        0.1111104590818286,
+        0.11092245788313448,
+        0.11078175017610192,
+        0.11284612491726875,
+        0.10861429199576378,
+        0.11008349992334843,
+        0.11226199986413121
+      ],
+      "median_ms": 111.01645848248154,
+      "p95_ms": 120.78216695226729
+    },
+    "collect_100000": {
+      "status": "pass",
+      "samples_seconds": [
+        1.0371777079999447,
+        1.012847124831751,
+        1.0147558751050383,
+        0.9967220830731094,
+        1.0251852918881923,
+        1.0081199170090258,
+        1.0230184579268098,
+        1.0037340000271797
+      ],
+      "median_ms": 1013.8014999683946,
+      "p95_ms": 1037.1777079999447
+    },
+    "schema_100_columns": {
+      "status": "pass",
+      "samples_seconds": [
+        0.00916483299806714,
+        0.006863707909360528,
+        0.006852708989754319,
+        0.006882457993924618,
+        0.006873499834910035,
+        0.0068805410992354155,
+        0.006860125111415982,
+        0.006806167075410485
+      ],
+      "median_ms": 6.868603872135282,
+      "p95_ms": 9.16483299806714
+    }
+  },
+  "mixed_concurrency": {
+    "1": {
+      "jobs_per_round": 4,
+      "rounds_seconds": [
+        0.1704910839907825,
+        0.16584899998269975,
+        0.1632191662210971
+      ],
+      "samples": [
+        {
+          "name": "ingest_1000",
+          "seconds": 0.0165970828384161
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.019493707921355963
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.013225332833826542
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.12105116713792086
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.017211625119671226
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.01999612501822412
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.015768750105053186
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.11279633408412337
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.016877499874681234
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.019681832985952497
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.015765707939863205
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1108487918972969
+        }
+      ]
+    },
+    "4": {
+      "jobs_per_round": 16,
+      "rounds_seconds": [
+        0.40699687507003546,
+        0.42013987503014505,
+        0.35768020898103714
+      ],
+      "samples": [
+        {
+          "name": "ingest_1000",
+          "seconds": 0.1788419159129262
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.052468499867245555
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.016248791944235563
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.15933270892128348
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.178258707979694
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.01709974999539554
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1315312918741256
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.03718095808289945
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.015158457914367318
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.16243391600437462
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.03289425000548363
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.12441245885565877
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.16895087505690753
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.027407333021983504
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.06743975006975234
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.0833984580822289
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.17873749998398125
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.03839437500573695
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.014273625100031495
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.17189229209907353
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.19007966690696776
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.026396166998893023
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1666637919843197
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.03685858310200274
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.014487291919067502
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1638929161708802
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.018284749938175082
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.18839420820586383
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.16325758420862257
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.03985558380372822
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.04568287497386336
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.15473691700026393
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.028920667013153434
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.18478687503375113
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.02960354182869196
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.11427200003527105
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.049340666038915515
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.09552591689862311
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.12809645920060575
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.03892129193991423
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.01696670800447464
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.19376562489196658
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.06869516707956791
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.06826674984768033
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.14053862495347857
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.08789208298549056
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.06817024992778897
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.03061845898628235
+        }
+      ]
+    },
+    "8": {
+      "jobs_per_round": 32,
+      "rounds_seconds": [
+        0.7298564999364316,
+        0.7960728749167174,
+        0.7486642089206725
+      ],
+      "samples": [
+        {
+          "name": "ingest_1000",
+          "seconds": 0.2085021249949932
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.25506791612133384
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.03494329215027392
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1792754998896271
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.19586166692897677
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.11141737503930926
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.14358091680333018
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.08542741695418954
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.015761332819238305
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.27087350003421307
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.09655233286321163
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.3151786250527948
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.16307383310049772
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.19342341599985957
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.3389163331594318
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.01634929096326232
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.2909850829746574
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.19166437513194978
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.030858999816700816
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1760369590483606
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.3212057079654187
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.025811042170971632
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1650557911489159
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.1967648749705404
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.025309749878942966
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.32067749998532236
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.17325195809826255
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.20863312506116927
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.18534704204648733
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.18495991686359048
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.30758683290332556
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.02980220806784928
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.21884162491187453
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.32682124990969896
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.01938016712665558
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.19565266696736217
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.18824883294291794
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.14983970811590552
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.18522754195146263
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.23864075005985796
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.015645458130165935
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.31520054186694324
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.2022703338880092
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.06129437522031367
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.16425375011749566
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.3657758329063654
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.22578258393332362
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.021370582981035113
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.20305233309045434
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.3349884171038866
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.021810875041410327
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.16305137518793344
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.1883755000308156
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.16134862485341728
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.18230158416554332
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.19763204199261963
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.18566608312539756
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.18008133303374052
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.205945166060701
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.22200349997729063
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.18485083314590156
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.3664007920306176
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.2157944580540061
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.01574804214760661
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.20157016697339714
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.26733929198235273
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.06332266586832702
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1351966669317335
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.2537331669591367
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.04257183405570686
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.23292041616514325
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.18494266597554088
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.016450207913294435
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.2669116659089923
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.24723683414049447
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.14833545801229775
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1563857919536531
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.34736229199916124
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.07366462494246662
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.15179279097355902
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.21299224998801947
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.2757619160693139
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.0526890829205513
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.1817112909629941
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.23336674994789064
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.051785292103886604
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.17497395910322666
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.09669012506492436
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.02783137490041554
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.3639591250102967
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.20008754217997193
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.15584804210811853
+        },
+        {
+          "name": "collect_10000",
+          "seconds": 0.19312858278863132
+        },
+        {
+          "name": "ingest_1000",
+          "seconds": 0.33518687495961785
+        },
+        {
+          "name": "nullable_orders",
+          "seconds": 0.16967908293008804
+        },
+        {
+          "name": "preview_limit",
+          "seconds": 0.030305958120152354
+        }
+      ]
+    }
+  },
+  "unsupported_probes": {
+    "grouped_sum": {
+      "status": "error",
+      "error": "SparkException: UNSUPPORTED_CONNECT_PLAN: only a global GROUP_TYPE_GROUPBY count(1) aggregate is supported\n\nJVM stacktrace:\n"
+    },
+    "join": {
+      "status": "error",
+      "error": "SparkException: UNSUPPORTED_CONNECT_PLAN: relation type is not enabled in the 4.18 subset\n\nJVM stacktrace:\n"
+    },
+    "sort": {
+      "status": "error",
+      "error": "SparkException: UNSUPPORTED_CONNECT_PLAN: relation type is not enabled in the 4.18 subset\n\nJVM stacktrace:\n"
+    },
+    "sql": {
+      "status": "error",
+      "error": "SparkException: UNSUPPORTED_CONNECT_PLAN: Connect commands and SQL execution are outside the 4.18 subset\n\nJVM stacktrace:\n"
+    }
+  }
+}

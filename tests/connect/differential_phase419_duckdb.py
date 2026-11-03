@@ -35,7 +35,7 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-from sparkless.server import SparklessConnect
+from sparkless_server_duckdb import SparklessConnect
 
 
 def normalize(value: Any) -> Any:

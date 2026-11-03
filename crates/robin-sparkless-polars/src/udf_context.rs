@@ -22,6 +22,30 @@ pub struct UdfContext {
     pub runtime_config: SessionRuntimeConfig,
 }
 
+/// Restores the worker thread's prior Sparkless context when one operation finishes.
+pub(crate) struct ThreadContextGuard {
+    previous: Option<UdfContext>,
+    previous_decimal_allow_precision_loss: bool,
+}
+
+impl ThreadContextGuard {
+    pub(crate) fn capture() -> Self {
+        let previous = THREAD_UDF_CONTEXT.with(|cell| cell.borrow().clone());
+        let previous_decimal_allow_precision_loss = get_thread_decimal_allow_precision_loss();
+        Self {
+            previous,
+            previous_decimal_allow_precision_loss,
+        }
+    }
+}
+
+impl Drop for ThreadContextGuard {
+    fn drop(&mut self) {
+        THREAD_UDF_CONTEXT.with(|cell| *cell.borrow_mut() = self.previous.take());
+        set_thread_decimal_allow_precision_loss(self.previous_decimal_allow_precision_loss);
+    }
+}
+
 /// Set the thread-local UDF context (registry + case_sensitive). Called by the main crate's session.
 pub fn set_thread_udf_context(registry: Arc<UdfRegistry>, case_sensitive: bool) {
     set_thread_udf_context_with_tz(registry, case_sensitive, None);

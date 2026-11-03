@@ -5705,6 +5705,7 @@ dependencies = [
  "chrono-tz 0.9.0",
  "crc32fast",
  "deltalake",
+ "duckdb",
  "fancy-regex",
  "futures",
  "futures-util",

@@ -219,7 +219,9 @@ pub fn expr_string_to_polars(
 ) -> Result<Expr, PolarsError> {
     let (sql_expr, alias) = spark_sql_parser::parse_select_expr(expr_str)
         .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))?;
-    set_thread_udf_session(session.clone());
+    if !crate::session::has_active_execution_context() {
+        set_thread_udf_session(session.clone());
+    }
     let expr = sql_expr_to_polars(&sql_expr, session, Some(df), None, None)?;
     Ok(match alias {
         Some(a) => expr.alias(a.value.as_str()),
@@ -248,7 +250,9 @@ pub fn translate_with_cancellation(
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     check_cancellation(token)?;
     reject_read_only_external_mutation(session, stmt)?;
-    set_thread_udf_session(session.clone());
+    if !crate::session::has_active_execution_context() {
+        set_thread_udf_session(session.clone());
+    }
     match stmt {
         Statement::Query(q) => translate_query(session, q.as_ref()),
         Statement::CreateView(create_view) => {
@@ -630,7 +634,11 @@ fn reject_read_only_external_mutation(
         _ => {}
     }
     for target in targets {
-        session.reject_read_only_external_target(&target)?;
+        if matches!(statement, Statement::Insert(_)) {
+            session.reject_read_only_external_target(&target)?;
+        } else {
+            session.reject_external_namespace_target(&target)?;
+        }
     }
     Ok(())
 }
@@ -726,7 +734,9 @@ fn translate_insert(
         session.resolve_external_table_descriptor(&table_name)?
     };
     let target_df = match &external_target {
-        Some((_, descriptor)) => session.read_external_table_descriptor(&table_name, descriptor)?,
+        Some((_, _, descriptor)) => {
+            session.read_external_table_descriptor(&table_name, descriptor)?
+        }
         None if has_provider => session.table_after_external_miss(&table_name, true)?,
         None => session.table(&table_name)?,
     };
@@ -822,12 +832,13 @@ fn translate_insert(
         }
     };
 
-    if let Some((provider, descriptor)) = external_target {
+    if let Some((catalog, ownership, descriptor)) = external_target {
         new_rows_df.write().save_as_external_table_descriptor(
             &table_name,
             crate::dataframe::SaveMode::Append,
             None,
-            provider.as_ref(),
+            catalog.as_ref(),
+            &ownership,
             &descriptor,
             &[],
             token,
@@ -2517,12 +2528,8 @@ fn sql_expr_to_polars_with_qualifiers_inner(
                     Ok(lit(Scalar::new_date(days)))
                 }
                 SqlDataType::Timestamp(_, _) => {
-                    let timezone = session
-                        .get_config()
-                        .get("spark.sql.session.timeZone")
-                        .map(String::as_str)
-                        .unwrap_or("UTC");
-                    let micros = parse_sql_timestamp_micros(value, timezone)?;
+                    let timezone = crate::udf_context::get_thread_session_time_zone();
+                    let micros = parse_sql_timestamp_micros(value, &timezone)?;
                     Ok(lit(Scalar::new_datetime(
                         micros,
                         polars::prelude::TimeUnit::Microseconds,
@@ -2551,10 +2558,8 @@ fn sql_expr_to_polars_with_qualifiers_inner(
                     .unwrap_or_default();
                 if let Some(expr) = super::decimal::binary_expr(
                     l.clone(), r.clone(), op, &schema,
-                    session.runtime_config().ansi_enabled,
-                    robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
-                        session.get_config(),
-                    ),
+                    crate::udf_context::get_thread_runtime_config().ansi_enabled,
+                    crate::udf_context::get_thread_decimal_allow_precision_loss(),
                 )? {
                     return Ok(expr);
                 }
@@ -2567,7 +2572,7 @@ fn sql_expr_to_polars_with_qualifiers_inner(
                 if matches!(op, BinaryOperator::Divide) {
                     // Spark SQL promotes integral division to DOUBLE. Polars' native integer
                     // division truncates (1 / 2 => 0), so keep non-decimal division fractional.
-                    if session.runtime_config().ansi_enabled {
+                    if crate::udf_context::get_thread_runtime_config().ansi_enabled {
                         let left = l.clone().cast(polars::prelude::DataType::Float64);
                         let right = r.clone().cast(polars::prelude::DataType::Float64);
                         record_ansi_failure(
@@ -2627,7 +2632,7 @@ fn sql_expr_to_polars_with_qualifiers_inner(
                     return Ok(when(right.clone().eq(lit(0.0)))
                         .then(lit(polars::prelude::NULL).cast(polars::prelude::DataType::Float64))
                         .otherwise(left / right));
-                } else if session.runtime_config().ansi_enabled
+                } else if crate::udf_context::get_thread_runtime_config().ansi_enabled
                     && matches!(op, BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Multiply)
                     && let (Ok(left_field), Ok(right_field)) =
                         (l.to_field(&schema), r.to_field(&schema))
