@@ -222,7 +222,7 @@ jobs:
       - name: Install test tools and check wheel dependencies
         run: |
           mkdir -p pytest-results
-          python -m pip install pytest pytest-xdist hypothesis pytest-timeout pyarrow
+          python -m pip install pytest pytest-xdist hypothesis pytest-timeout pandas polars pyarrow
           python -m pip check
           python scripts/test_installed_package_version.py
           python scripts/check_native_stub_exports.py

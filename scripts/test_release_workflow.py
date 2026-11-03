@@ -98,7 +98,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     if "pip install" in step.get("run", "")
                     and "pytest" in step.get("run", "")
                 )
-                self.assertIn("pyarrow", install)
+                for dependency in ("pandas", "polars", "pyarrow"):
+                    with self.subTest(dependency=dependency):
+                        self.assertIn(dependency, install)
 
     def test_new_pypi_projects_use_token_and_existing_projects_use_oidc(self):
         jobs = workflow("release.yml")["jobs"]
