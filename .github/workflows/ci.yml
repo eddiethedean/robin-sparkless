@@ -345,7 +345,7 @@ jobs:
       - name: Install pytest and run tests (fast subset + parity)
         run: |
           mkdir -p pytest-results
-          .venv/bin/pip install pytest pytest-xdist hypothesis pytest-timeout
+          .venv/bin/pip install pytest pytest-xdist hypothesis pytest-timeout pyarrow
           .venv/bin/pip check
           .venv/bin/python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --durations=25 --junitxml=pytest-results/ordinary.xml
           .venv/bin/python -m pytest tests/parity/ -v --tb=short --durations=25 --junitxml=pytest-results/parity.xml
@@ -450,7 +450,7 @@ jobs:
         run: |
           python -m venv .venv
           mkdir -p pytest-results
-          .venv/bin/pip install dist/*.whl pytest pytest-xdist hypothesis pytest-timeout
+          .venv/bin/pip install dist/*.whl pytest pytest-xdist hypothesis pytest-timeout pyarrow
           .venv/bin/python -m pytest tests -n 4 -v --tb=short --durations=25 --junitxml=pytest-results/full.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

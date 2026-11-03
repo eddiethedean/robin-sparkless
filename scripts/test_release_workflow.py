@@ -83,6 +83,23 @@ class ReleaseContextTests(unittest.TestCase):
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_python_catalog_writer_test_jobs_install_pyarrow(self):
+        test_jobs = (
+            ("ci.yml", "python"),
+            ("ci.yml", "python-full"),
+            ("release.yml", "python-tests"),
+        )
+        for workflow_name, job_name in test_jobs:
+            with self.subTest(workflow=workflow_name, job=job_name):
+                steps = workflow(workflow_name)["jobs"][job_name]["steps"]
+                install = next(
+                    step["run"]
+                    for step in steps
+                    if "pip install" in step.get("run", "")
+                    and "pytest" in step.get("run", "")
+                )
+                self.assertIn("pyarrow", install)
+
     def test_new_pypi_projects_use_token_and_existing_projects_use_oidc(self):
         jobs = workflow("release.yml")["jobs"]
         token_publishers = ("publish-connect", "publish-server-products")
