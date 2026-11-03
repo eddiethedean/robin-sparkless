@@ -2950,10 +2950,16 @@ fn write_delta_with_save_options_inner(
     })?;
 
     let load_result = robin_sparkless_delta::load_snapshot_uri(&table_uri, None);
-    rt.block_on(async {
+    // The Delta driver snapshot owns the runtime used while loading its table.
+    // Keep that runtime alive until after this outer runtime has finished
+    // polling all table operations: dropping a Tokio runtime from inside an
+    // async context panics.
+    let mut driver_runtime = None;
+    let result = rt.block_on(async {
         match load_result {
             Ok(snapshot) => {
-                let (mut table, _driver_runtime) = snapshot.into_parts();
+                let (mut table, runtime) = snapshot.into_parts();
+                driver_runtime = Some(runtime);
                 match save_mode {
                     crate::dataframe::SaveMode::Ignore => return Ok(()),
                     crate::dataframe::SaveMode::ErrorIfExists => {
@@ -3218,7 +3224,9 @@ fn write_delta_with_save_options_inner(
                 PolarsError::ComputeError(format!("write_delta: {error}").into()),
             ),
         }
-    })
+    });
+    drop(driver_runtime);
+    result
 }
 
 #[cfg(all(test, feature = "delta"))]

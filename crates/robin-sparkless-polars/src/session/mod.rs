@@ -4917,6 +4917,7 @@ mod tests {
                     bytes: cursor.into_inner(),
                     row_count: input.height() as u64,
                 };
+                let request_table = table.clone();
                 let committed_version = table.version.unwrap_or(0) + 1;
                 let mut table = table;
                 table.version = Some(committed_version);
@@ -4926,7 +4927,7 @@ mod tests {
                     .expect("test write lock")
                     .push(RecordedExternalWrite {
                         identifier,
-                        table: table.clone(),
+                        table: request_table,
                         data,
                         mode: external_mode,
                         format,

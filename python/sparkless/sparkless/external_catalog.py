@@ -326,7 +326,17 @@ def _normalize_python_provider_timestamp_ipc(payload, table):
     normalized = pa.Table.from_arrays(arrays, schema=schema)
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, schema) as writer:
-        writer.write_table(normalized)
+        if normalized.num_rows == 0:
+            # write_table emits no record batches for an empty table. Keep one
+            # schema-bearing batch so batch providers still receive the input
+            # schema for empty writes.
+            writer.write_batch(
+                pa.RecordBatch.from_arrays(
+                    [array.combine_chunks() for array in arrays], schema=schema
+                )
+            )
+        else:
+            writer.write_table(normalized)
     return sink.getvalue().to_pybytes()
 
 

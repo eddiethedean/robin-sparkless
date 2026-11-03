@@ -24,6 +24,7 @@ from sparkless.external_catalog import (
     ExternalTableWriteResult,
     _descriptor_from_json,
     _descriptor_to_json,
+    _normalize_python_provider_timestamp_ipc,
 )
 from sparkless.sql import types as T
 
@@ -196,6 +197,28 @@ def test_python_batch_writer_receives_bounded_record_batches(session):
         [3, 4, 5],
         [6],
     ]
+
+
+def test_timestamp_normalization_preserves_empty_schema_batch():
+    pa = pytest.importorskip("pyarrow")
+    schema = T.StructType([T.StructField("instant", T.TimestampType())])
+    table = descriptor(schema)
+    source_schema = pa.schema([("instant", pa.timestamp("us", tz="UTC"))])
+    empty_batch = pa.RecordBatch.from_arrays(
+        [pa.array([], type=source_schema.field("instant").type)], schema=source_schema
+    )
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, source_schema) as writer:
+        writer.write_batch(empty_batch)
+
+    normalized = _normalize_python_provider_timestamp_ipc(
+        sink.getvalue().to_pybytes(), table
+    )
+    batches = list(pa.ipc.open_stream(normalized))
+
+    assert len(batches) == 1
+    assert batches[0].num_rows == 0
+    assert batches[0].schema.field("instant").type == pa.timestamp("us")
 
 
 @pytest.mark.parametrize("ingress", ["python_rows", "pyarrow"])

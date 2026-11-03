@@ -5685,6 +5685,7 @@ dependencies = [
 name = "robin-sparkless-delta"
 version = "4.19.0"
 dependencies = [
+ "buoyant_kernel_derive",
  "deltalake",
  "robin-sparkless-core",
  "tokio",
