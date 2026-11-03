@@ -1460,6 +1460,9 @@ pub(crate) fn translate_query(
             .collect::<Result<Vec<_>, PolarsError>>()?;
         df = df.order_by_exprs(orders)?;
     }
+    if let Some(n) = portable_plan.offset {
+        df = df.offset(n)?;
+    }
     if let Some(n) = portable_plan.limit {
         df = df.limit(n)?;
     }

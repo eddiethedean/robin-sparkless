@@ -18,7 +18,7 @@ pub struct SqlQueryPlan {
     pub body: RelationalNode,
     pub order_by: Vec<SortKey>,
     pub limit: Option<usize>,
-    pub offset: Option<SqlExpression>,
+    pub offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -468,7 +468,7 @@ fn lower_expression(expr: &Expr) -> SqlExpression {
     }
 }
 
-fn lower_limit(query: &Query) -> Result<(Option<usize>, Option<SqlExpression>), SqlPlanError> {
+fn lower_limit(query: &Query) -> Result<(Option<usize>, Option<usize>), SqlPlanError> {
     let mut limit = None;
     let mut offset = None;
     if let Some(clause) = &query.limit_clause {
@@ -482,7 +482,7 @@ fn lower_limit(query: &Query) -> Result<(Option<usize>, Option<SqlExpression>), 
                     limit = Some(nonnegative_integer(expr, "LIMIT")?);
                 }
                 if let Some(value) = clause_offset {
-                    offset = Some(lower_expression(&value.value));
+                    offset = Some(nonnegative_integer(&value.value, "OFFSET")?);
                 }
                 if !limit_by.is_empty() {
                     // Keep ClickHouse LIMIT BY outside the portable limit contract.
@@ -493,7 +493,7 @@ fn lower_limit(query: &Query) -> Result<(Option<usize>, Option<SqlExpression>), 
                 offset: clause_offset,
                 limit: clause_limit,
             } => {
-                offset = Some(lower_expression(clause_offset));
+                offset = Some(nonnegative_integer(clause_offset, "OFFSET")?);
                 limit = Some(nonnegative_integer(clause_limit, "LIMIT")?);
             }
         }

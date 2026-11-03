@@ -309,3 +309,74 @@ pub fn resolve_column<'a>(
 pub fn identifier_from_ident(identifier: &Ident) -> String {
     identifier.value.clone()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lowers_query_clauses_and_relations_to_the_shared_plan() {
+        let statement = parse_statement(
+            "SELECT id, upper(name) AS normalized FROM analytics.events WHERE active = true ORDER BY id DESC LIMIT 5 OFFSET 2",
+        )
+        .expect("query parses");
+        let StatementPlan::Query(query) = lower_statement(&statement).expect("query lowers") else {
+            panic!("SELECT should lower to a query plan");
+        };
+
+        assert_eq!(query.limit, Some(5));
+        assert_eq!(query.offset, Some(2));
+        assert_eq!(query.order_by.len(), 1);
+        assert_eq!(query.order_by[0].ascending, Some(false));
+        let RelationalNode::Select(select) = &query.body else {
+            panic!("query body should be a SELECT");
+        };
+        assert_eq!(select.projection.len(), 2);
+        assert!(matches!(
+            &select.projection[1],
+            Projection::Expression { alias: Some(alias), .. } if alias == "normalized"
+        ));
+        assert!(matches!(
+            &select.from[0].relation,
+            RelationPlan::Table { name, .. } if name == "analytics.events"
+        ));
+        assert!(select.filter.is_some());
+    }
+
+    #[test]
+    fn classifies_metadata_and_mutation_commands_and_retains_their_query() {
+        let show = parse_statement("SHOW TABLES IN analytics").expect("SHOW parses");
+        assert!(matches!(
+            lower_statement(&show).expect("SHOW lowers"),
+            StatementPlan::Metadata(MetadataCommand::ShowTables { database: Some(database) })
+                if database == "analytics"
+        ));
+
+        let create = parse_statement(
+            "CREATE OR REPLACE TABLE analytics.snapshot USING parquet AS SELECT id FROM analytics.events",
+        )
+        .expect("CREATE parses");
+        let StatementPlan::Command(command) = lower_statement(&create).expect("CREATE lowers")
+        else {
+            panic!("CREATE should lower to a command plan");
+        };
+        assert_eq!(command.kind, CommandKind::CreateOrReplaceTableAs);
+        assert_eq!(command.targets, ["analytics.snapshot"]);
+        assert_eq!(command.format.as_deref(), Some("parquet"));
+        assert_eq!(command.effect, StatementEffect::Mutation);
+        assert!(command.query.is_some());
+        assert!(!command.source_sql.is_empty());
+    }
+
+    #[test]
+    fn rejects_non_literal_and_negative_limits_during_shared_lowering() {
+        for sql in [
+            "SELECT id FROM events LIMIT id",
+            "SELECT id FROM events LIMIT -1",
+        ] {
+            let statement = parse_statement(sql).expect("statement parses");
+            let error = lower_statement(&statement).expect_err("invalid LIMIT is rejected");
+            assert!(error.to_string().contains("LIMIT"));
+        }
+    }
+}

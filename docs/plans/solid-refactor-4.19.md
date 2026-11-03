@@ -5,8 +5,8 @@ search:
 
 # Repository-wide SOLID refactor for 4.19.0
 
-Status: adopted for 4.19.0. Phase 1–3 source work is implemented. The P0 inventory and
-P1–P3 behavioral gates remain pending.
+Status: adopted for 4.19.0. Phase 1–3 source work and the P3 targeted acceptance gate
+are complete. The P0 inventory and P1/P2 behavioral gates remain pending.
 
 Baseline: working tree inspected on 2026-11-02, based on commit `1292e3dd`, including
 existing uncommitted product/source changes. File sizes below describe that snapshot,
@@ -364,26 +364,39 @@ contract migration merely to meet a date.
 Phase 3 source implementation introduces `robin-sparkless-plan` with operation-specific
 payloads, validated expression trees, full-plan structural decoding and shared case-aware
 name resolution. The JSON facade decodes every operation before constructing its initial
-frame. The Polars adapter receives the typed operation and converts the validated payload
-to its engine-facing JSON representation only at the execution boundary. Connect numeric
-promotion now calls the shared core-type rule. Unsupported operation names retain a
-distinct error category and code.
+frame. The Polars adapter dispatches directly on typed operation and payload variants,
+removing its second string-based operation dispatch and full-payload JSON conversion.
+Expression leaves retain their existing JSON grammar until Polars compiles them. Connect
+numeric promotion now calls the shared core-type rule. Unsupported operation names retain
+a distinct error category and code.
 
 `robin-sparkless-sql` owns shared parsing, multipart identifier normalization, case-aware
 name rules, statement effects, typed DDL/DML command plans and query lowering into
 engine-neutral relational nodes. Command plans retain classified command kinds, targets,
 nested queries and source SQL for options owned by adapters. Local Polars SQL consumes the
-normalized sort and limit clauses; server SQL lowers accepted queries after applying the
-narrower HTTP policy. Connect uses the shared SQL expression parser, ASCII-compatible
+normalized sort, offset, and limit clauses; server SQL lowers accepted queries after
+applying the narrower HTTP policy. Connect uses the shared SQL expression parser, ASCII-compatible
 identifier matcher, and numeric promotion rule while retaining protobuf relation lowering
 and feature policy in its adapter.
 
-Formatting and the offline `robin-sparkless-sql` crate compile pass after the final
-command-plan changes. A locked all-features workspace check passed before that final
-SQL API expansion; its attempted rerun stalled while reading the Cargo cache and was
-stopped. Test suites were not run. The P3 frontend-equivalence and malformed-plan
-behavioral gates remain open, as do the P0 inventory and P1/P2 behavioral gates. The
-source implementation does not represent release acceptance.
+The P3 acceptance corpus now checks the JSON plan, local SQL, and Connect adapters on
+the same filter/project/limit query, comparing collected values and output schema. It
+also checks that all three surfaces report a missing-column error, that a malformed
+JSON plan fails before initial DataFrame validation, and that malformed Connect plans
+fail before an external source scan. Connect now performs its metadata-only validation
+pass even when an external catalog has no reader, preserving full-plan validation and
+owner checks before execution.
+
+The shared SQL plan normalizes literal offsets and local Polars applies the offset before
+the limit, with a regression case for the ordering.
+
+`cargo fmt --all` passes. The locked offline plan/SQL crate tests pass (6 tests), the
+Polars plan tests pass (9 tests), the Polars SQL tests pass (39 tests), and the Connect
+plan tests pass (23 tests). These targeted suites compile and exercise the new adapter
+paths. The P3 frontend-equivalence and malformed-plan gates are closed for this
+acceptance corpus. `cargo check --offline --locked --workspace --all-features` also
+passes. The P0 inventory and P1/P2 behavioral gates remain open, so this phase record
+does not represent full release acceptance.
 
 ## 7. Breaking-change ledger
 

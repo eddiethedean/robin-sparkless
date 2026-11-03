@@ -2,16 +2,20 @@
 
 The local Rust API is Polars-backed. Engine-neutral schemas, expressions, execution
 context, errors, and storage capability contracts live in `robin-sparkless-core`;
-Polars execution and type conversion live in `robin-sparkless-polars`. The root
-`robin-sparkless` crate composes those layers and exposes the familiar `SparkSession`
-and `DataFrame` API.
+portable DataFrame operation plans live in `robin-sparkless-plan`; shared SQL parsing
+and relational/command lowering live in `robin-sparkless-sql`; Polars execution,
+physical query compilation, and type conversion live in `robin-sparkless-polars`. The
+root `robin-sparkless` crate composes those layers and exposes the familiar
+`SparkSession` and `DataFrame` API.
 
 ## Crate ownership
 
 | Crate | Owns |
 | --- | --- |
 | `robin-sparkless-core` | Schemas, expression IR, cancellation, `ExecutionContext`, structured `EngineError`, typed frame/session/reader contracts, catalog ownership/read/write ports |
-| `robin-sparkless-polars` | Concrete Polars frames and readers, SQL translation, Delta/JDBC access, Polars error conversion, source composition |
+| `robin-sparkless-plan` | Portable DataFrame operations, structural JSON decoding, expression validation, shared name resolution, numeric promotion |
+| `robin-sparkless-sql` | Shared SQL parser entry points, relational and command plans, statement effects, identifier rules |
+| `robin-sparkless-polars` | Concrete Polars frames and readers, Polars query compilation/execution, Delta/JDBC access, Polars error conversion, source composition |
 | `robin-sparkless-duckdb` | Configured DuckDB source resolution, read snapshots, bounded scans, source connection lifecycle; reads only |
 | `robin-sparkless` | Concrete Polars-backed Rust facade and core/Polars exports |
 | `sparkless-native` | Python ABI, conversion, Python callback ownership, and Python exception mapping |
@@ -77,7 +81,9 @@ breaking-change details.
 
 ## Phase status
 
-Phase 1 module decomposition and Phase 2 contract source changes are implemented.
-Their targeted behavioral gates, along with the P0 inventory closeout, remain pending.
-Runtime extraction, typed plan/SQL crates, and final release acceptance are later
-phases of the 4.19 plan.
+Phase 1 module decomposition and Phase 2 contract source changes are implemented;
+their targeted behavioral gates and the P0 inventory closeout remain pending. Phase 3
+adds the portable plan and shared SQL crates. Its targeted corpus verifies matching
+values, schemas, and missing-column errors across JSON, local SQL, and Connect, plus
+rejection of malformed plans before Connect source scans. Runtime extraction and final
+release acceptance remain later phases of the 4.19 plan.

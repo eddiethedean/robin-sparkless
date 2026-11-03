@@ -617,6 +617,32 @@ mod tests {
     }
 
     #[test]
+    fn test_sql_limit_offset_applies_offset_before_limit() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let source = spark
+            .create_dataframe_from_rows(
+                vec![vec![json!(3)], vec![json!(1)], vec![json!(2)]],
+                vec![("id".to_string(), "bigint".to_string())],
+                false,
+                false,
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("limit_offset_src", source);
+
+        let result = spark
+            .sql("SELECT id FROM limit_offset_src ORDER BY id LIMIT 2 OFFSET 1")
+            .unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        let ids = rows
+            .iter()
+            .map(|row| row.get("id").and_then(serde_json::Value::as_i64).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, [2, 3]);
+    }
+
+    #[test]
     fn test_sql_select_from_temp_view() {
         let spark = SparkSession::builder().app_name("test").get_or_create();
         let df = spark

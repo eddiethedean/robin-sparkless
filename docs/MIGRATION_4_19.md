@@ -119,15 +119,17 @@ with `robin_sparkless_plan::LogicalPlan::decode` and pass it to `execute_typed_p
 Unsupported operation names return `UNSUPPORTED_PLAN_OPERATION`; malformed operations
 return `INVALID_PLAN` before the Polars executor starts. Decoded operations expose an
 operation-specific `PlanPayload`; expressions are available as `PlanExpression` trees,
-while the executor-specific JSON spelling is available from `payload_json()`.
+while the executor-specific JSON spelling is available from `payload_json()`. The
+Polars adapter dispatches directly on typed operations instead of converting each
+operation back to a JSON payload.
 
 The new `robin-sparkless-sql` crate owns SQL-to-relational normalization through
 `lower_query`. Its `SqlQueryPlan` uses engine-neutral relations, projections, filters,
-grouping keys, sort keys, limits and set operations. Adapters retain responsibility for
-expression execution and for enforcing their own supported subset. Local SQL consumes
-the normalized sort and limit clauses, and server SQL validation lowers the query before
-applying its HTTP-specific policy. `lower_statement` separates read queries and metadata
-commands from effectful commands; command plans classify DDL/DML families, retain targets
-and nested queries where available, and preserve the canonical SQL for adapter-specific
-options. Shared identifier and numeric-promotion helpers live below the SQL and Connect
-adapters.
+grouping keys, sort keys, offsets, limits and set operations. Adapters retain
+responsibility for expression execution and for enforcing their own supported subset.
+Local SQL consumes the normalized sort, offset, and limit clauses. Server SQL validation lowers the query
+before applying its HTTP-specific policy. `lower_statement` separates read queries and
+metadata commands from effectful commands; command plans classify DDL/DML families,
+retain targets and nested queries where available, and preserve the canonical SQL for
+adapter-specific options. Shared identifier and numeric-promotion helpers live below
+the SQL and Connect adapters.

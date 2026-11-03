@@ -43,6 +43,7 @@ enum ExpressionUse {
     Aggregate,
 }
 
+#[cfg(test)]
 pub(super) fn translate_plan(
     session: &SparkSession,
     plan: &proto::Plan,
@@ -74,19 +75,18 @@ pub(super) fn translate_plan_for_execution(
     let source_snapshot = session
         .begin_external_catalog_read_snapshot(token)
         .map_err(engine_failure)?;
-    // Validate the complete plan against metadata in the execution snapshot before
-    // scanning rows, including source ownership across nested joins.
-    if source_snapshot.is_some() {
-        translate_plan_with_context(
-            session,
-            plan,
-            TranslationContext {
-                source_snapshot: source_snapshot.clone(),
-                token: token.clone(),
-                materialize_sources: false,
-            },
-        )?;
-    }
+    // Validate the complete plan against metadata before scanning rows, including source
+    // ownership across nested joins. Run this even for metadata-only external catalogs: their
+    // lack of a reader must not bypass plan validation or let an earlier source scan happen.
+    translate_plan_with_context(
+        session,
+        plan,
+        TranslationContext {
+            source_snapshot: source_snapshot.clone(),
+            token: token.clone(),
+            materialize_sources: false,
+        },
+    )?;
     translate_plan_with_context(
         session,
         plan,
@@ -106,6 +106,7 @@ struct TranslationContext {
 }
 
 impl TranslationContext {
+    #[cfg(test)]
     fn analysis() -> Self {
         Self {
             source_snapshot: None,
@@ -3660,5 +3661,316 @@ mod tests {
             false,
         )]);
         assert_eq!(public_expression_name(&expression, &schema).unwrap(), "ID");
+    }
+
+    #[test]
+    fn json_local_sql_and_connect_match_values_and_output_schema_for_shared_subset() {
+        use std::collections::HashMap;
+
+        let session = SparkSession::builder()
+            .app_name("phase3_frontend_equivalence")
+            .config("spark.sql.caseSensitive", "false")
+            .get_or_create();
+        let rows = vec![
+            vec![serde_json::json!(1), serde_json::json!("one")],
+            vec![serde_json::json!(2), serde_json::json!("two")],
+            vec![serde_json::json!(3), serde_json::json!("three")],
+        ];
+        let input_schema = vec![
+            ("id".to_string(), "long".to_string()),
+            ("label".to_string(), "string".to_string()),
+        ];
+        let source = session
+            .create_dataframe_from_rows(rows.clone(), input_schema.clone(), false, false)
+            .unwrap();
+        session.register_table("phase3_frontend_source", source);
+
+        let json_result = robin_sparkless::execute_plan(
+            &session,
+            rows.clone(),
+            input_schema.clone(),
+            &[
+                serde_json::json!({"op": "filter", "payload": {"op": "gt", "left": {"col": "id"}, "right": {"lit": 1}}}),
+                serde_json::json!({"op": "select", "payload": ["id", "label"]}),
+                serde_json::json!({"op": "limit", "payload": {"n": 2}}),
+            ],
+        )
+        .unwrap();
+        let sql_result = session
+            .sql("SELECT id, label FROM phase3_frontend_source WHERE id > 1 LIMIT 2")
+            .unwrap();
+
+        let condition =
+            connect_expression(ExprType::ExpressionString(expression::ExpressionString {
+                expression: "id > 1".into(),
+            }));
+        let connect_source = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Filter(Box::new(proto::Filter {
+                input: Some(Box::new(named_table_relation(
+                    "phase3_frontend_source",
+                    None,
+                ))),
+                condition: Some(condition),
+            }))),
+        };
+        let connect_projection = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Project(Box::new(proto::Project {
+                input: Some(Box::new(connect_source)),
+                expressions: vec![
+                    connect_attribute("id", None),
+                    connect_attribute("label", None),
+                ],
+            }))),
+        };
+        let connect_plan = proto::Plan {
+            op_type: Some(PlanOp::Root(proto::Relation {
+                common: None,
+                rel_type: Some(RelType::Limit(Box::new(proto::Limit {
+                    input: Some(Box::new(connect_projection)),
+                    limit: 2,
+                }))),
+            })),
+        };
+        let connect_result = translate_plan(&session, &connect_plan).unwrap();
+
+        let schema_signature = |schema: &StructType| {
+            schema
+                .logical_fields()
+                .iter()
+                .map(|field| {
+                    (
+                        field.name.clone(),
+                        format!("{:?}", field.data_type),
+                        field.nullable,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let rows_by_id = |mut rows: Vec<HashMap<String, serde_json::Value>>| {
+            rows.sort_by_key(|row| row.get("id").and_then(serde_json::Value::as_i64));
+            rows
+        };
+
+        let json_schema = json_result.schema_engine().unwrap();
+        let sql_schema = sql_result.schema_engine().unwrap();
+        let connect_schema = connect_result.dataframe.schema_engine().unwrap();
+        assert_eq!(
+            schema_signature(&json_schema),
+            schema_signature(&sql_schema)
+        );
+        assert_eq!(
+            schema_signature(&json_schema),
+            schema_signature(&connect_schema)
+        );
+
+        let json_rows = rows_by_id(json_result.collect_as_json_rows().unwrap());
+        let sql_rows = rows_by_id(sql_result.collect_as_json_rows().unwrap());
+        let connect_rows = rows_by_id(connect_result.dataframe.collect_as_json_rows().unwrap());
+        assert_eq!(json_rows, sql_rows);
+        assert_eq!(json_rows, connect_rows);
+
+        let json_result = robin_sparkless::execute_plan(
+            &session,
+            rows.clone(),
+            input_schema,
+            &[serde_json::json!({"op": "select", "payload": ["missing"]})],
+        );
+        let json_error = match json_result {
+            Ok(frame) => match frame.collect_as_json_rows() {
+                Ok(_) => panic!("JSON plan must reject a missing column"),
+                Err(error) => error.to_string(),
+            },
+            Err(error) => error.to_string(),
+        };
+        let sql_result = session.sql("SELECT missing FROM phase3_frontend_source");
+        let sql_error = match sql_result {
+            Ok(frame) => match frame.collect_as_json_rows() {
+                Ok(_) => panic!("local SQL must reject a missing column"),
+                Err(error) => error.to_string(),
+            },
+            Err(error) => error.to_string(),
+        };
+        let missing_connect_column = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Project(Box::new(proto::Project {
+                input: Some(Box::new(named_table_relation(
+                    "phase3_frontend_source",
+                    None,
+                ))),
+                expressions: vec![connect_attribute("missing", None)],
+            }))),
+        };
+        let connect_error = match translate_plan(
+            &session,
+            &proto::Plan {
+                op_type: Some(PlanOp::Root(missing_connect_column)),
+            },
+        ) {
+            Ok(_) => panic!("Connect plan must reject a missing column"),
+            Err(error) => error,
+        };
+        assert_eq!(connect_error.code(), Code::InvalidArgument);
+        for error in [json_error, sql_error, connect_error.message().to_string()] {
+            assert!(
+                error.to_ascii_lowercase().contains("missing"),
+                "frontend error should identify the same missing column: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_connect_plan_is_rejected_before_external_source_scan() {
+        use robin_sparkless_core::engine::{
+            ArrowIpcStream, CatalogCapabilities, CatalogOwnership, CatalogReadSnapshot,
+            CatalogReader, CatalogResolver, ExternalCatalog, ExternalTableDescriptor,
+            ExternalTableFormat,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        #[derive(Clone)]
+        struct CountingReader {
+            scans: Arc<AtomicUsize>,
+        }
+
+        impl CatalogReader for CountingReader {
+            fn begin_snapshot(
+                &self,
+                token: &CancellationToken,
+            ) -> Result<Arc<dyn CatalogReadSnapshot>, EngineError> {
+                token.check_cancelled()?;
+                Ok(Arc::new(CountingSnapshot {
+                    scans: self.scans.clone(),
+                }))
+            }
+        }
+
+        struct CountingSnapshot {
+            scans: Arc<AtomicUsize>,
+        }
+
+        impl CountingSnapshot {
+            fn descriptor() -> ExternalTableDescriptor {
+                ExternalTableDescriptor {
+                    table_id: "source.items".into(),
+                    canonical_location: "test://source/items".into(),
+                    schema: StructType::from_logical_fields(vec![LogicalField::new(
+                        "id".into(),
+                        DataType::Long,
+                        false,
+                    )]),
+                    version: None,
+                    provider: "phase3-test".into(),
+                    permissions_context: None,
+                    format: ExternalTableFormat::DuckDb,
+                }
+            }
+        }
+
+        impl CatalogReadSnapshot for CountingSnapshot {
+            fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError> {
+                if identifier == "source.items" {
+                    Ok(CatalogOwnership::external(
+                        "source-owner",
+                        CatalogCapabilities::READ_ONLY,
+                    ))
+                } else {
+                    Ok(CatalogOwnership::Local)
+                }
+            }
+
+            fn resolve_table(
+                &self,
+                identifier: &str,
+            ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+                Ok((identifier == "source.items").then(Self::descriptor))
+            }
+
+            fn scan_table(
+                &self,
+                _table: &ExternalTableDescriptor,
+                _token: &CancellationToken,
+                _consume: &mut dyn FnMut(ArrowIpcStream) -> Result<(), EngineError>,
+            ) -> Result<(), EngineError> {
+                self.scans.fetch_add(1, Ordering::SeqCst);
+                Err(EngineError::invalid_input(
+                    "malformed Connect plan reached its source scan".into(),
+                ))
+            }
+        }
+
+        struct CountingCatalog;
+
+        impl CatalogResolver for CountingCatalog {
+            fn resolve_ownership(&self, identifier: &str) -> Result<CatalogOwnership, EngineError> {
+                if identifier == "source.items" {
+                    Ok(CatalogOwnership::external(
+                        "source-owner",
+                        CatalogCapabilities::READ_ONLY,
+                    ))
+                } else {
+                    Ok(CatalogOwnership::Local)
+                }
+            }
+
+            fn resolve_table(
+                &self,
+                identifier: &str,
+            ) -> Result<Option<ExternalTableDescriptor>, EngineError> {
+                Ok((identifier == "source.items").then(CountingSnapshot::descriptor))
+            }
+        }
+
+        let session = session();
+        let scans = Arc::new(AtomicUsize::new(0));
+        let resolver: Arc<dyn CatalogResolver> = Arc::new(CountingCatalog);
+        let reader: Arc<dyn CatalogReader> = Arc::new(CountingReader {
+            scans: scans.clone(),
+        });
+        session
+            .set_external_catalog(Some(Arc::new(ExternalCatalog::new(
+                resolver,
+                Some(reader),
+                None,
+                None,
+            ))))
+            .unwrap();
+
+        let malformed_right = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Filter(Box::new(proto::Filter {
+                input: Some(Box::new(proto::Relation {
+                    common: None,
+                    rel_type: Some(RelType::Range(proto::Range {
+                        end: 1,
+                        step: 1,
+                        ..Default::default()
+                    })),
+                })),
+                condition: None,
+            }))),
+        };
+        let plan = proto::Plan {
+            op_type: Some(PlanOp::Root(proto::Relation {
+                common: None,
+                rel_type: Some(RelType::Join(Box::new(proto::Join {
+                    left: Some(Box::new(named_table_relation("source.items", None))),
+                    right: Some(Box::new(malformed_right)),
+                    join_condition: None,
+                    using_columns: vec!["id".into()],
+                    join_type: proto::join::JoinType::Inner as i32,
+                    join_data_type: None,
+                }))),
+            })),
+        };
+
+        let result = translate_plan_for_execution(&session, &plan, &CancellationToken::new());
+        let error = match result {
+            Ok(_) => panic!("missing Filter.condition must invalidate the complete plan"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), Code::InvalidArgument);
+        assert_eq!(scans.load(Ordering::SeqCst), 0);
     }
 }

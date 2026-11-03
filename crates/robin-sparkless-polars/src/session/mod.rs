@@ -3974,8 +3974,9 @@ impl Default for SparkSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use robin_sparkless_core::engine::CatalogResolver;
     #[cfg(feature = "delta")]
-    use robin_sparkless_core::engine::{CatalogResolver, ExternalTableSaveMode};
+    use robin_sparkless_core::engine::ExternalTableSaveMode;
     use serde_json::json;
 
     #[test]
