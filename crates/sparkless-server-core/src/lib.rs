@@ -4,8 +4,10 @@ pub mod config;
 pub mod execution;
 pub use config::ServerConfig;
 pub use execution::{
-    ConnectExecutionPort, ConnectExecutionRequest, ConnectExecutionResult, EngineSessionHandle,
-    ExecutionError, ExecutionPort, SqlExecutionRequest, SqlExecutionResult,
+    ConnectExecutionPlan, ConnectExecutionPort, ConnectExecutionRequest, ConnectExecutionResult,
+    ConnectExpression, ConnectGroupType, ConnectJoinType, ConnectLiteral, ConnectNamedTable,
+    ConnectRelation, ConnectRelationKind, EngineSessionHandle, ExecutionError, ExecutionPort,
+    SqlExecutionRequest, SqlExecutionResult,
 };
 
 pub const CONTROL_PROTOCOL_VERSION: u32 = 2;

@@ -190,11 +190,13 @@ impl Drop for ExecutionContextGuard {
     }
 }
 
-pub(crate) fn active_operation_id() -> Option<String> {
+fn active_operation_id_for(identity: &Arc<()>) -> Option<String> {
     ACTIVE_EXECUTION_CONTEXT.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .map(|context| context.operation_id().to_string())
+        cell.borrow().as_ref().and_then(|context| {
+            context
+                .belongs_to_session(identity)
+                .then(|| context.operation_id().to_owned())
+        })
     })
 }
 
@@ -255,6 +257,10 @@ pub struct SparkSession {
 }
 
 impl SparkSession {
+    pub(crate) fn active_operation_id(&self) -> Option<String> {
+        active_operation_id_for(&self.execution_identity)
+    }
+
     pub fn new(
         app_name: Option<String>,
         master: Option<String>,
@@ -460,19 +466,6 @@ impl SparkSession {
             .read()
             .map(|provider| provider.clone())
             .map_err(|_| PolarsError::InvalidOperation("external catalog lock poisoned".into()))
-    }
-
-    pub(crate) fn reject_read_only_external_target(&self, name: &str) -> Result<(), PolarsError> {
-        let Some(catalog) = self.external_catalog()? else {
-            return Ok(());
-        };
-        let ownership = catalog.resolve_ownership(name).map_err(|error| {
-            PolarsError::InvalidOperation(
-                format!("external catalog failed to resolve write owner for '{name}': {error}")
-                    .into(),
-            )
-        })?;
-        self.reject_read_only_external_owner(&ownership)
     }
 
     pub(crate) fn reject_read_only_external_owner(

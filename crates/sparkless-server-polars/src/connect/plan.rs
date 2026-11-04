@@ -10,6 +10,7 @@ use robin_sparkless::{
 };
 use robin_sparkless_core::engine::{CancellationToken, CatalogReadSnapshot};
 use spark_sql_parser::ast::{BinaryOperator, Expr as SqlExpr, Value};
+use sparkless_server_core::ConnectExecutionPlan;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tonic::{Code, Status};
@@ -73,6 +74,15 @@ pub(super) fn translate_plan_for_analysis(
 
 pub(super) fn translate_plan_for_execution(
     session: &SparkSession,
+    plan: &ConnectExecutionPlan,
+    token: &CancellationToken,
+) -> Result<TranslatedPlan, Status> {
+    let plan = super::normalize::materialize_plan(plan);
+    translate_proto_plan_for_execution(session, &plan, token)
+}
+
+fn translate_proto_plan_for_execution(
+    session: &SparkSession,
     plan: &proto::Plan,
     token: &CancellationToken,
 ) -> Result<TranslatedPlan, Status> {
@@ -85,7 +95,7 @@ pub(super) fn translate_plan_for_execution(
     // lack of a reader must not bypass plan validation or let an earlier source scan happen.
     translate_plan_with_context(
         session,
-        plan,
+        &plan,
         TranslationContext {
             source_snapshot: source_snapshot.clone(),
             token: token.clone(),
@@ -95,7 +105,7 @@ pub(super) fn translate_plan_for_execution(
     )?;
     translate_plan_with_context(
         session,
-        plan,
+        &plan,
         TranslationContext {
             source_snapshot,
             token: token.clone(),
@@ -2799,7 +2809,7 @@ mod tests {
             let analysis_error = translate_plan(&session, &plan).err().unwrap();
             assert_eq!(analysis_error.code(), Code::Unimplemented);
             let execution_error =
-                translate_plan_for_execution(&session, &plan, &CancellationToken::new())
+                translate_proto_plan_for_execution(&session, &plan, &CancellationToken::new())
                     .err()
                     .unwrap();
             assert_eq!(execution_error.code(), Code::Unimplemented);
@@ -2809,8 +2819,12 @@ mod tests {
         // A local table that shadows an external name must keep its local identity.
         session.register_table("source.items", session.range(0, 3, 1).unwrap());
         assert!(
-            translate_plan_for_execution(&session, &join("managed"), &CancellationToken::new())
-                .is_ok()
+            translate_proto_plan_for_execution(
+                &session,
+                &join("managed"),
+                &CancellationToken::new(),
+            )
+            .is_ok()
         );
     }
 
@@ -3989,7 +4003,7 @@ mod tests {
             })),
         };
 
-        let result = translate_plan_for_execution(&session, &plan, &CancellationToken::new());
+        let result = translate_proto_plan_for_execution(&session, &plan, &CancellationToken::new());
         let error = match result {
             Ok(_) => panic!("missing Filter.condition must invalidate the complete plan"),
             Err(error) => error,

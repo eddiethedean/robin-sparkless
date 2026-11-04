@@ -669,6 +669,82 @@ def test_unknown_provider_write_error_remains_uncertain_and_generic(session):
     assert "do-not-leak" not in str(error)
 
 
+def test_independent_reentrant_writes_receive_distinct_operation_ids():
+    outer = SparkSession("outer-operation-context")
+    inner = outer.newSession()
+    try:
+        schema = T.StructType([T.StructField("id", T.LongType(), False)])
+        provider = Provider(descriptor(schema))
+        inner.set_external_catalog_provider(provider)
+        frame = inner.createDataFrame([(1,)], schema)
+
+        class ReentrantResolver:
+            def resolve_ownership(self, identifier):
+                frame.write.mode("append").saveAsTable(IDENTIFIER)
+                frame.write.mode("append").saveAsTable(IDENTIFIER)
+                return None
+
+            def resolve_table(self, identifier):
+                return None
+
+        outer.set_external_catalog_provider(ReentrantResolver())
+        with pytest.raises(SparklessError, match="not found"):
+            outer.sql("SELECT * FROM absent_table")
+
+        assert len(provider.writes) == 2
+        assert len({request.operation_id for request in provider.writes}) == 2
+    finally:
+        inner.stop()
+        outer.stop()
+
+
+def test_invalid_committed_receipt_reports_unknown_write_outcome(session):
+    class InvalidReceiptProvider(Provider):
+        def write_table_batches(self, request):
+            result = super().write_table_batches(request)
+            return replace(
+                result,
+                table=replace(result.table, table_id="different-table"),
+            )
+
+    schema = T.StructType([T.StructField("id", T.LongType(), False)])
+    provider = InvalidReceiptProvider(descriptor(schema))
+    session.set_external_catalog_provider(provider)
+
+    with pytest.raises(SparklessError) as exc_info:
+        session.createDataFrame([(1,)], schema).write.mode("append").saveAsTable(
+            IDENTIFIER
+        )
+
+    assert provider.table.version == 1
+    assert exc_info.value.code == "WRITE_OUTCOME_UNKNOWN"
+    assert exc_info.value.retryability == "outcome_unknown"
+    assert provider.writes[0].operation_id in str(exc_info.value)
+
+
+def test_read_only_external_owner_does_not_block_local_insert(session):
+    schema = T.StructType([T.StructField("id", T.LongType(), False)])
+    session.createDataFrame([(1,)], schema).write.saveAsTable(IDENTIFIER)
+
+    class ReadOnlyOwner:
+        def resolve_ownership(self, identifier):
+            if identifier == IDENTIFIER:
+                return ExternalCatalogOwnership(
+                    owner_id="catalog.schema",
+                    read=True,
+                    write=False,
+                    batch_write=False,
+                )
+            return None
+
+        def resolve_table(self, identifier):
+            return None
+
+    session.set_external_catalog_provider(ReadOnlyOwner())
+    session.sql(f"INSERT INTO {IDENTIFIER} VALUES (2)")
+    assert [row.id for row in session.table(IDENTIFIER).collect()] == [1, 2]
+
+
 @pytest.mark.delta
 def test_python_catalog_retains_map_metadata_for_reads_and_rejects_map_writes(
     session, tmp_path

@@ -4,9 +4,6 @@ use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 fn next_external_write_id() -> String {
-    if let Some(operation_id) = crate::session::active_operation_id() {
-        return operation_id;
-    }
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     format!(
         "local-{}-{}",
@@ -32,18 +29,22 @@ fn external_write_failure(name: &str, error: robin_sparkless_core::EngineError) 
 
 fn validate_external_write_outcome(
     name: &str,
+    provider: &str,
+    operation_id: &str,
     outcome: ExternalTableWriteOutcome,
     descriptor: &ExternalTableDescriptor,
 ) -> Result<(), PolarsError> {
     match outcome {
-        ExternalTableWriteOutcome::Committed(result) => result
-            .validate_against(descriptor)
-            .map_err(|error| {
+        ExternalTableWriteOutcome::Committed(result) => result.validate_against(descriptor).map_err(
+            |error| {
                 PolarsError::InvalidOperation(
-                    format!("external catalog returned an invalid write receipt: {error}")
-                        .into(),
+                    format!(
+                        "WRITE_OUTCOME_UNKNOWN: provider '{provider}' operation '{operation_id}' for '{name}' committed but returned an invalid receipt: {error}"
+                    )
+                    .into(),
                 )
-            }),
+            },
+        ),
         ExternalTableWriteOutcome::NotCommitted(error) => Err(external_write_failure(name, error)),
         ExternalTableWriteOutcome::OutcomeUnknown {
             provider,
@@ -281,6 +282,7 @@ impl<'a> DataFrameWriter<'a> {
         ownership: &CatalogOwnership,
         descriptor: &ExternalTableDescriptor,
         logical_map_paths: &[String],
+        operation_id: Option<&str>,
         token: &CancellationToken,
     ) -> Result<(), PolarsError> {
         token
@@ -372,7 +374,9 @@ impl<'a> DataFrameWriter<'a> {
             .to_arrow_ipc_batches_with_cancellation(max_rows, max_bytes, token)
             .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
         let request = ExternalTableWriteBatchRequest {
-            operation_id: next_external_write_id(),
+            operation_id: operation_id
+                .map(str::to_owned)
+                .unwrap_or_else(next_external_write_id),
             identifier: name.to_string(),
             table: descriptor.clone(),
             batches,
@@ -384,10 +388,17 @@ impl<'a> DataFrameWriter<'a> {
         token
             .check_cancelled()
             .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
+        let write_operation_id = request.operation_id.clone();
         let outcome = catalog
             .write_table_batches(ownership, request, token)
             .map_err(|error| external_write_failure(name, error))?;
-        validate_external_write_outcome(name, outcome, descriptor)
+        validate_external_write_outcome(
+            name,
+            &descriptor.provider,
+            &write_operation_id,
+            outcome,
+            descriptor,
+        )
     }
 
     /// JDBC write (PySpark-style). Requires the `jdbc` or `sqlite` feature.
@@ -520,6 +531,7 @@ impl<'a> DataFrameWriter<'a> {
                     &ownership,
                     &descriptor,
                     &logical_map_paths,
+                    None,
                     token,
                 );
             }

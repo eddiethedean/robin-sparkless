@@ -18,8 +18,8 @@ use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
     BinaryOperator, CastKind, ExactNumberInfo, Expr as SqlExpr, FromTable, Function, FunctionArg,
     FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectType,
-    Query, SchemaName, Select, SelectItem, SetExpr, SetOperator, Statement, TableAlias,
-    TableFactor, TableObject, Value, ValueWithSpan,
+    Query, SchemaName, Select, SelectItem, SetExpr, Statement, TableAlias, TableFactor,
+    TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -643,11 +643,6 @@ fn reject_read_only_external_mutation(
         Statement::CreateDatabase { db_name, .. } => {
             targets.push(table_name_from_object_name(db_name));
         }
-        Statement::Insert(insert) => {
-            if let TableObject::TableName(name) = &insert.table {
-                targets.push(table_name_from_object_name(name));
-            }
-        }
         Statement::Update(update) => {
             targets.push(table_name_from_factor(&update.table.relation)?);
         }
@@ -665,11 +660,7 @@ fn reject_read_only_external_mutation(
         _ => {}
     }
     for target in targets {
-        if matches!(statement, Statement::Insert(_)) {
-            session.reject_read_only_external_target(&target)?;
-        } else {
-            session.reject_external_namespace_target(&target)?;
-        }
+        session.reject_external_namespace_target(&target)?;
     }
     Ok(())
 }
@@ -764,6 +755,9 @@ fn translate_insert(
     } else {
         session.resolve_external_table_descriptor(&table_name)?
     };
+    if let Some((_, ownership, _)) = &external_target {
+        session.reject_read_only_external_owner(ownership)?;
+    }
     let target_df = match &external_target {
         Some((_, _, descriptor)) => {
             session.read_external_table_descriptor(&table_name, descriptor)?
@@ -872,6 +866,7 @@ fn translate_insert(
             &ownership,
             &descriptor,
             &[],
+            session.active_operation_id().as_deref(),
             token,
         )?;
         return Ok(DataFrame::from_polars_with_options(
@@ -1129,32 +1124,36 @@ fn translate_describe_table(
     translate_describe_table_optional_col(session, &name, None)
 }
 
-/// Translate a SetExpr (SELECT, Query, or SetOperation) to a DataFrame.
+/// Translate a backend-neutral relational node to a DataFrame.
 /// PR-B/#774: UNION [ALL] supported; EXCEPT/INTERSECT return a clear error.
-fn translate_set_expr(
+fn translate_relational_node(
     session: &SparkSession,
-    body: &SetExpr,
+    body: &robin_sparkless_sql::RelationalNode,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     match body {
-        SetExpr::Select(select) => translate_select_body(session, select.as_ref()),
-        SetExpr::Query(q) => translate_query(session, q.as_ref()),
-        SetExpr::SetOperation {
-            op,
+        robin_sparkless_sql::RelationalNode::Select(select) => {
+            translate_select_plan(session, select)
+        }
+        robin_sparkless_sql::RelationalNode::Nested(query) => translate_query_plan(session, query),
+        robin_sparkless_sql::RelationalNode::SetOperation {
+            operator,
+            quantifier,
             left,
             right,
-            set_quantifier,
         } => {
-            match op {
-                SetOperator::Union => {}
-                SetOperator::Except | SetOperator::Intersect | SetOperator::Minus => {
+            match operator {
+                robin_sparkless_sql::SetOperator::Union => {}
+                robin_sparkless_sql::SetOperator::Except
+                | robin_sparkless_sql::SetOperator::Intersect
+                | robin_sparkless_sql::SetOperator::Minus => {
                     return Err(PolarsError::InvalidOperation(
                         "SQL: EXCEPT, INTERSECT, and MINUS are not yet supported. Use UNION or UNION ALL."
                             .into(),
                     ));
                 }
             }
-            let left_df = translate_set_expr(session, left.as_ref())?;
-            let right_df = translate_set_expr(session, right.as_ref())?;
+            let left_df = translate_relational_node(session, left)?;
+            let right_df = translate_relational_node(session, right)?;
             let left_columns = left_df.columns()?;
             let right_columns = right_df.columns()?;
             if left_columns.len() != right_columns.len() {
@@ -1179,18 +1178,179 @@ fn translate_set_expr(
             )?;
             let mut df = left_df.union(&right_by_position)?;
             // DISTINCT (default for UNION) => drop duplicates; ALL => keep all rows.
-            // sqlparser uses SetQuantifier::None when neither ALL nor DISTINCT is written;
-            // Spark/SQL default for UNION is DISTINCT.
-            let keep_all = matches!(set_quantifier, spark_sql_parser::ast::SetQuantifier::All);
+            let keep_all = matches!(quantifier, robin_sparkless_sql::SetQuantifier::All);
             if !keep_all {
                 df = df.distinct(None)?;
             }
             Ok(df)
         }
-        _ => Err(PolarsError::InvalidOperation(
+        robin_sparkless_sql::RelationalNode::Values { .. } => Err(PolarsError::InvalidOperation(
             "SQL: only SELECT and UNION are supported (no VALUES, INSERT, etc.).".into(),
         )),
+        robin_sparkless_sql::RelationalNode::Opaque { kind, .. } => {
+            Err(PolarsError::InvalidOperation(
+                format!("SQL: unsupported relational node '{kind}'.").into(),
+            ))
+        }
     }
+}
+
+fn translate_select_plan(
+    session: &SparkSession,
+    plan: &robin_sparkless_sql::SelectPlan,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    // Interpret the plan's relational clauses. SQL fragments on individual expressions and
+    // relations are parsed by the existing Polars expression and table-factor interpreters.
+    let sql = select_plan_sql(plan)?;
+    let statement = robin_sparkless_sql::parse_query(&sql).map_err(|error| {
+        PolarsError::InvalidOperation(
+            format!("SQL: could not interpret lowered SELECT plan: {error}").into(),
+        )
+    })?;
+    let spark_sql_parser::ast::Statement::Query(query) = statement else {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: SELECT plan did not contain a query.".into(),
+        ));
+    };
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: SELECT plan did not contain a SELECT body.".into(),
+        ));
+    };
+    translate_select_body(session, select)
+}
+
+fn select_plan_sql(plan: &robin_sparkless_sql::SelectPlan) -> Result<String, PolarsError> {
+    use robin_sparkless_sql::{
+        GroupByPlan, JoinConstraintPlan, JoinKind, Projection, RelationPlan,
+    };
+
+    let projections = plan
+        .projection
+        .iter()
+        .map(|projection| match projection {
+            Projection::Wildcard => Ok("*".to_string()),
+            Projection::QualifiedWildcard(qualifier) => Ok(format!("{qualifier}.*")),
+            Projection::Expression { expression, alias } => Ok(match alias {
+                Some(alias) => format!("{} AS `{}`", expression.sql, alias.replace('`', "``")),
+                None => expression.sql.clone(),
+            }),
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
+    if projections.is_empty() {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: lowered SELECT has no projection expressions.".into(),
+        ));
+    }
+    let mut sql = String::from("SELECT ");
+    if let Some(distinct) = &plan.distinct {
+        sql.push_str(distinct);
+        sql.push(' ');
+    }
+    sql.push_str(&projections.join(", "));
+
+    if !plan.from.is_empty() {
+        sql.push_str(" FROM ");
+        let from_items = plan
+            .from
+            .iter()
+            .map(|from| {
+                let relation_sql = |relation: &RelationPlan| match relation {
+                    RelationPlan::Table { source_sql, .. }
+                    | RelationPlan::Derived { source_sql, .. } => Ok(source_sql.clone()),
+                    RelationPlan::Opaque { kind, .. } => Err(PolarsError::InvalidOperation(
+                        format!("SQL: unsupported relation plan '{kind}'.").into(),
+                    )),
+                };
+                let mut item = relation_sql(&from.relation)?;
+                for join in &from.joins {
+                    let join_keyword = match join.operator {
+                        JoinKind::Inner => " INNER JOIN ",
+                        JoinKind::Left => " LEFT JOIN ",
+                        JoinKind::Right => " RIGHT JOIN ",
+                        JoinKind::Full => " FULL OUTER JOIN ",
+                        JoinKind::Cross => " CROSS JOIN ",
+                        JoinKind::LeftSemi => " LEFT SEMI JOIN ",
+                        JoinKind::RightSemi => " RIGHT SEMI JOIN ",
+                        JoinKind::LeftAnti => " LEFT ANTI JOIN ",
+                        JoinKind::RightAnti => " RIGHT ANTI JOIN ",
+                        JoinKind::CrossApply
+                        | JoinKind::OuterApply
+                        | JoinKind::AsOf
+                        | JoinKind::Straight => {
+                            return Err(PolarsError::InvalidOperation(
+                                format!("SQL: unsupported join type {:?}.", join.operator).into(),
+                            ));
+                        }
+                    };
+                    item.push_str(join_keyword);
+                    item.push_str(&relation_sql(&join.relation)?);
+                    if join.global {
+                        return Err(PolarsError::InvalidOperation(
+                            "SQL: GLOBAL joins are not supported.".into(),
+                        ));
+                    }
+                    match &join.constraint {
+                        JoinConstraintPlan::On(expression) => {
+                            item.push_str(" ON ");
+                            item.push_str(&expression.sql);
+                        }
+                        JoinConstraintPlan::Using(columns) => {
+                            item.push_str(" USING (");
+                            item.push_str(&columns.join(", "));
+                            item.push(')');
+                        }
+                        JoinConstraintPlan::Natural | JoinConstraintPlan::None
+                            if join.operator == JoinKind::Cross => {}
+                        JoinConstraintPlan::Natural | JoinConstraintPlan::None => {
+                            return Err(PolarsError::InvalidOperation(
+                                "SQL: JOIN requires an ON equality condition.".into(),
+                            ));
+                        }
+                    }
+                }
+                Ok(item)
+            })
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        sql.push_str(&from_items.join(", "));
+    }
+
+    if let Some(filter) = &plan.filter {
+        sql.push_str(" WHERE ");
+        sql.push_str(&filter.sql);
+    }
+    match &plan.group_by {
+        GroupByPlan::Expressions {
+            expressions,
+            modifiers,
+        } if !expressions.is_empty() => {
+            sql.push_str(" GROUP BY ");
+            sql.push_str(
+                &expressions
+                    .iter()
+                    .map(|expression| expression.sql.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            if !modifiers.is_empty() {
+                sql.push(' ');
+                sql.push_str(&modifiers.join(" "));
+            }
+        }
+        GroupByPlan::All { modifiers } => {
+            sql.push_str(" GROUP BY ALL");
+            if !modifiers.is_empty() {
+                sql.push(' ');
+                sql.push_str(&modifiers.join(" "));
+            }
+        }
+        GroupByPlan::Expressions { .. } => {}
+    }
+    if let Some(having) = &plan.having {
+        sql.push_str(" HAVING ");
+        sql.push_str(&having.sql);
+    }
+    Ok(sql)
 }
 
 /// Translate UPDATE table SET col = expr [WHERE condition].
@@ -1458,6 +1618,13 @@ pub(crate) fn translate_query(
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let portable_plan = robin_sparkless_sql::lower_query(query)
         .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    translate_query_plan(session, &portable_plan)
+}
+
+fn translate_query_plan(
+    session: &SparkSession,
+    portable_plan: &robin_sparkless_sql::SqlQueryPlan,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
     let order_columns = portable_plan
         .order_by
         .iter()
@@ -1474,7 +1641,7 @@ pub(crate) fn translate_query(
             )),
         })
         .collect::<Result<Vec<_>, PolarsError>>()?;
-    let mut df = translate_set_expr(session, query.body.as_ref())?;
+    let mut df = translate_relational_node(session, &portable_plan.body)?;
     if !portable_plan.order_by.is_empty() {
         let orders: Vec<crate::functions::SortOrder> = portable_plan
             .order_by

@@ -63,28 +63,23 @@ impl ConnectExecutionPort for PolarsConnectExecution {
                 details: None,
             })?;
         session.sync_thread_context();
-        let plan =
-            connect_proto::Plan::decode(request.serialized_plan.as_slice()).map_err(|error| {
-                ExecutionError {
-                    code: "CONNECT_PLAN_DECODE_FAILED",
-                    message: error.to_string(),
-                    details: None,
-                }
-            })?;
-        let translated = plan::translate_plan_for_execution(session, &plan, &request.cancellation)
-            .map_err(|status| ExecutionError {
-                code: "CONNECT_PLAN_TRANSLATION_FAILED",
-                message: status.message().to_string(),
-                details: Some(serde_json::json!({ "connect_status_code": status.code() as i32 })),
-            })?;
+        let translated =
+            plan::translate_plan_for_execution(session, &request.plan, &request.cancellation)
+                .map_err(|status| ExecutionError {
+                    code: "CONNECT_PLAN_TRANSLATION_FAILED",
+                    message: status.message().to_string(),
+                    details: Some(
+                        serde_json::json!({ "connect_status_code": status.code() as i32 }),
+                    ),
+                })?;
         let schema =
             plan::schema_to_proto(&translated.schema).map_err(|status| ExecutionError {
                 code: "CONNECT_SCHEMA_TRANSLATION_FAILED",
                 message: status.message().to_string(),
                 details: Some(serde_json::json!({ "connect_status_code": status.code() as i32 })),
             })?;
-        let schema_bytes = schema.encode_to_vec();
         let output_schema = translated.schema;
+        let result_schema = output_schema.clone();
         let deferred_count_input = translated.deferred_count_input;
         let max_batch_bytes = request
             .max_response_bytes
@@ -121,7 +116,7 @@ impl ConnectExecutionPort for PolarsConnectExecution {
                 })?
         };
         Ok(ConnectExecutionResult {
-            schema: schema_bytes,
+            schema: result_schema,
             batches,
         })
     }
@@ -289,6 +284,7 @@ fn trace_connect_arrow_response(bytes: usize, rows: i64, start_offset: u64) {
 
 mod analysis;
 mod config;
+mod normalize;
 mod plan;
 
 enum InterruptTarget {
@@ -1215,16 +1211,26 @@ fn start_connect_producer(
         };
         let session_handle = EngineSessionHandle::new("polars", session);
         let planning_started = sender.trace_enabled.then(Instant::now);
-        let translated = sparkless_server_connect::execute_plan(
-            &execution,
-            &session_handle,
-            ConnectExecutionRequest {
-                serialized_plan: plan.encode_to_vec(),
-                max_batch_rows: MAX_CONNECT_ARROW_BATCH_ROWS,
-                max_response_bytes: MAX_CONNECT_ARROW_RESPONSE_BYTES,
-                cancellation: cancellation.clone(),
-            },
-        );
+        let translated = normalize::normalize_plan(&plan)
+            .map_err(|status| ExecutionError {
+                code: "CONNECT_PLAN_NORMALIZATION_FAILED",
+                message: status.message().to_string(),
+                details: Some(serde_json::json!({
+                    "connect_status_code": status.code() as i32
+                })),
+            })
+            .and_then(|plan| {
+                sparkless_server_connect::execute_plan(
+                    &execution,
+                    &session_handle,
+                    ConnectExecutionRequest {
+                        plan,
+                        max_batch_rows: MAX_CONNECT_ARROW_BATCH_ROWS,
+                        max_response_bytes: MAX_CONNECT_ARROW_RESPONSE_BYTES,
+                        cancellation: cancellation.clone(),
+                    },
+                )
+            });
         if let Some(started) = planning_started {
             sender.planning_time += started.elapsed();
         }
@@ -1247,12 +1253,9 @@ fn start_connect_producer(
                 return;
             }
         };
-        let schema = match connect_proto::DataType::decode(translated.schema.as_slice()) {
+        let schema = match plan::schema_to_proto(&translated.schema) {
             Ok(schema) => schema,
-            Err(error) => {
-                let status = Status::internal(format!(
-                    "execution adapter returned an invalid schema: {error}"
-                ));
+            Err(status) => {
                 operation.reject("CONNECT_SCHEMA_TRANSLATION_FAILED", status.message());
                 let _ = sender.send(Err(status), &operation);
                 return;
