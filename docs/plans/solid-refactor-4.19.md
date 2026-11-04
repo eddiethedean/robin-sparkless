@@ -636,10 +636,12 @@ The local Phase 6 gates passed on 2026-11-03:
   The Quack extension matched the pinned DuckDB 2.0.0 archive digest.
 
 This closes the Phase 6 source and local packaging gates on the local macOS arm64
-runtime. Cross-platform exact-candidate wheel inventory, supported-platform
-installs, publication, and post-publication hash verification remain P7 release
-acceptance checks. DuckDB remains read-only in 4.19; DuckDB writes and execution,
-live JDBC service roundtrips, and the protocol-neutral typed Connect boundary remain
+runtime. [Release workflow run 41771863666](https://github.com/eddiethedean/robin-sparkless/actions/runs/41771863666)
+subsequently passed the exact candidate inventory and Linux x86_64/macOS arm64
+product installs for commit `f3e69dd785783a4318272996b8dc62fa9ead4ca3`. P7 remains
+open for the remaining release acceptance, first uploads, and post-publication hash
+verification. DuckDB remains read-only in 4.19; DuckDB writes and execution, live
+JDBC service roundtrips, and the protocol-neutral typed Connect boundary remain
 outside this closure.
 
 ### Phase 7 implementation record — 2026-11-03

@@ -53,13 +53,16 @@ Evidence and narrower contracts:
   [4.19 source contract](plans/sparkless-server/RELEASE_4_19.md#duckdb-source-contract)
   and [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md).
 - The retained local macOS wheel and public standalone/Quack source smokes
-  validate the **pre-separation** DuckDB-enabled candidate only. They do not
-  certify the new base or DuckDB product wheels, whose exact-candidate checks
-  remain pending under V59. Historical wheel contents, tags, extension hashes,
-  and smoke results are recorded in the
-  [candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md); do not
-  reuse those hashes as evidence for the split products. Execution on an actual
-  macOS 14 host also remains open.
+  validate the **pre-separation** DuckDB-enabled candidate only. Exact split
+  product evidence is now recorded separately: [release workflow run
+  41771863666](https://github.com/eddiethedean/robin-sparkless/actions/runs/41771863666)
+  passed the Linux x86_64 and macOS arm64 product wheels, clean client/local/base/
+  DuckDB/coinstall profiles, source smokes, Spark differential checks, resource
+  probes, product images, and candidate inventory for commit
+  `f3e69dd785783a4318272996b8dc62fa9ead4ca3`. The [candidate evidence
+  record](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md) links the inventory
+  artifact and its hash; do not reuse historical wheel hashes for split
+  products. Runtime execution on an actual macOS 14 host remains open.
 - The earlier exact-commit
   [release workflow run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918)
   passed installed Linux x86_64 and macOS arm64 server-extra source smokes and a

@@ -90,7 +90,7 @@ The [2026-10-27 follow-up](READINESS_4_17_2026_10_27.md) records the additive Ru
 
 ## V59: Product separation and migration
 
-**Product/package implementation is present in the candidate; V59 is not yet passed.** The 2026-11-02 owner scope revision puts [SS-23](23-product-and-package-separation.md) and 419-12–419-15 in the current unpublished 4.19 release. D22 now records the actual 4.19 layout: engine-neutral configuration/identity contracts, a shared Polars-backed server runtime, and a separate DuckDB source crate. Existing local source/helper/performance reports remain valid only for their recorded artifacts; they do not certify newly composed products.
+**Current 4.19 candidate status (2026-11-04):** [Release workflow run 41771863666](https://github.com/eddiethedean/robin-sparkless/actions/runs/41771863666) passed the split-product builds, consumer profiles, source smokes/differential/resource checks, images, and final candidate inventory for commit `f3e69dd785783a4318272996b8dc62fa9ead4ca3`; see the [evidence record](RELEASE_4_19_EVIDENCE.md). This closes the exact split-product build, consumer, and inventory acceptance for 419-12–419-15. V59 is not complete: the remaining candidate-stage source/performance/support checks listed below and the fresh-public stage after publication remain open. The broader release stays on HOLD, including first uploads. The 2026-11-02 owner scope revision puts [SS-23](23-product-and-package-separation.md) and 419-12–419-15 in the current unpublished 4.19 release. D22 records the actual 4.19 layout: engine-neutral configuration/identity contracts, a shared Polars-backed server runtime, and a separate DuckDB source crate. Historical local source/helper/performance reports remain valid only for their recorded artifacts; they do not certify newly composed products.
 
 The **candidate stage blocks tagging/publication** until these checks pass:
 
@@ -102,7 +102,7 @@ The **candidate stage blocks tagging/publication** until these checks pass:
 
 The **public stage closes release completion after publication**: verify the complete exact-version registry file inventories/hashes, Rust consumer packages, both image digests and fresh client/local/base/DuckDB/combined installs; repeat the applicable public HTTP/Connect/helper/source witnesses and confirm removed compatibility paths remain absent. Partial publication leaves this stage open. Follow [RELEASING](../../RELEASING.md) for immutable-byte publication/recovery; do not require public artifacts as a prerequisite to first publication.
 
-Record source revision, features/product/backend identity, dependency graphs, artifact hashes, Python/client/runtime/platform versions, commands, pass/fail/skipped status and measured limits. Pre-separation local success does not close either V59 stage.
+Record source revision, features/product/backend identity, dependency graphs, artifact hashes, Python/client/runtime/platform versions, commands, pass/fail/skipped status and measured limits. Pre-separation local success does not close either V59 stage; the exact candidate evidence above applies only to its recorded revision and artifacts.
 
 ## Complete local SQL baseline gates — SS-22
 
