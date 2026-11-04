@@ -661,9 +661,12 @@ current product inventory. DuckDB writes remain outside 4.19.
 Local checks pass: the release workflow suite (12 tests), release helper/inventory
 suite (92 tests), server feature-graph suite (2 tests), and all four actual Cargo
 graphs pass. The release metadata check, 197-file documentation check, and Ruff
-lint/format checks also pass. Exact-head CI and Release acceptance are pending on
-the pushed Phase 7 candidate; P7 is not closed until those results pass. Public
-registry verification remains a post-publication stage.
+lint/format checks also pass. Exact-head CI and Release acceptance passed on
+`5917f17f0e6616eb3e8ee99b55a6d7ed4a1c78d4`: [CI run](https://github.com/eddiethedean/robin-sparkless/actions/runs/41715136122)
+and [Release run, attempt 2](https://github.com/eddiethedean/robin-sparkless/actions/runs/41715063209/attempts/2).
+The release run passed all four base and DuckDB server wheel builds, the container
+checks, all four exact-product consumer jobs, and the acceptance gate. Phase 7 is
+closed. Public registry verification remains a post-publication stage.
 
 ## 7. Breaking-change ledger
 
