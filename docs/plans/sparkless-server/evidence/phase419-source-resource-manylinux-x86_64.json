@@ -1,0 +1,146 @@
+{
+  "schema_version": 2,
+  "timestamp_utc": "2026-11-01T23:25:49.173543+00:00",
+  "harness_source_revision": "7361d16850f8e76a84d70b4a88c6ee6c39da7b58",
+  "harness_script_sha256": "c47fcf95d4442f978d3e98e74c04b01b0b95325f242801f2340a8c6c333c7dcd",
+  "server_binary": "/home/runner/work/robin-sparkless/robin-sparkless/.venv/lib/python3.11/site-packages/sparkless_server_bin/sparkless-server",
+  "server_version": "sparkless-server 4.19.0",
+  "server_binary_sha256": "7d4df36b6af25f733c0ce96882d24c2fbc1d3f21b1e2b022cbf8c6170b397d35",
+  "server_build_profile": "release",
+  "server_build_features": "http,connect,duckdb-source",
+  "workload": {
+    "source_mode": "standalone read-only DuckDB file",
+    "rows": 100000,
+    "concurrent_readers": 4,
+    "payload_bytes_per_row": 16,
+    "logical_uncompressed_column_bytes": 2400000,
+    "aggregate_logical_uncompressed_column_bytes": 9600000,
+    "source_database_bytes": 1323008,
+    "iterations": 1,
+    "warmups": 1,
+    "attempted_rounds": 2,
+    "timed_rounds_completed": 1,
+    "action": "slow_to_local_iterator",
+    "slow_reader_delay_ms": 10,
+    "action_samples_ms": [
+      3113.4973699999905,
+      3079.683361999997,
+      3154.763269,
+      3213.5210919999936
+    ],
+    "concurrent_batch_samples_ms": [
+      3216.539777000008
+    ],
+    "action_outcomes": [
+      {
+        "phase": "warmup",
+        "iteration": 0,
+        "reader": 0,
+        "result": "completed",
+        "count": 100000,
+        "duration_ms": 2870.178937999995,
+        "error": null
+      },
+      {
+        "phase": "warmup",
+        "iteration": 0,
+        "reader": 1,
+        "result": "completed",
+        "count": 100000,
+        "duration_ms": 3256.936350999993,
+        "error": null
+      },
+      {
+        "phase": "warmup",
+        "iteration": 0,
+        "reader": 2,
+        "result": "completed",
+        "count": 100000,
+        "duration_ms": 3272.3941960000075,
+        "error": null
+      },
+      {
+        "phase": "warmup",
+        "iteration": 0,
+        "reader": 3,
+        "result": "completed",
+        "count": 100000,
+        "duration_ms": 3272.6113399999977,
+        "error": null
+      },
+      {
+        "phase": "measured",
+        "iteration": 1,
+        "reader": 0,
+        "result": "completed",
+        "count": 100000,
+        "duration_ms": 3113.4973699999905,
+        "error": null
+      },
+      {
+        "phase": "measured",
+        "iteration": 1,
+        "reader": 1,
+        "result": "completed",
+        "count": 100000,
+        "duration_ms": 3079.683361999997,
+        "error": null
+      },
+      {
+        "phase": "measured",
+        "iteration": 1,
+        "reader": 2,
+        "result": "completed",
+        "count": 100000,
+        "duration_ms": 3154.763269,
+        "error": null
+      },
+      {
+        "phase": "measured",
+        "iteration": 1,
+        "reader": 3,
+        "result": "completed",
+        "count": 100000,
+        "duration_ms": 3213.5210919999936,
+        "error": null
+      }
+    ],
+    "result_limit_rejections": 0,
+    "action_p50_ms": 3113.4973699999905,
+    "action_p95_ms": 3213.5210919999936,
+    "result": "completed",
+    "expected_error": null
+  },
+  "source_limits": {
+    "rows_per_statement": 1000000,
+    "ipc_bytes_per_statement": 33554432,
+    "decoded_bytes_per_statement": 67108864,
+    "ipc_bytes_per_batch": 1048576,
+    "rows_per_batch": 16384,
+    "connections_per_catalog": 4,
+    "queued_operations_per_catalog": 16
+  },
+  "connect_result_limit_bytes": 8388608,
+  "server_configuration": {
+    "max_active_operations": 4,
+    "max_pending_operations": 16,
+    "queue_timeout_ms": 5000,
+    "response_timeout_ms": 60000,
+    "polars_max_threads": 4,
+    "rayon_threads": 4,
+    "omp_threads": 4
+  },
+  "server_rss": {
+    "peak_bytes": 202248192,
+    "method": "resource.getrusage(RUSAGE_CHILDREN) after the server child exits"
+  },
+  "environment": {
+    "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.11.17",
+    "pyspark_client": "4.0.5",
+    "pyarrow": "26.0.0",
+    "duckdb_fixture_writer": "1.5.1",
+    "client_peak_rss_bytes": 261488640
+  }
+}

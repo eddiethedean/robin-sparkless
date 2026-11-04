@@ -1,4 +1,4 @@
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_groupby_agg_accepts_aggregate_function_objects(spark) -> None:

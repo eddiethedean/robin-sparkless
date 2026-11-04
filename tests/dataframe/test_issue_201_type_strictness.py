@@ -8,7 +8,7 @@ operators (+, -, *, /) and plan interpreter add/subtract/multiply/divide.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 from tests.utils import _row_to_dict, assert_rows_equal
 
 _imports = get_imports()

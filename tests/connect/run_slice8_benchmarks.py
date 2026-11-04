@@ -68,6 +68,26 @@ def clean_client_environment() -> dict[str, str]:
     return environment
 
 
+def server_configuration(
+    rows: int,
+    active_operations: int,
+    queue_timeout_ms: int,
+    operation_history_records: int = 1024,
+    operation_history_bytes: int = 4 * 1024 * 1024,
+) -> dict[str, str]:
+    return {
+        **SERVER_CONFIG_ENVIRONMENT,
+        "SPARKLESS_MAX_RANGE_ROWS": str(max(rows, 10_000_000, 200_000)),
+        "SPARKLESS_MAX_ACTIVE_OPERATIONS": str(active_operations),
+        "SPARKLESS_MAX_MUTATION_RECORDS": str(operation_history_records),
+        "SPARKLESS_MAX_MUTATION_BYTES": str(operation_history_bytes),
+        "SPARKLESS_QUEUE_TIMEOUT_MS": str(queue_timeout_ms),
+        "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+        "SPARKLESS_CONNECT_TRACE": "1",
+        "SPARKLESS_ARROW_TRACE": "1",
+    }
+
+
 def free_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -181,7 +201,13 @@ def read_control_record(
 
 
 def start_server(
-    binary: Path, log_path: Path, rows: int
+    binary: Path,
+    log_path: Path,
+    rows: int,
+    active_operations: int,
+    queue_timeout_ms: int,
+    operation_history_records: int,
+    operation_history_bytes: int,
 ) -> tuple[subprocess.Popen[str], dict[str, Any], float]:
     environment = os.environ.copy()
     for key in (
@@ -200,11 +226,14 @@ def start_server(
             environment.pop(key, None)
     environment.update(
         {
-            "SPARKLESS_CONNECT_TRACE": "1",
-            "SPARKLESS_MAX_RANGE_ROWS": str(max(rows, 10_000_000, 200_000)),
-            "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
+            **server_configuration(
+                rows,
+                active_operations,
+                queue_timeout_ms,
+                operation_history_records,
+                operation_history_bytes,
+            ),
             "TZ": "UTC",
-            **SERVER_CONFIG_ENVIRONMENT,
         }
     )
     command = [
@@ -293,6 +322,7 @@ def stop_server(process: subprocess.Popen[str], timeout: float = 15) -> dict[str
         "exit_code": process.returncode,
         "acknowledged": True,
         "control_protocol_version": stopped["control_protocol_version"],
+        "rust_global_allocator": stopped.get("rust_global_allocator"),
     }
 
 
@@ -330,10 +360,12 @@ def health_probe(http_url: str) -> tuple[float, bool]:
         return (time.perf_counter() - started) * 1000, False
 
 
-def http_probe(http_url: str, sequence: int) -> tuple[float, bool]:
+def http_probe(http_url: str, timeout_seconds: float = 5) -> tuple[float, bool]:
     body = json.dumps(
         {
-            "session": f"slice8-benchmark-{sequence}",
+            # Reuse one read-only probe session so a 60-second cohort does not
+            # fill the server's bounded session registry with synthetic clients.
+            "session": "slice8-benchmark-http-progress",
             "code": "SELECT 1 AS result",
             "kind": "sql",
         }
@@ -346,7 +378,7 @@ def http_probe(http_url: str, sequence: int) -> tuple[float, bool]:
     )
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             payload = json.load(response)
         result = payload["data"]["application/json"]["data"]
         return (
@@ -364,8 +396,11 @@ def http_probe(http_url: str, sequence: int) -> tuple[float, bool]:
 
 
 class ProgressMonitor:
-    def __init__(self, http_url: str) -> None:
+    def __init__(self, http_url: str, http_timeout_seconds: float = 5) -> None:
+        if not math.isfinite(http_timeout_seconds) or http_timeout_seconds <= 0:
+            raise ValueError("HTTP probe timeout must be a finite positive number")
         self.http_url = http_url
+        self.http_timeout_seconds = http_timeout_seconds
         self.stop_event = threading.Event()
         self.health_ms: list[float] = []
         self.http_ms: list[float] = []
@@ -384,13 +419,11 @@ class ProgressMonitor:
             self.stop_event.wait(0.1)
 
     def _http_loop(self) -> None:
-        sequence = 0
         while not self.stop_event.is_set():
-            elapsed, ok = http_probe(self.http_url, sequence)
+            elapsed, ok = http_probe(self.http_url, self.http_timeout_seconds)
             self.http_ms.append(elapsed)
             if not ok:
                 self.errors.append("HTTP SELECT 1 failed")
-            sequence += 1
             self.stop_event.wait(0.25)
 
     def start(self) -> None:
@@ -400,7 +433,7 @@ class ProgressMonitor:
     def stop(self) -> dict[str, Any]:
         self.stop_event.set()
         for thread in self.threads:
-            thread.join(timeout=7)
+            thread.join(timeout=max(7, self.http_timeout_seconds + 1))
         if any(thread.is_alive() for thread in self.threads):
             raise TimeoutError("health/HTTP progress monitor did not stop")
         return {
@@ -429,6 +462,95 @@ def wait_for_ready_files(
         time.sleep(0.02)
 
 
+def phase_trace_summary(lines: str) -> dict[str, Any]:
+    producer_phases: list[dict[str, str]] = []
+    arrow_streams: list[dict[str, str]] = []
+    for line in lines.splitlines():
+        if "connect_trace event=producer_phases" in line:
+            producer_phases.append(dict(re.findall(r"([a-z_]+)=([^\s]+)", line)))
+        elif "sparkless_arrow_trace event=complete" in line:
+            arrow_streams.append(dict(re.findall(r"([a-z_]+)=([^\s]+)", line)))
+
+    summary: dict[str, Any] = {
+        "producer_phase_samples": len(producer_phases),
+        "arrow_streams": len(arrow_streams),
+        "source_batches_total": sum(
+            int(stream.get("source_batches", "0")) for stream in arrow_streams
+        ),
+        "source_rows_total": sum(
+            int(stream.get("source_rows", "0")) for stream in arrow_streams
+        ),
+        "output_batches_total": sum(
+            int(stream.get("output_batches", "0")) for stream in arrow_streams
+        ),
+        "serialization_ms_total": sum(
+            float(stream.get("serialization_ms", "0")) for stream in arrow_streams
+        ),
+        "rechunk_ms_total": sum(
+            float(stream.get("rechunk_ms", "0")) for stream in arrow_streams
+        ),
+        "ipc_write_ms_total": sum(
+            float(stream.get("ipc_write_ms", "0")) for stream in arrow_streams
+        ),
+        "schema_rewrite_ms_total": sum(
+            float(stream.get("schema_rewrite_ms", "0")) for stream in arrow_streams
+        ),
+        "combine_ms_total": sum(
+            float(stream.get("combine_ms", "0")) for stream in arrow_streams
+        ),
+        "max_source_batch_bytes_estimated": max(
+            (
+                int(stream.get("max_source_batch_bytes_estimated", "0"))
+                for stream in arrow_streams
+            ),
+            default=0,
+        ),
+        "peak_buffered_frame_bytes_estimated": max(
+            (
+                int(stream.get("peak_buffered_frame_bytes_estimated", "0"))
+                for stream in arrow_streams
+            ),
+            default=0,
+        ),
+        "peak_combined_frame_bytes_estimated": max(
+            (
+                int(stream.get("peak_combined_frame_bytes_estimated", "0"))
+                for stream in arrow_streams
+            ),
+            default=0,
+        ),
+        "peak_ipc_buffer_bytes": max(
+            (int(stream.get("peak_ipc_buffer_bytes", "0")) for stream in arrow_streams),
+            default=0,
+        ),
+        "peak_ipc_rewrite_bytes_estimated": max(
+            (
+                int(stream.get("peak_ipc_rewrite_bytes_estimated", "0"))
+                for stream in arrow_streams
+            ),
+            default=0,
+        ),
+        "serialized_ipc_bytes_total": sum(
+            int(stream.get("serialized_ipc_bytes", "0")) for stream in arrow_streams
+        ),
+        "emitted_ipc_bytes_total": sum(
+            int(stream.get("emitted_ipc_bytes", "0")) for stream in arrow_streams
+        ),
+    }
+    for field in (
+        "admission_wait_ms",
+        "planning_ms",
+        "arrow_next_ms",
+        "replay_accounting_ms",
+        "blocked_send_ms",
+    ):
+        values = [float(sample[field]) for sample in producer_phases if field in sample]
+        summary[f"{field}_p50"] = percentile(values, 0.50)
+        summary[f"{field}_p95"] = percentile(values, 0.95)
+        summary[f"{field}_p99"] = percentile(values, 0.99)
+    return summary
+
+
 def run_cohort(
     client_python: Path,
     url: str,
@@ -438,7 +560,14 @@ def run_cohort(
     concurrency: int,
     server_pid: int,
     http_url: str,
+    profile: str,
+    duration_seconds: int,
+    batch_rows: int,
+    slow_reader_rows: int,
+    http_probe_timeout_seconds: float,
 ) -> dict[str, Any]:
+    trace_log_path = output_dir / "server.log"
+    trace_start = trace_log_path.stat().st_size if trace_log_path.exists() else 0
     cohort_dir = output_dir / f"clients-{concurrency}"
     cohort_dir.mkdir(parents=True, exist_ok=True)
     barrier = cohort_dir / "start.barrier"
@@ -453,6 +582,12 @@ def run_cohort(
             str(rows),
             "--iterations",
             str(iterations),
+            "--profile",
+            profile,
+            "--duration-seconds",
+            str(duration_seconds),
+            "--batch-rows",
+            str(batch_rows),
             "--ready-file",
             str(ready_files[index]),
             "--barrier-file",
@@ -460,6 +595,7 @@ def run_cohort(
         ]
         for index in range(concurrency)
     ]
+    slow_reader_ready = cohort_dir / "slow-reader.ready"
     environment = clean_client_environment()
     processes = [
         subprocess.Popen(
@@ -472,19 +608,52 @@ def run_cohort(
         )
         for command in commands
     ]
+    slow_reader_process: subprocess.Popen[str] | None = None
+    if profile == "419":
+        slow_reader_process = subprocess.Popen(
+            [
+                str(client_python),
+                str(SLOW_READER_SCRIPT),
+                "--url",
+                url,
+                "--rows",
+                str(slow_reader_rows),
+                "--pause-every",
+                "1024",
+                "--pause-ms",
+                "50",
+                "--ready-file",
+                str(slow_reader_ready),
+                "--barrier-file",
+                str(barrier),
+            ],
+            cwd=ROOT,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     progress: ProgressMonitor | None = None
     sampler: ProcessSampler | None = None
     try:
-        wait_for_ready_files(ready_files, processes)
+        readiness_files = [*ready_files]
+        if profile == "419":
+            readiness_files.append(slow_reader_ready)
+        monitored_processes = [*processes]
+        if slow_reader_process is not None:
+            monitored_processes.append(slow_reader_process)
+        wait_for_ready_files(readiness_files, monitored_processes)
         sampler = ProcessSampler(server_pid)
         sampler.start()
         stage_started = time.perf_counter()
         barrier.write_text("start\n", encoding="utf-8")
-        progress = ProgressMonitor(http_url)
+        progress = ProgressMonitor(http_url, http_probe_timeout_seconds)
         progress.start()
         results = []
         for index, process in enumerate(processes):
-            stdout, stderr = process.communicate(timeout=max(120, iterations * 60))
+            stdout, stderr = process.communicate(
+                timeout=max(120, iterations * 60, duration_seconds * 2 + 60)
+            )
             if process.returncode:
                 raise RuntimeError(
                     f"benchmark client {index} failed ({process.returncode}): {stderr[-4000:]}"
@@ -494,6 +663,23 @@ def run_cohort(
             except (IndexError, json.JSONDecodeError) as error:
                 raise RuntimeError(
                     f"benchmark client {index} returned invalid JSON: {stdout[-2000:]}"
+                ) from error
+        slow_reader_result = None
+        if slow_reader_process is not None:
+            slow_stdout, slow_stderr = slow_reader_process.communicate(
+                timeout=max(120, duration_seconds * 2 + 60)
+            )
+            if slow_reader_process.returncode:
+                raise RuntimeError(
+                    "mixed-cohort slow reader failed "
+                    f"({slow_reader_process.returncode}): {slow_stderr[-4000:]}"
+                )
+            try:
+                slow_reader_result = json.loads(slow_stdout.strip().splitlines()[-1])
+            except (IndexError, json.JSONDecodeError) as error:
+                raise RuntimeError(
+                    "mixed-cohort slow reader returned invalid JSON: "
+                    f"{slow_stdout[-2000:]}"
                 ) from error
         elapsed = time.perf_counter() - stage_started
         probe_result = progress.stop()
@@ -508,6 +694,10 @@ def run_cohort(
             if process.poll() is None:
                 process.kill()
             process.wait(timeout=5)
+        if slow_reader_process is not None:
+            if slow_reader_process.poll() is None:
+                slow_reader_process.kill()
+            slow_reader_process.wait(timeout=5)
 
     latencies = [
         float(measurement["elapsed_ms"])
@@ -526,7 +716,16 @@ def run_cohort(
         for measurement in client["measurements"]
         if measurement["kind"] == "multi_batch_collect"
     ]
+    short_job_latencies = [
+        float(measurement["elapsed_ms"])
+        for client in results
+        for measurement in client["measurements"]
+        if measurement["kind"] in {"small_count", "preview_25"}
+    ]
     operation_count = len(latencies)
+    with trace_log_path.open("rb") as trace_log:
+        trace_log.seek(trace_start)
+        phase_trace = phase_trace_summary(trace_log.read().decode("utf-8", "replace"))
     throughput = operation_count / elapsed if elapsed else None
     client_fingerprints = [client["client_session_fingerprint"] for client in results]
     client_cpu_seconds = [float(client["cpu_seconds"]) for client in results]
@@ -553,9 +752,11 @@ def run_cohort(
         )
     return {
         "concurrency": concurrency,
-        "iterations_per_client": iterations,
+        "iterations_per_client": iterations if profile == "v26" else None,
+        "profile": profile,
+        "duration_seconds_per_client": duration_seconds if profile == "419" else None,
         "rows_per_count": rows,
-        "rows_per_collect": 20_000,
+        "rows_per_collect": batch_rows,
         "wall_seconds": elapsed,
         "correct_operations": operation_count,
         "operations_per_second": throughput,
@@ -563,12 +764,22 @@ def run_cohort(
         "client_cpu_seconds_total": sum(client_cpu_seconds),
         "latency_p50_ms": percentile(latencies, 0.50),
         "latency_p95_ms": percentile(latencies, 0.95),
+        "latency_p99_ms": percentile(latencies, 0.99),
+        "latency_sample_count": len(latencies),
+        "short_job_latency_p50_ms": percentile(short_job_latencies, 0.50),
+        "short_job_latency_p95_ms": percentile(short_job_latencies, 0.95),
+        "short_job_latency_p99_ms": percentile(short_job_latencies, 0.99),
+        "short_job_sample_count": len(short_job_latencies),
         "filtered_count_latency_p50_ms": percentile(count_latencies, 0.50),
         "filtered_count_latency_p95_ms": percentile(count_latencies, 0.95),
+        "filtered_count_latency_p99_ms": percentile(count_latencies, 0.99),
         "multi_batch_collect_latency_p50_ms": percentile(collect_latencies, 0.50),
         "multi_batch_collect_latency_p95_ms": percentile(collect_latencies, 0.95),
         "client_peak_rss_bytes": [client["peak_rss_bytes"] for client in results],
         "client_session_fingerprints": client_fingerprints,
+        "per_client_measurements": [client["measurements"] for client in results],
+        "concurrent_slow_reader": slow_reader_result,
+        "phase_trace": phase_trace,
         **probe_result,
         **process_result,
     }
@@ -707,11 +918,28 @@ def main() -> int:
         "--build", action="store_true", help="build the optimized combined server first"
     )
     parser.add_argument(
-        "--concurrency", default="1,2,4,8", help="comma-separated client process counts"
+        "--profile",
+        choices=("v26", "419"),
+        default="v26",
+        help="keep the historical V26 witness or run sustained 4.19 mixed workloads",
+    )
+    parser.add_argument(
+        "--concurrency",
+        default=None,
+        help="comma-separated client process counts (default depends on profile)",
     )
     parser.add_argument("--iterations", type=int, default=5)
+    parser.add_argument("--duration-seconds", type=int, default=60)
+    parser.add_argument("--active-operations", type=int, default=2)
+    parser.add_argument("--queue-timeout-ms", type=int, default=5_000)
+    parser.add_argument("--operation-history-records", type=int, default=1024)
+    parser.add_argument(
+        "--operation-history-bytes", type=int, default=4 * 1024 * 1024
+    )
+    parser.add_argument("--http-probe-timeout-seconds", type=float, default=5.0)
     parser.add_argument("--rows", type=int, default=1_000_000)
-    parser.add_argument("--slow-reader-rows", type=int, default=200_000)
+    parser.add_argument("--collect-rows", type=int, default=None)
+    parser.add_argument("--slow-reader-rows", type=int, default=None)
     parser.add_argument("--output", type=Path, default=ROOT / "target/connect-slice8")
     args = parser.parse_args()
 
@@ -719,9 +947,33 @@ def main() -> int:
     server_bin = args.server_bin.absolute()
     if not client_python.is_file():
         raise FileNotFoundError(f"pinned client interpreter not found: {client_python}")
-    if args.iterations < 1 or args.rows < 10 or args.slow_reader_rows < 1:
-        raise ValueError("iterations and workload rows must be positive")
-    concurrencies = [int(value) for value in args.concurrency.split(",")]
+    if (
+        args.iterations < 1
+        or args.rows < 10
+        or args.active_operations < 1
+        or args.queue_timeout_ms < 1
+        or args.operation_history_records < 1
+        or args.operation_history_bytes < 1
+        or not math.isfinite(args.http_probe_timeout_seconds)
+        or args.http_probe_timeout_seconds <= 0
+    ):
+        raise ValueError(
+            "iterations, workload rows, active operations, queue timeout, operation-history limits, and HTTP probe timeout must be positive"
+        )
+    slow_reader_rows = args.slow_reader_rows
+    if slow_reader_rows is None:
+        slow_reader_rows = 1_000_000 if args.profile == "419" else 200_000
+    if slow_reader_rows < 1:
+        raise ValueError("slow-reader rows must be positive")
+    collect_rows = args.collect_rows
+    if collect_rows is None:
+        collect_rows = 100_000 if args.profile == "419" else 20_000
+    if args.profile == "419" and args.duration_seconds < 60:
+        raise ValueError("the 4.19 scheduling profile requires at least 60 seconds")
+    concurrency_text = args.concurrency or (
+        "1,4,8,16" if args.profile == "419" else "1,2,4,8"
+    )
+    concurrencies = [int(value) for value in concurrency_text.split(",")]
     if (
         not concurrencies
         or any(value < 1 for value in concurrencies)
@@ -731,7 +983,7 @@ def main() -> int:
             "concurrency must be increasing, unique, positive client counts"
         )
     if max(concurrencies) < 8:
-        raise ValueError("Slice 8 requires measurements at eight or more clients")
+        raise ValueError("the benchmark requires measurements at eight or more clients")
 
     build_command = [
         "cargo",
@@ -765,7 +1017,13 @@ def main() -> int:
     server: subprocess.Popen[str] | None = None
     try:
         server, ready_record, startup_seconds = start_server(
-            server_bin, run_dir / "server.log", args.rows
+            server_bin,
+            run_dir / "server.log",
+            args.rows,
+            args.active_operations,
+            args.queue_timeout_ms,
+            args.operation_history_records,
+            args.operation_history_bytes,
         )
         http_url = ready_record["http_url"]
         connect_url = ready_record["spark_connect_url"]
@@ -779,11 +1037,16 @@ def main() -> int:
                 concurrency,
                 server.pid,
                 http_url,
+                args.profile,
+                args.duration_seconds,
+                collect_rows,
+                slow_reader_rows,
+                args.http_probe_timeout_seconds,
             )
             for concurrency in concurrencies
         ]
 
-        slow_progress = ProgressMonitor(http_url)
+        slow_progress = ProgressMonitor(http_url, args.http_probe_timeout_seconds)
         slow_progress.start()
         slow_sampler = ProcessSampler(server.pid)
         slow_sampler.start()
@@ -796,7 +1059,7 @@ def main() -> int:
                     "--url",
                     connect_url,
                     "--rows",
-                    str(args.slow_reader_rows),
+                    str(slow_reader_rows),
                 ],
                 cwd=ROOT,
                 env=clean_client_environment(),
@@ -810,7 +1073,7 @@ def main() -> int:
             slow_progress_result = slow_progress.stop()
             slow_resource_result = slow_sampler.stop()
         slow_result = json.loads(slow.stdout.strip().splitlines()[-1])
-        if slow_result["rows"] != args.slow_reader_rows:
+        if slow_result["rows"] != slow_reader_rows:
             raise AssertionError("slow-reader witness returned an unexpected row count")
         if (
             not slow_progress_result["health_requests"]
@@ -962,7 +1225,9 @@ def main() -> int:
         dirty_paths = repository_dirty_paths()
         report = {
             "schema_version": 1,
-            "slice": "418-08-local-v26",
+            "slice": "418-08-local-v26"
+            if args.profile == "v26"
+            else "419-11-mixed-scheduling",
             "run_id": run_id,
             "source_revision": repository_revision(),
             "source_dirty_paths": dirty_paths,
@@ -985,20 +1250,32 @@ def main() -> int:
             },
             "settings": {
                 "concurrency": concurrencies,
-                "iterations_per_client": args.iterations,
+                "profile": args.profile,
+                "iterations_per_client": args.iterations
+                if args.profile == "v26"
+                else None,
+                "duration_seconds_per_client": args.duration_seconds
+                if args.profile == "419"
+                else None,
                 "count_rows": args.rows,
-                "collect_rows": 20_000,
-                "slow_reader_rows": args.slow_reader_rows,
+                "collect_rows": collect_rows,
+                "slow_reader_rows": slow_reader_rows,
+                "active_operations": args.active_operations,
+                "queue_timeout_ms": args.queue_timeout_ms,
+                "operation_history_records": args.operation_history_records,
+                "operation_history_bytes": args.operation_history_bytes,
+                "http_probe_timeout_seconds": args.http_probe_timeout_seconds,
                 "warmup": "one filtered count and 32-row collect per client, excluded from timed cohorts",
                 "regression_budget": None,
                 "interpretation": "measurements only; no numeric regression budget or performance claim is implied",
                 "server_config_environment": {
-                    **SERVER_CONFIG_ENVIRONMENT,
-                    "SPARKLESS_MAX_RANGE_ROWS": str(
-                        max(args.rows, 10_000_000, 200_000)
+                    **server_configuration(
+                        args.rows,
+                        args.active_operations,
+                        args.queue_timeout_ms,
+                        args.operation_history_records,
+                        args.operation_history_bytes,
                     ),
-                    "SPARKLESS_RESPONSE_TIMEOUT_MS": "60000",
-                    "SPARKLESS_CONNECT_TRACE": "1",
                 },
                 "server_thread_environment": {
                     key: None for key in THREAD_ENVIRONMENT_KEYS

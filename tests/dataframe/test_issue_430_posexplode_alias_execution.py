@@ -11,7 +11,7 @@ Run in PySpark mode first, then mock mode:
 https://github.com/eddiethedean/sparkless/issues/430
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_posexplode_alias_two_names_returns_exploded_rows(spark, spark_mode):

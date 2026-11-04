@@ -7,7 +7,7 @@ returned a DataFrame so head()[0] failed with a TypeError.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 F = get_imports().F
 Row = get_imports().Row

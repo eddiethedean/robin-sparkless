@@ -47,7 +47,7 @@ def main() -> int:
         return 1
 
     # Session module sets PYSPARK_SUBMIT_ARGS with delta-spark_2.13 before pyspark import
-    from sparkless.testing.session import _delta_maven_package
+    from sparkless_testing.session import _delta_maven_package
 
     delta_pkg = _delta_maven_package()
     submit = os.environ.get("PYSPARK_SUBMIT_ARGS", "")
@@ -56,7 +56,7 @@ def main() -> int:
         errors.append(f"Expected {delta_pkg!r} in PYSPARK_SUBMIT_ARGS")
 
     os.environ["SPARKLESS_TEST_MODE"] = "pyspark"
-    from sparkless.testing import create_session
+    from sparkless_testing import create_session
 
     try:
         spark = create_session("verify_basic", mode=None)

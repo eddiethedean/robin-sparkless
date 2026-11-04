@@ -1,6 +1,6 @@
 """Regression test for #1410: array.slice parity."""
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_array_slice_parity(spark):

@@ -1,6 +1,6 @@
 ## Category: Missing native API – `arrays_overlap`
 
-**Error:** `AttributeError: module 'sparkless._native' has no attribute 'arrays_overlap'`
+**Error:** `AttributeError: module 'sparkless_native._native' has no attribute 'arrays_overlap'`
 
 Array-contains-join and related tests fail because the Rust extension does not expose `arrays_overlap`. PySpark uses this for joins on array overlap (e.g. `array_contains`-style join conditions).
 
@@ -12,8 +12,8 @@ from sparkless.sql.functions import array_contains, col
 
 spark = SparkSession.builder.app_name("test").get_or_create()
 # Any code path that triggers arrays_overlap (e.g. join using array overlap)
-# fails with: AttributeError: module 'sparkless._native' has no attribute 'arrays_overlap'
-import sparkless._native as n
+# fails with: AttributeError: module 'sparkless_native._native' has no attribute 'arrays_overlap'
+import sparkless_native._native as n
 _ = n.arrays_overlap  # AttributeError
 ```
 

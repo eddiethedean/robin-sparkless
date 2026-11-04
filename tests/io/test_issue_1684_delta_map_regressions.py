@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from sparkless.testing import create_session, get_imports
+from sparkless_testing import create_session, get_imports
 
 _imports = get_imports()
 ArrayType = _imports.ArrayType

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from pathlib import Path
 
 from pyspark.sql.connect.session import SparkSession
 
@@ -15,6 +16,8 @@ def main() -> None:
     parser.add_argument("--rows", type=int, default=200_000)
     parser.add_argument("--pause-every", type=int, default=4096)
     parser.add_argument("--pause-ms", type=float, default=10)
+    parser.add_argument("--ready-file", type=Path)
+    parser.add_argument("--barrier-file", type=Path)
     args = parser.parse_args()
     if args.rows < 1 or args.pause_every < 1 or args.pause_ms < 0:
         raise ValueError(
@@ -23,6 +26,14 @@ def main() -> None:
 
     session = SparkSession.builder.remote(args.url).create()
     try:
+        if args.ready_file is not None:
+            args.ready_file.write_text("ready\n", encoding="utf-8")
+        if args.barrier_file is not None:
+            deadline = time.monotonic() + 60
+            while not args.barrier_file.exists():
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("timed out waiting for the slow-reader barrier")
+                time.sleep(0.01)
         started = time.perf_counter()
         cpu_started = time.process_time()
         observed = 0

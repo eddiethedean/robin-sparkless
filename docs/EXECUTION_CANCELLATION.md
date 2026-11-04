@@ -44,12 +44,15 @@ request made during that call becomes a `SparklessCancelledError` when the call 
 the backend reaches its next safe point. Callers should wait for the action's terminal result
 before releasing any admission lease or treating its work as finished.
 
-For external catalog `saveAsTable()` writes, cancellation before the provider write begins
-prevents the provider call. Once the provider write begins, Sparkless returns the provider's
-receipt or error unchanged, even if cancellation arrives concurrently. Providers that can
-check cancellation before their commit may override `write_table_with_cancellation`; they
-must return a cancelled outcome only when the commit was not accepted.
+External catalog writes use a prepare/commit boundary. Sparkless checks cancellation
+before and after preparation, then passes the cancellation token to the prepared commit.
+Providers must check cancellation before the irreversible commit point and report
+`NotCommitted` only when the provider knows it did not accept the commit. If the provider
+cannot establish the outcome, it reports `OutcomeUnknown` with the operation ID; callers
+must reconcile that ID before retrying.
 
 Rust embedders can share `robin_sparkless_core::CancellationToken` with an action and call
-`DataFrameBackend::collect_with_cancellation` or `count_with_cancellation`. Backends may add
-safe points, while the default implementation checks before and after the action.
+`FrameActions::collect_with_cancellation` or `count_with_cancellation`. Backends may add
+safe points, while the default implementation checks before and after the action. For
+SQL, capture an `ExecutionContext` to carry cancellation, settings, operation ID, and a
+source snapshot together.

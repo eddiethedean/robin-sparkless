@@ -8,7 +8,7 @@ struct field names in the schema, so we use lowercase field names in tests.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

@@ -52,7 +52,7 @@ Yes, with the SQL feature enabled in the native build. Temp views, global temp v
 
 ### How do I run the same tests against PySpark and Sparkless?
 
-Use the `sparkless.testing` pytest plugin. See [Testing guide](TESTING_GUIDE.md).
+Use the `sparkless_testing` pytest plugin. See [Testing guide](TESTING_GUIDE.md).
 
 ## Parity and bugs
 

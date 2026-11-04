@@ -6,7 +6,7 @@ This module exposes the top-level `sparkless` namespace:
   `GroupedData`, `DataFrameReader`, and `DataFrameWriter`.
 - A selection of built-in scalar and aggregate functions (e.g. `col`, `lit`,
   `posexplode`, `to_date`, `current_timestamp`) backed by the native
-  `sparkless._native` extension.
+  `sparkless_native._native` extension.
 - Convenience imports such as `F`/`functions`, `Window`, and schema types
   via `__getattr__`.
 
@@ -16,22 +16,16 @@ Rust/Polars with no JVM dependency.
 
 from __future__ import annotations
 
-import sys as _sys
 from typing import Dict, List, Sequence, Tuple, Union, cast as _cast
 
-# Register the engine before imports so upgrades from old editable installs also
-# bypass any stale extension left in this source directory.
-import sparkless_native._native as _native
-
-_sys.modules[__name__ + "._native"] = _native
-
+# Load the separately installed native engine before the local API classes.
 from sparkless_native._native import PyColumn as _ColumnType  # noqa: E402
 
-__version__ = "4.18.1"
+__version__ = "4.19.0"
 
 
 _mod = __import__(
-    "sparkless._native",
+    "sparkless_native._native",
     fromlist=[
         "SparklessError",
         "SparklessCancelledError",
@@ -404,16 +398,6 @@ setattr(DataFrame, "select", _dataframe_select)
 
 # PySpark-style: from sparkless import F, functions, StringType, ...
 def __getattr__(name: str) -> object:
-    if name in (
-        "SparklessServer",
-        "AsyncSparklessServer",
-        "SparklessServerError",
-        "UnsupportedServerPlatformError",
-        "UnsupportedSparkConnectError",
-    ):
-        from sparkless import server as server_module
-
-        return getattr(server_module, name)
     if name in ("F", "functions"):
         import sparkless.sql.functions as f
 
@@ -509,11 +493,6 @@ __all__: List[str] = [
     "SparklessError",
     "SparklessCancelledError",
     "SparklessExternalCatalogError",
-    "SparklessServer",
-    "AsyncSparklessServer",
-    "SparklessServerError",
-    "UnsupportedServerPlatformError",
-    "UnsupportedSparkConnectError",
     "sql",
     "col",
     "lit",
@@ -546,7 +525,7 @@ def create_map(*cols: object) -> _ColumnType:
     """Top-level create_map for robin_sparkless tests."""
     from sparkless.sql import functions as f
 
-    return f.create_map(*cols)
+    return _cast(_ColumnType, f.create_map(*cols))
 
 
 class _SQLModule:

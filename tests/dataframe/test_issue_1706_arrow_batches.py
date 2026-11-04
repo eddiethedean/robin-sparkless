@@ -51,7 +51,7 @@ def test_to_arrow_batches_preserves_arrow_schema_details(spark) -> None:
 
 
 def test_replaced_arrow_column_does_not_reuse_non_nullable_field(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().functions
     schema = pa.schema([pa.field("id", pa.int64(), nullable=False)])
@@ -65,7 +65,7 @@ def test_replaced_arrow_column_does_not_reuse_non_nullable_field(spark) -> None:
 
 
 def test_with_columns_replaced_arrow_column_drops_stale_field_metadata(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().functions
     schema = pa.schema([pa.field("id", pa.int64(), metadata={b"field": b"stale"})])

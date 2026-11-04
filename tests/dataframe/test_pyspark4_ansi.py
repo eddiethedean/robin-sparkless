@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-pytest_plugins = ["sparkless.testing"]
+pytest_plugins = ["sparkless_testing"]
 
 
 def _set_compat(spark, profile: str) -> None:

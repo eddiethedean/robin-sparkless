@@ -13,7 +13,7 @@ These tests work with both sparkless and PySpark backends.
 Set SPARKLESS_TEST_MODE=pyspark to run with real PySpark.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 F = imports.F

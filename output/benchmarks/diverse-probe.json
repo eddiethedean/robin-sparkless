@@ -1,0 +1,102 @@
+{
+  "engine": "connect",
+  "pyspark": "4.0.5",
+  "active_operations": "2 (default)",
+  "workloads": {
+    "ingest_10": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "ingest_100": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "ingest_1000": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "ingest_10000": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "orders_pipeline": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "nullable_orders": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "scalar_roundtrip": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "wide_projection": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "string_payload": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "empty_result": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "selectivity_none": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "selectivity_one": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "selectivity_half": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "selectivity_all": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "arithmetic_pipeline": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "preview_limit": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "collect_10000": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "collect_100000": {
+      "status": "pass",
+      "samples_seconds": []
+    },
+    "schema_100_columns": {
+      "status": "pass",
+      "samples_seconds": []
+    }
+  },
+  "mixed_concurrency": {},
+  "unsupported_probes": {
+    "grouped_sum": {
+      "status": "error",
+      "error": "SparkException: UNSUPPORTED_CONNECT_PLAN: only a global GROUP_TYPE_GROUPBY count(1) aggregate is supported\n\nJVM stacktrace:\n"
+    },
+    "join": {
+      "status": "error",
+      "error": "SparkException: UNSUPPORTED_CONNECT_PLAN: relation type is not enabled in the 4.18 subset\n\nJVM stacktrace:\n"
+    },
+    "sort": {
+      "status": "error",
+      "error": "SparkException: UNSUPPORTED_CONNECT_PLAN: relation type is not enabled in the 4.18 subset\n\nJVM stacktrace:\n"
+    },
+    "sql": {
+      "status": "error",
+      "error": "SparkException: UNSUPPORTED_CONNECT_PLAN: Connect commands and SQL execution are outside the 4.18 subset\n\nJVM stacktrace:\n"
+    }
+  }
+}

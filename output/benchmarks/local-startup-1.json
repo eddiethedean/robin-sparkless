@@ -1,0 +1,13 @@
+{
+  "engine": "local",
+  "phase": "startup",
+  "python": "3.11.15",
+  "machine": "arm64",
+  "pyspark": "4.0.5",
+  "cpu_threads": 4,
+  "warmup_iterations": 2,
+  "measured_iterations": 10,
+  "startup_to_session_seconds": 1.8091624160297215,
+  "first_job_seconds": 1.036372167058289,
+  "startup_through_first_job_seconds": 2.845539208035916
+}

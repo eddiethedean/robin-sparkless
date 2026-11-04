@@ -13,9 +13,21 @@ import tomllib
 PUBLISHABLE_MANIFESTS = (
     "Cargo.toml",
     "crates/robin-sparkless-core/Cargo.toml",
+    "crates/robin-sparkless-plan/Cargo.toml",
+    "crates/robin-sparkless-sql/Cargo.toml",
+    "crates/robin-sparkless-delta/Cargo.toml",
+    "crates/robin-sparkless-jdbc/Cargo.toml",
+    "crates/robin-sparkless-jdbc-polars/Cargo.toml",
+    "crates/robin-sparkless-duckdb/Cargo.toml",
     "crates/robin-sparkless-polars/Cargo.toml",
     "crates/spark-sql-parser/Cargo.toml",
+    "crates/sparkless-server-core/Cargo.toml",
+    "crates/sparkless-server-runtime/Cargo.toml",
+    "crates/sparkless-server-http/Cargo.toml",
+    "crates/sparkless-server-connect/Cargo.toml",
+    "crates/sparkless-server-polars/Cargo.toml",
     "crates/sparkless-server/Cargo.toml",
+    "crates/sparkless-server-duckdb/Cargo.toml",
 )
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
 

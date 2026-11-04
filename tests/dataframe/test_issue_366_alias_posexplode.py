@@ -4,7 +4,7 @@ PySpark posexplode().alias("Value1", "Value2") names both columns.
 Uses get_imports only; same logic for both backends.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

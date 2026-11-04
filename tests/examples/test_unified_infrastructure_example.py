@@ -5,7 +5,7 @@ This module shows how to write tests that work with both sparkless and PySpark.
 Set SPARKLESS_TEST_MODE=pyspark to run tests with PySpark backend.
 """
 
-from sparkless.testing import assert_dataframes_equal, get_imports
+from sparkless_testing import assert_dataframes_equal, get_imports
 
 
 class TestUnifiedInfrastructure:

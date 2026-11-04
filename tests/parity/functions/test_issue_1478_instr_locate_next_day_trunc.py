@@ -7,7 +7,7 @@ sensible results.
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestIssue1478InstrLocateNextDayTrunc(ParityTestBase):

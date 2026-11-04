@@ -12,7 +12,7 @@ Tests are written PySpark-first: run with PySpark, then mock:
 https://github.com/eddiethedean/sparkless/issues/448
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _row_val(row, key):

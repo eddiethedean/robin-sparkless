@@ -10,7 +10,7 @@ from sparkless.sql.types import (
     YearMonthIntervalType,
 )
 
-pytest_plugins = ["sparkless.testing"]
+pytest_plugins = ["sparkless_testing"]
 
 
 @pytest.mark.sparkless_only

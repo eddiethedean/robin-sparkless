@@ -1,0 +1,33 @@
+         801458 function calls (801456 primitive calls) in 1.069 seconds
+
+   Ordered by: cumulative time
+   List reduced from 288 to 25 due to restriction <25>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    1.069    1.069 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/dataframe.py:1780(collect)
+        1    0.000    0.000    0.895    0.895 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/dataframe.py:1792(_to_table)
+        1    0.000    0.000    0.895    0.895 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/client/core.py:914(to_table)
+        1    0.000    0.000    0.895    0.895 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/client/core.py:1546(_execute_and_fetch)
+        9    0.000    0.000    0.895    0.099 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/client/core.py:1377(_execute_and_fetch_as_iterator)
+        9    0.000    0.000    0.894    0.099 <frozen _collections_abc>:326(__next__)
+        9    0.000    0.000    0.894    0.099 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/client/reattach.py:136(send)
+        9    0.000    0.000    0.893    0.099 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/client/reattach.py:152(_has_next)
+        8    0.000    0.000    0.893    0.112 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/client/reattach.py:244(_call_iter)
+       12    0.000    0.000    0.893    0.074 {built-in method builtins.next}
+        8    0.000    0.000    0.893    0.112 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/connect/client/reattach.py:163(<lambda>)
+        8    0.000    0.000    0.893    0.112 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/grpc/_channel.py:546(__next__)
+        8    0.000    0.000    0.893    0.112 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/grpc/_channel.py:932(_next)
+        8    0.000    0.000    0.893    0.112 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/grpc/_common.py:119(wait)
+       16    0.000    0.000    0.893    0.056 /Users/odosmatthews/.local/share/uv/python/cpython-3.11.15-macos-aarch64-none/lib/python3.11/threading.py:295(wait)
+       15    0.000    0.000    0.893    0.060 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/grpc/_common.py:109(_wait_once)
+       34    0.893    0.026    0.893    0.026 {method 'acquire' of '_thread.lock' objects}
+        1    0.044    0.044    0.174    0.174 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/conversion.py:528(convert)
+   100000    0.022    0.000    0.103    0.000 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/types.py:2993(_create_row)
+   100000    0.010    0.000    0.073    0.000 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/types.py:3066(__new__)
+   100004    0.063    0.000    0.063    0.000 {built-in method __new__ of type object at 0x1064c76b0}
+   100000    0.013    0.000    0.016    0.000 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/conversion.py:545(<listcomp>)
+   100000    0.008    0.000    0.008    0.000 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/types.py:3186(__setattr__)
+   100000    0.007    0.000    0.007    0.000 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/types.py:1485(fieldNames)
+   100000    0.003    0.000    0.003    0.000 /tmp/sparkless-linkedin-verify/lib/python3.11/site-packages/pyspark/sql/conversion.py:410(<lambda>)
+
+

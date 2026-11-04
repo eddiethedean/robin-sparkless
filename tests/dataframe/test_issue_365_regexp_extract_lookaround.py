@@ -7,7 +7,7 @@ Robin-sparkless now supports them via fancy-regex when the pattern contains look
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 _imports = get_imports()

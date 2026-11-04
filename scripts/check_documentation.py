@@ -29,6 +29,7 @@ def main() -> None:
             for p in tracked
             if p.endswith((".md", ".rst"))
             and not p.startswith(("upstream_", "vendor/"))
+            and (ROOT / p).is_file()
         }
     )
     errors = []

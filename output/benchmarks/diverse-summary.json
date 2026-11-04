@@ -1,0 +1,126 @@
+{
+  "workloads": {
+    "ingest_10": {
+      "connect-default": 16.480520484037697,
+      "local": 74.6060210512951,
+      "connect-active4": 16.54360443353653
+    },
+    "ingest_100": {
+      "connect-default": 16.1908125737682,
+      "local": 73.49085446912795,
+      "connect-active4": 16.235895571298897
+    },
+    "ingest_1000": {
+      "connect-default": 16.426666523329914,
+      "local": 75.07000060286373,
+      "connect-active4": 16.435208031907678
+    },
+    "ingest_10000": {
+      "connect-default": 19.04060458764434,
+      "local": 85.84570838138461,
+      "connect-active4": 19.04620847199112
+    },
+    "orders_pipeline": {
+      "connect-default": 16.793728922493756,
+      "local": 60.702687595039606,
+      "connect-active4": 16.80400059558451
+    },
+    "nullable_orders": {
+      "connect-default": 19.367708475328982,
+      "local": 78.06160394102335,
+      "connect-active4": 19.256707979366183
+    },
+    "scalar_roundtrip": {
+      "connect-default": 20.10560454800725,
+      "local": 62.15927051380277,
+      "connect-active4": 20.093083498068154
+    },
+    "wide_projection": {
+      "connect-default": 30.76545789372176,
+      "local": 83.11485452577472,
+      "connect-active4": 30.98814550321549
+    },
+    "string_payload": {
+      "connect-default": 25.355249526910484,
+      "local": 65.92295865993947,
+      "connect-active4": 25.36952099762857
+    },
+    "empty_result": {
+      "connect-default": 42.21279197372496,
+      "local": 11.889083543792367,
+      "connect-active4": 41.927125421352684
+    },
+    "selectivity_none": {
+      "connect-default": 19.185958080925047,
+      "local": 26.159750064834952,
+      "connect-active4": 19.214062951505184
+    },
+    "selectivity_one": {
+      "connect-default": 19.12100042682141,
+      "local": 24.964499403722584,
+      "connect-active4": 19.117541960440576
+    },
+    "selectivity_half": {
+      "connect-default": 18.989687552675605,
+      "local": 24.18987499549985,
+      "connect-active4": 19.02722951490432
+    },
+    "selectivity_all": {
+      "connect-default": 18.9786875853315,
+      "local": 25.057603954337537,
+      "connect-active4": 19.078791490755975
+    },
+    "arithmetic_pipeline": {
+      "connect-default": 27.55437500309199,
+      "local": 27.110062539577484,
+      "connect-active4": 29.283082927577198
+    },
+    "preview_limit": {
+      "connect-default": 15.690478961914778,
+      "local": 8.565541938878596,
+      "connect-active4": 15.638916520401835
+    },
+    "collect_10000": {
+      "connect-default": 112.25443740841001,
+      "local": 16.638833563774824,
+      "connect-active4": 113.28514595516026
+    },
+    "collect_100000": {
+      "connect-default": 1030.9258544584736,
+      "local": 97.2264795564115,
+      "connect-active4": 1020.6744369352236
+    },
+    "schema_100_columns": {
+      "connect-default": 6.901520420797169,
+      "local": 72.53908284474164,
+      "connect-active4": 6.923562614247203
+    }
+  },
+  "mixed_concurrency": {
+    "1": {
+      "connect-default": 24.299282195718416,
+      "local": 24.168052535905396,
+      "connect-active4": 23.6677287335431
+    },
+    "4": {
+      "connect-default": 38.08255524151808,
+      "local": 35.95061624829383,
+      "connect-active4": 46.873901438967565
+    },
+    "8": {
+      "connect-default": 41.19523689970446,
+      "local": 36.62762934224835,
+      "connect-active4": 52.56921421127332
+    }
+  },
+  "pytest": {
+    "0": {
+      "connect": 3.4636695000808686,
+      "local": 6.9870701669715345
+    },
+    "4": {
+      "connect": 3.038162208162248,
+      "local": 6.598347958177328
+    }
+  }
+}

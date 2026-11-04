@@ -54,11 +54,12 @@ pub mod traits;
 /// Prefer these for engine-generic code and embeddings that should not depend on Polars.
 pub mod engine {
     pub use robin_sparkless_core::engine::{
-        ArrowIpcBatchStream, ArrowIpcStream, CollectedRows, DataFrameBackend,
-        DataFrameReaderBackend, ExternalCatalogProvider, ExternalTableDescriptor,
+        ArrowIpcBatchStream, ArrowIpcStream, CatalogCapabilities, CatalogOwnership,
+        CatalogReadSnapshot, CatalogReader, CatalogResolver, CollectedRows, DataFrameReaderBackend,
+        ExecutionConfigSnapshot, ExecutionContext, ExternalCatalog, ExternalTableDescriptor,
         ExternalTableFormat, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
-        ExternalTableWriteRequest, ExternalTableWriteResult, GroupedDataBackend, JoinType,
-        PlanExecutor, SparkSessionBackend,
+        ExternalTableWriteOutcome, ExternalTableWriteResult, FrameActions, FrameSchema,
+        FrameTransform, GroupedData, JoinType, SparkSessionBackend, begin_catalog_read_snapshot,
     };
     pub use robin_sparkless_core::expr::{
         ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
@@ -67,7 +68,10 @@ pub mod engine {
         lit_i64, lit_null, lit_str, lt, max, mean, median, min, mode, ne, not_, or_, skewness, std,
         stddev, stddev_pop, stddev_samp, sum, try_avg, try_sum, var_pop, var_samp, variance, when,
     };
-    pub use robin_sparkless_core::{DataType, EngineError, LogicalField, StructField, StructType};
+    pub use robin_sparkless_core::{
+        DataType, EngineError, ErrorCategory, ErrorDetail, ErrorRetryability, LogicalField,
+        StructField, StructType,
+    };
 }
 
 /// Polars-backed types and helper functions re-exported from `robin-sparkless-polars`.
@@ -108,11 +112,19 @@ pub use dataframe::{
     SelectItem, WriteFormat, WriteMode, expr_contains_only_join_key_equalities,
     try_extract_join_eq_columns, try_extract_join_eq_columns_all,
 };
+#[cfg(feature = "duckdb-source")]
+pub use robin_sparkless_duckdb::{
+    DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
+};
 pub use robin_sparkless_polars::dataframe::DropColumnSpec;
 pub use robin_sparkless_polars::{SharedCatalog, SharedCatalogReadLease};
 pub use session::{DataFrameReader, SparkSession, SparkSessionBuilder};
 
 // Root-owned traits (work with root DataFrame/SparkSession); plan re-export.
+pub use robin_sparkless_plan::{
+    BinaryInput, ExpressionKind, GroupInput, LogicalPlan, OperationKind, PlanExpression,
+    PlanOperation, PlanPayload, common_numeric_type,
+};
 pub use robin_sparkless_polars::plan::{PlanError, PlanExprError};
 pub use traits::{FromRobinDf, IntoRobinDf};
 
@@ -123,15 +135,17 @@ pub fn execute_plan(
     schema: Vec<(String, String)>,
     plan: &[serde_json::Value],
 ) -> Result<DataFrame, PlanError> {
-    use robin_sparkless_core::engine::PlanExecutor as _;
+    robin_sparkless_polars::plan::execute_plan(&session.0, data, schema, plan).map(DataFrame)
+}
 
-    // Execute via the engine-generic PlanExecutor trait implemented by the Polars backend.
-    let boxed = robin_sparkless_polars::plan::PolarsPlanExecutor::execute_plan(
-        &session.0, data, schema, plan,
-    )
-    .map_err(|e| PlanError::InvalidPlan(e.to_string()))?;
-
-    crate::dataframe::from_backend(boxed).map_err(|e| PlanError::InvalidPlan(e.to_string()))
+/// Execute an already decoded portable plan with the root session facade.
+pub fn execute_typed_plan(
+    session: &SparkSession,
+    data: Vec<Vec<serde_json::Value>>,
+    schema: Vec<(String, String)>,
+    plan: LogicalPlan,
+) -> Result<DataFrame, PlanError> {
+    robin_sparkless_polars::plan::execute_typed_plan(&session.0, data, schema, plan).map(DataFrame)
 }
 
 pub use config::SparklessConfig;

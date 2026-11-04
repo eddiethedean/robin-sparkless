@@ -20,7 +20,7 @@ def test_filter_preserves_null_semantics(spark, spark_imports):
 For cross-engine tests use `spark_imports.StructType/StructField/IntegerType`
 instead of Sparkless-specific tuple schema shortcuts. Existing repository
 `tests/conftest.py` supplies `spark` and `spark_imports`. In external projects,
-register `pytest_plugins = ["sparkless.testing.plugin"]` in `conftest.py`.
+register `pytest_plugins = ["sparkless_testing.plugin"]` in `conftest.py`.
 
 ```bash
 SPARKLESS_TEST_MODE=sparkless .venv/bin/python -m pytest tests/dataframe/test_my_regression.py -v

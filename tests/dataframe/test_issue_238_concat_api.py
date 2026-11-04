@@ -7,7 +7,7 @@ This test verifies that robin-sparkless exposes concat/concat_ws with the same u
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 _imports = get_imports()

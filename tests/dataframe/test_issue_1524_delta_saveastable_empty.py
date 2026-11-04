@@ -2,7 +2,7 @@ import tempfile
 import uuid
 
 import pytest
-from sparkless.testing import create_session
+from sparkless_testing import create_session
 
 
 @pytest.mark.delta

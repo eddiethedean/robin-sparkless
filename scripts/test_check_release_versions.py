@@ -5,9 +5,39 @@ from tempfile import TemporaryDirectory
 
 from check_release_versions import (
     check_release,
+    read_toml,
     validate_server_inventory,
     validate_versions,
 )
+
+
+SERVER_INVENTORY_FILES = (
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/robin-sparkless-core/Cargo.toml",
+    "crates/robin-sparkless-duckdb/Cargo.toml",
+    "crates/robin-sparkless-polars/Cargo.toml",
+    "crates/spark-sql-parser/Cargo.toml",
+    "crates/sparkless-server-core/Cargo.toml",
+    "crates/sparkless-server-runtime/Cargo.toml",
+    "crates/sparkless-server-http/Cargo.toml",
+    "crates/sparkless-server-connect/Cargo.toml",
+    "crates/sparkless-server-polars/Cargo.toml",
+    "crates/sparkless-server/Cargo.toml",
+    "crates/sparkless-server-duckdb/Cargo.toml",
+    "python/pyproject.toml",
+    "python/connect/pyproject.toml",
+    "python/server/pyproject.toml",
+    "python/server-duckdb/pyproject.toml",
+    "python/testing/pyproject.toml",
+)
+
+
+def copy_server_inventory(source, destination):
+    for relative in SERVER_INVENTORY_FILES:
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / relative, target)
 
 
 class ReleaseVersionsTest(unittest.TestCase):
@@ -104,104 +134,64 @@ class ReleaseVersionsTest(unittest.TestCase):
 
     def test_coordinated_candidate_requires_parser_dependency_alignment(self):
         source = Path(__file__).resolve().parents[1]
+        candidate_version = read_toml(source / "Cargo.toml")["package"]["version"]
+        stale_version = "4.17.0" if candidate_version != "4.17.0" else "4.16.0"
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifests = (
-                "Cargo.toml",
-                "Cargo.lock",
-                "crates/robin-sparkless-core/Cargo.toml",
-                "crates/robin-sparkless-polars/Cargo.toml",
-                "crates/spark-sql-parser/Cargo.toml",
-                "crates/sparkless-server/Cargo.toml",
-                "python/pyproject.toml",
-                "python/server-bin/pyproject.toml",
-            )
-            for relative in manifests:
-                destination = root / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source / relative, destination)
+            copy_server_inventory(source, root)
 
-            server_manifest = root / "crates/sparkless-server/Cargo.toml"
-            server_manifest.write_text(
-                server_manifest.read_text().replace(
-                    'spark-sql-parser = { version = "4.18.0"',
-                    'spark-sql-parser = { version = "4.17.0"',
+            polars_manifest = root / "crates/robin-sparkless-polars/Cargo.toml"
+            polars_manifest.write_text(
+                polars_manifest.read_text().replace(
+                    f'spark-sql-parser = {{ version = "{candidate_version}"',
+                    f'spark-sql-parser = {{ version = "{stale_version}"',
                     1,
                 )
             )
-            errors = validate_server_inventory(root, "v4.18.0")
+            errors = validate_server_inventory(root, f"v{candidate_version}")
             self.assertTrue(
-                any("sparkless-server/spark-sql-parser" in error for error in errors)
+                any(
+                    "robin-sparkless-polars/spark-sql-parser" in error
+                    for error in errors
+                )
             )
 
     def test_candidate_branch_requires_parser_manifest_and_lock_alignment(self):
+        source = Path(__file__).resolve().parents[1]
+        candidate_version = read_toml(source / "Cargo.toml")["package"]["version"]
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            files = {
-                "Cargo.toml": '[package]\nname="robin-sparkless"\nversion="4.17.0"\n',
-                "crates/robin-sparkless-core/Cargo.toml": '[package]\nname="robin-sparkless-core"\nversion="4.17.0"\n',
-                "crates/robin-sparkless-polars/Cargo.toml": (
-                    '[package]\nname="robin-sparkless-polars"\nversion="4.17.0"\n'
-                    '[dependencies]\nspark-sql-parser={version="4.17.0"}\n'
-                ),
-                "crates/spark-sql-parser/Cargo.toml": '[package]\nname="spark-sql-parser"\nversion="4.17.0"\n',
-                "crates/sparkless-server/Cargo.toml": (
-                    '[package]\nname="sparkless-server"\nversion="4.17.0"\n'
-                    '[dependencies]\nrobin-sparkless={version="4.17.0"}\n'
-                    'robin-sparkless-core={version="4.17.0"}\n'
-                    'spark-sql-parser={version="4.17.0"}\n'
-                ),
-                "Cargo.lock": "".join(
-                    '[[package]]\nname="{}"\nversion="4.17.0"\n'.format(name)
-                    for name in (
-                        "sparkless-server",
-                        "spark-sql-parser",
-                    )
-                ),
-                "python/pyproject.toml": (
-                    "[project]\n[project.optional-dependencies]\n"
-                    'server=["sparkless-server-bin==4.17.0"]\n'
-                ),
-                "python/server-bin/pyproject.toml": (
-                    '[project]\nname="sparkless-server-bin"\nversion="4.17.0"\nrequires-python=">=3.11"\n'
-                ),
-            }
-            for relative, contents in files.items():
-                path = root / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(contents)
+            copy_server_inventory(source, root)
+            self.assertEqual(validate_server_inventory(root, "v4.17.0"), [])
 
-            self.assertEqual(validate_server_inventory(root), [])
-            for relative, label in (
-                (
-                    "crates/robin-sparkless-polars/Cargo.toml",
-                    "robin-sparkless-polars/spark-sql-parser",
-                ),
-                (
-                    "crates/sparkless-server/Cargo.toml",
-                    "sparkless-server/spark-sql-parser",
-                ),
-            ):
-                manifest = root / relative
-                manifest.write_text(
-                    manifest.read_text().replace(
-                        'spark-sql-parser={version="4.17.0"}',
-                        'spark-sql-parser={version="4.16.0"}',
-                    )
+            server_polars_manifest = root / "crates/sparkless-server-polars/Cargo.toml"
+            server_polars_manifest.write_text(
+                server_polars_manifest.read_text().replace(
+                    f'spark-sql-parser = {{ version = "{candidate_version}"',
+                    'spark-sql-parser = { version = "4.16.0"',
+                    1,
                 )
-                errors = validate_server_inventory(root)
-                self.assertTrue(any(label in error for error in errors), errors)
-                manifest.write_text(
-                    manifest.read_text().replace(
-                        'spark-sql-parser={version="4.16.0"}',
-                        'spark-sql-parser={version="4.17.0"}',
-                    )
+            )
+            errors = validate_server_inventory(root, "v4.17.0")
+            self.assertTrue(
+                any(
+                    "sparkless-server-polars/spark-sql-parser" in error
+                    for error in errors
+                ),
+                errors,
+            )
+            server_polars_manifest.write_text(
+                server_polars_manifest.read_text().replace(
+                    'spark-sql-parser = { version = "4.16.0"',
+                    f'spark-sql-parser = {{ version = "{candidate_version}"',
+                    1,
                 )
+            )
             parser_manifest = root / "crates/spark-sql-parser/Cargo.toml"
             parser_manifest.write_text(
                 '[package]\nname="spark-sql-parser"\nversion="0.5.0"\n'
             )
-            errors = validate_server_inventory(root)
+            errors = validate_server_inventory(root, "v4.17.0")
             self.assertTrue(
                 any("spark-sql-parser: version" in error for error in errors)
             )

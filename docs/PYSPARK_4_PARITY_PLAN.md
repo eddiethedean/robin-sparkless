@@ -330,9 +330,9 @@ Define pytest markers (document in [TESTING_GUIDE.md](TESTING_GUIDE.md)):
 
 **Rule:** Every semantic change for PySpark 4 ships with **at least one** fixture or issue test per profile.
 
-### 5.4 sparkless.testing dual mode
+### 5.4 sparkless_testing dual mode
 
-Extend [sparkless.testing](https://github.com/eddiethedean/robin-sparkless/tree/main/python/sparkless/sparkless/testing) (see [TESTING_GUIDE.md](TESTING_GUIDE.md)):
+Extend [sparkless_testing](https://github.com/eddiethedean/robin-sparkless/tree/main/python/testing/sparkless_testing) (see [TESTING_GUIDE.md](TESTING_GUIDE.md)):
 
 ```bash
 # Today

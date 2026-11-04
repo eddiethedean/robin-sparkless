@@ -77,7 +77,7 @@ def test_to_arrow_preserves_decimal_schema(spark) -> None:
 
 def test_decimal_filter_and_aggregation_remain_exact(spark) -> None:
     pa = pytest.importorskip("pyarrow")
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     table = pa.Table.from_pylist(
         [
@@ -122,7 +122,7 @@ def test_decimal_filter_keeps_large_integral_values_exact(spark) -> None:
 
 def test_scale_zero_decimal_string_filter_keeps_large_values_exact(spark) -> None:
     pa = pytest.importorskip("pyarrow")
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     table = pa.Table.from_pylist(
         [
@@ -169,7 +169,7 @@ def test_decimal_filter_literal_wider_than_column_precision(spark) -> None:
 
 
 def test_decimal_column_arithmetic_keeps_python_decimal_literals_exact(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame(
@@ -192,7 +192,7 @@ def test_decimal_column_arithmetic_keeps_python_decimal_literals_exact(spark) ->
 
 
 def test_decimal_sum_and_casts_keep_decimal_values(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame(
@@ -229,7 +229,7 @@ def test_decimal_cast_rescales_with_spark_half_up_rounding(spark) -> None:
 
 
 def test_decimal_average_keeps_large_values_and_rounds_exactly(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     large = spark.createDataFrame(
@@ -277,7 +277,7 @@ def test_decimal_average_keeps_large_values_and_rounds_exactly(spark) -> None:
 
 
 def test_decimal_sum_widens_precision_for_results(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame(
@@ -359,7 +359,7 @@ def test_wide_decimal_comparison_keeps_adjacent_scales_exact(spark) -> None:
 
 def test_decimal_map_values_are_decimal_after_collection(spark) -> None:
     pa = pytest.importorskip("pyarrow")
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     arrow_map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
     table = pa.Table.from_pylist(
@@ -580,7 +580,7 @@ def test_decimal_inference_counts_digits_before_positive_exponent(spark) -> None
 
 
 def test_ordered_decimal_windows_keep_running_sum_and_average_exact(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     Window = get_imports().Window
@@ -633,7 +633,7 @@ def test_ordered_decimal_windows_keep_running_sum_and_average_exact(spark) -> No
 
 
 def test_ordered_integer_window_sum_keeps_bits_above_float_precision(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     Window = get_imports().Window
@@ -657,7 +657,7 @@ def test_ordered_integer_window_sum_keeps_bits_above_float_precision(spark) -> N
 
 @pytest.mark.parametrize("frame_kind", ["rows", "range"])
 def test_decimal_window_average_overflow_obeys_ansi_mode(spark, frame_kind) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     Window = get_imports().Window
@@ -685,7 +685,7 @@ def test_decimal_window_average_overflow_obeys_ansi_mode(spark, frame_kind) -> N
 def test_ansi_integer_window_sum_detects_intermediate_overflow(
     spark, frame_kind
 ) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     Window = get_imports().Window
@@ -710,7 +710,7 @@ def test_ansi_integer_window_sum_detects_intermediate_overflow(
 
 def test_arrow_map_schema_and_nested_map_round_trip(spark) -> None:
     pa = pytest.importorskip("pyarrow")
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     map_type = pa.map_(pa.string(), pa.decimal128(12, 2))
     schema = pa.schema(
@@ -788,7 +788,7 @@ def test_pyarrow_names_only_schema_renames_columns_by_position(spark) -> None:
 
 def test_overwriting_arrow_map_with_array_does_not_reuse_stale_map_type(spark) -> None:
     pa = pytest.importorskip("pyarrow")
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     entries_type = pa.list_(pa.struct([("key", pa.string()), ("value", pa.int64())]))
@@ -824,7 +824,7 @@ def test_overwriting_arrow_map_with_array_does_not_reuse_stale_map_type(spark) -
 
 def test_decimal_pivot_sum_and_average_keep_spark_types(spark) -> None:
     pa = pytest.importorskip("pyarrow")
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     table = pa.Table.from_pylist(
@@ -879,7 +879,7 @@ def test_decimal_transport_marker_does_not_change_string_values(spark) -> None:
 
 def test_arrow_array_of_key_value_structs_survives_transformations(spark) -> None:
     pa = pytest.importorskip("pyarrow")
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     entry_type = pa.struct([("key", pa.string()), ("value", pa.decimal128(12, 2))])
@@ -1014,7 +1014,7 @@ def test_sql_decimal_literals_keep_all_digits(spark, schema, value, literal) -> 
 
 
 def test_string_and_float_decimal_casts_use_half_up_rounding(spark) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame(
@@ -1050,7 +1050,7 @@ def test_grouped_decimal_sum_and_average_keep_decimal_semantics(spark) -> None:
 def test_decimal_sum_overflow_obeys_ansi_mode_for_global_and_grouped_sums(
     spark,
 ) -> None:
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     largest = Decimal("9" * 38)
@@ -1135,7 +1135,7 @@ def test_sql_decimal_unary_minus_and_negative_literals_are_supported(spark):
 
 
 def test_grouped_integer_sum_preserves_large_values_and_long_type(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame(
@@ -1188,7 +1188,7 @@ def test_arrow_array_metadata_survives_union_missing_columns(spark, array_on_lef
 
 
 def test_arrow_array_metadata_uses_resolved_renames_and_column_sources(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df, expected = _arrow_duplicate_entries_frame(spark)
@@ -1222,7 +1222,7 @@ def test_select_expr_preserves_arrow_array_with_sql_aliases(spark, expression, n
 
 @pytest.mark.parametrize("value", [1.05, 2.55, -1.05, -2.55])
 def test_float32_decimal_cast_preserves_binary_value(spark, value):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame([{"amount": value}], "amount double")
@@ -1234,7 +1234,7 @@ def test_float32_decimal_cast_preserves_binary_value(spark, value):
 
 @pytest.mark.parametrize("ansi", ["true", "false"])
 def test_nonfinite_float_decimal_casts_return_null_in_both_ansi_modes(spark, ansi):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     previous = spark.conf.get("spark.sql.ansi.enabled", "true")
@@ -1255,7 +1255,7 @@ def test_nonfinite_float_decimal_casts_return_null_in_both_ansi_modes(spark, ans
 
 
 def test_reused_sum_expression_uses_plan_ansi_mode(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     previous = spark.conf.get("spark.sql.ansi.enabled", "true")
@@ -1339,7 +1339,7 @@ def test_sql_decimal_division_adjusts_large_result_precision(
 def test_column_decimal_division_respects_precision_loss_config(
     spark, allow_loss, value, dtype
 ):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     key = "spark.sql.decimalOperations.allowPrecisionLoss"
@@ -1396,7 +1396,7 @@ def test_sql_decimal_arithmetic_errors_obey_ansi_mode(spark, ansi, expression):
 
 
 def test_float_range_aggregates_reset_at_partition_boundaries(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     Window = get_imports().Window
@@ -1421,7 +1421,7 @@ def test_float_range_aggregates_reset_at_partition_boundaries(spark):
 
 
 def test_bounded_float_rows_aggregates_slide_and_recover_after_infinity(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     Window = get_imports().Window
@@ -1449,7 +1449,7 @@ def test_bounded_float_rows_aggregates_slide_and_recover_after_infinity(spark):
 
 
 def test_bounded_float_rows_recover_after_finite_sum_overflow(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     Window = get_imports().Window
@@ -1483,7 +1483,7 @@ def test_bounded_float_rows_recover_after_finite_sum_overflow(spark):
 def test_decimal_to_integer_cast_obeys_ansi_overflow_mode(
     spark, target, value, expected
 ):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "true")
@@ -1509,7 +1509,7 @@ def test_decimal_to_integer_cast_obeys_ansi_overflow_mode(
 def test_decimal_average_overflow_obeys_ansi_mode_for_global_and_grouped_aggregates(
     spark,
 ):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "true")
@@ -1567,7 +1567,7 @@ def test_select_expr_computed_projection_preserves_arrow_metadata(
 
 def test_arrow_array_metadata_survives_struct_construction(spark):
     pa = pytest.importorskip("pyarrow")
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     entry_type = pa.list_(pa.struct([("key", pa.string()), ("value", pa.int32())]))
@@ -1588,7 +1588,7 @@ def test_arrow_array_metadata_survives_struct_construction(spark):
 
 
 def test_decimal_column_arithmetic_keeps_exact_values(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame(
@@ -1610,7 +1610,7 @@ def test_decimal_column_arithmetic_keeps_exact_values(spark):
 
 
 def test_decimal_column_division_keeps_exact_values(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame(
@@ -1626,7 +1626,7 @@ def test_decimal_column_division_keeps_exact_values(spark):
 
 
 def test_ansi_integer_sum_raises_on_int64_overflow(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     previous_ansi = spark.conf.get("spark.sql.ansi.enabled", "false")
@@ -1642,7 +1642,7 @@ def test_ansi_integer_sum_raises_on_int64_overflow(spark):
 
 
 def test_decimal_column_comparison_preserves_sub_precision_values(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     F = get_imports().F
     df = spark.createDataFrame(

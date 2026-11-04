@@ -1,6 +1,6 @@
 """Regression test for #1414: window sum().over() schema should be BIGINT for integer inputs."""
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_window_sum_over_schema_bigint(spark) -> None:

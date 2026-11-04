@@ -6,7 +6,7 @@ internal validation system incorrectly expects StringType, causing validation fa
 with the error: "invalid series dtype: expected `String`, got `datetime[μs]`".
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 # Get the appropriate imports based on backend (sparkless or PySpark)
 imports = get_imports()

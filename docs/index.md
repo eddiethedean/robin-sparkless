@@ -24,7 +24,7 @@ Install Python package: `pip install "sparkless>=4,<5"`
 ## Python (Sparkless v4)
 
 - [Getting started](python_getting_started.md) — Install from PyPI, quick start, core features
-- [Testing guide](TESTING_GUIDE.md) — Dual-mode pytest with `sparkless.testing`
+- [Testing guide](TESTING_GUIDE.md) — Dual-mode pytest with `sparkless_testing`
 - [Migration](python_migration.md) — From PySpark or Sparkless 3.x
 - [FAQ](FAQ.md) · [Troubleshooting (Python)](TROUBLESHOOTING_PYTHON.md)
 - [Python API reference](PYTHON_API_REFERENCE.md)

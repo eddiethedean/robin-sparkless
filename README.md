@@ -29,7 +29,7 @@ spark.stop()
 ```
 
 Sparkless supports common transformations, joins, aggregations, windows, SQL,
-and file I/O. The `sparkless.testing` plugin lets you run the same pytest tests
+and file I/O. The `sparkless_testing` plugin lets you run the same pytest tests
 with Sparkless and real PySpark.
 
 It runs on one machine and implements a subset of PySpark behavior. Read

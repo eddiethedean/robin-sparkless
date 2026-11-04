@@ -1,0 +1,7 @@
+{
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "processor": "Apple M4 Pro",
+  "logical_cpus": 12,
+  "memory_bytes": 25769803776,
+  "note": "Sequential engine runs; fresh processes, warm filesystem cache; no installation time."
+}

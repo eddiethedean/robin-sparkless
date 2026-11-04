@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-11-01T20:00:14.663266+00:00",
+  "source_revision": "2980835d04a917444984fc783391b572b7b8917a",
+  "server_source_revision": "43ce29b2c31a3da8d175a91cc350d09a76e8eeb4",
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "client_lock_sha256": "61842cd77fc5f34e7e80353897ef2569532c3ac2e5dedc8fe40a81804439868b",
+  "server_binary": {
+    "version": "4.19.0",
+    "features": "http,connect,duckdb-source",
+    "profile": "release",
+    "sha256": "8c48df6228973930c744a491356f48e3058fa6f3f384d397c85c939d91778199"
+  },
+  "wheels": {
+    "sparkless-4.19.0-py3-none-any.whl": {
+      "size_bytes": 70425,
+      "sha256": "9c4b75f79864862d238a5498ccc003743c6bceb3644b9e5e81913bf093371ba9"
+    },
+    "sparkless_native-4.19.0-cp311-abi3-macosx_11_0_arm64.whl": {
+      "size_bytes": 44117188,
+      "sha256": "83c96a8f58d3275c48a61497f33ea565aa710069f06fac3a0879d815e0499380"
+    },
+    "sparkless_server_bin-4.19.0-py3-none-macosx_26_0_arm64.whl": {
+      "size_bytes": 48762438,
+      "sha256": "954b563bf3d2430298086ee8455694c2aa208b1bf7310b8d823249399f9ccc52"
+    }
+  },
+  "matrix": [
+    {
+      "extra": "base",
+      "installation": "sparkless==4.19.0",
+      "result": "pass",
+      "checks": [
+        "pip check",
+        "import sparkless and SparklessConnect",
+        "no pyspark-client or server-bin installed"
+      ],
+      "installed_environment": {
+        "python": "3.11.14",
+        "packages": {
+          "sparkless": "4.19.0",
+          "sparkless-native": "4.19.0",
+          "sparkless-server-bin": null,
+          "pyspark-client": null,
+          "pyarrow": null
+        },
+        "pyspark_module": false
+      }
+    },
+    {
+      "extra": "server",
+      "installation": "sparkless[server]==4.19.0",
+      "result": "pass",
+      "checks": [
+        "pip check",
+        "verify_server_extra_install.py 4.19.0 --mutations",
+        "no pyspark-client installed"
+      ],
+      "installed_environment": {
+        "python": "3.11.14",
+        "packages": {
+          "sparkless": "4.19.0",
+          "sparkless-native": "4.19.0",
+          "sparkless-server-bin": "4.19.0",
+          "pyspark-client": null,
+          "pyarrow": null
+        },
+        "pyspark_module": false
+      }
+    },
+    {
+      "extra": "connect",
+      "installation": "sparkless[connect]==4.19.0",
+      "result": "pass",
+      "checks": [
+        "hash-locked tests/connect/client-py311.lock",
+        "pip check",
+        "SparklessConnect range(32) returns exact ordered rows"
+      ],
+      "installed_environment": {
+        "python": "3.11.14",
+        "packages": {
+          "sparkless": "4.19.0",
+          "sparkless-native": "4.19.0",
+          "sparkless-server-bin": "4.19.0",
+          "pyspark-client": "4.0.5",
+          "pyarrow": "26.0.0"
+        },
+        "pyspark_module": true
+      }
+    },
+    {
+      "extra": "server,connect",
+      "installation": "sparkless[server,connect]==4.19.0",
+      "result": "pass",
+      "checks": [
+        "hash-locked tests/connect/client-py311.lock",
+        "pip check",
+        "SparklessConnect range(32) returns exact ordered rows"
+      ],
+      "installed_environment": {
+        "python": "3.11.14",
+        "packages": {
+          "sparkless": "4.19.0",
+          "sparkless-native": "4.19.0",
+          "sparkless-server-bin": "4.19.0",
+          "pyspark-client": "4.0.5",
+          "pyarrow": "26.0.0"
+        },
+        "pyspark_module": true
+      }
+    }
+  ],
+  "limitations": [
+    "Local server wheel uses the host macosx_26_0_arm64 tag; the release workflow separately validates its macosx_14_0_arm64 and manylinux_2_28_x86_64 server wheels.",
+    "Resource and allocator budgets are not covered by this package matrix."
+  ]
+}

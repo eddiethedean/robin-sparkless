@@ -7,7 +7,7 @@ Now parses LTRIM, RTRIM, and nested function calls in F.expr() for PySpark parit
 https://github.com/eddiethedean/sparkless/issues/434
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_expr_ltrim_rtrim_exact_issue_434(spark, spark_mode):

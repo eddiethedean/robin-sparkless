@@ -3,14 +3,14 @@
 This corpus is pinned to **`pyspark-client==4.0.5`**, with the matching Apache Spark **4.0.5** protocol source. It captures protobuf requests from unmodified public Python APIs and the client's own reattachment/release encoder. The recording stub stops before a server executes a plan. These files establish client wire shapes; they do not claim Sparkless interoperability or server behavior.
 
 The native `connect` feature compiles Apache Spark's ten unchanged protocol sources vendored in
-`crates/sparkless-server/proto/spark/connect/`. Their reviewed source hashes and selected client
+`crates/sparkless-server-polars/proto/spark/connect/`. Their reviewed source hashes and selected client
 behavior are recorded in `docs/plans/sparkless-server/CONNECT_PROTOCOL_RESEARCH.md`. The Rust
 service tests decode the checked-in `execute-range-filter-count.pb` fixture and cover malformed
 session IDs, duplicate operation IDs, session-generation/tombstone behavior, structural protobuf
 limits, and a real gRPC listener's inbound-size rejection. Run them with:
 
 ```sh
-cargo test -p sparkless-server --no-default-features --features connect connect::tests --lib
+cargo test -p sparkless-server-polars --no-default-features --features connect connect::tests --lib
 ```
 
 These are slice 2 transport and identity tests. They do not exercise native plan translation or
@@ -116,6 +116,19 @@ dirty-source digest, server binary SHA-256, raw invocation, client/server CPU an
 and cleanup outcome. Measurements are evidence only until numeric regression budgets are selected;
 this runner does not claim a speedup or close formal V26 on its own.
 
+For 4.19 scheduler comparisons, `--operation-history-records` and
+`--operation-history-bytes` set the server's finite completed-operation history budget. Both
+default to the production values (1,024 records and 4 MiB); use the same explicit values for the
+released baseline and candidate when measuring a long cohort that exceeds the legacy history cap.
+The report records these limits. Overrides apply only to the benchmark server process and do not
+change production defaults.
+
+For a process-wide Rust allocation witness, build the server with the opt-in
+`allocator-trace` Cargo feature. Its control shutdown record reports live bytes, peak live bytes,
+and cumulative allocated bytes through Rust's global allocator. Direct native C/C++ allocations
+are excluded; pair these counters with the existing process RSS sampling and DuckDB connection
+memory limit when interpreting source runs.
+
 The V25 route runner is separate and requires a reachable authenticated emulator route plus its
 immutable source revision. Set `SPARKLESS_PROXY_TOKEN` through the environment or secret manager; the
 value is never written into the report or process arguments:
@@ -138,9 +151,51 @@ route or missing pinned revision fails explicitly; standalone tests do not count
 The interpreter-specific dependency snapshots are hash-locked for CPython 3.11:
 
 - `client-requirements.in` and `client-py311.lock` install only the standalone client package.
+- `duckdb-source-requirements.in` and `duckdb-source-py311.lock` install the standalone DuckDB fixture writer used by the 4.19 packaged-source smoke.
 - `oracle-requirements.in` and `oracle-py311.lock` install the matching Python reference client and Connect dependencies (`pyspark[connect]==4.0.5`). Both locks constrain pandas to `>=2,<3`, matching the [Spark 4.0.5 documented Connect dependency range](https://spark.apache.org/docs/4.0.5/api/python/getting_started/install.html#spark-connect). The reference server is a separate Apache binary distribution: [`spark-4.0.5-bin-hadoop3-connect.tgz`](https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz), SHA-512 `4cc2e43959b5e0a67b7d895e1aa1fb3ab05fa6ad4a5912de76236bb9b70f9557b20837b05ee63474798e927130e72ed6d1fadcd273a71e65c70eac18771c0d6b`. Verify against the [Apache checksum](https://downloads.apache.org/spark/spark-4.0.5/spark-4.0.5-bin-hadoop3-connect.tgz.sha512) and signature, then run it with Java 17. Keep the reference server/client outside the request-fixture environment.
 
 The reference starts with Apache's `sbin/start-connect-server.sh`, with UTC timezone, ANSI enabled, case sensitivity disabled, and `spark.sql.execution.arrow.useLargeVarTypes=false`. The client's local-relation cache threshold remains at its real 64 MiB default. The matching Python distribution is pinned in `oracle-py311.lock`; this is the client-side dependency lock, not the server archive checksum.
+
+`benchmark_phase419_duckdb_source.py` creates a standalone DuckDB fixture with distinct, hash-derived string values and measures a warm public-client action through the packaged server. It records source and logical data sizes, the server binary hash, per-iteration latency, and the managed server child's peak RSS. Run it from the locked `duckdb-source-py311.lock` environment. `--expect-rejection ipc` and `--expect-rejection rows` turn the respective statement-cap failures into recorded passing outcomes; `--slow-reader-delay-ms` pauses public `toLocalIterator()` consumption after each row group to measure a bounded slow-reader case. Combine that option with `--expect-rejection result` to require the 8 MiB per-operation Connect replay/sender rejection, or `--allow-result-rejection` to retain both completed scans and cap rejections per reader.
+
+`benchmark_phase419_exports.py --small-jobs-only --startup-samples 20` measures the 10/100/1,000/10,000-row Python-tuple ingest/filter/count cases, a nullable 25-row preview, nullable/mixed collection, and public schema analysis. It validates each result, records 20 warm iterations by default, and measures twenty fresh server/readiness/session starts in the same client runtime. Run it for three fresh runtimes per executable when collecting the paired small-job guardrails; `--iterations` changes the warm action sample count and `--startup-samples` changes the fresh-start sample count.
+
+`benchmark_phase419_xdist.py` runs a 38-case pytest suite with four real xdist workers against one shared server per engine. Every worker creates its own Connect session. Its four job shapes cover the four-job mix described in #1738; the original case list behind the issue's earlier 38-test timing is not retained, so these timings do not reproduce that historical suite. Results, per-test durations, suite timings, rotations, and artifact hashes are retained in the JSON report. It requires a CPython 3.11 environment with `sparkless-connect`, `pyspark-client==4.0.5`, PyArrow 26.0.0, pytest, and pytest-xdist 3.8.0; `--spark-home` points to the extracted `deps` directory from the PySpark 4.0.5 source archive. Select `--product base` or `--product duckdb` to match the supplied server wheel and executable.
+
+```sh
+python tests/connect/benchmark_phase419_xdist.py \
+  --server-binary /path/to/sparkless-server \
+  --server-wheel /path/to/sparkless_server-4.19.0-py3-none-manylinux_2_28_x86_64.whl \
+  --product base \
+  --spark-archive /path/to/pyspark-4.0.5.tar.gz \
+  --spark-home /path/to/pyspark-4.0.5-deps \
+  --output /tmp/phase419-four-worker-pytest.json
+```
+
+`differential_phase419_duckdb.py` compares the declared source subset with local Apache Spark 4.0.5 and a packaged Sparkless 4.19 server. Its fixtures cover table schemas/rows, nullable comparisons, filter and projection, empty results/counts/aggregates/join sides, all-null grouped counts and sums, same-owner joins with duplicate/null keys, date/timestamp and decimal boundaries, and a schema change between analysis and execution. Use a CPython 3.11 environment containing `pyspark[connect]==4.0.5`, `duckdb==1.5.1`, the candidate `sparkless==4.19.0` API/native packages, and the corresponding server binary:
+
+```sh
+python tests/connect/differential_phase419_duckdb.py \
+  --server-bin /path/to/sparkless-server \
+  --output /tmp/phase419-duckdb-spark-differential.json
+```
+
+The script temporarily removes inherited `SPARK_HOME` so PySpark starts its bundled Spark 4.0.5 local runtime, then restores it. The retained candidate report records the exact API/server versions, executable hash, runtime versions, schemas, and rows.
+
+The source benchmark accepts `--concurrent-readers 1..4` to run independent public clients against one server and one source alias. By default it sets the server active-operation limit to match that cohort; `--active-operations` can set a lower admission limit, and `--queue-timeout-ms` adjusts the queue deadline for readers waiting behind it. Action samples are per client, and `concurrent_batch_samples_ms` records each simultaneous round. Pair this with `--slow-reader-delay-ms` to measure concurrent source readers and replay pressure. The 4.19 release workflow runs four-reader, 100k- and 350k-row, 16-byte-payload slow-consumer cases against each packaged Linux x86_64 and macOS arm64 server extra, then retains the raw reports as a workflow artifact.
+
+`smoke_phase419_duckdb_shutdown.py` launches the Quack owner and packaged server as separate processes, begins a billion-row public source scan, then sends the normal graceful server shutdown command. It uses the pinned client's non-reattachable, zero-retry mode because the test intentionally stops the server; it requires the Connect action to receive the shutdown status and the server trace to confirm that Quack accepted the remote query cancellation. Build the source-enabled candidate and owner fixture, then run:
+
+```sh
+cargo build --locked --release -p sparkless-server-duckdb --no-default-features \
+  --features http,connect
+cargo build --locked --release -p robin-sparkless-duckdb \
+  --example duckdb_quack_fixture_owner
+python tests/connect/smoke_phase419_duckdb_shutdown.py \
+  --server-bin target/release/sparkless-server-duckdb \
+  --quack-owner-bin target/release/examples/duckdb_quack_fixture_owner \
+  --quack-extension-path /path/to/duckdb-2.0.0/quack.duckdb_extension
+```
 
 Recreate and verify the client fixtures in an isolated environment:
 

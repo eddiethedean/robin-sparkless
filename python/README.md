@@ -30,8 +30,9 @@ spark.stop()
 ```
 
 Use common transformations, joins, aggregations, windows, SQL, and file I/O.
-For tests, `sparkless.testing` lets you run one pytest suite with Sparkless or
-real PySpark.
+For tests, install `sparkless[testing]` to get the backend-independent
+`sparkless_testing` helpers. They let one pytest suite run with Sparkless or real
+PySpark.
 
 Sparkless runs on one machine and implements a subset of PySpark behavior.
 See [Before you adopt](https://github.com/eddiethedean/robin-sparkless/blob/main/docs/BEFORE_YOU_ADOPT.md)

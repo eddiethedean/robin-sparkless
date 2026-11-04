@@ -1,10 +1,11 @@
 """Python providers for Sparkless external catalog reads and table writes.
 
 Attach a provider with ``spark.set_external_catalog_provider(provider)``. Its
+``resolve_ownership(identifier)`` method returns ``None`` for local identifiers or
+an ``ExternalCatalogOwnership`` for identifiers owned by the provider. The separate
 ``resolve_table(identifier)`` method returns an ExternalTableDescriptor or None.
-Providers can implement ``write_table(request)`` for materialized Arrow IPC bytes,
-or ``write_table_batches(request)`` to consume PyArrow RecordBatches on demand.
-Callbacks are synchronous and run with the Python GIL.
+Writable providers implement ``write_table_batches(request)`` to consume bounded
+PyArrow RecordBatches on demand. Callbacks are synchronous and run with the Python GIL.
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ from sparkless.errors import SparklessExternalCatalogError
 from sparkless.sql import types as T
 
 __all__ = [
+    "ExternalCatalogOwnership",
     "ExternalCatalogProvider",
-    "WritableExternalCatalogProvider",
     "ArrowIpcStream",
     "ExternalTableFormat",
     "ExternalTableSaveMode",
@@ -38,6 +39,16 @@ class ExternalTableFormat(str, Enum):
 
     def __str__(self) -> str:
         return self.value
+
+
+@dataclass(frozen=True)
+class ExternalCatalogOwnership:
+    """Owner/capabilities for an identifier; return None when the local catalog owns it."""
+
+    owner_id: str
+    read: bool = True
+    write: bool = False
+    batch_write: bool = False
 
 
 class ExternalTableSaveMode(str, Enum):
@@ -85,32 +96,32 @@ class ExternalTableDescriptor:
 
 @dataclass
 class ExternalTableWriteRequest:
-    """A resolved write using either a materialized or lazy Arrow payload.
+    """A resolved write using a lazy sequence of bounded Arrow batches.
 
-    ``write_table`` receives ``data`` as an Arrow IPC stream and ``batches=None``.
-    ``write_table_batches`` receives ``data=None`` and a lazy ``batches`` iterator
-    of PyArrow RecordBatches. Closing or exhausting that iterator releases the
-    producer; a callback may stop early by closing it. Options are ordered pairs
+    ``batches`` is a lazy iterator of PyArrow RecordBatches. Closing or exhausting
+    it releases the producer; a callback may stop early by closing it. Options are ordered pairs
     so duplicate keys survive. A successful callback must commit the data it
-    accepts before returning its receipt.
+    accepts before returning its receipt. A callback failure after it starts may have an
+    unknown commit outcome and is retained as such by the native layer.
     """
 
+    operation_id: str
     identifier: str
     table: ExternalTableDescriptor
-    data: Optional[ArrowIpcStream]
     mode: Union[ExternalTableSaveMode, str]
     format: Optional[str]
     options: List[Tuple[str, str]]
     partition_by: List[str]
-    batches: Optional[Iterator[Any]] = None
+    batches: Iterator[Any]
 
 
 @dataclass
 class ExternalTableWriteResult:
-    """Descriptor and exact version of a completed provider commit."""
+    """Descriptor and provider-specific identity of a completed commit."""
 
     table: ExternalTableDescriptor
-    committed_version: int
+    committed_version: Optional[int] = None
+    provider_commit_id: Optional[str] = None
 
     def validate_against(self, previous: ExternalTableDescriptor) -> None:
         """Run the native identity and committed-version receipt checks."""
@@ -120,22 +131,18 @@ class ExternalTableWriteResult:
 
 
 class ExternalCatalogProvider(Protocol):
-    """Required provider interface.
+    """Python catalog callback surface used to build separate Rust capabilities.
 
-    Writable providers also implement ``write_table(request:
-    ExternalTableWriteRequest) -> ExternalTableWriteResult``. Read-only objects
-    may omit that method.
+    ``resolve_ownership`` is called before table lookup. Return None only when Sparkless'
+    local catalog should handle the identifier. Writable providers implement
+    ``write_table_batches``; read-only objects may omit it.
     """
 
+    def resolve_ownership(
+        self, identifier: str
+    ) -> Optional[ExternalCatalogOwnership]: ...
+
     def resolve_table(self, identifier: str) -> Optional[ExternalTableDescriptor]: ...
-
-
-class WritableExternalCatalogProvider(ExternalCatalogProvider, Protocol):
-    """Provider interface including the optional native write hook."""
-
-    def write_table(
-        self, request: ExternalTableWriteRequest
-    ) -> ExternalTableWriteResult: ...
 
 
 class BatchWritableExternalCatalogProvider(ExternalCatalogProvider, Protocol):
@@ -248,10 +255,16 @@ def _timestamp_timezone_free_type(data_type, arrow_type, pa):
         fields = []
         for field in arrow_type:
             try:
-                declared = data_type[field.name].dataType
+                declared_field = data_type[field.name]
             except KeyError:
                 fields.append(field)
                 continue
+            if isinstance(declared_field, T.StructType):
+                # Spark-compatible indexing can return nested struct metadata for
+                # integer/slice keys; name lookup is a field in this loop.
+                fields.append(field)
+                continue
+            declared = declared_field.dataType
             child_type = _timestamp_timezone_free_type(declared, field.type, pa)
             fields.append(
                 pa.field(
@@ -319,7 +332,17 @@ def _normalize_python_provider_timestamp_ipc(payload, table):
     normalized = pa.Table.from_arrays(arrays, schema=schema)
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, schema) as writer:
-        writer.write_table(normalized)
+        if normalized.num_rows == 0:
+            # write_table emits no record batches for an empty table. Keep one
+            # schema-bearing batch so batch providers still receive the input
+            # schema for empty writes.
+            writer.write_batch(
+                pa.RecordBatch.from_arrays(
+                    [array.combine_chunks() for array in arrays], schema=schema
+                )
+            )
+        else:
+            writer.write_table(normalized)
     return sink.getvalue().to_pybytes()
 
 
@@ -370,7 +393,49 @@ def _descriptor_from_json(value):
 
 def _write_result_to_parts(result):
     if not isinstance(result, ExternalTableWriteResult):
-        raise TypeError("provider.write_table must return ExternalTableWriteResult")
-    if type(result.committed_version) is not int:
-        raise TypeError("committed_version must be an integer")
-    return _descriptor_to_json(result.table), result.committed_version
+        raise TypeError(
+            "provider.write_table_batches must return ExternalTableWriteResult"
+        )
+    if (
+        result.committed_version is not None
+        and type(result.committed_version) is not int
+    ):
+        raise TypeError("committed_version must be an integer or None")
+    if result.provider_commit_id is not None and not isinstance(
+        result.provider_commit_id, str
+    ):
+        raise TypeError("provider_commit_id must be a string or None")
+    if result.committed_version is None and result.provider_commit_id is None:
+        raise ValueError("write receipt must include a version or provider_commit_id")
+    return (
+        _descriptor_to_json(result.table),
+        result.committed_version,
+        result.provider_commit_id,
+    )
+
+
+def _ownership_to_json(ownership):
+    if ownership is None:
+        return json.dumps({"kind": "local"})
+    if not isinstance(ownership, ExternalCatalogOwnership):
+        raise TypeError(
+            "resolve_ownership must return ExternalCatalogOwnership or None"
+        )
+    if not isinstance(ownership.owner_id, str) or not ownership.owner_id.strip():
+        raise ValueError("external owner_id must not be empty")
+    for capability in (ownership.read, ownership.write, ownership.batch_write):
+        if not isinstance(capability, bool):
+            raise TypeError("external ownership capabilities must be bool values")
+    if ownership.batch_write != ownership.write:
+        raise ValueError("external writes require batch_write=True")
+    return json.dumps(
+        {
+            "kind": "external",
+            "owner_id": ownership.owner_id,
+            "capabilities": {
+                "read": ownership.read,
+                "write": ownership.write,
+                "batch_write": ownership.batch_write,
+            },
+        }
+    )

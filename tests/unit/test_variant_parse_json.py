@@ -6,7 +6,7 @@ import pytest
 from sparkless.sql import functions as F
 from sparkless.sql.types import StructField, StructType, VariantType
 
-pytest_plugins = ["sparkless.testing"]
+pytest_plugins = ["sparkless_testing"]
 
 
 @pytest.mark.sparkless_only

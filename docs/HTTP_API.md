@@ -64,8 +64,10 @@ boolean, string, date, timestamp and typed nulls. Nested/binary/unrepresented
 types fail with `UnsupportedResultType`. Preserve decimal and large integer
 precision in your client rather than converting all numbers to JavaScript Number.
 
-Errors use `{"status":"error","ename":"...","evalue":"..."}`. **SQL/execution
-errors can return HTTP200**. Check `status == "ok"` as well as HTTP status.
+Errors use `{"status":"error","ename":"...","evalue":"..."}`. Engine errors
+also include an `error_detail` object with category, code, retryability, operation,
+metadata, and cause when those fields are available. **SQL/execution errors can return
+HTTP200**. Check `status == "ok"` as well as HTTP status.
 Transport/protocol errors use 400/413/415; wrong instance uses409, unknown route/
 operation404; draining/admission exhaustion can use503. Result limits fail rather
 than silently truncate. Use `ename` for classification; messages are diagnostic.

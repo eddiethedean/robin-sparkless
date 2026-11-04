@@ -8,7 +8,7 @@ from typing import Iterable, List, Tuple
 
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

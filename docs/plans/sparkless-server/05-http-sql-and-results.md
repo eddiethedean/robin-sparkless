@@ -19,6 +19,10 @@ The [4.16 implementation plan](RELEASE_4_16.md#416-05-explicit-read-only-sql-and
 
 The [4.17 extension](RELEASE_4_17.md) adds only its enumerated managed-table reads/mutations and session commands after SS-07 coordination and HTTP identity/status gates pass. Legacy mutation requests remain rejected. Keep the 4.16 exact scalar/result and bounded-response behavior as regression requirements.
 
+## Complete local SQL expansion — Phase 7 / SS-22
+
+The initial 4.16/4.17 allowlists remain historical release boundaries. [SS-22](22-local-sql-feature-parity.md) now requires all existing locally implemented `SparkSession.sql` statements, expressions/functions and result types on HTTP as well as Connect. Complete native query/DDL/DML coverage in Phase 7 / SS-16 (including UPDATE/DELETE, CTAS/replace, SHOW/DESCRIBE and supported CTE/subquery/window/generator combinations); worker/storage/connector SQL integrates in its owning Phase 5/6/8. Reuse shared parser/engine capabilities instead of a permanently narrower HTTP function list. Preserve identity/snapshots/admission, version the result schema where needed for exact nested/other local types, and retain configured I/O/credential policy. D21 and V56/V58 require local/HTTP/Connect regression coverage before Phase 11 certification; no current-support expansion is claimed by this plan.
+
 ## Dependencies and delivery slices
 
 SS-01 standalone typed-result contracts; SS-02 transport; SS-04 runtime; SS-07 minimum sessions; SS-08 minimum scalar/schema repairs.

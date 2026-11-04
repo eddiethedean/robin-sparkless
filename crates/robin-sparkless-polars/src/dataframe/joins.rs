@@ -1,6 +1,6 @@
 //! Join operations for DataFrame.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::DataFrame;
 use crate::schema_conv::data_type_to_polars_type;
@@ -120,6 +120,8 @@ pub enum JoinType {
 pub enum JoinOrigin {
     /// join(on = [...]) style joins (column-name based)
     ColumnOn,
+    /// Spark Connect `using_columns`, whose full outer key must include right-only rows.
+    ColumnUsing,
     /// Condition-based joins (e.g. left.col == right.col) where both key sides
     /// must remain addressable separately (dept_id, dept_id_right).
     Condition,
@@ -189,12 +191,13 @@ pub fn join(
     }
     let mut left_lf = left.lazy_frame();
     let mut right_lf = right.lazy_frame();
-    // For full outer joins we preserve the left-side join key values in temporary columns so we
-    // can use them as the canonical join key after the join (unmatched right rows get null key).
+    // Preserve original left keys while full outer joins rebuild their canonical key columns.
     let mut outer_left_key_copies: Vec<(String, String)> = Vec::new();
     // Track any right-side join keys we renamed for outer joins so we can drop the suffixed
     // key columns from the final result schema (PySpark parity for outer join keys).
     let mut outer_join_renamed_right_keys: Vec<String> = Vec::new();
+    // Preserve exact key lineage independently of the engine's shared non-key suffix.
+    let mut right_key_alias_sources = HashMap::new();
 
     // Resolve key names on both sides so we can alias right keys to left names (#604, #743).
     let left_key_names: Vec<String> = left_on
@@ -213,17 +216,41 @@ pub fn join(
             })
         })
         .collect::<Result<_, _>>()?;
+    let original_right_key_names = right_key_names.clone();
+    let mut right_column_renames = HashMap::new();
     // For outer joins invoked via column-name based join (coalesce_same_name_keys = true),
     // add temp copies of left join keys so we can restore them as canonical keys after the join
     // (PySpark parity for grouping/selection on join keys when using join(on=...)).
     if matches!(how, JoinType::Outer)
         && coalesce_same_name_keys
-        && matches!(origin, JoinOrigin::ColumnOn)
+        && matches!(origin, JoinOrigin::ColumnOn | JoinOrigin::ColumnUsing)
     {
         use polars::prelude::col;
         let mut copy_exprs: Vec<Expr> = Vec::new();
+        let mut reserved: HashSet<String> = left
+            .columns()?
+            .into_iter()
+            .chain(right.columns()?)
+            .map(|name| {
+                if case_sensitive {
+                    name
+                } else {
+                    name.to_ascii_lowercase()
+                }
+            })
+            .collect();
         for name in &left_key_names {
-            let temp = format!("__rs_outer_key_{}", name);
+            let base = format!("__rs_outer_key_{name}");
+            let mut temp = base.clone();
+            let mut index = 0usize;
+            while !reserved.insert(if case_sensitive {
+                temp.clone()
+            } else {
+                temp.to_ascii_lowercase()
+            }) {
+                index += 1;
+                temp = format!("{base}_{index}");
+            }
             outer_left_key_copies.push((name.clone(), temp.clone()));
             copy_exprs.push(col(name.as_str()).alias(temp.as_str()));
         }
@@ -234,9 +261,7 @@ pub fn join(
     // For condition-based full outer joins on same-named keys, keep both key columns by
     // renaming the right-side keys to a suffixed form (e.g. dept_id -> dept_id_right)
     // so that left/right keys remain addressable separately (dept_id, dept_id_right).
-    // Inner/left/right condition joins keep the original column-name join semantics
-    // (single key column) so tests like issue #353 that use `on` as a Column do not
-    // see extra *_right key columns.
+    // Other condition join kinds retain separate keys through the engine's suffix handling.
     if matches!(origin, JoinOrigin::Condition)
         && matches!(how, JoinType::Outer)
         && left_key_names.len() == right_key_names.len()
@@ -246,13 +271,22 @@ pub fn join(
             .all(|(a, b)| a.eq_ignore_ascii_case(b))
     {
         use polars::prelude::col;
-        use std::collections::HashMap;
-        let mut rename_map: HashMap<String, String> = HashMap::new();
-        for name in &right_key_names {
-            rename_map.insert(name.clone(), format!("{name}_right"));
+        let current_names: Vec<String> = right.columns()?.into_iter().collect();
+        let left_names: Vec<String> = left_lf
+            .collect_schema()?
+            .iter_names()
+            .map(|name| name.to_string())
+            .collect();
+        let rename_map = unique_key_aliases(
+            &left_names,
+            &current_names,
+            &right_key_names,
+            case_sensitive,
+        );
+        for (source, alias) in &rename_map {
+            right_key_alias_sources.insert(alias.clone(), source.clone());
         }
         if !rename_map.is_empty() {
-            let current_names: Vec<String> = right.columns()?.into_iter().collect();
             let exprs: Vec<Expr> = current_names
                 .iter()
                 .map(|n| {
@@ -279,17 +313,32 @@ pub fn join(
     // join key column). Condition-based joins (on=Column) keep both key columns.
     if matches!(how, JoinType::Outer)
         && coalesce_same_name_keys
-        && left_key_names == right_key_names
-        && matches!(origin, JoinOrigin::ColumnOn)
+        && (left_key_names == right_key_names
+            || (!case_sensitive
+                && left_key_names.len() == right_key_names.len()
+                && left_key_names
+                    .iter()
+                    .zip(right_key_names.iter())
+                    .all(|(left, right)| left.eq_ignore_ascii_case(right))))
+        && matches!(origin, JoinOrigin::ColumnOn | JoinOrigin::ColumnUsing)
     {
         use polars::prelude::col;
-        use std::collections::HashMap;
-        let mut rename_map: HashMap<String, String> = HashMap::new();
-        for name in &right_key_names {
-            rename_map.insert(name.clone(), format!("{name}_right"));
+        let current_names: Vec<String> = right.columns()?.into_iter().collect();
+        let left_names: Vec<String> = left_lf
+            .collect_schema()?
+            .iter_names()
+            .map(|name| name.to_string())
+            .collect();
+        let rename_map = unique_key_aliases(
+            &left_names,
+            &current_names,
+            &right_key_names,
+            case_sensitive,
+        );
+        for (source, alias) in &rename_map {
+            right_key_alias_sources.insert(alias.clone(), source.clone());
         }
         if !rename_map.is_empty() {
-            let current_names: Vec<String> = right.columns()?.into_iter().collect();
             let exprs: Vec<Expr> = current_names
                 .iter()
                 .map(|n| {
@@ -336,6 +385,7 @@ pub fn join(
             }
         }
         if !renames.is_empty() {
+            right_column_renames.extend(renames.clone());
             let exprs: Vec<Expr> = right_names
                 .iter()
                 .map(|n| {
@@ -423,13 +473,31 @@ pub fn join(
     // Pick a suffix that will not collide with any existing left column names for all overlapping
     // right-side columns in this join.
     let join_suffix: String = {
-        let left_names: Vec<String> = left.columns()?.into_iter().collect();
-        let right_names: Vec<String> = right.columns()?.into_iter().collect();
+        let left_names: Vec<String> = left_lf
+            .collect_schema()?
+            .iter_names()
+            .map(|name| name.to_string())
+            .collect();
+        let right_names: Vec<String> = right_lf
+            .collect_schema()?
+            .iter_names()
+            .map(|name| name.to_string())
+            .collect();
         let left_set: HashSet<String> = left_names.iter().cloned().collect();
+        let right_set: HashSet<String> = right_names.iter().cloned().collect();
+        // A right key also needs a suffix when the join keeps both key columns (condition
+        // joins and full outer joins). Otherwise an unrelated right field such as `id_right`
+        // collides with the engine's suffix for the right `id` key.
+        let right_keys_need_suffix =
+            !coalesce_same_name_keys || !keys_match_for_coalesce || matches!(how, JoinType::Outer);
         let overlaps: Vec<&String> = right_names
             .iter()
-            .filter(|n| left_set.contains(*n))
-            .filter(|n| !on_set.contains(n.as_str()))
+            .filter(|n| {
+                left_set.contains(*n)
+                    || (!case_sensitive
+                        && left_names.iter().any(|left| left.eq_ignore_ascii_case(n)))
+            })
+            .filter(|n| !on_set.contains(n.as_str()) || right_keys_need_suffix)
             .collect();
         if overlaps.is_empty() {
             "_right".to_string()
@@ -444,6 +512,12 @@ pub fn join(
                 let collides = overlaps.iter().any(|name| {
                     let candidate = format!("{name}{suffix}");
                     left_set.contains(&candidate)
+                        || right_set.contains(&candidate)
+                        || (!case_sensitive
+                            && left_names
+                                .iter()
+                                .chain(right_names.iter())
+                                .any(|existing| existing.eq_ignore_ascii_case(&candidate)))
                 });
                 if !collides {
                     break suffix;
@@ -512,7 +586,7 @@ pub fn join(
     // key column and no _right in row keys (PySpark parity #1049, #353, #1148). Use keys_match_for_coalesce
     // so case-insensitive match (e.g. name/NAME) also coalesces (#297).
     // Outer joins keep separate key columns so canonical key comes from left (issue #280).
-    let coalesce = if !keys_match_for_coalesce {
+    let coalesce = if !coalesce_same_name_keys || !keys_match_for_coalesce {
         JoinCoalesce::KeepColumns
     } else if matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right) {
         JoinCoalesce::CoalesceColumns
@@ -554,7 +628,9 @@ pub fn join(
         });
         for (i, (left_name, temp)) in outer_left_key_copies.iter().enumerate() {
             let right_key_name = right_key_names.get(i).map(|s| s.as_str()).unwrap_or("");
-            let expr = if mark_join_keys_ambiguous || has_non_key_overlap {
+            let preserve_left_key = mark_join_keys_ambiguous
+                || (has_non_key_overlap && !matches!(origin, JoinOrigin::ColumnUsing));
+            let expr = if preserve_left_key {
                 // Expression / condition-style joins or joins with overlapping
                 // non-key column names: canonical key comes from the left side
                 // only; right key is exposed via the *_right column.
@@ -611,7 +687,9 @@ pub fn join(
     // Column order: left columns in original order, then right non-keys with _right for overlap
     // (PySpark parity: same as fixture join_inner_dept_issue510 / join_on_string_issue513). Use
     // keys_match_for_coalesce so case-insensitive key match (e.g. name/NAME) gets single key (#297).
-    if keys_match_for_coalesce && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right)
+    if coalesce_same_name_keys
+        && keys_match_for_coalesce
+        && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right)
     {
         let left_names: Vec<String> = left.columns()?.into_iter().collect();
         let right_names: Vec<String> = right.columns()?.into_iter().collect();
@@ -669,39 +747,43 @@ pub fn join(
                 used_names.insert(alias.to_string());
                 exprs.push(e.alias(alias));
             }
-            let mut right_non_key_pos = 0_usize;
             for right_name in &right_names {
-                if key_set.contains(right_name.as_str()) {
+                // Right keys may have been normalized to the left spelling and moved
+                // within the engine schema. Identify them by their original key pair.
+                if original_right_key_names.contains(right_name) {
                     continue;
+                }
+                let input_name = right_column_renames.get(right_name).unwrap_or(right_name);
+                let source_name = if left_names.iter().any(|name| name == input_name) {
+                    format!("{input_name}{join_suffix}")
+                } else {
+                    input_name.clone()
+                };
+                if !result_names_set.contains(&source_name) {
+                    return Err(PolarsError::ColumnNotFound(
+                        format!("right join output for column '{right_name}' is missing").into(),
+                    ));
                 }
                 let matches_left = left_names
                     .iter()
                     .any(|l| l.eq_ignore_ascii_case(right_name));
                 if matches_left {
-                    // Include right column by position only when it exists (join may coalesce keys).
-                    let result_idx = left_names.len() + right_non_key_pos;
-                    if result_idx < result_names_vec.len() {
-                        let dtype = right_struct
-                            .as_ref()
-                            .and_then(|s| {
-                                s.logical_fields()
-                                    .iter()
-                                    .find(|f| f.name.as_str() == right_name.as_str())
-                                    .map(|f| data_type_to_polars_type(&f.data_type))
-                            })
-                            .or_else(|| right.get_column_dtype(right_name.as_str()));
-                        let alias_name = unique_right_alias(right_name.as_str(), &mut used_names);
-                        let e = nth(result_idx as i64).as_expr();
-                        let e = match dtype {
-                            Some(dt) => e.cast(dt),
-                            None => e,
-                        };
-                        exprs.push(e.alias(alias_name.as_str()));
-                    }
-                    right_non_key_pos += 1;
-                    continue;
-                }
-                if !result_names_set.contains(right_name) {
+                    let dtype = right_struct
+                        .as_ref()
+                        .and_then(|s| {
+                            s.logical_fields()
+                                .iter()
+                                .find(|f| f.name.as_str() == right_name.as_str())
+                                .map(|f| data_type_to_polars_type(&f.data_type))
+                        })
+                        .or_else(|| right.get_column_dtype(right_name.as_str()));
+                    let alias_name = unique_right_alias(right_name.as_str(), &mut used_names);
+                    let e = col(source_name.as_str());
+                    let e = match dtype {
+                        Some(dt) => e.cast(dt),
+                        None => e,
+                    };
+                    exprs.push(e.alias(alias_name.as_str()));
                     continue;
                 }
                 let dtype = right_struct
@@ -714,12 +796,11 @@ pub fn join(
                     })
                     .or_else(|| right.get_column_dtype(right_name.as_str()));
                 let e = match dtype {
-                    Some(dt) => col(right_name.as_str()).cast(dt),
-                    None => col(right_name.as_str()),
+                    Some(dt) => col(source_name.as_str()).cast(dt),
+                    None => col(source_name.as_str()),
                 };
                 used_names.insert(right_name.clone());
                 exprs.push(e.alias(right_name.as_str()));
-                right_non_key_pos += 1;
             }
             Ok(exprs)
         } else {
@@ -887,7 +968,7 @@ pub fn join(
                 let name_lower = name.to_lowercase();
                 if seen_lower.contains(&name_lower) {
                     need_rename = true;
-                    format!("{}_right", name)
+                    format!("{name}{join_suffix}")
                 } else {
                     seen_lower.insert(name_lower);
                     name.clone()
@@ -933,10 +1014,57 @@ pub fn join(
         case_sensitive,
         ambiguous_columns,
     );
-    let global_suffix = (case_sensitive || keys_differ || matches!(how, JoinType::Outer))
-        .then_some(join_suffix.as_str());
-    output.logical_schema = left.joined_logical_schema(right, &output, how, global_suffix);
+    // The source-order per-column alias reconstruction above only runs for coalesced
+    // same-name joins. Condition joins retain Polars' shared suffix, so use that same
+    // suffix when rebuilding their logical fields to preserve lineage/nullability.
+    let reconstructs_suffix_per_column = !case_sensitive
+        && coalesce_same_name_keys
+        && keys_match_for_coalesce
+        && matches!(how, JoinType::Inner | JoinType::Left | JoinType::Right);
+    let global_suffix = (!reconstructs_suffix_per_column).then_some(join_suffix.as_str());
+    output.logical_schema = left.joined_logical_schema(
+        right,
+        &output,
+        how,
+        global_suffix,
+        Some(&right_key_alias_sources),
+    );
     Ok(output)
+}
+
+fn unique_key_aliases(
+    left_names: &[String],
+    right_names: &[String],
+    key_names: &[String],
+    case_sensitive: bool,
+) -> HashMap<String, String> {
+    let same = |left: &str, right: &str| {
+        if case_sensitive {
+            left == right
+        } else {
+            left.eq_ignore_ascii_case(right)
+        }
+    };
+    let mut reserved: Vec<String> = left_names.to_vec();
+    reserved.extend(
+        right_names
+            .iter()
+            .filter(|name| !key_names.iter().any(|key| same(key, name)))
+            .cloned(),
+    );
+    let mut renames = HashMap::new();
+    for key in key_names {
+        let base = format!("{key}_right");
+        let mut alias = base.clone();
+        let mut index = 0usize;
+        while reserved.iter().any(|name| same(name, &alias)) {
+            index += 1;
+            alias = format!("{base}_{index}");
+        }
+        reserved.push(alias.clone());
+        renames.insert(key.clone(), alias);
+    }
+    renames
 }
 
 fn max_cross_join_rows() -> u64 {

@@ -8,7 +8,7 @@ where col.value was StringType. Must translate Column/ColumnOperation, not pl.li
 https://github.com/eddiethedean/sparkless/issues/436
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_concat_literal_cast_string_exact_issue_436(spark, spark_mode):

@@ -1,0 +1,126 @@
+"""Pytest plugin for sparkless_testing.
+
+This module provides the pytest plugin entry point that registers
+all fixtures from sparkless_testing when users add:
+
+    pytest_plugins = ["sparkless_testing"]
+
+to their conftest.py.
+"""
+
+from __future__ import annotations
+
+from typing import List
+
+import pytest
+
+from .mode import Mode
+
+
+# Import fixtures to register them with pytest
+from .fixtures import (
+    spark,
+    spark_mode,
+    spark_imports,
+    isolated_session,
+    table_prefix,
+    cleanup_after_each_test,
+)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Configure pytest with custom markers for sparkless testing."""
+    config.addinivalue_line(
+        "markers",
+        "sparkless_only: mark test to run only in sparkless mode",
+    )
+    config.addinivalue_line(
+        "markers",
+        "pyspark_only: mark test to run only in PySpark mode",
+    )
+    config.addinivalue_line(
+        "markers",
+        "delta: mark test as requiring Delta Lake (may be skipped)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "performance: mark test as a performance benchmark",
+    )
+    config.addinivalue_line(
+        "markers",
+        "integration: mark test as integration test (may require external setup)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "pyspark4_only: mark test requiring PySpark 4.x semantics (compat=4.0)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "pyspark3_only: mark test requiring PySpark 3.x semantics (compat=3.5)",
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: List[pytest.Item],
+) -> None:
+    """Skip tests based on mode markers.
+
+    Tests marked with @pytest.mark.sparkless_only are skipped in PySpark mode.
+    Tests marked with @pytest.mark.pyspark_only are skipped in sparkless mode.
+    """
+    from .mode import get_mode
+    from .compat import get_compat_profile
+
+    mode = get_mode()
+    compat = get_compat_profile()
+
+    skip_sparkless = pytest.mark.skip(
+        reason="Test marked sparkless_only, running in PySpark mode"
+    )
+    skip_pyspark = pytest.mark.skip(
+        reason="Test marked pyspark_only, running in sparkless mode"
+    )
+    skip_pyspark4 = pytest.mark.skip(
+        reason=f"Test marked pyspark4_only, compat profile is {compat}"
+    )
+    skip_pyspark3 = pytest.mark.skip(
+        reason=f"Test marked pyspark3_only, compat profile is {compat}"
+    )
+
+    for item in items:
+        if mode == Mode.PYSPARK and "sparkless_only" in item.keywords:
+            item.add_marker(skip_sparkless)
+        elif mode == Mode.SPARKLESS and "pyspark_only" in item.keywords:
+            item.add_marker(skip_pyspark)
+        if compat != "4.0" and "pyspark4_only" in item.keywords:
+            item.add_marker(skip_pyspark4)
+        if compat != "3.5" and "pyspark3_only" in item.keywords:
+            item.add_marker(skip_pyspark3)
+
+
+def pytest_report_header(config: pytest.Config) -> list[str]:
+    """Add sparkless testing info to pytest header."""
+    from .mode import get_mode
+    from .compat import get_compat_profile
+
+    mode = get_mode()
+    compat = get_compat_profile()
+    return [
+        f"sparkless_testing mode: {mode.value}",
+        f"sparkless_testing compat: {compat}",
+    ]
+
+
+# Re-export fixtures so they're registered when this module is loaded as a plugin
+__all__ = [
+    "spark",
+    "spark_mode",
+    "spark_imports",
+    "isolated_session",
+    "table_prefix",
+    "cleanup_after_each_test",
+    "pytest_configure",
+    "pytest_collection_modifyitems",
+    "pytest_report_header",
+]

@@ -18,7 +18,7 @@ from typing import Iterable
 import os
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 imports = get_imports()

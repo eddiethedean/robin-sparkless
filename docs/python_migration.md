@@ -39,6 +39,35 @@ PySpark validation run.
    file round trips, and error behavior. Replace unsupported options explicitly.
 5. Run the same transformation assertions on real Spark before upgrading CI.
 
+## From Sparkless 4.18 to 4.19
+
+4.19 separates the local API, server launcher, native extension, and test helpers
+into independently installed packages. Migrate imports and install extras with
+the package boundary:
+
+| 4.18 | 4.19 |
+| --- | --- |
+| `from sparkless.server import SparklessServer` | `from sparkless_connect import SparklessServer` for the shared launcher, or `from sparkless_server import SparklessServer` for the base product |
+| `from sparkless.server import AsyncSparklessServer, SparklessConnect` | `from sparkless_connect import AsyncSparklessServer, SparklessConnect` |
+| `from sparkless.server import SparklessConnect` when using DuckDB sources | `from sparkless_server_duckdb import SparklessConnect` to bind the owned helper to the DuckDB-source product |
+| `import sparkless.testing` | `import sparkless_testing` |
+| `pip install "sparkless[dev]"` for shared pytest helpers | `pip install "sparkless[testing]"` or `pip install sparkless-testing` |
+| `sparkless._native` | `sparkless_native._native` for internal extension integrations |
+
+The `sparkless.server` module and `sparkless-server-bin` compatibility
+distribution are removed from the 4.19 package graph. Install
+`sparkless-server` or `sparkless-server-duckdb` when owning a packaged server;
+the client-only `sparkless-connect[client]` install does not include a server or
+the local native engine. The `sparkless-testing` package has no runtime
+dependency on Sparkless, its native extension, or PySpark.
+
+When both server products are installed, choose the package import explicitly:
+`sparkless_server.SparklessConnect` owns a base server, while
+`sparkless_server_duckdb.SparklessConnect` owns the DuckDB-source product.
+`sparkless_connect` is the shared launcher for explicit executable/product
+selection and remote-client support. It does not guess which product to launch
+from the installed packages.
+
 Local scalar `F.udf` works with an explicit DataType return object in documented
 contexts. Public pandas/vectorized/grouped UDFs and remote Python execution are
 unsupported. Local RDD helpers are bounded in-process operations; they provide
@@ -54,7 +83,7 @@ select an oracle. See [profile keys and effects](PYSPARK_COMPAT_PROFILES.md).
 
 Use separate environments for Spark 3.5 and Spark 4.0.5; install the matching
 PySpark extra and Java (17 for Spark 4). Register
-`pytest_plugins = ["sparkless.testing.plugin"]` in your `conftest.py`, then run:
+`pytest_plugins = ["sparkless_testing.plugin"]` in your `conftest.py`, then run:
 
 ```bash
 SPARKLESS_TEST_MODE=sparkless python -m pytest tests -v

@@ -41,6 +41,27 @@ server binary also supports `--disable-connect` and `--disable-http`. Readiness 
 endpoint only after its socket is bound and includes the server instance identity and versioned
 capability record. The launcher does not import PySpark, download a binary, or compile a server.
 
+For a convenience context that owns both a fresh server and an independent Connect session,
+install the optional Connect extra:
+
+```sh
+python -m pip install "sparkless[connect]==4.19.0"
+```
+
+Then use `SparklessConnect`; it returns the actual `pyspark-client` session and always attempts to
+stop that session before shutting down the server:
+
+```python
+from sparkless_connect import SparklessConnect
+
+with SparklessConnect() as spark:
+    assert spark.range(10).filter("id > 5").count() == 4
+```
+
+The helper imports the optional client only when entering the context. It can be reused after
+successful cleanup, and a server-shutdown failure keeps ownership attached so cleanup can be
+retried. Same-instance nesting and use after fork raise `SparklessServerError`.
+
 For a manually managed server, compile the `connect` Cargo feature and use `--connect-host` and
 `--connect-port`. The CLI defaults to `127.0.0.1:15002`; port `0` asks the OS for an available
 port. Keep listeners on loopback unless deployment configuration supplies an explicit network
@@ -77,6 +98,90 @@ Supported logical values are deliberately limited:
 Field labels, nullability and supported metadata are preserved through the checked Arrow path.
 Empty results carry their schema. The 4.18 feature matrix is narrower than the Spark Connect
 protocol: an operation is supported only when it is listed here and covered by the 4.18 tests.
+
+## Phase 4.19 branch additions (pre-release)
+
+The `codex/release-4.19` branch adds optional named-table relations, aliases, joins, grouped
+count/sum, global `count(column)`, and the `SparklessConnect` helper. The helper behavior is
+described above. The local branch contains the product/package split, but its new wheels and
+install matrix still need final acceptance; release remains open.
+
+For supported inline DataFrame projections, filters, and join projections, use public
+schema names or column references bound to the input DataFrame. Bound references retain
+their input through aliases and joins. Names generated internally during Arrow import
+cannot be used to address hidden columns. A join on shared column names returns one
+column per key, in the requested key order, even when the inputs order those columns
+differently. A missing relation type, projection
+expression type, or projection literal type returns `INVALID_ARGUMENT` in both analysis
+and execution. A supplied but unsupported variant in those positions returns
+`UNIMPLEMENTED`.
+
+The 4.19 base `sparkless-server` product has no DuckDB feature. The separate
+`sparkless-server-duckdb` product enables the read-only source adapter and carries the matching
+DuckDB 2.0.0 Quack extension. Both products execute transformations in Polars. Configure trusted
+aliases at startup; clients provide table names only. To run a source-enabled development build:
+
+```sh
+cargo run -p sparkless-server-duckdb --features http,connect -- serve
+```
+
+Standalone mode maps an alias to a local read-only file:
+
+```sh
+SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/warehouse.duckdb"}]' \
+  sparkless-server-duckdb
+```
+
+For shared-owner mode, the configured Quack endpoint must already be serving the DuckDB database.
+The installed 4.19 server wheel uses its bundled extension when `extension_path` is omitted. A
+source-built executable can use an explicit local DuckDB 2.0.0 `quack.duckdb_extension` built for
+the same platform. The DuckDB product loads that exact file and does not install or download
+extensions at runtime. Quack itself is an [experimental, pre-release DuckDB extension](https://github.com/duckdb/duckdb-quack):
+keep this source mode opt-in and pin the owner to the tested DuckDB 2.0.0 line:
+
+```sh
+SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","quack_uri":"quack:localhost:9494","token":"replace-with-secret"}]' \
+  sparkless-server-duckdb
+```
+
+For an installed Python product, use `sparkless-server-duckdb[connect]` and
+`sparkless_server_duckdb.SparklessServer` (or its product-bound `SparklessConnect`). The legacy
+`sparkless_connect` helper keeps the base default even when both products are installed.
+
+Pass the JSON through the deployment's secret mechanism so the token does not appear in a shell
+history. Configure Quack authorization on the owner to restrict that token to the intended
+read-only queries; DuckDB's default Quack authorization permits the full SQL surface, so possession
+of the token is broader than Sparkless's read-only source API.
+
+The client can read `warehouse.main.events` or `warehouse.events`. Schema analysis resolves
+metadata without scanning rows. Execution opens the configured database read-only and retains one
+statement transaction while it exports typed batches to Polars. Quack mode uses one transaction on
+the attached remote owner; an independent writer's commit becomes visible to the next statement.
+A statement can read only one configured database owner. Configured aliases reserve their
+qualified namespace; a missing source table does not fall through to a managed table with the same
+name. Per catalog, at most four source connections are open and sixteen operations can wait for a
+connection. Enforced source limits are 1,000,000 rows, 32 MiB of Arrow IPC input, and 64 MiB of
+decoded data per statement, plus 16,384 rows and 1 MiB per batch.
+The source mapping supports BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE, VARCHAR, DATE,
+TIMESTAMPTZ, and DECIMAL with precision at most 38 and scale no greater than precision. The
+retained public smoke/differential covers BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE,
+VARCHAR, DATE, UTC TIMESTAMPTZ, and DECIMAL(12, 2); it does not certify every decimal boundary.
+The branch's public-client source smoke covers table reads, filter/project/limit, row and
+non-null-column counts, same-owner inner joins, grouped count/sum, and source DDL/DML plus append
+and overwrite rejection with an unchanged row count. It runs against both a local file and a live
+Quack owner.
+
+Cancelling a Quack scan interrupts the local DuckDB client and sends `quack_cancel` to the shared
+owner. The control connection is reserved with the scan under the four-connection cap and uses a
+three-second HTTP timeout.
+
+Quack mode and an independent writer fixture are implemented. Exact-commit Linux x86_64 and macOS
+arm64 server-extra installs, packaged Quack public source smokes, and four-reader 100k-row
+slow-consumer checks passed in [release run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918).
+Each measured reader completed; observed server-child RSS was 192.9 MiB on Linux and 137.8 MiB on
+macOS. These are single-run observations, not a hard cross-platform memory limit. D14 and V36
+remain open for broader source/resource evidence. DuckDB writes, unsupported types, arbitrary
+client-supplied paths, and cross-owner joins fail explicitly.
 
 ## Limits and unsupported operations
 

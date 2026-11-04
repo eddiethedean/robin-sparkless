@@ -1,0 +1,26 @@
+[package]
+name = "sparkless-server-duckdb"
+version = "4.19.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Sparkless Connect and HTTP server with optional DuckDB table sources"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/eddiethedean/robin-sparkless"
+
+[features]
+default = ["http"]
+http = ["dep:sparkless-server-http", "sparkless-server-polars/http"]
+connect = ["dep:sparkless-server-connect", "sparkless-server-polars/connect"]
+allocator-trace = ["sparkless-server-polars/allocator-trace"]
+
+[[bin]]
+name = "sparkless-server-duckdb"
+path = "src/main.rs"
+
+[dependencies]
+sparkless-server-core = { version = "4.19.0", path = "../sparkless-server-core" }
+sparkless-server-runtime = { version = "4.19.0", path = "../sparkless-server-runtime" }
+sparkless-server-http = { version = "4.19.0", path = "../sparkless-server-http", optional = true }
+sparkless-server-connect = { version = "4.19.0", path = "../sparkless-server-connect", optional = true }
+sparkless-server-polars = { version = "4.19.0", path = "../sparkless-server-polars", default-features = false, features = ["duckdb-source"] }

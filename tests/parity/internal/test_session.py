@@ -3,7 +3,7 @@ PySpark parity tests for SparkSession operations. Uses get_imports from fixture 
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _schema_for_spark(spark):

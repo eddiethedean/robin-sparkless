@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from sparkless.testing import is_pyspark_mode
+from sparkless_testing import is_pyspark_mode
 from tests.sql.conftest import jdbc_available
 
 pytestmark = pytest.mark.skipif(

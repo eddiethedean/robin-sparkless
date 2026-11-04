@@ -148,7 +148,7 @@ pub use spark_sql_parser::ast::Statement;
 /// Parse a single SQL statement using [spark_sql_parser]. Returns PolarsError for compatibility with session/translator.
 /// On parse failure, error message includes supported statements (#706, #701).
 fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {
-    spark_sql_parser::parse_sql(query).map_err(|e| {
+    robin_sparkless_sql::parse_query(query).map_err(|e| {
         let msg = e.to_string();
         let hint = " Only SELECT, CREATE SCHEMA/DATABASE, and DROP TABLE/VIEW/SCHEMA/DATABASE are supported for execution.";
         PolarsError::InvalidOperation(
@@ -159,7 +159,7 @@ fn parse_sql_to_statement(query: &str) -> Result<Statement, PolarsError> {
 
 /// Parse Spark/PySpark SQL into a SparkStatement. Used by execute_sql.
 fn parse_spark_statement(query: &str) -> Result<SparkStatement, PolarsError> {
-    spark_sql_parser::parse_spark_sql(query).map_err(|e| {
+    robin_sparkless_sql::parse_statement(query).map_err(|e| {
         let msg = e.to_string();
         PolarsError::InvalidOperation(msg.into())
     })
@@ -191,7 +191,9 @@ pub fn execute_sql_with_cancellation(
     test_hooks::arm_for_query(query);
     token.check_cancelled()?;
     let statement = parse_spark_statement(query).map_err(polars_to_core_error)?;
-    let read_only = is_read_only_statement(&statement);
+    let statement_plan = robin_sparkless_sql::lower_statement(&statement)
+        .map_err(|error| EngineError::invalid_input(error.to_string()))?;
+    let read_only = statement_plan.effect() == robin_sparkless_sql::StatementEffect::ReadOnly;
     let staged_insert = is_staged_insert(&statement);
     let staged_temp_view = is_staged_temp_view(&statement);
     let _mutation_guard = if read_only {
@@ -207,13 +209,7 @@ pub fn execute_sql_with_cancellation(
     } else {
         session.shared_catalog_guard()?
     };
-    let result = execute_sql_statement(session, statement, token).map_err(|error| {
-        if error.to_string().starts_with("cancelled: ") {
-            EngineError::Cancelled("operation cancelled".into())
-        } else {
-            polars_to_core_error(error)
-        }
-    })?;
+    let result = execute_sql_statement(session, statement, token).map_err(polars_to_core_error)?;
     if read_only {
         token.check_cancelled()?;
     }
@@ -226,7 +222,9 @@ fn execute_sql_inner(
     token: &CancellationToken,
 ) -> Result<DataFrame, PolarsError> {
     let statement = parse_spark_statement(query)?;
-    let read_only = is_read_only_statement(&statement);
+    let statement_plan = robin_sparkless_sql::lower_statement(&statement)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    let read_only = statement_plan.effect() == robin_sparkless_sql::StatementEffect::ReadOnly;
     let staged_insert = is_staged_insert(&statement);
     let staged_temp_view = is_staged_temp_view(&statement);
     let _mutation_guard = if read_only {
@@ -260,19 +258,6 @@ fn is_staged_temp_view(statement: &SparkStatement) -> bool {
         SparkStatement::Sqlparser(statement)
             if matches!(statement.as_ref(), Statement::CreateView(_))
     )
-}
-
-fn is_read_only_statement(statement: &SparkStatement) -> bool {
-    match statement {
-        SparkStatement::DescribeDetail { .. }
-        | SparkStatement::ShowDatabases
-        | SparkStatement::ShowTables { .. }
-        | SparkStatement::Describe { .. } => true,
-        SparkStatement::Sqlparser(statement) => {
-            matches!(statement.as_ref(), Statement::Query(_))
-        }
-        SparkStatement::CreateOrReplaceTableAs { .. } => false,
-    }
 }
 
 fn execute_sql_statement(
@@ -345,7 +330,8 @@ fn execute_sql_statement(
             format,
             query,
         } => {
-            let table_name = table.to_string();
+            let table_name = translator::table_name_from_object_name(&table);
+            session.reject_external_namespace_target(&table_name)?;
             let format_lower = format.to_lowercase();
 
             // Execute the SELECT query to get the result DataFrame
@@ -628,6 +614,32 @@ mod tests {
         let df = spark.sql("SELECT 1 AS x, 'a' AS s").unwrap();
         assert_eq!(df.columns().unwrap(), vec!["x", "s"]);
         assert_eq!(df.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_sql_limit_offset_applies_offset_before_limit() {
+        use serde_json::json;
+
+        let spark = SparkSession::builder().app_name("test").get_or_create();
+        let source = spark
+            .create_dataframe_from_rows(
+                vec![vec![json!(3)], vec![json!(1)], vec![json!(2)]],
+                vec![("id".to_string(), "bigint".to_string())],
+                false,
+                false,
+            )
+            .unwrap();
+        spark.create_or_replace_temp_view("limit_offset_src", source);
+
+        let result = spark
+            .sql("SELECT id FROM limit_offset_src ORDER BY id LIMIT 2 OFFSET 1")
+            .unwrap();
+        let rows = result.collect_as_json_rows().unwrap();
+        let ids = rows
+            .iter()
+            .map(|row| row.get("id").and_then(serde_json::Value::as_i64).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, [2, 3]);
     }
 
     #[test]
@@ -1048,6 +1060,29 @@ mod tests {
             rows[0].get("parsed_date").and_then(|v| v.as_str()),
             Some("2024-01-15")
         );
+
+        let literal = spark.sql(r#"SELECT "abc" AS value"#).unwrap();
+        assert_eq!(
+            literal.collect_as_json_rows().unwrap()[0]
+                .get("value")
+                .and_then(|value| value.as_str()),
+            Some("abc")
+        );
+    }
+
+    #[test]
+    fn test_lowered_select_preserves_decoded_backslashes() {
+        let spark = SparkSession::builder().get_or_create();
+        for (query, expected) in [
+            (r"SELECT 'a\\b' AS x", r"a\b"),
+            (r#"SELECT "a\\b" AS x"#, r"a\b"),
+            (r"SELECT 'a\\' AS x", "a\\"),
+            (r#"SELECT "a\\'b''c" AS x"#, r"a\'b''c"),
+            (r#"SELECT x FROM (SELECT "a\\b" AS x) AS t"#, r"a\b"),
+        ] {
+            let rows = spark.sql(query).unwrap().collect_as_json_rows().unwrap();
+            assert_eq!(rows[0]["x"].as_str(), Some(expected), "{query}");
+        }
     }
 
     #[test]

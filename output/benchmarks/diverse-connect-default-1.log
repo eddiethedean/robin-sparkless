@@ -1,0 +1,22 @@
+ingest_10 pass
+ingest_100 pass
+ingest_1000 pass
+ingest_10000 pass
+orders_pipeline pass
+nullable_orders pass
+scalar_roundtrip pass
+wide_projection pass
+string_payload pass
+empty_result pass
+selectivity_none pass
+selectivity_one pass
+selectivity_half pass
+selectivity_all pass
+arithmetic_pipeline pass
+preview_limit pass
+collect_10000 pass
+collect_100000 pass
+schema_100_columns pass
+mixed clients 1 pass
+mixed clients 4 pass
+mixed clients 8 pass

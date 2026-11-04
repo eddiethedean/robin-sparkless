@@ -7,7 +7,7 @@ use crate::column::Column;
 use crate::dataframe::{DataFrame, JoinOptions, JoinType, disambiguate_agg_output_names, join};
 use crate::functions;
 use crate::schema::{DataType as CoreDataType, StructType};
-use crate::session::{SparkSession, set_thread_udf_session};
+use crate::session::SparkSession;
 use crate::temporal::{parse_sql_date, parse_sql_timestamp_micros};
 use polars::prelude::{
     AnyValue, DataFrame as PlDataFrame, Expr, NewChunkedArray, PolarsError, Scalar, col, lit, when,
@@ -17,9 +17,9 @@ use robin_sparkless_core::CancellationToken;
 use serde_json::Value as JsonValue;
 use spark_sql_parser::ast::{
     BinaryOperator, CastKind, ExactNumberInfo, Expr as SqlExpr, FromTable, Function, FunctionArg,
-    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, LimitClause,
-    ObjectType, OrderByKind, Query, SchemaName, Select, SelectItem, SetExpr, SetOperator,
-    Statement, TableAlias, TableFactor, TableObject, Value, ValueWithSpan,
+    FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint, JoinOperator, ObjectType,
+    Query, SchemaName, Select, SelectItem, SetExpr, Statement, TableAlias, TableFactor,
+    TableObject, Value, ValueWithSpan,
 };
 
 /// Parsed SQL number literal: integer or float.
@@ -219,7 +219,7 @@ pub fn expr_string_to_polars(
 ) -> Result<Expr, PolarsError> {
     let (sql_expr, alias) = spark_sql_parser::parse_select_expr(expr_str)
         .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))?;
-    set_thread_udf_session(session.clone());
+    let _thread_context = session.enter_sql_thread_context();
     let expr = sql_expr_to_polars(&sql_expr, session, Some(df), None, None)?;
     Ok(match alias {
         Some(a) => expr.alias(a.value.as_str()),
@@ -247,7 +247,47 @@ pub fn translate_with_cancellation(
     token: &CancellationToken,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     check_cancellation(token)?;
-    set_thread_udf_session(session.clone());
+    let _thread_context = session.enter_sql_thread_context();
+    // Resolve CREATE TABLE existence before the mutation guard. IF NOT EXISTS is a
+    // no-op for an existing external table, while a missing table in any external
+    // namespace remains owned by that provider and cannot fall through locally.
+    if let Statement::CreateTable(create_table) = stmt {
+        let table_name = table_name_from_object_name(&create_table.name);
+        session.check_saved_table_database(&table_name)?;
+        if session.saved_table_exists(&table_name) {
+            if create_table.if_not_exists {
+                return Ok(DataFrame::from_polars_with_options(
+                    PlDataFrame::empty(),
+                    session.is_case_sensitive(),
+                ));
+            }
+            return Err(PolarsError::InvalidOperation(
+                format!("SQL: table already exists: {table_name}").into(),
+            ));
+        }
+        let (external, has_external_owner) =
+            session.resolve_external_table_descriptor(&table_name)?;
+        if external.is_some() {
+            if create_table.if_not_exists {
+                return Ok(DataFrame::from_polars_with_options(
+                    PlDataFrame::empty(),
+                    session.is_case_sensitive(),
+                ));
+            }
+            return Err(PolarsError::InvalidOperation(
+                format!("SQL: table already exists: {table_name}").into(),
+            ));
+        }
+        if has_external_owner {
+            return Err(PolarsError::InvalidOperation(
+                format!(
+                    "SQL: cannot create missing table '{table_name}' in an externally owned namespace"
+                )
+                .into(),
+            ));
+        }
+    }
+    reject_read_only_external_mutation(session, stmt)?;
     match stmt {
         Statement::Query(q) => translate_query(session, q.as_ref()),
         Statement::CreateView(create_view) => {
@@ -313,15 +353,10 @@ pub fn translate_with_cancellation(
         Statement::CreateTable(create_table) => {
             let table_name = table_name_from_object_name(&create_table.name);
             session.check_saved_table_database(&table_name)?;
-            // CREATE TABLE IF NOT EXISTS applies to saved tables, not session temp views.
-            // A temp view may shadow this name during unqualified lookup, but it is not a
-            // durable object in the default namespace and cannot satisfy this DDL.
-            let exists = session.saved_table_exists(&table_name)
-                || session
-                    .resolve_external_table_descriptor(&table_name)?
-                    .0
-                    .is_some();
-            if exists {
+            // CREATE TABLE IF NOT EXISTS and external-target ownership were handled
+            // before the general mutation guard above. Keep the ordinary conflict
+            // category for non-idempotent creation of a saved local table.
+            if session.saved_table_exists(&table_name) {
                 if create_table.if_not_exists {
                     return Ok(DataFrame::from_polars_with_options(
                         PlDataFrame::empty(),
@@ -584,6 +619,48 @@ pub fn translate_with_cancellation(
     }
 }
 
+fn reject_read_only_external_mutation(
+    session: &SparkSession,
+    statement: &Statement,
+) -> Result<(), PolarsError> {
+    let mut targets = Vec::new();
+    match statement {
+        Statement::CreateView(create) => {
+            targets.push(table_name_from_object_name(&create.name));
+        }
+        Statement::CreateSchema { schema_name, .. } => {
+            let name = match schema_name {
+                SchemaName::Simple(name) => table_name_from_object_name(name),
+                SchemaName::UnnamedAuthorization(ident) => ident.value.clone(),
+                _ => schema_name.to_string(),
+            };
+            targets.push(name);
+        }
+        Statement::CreateDatabase { db_name, .. } => {
+            targets.push(table_name_from_object_name(db_name));
+        }
+        Statement::Update(update) => {
+            targets.push(table_name_from_factor(&update.table.relation)?);
+        }
+        Statement::Delete(delete) => {
+            let tables = match &delete.from {
+                FromTable::WithFromKeyword(tables) | FromTable::WithoutKeyword(tables) => tables,
+            };
+            if let Some(first) = tables.first() {
+                targets.push(table_name_from_factor(&first.relation)?);
+            }
+        }
+        Statement::Drop { names, .. } => {
+            targets.extend(names.iter().map(table_name_from_object_name));
+        }
+        _ => {}
+    }
+    for target in targets {
+        session.reject_external_namespace_target(&target)?;
+    }
+    Ok(())
+}
+
 /// Map INSERT ... SELECT output onto the target table schema (respect column list, NULL-fill omitted columns).
 fn align_insert_select_to_target(
     select_df: &DataFrame,
@@ -672,10 +749,12 @@ fn translate_insert(
     let (external_target, has_provider) = if local_target {
         (None, false)
     } else {
-        session.resolve_external_table_descriptor(&table_name)?
+        session.resolve_external_table_descriptor_for_write(&table_name)?
     };
     let target_df = match &external_target {
-        Some((_, descriptor)) => session.read_external_table_descriptor(&table_name, descriptor)?,
+        Some((_, _, descriptor)) => {
+            session.read_external_table_descriptor(&table_name, descriptor)?
+        }
         None if has_provider => session.table_after_external_miss(&table_name, true)?,
         None => session.table(&table_name)?,
     };
@@ -771,14 +850,16 @@ fn translate_insert(
         }
     };
 
-    if let Some((provider, descriptor)) = external_target {
+    if let Some((catalog, ownership, descriptor)) = external_target {
         new_rows_df.write().save_as_external_table_descriptor(
             &table_name,
             crate::dataframe::SaveMode::Append,
             None,
-            provider.as_ref(),
+            catalog.as_ref(),
+            &ownership,
             &descriptor,
             &[],
+            session.active_operation_id().as_deref(),
             token,
         )?;
         return Ok(DataFrame::from_polars_with_options(
@@ -1036,32 +1117,36 @@ fn translate_describe_table(
     translate_describe_table_optional_col(session, &name, None)
 }
 
-/// Translate a SetExpr (SELECT, Query, or SetOperation) to a DataFrame.
+/// Translate a backend-neutral relational node to a DataFrame.
 /// PR-B/#774: UNION [ALL] supported; EXCEPT/INTERSECT return a clear error.
-fn translate_set_expr(
+fn translate_relational_node(
     session: &SparkSession,
-    body: &SetExpr,
+    body: &robin_sparkless_sql::RelationalNode,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     match body {
-        SetExpr::Select(select) => translate_select_body(session, select.as_ref()),
-        SetExpr::Query(q) => translate_query(session, q.as_ref()),
-        SetExpr::SetOperation {
-            op,
+        robin_sparkless_sql::RelationalNode::Select(select) => {
+            translate_select_plan(session, select)
+        }
+        robin_sparkless_sql::RelationalNode::Nested(query) => translate_query_plan(session, query),
+        robin_sparkless_sql::RelationalNode::SetOperation {
+            operator,
+            quantifier,
             left,
             right,
-            set_quantifier,
         } => {
-            match op {
-                SetOperator::Union => {}
-                SetOperator::Except | SetOperator::Intersect | SetOperator::Minus => {
+            match operator {
+                robin_sparkless_sql::SetOperator::Union => {}
+                robin_sparkless_sql::SetOperator::Except
+                | robin_sparkless_sql::SetOperator::Intersect
+                | robin_sparkless_sql::SetOperator::Minus => {
                     return Err(PolarsError::InvalidOperation(
                         "SQL: EXCEPT, INTERSECT, and MINUS are not yet supported. Use UNION or UNION ALL."
                             .into(),
                     ));
                 }
             }
-            let left_df = translate_set_expr(session, left.as_ref())?;
-            let right_df = translate_set_expr(session, right.as_ref())?;
+            let left_df = translate_relational_node(session, left)?;
+            let right_df = translate_relational_node(session, right)?;
             let left_columns = left_df.columns()?;
             let right_columns = right_df.columns()?;
             if left_columns.len() != right_columns.len() {
@@ -1086,18 +1171,179 @@ fn translate_set_expr(
             )?;
             let mut df = left_df.union(&right_by_position)?;
             // DISTINCT (default for UNION) => drop duplicates; ALL => keep all rows.
-            // sqlparser uses SetQuantifier::None when neither ALL nor DISTINCT is written;
-            // Spark/SQL default for UNION is DISTINCT.
-            let keep_all = matches!(set_quantifier, spark_sql_parser::ast::SetQuantifier::All);
+            let keep_all = matches!(quantifier, robin_sparkless_sql::SetQuantifier::All);
             if !keep_all {
                 df = df.distinct(None)?;
             }
             Ok(df)
         }
-        _ => Err(PolarsError::InvalidOperation(
+        robin_sparkless_sql::RelationalNode::Values { .. } => Err(PolarsError::InvalidOperation(
             "SQL: only SELECT and UNION are supported (no VALUES, INSERT, etc.).".into(),
         )),
+        robin_sparkless_sql::RelationalNode::Opaque { kind, .. } => {
+            Err(PolarsError::InvalidOperation(
+                format!("SQL: unsupported relational node '{kind}'.").into(),
+            ))
+        }
     }
+}
+
+fn translate_select_plan(
+    session: &SparkSession,
+    plan: &robin_sparkless_sql::SelectPlan,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    // Interpret the plan's relational clauses. SQL fragments on individual expressions and
+    // relations are parsed by the existing Polars expression and table-factor interpreters.
+    let sql = select_plan_sql(plan)?;
+    let statement = robin_sparkless_sql::parse_lowered_query(&sql).map_err(|error| {
+        PolarsError::InvalidOperation(
+            format!("SQL: could not interpret lowered SELECT plan: {error}").into(),
+        )
+    })?;
+    let Statement::Query(query) = statement else {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: SELECT plan did not contain a query.".into(),
+        ));
+    };
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: SELECT plan did not contain a SELECT body.".into(),
+        ));
+    };
+    translate_select_body(session, select)
+}
+
+fn select_plan_sql(plan: &robin_sparkless_sql::SelectPlan) -> Result<String, PolarsError> {
+    use robin_sparkless_sql::{
+        GroupByPlan, JoinConstraintPlan, JoinKind, Projection, RelationPlan,
+    };
+
+    let projections = plan
+        .projection
+        .iter()
+        .map(|projection| match projection {
+            Projection::Wildcard => Ok("*".to_string()),
+            Projection::QualifiedWildcard(qualifier) => Ok(format!("{qualifier}.*")),
+            Projection::Expression { expression, alias } => Ok(match alias {
+                Some(alias) => format!("{} AS `{}`", expression.sql, alias.replace('`', "``")),
+                None => expression.sql.clone(),
+            }),
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
+    if projections.is_empty() {
+        return Err(PolarsError::InvalidOperation(
+            "SQL: lowered SELECT has no projection expressions.".into(),
+        ));
+    }
+    let mut sql = String::from("SELECT ");
+    if let Some(distinct) = &plan.distinct {
+        sql.push_str(distinct);
+        sql.push(' ');
+    }
+    sql.push_str(&projections.join(", "));
+
+    if !plan.from.is_empty() {
+        sql.push_str(" FROM ");
+        let from_items = plan
+            .from
+            .iter()
+            .map(|from| {
+                let relation_sql = |relation: &RelationPlan| match relation {
+                    RelationPlan::Table { source_sql, .. }
+                    | RelationPlan::Derived { source_sql, .. } => Ok(source_sql.clone()),
+                    RelationPlan::Opaque { kind, .. } => Err(PolarsError::InvalidOperation(
+                        format!("SQL: unsupported relation plan '{kind}'.").into(),
+                    )),
+                };
+                let mut item = relation_sql(&from.relation)?;
+                for join in &from.joins {
+                    let join_keyword = match join.operator {
+                        JoinKind::Inner => " INNER JOIN ",
+                        JoinKind::Left => " LEFT JOIN ",
+                        JoinKind::Right => " RIGHT JOIN ",
+                        JoinKind::Full => " FULL OUTER JOIN ",
+                        JoinKind::Cross => " CROSS JOIN ",
+                        JoinKind::LeftSemi => " LEFT SEMI JOIN ",
+                        JoinKind::RightSemi => " RIGHT SEMI JOIN ",
+                        JoinKind::LeftAnti => " LEFT ANTI JOIN ",
+                        JoinKind::RightAnti => " RIGHT ANTI JOIN ",
+                        JoinKind::CrossApply
+                        | JoinKind::OuterApply
+                        | JoinKind::AsOf
+                        | JoinKind::Straight => {
+                            return Err(PolarsError::InvalidOperation(
+                                format!("SQL: unsupported join type {:?}.", join.operator).into(),
+                            ));
+                        }
+                    };
+                    item.push_str(join_keyword);
+                    item.push_str(&relation_sql(&join.relation)?);
+                    if join.global {
+                        return Err(PolarsError::InvalidOperation(
+                            "SQL: GLOBAL joins are not supported.".into(),
+                        ));
+                    }
+                    match &join.constraint {
+                        JoinConstraintPlan::On(expression) => {
+                            item.push_str(" ON ");
+                            item.push_str(&expression.sql);
+                        }
+                        JoinConstraintPlan::Using(columns) => {
+                            item.push_str(" USING (");
+                            item.push_str(&columns.join(", "));
+                            item.push(')');
+                        }
+                        JoinConstraintPlan::Natural | JoinConstraintPlan::None
+                            if join.operator == JoinKind::Cross => {}
+                        JoinConstraintPlan::Natural | JoinConstraintPlan::None => {
+                            return Err(PolarsError::InvalidOperation(
+                                "SQL: JOIN requires an ON equality condition.".into(),
+                            ));
+                        }
+                    }
+                }
+                Ok(item)
+            })
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        sql.push_str(&from_items.join(", "));
+    }
+
+    if let Some(filter) = &plan.filter {
+        sql.push_str(" WHERE ");
+        sql.push_str(&filter.sql);
+    }
+    match &plan.group_by {
+        GroupByPlan::Expressions {
+            expressions,
+            modifiers,
+        } if !expressions.is_empty() => {
+            sql.push_str(" GROUP BY ");
+            sql.push_str(
+                &expressions
+                    .iter()
+                    .map(|expression| expression.sql.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            if !modifiers.is_empty() {
+                sql.push(' ');
+                sql.push_str(&modifiers.join(" "));
+            }
+        }
+        GroupByPlan::All { modifiers } => {
+            sql.push_str(" GROUP BY ALL");
+            if !modifiers.is_empty() {
+                sql.push(' ');
+                sql.push_str(&modifiers.join(" "));
+            }
+        }
+        GroupByPlan::Expressions { .. } => {}
+    }
+    if let Some(having) = &plan.having {
+        sql.push_str(" HAVING ");
+        sql.push_str(&having.sql);
+    }
+    Ok(sql)
 }
 
 /// Translate UPDATE table SET col = expr [WHERE condition].
@@ -1363,52 +1609,59 @@ pub(crate) fn translate_query(
     session: &SparkSession,
     query: &Query,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
-    let mut df = translate_set_expr(session, query.body.as_ref())?;
-    if let Some(order_by) = &query.order_by {
-        if let OrderByKind::Expressions(exprs) = &order_by.kind {
-            if !exprs.is_empty() {
-                let orders: Vec<crate::functions::SortOrder> = exprs
-                    .iter()
-                    .map(|o| {
-                        let col_name = sql_expr_to_col_name(&o.expr)?;
-                        let resolved = df.resolve_column_name(&col_name)?;
-                        let ascending = o.options.asc.unwrap_or(true);
-                        let column = Column::new(resolved);
-                        let nulls_first = o.options.nulls_first.unwrap_or(ascending);
-                        Ok(match (ascending, nulls_first) {
-                            (true, true) => functions::asc_nulls_first(&column),
-                            (true, false) => functions::asc_nulls_last(&column),
-                            (false, true) => functions::desc_nulls_first(&column),
-                            (false, false) => functions::desc_nulls_last(&column),
-                        })
-                    })
-                    .collect::<Result<Vec<_>, PolarsError>>()?;
-                df = df.order_by_exprs(orders)?;
-            }
-        }
+    let portable_plan = robin_sparkless_sql::lower_query(query)
+        .map_err(|error| PolarsError::InvalidOperation(error.to_string().into()))?;
+    translate_query_plan(session, &portable_plan)
+}
+
+fn translate_query_plan(
+    session: &SparkSession,
+    portable_plan: &robin_sparkless_sql::SqlQueryPlan,
+) -> Result<crate::dataframe::DataFrame, PolarsError> {
+    let order_columns = portable_plan
+        .order_by
+        .iter()
+        .map(|sort| match &sort.expression.shape {
+            robin_sparkless_sql::ExpressionShape::Identifier(parts) => parts
+                .last()
+                .filter(|name| !name.is_empty())
+                .map(String::as_str)
+                .ok_or_else(|| {
+                    PolarsError::InvalidOperation("SQL: empty compound identifier.".into())
+                }),
+            _ => Err(PolarsError::InvalidOperation(
+                format!("SQL: expected column name, got {}", sort.expression.debug).into(),
+            )),
+        })
+        .collect::<Result<Vec<_>, PolarsError>>()?;
+    let mut df = translate_relational_node(session, &portable_plan.body)?;
+    if !portable_plan.order_by.is_empty() {
+        let orders: Vec<crate::functions::SortOrder> = portable_plan
+            .order_by
+            .iter()
+            .zip(order_columns)
+            .map(|(sort, col_name)| {
+                let resolved = df.resolve_column_name(col_name)?;
+                let ascending = sort.ascending.unwrap_or(true);
+                let column = Column::new(resolved);
+                let nulls_first = sort.nulls_first.unwrap_or(ascending);
+                Ok(match (ascending, nulls_first) {
+                    (true, true) => functions::asc_nulls_first(&column),
+                    (true, false) => functions::asc_nulls_last(&column),
+                    (false, true) => functions::desc_nulls_first(&column),
+                    (false, false) => functions::desc_nulls_last(&column),
+                })
+            })
+            .collect::<Result<Vec<_>, PolarsError>>()?;
+        df = df.order_by_exprs(orders)?;
     }
-    // LIMIT: sqlparser parses "LIMIT n" as limit_clause (LimitOffset) or FETCH (standard SQL).
-    let limit_expr = query
-        .limit_clause
-        .as_ref()
-        .and_then(|lc| limit_clause_to_expr(lc))
-        .or_else(|| query.fetch.as_ref().and_then(|f| f.quantity.as_ref()));
-    if let Some(limit_expr) = limit_expr {
-        let n = sql_limit_to_usize(limit_expr)?;
+    if let Some(n) = portable_plan.offset {
+        df = df.offset(n)?;
+    }
+    if let Some(n) = portable_plan.limit {
         df = df.limit(n)?;
     }
     Ok(df)
-}
-
-/// Extract the limit expression from LimitClause for LIMIT n (no OFFSET handling here).
-fn limit_clause_to_expr(lc: &LimitClause) -> Option<&SqlExpr> {
-    match lc {
-        LimitClause::LimitOffset {
-            limit: Some(expr), ..
-        } => Some(expr),
-        LimitClause::LimitOffset { limit: None, .. } => None,
-        LimitClause::OffsetCommaLimit { limit, .. } => Some(limit),
-    }
 }
 
 type SelectFromTranslation = (
@@ -1565,21 +1818,8 @@ fn translate_select_from(
     ))
 }
 
-fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
-    if name.0.len() >= 2 {
-        let parts: Vec<String> = name
-            .0
-            .iter()
-            .filter_map(|p| p.as_ident().map(|i| i.value.clone()))
-            .collect();
-        parts.join(".")
-    } else {
-        name.0
-            .last()
-            .and_then(|p| p.as_ident())
-            .map(|i| i.value.clone())
-            .unwrap_or_default()
-    }
+pub(crate) fn table_name_from_object_name(name: &spark_sql_parser::ast::ObjectName) -> String {
+    robin_sparkless_sql::object_name(name)
 }
 
 #[allow(dead_code)]
@@ -2466,12 +2706,8 @@ fn sql_expr_to_polars_with_qualifiers_inner(
                     Ok(lit(Scalar::new_date(days)))
                 }
                 SqlDataType::Timestamp(_, _) => {
-                    let timezone = session
-                        .get_config()
-                        .get("spark.sql.session.timeZone")
-                        .map(String::as_str)
-                        .unwrap_or("UTC");
-                    let micros = parse_sql_timestamp_micros(value, timezone)?;
+                    let timezone = crate::udf_context::get_thread_session_time_zone();
+                    let micros = parse_sql_timestamp_micros(value, &timezone)?;
                     Ok(lit(Scalar::new_datetime(
                         micros,
                         polars::prelude::TimeUnit::Microseconds,
@@ -2500,10 +2736,8 @@ fn sql_expr_to_polars_with_qualifiers_inner(
                     .unwrap_or_default();
                 if let Some(expr) = super::decimal::binary_expr(
                     l.clone(), r.clone(), op, &schema,
-                    session.runtime_config().ansi_enabled,
-                    robin_sparkless_core::decimal_allow_precision_loss_from_session_map(
-                        session.get_config(),
-                    ),
+                    crate::udf_context::get_thread_runtime_config().ansi_enabled,
+                    crate::udf_context::get_thread_decimal_allow_precision_loss(),
                 )? {
                     return Ok(expr);
                 }
@@ -2516,7 +2750,7 @@ fn sql_expr_to_polars_with_qualifiers_inner(
                 if matches!(op, BinaryOperator::Divide) {
                     // Spark SQL promotes integral division to DOUBLE. Polars' native integer
                     // division truncates (1 / 2 => 0), so keep non-decimal division fractional.
-                    if session.runtime_config().ansi_enabled {
+                    if crate::udf_context::get_thread_runtime_config().ansi_enabled {
                         let left = l.clone().cast(polars::prelude::DataType::Float64);
                         let right = r.clone().cast(polars::prelude::DataType::Float64);
                         record_ansi_failure(
@@ -2576,7 +2810,7 @@ fn sql_expr_to_polars_with_qualifiers_inner(
                     return Ok(when(right.clone().eq(lit(0.0)))
                         .then(lit(polars::prelude::NULL).cast(polars::prelude::DataType::Float64))
                         .otherwise(left / right));
-                } else if session.runtime_config().ansi_enabled
+                } else if crate::udf_context::get_thread_runtime_config().ansi_enabled
                     && matches!(op, BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Multiply)
                     && let (Ok(left_field), Ok(right_field)) =
                         (l.to_field(&schema), r.to_field(&schema))
@@ -3089,19 +3323,6 @@ fn sql_function_args_to_columns(
         }
     }
     Ok(cols)
-}
-
-fn sql_expr_to_col_name(expr: &SqlExpr) -> Result<String, PolarsError> {
-    match expr {
-        SqlExpr::Identifier(ident) => Ok(ident.value.clone()),
-        SqlExpr::CompoundIdentifier(parts) => parts
-            .last()
-            .map(|i| i.value.clone())
-            .ok_or_else(|| PolarsError::InvalidOperation("SQL: empty compound identifier.".into())),
-        _ => Err(PolarsError::InvalidOperation(
-            format!("SQL: expected column name, got {:?}", expr).into(),
-        )),
-    }
 }
 
 /// Column name for JOIN ON. When a table alias was applied (alias_opt is Some), use prefix_column form (e.g. "e_dept_id"); otherwise bare column (#152).
@@ -4400,30 +4621,6 @@ fn projection_to_agg_exprs(
 
 fn having_group_expr_key(expr: &SqlExpr) -> (String, String) {
     ("__group_expression".to_string(), format!("{expr:?}"))
-}
-
-fn sql_limit_to_usize(expr: &SqlExpr) -> Result<usize, PolarsError> {
-    match expr {
-        SqlExpr::Value(ValueWithSpan {
-            value: Value::Number(s, _),
-            ..
-        }) => {
-            let n: i64 = s.parse().map_err(|_| {
-                PolarsError::InvalidOperation(
-                    format!("SQL: LIMIT must be a positive integer, got '{}'", s).into(),
-                )
-            })?;
-            if n < 0 {
-                return Err(PolarsError::InvalidOperation(
-                    "SQL: LIMIT must be non-negative.".into(),
-                ));
-            }
-            Ok(n as usize)
-        }
-        _ => Err(PolarsError::InvalidOperation(
-            "SQL: LIMIT must be a literal integer.".into(),
-        )),
-    }
 }
 
 #[cfg(test)]

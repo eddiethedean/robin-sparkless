@@ -1,7 +1,9 @@
 //! Root-owned DataFrame API; delegates to robin-sparkless-polars for execution.
 
 use robin_sparkless_core::EngineError;
-use robin_sparkless_core::engine::{CollectedRows, DataFrameBackend, GroupedDataBackend};
+use robin_sparkless_core::engine::{
+    CollectedRows, FrameActions, FrameTransform, GroupedData as CoreGroupedData,
+};
 use robin_sparkless_core::expr::ExprIr;
 use robin_sparkless_core::{CancellationToken, DataType, StructType};
 pub use robin_sparkless_polars::DataFrameBatches;
@@ -22,21 +24,6 @@ use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
 
-/// Downcast trait result to root DataFrame (Polars backend).
-fn downcast_df(box_df: Box<dyn DataFrameBackend>) -> Result<DataFrame, EngineError> {
-    let concrete = box_df
-        .as_any()
-        .downcast_ref::<PolarsDataFrame>()
-        .ok_or_else(|| EngineError::Internal("expected Polars backend".into()))?;
-    Ok(DataFrame(concrete.clone()))
-}
-
-/// Convert a boxed engine [`DataFrameBackend`] into a root-owned [`DataFrame`].
-/// This is a small adapter used by plan execution and other engine-generic entry points.
-pub(crate) fn from_backend(box_df: Box<dyn DataFrameBackend>) -> Result<DataFrame, EngineError> {
-    downcast_df(box_df)
-}
-
 /// Root-owned DataFrame; delegates to the Polars backend.
 #[derive(Clone)]
 pub struct DataFrame(pub(crate) PolarsDataFrame);
@@ -49,34 +36,6 @@ pub struct CubeRollupData(pub(crate) PolarsCubeRollupData);
 
 /// Root-owned PivotedGroupedData; delegates to the Polars backend.
 pub struct PivotedGroupedData(pub(crate) PolarsPivotedGroupedData);
-
-/// Engine-generic DataFrame operations expressed in terms of `ExprIr` and `EngineError`.
-/// Implemented for the root [`DataFrame`] using the `DataFrameBackend` trait so callers
-/// can depend on this trait instead of the concrete Polars-backed type.
-pub trait EngineDataFrame {
-    fn filter_expr_ir(&self, condition: &ExprIr) -> Result<DataFrame, EngineError>;
-    fn select_expr_ir(&self, exprs: &[ExprIr]) -> Result<DataFrame, EngineError>;
-    fn with_column_expr_ir(&self, name: &str, expr: &ExprIr) -> Result<DataFrame, EngineError>;
-    fn collect_rows(&self) -> Result<CollectedRows, EngineError>;
-}
-
-impl EngineDataFrame for DataFrame {
-    fn filter_expr_ir(&self, condition: &ExprIr) -> Result<DataFrame, EngineError> {
-        downcast_df(DataFrameBackend::filter(&self.0, condition)?)
-    }
-
-    fn select_expr_ir(&self, exprs: &[ExprIr]) -> Result<DataFrame, EngineError> {
-        downcast_df(DataFrameBackend::select(&self.0, exprs)?)
-    }
-
-    fn with_column_expr_ir(&self, name: &str, expr: &ExprIr) -> Result<DataFrame, EngineError> {
-        downcast_df(DataFrameBackend::with_column(&self.0, name, expr)?)
-    }
-
-    fn collect_rows(&self) -> Result<CollectedRows, EngineError> {
-        DataFrameBackend::collect(&self.0)
-    }
-}
 
 pub use robin_sparkless_polars::dataframe::joins::check_cross_join_budget;
 /// Re-export for API compatibility.
@@ -142,22 +101,22 @@ impl DataFrame {
 
     /// Filter rows using an engine-agnostic expression (ExprIr).
     pub fn filter_expr_ir(&self, condition: &ExprIr) -> Result<DataFrame, EngineError> {
-        <Self as EngineDataFrame>::filter_expr_ir(self, condition)
+        FrameTransform::filter(&self.0, condition).map(DataFrame)
     }
 
     /// Select columns/expressions using ExprIr.
     pub fn select_expr_ir(&self, exprs: &[ExprIr]) -> Result<DataFrame, EngineError> {
-        <Self as EngineDataFrame>::select_expr_ir(self, exprs)
+        FrameTransform::select(&self.0, exprs).map(DataFrame)
     }
 
     /// Add or replace a column using ExprIr.
     pub fn with_column_expr_ir(&self, name: &str, expr: &ExprIr) -> Result<DataFrame, EngineError> {
-        <Self as EngineDataFrame>::with_column_expr_ir(self, name, expr)
+        FrameTransform::with_column(&self.0, name, expr).map(DataFrame)
     }
 
     /// Collect as engine-agnostic rows (column name -> JSON value per row).
     pub fn collect_rows(&self) -> Result<CollectedRows, EngineError> {
-        <Self as EngineDataFrame>::collect_rows(self)
+        FrameActions::collect(&self.0)
     }
 
     pub fn resolve_expr_column_names(&self, expr: Expr) -> Result<Expr, PolarsError> {
@@ -459,6 +418,18 @@ impl DataFrame {
     ) -> Result<DataFrame, PolarsError> {
         self.0
             .join_with_keys(&other.0, left_on, right_on, how, only_key_equalities)
+            .map(DataFrame)
+    }
+
+    pub fn join_with_keys_using(
+        &self,
+        other: &DataFrame,
+        left_on: Vec<&str>,
+        right_on: Vec<&str>,
+        how: JoinType,
+    ) -> Result<DataFrame, PolarsError> {
+        self.0
+            .join_with_keys_using(&other.0, left_on, right_on, how)
             .map(DataFrame)
     }
 
@@ -1096,7 +1067,7 @@ impl GroupedData {
 
     /// Aggregate using ExprIr expressions (e.g. sum(col("x")), count(col("y")) from core).
     pub fn agg_expr_ir(&self, exprs: &[ExprIr]) -> Result<DataFrame, EngineError> {
-        downcast_df(GroupedDataBackend::agg(&self.0, exprs)?)
+        CoreGroupedData::agg(&self.0, exprs).map(DataFrame)
     }
 
     pub fn pivot(&self, pivot_col: &str, values: Option<Vec<String>>) -> PivotedGroupedData {
@@ -1207,9 +1178,9 @@ impl PivotedGroupedData {
 
 #[cfg(test)]
 mod tests {
-    /// Smoke test for EngineDataFrame: ensure filter_expr_ir + collect_rows round-trips a simple filter.
+    /// Ensure the typed engine contract round-trips a simple filter.
     #[test]
-    fn engine_dataframe_filter_and_collect_rows() {
+    fn typed_frame_filter_and_collect_rows() {
         use robin_sparkless_core::expr::{col, gt};
         use serde_json::json;
 

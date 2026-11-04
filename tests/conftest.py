@@ -1,5 +1,5 @@
 """
-Global pytest configuration using sparkless.testing.
+Global pytest configuration using sparkless_testing.
 
 Uses SPARKLESS_TEST_MODE environment variable to select the test backend:
 - SPARKLESS_TEST_MODE=sparkless (default): Run with sparkless backend
@@ -29,8 +29,8 @@ if "PYSPARK_PYTHON" not in os.environ:
 if "PYSPARK_DRIVER_PYTHON" not in os.environ:
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
-# Import from sparkless.testing
-from sparkless.testing import (
+# Import from sparkless_testing
+from sparkless_testing import (
     Mode,
     get_mode,
     is_pyspark_mode,
@@ -38,10 +38,10 @@ from sparkless.testing import (
     get_imports,
     SparkImports,
 )
-from sparkless.testing.fixtures import _SharedSessionWrapper
+from sparkless_testing.fixtures import _SharedSessionWrapper
 
-# Register sparkless.testing as the pytest plugin
-pytest_plugins = ["sparkless.testing"]
+# Register sparkless_testing as the pytest plugin
+pytest_plugins = ["sparkless_testing"]
 
 # Configure sparkless for multiprocessing (pytest-xdist) in sparkless mode
 if not is_pyspark_mode():
@@ -344,8 +344,8 @@ def pytest_collection_modifyitems(
     items: list[pytest.Item],
 ) -> None:
     """Skip backend-only marked tests; enforce no backend branching in test modules."""
-    from sparkless.testing.compat import get_compat_profile
-    from sparkless.testing.mode import Mode, get_mode
+    from sparkless_testing.compat import get_compat_profile
+    from sparkless_testing.mode import Mode, get_mode
 
     mode = get_mode()
     compat = get_compat_profile()
@@ -457,10 +457,10 @@ def pytest_collection_modifyitems(
             if forbidden_import_pyspark.search(line):
                 violations.append(f"{path}:{lineno}: forbidden import `{line.strip()}`")
 
-            # Disallow importing sparkless directly in tests. Allow sparkless.testing (harness).
+            # Disallow importing sparkless directly in tests. Allow sparkless_testing (harness).
             if (
                 forbidden_import_sparkless.search(line)
-                and "sparkless.testing" not in line
+                and "sparkless_testing" not in line
             ):
                 violations.append(f"{path}:{lineno}: forbidden import `{line.strip()}`")
 
@@ -476,4 +476,4 @@ def pytest_collection_modifyitems(
 def pytest_report_header(config: pytest.Config) -> list[str]:
     """Add sparkless testing info to pytest header."""
     mode = get_mode()
-    return [f"sparkless.testing mode: {mode.value}"]
+    return [f"sparkless_testing mode: {mode.value}"]

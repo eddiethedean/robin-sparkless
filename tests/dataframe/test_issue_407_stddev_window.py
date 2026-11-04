@@ -12,7 +12,7 @@ class TestIssue407StddevWindow:
 
     def test_stddev_over_window_partition(self, spark):
         """Exact scenario from issue #407: F.stddev('Value').over(w) with partitionBy ID."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -38,7 +38,7 @@ class TestIssue407StddevWindow:
 
     def test_stddev_over_window_multiple_partitions(self, spark):
         """stddev over window with multiple partitions; each partition has same stddev value."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -70,7 +70,7 @@ class TestIssue407StddevWindow:
 
     def test_stddev_samp_over_window(self, spark):
         """stddev_samp() over window (alias for stddev) returns same as stddev."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -91,7 +91,7 @@ class TestIssue407StddevWindow:
 
     def test_stddev_pop_over_window(self, spark):
         """stddev_pop() over window returns population standard deviation."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -114,7 +114,7 @@ class TestIssue407StddevWindow:
 
     def test_stddev_over_window_with_nulls(self, spark):
         """stddev ignores nulls in the column; partition stddev is computed on non-null values."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -138,7 +138,7 @@ class TestIssue407StddevWindow:
 
     def test_stddev_single_row_per_partition_returns_none(self, spark):
         """Sample stddev of one value per partition is None (n-1=0)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F
@@ -154,7 +154,7 @@ class TestIssue407StddevWindow:
 
     def test_stddev_over_window_then_select_and_show(self, spark):
         """withColumn(stddev over window) then select and show works."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         F = imports.F

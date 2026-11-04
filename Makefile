@@ -70,7 +70,8 @@ lint-python:
 	@RUFF=$$(test -f .venv/bin/ruff && echo .venv/bin/ruff || echo ruff); \
 	MYPY=$$(test -f .venv/bin/mypy && echo .venv/bin/mypy || echo mypy); \
 	$$RUFF format --check . && $$RUFF check . && \
-	$$MYPY --config-file python/pyproject.toml python/sparkless
+	$$MYPY --config-file python/pyproject.toml --check-untyped-defs \
+	  python/sparkless/sparkless python/testing/sparkless_testing python/connect/sparkless_connect
 
 # Backwards-compatible alias for full check suite (Rust + Python lint).
 # With CRATE set, runs checks for that package only (faster when editing one crate).

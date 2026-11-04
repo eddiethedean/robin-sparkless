@@ -38,6 +38,7 @@ uv pip install --python .venv/bin/python pytest pandas pytest-xdist hypothesis p
     python -m maturin develop --uv --locked --release
 )
 uv pip install --python .venv/bin/python --no-deps -e 'python[dev]'
+uv pip install --python .venv/bin/python --no-deps -e python/testing
 ```
 
 Run these Bash examples from the repository root. No environment activation is required.
@@ -57,7 +58,7 @@ an explicit rebuild. To check which package and extension the environment import
 
 ```bash
 uv run --no-project --python .venv/bin/python python -c \
-  "import sparkless, sparkless._native; print(sparkless.__file__); print(sparkless._native.__file__)"
+  "import sparkless, sparkless_native._native; print(sparkless.__file__); print(sparkless_native._native.__file__)"
 ```
 
 To build distribution wheels, build the engine with `maturin build --release --manifest-path python/native/Cargo.toml`
@@ -82,7 +83,7 @@ Faster subsets:
 
 ```bash
 make check              # Rust only
-make lint-python        # ruff + mypy on sparkless package
+make lint-python        # ruff + mypy on the local API, testing package, and launcher
 uv run --no-project --python .venv/bin/python python -m pytest tests/ -v
 make check-crate CRATE=robin-sparkless-polars   # single crate
 ```

@@ -5,7 +5,7 @@ Start by recording the exact interpreter, distribution, and native module:
 ```bash
 python -m pip show sparkless
 python -c "import sys, sparkless; print(sys.executable, sys.version); print(sparkless.__version__, sparkless.__file__)"
-python -c "import sparkless._native as native; print(native.__file__)"
+python -c "import sparkless_native._native as native; print(native.__file__)"
 ```
 
 ## Installation or native import fails

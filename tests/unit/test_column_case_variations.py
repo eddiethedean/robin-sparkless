@@ -7,7 +7,7 @@ to ensure case-insensitive resolution works correctly across all operations.
 
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _backend_imports():

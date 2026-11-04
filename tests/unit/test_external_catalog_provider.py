@@ -12,10 +12,12 @@ import pytest
 from sparkless import (
     SparklessCancelledError,
     SparklessExternalCatalogError,
+    SparklessError,
     SparkSession,
 )
 from sparkless.external_catalog import (
     ArrowIpcStream,
+    ExternalCatalogOwnership,
     ExternalTableDescriptor,
     ExternalTableFormat,
     ExternalTableSaveMode,
@@ -23,11 +25,27 @@ from sparkless.external_catalog import (
     ExternalTableWriteResult,
     _descriptor_from_json,
     _descriptor_to_json,
+    _normalize_python_provider_timestamp_ipc,
 )
 from sparkless.sql import types as T
 
 pytestmark = pytest.mark.sparkless_only
 IDENTIFIER = "catalog.schema.orders"
+
+
+class _OwnershipMixin:
+    """Keep test providers explicit about the namespace they own."""
+
+    def resolve_ownership(self, identifier):
+        if identifier != IDENTIFIER:
+            return None
+        has_batch_writer = callable(getattr(self, "write_table_batches", None))
+        return ExternalCatalogOwnership(
+            owner_id="catalog.schema",
+            read=True,
+            write=has_batch_writer,
+            batch_write=has_batch_writer,
+        )
 
 
 def test_external_catalog_error_defaults_are_present():
@@ -53,7 +71,7 @@ def session():
     spark.stop()
 
 
-class Provider:
+class Provider(_OwnershipMixin):
     def __init__(self, table):
         self.table = table
         self.lookups = []
@@ -63,7 +81,8 @@ class Provider:
         self.lookups.append(identifier)
         return self.table if identifier == IDENTIFIER else None
 
-    def write_table(self, request):
+    def write_table_batches(self, request):
+        request.batches = list(request.batches)
         self.writes.append(request)
         self.table = replace(request.table, version=(request.table.version or 0) + 1)
         return ExternalTableWriteResult(self.table, self.table.version)
@@ -133,12 +152,9 @@ def test_python_writer_passes_typed_ipc_and_exact_options(session):
     assert request.table.permissions_context == "caller-context"
     assert type(request.table.schema["id"].dataType) is T.LongType
     assert request.table.schema["id"].nullable is False
-    assert isinstance(request.data, bytes)
-    assert isinstance(request.data, ArrowIpcStream)
-    assert request.data.bytes == bytes(request.data)
     assert request.mode is ExternalTableSaveMode.APPEND
     assert request.table.format is ExternalTableFormat.DELTA
-    table = pa.ipc.open_stream(request.data).read_all()
+    table = pa.Table.from_batches(request.batches)
     assert table["id"].to_pylist() == [2**54 + 3, 4]
     assert table["amount"].type == pa.decimal128(12, 2)
     assert table["amount"].to_pylist() == [Decimal("12.34"), None]
@@ -154,14 +170,13 @@ def test_python_batch_writer_receives_bounded_record_batches(session):
     schema = T.StructType([T.StructField("id", T.LongType(), False)])
     table = descriptor(schema)
 
-    class BatchProvider:
+    class BatchProvider(_OwnershipMixin):
         received = None
 
         def resolve_table(self, identifier):
             return table
 
         def write_table_batches(self, request):
-            assert request.data is None
             self.received = list(request.batches)
             updated = replace(request.table, version=1)
             return ExternalTableWriteResult(updated, 1)
@@ -183,6 +198,28 @@ def test_python_batch_writer_receives_bounded_record_batches(session):
         [3, 4, 5],
         [6],
     ]
+
+
+def test_timestamp_normalization_preserves_empty_schema_batch():
+    pa = pytest.importorskip("pyarrow")
+    schema = T.StructType([T.StructField("instant", T.TimestampType())])
+    table = descriptor(schema)
+    source_schema = pa.schema([("instant", pa.timestamp("us", tz="UTC"))])
+    empty_batch = pa.RecordBatch.from_arrays(
+        [pa.array([], type=source_schema.field("instant").type)], schema=source_schema
+    )
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, source_schema) as writer:
+        writer.write_batch(empty_batch)
+
+    normalized = _normalize_python_provider_timestamp_ipc(
+        sink.getvalue().to_pybytes(), table
+    )
+    batches = list(pa.ipc.open_stream(normalized))
+
+    assert len(batches) == 1
+    assert batches[0].num_rows == 0
+    assert batches[0].schema.field("instant").type == pa.timestamp("us")
 
 
 @pytest.mark.parametrize("ingress", ["python_rows", "pyarrow"])
@@ -243,14 +280,14 @@ def test_external_writer_preserves_null_struct_parent_validity(session, ingress)
     else:
         data = [(row["details"], row["items"]) for row in expected]
 
-    class CaptureThenFail:
+    class CaptureThenFail(_OwnershipMixin):
         received = None
 
         def resolve_table(self, identifier):
             return descriptor(schema)
 
-        def write_table(self, request):
-            self.received = pa.ipc.open_stream(request.data).read_all().to_pylist()
+        def write_table_batches(self, request):
+            self.received = pa.Table.from_batches(list(request.batches)).to_pylist()
             raise RuntimeError("intentional capture stop before commit")
 
     provider = CaptureThenFail()
@@ -258,9 +295,9 @@ def test_external_writer_preserves_null_struct_parent_validity(session, ingress)
     frame = session.createDataFrame(data, schema)
     with pytest.raises(SparklessExternalCatalogError) as exc_info:
         frame.write.mode("append").saveAsTable(IDENTIFIER)
-    assert exc_info.value.operation == "write_table"
+    assert exc_info.value.operation == "write_table_batches"
     assert exc_info.value.category == "provider_failure"
-    assert exc_info.value.retryability == "uncertain"
+    assert exc_info.value.retryability == "outcome_unknown"
     assert "intentional capture stop before commit" not in str(exc_info.value)
 
     assert provider.received == expected
@@ -353,22 +390,23 @@ def test_read_only_provider_and_invalid_receipts_fail_explicitly(session):
     frame = session.createDataFrame([(1,)], ["id"])
     table = descriptor(frame.schema)
 
-    class ReadOnly:
+    class ReadOnly(_OwnershipMixin):
         def resolve_table(self, identifier):
             return table
 
     session.set_external_catalog_provider(ReadOnly())
-    with pytest.raises(SparklessExternalCatalogError) as exc_info:
+    with pytest.raises(SparklessError) as exc_info:
         frame.write.mode("append").saveAsTable(IDENTIFIER)
-    assert exc_info.value.category == "unsupported_operation"
+    assert exc_info.value.category == "capability"
+    assert exc_info.value.code == "WRITE_CAPABILITY_DENIED"
     assert exc_info.value.retryability == "terminal"
 
     class InvalidReceipt(Provider):
-        def write_table(self, request):
+        def write_table_batches(self, request):
             return ExternalTableWriteResult(replace(request.table, version=9), 10)
 
     session.set_external_catalog_provider(InvalidReceipt(table))
-    with pytest.raises(Exception, match="committed version"):
+    with pytest.raises(Exception, match="receipt version"):
         frame.write.mode("append").saveAsTable(IDENTIFIER)
     session.set_external_catalog_provider(None)
     with pytest.raises(Exception, match="not found"):
@@ -382,7 +420,7 @@ def test_python_write_failures_do_not_fall_back_to_local(session, failure):
     frame = session.createDataFrame([(1,)], ["id"])
 
     class InvalidWrite(Provider):
-        def write_table(self, request):
+        def write_table_batches(self, request):
             if failure == "exception":
                 raise RuntimeError("native commit failed")
             if failure == "missing":
@@ -400,9 +438,9 @@ def test_python_write_failures_do_not_fall_back_to_local(session, failure):
     else:
         with pytest.raises(SparklessExternalCatalogError) as exc_info:
             frame.write.mode("append").saveAsTable(IDENTIFIER)
-        assert exc_info.value.operation == "write_table"
+        assert exc_info.value.operation == "write_table_batches"
         assert exc_info.value.category == "provider_failure"
-        assert exc_info.value.retryability == "uncertain"
+        assert exc_info.value.retryability == "outcome_unknown"
     session.set_external_catalog_provider(None)
     with pytest.raises(Exception, match="not found"):
         session.table(IDENTIFIER)
@@ -410,7 +448,7 @@ def test_python_write_failures_do_not_fall_back_to_local(session, failure):
 
 @pytest.mark.parametrize("result", [{}, "bad descriptor", False])
 def test_invalid_python_descriptors_do_not_become_misses(session, result):
-    class Invalid:
+    class Invalid(_OwnershipMixin):
         def resolve_table(self, identifier):
             return result
 
@@ -475,12 +513,14 @@ def test_python_provider_native_reads_and_committed_writes(session, tmp_path):
     seed.write.format("delta").mode("overwrite").save(path)
 
     class CommittingProvider(Provider):
-        def write_table(self, request):
-            table = pa.ipc.open_stream(request.data).read_all()
+        def write_table_batches(self, request):
+            batches = list(request.batches)
+            request.batches = iter(batches)
+            table = pa.Table.from_batches(batches)
             session.createDataFrame(table).write.format("delta").mode(
                 request.mode
             ).save(path)
-            return super().write_table(request)
+            return super().write_table_batches(request)
 
     provider = CommittingProvider(descriptor(seed.schema, path))
     session.set_external_catalog_provider(provider)
@@ -545,7 +585,7 @@ def test_python_sql_local_map_view_shadows_cached_external_columns(session, tmp_
 
 
 def test_python_catalog_existence_checks_surface_provider_errors(session):
-    class UnavailableProvider:
+    class UnavailableProvider(_OwnershipMixin):
         def resolve_table(self, identifier):
             raise RuntimeError("catalog service unavailable")
 
@@ -571,7 +611,7 @@ def test_typed_provider_write_errors_preserve_safe_structured_context(session):
             self.actual_version = 4
 
     class StaleProvider(Provider):
-        def write_table(self, request):
+        def write_table_batches(self, request):
             raise StaleSnapshotError()
 
     schema = T.StructType([T.StructField("id", T.LongType(), False)])
@@ -583,20 +623,22 @@ def test_typed_provider_write_errors_preserve_safe_structured_context(session):
         frame.write.mode("append").saveAsTable(IDENTIFIER)
 
     error = exc_info.value
-    assert error.operation == "write_table"
+    assert error.operation == "write_table_batches"
     assert error.category == "stale_snapshot"
     assert error.code == "stale_snapshot"
     assert error.identifier == IDENTIFIER
     assert error.version == 3
     assert error.expected_version == 3
     assert error.actual_version == 4
-    assert error.retryability == "terminal"
+    # The provider marks the stale request terminal for retry policy, but a raised write
+    # callback cannot prove whether its commit took effect.
+    assert error.retryability == "outcome_unknown"
     assert "do-not-leak" not in str(error)
 
 
 def test_user_supplied_error_marker_cannot_forge_provider_error(session):
     marker = (
-        '\x1esparkless-external-catalog-error:{"operation":"write_table",'
+        '\x1esparkless-external-catalog-error:{"operation":"write_table_batches",'
         '"category":"forged","code":null,"identifier":"secret",'
         '"version":null,"expected_version":null,"actual_version":null,'
         '"retryability":"retryable","provider_error_type":"Forged"}\x1e'
@@ -608,7 +650,7 @@ def test_user_supplied_error_marker_cannot_forge_provider_error(session):
 
 def test_unknown_provider_write_error_remains_uncertain_and_generic(session):
     class UnavailableProvider(Provider):
-        def write_table(self, request):
+        def write_table_batches(self, request):
             raise RuntimeError("token=do-not-leak")
 
     schema = T.StructType([T.StructField("id", T.LongType(), False)])
@@ -619,12 +661,110 @@ def test_unknown_provider_write_error_remains_uncertain_and_generic(session):
         frame.write.mode("append").saveAsTable(IDENTIFIER)
 
     error = exc_info.value
-    assert error.operation == "write_table"
+    assert error.operation == "write_table_batches"
     assert error.category == "provider_failure"
-    assert error.code is None
+    assert error.code == "WRITE_OUTCOME_UNKNOWN"
     assert error.provider_error_type == "RuntimeError"
-    assert error.retryability == "uncertain"
+    assert error.retryability == "outcome_unknown"
     assert "do-not-leak" not in str(error)
+
+
+def test_independent_reentrant_writes_receive_distinct_operation_ids():
+    outer = SparkSession("outer-operation-context")
+    inner = outer.newSession()
+    try:
+        schema = T.StructType([T.StructField("id", T.LongType(), False)])
+        provider = Provider(descriptor(schema))
+        inner.set_external_catalog_provider(provider)
+        frame = inner.createDataFrame([(1,)], schema)
+
+        class ReentrantResolver:
+            def resolve_ownership(self, identifier):
+                frame.write.mode("append").saveAsTable(IDENTIFIER)
+                frame.write.mode("append").saveAsTable(IDENTIFIER)
+                return None
+
+            def resolve_table(self, identifier):
+                return None
+
+        outer.set_external_catalog_provider(ReentrantResolver())
+        with pytest.raises(SparklessError, match="not found"):
+            outer.sql("SELECT * FROM absent_table")
+
+        assert len(provider.writes) == 2
+        assert len({request.operation_id for request in provider.writes}) == 2
+    finally:
+        inner.stop()
+        outer.stop()
+
+
+def test_invalid_committed_receipt_reports_unknown_write_outcome(session):
+    class InvalidReceiptProvider(Provider):
+        def write_table_batches(self, request):
+            result = super().write_table_batches(request)
+            return replace(
+                result,
+                table=replace(result.table, table_id="different-table"),
+            )
+
+    schema = T.StructType([T.StructField("id", T.LongType(), False)])
+    provider = InvalidReceiptProvider(descriptor(schema))
+    session.set_external_catalog_provider(provider)
+
+    with pytest.raises(SparklessError) as exc_info:
+        session.createDataFrame([(1,)], schema).write.mode("append").saveAsTable(
+            IDENTIFIER
+        )
+
+    assert provider.table.version == 1
+    assert exc_info.value.code == "WRITE_OUTCOME_UNKNOWN"
+    assert exc_info.value.retryability == "outcome_unknown"
+    assert provider.writes[0].operation_id in str(exc_info.value)
+
+
+def test_read_only_external_owner_does_not_block_local_insert(session):
+    schema = T.StructType([T.StructField("id", T.LongType(), False)])
+    session.createDataFrame([(1,)], schema).write.saveAsTable(IDENTIFIER)
+
+    class ReadOnlyOwner:
+        def resolve_ownership(self, identifier):
+            if identifier == IDENTIFIER:
+                return ExternalCatalogOwnership(
+                    owner_id="catalog.schema",
+                    read=True,
+                    write=False,
+                    batch_write=False,
+                )
+            return None
+
+        def resolve_table(self, identifier):
+            return None
+
+    session.set_external_catalog_provider(ReadOnlyOwner())
+    session.sql(f"INSERT INTO {IDENTIFIER} VALUES (2)")
+    assert [row.id for row in session.table(IDENTIFIER).collect()] == [1, 2]
+
+
+def test_read_only_external_owner_rejects_insert_before_table_lookup(session):
+    class ReadOnlyOwner:
+        def resolve_ownership(self, identifier):
+            if identifier == IDENTIFIER:
+                return ExternalCatalogOwnership(
+                    owner_id="catalog.schema",
+                    read=True,
+                    write=False,
+                    batch_write=False,
+                )
+            return None
+
+        def resolve_table(self, identifier):
+            raise AssertionError("read-only INSERT should be rejected before table lookup")
+
+    session.set_external_catalog_provider(ReadOnlyOwner())
+    with pytest.raises(SparklessError) as exc_info:
+        session.sql(f"INSERT INTO {IDENTIFIER} VALUES (2)")
+
+    assert exc_info.value.code == "WRITE_CAPABILITY_DENIED"
 
 
 @pytest.mark.delta
@@ -844,8 +984,8 @@ def test_python_descriptor_validate_uses_native_rules(change, match):
         ({"table_id": "other"}, 5, "identity"),
         ({"canonical_location": "/other"}, 5, "identity"),
         ({"provider": "other"}, 5, "identity"),
-        ({"version": None}, 5, "committed version"),
-        ({"version": 6}, 5, "committed version"),
+        ({"version": None}, 5, "receipt version"),
+        ({"version": 6}, 5, "receipt version"),
         ({"version": -1}, -1, "negative"),
         ({"version": 3}, 3, "backwards"),
     ],
@@ -900,7 +1040,7 @@ def test_python_ipc_preserves_remaining_native_primitive_types(session, source_k
     provider = Provider(descriptor(schema))
     session.set_external_catalog_provider(provider)
     frame.write.mode(ExternalTableSaveMode.APPEND).saveAsTable(IDENTIFIER)
-    table = pa.ipc.open_stream(provider.writes[0].data.bytes).read_all()
+    table = pa.Table.from_batches(provider.writes[0].batches)
     assert table.schema.types[:4] == [
         pa.int16(),
         pa.int32(),
@@ -986,12 +1126,14 @@ def test_python_catalog_exists_create_and_select_insert_and_overwrite(
     seed.write.format("delta").mode("overwrite").save(path)
 
     class Committing(Provider):
-        def write_table(self, request):
-            table = pa.ipc.open_stream(request.data.bytes).read_all()
+        def write_table_batches(self, request):
+            batches = list(request.batches)
+            request.batches = iter(batches)
+            table = pa.Table.from_batches(batches)
             session.createDataFrame(table).write.format(ExternalTableFormat.DELTA).mode(
                 request.mode
             ).save(path)
-            return super().write_table(request)
+            return super().write_table_batches(request)
 
     provider = Committing(descriptor(seed.schema, path))
     session.set_external_catalog_provider(provider)
@@ -1055,10 +1197,23 @@ def test_cancel_during_catalog_resolution_prevents_local_save_as_table():
     continue_resolve = Event()
 
     class Provider:
+        def resolve_ownership(self, identifier):
+            if identifier == "cancelled_local":
+                return ExternalCatalogOwnership(
+                    owner_id="cancelled-local",
+                    read=True,
+                    write=True,
+                    batch_write=True,
+                )
+            return None
+
         def resolve_table(self, identifier):
             entered_resolve.set()
             assert continue_resolve.wait(timeout=5)
             return None
+
+        def write_table_batches(self, request):
+            raise AssertionError("cancellation must happen before the writer callback")
 
     spark.set_external_catalog_provider(Provider())
     frame = spark.createDataFrame([(1,)], ["id"])
@@ -1203,6 +1358,11 @@ def test_cancellation_during_sql_delta_metadata_processing_is_reported(tmp_path)
     class Provider:
         calls = 0
 
+        def resolve_ownership(self, identifier):
+            if identifier == "external_source":
+                return ExternalCatalogOwnership(owner_id="external_source", read=True)
+            return None
+
         def resolve_table(self, identifier):
             self.calls += 1
             if self.calls == 2:
@@ -1261,9 +1421,22 @@ def test_save_as_table_registers_with_active_target_session():
     handle = target.cancellation_handle()
 
     class Provider:
+        def resolve_ownership(self, identifier):
+            if identifier == "cancelled_in_target":
+                return ExternalCatalogOwnership(
+                    owner_id="cancelled-in-target",
+                    read=True,
+                    write=True,
+                    batch_write=True,
+                )
+            return None
+
         def resolve_table(self, identifier):
             assert handle.cancel_all_active_actions() == 1
             return None
+
+        def write_table_batches(self, request):
+            raise AssertionError("cancellation must happen before the writer callback")
 
     target.set_external_catalog_provider(Provider())
     try:

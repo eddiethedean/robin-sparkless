@@ -3,8 +3,10 @@
 Sparkless is maintained as an open-source project on a best-effort basis.
 There is no published SLA, paid support commitment, or guaranteed security-fix
 backport schedule. Evaluate your required response and lifecycle guarantees
-before enterprise adoption. The current candidate contract is [4.18.0](SUPPORT_MATRIX.md);
-[installation](INSTALLATION.md) distinguishes it from published stable artifacts.
+before enterprise adoption. The published stable contract remains [4.18.1 API / 4.18.0
+native and server](INSTALLATION.md); the [4.19.0 candidate matrix](SUPPORT_MATRIX.md)
+describes only evidence retained on the release branch and does not change the
+published contract.
 
 Use [GitHub Issues](https://github.com/eddiethedean/robin-sparkless/issues) for bugs
 and feature requests. Include package/interpreter/OS/architecture versions,

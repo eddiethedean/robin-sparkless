@@ -1,12 +1,22 @@
 //! DataFrame module: main tabular type and submodules for transformations, aggregations, joins, stats.
 
 mod aggregations;
+mod batches;
 pub mod joins;
 mod stats;
 mod transformations;
+mod writer;
 
 pub(crate) use aggregations::disambiguate_agg_output_names;
 pub use aggregations::{CubeRollupData, GroupedData, PivotedGroupedData};
+#[cfg(test)]
+use batches::integer_literal;
+pub use batches::{DataFrameBatches, resolve_column_with_schema};
+use batches::{
+    DataFrameInner, IpcBatchSource, PolarsIpcBatchIterator, RangeBatchError, RangeBatchProducer,
+    RangeCardinality, RangeOperation, conservative_union_logical_type, external_arrow_batch_limit,
+    merge_union_logical_type, pyspark_type_name,
+};
 pub use joins::{
     JoinOptions, JoinType, expr_contains_only_join_key_equalities, join,
     try_extract_join_eq_columns, try_extract_join_eq_columns_all,
@@ -17,6 +27,7 @@ pub use transformations::{
     DataFrameNa, DropColumnSpec, SelectItem, filter, order_by, order_by_exprs, select,
     select_items, select_with_exprs, with_column,
 };
+pub use writer::{DataFrameWriter, SaveMode, WriteFormat, WriteMode};
 
 use crate::column::Column;
 use crate::error::{EngineError, polars_to_core_error};
@@ -32,10 +43,11 @@ use polars::prelude::{
     LazyFrame, LiteralValue, NULL, NamedFrom, Operator, PlSmallStr, PolarsError, Schema,
     SchemaNamesAndDtypes, UnknownKind, col, lit,
 };
+use polars_plan::prelude::DynLiteralValue;
 use robin_sparkless_core::engine::{
-    ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, ExternalCatalogProvider,
+    ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, CatalogOwnership, ExternalCatalog,
     ExternalTableDescriptor, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
-    ExternalTableWriteRequest,
+    ExternalTableWriteOutcome,
 };
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -182,6 +194,7 @@ const DEFAULT_CASE_SENSITIVE: bool = false;
 const DEFAULT_EXTERNAL_ARROW_BATCH_ROWS: usize = 10_000;
 const DEFAULT_EXTERNAL_ARROW_BATCH_BYTES: usize = 64 * 1024 * 1024;
 const RANGE_EXECUTION_BATCH_ROWS: usize = 16_384;
+const IPC_SOURCE_BATCH_ROWS: usize = 256;
 
 /// Positional result fields, rows, and their declared logical schema.
 pub type PositionalJsonResult = (Vec<String>, Vec<Vec<JsonValue>>, StructType);
@@ -404,864 +417,6 @@ fn range_projection_can_run_per_batch(expressions: &[Expr]) -> bool {
                 && !range_batch_safe_arithmetic_function(node)
         })
     })
-}
-
-#[derive(Clone)]
-pub(crate) struct RangeCardinality {
-    pub start: i64,
-    pub step: i64,
-    pub row_count: u64,
-    operations: Vec<RangeOperation>,
-}
-
-#[derive(Clone)]
-enum RangeOperation {
-    Filter(Expr),
-    Limit(u64),
-    Project(Vec<Expr>),
-    Rename(Vec<(String, String)>),
-}
-
-enum RangeBatchError {
-    Polars(PolarsError),
-    Engine(EngineError),
-}
-
-struct RangeBatchProducer {
-    range: RangeCardinality,
-    case_sensitive: bool,
-    token: Option<CancellationToken>,
-    batch_rows: usize,
-    first_index: u64,
-    limit_consumed: Vec<u64>,
-}
-
-impl RangeBatchProducer {
-    fn new(
-        range: RangeCardinality,
-        case_sensitive: bool,
-        token: Option<CancellationToken>,
-        batch_rows: usize,
-    ) -> Self {
-        let limit_consumed = vec![0; range.operations.len()];
-        Self {
-            range,
-            case_sensitive,
-            token,
-            batch_rows: batch_rows.max(1),
-            first_index: 0,
-            limit_consumed,
-        }
-    }
-
-    fn next_batch(&mut self) -> Result<Option<PlDataFrame>, RangeBatchError> {
-        loop {
-            if let Some(token) = &self.token {
-                token.check_cancelled().map_err(RangeBatchError::Engine)?;
-            }
-            let limit_satisfied = self
-                .range
-                .operations
-                .iter()
-                .enumerate()
-                .any(|(index, operation)| {
-                    matches!(operation, RangeOperation::Limit(limit) if self.limit_consumed[index] >= *limit)
-                });
-            if self.first_index >= self.range.row_count || limit_satisfied {
-                return Ok(None);
-            }
-
-            let rows = usize::try_from(
-                (self.range.row_count - self.first_index).min(self.batch_rows as u64),
-            )
-            .expect("range batch size is bounded by usize");
-            let mut batch = self
-                .range
-                .batch(self.first_index, rows)
-                .map_err(RangeBatchError::Polars)?;
-            self.first_index += rows as u64;
-
-            for (operation_index, operation) in self.range.operations.iter().enumerate() {
-                if let Some(token) = &self.token {
-                    token.check_cancelled().map_err(RangeBatchError::Engine)?;
-                }
-                match operation {
-                    RangeOperation::Filter(condition) => {
-                        let frame = DataFrame::from_polars_with_options(batch, self.case_sensitive);
-                        let filtered = frame
-                            .filter(condition.clone())
-                            .map_err(RangeBatchError::Polars)?;
-                        batch = filtered
-                            .collect_inner()
-                            .map_err(RangeBatchError::Polars)?
-                            .as_ref()
-                            .clone();
-                    }
-                    RangeOperation::Limit(limit) => {
-                        let remaining = limit.saturating_sub(self.limit_consumed[operation_index]);
-                        if remaining < batch.height() as u64 {
-                            let frame =
-                                DataFrame::from_polars_with_options(batch, self.case_sensitive);
-                            let limited = frame
-                                .limit(remaining as usize)
-                                .map_err(RangeBatchError::Polars)?;
-                            batch = limited
-                                .collect_inner()
-                                .map_err(RangeBatchError::Polars)?
-                                .as_ref()
-                                .clone();
-                        }
-                        self.limit_consumed[operation_index] = self.limit_consumed[operation_index]
-                            .saturating_add(batch.height() as u64);
-                    }
-                    RangeOperation::Rename(renames) => {
-                        for (old_name, new_name) in renames {
-                            batch
-                                .rename(old_name, new_name.as_str().into())
-                                .map_err(RangeBatchError::Polars)?;
-                        }
-                    }
-                    RangeOperation::Project(expressions) => {
-                        let frame = DataFrame::from_polars_with_options(batch, self.case_sensitive);
-                        let projected = frame
-                            .select_exprs(expressions.clone())
-                            .map_err(RangeBatchError::Polars)?;
-                        batch = projected
-                            .collect_inner()
-                            .map_err(RangeBatchError::Polars)?
-                            .as_ref()
-                            .clone();
-                    }
-                }
-            }
-            if let Some(token) = &self.token {
-                token.check_cancelled().map_err(RangeBatchError::Engine)?;
-            }
-            if batch.height() > 0 {
-                return Ok(Some(batch));
-            }
-        }
-    }
-}
-
-impl RangeCardinality {
-    pub(crate) fn count_matching(&self, expression: &Expr) -> Option<u64> {
-        // This arithmetic shortcut is exact only before any other filter or limit has
-        // changed the sequence being counted. All compound cases use bounded execution.
-        if !self.operations.is_empty() {
-            return None;
-        }
-        let Expr::BinaryExpr { left, op, right } = expression else {
-            return None;
-        };
-        if !matches!(
-            op,
-            Operator::Eq
-                | Operator::EqValidity
-                | Operator::NotEq
-                | Operator::NotEqValidity
-                | Operator::Lt
-                | Operator::LtEq
-                | Operator::Gt
-                | Operator::GtEq
-        ) {
-            return None;
-        }
-        let (operator, threshold) = match (left.as_ref(), right.as_ref()) {
-            (Expr::Column(name), Expr::Literal(value))
-                if name.as_str().eq_ignore_ascii_case("id") =>
-            {
-                (*op, integer_literal(value)?)
-            }
-            (Expr::Literal(value), Expr::Column(name))
-                if name.as_str().eq_ignore_ascii_case("id") =>
-            {
-                (reverse_comparison(*op)?, integer_literal(value)?)
-            }
-            _ => return None,
-        };
-
-        if self.row_count == 0 {
-            return Some(0);
-        }
-        if matches!(
-            operator,
-            Operator::Eq | Operator::EqValidity | Operator::NotEq | Operator::NotEqValidity
-        ) {
-            let delta = threshold as i128 - self.start as i128;
-            let step = self.step as i128;
-            let equal = if delta % step == 0 {
-                let index = delta / step;
-                (index >= 0 && (index as u128) < self.row_count as u128) as u64
-            } else {
-                0
-            };
-            return Some(if matches!(operator, Operator::Eq | Operator::EqValidity) {
-                equal
-            } else {
-                self.row_count - equal
-            });
-        }
-
-        let matches = |index: u64| {
-            let value = self.start as i128 + index as i128 * self.step as i128;
-            match operator {
-                Operator::Lt => value < threshold as i128,
-                Operator::LtEq => value <= threshold as i128,
-                Operator::Gt => value > threshold as i128,
-                Operator::GtEq => value >= threshold as i128,
-                _ => false,
-            }
-        };
-        let first = matches(0);
-        let last = matches(self.row_count - 1);
-        if first == last {
-            return Some(if first { self.row_count } else { 0 });
-        }
-
-        let mut low = 1;
-        let mut high = self.row_count;
-        while low < high {
-            let middle = low + (high - low) / 2;
-            if matches(middle) == first {
-                low = middle + 1;
-            } else {
-                high = middle;
-            }
-        }
-        Some(if first { low } else { self.row_count - low })
-    }
-
-    fn batch(&self, first_index: u64, rows: usize) -> Result<PlDataFrame, PolarsError> {
-        let mut values = Vec::with_capacity(rows);
-        for offset in 0..rows {
-            let index = first_index.checked_add(offset as u64).ok_or_else(|| {
-                PolarsError::ComputeError("range scan row index overflowed UInt64".into())
-            })?;
-            let value = self.start as i128 + index as i128 * self.step as i128;
-            values.push(i64::try_from(value).map_err(|_| {
-                PolarsError::ComputeError("range value exceeds Int64 bounds".into())
-            })?);
-        }
-        let id = polars::prelude::Series::new("id".into(), values);
-        PlDataFrame::new_infer_height(vec![id.into()])
-    }
-}
-
-enum IpcBatchSource {
-    Polars(CollectBatches),
-    Range(RangeBatchProducer),
-    Eager {
-        frame: Arc<PlDataFrame>,
-        next_row: usize,
-        max_rows: usize,
-    },
-}
-
-impl IpcBatchSource {
-    fn next_batch(&mut self) -> Option<Result<PlDataFrame, EngineError>> {
-        match self {
-            Self::Polars(batches) => batches
-                .next()
-                .map(|result| result.map_err(polars_to_core_error)),
-            Self::Range(producer) => match producer.next_batch() {
-                Ok(Some(batch)) => Some(Ok(batch)),
-                Ok(None) => None,
-                Err(RangeBatchError::Polars(error)) => Some(Err(polars_to_core_error(error))),
-                Err(RangeBatchError::Engine(error)) => Some(Err(error)),
-            },
-            Self::Eager {
-                frame,
-                next_row,
-                max_rows,
-            } => {
-                if *next_row >= frame.height() {
-                    return None;
-                }
-                let offset = match i64::try_from(*next_row) {
-                    Ok(offset) => offset,
-                    Err(_) => {
-                        return Some(Err(EngineError::User(
-                            "eager Arrow batch offset exceeds Int64".into(),
-                        )));
-                    }
-                };
-                let rows = (*max_rows).min(frame.height() - *next_row);
-                *next_row += rows;
-                Some(Ok(frame.slice(offset, rows)))
-            }
-        }
-    }
-}
-
-/// A bounded, cancellable stream of collected DataFrame batches.
-///
-/// This export iterator uses the native range producer for plans that can be
-/// evaluated per range batch, avoiding Polars' unsupported `AnonymousScan`
-/// lowering for those plans.
-pub struct DataFrameBatches {
-    source: Option<IpcBatchSource>,
-    token: CancellationToken,
-}
-
-impl Iterator for DataFrameBatches {
-    type Item = Result<PlDataFrame, EngineError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Err(error) = self.token.check_cancelled() {
-            self.source.take();
-            return Some(Err(error));
-        }
-        let result = self.source.as_mut()?.next_batch()?;
-        if result.is_err() {
-            self.source.take();
-        }
-        Some(result)
-    }
-}
-
-fn merge_union_logical_type(
-    left: &LogicalDataType,
-    right: &LogicalDataType,
-    output_physical: &DataType,
-) -> Option<LogicalDataType> {
-    use LogicalDataType as D;
-
-    match (left, right, output_physical) {
-        (
-            D::Array(_) | D::ArrayWithNullability { .. },
-            D::Array(_) | D::ArrayWithNullability { .. },
-            DataType::List(output_element),
-        ) => {
-            let (left_element, left_nullable) = match left {
-                D::Array(element) => (element.as_ref(), true),
-                D::ArrayWithNullability {
-                    element_type,
-                    contains_null,
-                } => (element_type.as_ref(), *contains_null),
-                _ => return None,
-            };
-            let (right_element, right_nullable) = match right {
-                D::Array(element) => (element.as_ref(), true),
-                D::ArrayWithNullability {
-                    element_type,
-                    contains_null,
-                } => (element_type.as_ref(), *contains_null),
-                _ => return None,
-            };
-            Some(D::ArrayWithNullability {
-                element_type: Box::new(merge_union_logical_type(
-                    left_element,
-                    right_element,
-                    output_element,
-                )?),
-                contains_null: left_nullable || right_nullable,
-            })
-        }
-        (
-            D::LogicalStruct(left_fields),
-            D::LogicalStruct(right_fields),
-            DataType::Struct(output_fields),
-        ) if left_fields.len() == right_fields.len()
-            && left_fields.len() == output_fields.len() =>
-        {
-            let fields = left_fields
-                .iter()
-                .zip(right_fields)
-                .zip(output_fields)
-                .map(|((left, right), output)| {
-                    if left.name != right.name || left.name != output.name().as_str() {
-                        return None;
-                    }
-                    let mut field = left.clone();
-                    field.data_type = merge_union_logical_type(
-                        &left.data_type,
-                        &right.data_type,
-                        output.dtype(),
-                    )?;
-                    field.nullable = left.nullable || right.nullable;
-                    Some(field)
-                })
-                .collect::<Option<Vec<_>>>()?;
-            Some(D::LogicalStruct(fields))
-        }
-        _ => crate::schema_conv::checked_polars_type_to_data_type(output_physical, "union").ok(),
-    }
-}
-
-fn conservative_union_logical_type(output_physical: &DataType) -> Option<LogicalDataType> {
-    match output_physical {
-        DataType::List(element) => Some(LogicalDataType::ArrayWithNullability {
-            element_type: Box::new(conservative_union_logical_type(element)?),
-            contains_null: true,
-        }),
-        DataType::Struct(fields) => Some(LogicalDataType::LogicalStruct(
-            fields
-                .iter()
-                .map(|field| {
-                    Some(StructField::new(
-                        field.name().to_string(),
-                        conservative_union_logical_type(field.dtype())?,
-                        true,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?,
-        )),
-        _ => crate::schema_conv::checked_polars_type_to_data_type(output_physical, "union").ok(),
-    }
-}
-
-fn integer_literal(value: &LiteralValue) -> Option<i64> {
-    let LiteralValue::Scalar(value) = value else {
-        return None;
-    };
-    match value.as_any_value() {
-        AnyValue::Int8(value) => Some(value as i64),
-        AnyValue::Int16(value) => Some(value as i64),
-        AnyValue::Int32(value) => Some(value as i64),
-        AnyValue::Int64(value) => Some(value),
-        AnyValue::UInt8(value) => Some(value as i64),
-        AnyValue::UInt16(value) => Some(value as i64),
-        AnyValue::UInt32(value) => Some(value as i64),
-        AnyValue::UInt64(value) => i64::try_from(value).ok(),
-        _ => None,
-    }
-}
-
-fn reverse_comparison(operator: Operator) -> Option<Operator> {
-    Some(match operator {
-        Operator::Eq | Operator::EqValidity => operator,
-        Operator::NotEq | Operator::NotEqValidity => operator,
-        Operator::Lt => Operator::Gt,
-        Operator::LtEq => Operator::GtEq,
-        Operator::Gt => Operator::Lt,
-        Operator::GtEq => Operator::LtEq,
-        _ => return None,
-    })
-}
-
-fn external_arrow_batch_limit(
-    options: Option<&[(String, String)]>,
-    option: &str,
-    default: usize,
-) -> Result<usize, PolarsError> {
-    let Some((_, value)) = options
-        .unwrap_or_default()
-        .iter()
-        .rev()
-        .find(|(key, _)| key.eq_ignore_ascii_case(option))
-    else {
-        return Ok(default);
-    };
-    let limit = value.parse::<usize>().map_err(|_| {
-        PolarsError::InvalidOperation(
-            format!("{option} must be a positive integer, got '{value}'").into(),
-        )
-    })?;
-    if limit == 0 {
-        return Err(PolarsError::InvalidOperation(
-            format!("{option} must be greater than zero").into(),
-        ));
-    }
-    Ok(limit)
-}
-
-/// Resolve a column or dotted struct path against a schema.
-/// Resolution order:
-/// 1. If a column with the full name exists (respecting case sensitivity), return it.
-/// 2. If the name contains dots, treat the first component as the base column and the rest
-///    as struct field names, building a struct.field_by_name(...) chain.
-/// 3. Otherwise, return a ColumnNotFound error listing available columns.
-pub fn resolve_column_with_schema(
-    name: &str,
-    schema: &Schema,
-    case_sensitive: bool,
-    extra_valid_names: Option<&[String]>,
-) -> Result<String, PolarsError> {
-    let mut candidates: Vec<String> = schema
-        .iter_names_and_dtypes()
-        .map(|(n, _)| n.to_string())
-        .collect();
-    if let Some(extra) = extra_valid_names {
-        candidates.extend_from_slice(extra);
-    }
-    if case_sensitive {
-        if candidates.iter().any(|n| n == name) {
-            return Ok(name.to_string());
-        }
-    } else {
-        let name_lower = name.to_lowercase();
-        for n in &candidates {
-            if n.to_lowercase() == name_lower {
-                return Ok(n.clone());
-            }
-        }
-    }
-    let available = candidates.join(", ");
-    Err(PolarsError::ColumnNotFound(
-        format!(
-            "cannot resolve: column '{name}' not found in DataFrame. Available: [{available}]."
-        )
-        .into(),
-    ))
-}
-
-/// Map Polars DataType to PySpark type name for schema alignment (#790, #734).
-fn pyspark_type_name(dtype: &DataType) -> String {
-    use polars::datatypes::DataType as PlDataType;
-    match dtype {
-        PlDataType::Int32 => "IntegerType".to_string(),
-        PlDataType::Int64 => "LongType".to_string(),
-        PlDataType::String => "StringType".to_string(),
-        PlDataType::Float32 | PlDataType::Float64 => "DoubleType".to_string(),
-        PlDataType::Boolean => "BooleanType".to_string(),
-        PlDataType::Date => "DateType".to_string(),
-        PlDataType::Datetime(_, _) => "TimestampType".to_string(),
-        PlDataType::List(inner) => format!("ArrayType({})", pyspark_type_name(inner)),
-        PlDataType::Struct(fields) => {
-            let parts: Vec<String> = fields
-                .iter()
-                .map(|f| format!("{}: {}", f.name(), pyspark_type_name(f.dtype())))
-                .collect();
-            format!("StructType([{}])", parts.join(", "))
-        }
-        _ => format!("{dtype:?}"),
-    }
-}
-
-/// Inner representation: eager (legacy) or lazy (preferred).
-/// Transformations extend LazyFrame; only actions trigger collect.
-#[allow(clippy::large_enum_variant)]
-pub(crate) enum DataFrameInner {
-    #[allow(dead_code)]
-    Eager(Arc<PlDataFrame>),
-    Lazy(LazyFrame),
-}
-
-struct PolarsIpcBatchIterator {
-    source: Option<IpcBatchSource>,
-    empty_schema: Arc<Schema>,
-    current: Option<PlDataFrame>,
-    current_offset: usize,
-    deferred_row: Option<PlDataFrame>,
-    max_rows: usize,
-    max_bytes: usize,
-    logical_schema_json: Option<String>,
-    connect_output_schema: Option<StructType>,
-    token: CancellationToken,
-    deferred_error: Option<EngineError>,
-    emitted_empty: bool,
-    closed: bool,
-}
-
-impl PolarsIpcBatchIterator {
-    fn close(&mut self) {
-        self.source.take();
-        self.current.take();
-        self.current_offset = 0;
-        self.deferred_row.take();
-        self.closed = true;
-    }
-
-    fn next_source_row(&mut self) -> Option<Result<PlDataFrame, EngineError>> {
-        if let Some(row) = self.deferred_row.take() {
-            return Some(Ok(row));
-        }
-        if self.current.is_none() {
-            match self.source.as_mut().and_then(IpcBatchSource::next_batch) {
-                Some(Ok(batch)) => self.current = Some(batch),
-                Some(Err(error)) => return Some(Err(error)),
-                None => return None,
-            }
-        }
-        let current = self.current.as_ref().expect("source batch was set");
-        let row = current.slice(self.current_offset as i64, 1);
-        self.current_offset += 1;
-        if self.current_offset >= current.height() {
-            self.current.take();
-            self.current_offset = 0;
-        }
-        Some(Ok(row))
-    }
-
-    fn combine_rows(rows: &[PlDataFrame]) -> Result<PlDataFrame, polars::prelude::PolarsError> {
-        let mut combined = rows.first().expect("non-empty rows").clone();
-        for row in &rows[1..] {
-            combined.vstack_mut(row)?;
-        }
-        Ok(combined)
-    }
-
-    fn serialize_batch(&self, batch: &mut PlDataFrame) -> Result<Vec<u8>, EngineError> {
-        batch.rechunk_mut();
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        {
-            use polars::io::ipc::IpcStreamWriter;
-            use polars::prelude::SerWriter;
-            let mut writer = IpcStreamWriter::new(&mut cursor);
-            if self.connect_output_schema.is_none()
-                && let Some(schema) = &self.logical_schema_json
-            {
-                let mut metadata = polars_arrow::datatypes::Metadata::new();
-                metadata.insert("sparkless.logical_schema.v1".into(), schema.clone().into());
-                writer.set_custom_schema_metadata(Arc::new(metadata));
-            }
-            writer.finish(batch).map_err(polars_to_core_error)?;
-        }
-        let bytes = cursor.into_inner();
-        match &self.connect_output_schema {
-            Some(schema) => rewrite_connect_arrow_stream_schema(&bytes, schema),
-            None => Ok(bytes),
-        }
-    }
-}
-
-/// Replace the writer's unique physical field names with the ordered public Connect schema.
-/// Arrow schemas permit duplicate field names, while Polars' dataframe schema does not. The
-/// record-batch buffers remain unchanged; only the first IPC schema message is rebuilt.
-fn rewrite_connect_arrow_stream_schema(
-    bytes: &[u8],
-    public_schema: &StructType,
-) -> Result<Vec<u8>, EngineError> {
-    use polars_arrow::io::ipc::format::ipc::planus::{Builder, ReadAsRoot};
-    use polars_arrow::io::ipc::format::ipc::{Message, MessageHeader, MessageRef};
-
-    if bytes.len() < 8 || bytes[..4] != [0xff; 4] {
-        return Err(EngineError::Internal(
-            "native Arrow writer returned an invalid stream prefix".into(),
-        ));
-    }
-    let original_metadata_len = i32::from_le_bytes(bytes[4..8].try_into().unwrap());
-    let original_metadata_len = usize::try_from(original_metadata_len).map_err(|_| {
-        EngineError::Internal("native Arrow writer returned an invalid schema length".into())
-    })?;
-    let original_message_end = 8usize
-        .checked_add(original_metadata_len)
-        .filter(|end| *end <= bytes.len())
-        .ok_or_else(|| {
-            EngineError::Internal("native Arrow writer returned a truncated schema".into())
-        })?;
-    let message_ref =
-        MessageRef::read_as_root(&bytes[8..original_message_end]).map_err(|error| {
-            EngineError::Internal(format!("native Arrow schema cannot be read: {error}"))
-        })?;
-    let mut message = Message::try_from(message_ref).map_err(|error| {
-        EngineError::Internal(format!("native Arrow schema cannot be converted: {error}"))
-    })?;
-    let Some(MessageHeader::Schema(schema_message)) = message.header.as_mut() else {
-        return Err(EngineError::Internal(
-            "native Arrow stream does not begin with a schema".into(),
-        ));
-    };
-    let fields = schema_message
-        .fields
-        .as_mut()
-        .ok_or_else(|| EngineError::Internal("native Arrow schema has no fields".into()))?;
-    if fields.len() != public_schema.logical_fields().len() {
-        return Err(EngineError::Internal(format!(
-            "Connect Arrow schema has {} fields but the public schema has {}",
-            fields.len(),
-            public_schema.logical_fields().len()
-        )));
-    }
-    for (arrow_field, logical_field) in fields.iter_mut().zip(public_schema.logical_fields()) {
-        arrow_field.name = Some(logical_field.name.clone());
-        arrow_field.nullable = logical_field.nullable;
-    }
-    if let Some(metadata) = schema_message.custom_metadata.as_mut() {
-        metadata.retain(|entry| entry.key.as_deref() != Some("sparkless.logical_schema.v1"));
-        if metadata.is_empty() {
-            schema_message.custom_metadata = None;
-        }
-    }
-
-    let serialized_message = {
-        let mut builder = Builder::new();
-        builder.finish(&message, None).to_vec()
-    };
-    let padded_message_len = serialized_message
-        .len()
-        .checked_add(7)
-        .map(|length| length & !7)
-        .ok_or_else(|| EngineError::Internal("Connect Arrow schema size overflow".into()))?;
-    let continuation_len = i32::try_from(padded_message_len).map_err(|_| {
-        EngineError::Internal("Connect Arrow schema exceeds IPC framing range".into())
-    })?;
-    let mut output = Vec::with_capacity(
-        8usize
-            .saturating_add(padded_message_len)
-            .saturating_add(bytes.len() - original_message_end),
-    );
-    output.extend_from_slice(&[0xff; 4]);
-    output.extend_from_slice(&continuation_len.to_le_bytes());
-    output.extend_from_slice(&serialized_message);
-    output.resize(8 + padded_message_len, 0);
-    output.extend_from_slice(&bytes[original_message_end..]);
-    Ok(output)
-}
-
-impl Iterator for PolarsIpcBatchIterator {
-    type Item = Result<ArrowIpcStream, EngineError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.closed {
-            return None;
-        }
-        let mut rows = Vec::new();
-        let mut estimated_bytes = 0usize;
-        let mut source_ended = false;
-        loop {
-            if self.current.is_none() {
-                if let Some(error) = self.deferred_error.take() {
-                    if rows.is_empty() {
-                        self.close();
-                        return Some(Err(error));
-                    }
-                    self.deferred_error = Some(error);
-                    break;
-                }
-            }
-            if let Err(error) = self.token.check_cancelled() {
-                self.close();
-                return Some(Err(error));
-            }
-            let row = match self.next_source_row() {
-                Some(Ok(row)) if row.height() > 0 => row,
-                Some(Ok(_)) => continue,
-                Some(Err(error)) => {
-                    if !rows.is_empty() {
-                        self.deferred_error = Some(error);
-                        break;
-                    }
-                    self.close();
-                    return Some(Err(error));
-                }
-                None => {
-                    source_ended = true;
-                    break;
-                }
-            };
-            if let Err(error) = self.token.check_cancelled() {
-                self.close();
-                return Some(Err(error));
-            }
-
-            let row_bytes = row.estimated_size();
-            if !rows.is_empty() && estimated_bytes.saturating_add(row_bytes) > self.max_bytes {
-                self.deferred_row = Some(row);
-                break;
-            }
-            estimated_bytes = estimated_bytes.saturating_add(row_bytes);
-            rows.push(row);
-            if rows.len() >= self.max_rows || estimated_bytes >= self.max_bytes {
-                break;
-            }
-        }
-
-        if rows.is_empty() {
-            if source_ended {
-                if !self.emitted_empty {
-                    self.emitted_empty = true;
-                    let mut empty = PlDataFrame::empty_with_schema(&self.empty_schema);
-                    let bytes = match self.serialize_batch(&mut empty) {
-                        Ok(bytes) => bytes,
-                        Err(error) => {
-                            self.close();
-                            return Some(Err(error));
-                        }
-                    };
-                    self.close();
-                    if bytes.len() > self.max_bytes {
-                        return Some(Err(EngineError::User(format!(
-                            "an empty Arrow IPC schema requires {} bytes, exceeding max_bytes={}",
-                            bytes.len(),
-                            self.max_bytes
-                        ))));
-                    }
-                    return Some(Ok(ArrowIpcStream {
-                        bytes,
-                        row_count: 0,
-                    }));
-                }
-                self.close();
-            }
-            return None;
-        }
-        let mut combined = match Self::combine_rows(&rows) {
-            Ok(combined) => combined,
-            Err(error) => {
-                self.close();
-                return Some(Err(polars_to_core_error(error)));
-            }
-        };
-        let bytes = match self.serialize_batch(&mut combined) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                self.close();
-                return Some(Err(error));
-            }
-        };
-        if bytes.len() <= self.max_bytes {
-            if source_ended {
-                self.close();
-            }
-            return Some(Ok(ArrowIpcStream {
-                bytes,
-                row_count: rows.len() as u64,
-            }));
-        }
-
-        if rows.len() == 1 {
-            let actual_bytes = bytes.len();
-            self.close();
-            return Some(Err(EngineError::User(format!(
-                "a single Arrow IPC row requires {actual_bytes} bytes, exceeding max_bytes={}",
-                self.max_bytes
-            ))));
-        }
-        let mut prefix_rows = rows.len() / 2;
-        while prefix_rows > 0 {
-            let mut prefix = combined.slice(0, prefix_rows);
-            let prefix_bytes = match self.serialize_batch(&mut prefix) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    self.close();
-                    return Some(Err(error));
-                }
-            };
-            if prefix_bytes.len() <= self.max_bytes {
-                let mut pending = combined.slice(prefix_rows as i64, rows.len() - prefix_rows);
-                if let Some(deferred_row) = self.deferred_row.take()
-                    && let Err(error) = pending.vstack_mut(&deferred_row)
-                {
-                    self.close();
-                    return Some(Err(polars_to_core_error(error)));
-                }
-                if let Some(remaining_pending) = self.current.take() {
-                    let remaining_pending = remaining_pending.slice(
-                        self.current_offset as i64,
-                        remaining_pending.height() - self.current_offset,
-                    );
-                    if let Err(error) = pending.vstack_mut(&remaining_pending) {
-                        self.close();
-                        return Some(Err(polars_to_core_error(error)));
-                    }
-                }
-                self.current = Some(pending);
-                self.current_offset = 0;
-                return Some(Ok(ArrowIpcStream {
-                    bytes: prefix_bytes,
-                    row_count: prefix_rows as u64,
-                }));
-            }
-            prefix_rows /= 2;
-        }
-        self.close();
-        Some(Err(EngineError::User(format!(
-            "a single Arrow IPC row exceeds max_bytes={}",
-            self.max_bytes
-        ))))
-    }
 }
 
 /// DataFrame - main tabular data structure.
@@ -2518,15 +1673,7 @@ impl DataFrame {
             .collect();
         // Unqualified name: check for multiple physical columns (e.g. duplicate "id" in schema).
         if !name.contains('.') {
-            let matches: Vec<&String> = if self.case_sensitive {
-                names.iter().filter(|n| n.as_str() == name).collect()
-            } else {
-                let name_lower = name.to_lowercase();
-                names
-                    .iter()
-                    .filter(|n| n.to_lowercase() == name_lower)
-                    .collect()
-            };
+            let matches = robin_sparkless_plan::matching_indices(&names, name, self.case_sensitive);
             if matches.len() > 1 {
                 return Err(PolarsError::ColumnNotFound(
                     format!("Reference `{}` is ambiguous. AMBIGUOUS_REFERENCE", name).into(),
@@ -2534,7 +1681,7 @@ impl DataFrame {
             }
         }
         if self.case_sensitive {
-            if names.iter().any(|n| n == name) {
+            if !robin_sparkless_plan::matching_indices(&names, name, true).is_empty() {
                 return Ok(name.to_string());
             }
         } else {
@@ -2545,11 +1692,9 @@ impl DataFrame {
             if let Some(exact) = names.iter().find(|n| n.as_str() == name) {
                 return Ok(exact.clone());
             }
-            let name_lower = name.to_lowercase();
-            for n in &names {
-                if n.to_lowercase() == name_lower {
-                    return Ok(n.clone());
-                }
+            if let Some(index) = robin_sparkless_plan::matching_indices(&names, name, false).first()
+            {
+                return Ok(names[*index].clone());
             }
         }
         // Qualified name (e.g. "sm.taxonomy_id" or "l.location_id" after multi-join): try suffix (#374).
@@ -2909,12 +2054,15 @@ impl DataFrame {
     /// Preserve field declarations across joins by following the result names back to their
     /// input columns. Polars does not carry Spark field metadata or nested nullability in its
     /// physical schema, so the join result must retain the logical descriptor explicitly.
+    /// `explicit_right_aliases` maps physical key aliases to their original right fields;
+    /// these aliases can differ from the shared suffix used for non-key columns.
     pub(crate) fn joined_logical_schema(
         &self,
         other: &DataFrame,
         output: &DataFrame,
         how: JoinType,
         global_suffix: Option<&str>,
+        explicit_right_aliases: Option<&HashMap<String, String>>,
     ) -> Option<StructType> {
         if self.logical_schema.is_none() && other.logical_schema.is_none() {
             return None;
@@ -2992,6 +2140,13 @@ impl DataFrame {
             if output_schema.get(&alias).is_some() {
                 used_names.insert(alias.clone());
                 aliased_right_sources.insert(alias, right_name.clone());
+            }
+        }
+        if let Some(aliases) = explicit_right_aliases {
+            for (alias, source) in aliases {
+                if output_schema.get(alias).is_some() {
+                    aliased_right_sources.insert(alias.clone(), source.clone());
+                }
             }
         }
         let aliased_right_source = |output_name: &str| -> Option<&str> {
@@ -3414,7 +2569,7 @@ impl DataFrame {
         token.check_cancelled()?;
         if let Some(count) = self.row_count_hint {
             return usize::try_from(count).map_err(|_| {
-                EngineError::User(format!(
+                EngineError::invalid_input(format!(
                     "row count {count} exceeds this platform's usize range"
                 ))
             });
@@ -3427,7 +2582,7 @@ impl DataFrame {
                         RangeBatchError::Engine(error) => error,
                     })?;
             return usize::try_from(count).map_err(|_| {
-                EngineError::User(format!(
+                EngineError::invalid_input(format!(
                     "row count {count} exceeds this platform's usize range"
                 ))
             });
@@ -3445,9 +2600,9 @@ impl DataFrame {
             .u64()
             .map_err(polars_to_core_error)?
             .get(0)
-            .ok_or_else(|| EngineError::Internal("row count aggregate returned no value".into()))?;
+            .ok_or_else(|| EngineError::internal("row count aggregate returned no value".into()))?;
         usize::try_from(count).map_err(|_| {
-            EngineError::User(format!(
+            EngineError::invalid_input(format!(
                 "row count {count} exceeds this platform's usize range"
             ))
         })
@@ -3501,7 +2656,7 @@ impl DataFrame {
     ) -> Result<DataFrameBatches, EngineError> {
         token.check_cancelled()?;
         if max_rows == 0 {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "max_rows must be greater than zero".into(),
             ));
         }
@@ -3554,11 +2709,11 @@ impl DataFrame {
         output_schema: &StructType,
     ) -> Result<ArrowIpcBatchStream, EngineError> {
         output_schema.validate_metadata().map_err(|error| {
-            EngineError::User(format!("invalid Connect output schema metadata: {error}"))
+            EngineError::invalid_input(format!("invalid Connect output schema metadata: {error}"))
         })?;
         let physical_schema = self.schema_or_collect().map_err(polars_to_core_error)?;
         if output_schema.logical_fields().len() != physical_schema.len() {
-            return Err(EngineError::User(format!(
+            return Err(EngineError::invalid_input(format!(
                 "Connect output schema has {} fields but the native plan has {}",
                 output_schema.logical_fields().len(),
                 physical_schema.len()
@@ -3575,7 +2730,7 @@ impl DataFrame {
             )
             .map_err(polars_to_core_error)?;
             if &expected != physical_type {
-                return Err(EngineError::User(format!(
+                return Err(EngineError::invalid_input(format!(
                     "Connect output field {:?} maps to {expected} but the native plan has {physical_type}",
                     logical_field.name
                 )));
@@ -3593,34 +2748,37 @@ impl DataFrame {
     ) -> Result<ArrowIpcBatchStream, EngineError> {
         token.check_cancelled()?;
         if max_rows == 0 {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "max_rows must be greater than zero".into(),
             ));
         }
         if max_bytes == 0 {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "max_bytes must be greater than zero".into(),
             ));
         }
         let empty_schema = self.schema_or_collect().map_err(polars_to_core_error)?;
-        // Row-sized source pulls keep in-flight memory independent of max_rows/max_bytes.
-        // Range plans use the native operation pipeline with a one-row source chunk so a
-        // small byte limit is checked before a larger chunk is retained.
+        // Keep source pulls bounded while avoiding a native plan execution and frame assembly
+        // for every source row. Output IPC batches are still independently split against the
+        // caller's exact byte and row caps below.
         let source = if let Some(range) = &self.range_cardinality {
             IpcBatchSource::Range(RangeBatchProducer::new(
                 range.clone(),
                 self.case_sensitive,
                 Some(token.clone()),
-                1,
+                IPC_SOURCE_BATCH_ROWS,
             ))
         } else if let DataFrameInner::Eager(frame) = &self.inner {
             IpcBatchSource::Eager {
                 frame: Arc::clone(frame),
                 next_row: 0,
-                max_rows,
+                max_rows: max_rows.min(IPC_SOURCE_BATCH_ROWS),
             }
         } else {
-            IpcBatchSource::Polars(self.collect_batches(1).map_err(polars_to_core_error)?)
+            IpcBatchSource::Polars(
+                self.collect_batches(IPC_SOURCE_BATCH_ROWS)
+                    .map_err(polars_to_core_error)?,
+            )
         };
         let logical_schema_json = self
             .logical_schema
@@ -3628,14 +2786,14 @@ impl DataFrame {
             .map(StructType::to_json)
             .transpose()
             .map_err(|error| {
-                EngineError::User(format!("logical schema serialization failed: {error}"))
+                EngineError::invalid_input(format!("logical schema serialization failed: {error}"))
             })?;
         Ok(ArrowIpcBatchStream::new(PolarsIpcBatchIterator {
             source: Some(source),
             empty_schema,
             current: None,
             current_offset: 0,
-            deferred_row: None,
+            deferred_batch: None,
             max_rows,
             max_bytes,
             logical_schema_json,
@@ -3644,6 +2802,24 @@ impl DataFrame {
             deferred_error: None,
             emitted_empty: false,
             closed: false,
+            trace_enabled: std::env::var_os("SPARKLESS_ARROW_TRACE").as_deref()
+                == Some(std::ffi::OsStr::new("1")),
+            trace_emitted: false,
+            source_batches: 0,
+            source_rows: 0,
+            output_batches: 0,
+            serialization_time: std::time::Duration::ZERO,
+            rechunk_time: std::time::Duration::ZERO,
+            ipc_write_time: std::time::Duration::ZERO,
+            schema_rewrite_time: std::time::Duration::ZERO,
+            combine_time: std::time::Duration::ZERO,
+            max_source_batch_bytes_estimated: 0,
+            peak_buffered_frame_bytes_estimated: 0,
+            peak_combined_frame_bytes_estimated: 0,
+            peak_ipc_buffer_bytes: 0,
+            peak_ipc_rewrite_bytes_estimated: 0,
+            serialized_ipc_bytes: 0,
+            emitted_ipc_bytes: 0,
         }))
     }
 
@@ -3973,12 +3149,12 @@ impl DataFrame {
     ) -> Result<PositionalJsonResult, EngineError> {
         token.check_cancelled()?;
         if max_total_json_bytes < 2 {
-            return Err(EngineError::User(
+            return Err(EngineError::invalid_input(
                 "result exceeds the configured serialized byte limit".into(),
             ));
         }
         let probe_limit = max_rows.checked_add(1).ok_or_else(|| {
-            EngineError::User("maximum positional result row count is too large".into())
+            EngineError::invalid_input("maximum positional result row count is too large".into())
         })?;
         let limited = self
             .clone()
@@ -3990,7 +3166,7 @@ impl DataFrame {
             .map_err(polars_to_core_error)?;
         let collected = limited.collect_with_cancellation(token)?;
         if collected.height() > max_rows {
-            return Err(EngineError::User(format!(
+            return Err(EngineError::invalid_input(format!(
                 "result exceeds the configured row limit of {max_rows}"
             )));
         }
@@ -4021,7 +3197,7 @@ impl DataFrame {
                     .nth(*occurrence)
                     .map(|(index, _)| index)
                     .ok_or_else(|| {
-                        EngineError::User(format!(
+                        EngineError::invalid_input(format!(
                             "result column at position {column_index} ('{name}') is missing"
                         ))
                     })?;
@@ -4036,7 +3212,7 @@ impl DataFrame {
                         dtype,
                         array_struct_paths,
                         &serde_json::to_string(name).map_err(|error| {
-                            EngineError::User(format!(
+                            EngineError::invalid_input(format!(
                                 "could not encode result column name: {error}"
                             ))
                         })?,
@@ -4045,10 +3221,10 @@ impl DataFrame {
                     .map_err(polars_to_core_error)?
                 };
                 let cell_bytes = serde_json::to_vec(&json)
-                    .map_err(|error| EngineError::User(error.to_string()))?
+                    .map_err(|error| EngineError::invalid_input(error.to_string()))?
                     .len();
                 if cell_bytes > max_cell_json_bytes {
-                    return Err(EngineError::User(
+                    return Err(EngineError::invalid_input(
                         "a result cell exceeds the configured byte limit".into(),
                     ));
                 }
@@ -4059,7 +3235,7 @@ impl DataFrame {
                     .saturating_add(usize::from(!rows.is_empty()))
                     .saturating_add(encoded_row_bytes);
                 if next_total > max_total_json_bytes {
-                    return Err(EngineError::User(
+                    return Err(EngineError::invalid_input(
                         "serialized result exceeds the configured byte limit".into(),
                     ));
                 }
@@ -4069,7 +3245,7 @@ impl DataFrame {
                 .saturating_add(usize::from(!rows.is_empty()))
                 .saturating_add(encoded_row_bytes);
             if next_total > max_total_json_bytes {
-                return Err(EngineError::User(
+                return Err(EngineError::invalid_input(
                     "serialized result exceeds the configured byte limit".into(),
                 ));
             }
@@ -4522,6 +3698,39 @@ impl DataFrame {
         )
     }
 
+    /// Join using paired key names with Spark Connect USING semantics for full outer keys.
+    pub fn join_with_keys_using(
+        &self,
+        other: &DataFrame,
+        left_on: Vec<&str>,
+        right_on: Vec<&str>,
+        how: JoinType,
+    ) -> Result<DataFrame, PolarsError> {
+        let left_resolved: Vec<String> = left_on
+            .iter()
+            .map(|column| self.resolve_column_name(column))
+            .collect::<Result<_, _>>()?;
+        let right_resolved: Vec<String> = right_on
+            .iter()
+            .map(|column| other.resolve_column_name(column))
+            .collect::<Result<_, _>>()?;
+        let left_refs = left_resolved.iter().map(String::as_str).collect();
+        let right_refs = right_resolved.iter().map(String::as_str).collect();
+        join(
+            self,
+            other,
+            left_refs,
+            right_refs,
+            how,
+            JoinOptions {
+                case_sensitive: self.case_sensitive,
+                coalesce_same_name_keys: true,
+                mark_join_keys_ambiguous: false,
+                origin: crate::dataframe::joins::JoinOrigin::ColumnUsing,
+            },
+        )
+    }
+
     /// Order by columns (sort).
     /// When `spark.sql.caseSensitive` is false (default), column names are resolved
     /// case-insensitively so that `order_by("value")` and `order_by("VALUE")` both
@@ -4684,7 +3893,8 @@ impl DataFrame {
     /// Cross join with another DataFrame (cartesian product). PySpark crossJoin.
     pub fn cross_join(&self, other: &DataFrame) -> Result<DataFrame, PolarsError> {
         let mut output = transformations::cross_join(self, other, self.case_sensitive)?;
-        output.logical_schema = self.joined_logical_schema(other, &output, JoinType::Inner, None);
+        output.logical_schema =
+            self.joined_logical_schema(other, &output, JoinType::Inner, None, None);
         Ok(output)
     }
 
@@ -5193,1288 +4403,7 @@ impl DataFrame {
 
     /// Return a writer for generic format (parquet, csv, json). PySpark-style write API.
     pub fn write(&self) -> DataFrameWriter<'_> {
-        DataFrameWriter {
-            df: self,
-            mode: WriteMode::Overwrite,
-            format: WriteFormat::Parquet,
-            format_was_set: false,
-            options: HashMap::new(),
-            partition_by: Vec::new(),
-        }
-    }
-}
-
-/// Write mode: overwrite or append (PySpark DataFrameWriter.mode for path-based save).
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum WriteMode {
-    Overwrite,
-    Append,
-}
-
-/// Save mode for saveAsTable (PySpark default is ErrorIfExists).
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum SaveMode {
-    /// Throw if table already exists (PySpark default).
-    ErrorIfExists,
-    /// Replace existing table.
-    Overwrite,
-    /// Append to existing table; create if not exists. Column names align.
-    Append,
-    /// No-op if table exists; create if not.
-    Ignore,
-}
-
-/// Output format for generic write (PySpark DataFrameWriter.format).
-#[derive(Clone, Copy)]
-pub enum WriteFormat {
-    Parquet,
-    Csv,
-    Json,
-}
-
-/// Align two DataFrames to a merged column order (existing first, then new columns not in existing).
-/// Adds null columns for missing columns. Used for saveAsTable append with mergeSchema (issue #1109).
-pub(crate) fn align_to_merged_schema_inline(
-    existing: &PlDataFrame,
-    new_df: &PlDataFrame,
-) -> Result<(PlDataFrame, PlDataFrame), PolarsError> {
-    use polars::prelude::*;
-    let existing_names: Vec<String> = existing
-        .get_column_names()
-        .iter()
-        .map(|s| s.as_str().to_string())
-        .collect();
-    let new_names: Vec<String> = new_df
-        .get_column_names()
-        .iter()
-        .map(|s| s.as_str().to_string())
-        .collect();
-    let existing_set: HashSet<&str> = existing_names.iter().map(String::as_str).collect();
-    let mut merged: Vec<String> = existing_names.clone();
-    for n in &new_names {
-        if !existing_set.contains(n.as_str()) {
-            merged.push(n.clone());
-        }
-    }
-    let n_existing = existing.height();
-    let n_new = new_df.height();
-    let schema_existing = existing.schema();
-    let schema_new = new_df.schema();
-    let name_into = |n: &String| n.as_str().into();
-    let mut cols_existing: Vec<polars::prelude::Column> = Vec::with_capacity(merged.len());
-    let mut cols_new: Vec<polars::prelude::Column> = Vec::with_capacity(merged.len());
-    for name in &merged {
-        if let Some(dtype) = schema_existing.get(name) {
-            if let Some(idx) = existing.get_column_index(name) {
-                cols_existing.push(existing.columns()[idx].clone());
-            } else {
-                cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
-            }
-        } else if let Some(dtype) = schema_new.get(name) {
-            cols_existing.push(Series::full_null(name_into(name), n_existing, dtype).into());
-        } else {
-            cols_existing
-                .push(Series::full_null(name_into(name), n_existing, &DataType::String).into());
-        }
-        if let Some(dtype) = schema_new.get(name) {
-            if let Some(idx) = new_df.get_column_index(name) {
-                cols_new.push(new_df.columns()[idx].clone());
-            } else {
-                cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
-            }
-        } else if let Some(dtype) = schema_existing.get(name) {
-            cols_new.push(Series::full_null(name_into(name), n_new, dtype).into());
-        } else {
-            cols_new.push(Series::full_null(name_into(name), n_new, &DataType::String).into());
-        }
-    }
-    let aligned_existing = PlDataFrame::new_infer_height(cols_existing)?;
-    let aligned_new = PlDataFrame::new_infer_height(cols_new)?;
-    Ok((aligned_existing, aligned_new))
-}
-
-/// Builder for writing DataFrame to path (PySpark DataFrameWriter).
-pub struct DataFrameWriter<'a> {
-    df: &'a DataFrame,
-    mode: WriteMode,
-    format: WriteFormat,
-    format_was_set: bool,
-    options: HashMap<String, String>,
-    partition_by: Vec<String>,
-}
-
-impl<'a> DataFrameWriter<'a> {
-    pub fn mode(mut self, mode: WriteMode) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    pub fn format(mut self, format: WriteFormat) -> Self {
-        self.format = format;
-        self.format_was_set = true;
-        self
-    }
-
-    /// Add a single option (PySpark: option(key, value)). Returns self for chaining.
-    pub fn option(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.options.insert(key.into(), value.into());
-        self
-    }
-
-    /// Add multiple options (PySpark: options(**kwargs)). Returns self for chaining.
-    pub fn options(mut self, opts: impl IntoIterator<Item = (String, String)>) -> Self {
-        for (k, v) in opts {
-            self.options.insert(k, v);
-        }
-        self
-    }
-
-    /// Partition output by the given columns (PySpark: partitionBy(cols)).
-    pub fn partition_by(mut self, cols: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.partition_by = cols.into_iter().map(|s| s.into()).collect();
-        self
-    }
-
-    /// Save the DataFrame as a table (PySpark: saveAsTable). In-memory by default; when spark.sql.warehouse.dir is set, persists to disk for cross-session access.
-    /// Writer options (e.g. mergeSchema) are applied when set via option()/options(). Issue #1109.
-    pub fn save_as_table(
-        &self,
-        session: &SparkSession,
-        name: &str,
-        mode: SaveMode,
-    ) -> Result<(), PolarsError> {
-        self.save_as_table_with_cancellation(session, name, mode, &CancellationToken::new())
-    }
-
-    /// Save a table while honoring cancellation before materialization and commit acceptance.
-    pub fn save_as_table_with_cancellation(
-        &self,
-        session: &SparkSession,
-        name: &str,
-        mode: SaveMode,
-        token: &CancellationToken,
-    ) -> Result<(), PolarsError> {
-        let opts: Vec<(String, String)> = self
-            .options
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let options = if opts.is_empty() {
-            None
-        } else {
-            Some(opts.as_slice())
-        };
-        self.save_as_table_impl(session, name, mode, options, token)
-    }
-
-    /// Same as save_as_table but with options passed explicitly (e.g. from Python writer). Issue #1109.
-    pub fn save_as_table_with_options(
-        &self,
-        session: &SparkSession,
-        name: &str,
-        mode: SaveMode,
-        options: &[(String, String)],
-    ) -> Result<(), PolarsError> {
-        self.save_as_table_with_options_and_cancellation(
-            session,
-            name,
-            mode,
-            options,
-            &CancellationToken::new(),
-        )
-    }
-
-    /// Same as `save_as_table_with_options` with a caller-owned cancellation token.
-    pub fn save_as_table_with_options_and_cancellation(
-        &self,
-        session: &SparkSession,
-        name: &str,
-        mode: SaveMode,
-        options: &[(String, String)],
-        token: &CancellationToken,
-    ) -> Result<(), PolarsError> {
-        self.save_as_table_impl(
-            session,
-            name,
-            mode,
-            if options.is_empty() {
-                None
-            } else {
-                Some(options)
-            },
-            token,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn save_as_external_table_descriptor(
-        &self,
-        name: &str,
-        mode: SaveMode,
-        options: Option<&[(String, String)]>,
-        provider: &dyn ExternalCatalogProvider,
-        descriptor: &ExternalTableDescriptor,
-        logical_map_paths: &[String],
-        token: &CancellationToken,
-    ) -> Result<(), PolarsError> {
-        token
-            .check_cancelled()
-            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-        let external_mode = match mode {
-            SaveMode::ErrorIfExists => {
-                return Err(PolarsError::InvalidOperation(
-                    format!("Table or view '{name}' already exists. SaveMode is ErrorIfExists.")
-                        .into(),
-                ));
-            }
-            SaveMode::Ignore => return Ok(()),
-            SaveMode::Append => ExternalTableSaveMode::Append,
-            SaveMode::Overwrite => ExternalTableSaveMode::Overwrite,
-        };
-        fn contains_map(dtype: &crate::schema::DataType) -> bool {
-            use crate::schema::DataType;
-            match dtype {
-                DataType::Map(_, _) | DataType::MapWithNullability { .. } => true,
-                DataType::Array(element)
-                | DataType::ArrayWithNullability {
-                    element_type: element,
-                    ..
-                } => contains_map(element),
-                DataType::Struct(fields) => {
-                    fields.iter().any(|field| contains_map(&field.data_type))
-                }
-                DataType::LogicalStruct(fields) => {
-                    fields.iter().any(|field| contains_map(&field.data_type))
-                }
-                _ => false,
-            }
-        }
-        if !logical_map_paths.is_empty()
-            || descriptor
-                .schema
-                .logical_fields()
-                .iter()
-                .any(|field| contains_map(&field.data_type))
-        {
-            return Err(PolarsError::InvalidOperation(
-                "external catalog Arrow IPC writes do not yet support logical Map columns".into(),
-            ));
-        }
-
-        let table_format = options
-            .unwrap_or_default()
-            .iter()
-            .rev()
-            .find(|(key, _)| key.eq_ignore_ascii_case("sparkless.writer.format"))
-            .map(|(_, value)| value.clone())
-            .or_else(|| {
-                self.format_was_set.then(|| match self.format {
-                    WriteFormat::Parquet => "parquet".to_string(),
-                    WriteFormat::Csv => "csv".to_string(),
-                    WriteFormat::Json => "json".to_string(),
-                })
-            });
-        let writer_options = options
-            .unwrap_or_default()
-            .iter()
-            .filter(|(key, _)| !key.to_ascii_lowercase().starts_with("sparkless."))
-            .cloned()
-            .collect();
-        let partition_by = self
-            .partition_by
-            .iter()
-            .map(|column| self.df.resolve_column_name(column))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        if provider.supports_batch_writes() {
-            let max_rows = external_arrow_batch_limit(
-                options,
-                "sparkless.writer.maxRowsPerBatch",
-                DEFAULT_EXTERNAL_ARROW_BATCH_ROWS,
-            )?;
-            let max_bytes = external_arrow_batch_limit(
-                options,
-                "sparkless.writer.maxBytesPerBatch",
-                DEFAULT_EXTERNAL_ARROW_BATCH_BYTES,
-            )?;
-            let batches = self
-                .df
-                .to_arrow_ipc_batches_with_cancellation(max_rows, max_bytes, token)
-                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-            let request = ExternalTableWriteBatchRequest {
-                identifier: name.to_string(),
-                table: descriptor.clone(),
-                batches,
-                mode: external_mode,
-                format: table_format,
-                options: writer_options,
-                partition_by,
-            };
-            let result = provider
-                .write_table_batches_with_cancellation(request, token)
-                .map_err(|error| match error {
-                    EngineError::Cancelled(message) => {
-                        PolarsError::ComputeError(format!("cancelled: {message}").into())
-                    }
-                    error => PolarsError::InvalidOperation(
-                        format!("external catalog provider failed to write '{name}': {error}")
-                            .into(),
-                    ),
-                })?;
-            return result.validate_against(descriptor).map_err(|error| {
-                PolarsError::InvalidOperation(
-                    format!("external catalog provider returned an invalid write receipt: {error}")
-                        .into(),
-                )
-            });
-        }
-
-        let mut materialized = self
-            .df
-            .collect_with_cancellation(token)
-            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
-            .as_ref()
-            .clone();
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        {
-            use polars::io::ipc::IpcStreamWriter;
-            use polars::prelude::SerWriter;
-            IpcStreamWriter::new(&mut cursor).finish(&mut materialized)?;
-        }
-        let request = ExternalTableWriteRequest {
-            identifier: name.to_string(),
-            table: descriptor.clone(),
-            data: ArrowIpcStream {
-                bytes: cursor.into_inner(),
-                row_count: materialized.height() as u64,
-            },
-            mode: external_mode,
-            format: table_format,
-            options: writer_options,
-            partition_by,
-        };
-        token
-            .check_cancelled()
-            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-        let result = provider
-            .write_table_with_cancellation(request, token)
-            .map_err(|error| match error {
-                EngineError::Cancelled(message) => {
-                    PolarsError::ComputeError(format!("cancelled: {message}").into())
-                }
-                error => PolarsError::InvalidOperation(
-                    format!("external catalog provider failed to write '{name}': {error}").into(),
-                ),
-            })?;
-        result.validate_against(descriptor).map_err(|error| {
-            PolarsError::InvalidOperation(
-                format!("external catalog provider returned an invalid write receipt: {error}")
-                    .into(),
-            )
-        })?;
-        Ok(())
-    }
-
-    /// JDBC write (PySpark-style). Requires the `jdbc` or `sqlite` feature.
-    #[cfg(any(
-        feature = "jdbc",
-        feature = "jdbc_mysql",
-        feature = "jdbc_mariadb",
-        feature = "jdbc_mssql",
-        feature = "jdbc_oracle",
-        feature = "jdbc_db2",
-        feature = "sqlite"
-    ))]
-    pub fn jdbc(
-        &self,
-        url: &str,
-        table: &str,
-        properties: &[(String, String)],
-        mode: SaveMode,
-    ) -> Result<(), crate::error::EngineError> {
-        use crate::jdbc::{JdbcOptions, write_jdbc_from_polars};
-        use std::collections::HashMap;
-
-        let mut props_map = HashMap::new();
-        for (k, v) in properties {
-            props_map.insert(k.clone(), v.clone());
-        }
-        let opts = JdbcOptions::from_url_dbtable_and_properties(
-            url.to_string(),
-            table.to_string(),
-            &props_map,
-        )?;
-        let pl_df = self
-            .df
-            .collect_inner()
-            .map_err(crate::polars_to_core_error)?;
-        write_jdbc_from_polars(pl_df.as_ref(), &opts, mode)
-    }
-
-    fn save_as_table_impl(
-        &self,
-        session: &SparkSession,
-        name: &str,
-        mode: SaveMode,
-        options: Option<&[(String, String)]>,
-        token: &CancellationToken,
-    ) -> Result<(), PolarsError> {
-        use polars::prelude::*;
-        use std::fs;
-        use std::path::Path;
-
-        token
-            .check_cancelled()
-            .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-
-        if SparkSession::is_global_temp_name(name) && session.local_table_exists(name) {
-            return Err(PolarsError::InvalidOperation(
-                format!("cannot save a table over global temporary view '{name}'").into(),
-            ));
-        }
-
-        let (merge_schema, overwrite_schema, is_delta_format, logical_map_paths) =
-            options.map_or((false, false, false, Vec::new()), |opts| {
-                let mut merge_schema = false;
-                let mut overwrite_schema = false;
-                let mut is_delta = false;
-                let mut logical_map_paths: Vec<String> = Vec::new();
-                for (k, v) in opts {
-                    if k.eq_ignore_ascii_case("mergeSchema") && v.eq_ignore_ascii_case("true") {
-                        merge_schema = true;
-                    } else if k.eq_ignore_ascii_case("overwriteSchema")
-                        && v.eq_ignore_ascii_case("true")
-                    {
-                        overwrite_schema = true;
-                    } else if k.eq_ignore_ascii_case("sparkless.writer.format")
-                        && v.eq_ignore_ascii_case("delta")
-                    {
-                        is_delta = true;
-                    } else if k.eq_ignore_ascii_case("sparkless.delta.logicalMapPaths") {
-                        logical_map_paths = serde_json::from_str(v).unwrap_or_default();
-                    }
-                }
-                (merge_schema, overwrite_schema, is_delta, logical_map_paths)
-            });
-
-        // A session-local table or view shadows the external catalog. Otherwise, an exact
-        // provider hit owns this write; provider errors or unsupported writes must never fall
-        // through into Sparkless' in-memory or warehouse writer.
-        if !session.saved_table_exists(name)
-            && !session.has_exact_temp_view(name)
-            && !SparkSession::is_global_temp_name(name)
-            && let Some(provider) = session.external_catalog_provider()?
-        {
-            let descriptor = provider.resolve_table(name).map_err(|error| {
-                PolarsError::InvalidOperation(
-                    format!("external catalog provider failed to resolve '{name}': {error}").into(),
-                )
-            })?;
-            token
-                .check_cancelled()
-                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-            if let Some(descriptor) = descriptor {
-                descriptor.validate().map_err(|error| {
-                    PolarsError::InvalidOperation(
-                        format!(
-                            "external catalog returned an invalid descriptor for '{name}': {error}"
-                        )
-                        .into(),
-                    )
-                })?;
-                return self.save_as_external_table_descriptor(
-                    name,
-                    mode,
-                    options,
-                    provider.as_ref(),
-                    &descriptor,
-                    &logical_map_paths,
-                    token,
-                );
-            }
-        }
-
-        // Warehouse paths (disk-backed saveAsTable). For schema-qualified names, allow both:
-        // - "{warehouse}/{schema.table}" (single dir)
-        // - "{warehouse}/{schema}/{table}" (schema as subdir)
-        let warehouse_paths: Vec<std::path::PathBuf> = session
-            .warehouse_dir()
-            .map(|w| {
-                let mut out = Vec::with_capacity(2);
-                if let Ok(p) = robin_sparkless_core::resolve_path_under_base(w, name) {
-                    out.push(p);
-                }
-                if name.contains('.') {
-                    let alt = name.replace('.', std::path::MAIN_SEPARATOR_STR);
-                    if let Ok(p) = robin_sparkless_core::resolve_path_under_base(w, &alt) {
-                        out.push(p);
-                    }
-                }
-                out
-            })
-            .unwrap_or_default();
-        let warehouse_exists = warehouse_paths.iter().any(|p| p.is_dir());
-
-        // Delta saveAsTable is warehouse-backed. Let the transaction snapshot determine whether
-        // the target exists as a Delta table; an empty warehouse directory is only a location.
-        if is_delta_format {
-            #[cfg(feature = "delta")]
-            {
-                let target = warehouse_paths
-                    .iter()
-                    .find(|path| path.join("_delta_log").is_dir())
-                    .or_else(|| warehouse_paths.first())
-                    .ok_or_else(|| {
-                        PolarsError::InvalidOperation(
-                            "saveAsTable(format=delta) requires spark.sql.warehouse.dir to be set."
-                                .into(),
-                        )
-                    })?;
-
-                match mode {
-                    SaveMode::Ignore if session.saved_table_exists(name) => return Ok(()),
-                    SaveMode::ErrorIfExists if session.saved_table_exists(name) => {
-                        return Err(PolarsError::InvalidOperation(
-                            format!(
-                                "Table or view '{name}' already exists. SaveMode is ErrorIfExists."
-                            )
-                            .into(),
-                        ));
-                    }
-                    SaveMode::Append
-                    | SaveMode::Overwrite
-                    | SaveMode::Ignore
-                    | SaveMode::ErrorIfExists => {}
-                }
-                let pl_df = self
-                    .df
-                    .collect_with_cancellation(token)
-                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
-                    .as_ref()
-                    .clone();
-                token
-                    .check_cancelled()
-                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-                let resolved_partition_by = self
-                    .partition_by
-                    .iter()
-                    .map(|name| self.df.resolve_column_name(name))
-                    .collect::<Result<Vec<_>, _>>()?;
-                crate::delta::write_delta_with_save_options_and_logical_map_paths_for_catalog(
-                    &pl_df,
-                    target,
-                    mode,
-                    merge_schema,
-                    overwrite_schema,
-                    &resolved_partition_by,
-                    &logical_map_paths,
-                )?;
-                let loaded = crate::delta::read_delta(target, session.is_case_sensitive())?;
-                session.register_table(name, loaded);
-                return Ok(());
-            }
-            #[cfg(not(feature = "delta"))]
-            {
-                let _ = (
-                    warehouse_paths,
-                    warehouse_exists,
-                    merge_schema,
-                    overwrite_schema,
-                    logical_map_paths,
-                );
-                return Err(PolarsError::InvalidOperation(
-                    "saveAsTable(format=delta) requires the delta feature to be enabled.".into(),
-                ));
-            }
-        }
-
-        let warehouse_path = warehouse_paths.first().cloned();
-
-        fn persist_to_warehouse(
-            df: &crate::dataframe::DataFrame,
-            dir: &Path,
-        ) -> Result<(), PolarsError> {
-            use std::fs;
-            fs::create_dir_all(dir).map_err(|e| {
-                PolarsError::ComputeError(format!("saveAsTable: create dir: {e}").into())
-            })?;
-            let file_path = dir.join("data.parquet");
-            df.write()
-                .mode(crate::dataframe::WriteMode::Overwrite)
-                .format(crate::dataframe::WriteFormat::Parquet)
-                .save(&file_path)
-        }
-
-        fn check_cancelled(token: &CancellationToken) -> Result<(), PolarsError> {
-            token
-                .check_cancelled()
-                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))
-        }
-
-        fn staging_path(target: &Path) -> std::path::PathBuf {
-            static NEXT_STAGE_ID: std::sync::atomic::AtomicU64 =
-                std::sync::atomic::AtomicU64::new(0);
-            let id = NEXT_STAGE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let parent = target.parent().unwrap_or_else(|| Path::new("."));
-            let name = target
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("table");
-            parent.join(format!(
-                ".{name}.sparkless-stage-{}-{id}",
-                std::process::id()
-            ))
-        }
-
-        fn stage_warehouse_write(
-            df: &crate::dataframe::DataFrame,
-            target: &Path,
-            token: &CancellationToken,
-        ) -> Result<std::path::PathBuf, PolarsError> {
-            let materialized = df
-                .collect_with_cancellation(token)
-                .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?;
-            check_cancelled(token)?;
-            let eager = crate::dataframe::DataFrame::from_polars_with_options(
-                materialized.as_ref().clone(),
-                df.case_sensitive,
-            );
-            let stage = staging_path(target);
-            if let Err(error) = persist_to_warehouse(&eager, &stage) {
-                let _ = fs::remove_dir_all(&stage);
-                return Err(error);
-            }
-            if let Err(error) = check_cancelled(token) {
-                let _ = fs::remove_dir_all(&stage);
-                return Err(error);
-            }
-            Ok(stage)
-        }
-
-        fn commit_warehouse_stage(
-            stage: &Path,
-            target: &Path,
-            overwrite: bool,
-        ) -> Result<(), PolarsError> {
-            let backup = staging_path(target);
-            let had_target = target.exists();
-            if had_target && !overwrite {
-                let _ = fs::remove_dir_all(stage);
-                return Err(PolarsError::InvalidOperation(
-                    format!("saveAsTable target already exists: {}", target.display()).into(),
-                ));
-            }
-            if had_target {
-                if let Err(error) = fs::rename(target, &backup) {
-                    let _ = fs::remove_dir_all(stage);
-                    return Err(PolarsError::ComputeError(
-                        format!("saveAsTable: move existing target aside: {error}").into(),
-                    ));
-                }
-            }
-            if let Err(error) = fs::rename(stage, target) {
-                if had_target {
-                    let _ = fs::rename(&backup, target);
-                }
-                let _ = fs::remove_dir_all(stage);
-                return Err(PolarsError::ComputeError(
-                    format!("saveAsTable: commit staged directory: {error}").into(),
-                ));
-            }
-            if had_target {
-                let _ = fs::remove_dir_all(backup);
-            }
-            Ok(())
-        }
-
-        let final_df = match mode {
-            SaveMode::ErrorIfExists => {
-                if session.saved_table_exists(name) || warehouse_exists {
-                    return Err(PolarsError::InvalidOperation(
-                        format!(
-                            "Table or view '{name}' already exists. SaveMode is ErrorIfExists."
-                        )
-                        .into(),
-                    ));
-                }
-                if let Some(ref p) = warehouse_path {
-                    let stage = stage_warehouse_write(self.df, p, token)?;
-                    check_cancelled(token)?;
-                    commit_warehouse_stage(&stage, p, false)?;
-                }
-                self.df.clone()
-            }
-            SaveMode::Overwrite => {
-                if let Some(ref p) = warehouse_path {
-                    let stage = stage_warehouse_write(self.df, p, token)?;
-                    check_cancelled(token)?;
-                    commit_warehouse_stage(&stage, p, true)?;
-                }
-                self.df.clone()
-            }
-            SaveMode::Append => {
-                let saved_existing = session.get_saved_table(name);
-                if let (Some(existing), Some(incoming)) = (
-                    saved_existing
-                        .as_ref()
-                        .and_then(|frame| frame.logical_schema.as_ref()),
-                    self.df.logical_schema.as_ref(),
-                ) {
-                    let same_name = |left: &str, right: &str| {
-                        if self.df.case_sensitive {
-                            left == right
-                        } else {
-                            left.eq_ignore_ascii_case(right)
-                        }
-                    };
-                    for existing_field in existing.logical_fields() {
-                        let incoming_field = incoming
-                            .logical_fields()
-                            .iter()
-                            .find(|field| same_name(&field.name, &existing_field.name));
-                        if incoming_field.is_none() && !merge_schema {
-                            return Err(PolarsError::SchemaMismatch(
-                                format!(
-                                    "saveAsTable append: logical field '{}' is missing from incoming schema for table '{name}'",
-                                    existing_field.name
-                                )
-                                .into(),
-                            ));
-                        }
-                        if let Some(incoming_field) = incoming_field {
-                            if serde_json::to_value(&existing_field.data_type).ok()
-                                != serde_json::to_value(&incoming_field.data_type).ok()
-                                || existing_field.metadata != incoming_field.metadata
-                            {
-                                return Err(PolarsError::SchemaMismatch(
-                                    format!(
-                                        "saveAsTable append: logical field '{}' does not match existing table '{name}'",
-                                        existing_field.name
-                                    )
-                                    .into(),
-                                ));
-                            }
-                        }
-                    }
-                    if !merge_schema
-                        && incoming.logical_fields().iter().any(|incoming_field| {
-                            !existing
-                                .logical_fields()
-                                .iter()
-                                .any(|field| same_name(&field.name, &incoming_field.name))
-                        })
-                    {
-                        return Err(PolarsError::SchemaMismatch(
-                            format!(
-                                "saveAsTable append: incoming logical schema has extra fields for table '{name}'"
-                            )
-                            .into(),
-                        ));
-                    }
-                }
-                let existing_pl = if let Some(existing) = saved_existing.as_ref() {
-                    existing.collect_inner()?.as_ref().clone()
-                } else if warehouse_exists {
-                    // Read from warehouse (data.parquet convention). For schema-qualified names,
-                    // look in both "{warehouse}/{schema.table}" and "{warehouse}/{schema}/{table}".
-                    let mut loaded: Option<polars::prelude::DataFrame> = None;
-                    for p in &warehouse_paths {
-                        if !p.is_dir() {
-                            continue;
-                        }
-                        let data_file = p.join("data.parquet");
-                        let read_path = if data_file.is_file() {
-                            data_file.as_path()
-                        } else {
-                            p.as_path()
-                        };
-                        let pl_path = polars::prelude::PlRefPath::try_from_path(read_path)
-                            .map_err(|e| {
-                                PolarsError::ComputeError(
-                                    format!("saveAsTable append: path: {e}").into(),
-                                )
-                            })?;
-                        let lf = LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())
-                            .map_err(|e| {
-                                PolarsError::ComputeError(
-                                    format!("saveAsTable append: read warehouse: {e}").into(),
-                                )
-                            })?;
-                        loaded = Some(lf.collect().map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("saveAsTable append: collect: {e}").into(),
-                            )
-                        })?);
-                        break;
-                    }
-                    loaded.ok_or_else(|| {
-                        PolarsError::ComputeError(
-                            format!("saveAsTable append: warehouse table '{name}' not found")
-                                .into(),
-                        )
-                    })?
-                } else {
-                    // New table
-                    if let Some(ref p) = warehouse_path {
-                        let stage = stage_warehouse_write(self.df, p, token)?;
-                        check_cancelled(token)?;
-                        commit_warehouse_stage(&stage, p, false)?;
-                    } else {
-                        check_cancelled(token)?;
-                    }
-                    session.register_table(name, self.df.clone());
-                    return Ok(());
-                };
-                let new_pl = self
-                    .df
-                    .collect_with_cancellation(token)
-                    .map_err(|error| PolarsError::ComputeError(error.to_string().into()))?
-                    .as_ref()
-                    .clone();
-                if let Some(schema) = saved_existing
-                    .as_ref()
-                    .and_then(|existing| existing.logical_schema.as_ref())
-                {
-                    for field in schema.logical_fields() {
-                        let column = match new_pl.column(&field.name) {
-                            Ok(column) => column,
-                            Err(_) if merge_schema => {
-                                if !field.nullable {
-                                    return Err(PolarsError::InvalidOperation(
-                                        format!("saveAsTable append: non-nullable field '{}' contains null values", field.name).into(),
-                                    ));
-                                }
-                                continue;
-                            }
-                            Err(_) => continue,
-                        };
-                        for row in 0..new_pl.height() {
-                            let value = column.get(row)?;
-                            validate_logical_nullability(
-                                &value,
-                                &field.data_type,
-                                field.nullable,
-                                &field.name,
-                            )?;
-                        }
-                    }
-                }
-                check_cancelled(token)?;
-                let existing_for_schema = saved_existing.clone().unwrap_or_else(|| {
-                    crate::dataframe::DataFrame::from_polars_with_options(
-                        existing_pl.clone(),
-                        self.df.case_sensitive,
-                    )
-                });
-                let merged = if merge_schema {
-                    let (aligned_existing, aligned_new) =
-                        align_to_merged_schema_inline(&existing_pl, &new_pl)?;
-                    let mut out = aligned_existing;
-                    out.vstack_mut(&aligned_new)?;
-                    crate::dataframe::DataFrame::from_polars_with_options(
-                        out,
-                        self.df.case_sensitive,
-                    )
-                } else {
-                    let existing_cols: Vec<&str> = existing_pl
-                        .get_column_names()
-                        .iter()
-                        .map(|s| s.as_str())
-                        .collect();
-                    let new_cols = new_pl.get_column_names();
-                    let missing: Vec<_> = existing_cols
-                        .iter()
-                        .filter(|c| !new_cols.iter().any(|n| n.as_str() == **c))
-                        .collect();
-                    if !missing.is_empty() {
-                        return Err(PolarsError::InvalidOperation(
-                            format!(
-                                "saveAsTable append: new DataFrame missing columns: {:?}",
-                                missing
-                            )
-                            .into(),
-                        ));
-                    }
-                    let new_ordered = new_pl.select(existing_cols.iter().copied())?;
-                    let mut combined = existing_pl;
-                    combined.vstack_mut(&new_ordered)?;
-                    crate::dataframe::DataFrame::from_polars_with_options(
-                        combined,
-                        self.df.case_sensitive,
-                    )
-                };
-                let merged = if let Some(logical_schema) =
-                    existing_for_schema.merged_logical_schema(self.df, &merged, merge_schema)
-                {
-                    merged.with_logical_schema(logical_schema)?
-                } else {
-                    merged
-                };
-                if let Some(ref p) = warehouse_path {
-                    let stage = stage_warehouse_write(&merged, p, token)?;
-                    check_cancelled(token)?;
-                    commit_warehouse_stage(&stage, p, true)?;
-                }
-                merged
-            }
-            SaveMode::Ignore => {
-                if session.saved_table_exists(name) || warehouse_exists {
-                    return Ok(());
-                }
-                if let Some(ref p) = warehouse_path {
-                    let stage = stage_warehouse_write(self.df, p, token)?;
-                    check_cancelled(token)?;
-                    commit_warehouse_stage(&stage, p, false)?;
-                }
-                self.df.clone()
-            }
-        };
-        if warehouse_path.is_none() {
-            check_cancelled(token)?;
-        }
-        session.register_table(name, final_df);
-        Ok(())
-    }
-
-    /// Write as Parquet (PySpark: parquet(path)). Equivalent to format(Parquet).save(path).
-    pub fn parquet(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
-        DataFrameWriter {
-            df: self.df,
-            mode: self.mode,
-            format: WriteFormat::Parquet,
-            format_was_set: true,
-            options: self.options.clone(),
-            partition_by: self.partition_by.clone(),
-        }
-        .save(path)
-    }
-
-    /// Write as CSV (PySpark: csv(path)). Equivalent to format(Csv).save(path).
-    pub fn csv(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
-        DataFrameWriter {
-            df: self.df,
-            mode: self.mode,
-            format: WriteFormat::Csv,
-            format_was_set: true,
-            options: self.options.clone(),
-            partition_by: self.partition_by.clone(),
-        }
-        .save(path)
-    }
-
-    /// Write as JSON lines (PySpark: json(path)). Equivalent to format(Json).save(path).
-    pub fn json(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
-        DataFrameWriter {
-            df: self.df,
-            mode: self.mode,
-            format: WriteFormat::Json,
-            format_was_set: true,
-            options: self.options.clone(),
-            partition_by: self.partition_by.clone(),
-        }
-        .save(path)
-    }
-
-    /// Write to path. Overwrite replaces; append reads existing (if any) and concatenates then writes.
-    /// With partition_by, path is a directory; each partition is written as path/col1=val1/col2=val2/... with partition columns omitted from the file (Spark/Hive style).
-    pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<(), PolarsError> {
-        use polars::prelude::*;
-        let path = robin_sparkless_core::maybe_confine_files_path(path.as_ref()).map_err(|e| {
-            PolarsError::InvalidOperation(format!("write path confinement: {e}").into())
-        })?;
-        let path = path.as_path();
-        let to_write: PlDataFrame = match self.mode {
-            WriteMode::Overwrite => self.df.collect_inner()?.as_ref().clone(),
-            WriteMode::Append => {
-                if self.partition_by.is_empty() {
-                    let existing: Option<PlDataFrame> = if path.exists() && path.is_file() {
-                        match self.format {
-                            WriteFormat::Parquet => polars::prelude::PlRefPath::try_from_path(path)
-                                .ok()
-                                .and_then(|pl_path| {
-                                    LazyFrame::scan_parquet(pl_path, ScanArgsParquet::default())
-                                        .and_then(|lf| lf.collect())
-                                        .ok()
-                                }),
-                            WriteFormat::Csv => polars::prelude::PlRefPath::try_from_path(path)
-                                .ok()
-                                .and_then(|pl_path| {
-                                    LazyCsvReader::new(pl_path)
-                                        .with_has_header(true)
-                                        .finish()
-                                        .and_then(|lf| lf.collect())
-                                        .ok()
-                                }),
-                            WriteFormat::Json => polars::prelude::PlRefPath::try_from_path(path)
-                                .ok()
-                                .and_then(|pl_path| {
-                                    LazyJsonLineReader::new(pl_path)
-                                        .finish()
-                                        .and_then(|lf| lf.collect())
-                                        .ok()
-                                }),
-                        }
-                    } else {
-                        None
-                    };
-                    match existing {
-                        Some(existing) => {
-                            let lfs: [LazyFrame; 2] = [
-                                existing.clone().lazy(),
-                                self.df.collect_inner()?.as_ref().clone().lazy(),
-                            ];
-                            concat(lfs, UnionArgs::default())?.collect()?
-                        }
-                        None => self.df.collect_inner()?.as_ref().clone(),
-                    }
-                } else {
-                    self.df.collect_inner()?.as_ref().clone()
-                }
-            }
-        };
-
-        if !self.partition_by.is_empty() {
-            return self.save_partitioned(path, &to_write);
-        }
-
-        // When path is an existing directory (e.g. Delta table root from mkdtemp), write part file inside it.
-        let ext = match self.format {
-            WriteFormat::Parquet => "parquet",
-            WriteFormat::Csv => "csv",
-            WriteFormat::Json => "json",
-        };
-        let out_path = if path.exists() && path.is_dir() {
-            let part_idx = if self.mode == WriteMode::Append {
-                let suffix = format!(".{ext}");
-                let max_n = std::fs::read_dir(path)
-                    .map(|rd| {
-                        rd.filter_map(Result::ok)
-                            .filter_map(|e| {
-                                e.file_name().to_str().and_then(|s| {
-                                    s.strip_prefix("part-")
-                                        .and_then(|t| t.strip_suffix(&suffix))
-                                        .and_then(|t| t.parse::<u32>().ok())
-                                })
-                            })
-                            .max()
-                            .unwrap_or(0)
-                    })
-                    .unwrap_or(0);
-                max_n + 1
-            } else {
-                0
-            };
-            path.join(format!("part-{part_idx:05}.{ext}"))
-        } else {
-            path.to_path_buf()
-        };
-
-        match self.format {
-            WriteFormat::Parquet => {
-                if let Some(parent) = out_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        PolarsError::ComputeError(format!("write parquet create dir: {e}").into())
-                    })?;
-                }
-                let mut file = std::fs::File::create(&out_path).map_err(|e| {
-                    PolarsError::ComputeError(format!("write parquet create: {e}").into())
-                })?;
-                let mut df_mut = to_write;
-                ParquetWriter::new(&mut file)
-                    .finish(&mut df_mut)
-                    .map_err(|e| PolarsError::ComputeError(format!("write parquet: {e}").into()))?;
-            }
-            WriteFormat::Csv => {
-                let has_header = self
-                    .options
-                    .get("header")
-                    .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-                    .unwrap_or(true);
-                let delimiter = self
-                    .options
-                    .get("sep")
-                    .and_then(|s| s.bytes().next())
-                    .unwrap_or(b',');
-                if let Some(parent) = out_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        PolarsError::ComputeError(format!("write csv create dir: {e}").into())
-                    })?;
-                }
-                let mut file = std::fs::File::create(&out_path).map_err(|e| {
-                    PolarsError::ComputeError(format!("write csv create: {e}").into())
-                })?;
-                CsvWriter::new(&mut file)
-                    .include_header(has_header)
-                    .with_separator(delimiter)
-                    .finish(&mut to_write.clone())
-                    .map_err(|e| PolarsError::ComputeError(format!("write csv: {e}").into()))?;
-            }
-            WriteFormat::Json => {
-                if let Some(parent) = out_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        PolarsError::ComputeError(format!("write json create dir: {e}").into())
-                    })?;
-                }
-                let mut file = std::fs::File::create(&out_path).map_err(|e| {
-                    PolarsError::ComputeError(format!("write json create: {e}").into())
-                })?;
-                JsonWriter::new(&mut file)
-                    .finish(&mut to_write.clone())
-                    .map_err(|e| PolarsError::ComputeError(format!("write json: {e}").into()))?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Write partitioned by columns: path/col1=val1/col2=val2/part-00000.{ext}. Partition columns are not written into the file (Spark/Hive style).
-    fn save_partitioned(&self, path: &Path, to_write: &PlDataFrame) -> Result<(), PolarsError> {
-        use polars::prelude::*;
-        let resolved: Vec<String> = self
-            .partition_by
-            .iter()
-            .map(|c| self.df.resolve_column_name(c))
-            .collect::<Result<Vec<_>, _>>()?;
-        let all_names = to_write.get_column_names();
-        let data_cols: Vec<&str> = all_names
-            .iter()
-            .filter(|n| !resolved.iter().any(|r| r == n.as_str()))
-            .map(|n| n.as_str())
-            .collect();
-
-        let unique_keys = to_write
-            .select(resolved.iter().map(|s| s.as_str()).collect::<Vec<_>>())?
-            .unique::<Option<&[String]>, String>(
-                None,
-                polars::prelude::UniqueKeepStrategy::First,
-                None,
-            )?;
-
-        if self.mode == WriteMode::Overwrite && path.exists() {
-            if path.is_dir() {
-                std::fs::remove_dir_all(path).map_err(|e| {
-                    PolarsError::ComputeError(
-                        format!("write partitioned: remove_dir_all: {e}").into(),
-                    )
-                })?;
-            } else {
-                std::fs::remove_file(path).map_err(|e| {
-                    PolarsError::ComputeError(format!("write partitioned: remove_file: {e}").into())
-                })?;
-            }
-        }
-        std::fs::create_dir_all(path).map_err(|e| {
-            PolarsError::ComputeError(format!("write partitioned: create_dir_all: {e}").into())
-        })?;
-
-        let ext = match self.format {
-            WriteFormat::Parquet => "parquet",
-            WriteFormat::Csv => "csv",
-            WriteFormat::Json => "json",
-        };
-
-        for row_idx in 0..unique_keys.height() {
-            let row = unique_keys
-                .get(row_idx)
-                .ok_or_else(|| PolarsError::ComputeError("partition_row: get row".into()))?;
-            let filter_expr = partition_row_to_filter_expr(&resolved, &row)?;
-            let subset = to_write.clone().lazy().filter(filter_expr).collect()?;
-            let subset = subset.select(data_cols.iter().copied())?;
-            if subset.height() == 0 {
-                continue;
-            }
-
-            let partition_segments = resolved
-                .iter()
-                .zip(row.iter())
-                .map(|(name, av)| format_partition_value(av).map(|value| format!("{name}={value}")))
-                .collect::<Result<Vec<_>, _>>()?;
-            let part_path = partition_segments
-                .into_iter()
-                .fold(path.to_path_buf(), |p, seg| p.join(seg));
-            std::fs::create_dir_all(&part_path).map_err(|e| {
-                PolarsError::ComputeError(
-                    format!("write partitioned: create_dir_all partition: {e}").into(),
-                )
-            })?;
-
-            let file_idx = if self.mode == WriteMode::Append {
-                let suffix = format!(".{ext}");
-                let max_n = std::fs::read_dir(&part_path)
-                    .map(|rd| {
-                        rd.filter_map(Result::ok)
-                            .filter_map(|e| {
-                                e.file_name().to_str().and_then(|s| {
-                                    s.strip_prefix("part-")
-                                        .and_then(|t| t.strip_suffix(&suffix))
-                                        .and_then(|t| t.parse::<u32>().ok())
-                                })
-                            })
-                            .max()
-                            .unwrap_or(0)
-                    })
-                    .unwrap_or(0);
-                max_n + 1
-            } else {
-                0
-            };
-            let filename = format!("part-{file_idx:05}.{ext}");
-            let file_path = part_path.join(&filename);
-
-            match self.format {
-                WriteFormat::Parquet => {
-                    let mut file = std::fs::File::create(&file_path).map_err(|e| {
-                        PolarsError::ComputeError(
-                            format!("write partitioned parquet create: {e}").into(),
-                        )
-                    })?;
-                    let mut df_mut = subset;
-                    ParquetWriter::new(&mut file)
-                        .finish(&mut df_mut)
-                        .map_err(|e| {
-                            PolarsError::ComputeError(
-                                format!("write partitioned parquet: {e}").into(),
-                            )
-                        })?;
-                }
-                WriteFormat::Csv => {
-                    let has_header = self
-                        .options
-                        .get("header")
-                        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-                        .unwrap_or(true);
-                    let delimiter = self
-                        .options
-                        .get("sep")
-                        .and_then(|s| s.bytes().next())
-                        .unwrap_or(b',');
-                    let mut file = std::fs::File::create(&file_path).map_err(|e| {
-                        PolarsError::ComputeError(
-                            format!("write partitioned csv create: {e}").into(),
-                        )
-                    })?;
-                    CsvWriter::new(&mut file)
-                        .include_header(has_header)
-                        .with_separator(delimiter)
-                        .finish(&mut subset.clone())
-                        .map_err(|e| {
-                            PolarsError::ComputeError(format!("write partitioned csv: {e}").into())
-                        })?;
-                }
-                WriteFormat::Json => {
-                    let mut file = std::fs::File::create(&file_path).map_err(|e| {
-                        PolarsError::ComputeError(
-                            format!("write partitioned json create: {e}").into(),
-                        )
-                    })?;
-                    JsonWriter::new(&mut file)
-                        .finish(&mut subset.clone())
-                        .map_err(|e| {
-                            PolarsError::ComputeError(format!("write partitioned json: {e}").into())
-                        })?;
-                }
-            }
-        }
-        Ok(())
+        DataFrameWriter::new(self)
     }
 }
 
@@ -7164,6 +5093,186 @@ mod tests {
     };
 
     #[test]
+    fn dynamic_integer_range_filters_keep_exact_count_hints() {
+        let session = SparkSession::builder()
+            .app_name("dynamic-integer-range-count")
+            .get_or_create();
+        let range = session.range(0, 10_000_000, 1).unwrap();
+
+        let strict = range.filter(col("id").gt(5_i64)).unwrap();
+        assert_eq!(strict.row_count_hint, Some(9_999_994));
+        assert_eq!(strict.count().unwrap(), 9_999_994);
+
+        let inclusive = range.filter(col("id").lt_eq(5_i64)).unwrap();
+        assert_eq!(inclusive.row_count_hint, Some(6));
+        assert_eq!(inclusive.count().unwrap(), 6);
+
+        let reversed = range.filter(lit(5_i64).lt(col("id"))).unwrap();
+        assert_eq!(reversed.row_count_hint, Some(9_999_994));
+        assert_eq!(reversed.count().unwrap(), 9_999_994);
+    }
+
+    #[test]
+    fn dynamic_range_counts_cover_reverse_empty_and_fractional_fallbacks() {
+        let session = SparkSession::builder()
+            .app_name("dynamic-range-count-boundaries")
+            .get_or_create();
+        let reverse = session.range(10, -1, -2).unwrap();
+        let reverse_filtered = reverse.filter(col("id").gt_eq(4_i64)).unwrap();
+        assert_eq!(reverse_filtered.row_count_hint, Some(4));
+        assert_eq!(reverse_filtered.count().unwrap(), 4);
+
+        let empty = session.range(0, 0, 1).unwrap();
+        let empty_filtered = empty.filter(col("id").gt(1_i64)).unwrap();
+        assert_eq!(empty_filtered.row_count_hint, Some(0));
+        assert_eq!(empty_filtered.count().unwrap(), 0);
+
+        let fractional = reverse.filter(col("id").gt(3.5_f64)).unwrap();
+        assert_eq!(fractional.row_count_hint, None);
+        assert_eq!(fractional.count().unwrap(), 4);
+
+        let out_of_range = reverse.filter(col("id").lt(lit(u64::MAX))).unwrap();
+        assert_eq!(out_of_range.row_count_hint, None);
+        assert_eq!(out_of_range.count().unwrap(), 6);
+
+        let lower = Expr::BinaryExpr {
+            left: std::sync::Arc::new(col("id")),
+            op: Operator::Gt,
+            right: std::sync::Arc::new(lit(2_i64)),
+        };
+        let upper = Expr::BinaryExpr {
+            left: std::sync::Arc::new(col("id")),
+            op: Operator::Lt,
+            right: std::sync::Arc::new(lit(9_i64)),
+        };
+        let compound = Expr::BinaryExpr {
+            left: std::sync::Arc::new(lower),
+            op: Operator::And,
+            right: std::sync::Arc::new(upper),
+        };
+        let unsupported = reverse.filter(compound).unwrap();
+        assert_eq!(unsupported.row_count_hint, None);
+        assert_eq!(unsupported.count().unwrap(), 3);
+
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        assert!(matches!(
+            fractional.count_with_cancellation(&cancelled),
+            Err(error) if error.category() == robin_sparkless_core::ErrorCategory::Cancelled
+        ));
+    }
+
+    #[test]
+    fn dynamic_range_comparison_hints_match_values_at_signed_boundaries() {
+        use std::sync::Arc;
+
+        let session = SparkSession::builder()
+            .app_name("dynamic-range-count-comparison-matrix")
+            .get_or_create();
+        let ranges = [
+            (0, 11, 2, vec![i64::MIN, -1, 0, 3, 10, i64::MAX]),
+            (9, -4, -3, vec![i64::MIN, -4, 0, 3, 9, i64::MAX]),
+            (
+                i64::MIN,
+                i64::MIN + 5,
+                1,
+                vec![i64::MIN, i64::MIN + 1, i64::MIN + 4, i64::MAX],
+            ),
+            (
+                i64::MAX - 5,
+                i64::MAX,
+                2,
+                vec![i64::MIN, i64::MAX - 5, i64::MAX - 1, i64::MAX],
+            ),
+            (3, 3, 1, vec![i64::MIN, 0, 3, i64::MAX]),
+        ];
+        let operators = [
+            Operator::Eq,
+            Operator::NotEq,
+            Operator::Lt,
+            Operator::LtEq,
+            Operator::Gt,
+            Operator::GtEq,
+        ];
+
+        for (start, end, step, thresholds) in ranges {
+            let range = session.range(start, end, step).unwrap();
+            let mut values = Vec::new();
+            let mut value = start as i128;
+            let end = end as i128;
+            let step_wide = step as i128;
+            while if step_wide > 0 {
+                value < end
+            } else {
+                value > end
+            } {
+                values.push(value as i64);
+                value += step_wide;
+            }
+
+            for threshold in thresholds {
+                for operator in operators {
+                    for reversed in [false, true] {
+                        let compare = |left: i64, right: i64| match operator {
+                            Operator::Eq => left == right,
+                            Operator::NotEq => left != right,
+                            Operator::Lt => left < right,
+                            Operator::LtEq => left <= right,
+                            Operator::Gt => left > right,
+                            Operator::GtEq => left >= right,
+                            _ => unreachable!("only integer comparison operators are used"),
+                        };
+                        let expected = values
+                            .iter()
+                            .filter(|value| {
+                                if reversed {
+                                    compare(threshold, **value)
+                                } else {
+                                    compare(**value, threshold)
+                                }
+                            })
+                            .count() as u64;
+                        let (left, right) = if reversed {
+                            (lit(threshold), col("id"))
+                        } else {
+                            (col("id"), lit(threshold))
+                        };
+                        let predicate = Expr::BinaryExpr {
+                            left: Arc::new(left),
+                            op: operator,
+                            right: Arc::new(right),
+                        };
+                        let filtered = range.clone().filter(predicate).unwrap();
+                        let context = format!(
+                            "range=({start}, {end}, {step}) operator={operator:?} \
+                             threshold={threshold} reversed={reversed}"
+                        );
+                        assert_eq!(filtered.row_count_hint, Some(expected), "{context}");
+                        assert_eq!(
+                            filtered.collect().unwrap().height() as u64,
+                            expected,
+                            "{context}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn integer_literal_recognizes_dynamic_values_with_checked_i64_bounds() {
+        let literal = |expression: Expr| match expression {
+            Expr::Literal(value) => value,
+            other => panic!("expected a literal expression, got {other:?}"),
+        };
+        assert_eq!(integer_literal(&literal(lit(42_i64))), Some(42));
+        assert_eq!(integer_literal(&literal(lit(i64::MIN))), Some(i64::MIN));
+        assert_eq!(integer_literal(&literal(lit(i64::MAX))), Some(i64::MAX));
+        assert_eq!(integer_literal(&literal(lit(u64::MAX))), None);
+        assert_eq!(integer_literal(&literal(lit(1.0_f64))), None);
+    }
+
+    #[test]
     fn with_columns_updates_replaced_column_nullability() {
         use polars::prelude::{DataType as PolarsDataType, NULL, lit};
         use robin_sparkless_core::DataType as LogicalDataType;
@@ -7322,6 +5431,291 @@ mod tests {
     }
 
     #[test]
+    fn full_outer_using_join_coalesces_case_insensitive_keys() {
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64, 2_i64], "left_value" => [10_i64, 20_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("ID" => [1_i64, 3_i64], "right_value" => [100_i64, 300_i64])
+                .unwrap(),
+        );
+
+        let joined = left
+            .join_with_keys_using(&right, vec!["id"], vec!["ID"], JoinType::Outer)
+            .unwrap();
+        let rows = joined.collect().unwrap();
+        assert_eq!(
+            rows.get_column_names()
+                .iter()
+                .filter(|name| **name == "id")
+                .count(),
+            1
+        );
+        assert!(
+            !rows
+                .get_column_names()
+                .iter()
+                .any(|name| **name == "ID_right")
+        );
+        let ids = rows.column("id").unwrap().i64().unwrap();
+        assert!(ids.into_iter().any(|id| id == Some(3)));
+    }
+
+    #[test]
+    fn case_insensitive_using_joins_preserve_overlapping_right_values() {
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64, 2], "value" => [10_i64, 20], "label" => ["left", "left-only"]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("ID" => [1_i64, 3], "value" => [100_i64, 300], "tag" => ["right", "right-only"]).unwrap(),
+        );
+        for how in [JoinType::Inner, JoinType::Left, JoinType::Right] {
+            let joined = left
+                .join_with_keys(&right, vec!["id"], vec!["ID"], how, false)
+                .unwrap();
+            let rows = joined.collect().unwrap();
+            assert_eq!(rows.width(), 5, "{how:?}");
+            assert_eq!(rows.height(), if how == JoinType::Inner { 1 } else { 2 });
+            let ids = rows.column("id").unwrap().i64().unwrap();
+            let values = rows.column("value").unwrap().i64().unwrap();
+            let right_values = rows.column("value_right").unwrap().i64().unwrap();
+            let tags = rows.column("tag").unwrap().str().unwrap();
+            for index in 0..rows.height() {
+                match ids.get(index).unwrap() {
+                    1 => {
+                        assert_eq!(values.get(index), Some(10), "{how:?}");
+                        assert_eq!(right_values.get(index), Some(100), "{how:?}");
+                        assert_eq!(tags.get(index), Some("right"), "{how:?}");
+                    }
+                    2 => {
+                        assert_eq!(values.get(index), Some(20));
+                        assert_eq!(right_values.get(index), None);
+                        assert_eq!(tags.get(index), None);
+                    }
+                    3 => {
+                        assert_eq!(values.get(index), None);
+                        assert_eq!(right_values.get(index), Some(300));
+                        assert_eq!(tags.get(index), Some("right-only"));
+                    }
+                    id => panic!("unexpected key {id} for {how:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn outer_using_join_preserves_columns_named_like_internal_key_copies() {
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "__rs_outer_key_id" => [777_i64], "__rs_outer_key_id_1" => [778_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64, 3], "__rs_outer_key_id_2" => [900_i64, 901], "amount" => [100_i64, 300]).unwrap(),
+        );
+        let joined = left
+            .join_with_keys_using(&right, vec!["id"], vec!["id"], JoinType::Outer)
+            .unwrap();
+        let rows = joined.collect().unwrap();
+        assert_eq!(rows.width(), 5);
+        assert_eq!(rows.height(), 2);
+        let ids = rows.column("id").unwrap().i64().unwrap();
+        for index in 0..rows.height() {
+            let matched = ids.get(index) == Some(1);
+            assert_eq!(
+                rows.column("__rs_outer_key_id")
+                    .unwrap()
+                    .i64()
+                    .unwrap()
+                    .get(index),
+                matched.then_some(777)
+            );
+            assert_eq!(
+                rows.column("__rs_outer_key_id_1")
+                    .unwrap()
+                    .i64()
+                    .unwrap()
+                    .get(index),
+                matched.then_some(778)
+            );
+            assert_eq!(
+                rows.column("__rs_outer_key_id_2")
+                    .unwrap()
+                    .i64()
+                    .unwrap()
+                    .get(index),
+                Some(if matched { 900 } else { 901 })
+            );
+        }
+    }
+
+    #[test]
+    fn normalized_using_keys_preserve_per_column_suffix_metadata() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [10_i64], "a_right" => [90_i64], "b" => [20_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("ID" => [1_i64], "a" => [100_i64], "b" => [200_i64]).unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![
+            StructField::new("ID".into(), LogicalDataType::Long, false),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+            StructField::new("b".into(), LogicalDataType::Long, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-b"))].into()),
+        ]))
+        .unwrap();
+        for how in [JoinType::Inner, JoinType::Left, JoinType::Right] {
+            let joined = left
+                .join_with_keys(&right, vec!["id"], vec!["ID"], how, false)
+                .unwrap();
+            let schema = joined.schema().unwrap();
+            let field = schema
+                .logical_fields()
+                .iter()
+                .find(|field| field.name == "b_right")
+                .unwrap();
+            assert_eq!(field.metadata["origin"], "right-b", "{how:?}");
+            assert_eq!(field.nullable, how == JoinType::Left, "{how:?}");
+            let rows = joined.collect().unwrap();
+            assert_eq!(
+                rows.column("a_right_1").unwrap().i64().unwrap().get(0),
+                Some(100),
+                "{how:?}"
+            );
+            assert_eq!(
+                rows.column("b_right").unwrap().i64().unwrap().get(0),
+                Some(200),
+                "{how:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_outer_using_join_reserves_existing_right_key_aliases() {
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "value" => [10_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("ID" => [1_i64, 3_i64], "ID_right" => [100_i64, 300_i64]).unwrap(),
+        );
+
+        let joined = left
+            .join_with_keys_using(&right, vec!["id"], vec!["ID"], JoinType::Outer)
+            .unwrap();
+        let rows = joined.collect().unwrap();
+        assert!(rows.column("id").is_ok());
+        assert!(rows.column("ID_right").is_ok());
+        assert!(
+            rows.column("id")
+                .unwrap()
+                .i64()
+                .unwrap()
+                .into_iter()
+                .any(|id| id == Some(3))
+        );
+    }
+
+    #[test]
+    fn condition_join_shared_suffix_preserves_right_field_metadata() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left = DataFrame::from_polars(
+            polars::prelude::df!(
+                "id" => [1_i64],
+                "a" => [10_i64],
+                "a_right" => [90_i64],
+                "b" => [10_i64],
+                "b_right" => [80_i64]
+            )
+            .unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [100_i64], "B" => ["right"]).unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![
+            StructField::new("id".into(), LogicalDataType::Long, false),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+            StructField::new("B".into(), LogicalDataType::String, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-b"))].into()),
+        ]))
+        .unwrap();
+
+        let schema = left
+            .join_with_keys(&right, vec!["id"], vec!["id"], JoinType::Inner, true)
+            .unwrap()
+            .schema()
+            .unwrap();
+        let field = schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "B_right_1")
+            .unwrap();
+        assert_eq!(
+            field.metadata.get("origin"),
+            Some(&serde_json::json!("right-b"))
+        );
+        assert!(!field.nullable);
+    }
+
+    #[test]
+    fn case_insensitive_join_alias_skips_existing_case_variant() {
+        let left = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "b" => [10_i64], "B_right" => [20_i64]).unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "other" => [30_i64], "B" => [40_i64]).unwrap(),
+        );
+
+        let joined = left
+            .join_with_keys(&right, vec!["id"], vec!["id"], JoinType::Inner, true)
+            .unwrap();
+        let columns = joined.columns().unwrap();
+        assert!(columns.iter().any(|name| name == "B_right_1"));
+        assert!(columns.iter().any(|name| name == "B_right"));
+    }
+
+    #[test]
+    fn outer_condition_join_uses_explicit_key_alias_metadata() {
+        use robin_sparkless_core::DataType as LogicalDataType;
+
+        let left = DataFrame::from_polars(
+            polars::prelude::df!(
+                "id" => [1_i64], "a" => [10_i64], "a_right" => [20_i64],
+                "id_right" => [777_i64], "a_right_1" => [30_i64]
+            )
+            .unwrap(),
+        );
+        let right = DataFrame::from_polars(
+            polars::prelude::df!("id" => [1_i64], "a" => [100_i64]).unwrap(),
+        )
+        .with_logical_schema(StructType::from_logical_fields(vec![
+            StructField::new("id".into(), LogicalDataType::Long, false)
+                .with_metadata([("origin".into(), serde_json::json!("right-key"))].into()),
+            StructField::new("a".into(), LogicalDataType::Long, false),
+        ]))
+        .unwrap();
+
+        let joined = left
+            .join_with_keys(&right, vec!["id"], vec!["id"], JoinType::Outer, true)
+            .unwrap();
+        let schema = joined.schema().unwrap();
+        let right_key = schema
+            .logical_fields()
+            .iter()
+            .find(|field| field.name == "id_right_1")
+            .unwrap();
+        assert_eq!(right_key.metadata["origin"], "right-key");
+        let rows = joined.collect().unwrap();
+        assert_eq!(
+            rows.column("id_right").unwrap().i64().unwrap().get(0),
+            Some(777)
+        );
+        assert_eq!(
+            rows.column("id_right_1").unwrap().i64().unwrap().get(0),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn earlier_nonoverlap_right_column_reserves_its_name_for_join_aliases() {
         use robin_sparkless_core::DataType as LogicalDataType;
 
@@ -7421,7 +5815,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(EngineError::User(message)) if message == "max_rows must be greater than zero"
+            Err(error) if error.user_message() == "max_rows must be greater than zero"
         ));
     }
 
@@ -7825,6 +6219,46 @@ mod tests {
     }
 
     #[test]
+    fn arrow_ipc_batches_split_vectorized_source_chunks_by_row_and_byte_budgets() {
+        use polars::io::ipc::IpcStreamReader;
+        use polars::prelude::SerReader;
+
+        let session = SparkSession::builder()
+            .app_name("vectorized-range-ipc-budgets")
+            .get_or_create();
+        let frame = session.range(0, 600, 1).unwrap();
+        let mut batches = frame
+            .to_arrow_ipc_batches_with_cancellation(100, 1024, &CancellationToken::new())
+            .unwrap();
+        let mut expected = 0i64;
+        let mut batch_count = 0usize;
+
+        for stream in &mut batches {
+            let stream = stream.unwrap();
+            assert!(stream.bytes.len() <= 1024);
+            assert!(stream.row_count <= 100);
+            let rows = IpcStreamReader::new(std::io::Cursor::new(stream.bytes))
+                .finish()
+                .unwrap();
+            assert_eq!(stream.row_count, rows.height() as u64);
+            for value in rows
+                .column("id")
+                .unwrap()
+                .i64()
+                .unwrap()
+                .into_no_null_iter()
+            {
+                assert_eq!(value, expected);
+                expected += 1;
+            }
+            batch_count += 1;
+        }
+
+        assert_eq!(expected, 600);
+        assert!(batch_count >= 6);
+    }
+
+    #[test]
     fn cancellable_dataframe_batches_use_the_native_range_source() {
         let session = SparkSession::builder()
             .app_name("projected-range-dataframe-batches")
@@ -7877,7 +6311,8 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(RangeBatchError::Engine(EngineError::Cancelled(_)))
+            Err(RangeBatchError::Engine(error))
+                if error.category() == robin_sparkless_core::ErrorCategory::Cancelled
         ));
         assert_eq!(visited, 1);
     }
@@ -8917,7 +7352,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             undersized_empty_batch.next().unwrap(),
-            Err(EngineError::User(message)) if message.contains("empty Arrow IPC schema")
+            Err(error) if error.user_message().contains("empty Arrow IPC schema")
         ));
     }
 
@@ -9173,7 +7608,7 @@ mod tests {
         cancelled.cancel();
         assert!(matches!(
             filtered.count_with_cancellation(&cancelled),
-            Err(EngineError::Cancelled(_))
+            Err(error) if error.category() == robin_sparkless_core::ErrorCategory::Cancelled
         ));
     }
 
@@ -9502,7 +7937,7 @@ mod tests {
                 &HashSet::new(),
                 &token,
             ),
-            Err(EngineError::User(message)) if message.contains("cell")
+            Err(error) if error.user_message().contains("cell")
         ));
         assert!(matches!(
             df.collect_as_positional_json_with_limits(
@@ -9512,7 +7947,7 @@ mod tests {
                 &HashSet::new(),
                 &token,
             ),
-            Err(EngineError::User(message)) if message.contains("serialized result")
+            Err(error) if error.user_message().contains("serialized result")
         ));
     }
 

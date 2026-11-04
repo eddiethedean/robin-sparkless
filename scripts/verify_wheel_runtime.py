@@ -166,6 +166,22 @@ def _verify_native_binary(wheel: Path, root: Path, expected_machine: str) -> Non
         raise ValueError("unsupported runtime platform: {}".format(sys.platform))
 
 
+def _verify_api_package_boundary(wheel: Path) -> None:
+    with zipfile.ZipFile(wheel) as archive:
+        files = set(archive.namelist())
+    retired = {
+        "sparkless/server.py",
+        "sparkless/_native.pyi",
+        "sparkless/sql/functions.py",
+    }
+    retired.update(path for path in files if path.startswith("sparkless/testing/"))
+    present = sorted(retired & files)
+    if present:
+        raise ValueError("API wheel contains retired package paths: {}".format(present))
+    if "sparkless/sql/functions/__init__.py" not in files:
+        raise ValueError("API wheel is missing the SQL functions package facade")
+
+
 def _exercise_runtime(root: Path) -> None:
     from sparkless.sql import SparkSession
 
@@ -233,6 +249,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        _verify_api_package_boundary(args.api_wheel)
         digest, _actual_machine = _check_wheel(
             args.wheel, args.platform_tag, args.machine
         )
@@ -243,13 +260,25 @@ def main() -> int:
             raise ValueError("installed native engine version does not match the wheel")
         if importlib.metadata.version("sparkless") != args.api_wheel.name.split("-")[1]:
             raise ValueError("installed Sparkless version does not match the wheel")
-        import sparkless._native
-        import sparkless_native._native
+        import sparkless
 
-        if sparkless._native is not sparkless_native._native:
-            raise ValueError(
-                "legacy native import does not resolve to the engine module"
-            )
+        native_module = importlib.import_module("sparkless_native._native")
+
+        if native_module.__name__ != "sparkless_native._native":
+            raise ValueError("the canonical native extension failed to import")
+
+        if hasattr(sparkless, "_native"):
+            raise ValueError("the removed sparkless._native alias is still exposed")
+        if hasattr(sparkless, "SparklessServer") or hasattr(
+            sparkless, "SparklessConnect"
+        ):
+            raise ValueError("the local API still exposes retired server aliases")
+        try:
+            importlib.import_module("sparkless._native")
+        except ModuleNotFoundError:
+            pass
+        else:
+            raise ValueError("the removed sparkless._native module is still importable")
 
         with tempfile.TemporaryDirectory(
             prefix="sparkless-wheel-witness-"

@@ -10,7 +10,7 @@ Error:
     Available columns: dept_id, name
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 # Get the appropriate imports based on backend (sparkless or PySpark)
 imports = get_imports()

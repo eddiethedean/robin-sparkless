@@ -5,7 +5,7 @@ Uses PySpark APIs only: struct fields via getField("E1"), getField("E2") (case a
 StructType/Window from get_imports().
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

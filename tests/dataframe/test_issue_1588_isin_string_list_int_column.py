@@ -7,7 +7,7 @@ raise when filtering e.g. col("example1").isin(["1", "2"]) on an int column.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 F = get_imports().F
 

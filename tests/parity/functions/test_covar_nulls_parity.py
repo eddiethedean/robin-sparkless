@@ -5,7 +5,7 @@ PySpark excludes rows where either column is null before computing covariance.
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestCovarNullsParity(ParityTestBase):

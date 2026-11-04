@@ -4,7 +4,7 @@ Unit tests for Issue #327: orderBy() with .asc()/.desc() (PySpark parity).
 PySpark does not support orderBy(..., ascending=...). Use col("x").asc() or .desc().
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

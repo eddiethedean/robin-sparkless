@@ -1,6 +1,6 @@
 """Regression test for #1412: array of struct built from literals inside select."""
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_array_struct_in_array_with_range(spark):

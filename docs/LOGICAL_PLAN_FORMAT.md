@@ -56,13 +56,9 @@ Example: `{"op": "withColumn", "payload": {"name": "upper_name", "expr": {"fn": 
 
 ### groupBy
 
-- **payload**: `{"group_by": ["col1", ...], "aggs": [...]}`.
+- **payload**: `{"group_by": ["col1", ...], "aggs": [...]}`. Both arrays are required by the executor.
   - `group_by`: list of grouping key column names.
-  - Optional `aggs`: see **agg** below. When provided, `groupBy` + `agg` are executed in a single logical step.
-
-### agg
-
-- **payload**: `{"aggs": [...]}`. When used as a separate op, it is applied to the result of the previous **groupBy** (for backwards compatibility). New plans SHOULD prefer putting `aggs` inside the `groupBy` payload.
+- `aggs`: see the aggregation entries below.
 
 Each entry in `aggs` is one aggregation:
 
@@ -73,22 +69,9 @@ Each entry in `aggs` is one aggregation:
 - For `"count"`, `column` may be omitted or a column name.
 - Optional `alias`: output column name (e.g. `"sum(v)"`, `"count(v)"` for PySpark-style names).
 
-Grouped Python UDF aggregations (pandas_udf-style GROUPED_AGG) use a dedicated shape:
-
-```json
-{
-  "agg": "python_grouped_udf",
-  "udf": "<udf_name>",
-  "args": [ <expression>, ... ],
-  "alias": "<output_col>",
-  "return_type": "<type_str>"
-}
-```
-
-- `udf`: Name of a Python UDF registered on the session with `function_type="grouped_agg"`.
-- `args`: Expression trees for the UDF arguments (typically column refs).
-- `alias`: Output column name in the aggregated DataFrame.
-- `return_type`: DDL-style type string (`"int"`, `"bigint"`, `"double"`, `"string"`, etc.).
+Plan aggregation entries support `sum`, `count`, `avg`, `min`, `max`, `first`, and `last`,
+or an `expr` expression tree. Python grouped UDF aggregation is available through the
+DataFrame API and is not supported by `execute_plan`.
 
 ### join
 
@@ -193,7 +176,7 @@ ops = rs.supported_plan_operations()  # tuple[str, ...]
 # e.g. "filter" in ops
 ```
 
-The returned tuple includes all op names that `_execute_plan` accepts: `filter`, `select`, `limit`, `offset`, `orderBy`, `withColumn`, `withColumnRenamed`, `groupBy`, `join`, `union`, `unionByName`, `distinct`, `drop`. This allows Sparkless to avoid raising "Operation 'filter' is not supported" when the Robin backend does support filter (see issue #202).
+The returned tuple includes all op names that `_execute_plan` accepts, including `filter`, `select`, `limit`, `offset`, `orderBy`, `withColumn`, `withColumnRenamed`, `groupBy`, `join`, `union`, `unionByName`, `crossJoin`, `rollup`, `cube`, `distinct`, and `drop`. This allows Sparkless to avoid raising "Operation 'filter' is not supported" when the Robin backend does support filter (see issue #202).
 
 ---
 

@@ -7,7 +7,7 @@ Exception assertions use generic Exception (PySpark raises AnalysisException/Val
 
 import os
 import pytest
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

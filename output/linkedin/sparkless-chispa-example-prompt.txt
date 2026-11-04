@@ -1,0 +1,40 @@
+Use case: infographic-diagram
+Asset type: polished LinkedIn technical code graphic, high-resolution portrait 4:5 composition.
+Primary request: Make a beautiful, highly legible image of this actual tested Python example combining Sparkless and chispa. Prioritize precise code typography and readability. Restrained professional design, dark navy background, one large dark editor panel with crisp monospace Python syntax highlighting, cyan and warm amber accents, generous padding. Flat front-on graphic, no perspective, no device mockup, no people, no logos, no watermark.
+Header text verbatim:
+"Sparkless + chispa"
+"Run with Sparkless. Assert with chispa."
+Small badge: "No Spark or JVM started"
+Main code panel: render the following Python code EXACTLY, preserving every character and indentation. No line numbers, no markdown backticks. Make code large enough to read at phone size; use wide panel, minimal decoration:
+from sparkless.sql import SparkSession, functions as F
+from chispa import assert_df_equality
+
+spark = SparkSession.builder.appName("example").getOrCreate()
+
+source = spark.createDataFrame(
+    [("Alice", 17), ("Bob", 30), ("Carol", 25)],
+    ["name", "age"],
+)
+
+actual = source.filter(F.col("age") >= 18).select("name")
+expected = spark.createDataFrame(
+    [("Bob",), ("Carol",)], ["name"]
+)
+
+assert_df_equality(
+    actual,
+    expected,
+    ignore_nullable=True,
+    ignore_row_order=True,
+)
+
+print("PASS")
+spark.stop()
+
+Below code panel add a slim green result bar with exact text:
+"PASS  •  Expected rows: Bob, Carol"
+Below result bar, small but legible technical notes exactly:
+"Tested: Sparkless 4.18.1 + chispa 0.12.0"
+"ignore_nullable=True skips schema nullability checks."
+"PySpark package installed for chispa imports; execution uses Sparkless."
+Constraints: Ensure balanced vertical spacing and every line fits without clipping. Both imports must be accurate. Do not imply full compatibility, universal speedups, or that the PySpark Python package is unnecessary. This graphic shows one tested example, not a benchmark.

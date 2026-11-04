@@ -6,7 +6,7 @@ PySpark df.rollup("a", "b") and df.rollup(*cols) accept multiple column names.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

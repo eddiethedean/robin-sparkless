@@ -12,12 +12,17 @@ pub mod schema;
 
 pub use config::SparklessConfig;
 pub use engine::{
-    ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, CollectedRows, DataFrameBackend,
-    DataFrameReaderBackend, ExternalCatalogProvider, ExternalTableDescriptor, ExternalTableFormat,
-    ExternalTableSaveMode, ExternalTableWriteBatchRequest, ExternalTableWriteRequest,
-    ExternalTableWriteResult, GroupedDataBackend, JoinType, PlanExecutor, SparkSessionBackend,
+    ArrowIpcBatchStream, ArrowIpcStream, CancellationToken, CatalogBatchWriter,
+    CatalogCapabilities, CatalogOwnership, CatalogReadSnapshot, CatalogReader, CatalogResolution,
+    CatalogResolver, CollectedRows, DataFrameReaderBackend, ExecutionConfigSnapshot,
+    ExecutionContext, ExternalCatalog, ExternalTableDescriptor, ExternalTableFormat,
+    ExternalTableSaveMode, ExternalTableWriteBatchRequest, ExternalTableWriteOutcome,
+    ExternalTableWriteResult, FrameActions, FrameSchema, FrameTransform, GroupedData, JoinType,
+    SparkSessionBackend, begin_catalog_read_snapshot, resolve_catalog_identifier,
 };
-pub use error::{EngineError, normalize_unresolved_column_message};
+pub use error::{
+    EngineError, ErrorCategory, ErrorDetail, ErrorRetryability, normalize_unresolved_column_message,
+};
 pub use expr::{
     ExprIr, LiteralValue, WhenBuilder, WhenThenBuilder, alias, and_, approx_count_distinct,
     between, bool_and, call, col, collect_list, collect_set, count, count_distinct, count_if, eq,

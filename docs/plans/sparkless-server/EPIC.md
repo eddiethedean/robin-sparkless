@@ -25,7 +25,21 @@ Both transports use the same native execution, session, catalog, and result serv
 
 This epic covers the complete direction. Each phase has its own supported surface and release gate; a passing smoke query does not establish general Spark or Databricks compatibility.
 
-The 2026-10-29 scope extension schedules remaining Connect API gaps in Phases 7–10 and adds scalar/Pandas UDFs to Phase 5. Optional UDF workers and JDBC connector processes remain separately packaged; the core native process/image never embeds Python or a JVM. RDD/SparkContext and distributed Spark execution remain outside this single-node roadmap.
+The 2026-10-29 scope extension schedules remaining Connect API gaps in Phases 7–10 and adds scalar/Pandas UDFs to Phase 5. Optional UDF workers and JDBC connector processes remain separately packaged; the core native process/image never embeds Python or a JVM. Distributed RDD/SparkContext execution remains outside this single-node roadmap. The existing bounded local RDD and metadata-only SparkContext compatibility interfaces are included through SS-22's bridge/worker contract.
+
+## Product separation before 4.19 release — 2026-11-02
+
+The owner requires three independently installable products: local Sparkless, the base Polars server and the DuckDB-enabled server. [SS-23](23-product-and-package-separation.md) and D22 define shared engine-neutral server infrastructure, a Polars adapter, a separate DuckDB source crate and thin product crates. Python uses dedicated product distributions and a lightweight common launcher; server-only users need no local PyO3 engine. The original forwarding-compatibility proposal is superseded by the approved 4.19 breaking migration: `sparkless.server` and `sparkless-server-bin` are removed and checked as retired paths. Base artifacts exclude DuckDB/Quack, and installing the optional product cannot change default selection.
+
+This is required migration work on the largely implemented current 4.19 candidate, in slices 419-12–419-15 before release. Keep existing source/helper/performance code and reports, close earlier source/platform gaps, and pass V59 on the final product artifacts. Both 4.19 servers still execute through Polars; the DuckDB product adds the existing read-only standalone/Quack source. Phase 4 later adds DuckDB execution/writes under its own semantic/lifecycle gates. Product separation neither establishes backend parity nor supersedes SS-22's local baseline obligation.
+
+The original single-server workspace/distribution bullets below describe the initial architecture. SS-23 governs the required 4.19 extraction and expanded crate/Python/image inventory. This local plan update does not modify the remote epic or publish artifacts.
+
+## Complete existing local feature scope — 2026-11-01
+
+The owner requires **all existing implemented `sparkless.sql` features** on the server. [SS-22](22-local-sql-feature-parity.md) defines the complete [local baseline](LOCAL_SQL_FEATURE_BASELINE.md), transport mappings and delivery in Phases 5–8. This supersedes narrower proposed function/operator/type exclusions: native functions, pivots/grouping sets where implemented, statistics/approximation, generators, supported unbounded batch-window endpoints, actions/conversions, all accepted local SQL statements, optional workers/providers/connectors and bounded local callback APIs are required.
+
+HTTP SQL must cover the locally implemented SQL language and result types; Connect must cover the representable local API. Client utilities and local interfaces absent from standard Connect receive an explicit, tested Sparkless client bridge rather than an implicit exclusion. Preserve documented local behavior, including known limitations and compatibility stubs; no requirement for distributed Spark or functionality absent locally is introduced. D21 and V56–V58 reconcile source/wheel/SQL cases with remote behavior and block Phase 11 certification until the baseline is complete.
 
 ## Delivery order and scope
 
@@ -35,7 +49,7 @@ The 2026-10-29 scope extension schedules remaining Connect API gaps in Phases 7�
 | **Phase 0B** | Read-only HTTP SQL service, minimum bounded runtime/session management, sync/async Python launcher, native image | Exact values and schemas through direct HTTP and fresh packaged consumer environments |
 | **Phase 1** | Shared catalog ownership, controlled mutations, richer logical types, lazy execution improvements | Visibility, concurrency, mutation outcomes, type fidelity, and resource-accounting tests |
 | **Phase 2** | Supported Spark Connect release with Arrow streaming and resumable executions | Pinned unmodified client, lifecycle/conformance suite, with optional external route certification outside the standalone release gate |
-| **Phase 3** | Optional DuckDB data source feeding Polars execution | Supported Connect first; V35/V36 typed scans, source snapshots, database ownership, and bounded resources |
+| **Phase 3** | Optional DuckDB data source feeding Polars execution; required local/base/DuckDB product separation before 4.19 release | Supported Connect first; V35/V36 typed scans, source snapshots, database ownership and bounded resources; SS-23/D22/V59 migration of implemented work and final product verification |
 | **Phase 4** | Optional DuckDB execution backend through Connect | Phase 3 first; V37/V38 Spark semantics, backend lifecycle, persistent transaction outcomes, and shared-table interoperability |
 | **Phase 5** | Optional isolated Python Jobs/notebooks and scalar/Pandas UDF workers | Separate trust, packaging, resource, UDF semantics, and lifecycle contract; V27 |
 | **Phase 6** | Optional Delta Lake / Unity Catalog | Verified native transactions and interoperability |
@@ -360,7 +374,7 @@ The [4.19 implementation plan](RELEASE_4_19.md) refines Phase 3 and its independ
 
 - **Phases 11–14 / SS-21 / 4.27–4.30:** after completing all planned server features, certify `sparkless-connect40`, followed by separate phases for `sparkless-connect35`, `sparkless-connect41` and `sparkless-connect42`. Each package pins a tested upstream patch and matching Sparkless launcher/server and selects a certified server compatibility profile. [SS-21](21-versioned-connect-packages.md) defines D20 and V48–V55, full version-delta audits, semantic/protocol implementations and coordinated packaging gates.
 
-Each new phase preserves earlier enabled capabilities and passes coordinated candidate/public installation checks. Optional Python/JDBC/Delta/DuckDB components are dependencies only for the APIs selecting them. Full Spark compatibility, RDD/SparkContext, distributed execution/failover, and continuous streaming are not implied by this extension.
+Each new phase preserves earlier enabled capabilities and passes coordinated candidate/public installation checks. Optional Python/JDBC/Delta/DuckDB components are dependencies only for the APIs selecting them. Full Spark compatibility, distributed RDD/SparkContext execution, distributed execution/failover, and continuous streaming are not implied by this extension. SS-22 includes existing local RDD/SparkContext compatibility behavior and is a required Phase 11 prerequisite.
 
 ### Common release checks
 

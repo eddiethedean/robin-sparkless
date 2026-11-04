@@ -87,7 +87,8 @@ def api(check: bool) -> None:
     import sparkless
     from sparkless.sql import functions, types
     from sparkless.sql.window import Window
-    from sparkless import server, external_catalog
+    import sparkless_connect.server as server
+    from sparkless import external_catalog
 
     sections = []
     for name in [
@@ -116,7 +117,7 @@ def api(check: bool) -> None:
         ("Window", Window),
         ("functions", functions),
         ("types", types),
-        ("server", server),
+        ("sparkless_connect.server", server),
         ("external_catalog", external_catalog),
     ]
     lines = [

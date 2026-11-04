@@ -5,7 +5,7 @@ Uses get_imports() so F and session match the backend (PySpark or Robin).
 
 import pytest
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 F = imports.F

@@ -130,7 +130,7 @@ objects and handle nulls. [UDF guide](UDF_GUIDE.md) defines supported contexts.
 `SparklessServer(host='127.0.0.1', port=0, executable_path=None,
 startup_timeout=30.0, shutdown_timeout=10.0, kill_timeout=5.0, env=None,
 connect_host='127.0.0.1', connect_port=0)` owns one child process. Import it from
-`sparkless.server`; use a `with` block. Zero ports allocate ephemeral listeners;
+`sparkless_connect`; use a `with` block. Zero ports allocate ephemeral listeners;
 `connect_port=None` disables Connect. After readiness, `http_url`,
 `spark_connect_url`, and `server_instance_id` identify the live endpoints.
 `stop()` drains/shuts down and reaps the child. `AsyncSparklessServer` offers
@@ -138,6 +138,14 @@ async start/stop/context management. Startup/protocol/ownership failures raise
 `SparklessServerError`; disabled Connect access raises `UnsupportedSparkConnectError`.
 Neither launcher implements a general SQL client: use [HTTP](HTTP_API.md) or the
 supported [Connect client](SPARK_CONNECT.md).
+
+`SparklessConnect(*, server_options=None)` is in `sparkless_connect` and requires
+the optional `sparkless[connect]` extra. It starts a new `SparklessServer`, creates
+a new public `pyspark-client` session, and returns that session from a `with` block.
+`server_options` is copied and forwarded to `SparklessServer`; cleanup stops the
+session and then shuts down/reaps its server. The helper imports the Connect client
+when entering, so base and server-only installs do not require it. See
+[Spark Connect](SPARK_CONNECT.md) for the usage example and lifecycle details.
 
 ## Errors and compatibility
 

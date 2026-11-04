@@ -13,6 +13,8 @@ search:
 
 ## Outcome and boundary
 
+**Current 4.19 revision:** [SS-23](23-product-and-package-separation.md) requires moving the implemented native source into `robin-sparkless-duckdb` and shipping it in the dedicated `sparkless-server-duckdb` product before release. The base product excludes DuckDB/Quack. Keep current read-only Polars execution semantics, snapshots, limits and source evidence; final artifacts must pass the new product gate as well as V35/V36.
+
 Allow the existing Polars execution backend to read named DuckDB tables through a native, bounded Arrow batch source. An unmodified Connect client can resolve a configured DuckDB table and run the supported Sparkless transformations over it. No Parquet export or separately synchronized table copy is required. Arrow transfer may allocate or copy data; no zero-copy or zero-transfer claim follows.
 
 This phase adds a data source, not a DuckDB query execution backend. Sparkless/Polars still owns transformations and Spark semantics. DuckDB owns its storage and source transaction. Begin with read-only access: reject DuckDB-targeted DDL, appends, updates, deletes, overwrite, and table-save operations explicitly before effects. DuckDB execution and writes belong to [Phase 4 / SS-15](15-duckdb-connect-backend.md). Existing Sparkless-owned tables retain their current behavior.
@@ -56,6 +58,16 @@ The [4.19 implementation plan](RELEASE_4_19.md#delivery-order-and-dependencies) 
 
 ## Acceptance and evidence
 
+The current branch has standalone size/RSS measurements and public-client source checks for
+fault-proxy reattachment, plus Quack checks for a separate-process writer, owner loss between
+analysis and execution, and recovery after restarting the same owner. The native Quack fixture
+also observes remote cancellation after its first batch. The exact commands, binary hashes, raw reports, and limits are in the
+[4.19 evidence record](RELEASE_4_19_EVIDENCE.md#standalone-duckdb-source-resource-measurements-2026-11-01).
+These single-scan measurements do not establish aggregate RSS limits under concurrent operations
+or slow readers at the result-buffer cap; D14 and V36 remain open until those cases, public
+cancellation during shutdown, the differential corpus, and clean platform extension packaging
+are covered.
+
 - **V35:** a pinned unmodified Connect client reads real DuckDB tables, computes the advertised transformation corpus through Polars, preserves values/schema, and receives explicit errors for unsupported types and source writes. Test empty tables and joins as well as scalar smoke queries.
 - **V36:** controlled concurrent source writes/replacements demonstrate snapshots; cancellation, disconnect, reattach, source loss, and shutdown preserve ownership. Increasing source sizes demonstrate numeric allocation/RSS/queue budgets recorded in D14. An independent DuckDB writer and a Connect reader share one database owner and observe the declared commit visibility without export or synchronization.
 - Record source/library/client revisions, schemas, commands, source sizes, platforms, latency/RSS, and limits. If live sharing fails feasibility, keep its gate open and revise advertised scope explicitly instead of claiming live shared-table support from a standalone scan.
@@ -66,7 +78,7 @@ The [4.19 implementation plan](RELEASE_4_19.md#delivery-order-and-dependencies) 
 - [External catalog contract](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/engine/external_catalog.rs)
 - [Backend interfaces](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-core/src/engine/mod.rs)
 - [Polars sessions](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/robin-sparkless-polars/src/session/mod.rs)
-- [Server runtime](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server/src/lib.rs)
+- [Shared Polars-backed server runtime](https://github.com/eddiethedean/robin-sparkless/blob/main/crates/sparkless-server-polars/src/lib.rs)
 - [DuckDB concurrency](https://duckdb.org/docs/stable/connect/concurrency): verify the selected version's embedded/service ownership rules; documentation is not a compatibility pin.
 
 Python workers, distributed query execution, application-specific integration protocols, durable source caches, and a DuckDB execution backend are outside this phase.

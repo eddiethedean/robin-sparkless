@@ -12,7 +12,7 @@ class TestIssue369IsinNegation:
 
     def test_negation_isin_string_column_int_list(self, spark):
         """Exact scenario from issue #369: filter with ~col.isin([int, int]) on string column."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame(
@@ -28,7 +28,7 @@ class TestIssue369IsinNegation:
 
     def test_negation_isin_show(self, spark):
         """Exact issue scenario: filter + show() (issue #369)."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame(
@@ -44,7 +44,7 @@ class TestIssue369IsinNegation:
 
     def test_isin_without_negation_string_column_int_list(self, spark):
         """Positive isin (no ~) with string column and int list also coerces."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame(
@@ -60,7 +60,7 @@ class TestIssue369IsinNegation:
 
     def test_negation_isin_string_to_string(self, spark):
         """~col.isin([str, str]) on string column (types match) still works."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         F = get_imports().F
         df = spark.createDataFrame(

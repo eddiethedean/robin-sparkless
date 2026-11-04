@@ -1,6 +1,6 @@
 """Regression test for #1411: array literal of simple values after range()."""
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_array_literal_after_range(spark):

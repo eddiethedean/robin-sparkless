@@ -1,4 +1,4 @@
-//! Row type produced by DataFrameBackend::collect (engine-agnostic).
+//! Engine-neutral row type produced by a collection action.
 
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;

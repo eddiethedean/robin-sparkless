@@ -5,7 +5,7 @@ Tests that Column subscript notation (e.g., F.col("StructVal")["E1"]) matches Py
 Uses get_imports from fixture only; same logic for both backends.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

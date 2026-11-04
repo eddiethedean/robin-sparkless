@@ -10,7 +10,7 @@ and produces the correct computed columns.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 from tests.utils import _row_to_dict
 
 _imports = get_imports()

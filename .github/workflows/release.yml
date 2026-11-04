@@ -43,6 +43,23 @@ jobs:
         env:
           PUBLISH_RUST: ${{ inputs.publish_rust }}
         run: python scripts/release_context.py
+      - name: Require the PyPI API token for new projects
+        if: steps.context.outputs.publish_python == 'true'
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [[ -z "${PYPI_API_TOKEN:-}" ]]; then
+            echo 'PYPI_API_TOKEN GitHub Actions secret is required to publish new PyPI projects.'
+            exit 1
+          fi
+      - name: Install release workflow test dependency
+        run: python -m pip install PyYAML
+      - name: Validate release workflow and publication policy
+        run: python scripts/test_release_workflow.py
+      - name: Verify candidate inventory and dependency gate unit tests
+        run: |
+          python -m unittest discover -s scripts -p 'test_release_inventory.py'
+          python -m unittest discover -s scripts -p 'test_server_feature_graphs.py'
       - name: Require successful CI for the publication commit
         if: steps.context.outputs.publish_rust == 'true'
         env:
@@ -150,8 +167,13 @@ jobs:
           RUSTUP_TOOLCHAIN: 1.93.1
         run: |
           python -m pip install build 'maturin>=1.4,<2'
+          rm -rf python/build python/sparkless/sparkless.egg-info \
+            python/connect/build python/connect/sparkless_connect.egg-info \
+            python/testing/build python/testing/sparkless_testing.egg-info
           python -m build --sdist --outdir dist/native python/native
           python -m build --outdir dist/api python
+          python -m build --wheel --sdist --outdir dist/connect python/connect
+          python -m build --wheel --sdist --outdir dist/testing python/testing
           native_version="$(python -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
           python scripts/reuse_pypi_distributions.py --directory dist/native --project sparkless-native --version "$native_version"
           cargo package --locked --workspace --exclude sparkless-native --no-verify
@@ -165,6 +187,16 @@ jobs:
         with:
           name: sparkless-api-dist
           path: dist/api/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sparkless-connect-dist
+          path: dist/connect/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sparkless-testing-dist
+          path: dist/testing/*
           if-no-files-found: error
 
   python-tests:
@@ -186,14 +218,24 @@ jobs:
         with:
           name: sparkless-api-dist
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-connect-dist
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-testing-dist
+          path: dist
       - name: Install the exact publication wheel
         run: python -m pip install dist/*.whl
       - name: Install test tools and check wheel dependencies
         run: |
           mkdir -p pytest-results
-          python -m pip install pytest pytest-xdist hypothesis pytest-timeout
+          python -m pip install pytest pytest-xdist hypothesis pytest-timeout pandas polars pyarrow
           python -m pip check
           python scripts/test_installed_package_version.py
+          python scripts/check_native_stub_exports.py
+          python scripts/check_testing_package_boundary.py
       - name: Run ordinary and parity Python suites
         run: |
           python -m pytest tests --ignore=tests/parity -m "not delta and not integration" -n 4 -v --tb=short --timeout 90 --durations=25 --junitxml=pytest-results/ordinary.xml
@@ -288,6 +330,10 @@ jobs:
         with:
           name: sparkless-api-dist
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-connect-dist
+          path: dist
       - name: Install and run the witness inside the pinned native runtime image
         env:
           IMAGE: ${{ matrix.image }}
@@ -354,6 +400,10 @@ jobs:
         with:
           name: sparkless-api-dist
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-connect-dist
+          path: dist
       - name: Install and exercise the publication wheel
         env:
           PLATFORM_TAG: ${{ matrix.platform-tag }}
@@ -364,109 +414,284 @@ jobs:
           python scripts/verify_wheel_runtime.py --wheel dist/sparkless_native-*.whl --api-wheel dist/sparkless-*.whl \
             --platform-tag "$PLATFORM_TAG" --machine "$MACHINE"
 
-  server-bin-manylinux-x86_64:
-    name: Server binary wheel (manylinux 2.28 x86_64)
-    needs: [release-metadata]
+  server-base-manylinux-x86_64:
+    name: Base server wheel (manylinux 2.28 x86_64)
+    needs:
+    - release-metadata
     runs-on: ubuntu-latest
     container:
       image: quay.io/pypa/manylinux_2_28_x86_64
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Cache cargo
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install pinned public Connect client
-        run: |
-          /opt/python/cp311-cp311/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
-      - name: Build the combined server once
-        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
-        env:
-          CARGO_BUILD_JOBS: 1
-          RUSTUP_TOOLCHAIN: 1.93.1
-      - name: Build and verify manylinux wheel
-        run: |
-          set -euo pipefail
-          PY=/opt/python/cp311-cp311/bin/python
-          "$PY" -m pip install wheel auditwheel setuptools
-          mkdir -p dist
-          SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
-            SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
-            "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
-          version="$("$PY" -c 'import tomllib; print(tomllib.load(open("python/server-bin/pyproject.toml", "rb"))["project"]["version"])')"
-          "$PY" scripts/reuse_pypi_distributions.py --directory dist --project sparkless-server-bin --version "$version"
-          wheel=(dist/*.whl)
-          "$PY" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform manylinux_2_28_x86_64 --connect --connect-client --client-python "$PY"
-          auditwheel show "${wheel[0]}"
-      - name: Upload manylinux server wheel
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-server-bin-manylinux-2-28-x86_64
-          path: dist/*.whl
-
-  server-bin-macos-arm64:
-    name: Server binary wheel (macOS arm64)
-    needs: [release-metadata]
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+      with:
+        toolchain: 1.93.1
+    - name: Cache cargo
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      continue-on-error: true
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml',
+          '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+        restore-keys: |
+          ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+    - name: Install pinned public Connect client
+      run: |
+        /opt/python/cp311-cp311/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+    - name: Build the base server without DuckDB
+      run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
+      env:
+        CARGO_TARGET_DIR: target/server-base
+        CARGO_BUILD_JOBS: 1
+        RUSTUP_TOOLCHAIN: 1.93.1
+    - name: Build and verify the manylinux base server wheel
+      run: |-
+        set -euo pipefail
+        PY=/opt/python/cp311-cp311/bin/python
+        "$PY" -m pip install wheel auditwheel setuptools
+        mkdir -p dist/connect dist/base
+        "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist/connect python/connect
+        connect_wheel=(dist/connect/*.whl)
+        base_version="$("$PY" -c 'import tomllib; print(tomllib.load(open("python/server/pyproject.toml", "rb"))["project"]["version"])')"
+        SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/server-base/release/sparkless-server" \
+          SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
+          "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist/base python/server
+        "$PY" scripts/reuse_pypi_distributions.py --directory dist/base --project sparkless-server --version "$base_version"
+        base_wheel=(dist/base/*.whl)
+        "$PY" scripts/verify_server_bin_wheel.py --wheel "${base_wheel[0]}" --project python/server/pyproject.toml --product base --dependency-wheel "${connect_wheel[0]}" --platform manylinux_2_28_x86_64 --connect --connect-client --client-python "$PY"
+        auditwheel show "${base_wheel[0]}"
+    - name: Upload manylinux base wheel
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: sparkless-server-base-manylinux-2-28-x86_64
+        path: dist/base/*.whl
+  server-duckdb-manylinux-x86_64:
+    name: DuckDB server wheel (manylinux 2.28 x86_64)
+    needs:
+    - release-metadata
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    timeout-minutes: 180
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+      with:
+        toolchain: 1.93.1
+    - name: Cache cargo
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      continue-on-error: true
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml',
+          '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+        restore-keys: |
+          ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+    - name: Install pinned public Connect client
+      run: |
+        /opt/python/cp311-cp311/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+    - name: Fetch the signed DuckDB 2.0.0 Quack extension
+      run: /opt/python/cp311-cp311/bin/python scripts/fetch_duckdb_quack_extension.py --platform linux_amd64 --output "$RUNNER_TEMP/quack.duckdb_extension"
+    - name: Build the DuckDB server product
+      run: cargo build --locked --release -p sparkless-server-duckdb --no-default-features --features http,connect
+      env:
+        CARGO_TARGET_DIR: target/server-duckdb
+        CARGO_BUILD_JOBS: 1
+        RUSTUP_TOOLCHAIN: 1.93.1
+    - name: Build the DuckDB source owner fixture
+      run: cargo build --locked --release -p robin-sparkless-duckdb --example duckdb_quack_fixture_owner
+      env:
+        CARGO_TARGET_DIR: target/server-duckdb
+        CARGO_BUILD_JOBS: 1
+        RUSTUP_TOOLCHAIN: 1.93.1
+    - name: Build and verify the manylinux DuckDB server wheel
+      run: |-
+        set -euo pipefail
+        PY=/opt/python/cp311-cp311/bin/python
+        "$PY" -m pip install wheel auditwheel setuptools
+        mkdir -p dist/connect dist/duckdb
+        "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist/connect python/connect
+        connect_wheel=(dist/connect/*.whl)
+        duckdb_version="$("$PY" -c 'import tomllib; print(tomllib.load(open("python/server-duckdb/pyproject.toml", "rb"))["project"]["version"])')"
+        SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/server-duckdb/release/sparkless-server-duckdb" \
+          SPARKLESS_QUACK_EXTENSION_BINARY="$RUNNER_TEMP/quack.duckdb_extension" \
+          SPARKLESS_SERVER_WHEEL_PLATFORM=manylinux_2_28_x86_64 \
+          "$PY" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist/duckdb python/server-duckdb
+        "$PY" scripts/reuse_pypi_distributions.py --directory dist/duckdb --project sparkless-server-duckdb --version "$duckdb_version"
+        duckdb_wheel=(dist/duckdb/*.whl)
+        "$PY" scripts/verify_server_bin_wheel.py --wheel "${duckdb_wheel[0]}" --project python/server-duckdb/pyproject.toml --product duckdb --dependency-wheel "${connect_wheel[0]}" --platform manylinux_2_28_x86_64 --connect --connect-client --client-python "$PY"
+        auditwheel show "${duckdb_wheel[0]}"
+    - name: Upload manylinux DuckDB wheel
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: sparkless-server-duckdb-manylinux-2-28-x86_64
+        path: dist/duckdb/*.whl
+    - name: Upload Quack owner fixture
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: duckdb-quack-fixture-owner-linux-amd64
+        path: target/server-duckdb/release/examples/duckdb_quack_fixture_owner
+  server-base-macos-arm64:
+    name: Base server wheel (macOS arm64)
+    needs:
+    - release-metadata
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # Rust action revision; toolchain versions are pinned below
-        with:
-          toolchain: 1.93.1
-      - name: Cache cargo
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        continue-on-error: true
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Build native server
-        run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
-        env:
-          CARGO_BUILD_JOBS: 1
-      - name: Build and verify macOS wheel
-        run: |
-          set -euo pipefail
-          python3 -m venv .venv-server-wheel
-          SPARKLESS_WHEEL_PYTHON=.venv-server-wheel/bin/python
-          "$SPARKLESS_WHEEL_PYTHON" -m pip install wheel setuptools
-          "$SPARKLESS_WHEEL_PYTHON" -m pip install --require-hashes -r tests/connect/client-py311.lock
-          mkdir -p dist
-          SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/release/sparkless-server" \
-            SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
-            "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist python/server-bin
-          version="$("$SPARKLESS_WHEEL_PYTHON" -c 'import tomllib; print(tomllib.load(open("python/server-bin/pyproject.toml", "rb"))["project"]["version"])')"
-          "$SPARKLESS_WHEEL_PYTHON" scripts/reuse_pypi_distributions.py --directory dist --project sparkless-server-bin --version "$version"
-          wheel=(dist/*.whl)
-          "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${wheel[0]}" --platform macosx_14_0_arm64 --connect --connect-client --client-python "$SPARKLESS_WHEEL_PYTHON"
-      - name: Upload macOS server wheel
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sparkless-server-bin-macosx-14-0-arm64
-          path: dist/*.whl
-
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+      with:
+        toolchain: 1.93.1
+    - name: Cache cargo
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      continue-on-error: true
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml',
+          '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+        restore-keys: |
+          ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+    - name: Build the base server without DuckDB
+      run: cargo build --locked --release -p sparkless-server --no-default-features --features http,connect
+      env:
+        CARGO_TARGET_DIR: target/server-base
+        CARGO_BUILD_JOBS: 1
+    - name: Build and verify the macOS base server wheel
+      run: |-
+        set -euo pipefail
+        python3 -m venv .venv-server-wheel
+        SPARKLESS_WHEEL_PYTHON=.venv-server-wheel/bin/python
+        "$SPARKLESS_WHEEL_PYTHON" -m pip install wheel setuptools
+        "$SPARKLESS_WHEEL_PYTHON" -m pip install --require-hashes -r tests/connect/client-py311.lock
+        mkdir -p dist/connect dist/base
+        "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist/connect python/connect
+        connect_wheel=(dist/connect/*.whl)
+        base_version="$("$SPARKLESS_WHEEL_PYTHON" -c 'import tomllib; print(tomllib.load(open("python/server/pyproject.toml", "rb"))["project"]["version"])')"
+        SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/server-base/release/sparkless-server" \
+          SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
+          "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist/base python/server
+        "$SPARKLESS_WHEEL_PYTHON" scripts/reuse_pypi_distributions.py --directory dist/base --project sparkless-server --version "$base_version"
+        base_wheel=(dist/base/*.whl)
+        "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${base_wheel[0]}" --project python/server/pyproject.toml --product base --dependency-wheel "${connect_wheel[0]}" --platform macosx_14_0_arm64 --connect --connect-client --client-python "$SPARKLESS_WHEEL_PYTHON"
+    - name: Upload macOS base wheel
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: sparkless-server-base-macosx-14-0-arm64
+        path: dist/base/*.whl
+  server-duckdb-macos-arm64:
+    name: DuckDB server wheel (macOS arm64)
+    needs:
+    - release-metadata
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+      with:
+        toolchain: 1.93.1
+    - name: Fetch the signed DuckDB 2.0.0 Quack extension
+      run: python3 scripts/fetch_duckdb_quack_extension.py --platform osx_arm64 --output "$RUNNER_TEMP/quack.duckdb_extension"
+    - name: Cache cargo
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      continue-on-error: true
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml',
+          '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+        restore-keys: |
+          ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+    - name: Build the DuckDB server product
+      run: cargo build --locked --release -p sparkless-server-duckdb --no-default-features --features http,connect
+      env:
+        CARGO_TARGET_DIR: target/server-duckdb
+        CARGO_BUILD_JOBS: 1
+    - name: Build the DuckDB source owner fixture
+      run: cargo build --locked --release -p robin-sparkless-duckdb --example duckdb_quack_fixture_owner
+      env:
+        CARGO_TARGET_DIR: target/server-duckdb
+        CARGO_BUILD_JOBS: 1
+    - name: Build and verify the macOS DuckDB server wheel
+      run: |-
+        set -euo pipefail
+        python3 -m venv .venv-server-wheel
+        SPARKLESS_WHEEL_PYTHON=.venv-server-wheel/bin/python
+        "$SPARKLESS_WHEEL_PYTHON" -m pip install wheel setuptools
+        "$SPARKLESS_WHEEL_PYTHON" -m pip install --require-hashes -r tests/connect/client-py311.lock
+        mkdir -p dist/connect dist/duckdb
+        "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist/connect python/connect
+        connect_wheel=(dist/connect/*.whl)
+        duckdb_version="$("$SPARKLESS_WHEEL_PYTHON" -c 'import tomllib; print(tomllib.load(open("python/server-duckdb/pyproject.toml", "rb"))["project"]["version"])')"
+        SPARKLESS_SERVER_BINARY="$GITHUB_WORKSPACE/target/server-duckdb/release/sparkless-server-duckdb" \
+          SPARKLESS_QUACK_EXTENSION_BINARY="$RUNNER_TEMP/quack.duckdb_extension" \
+          SPARKLESS_SERVER_WHEEL_PLATFORM=macosx_14_0_arm64 \
+          "$SPARKLESS_WHEEL_PYTHON" -m pip wheel --no-deps --no-build-isolation --wheel-dir dist/duckdb python/server-duckdb
+        "$SPARKLESS_WHEEL_PYTHON" scripts/reuse_pypi_distributions.py --directory dist/duckdb --project sparkless-server-duckdb --version "$duckdb_version"
+        duckdb_wheel=(dist/duckdb/*.whl)
+        "$SPARKLESS_WHEEL_PYTHON" scripts/verify_server_bin_wheel.py --wheel "${duckdb_wheel[0]}" --project python/server-duckdb/pyproject.toml --product duckdb --dependency-wheel "${connect_wheel[0]}" --platform macosx_14_0_arm64 --connect --connect-client --client-python "$SPARKLESS_WHEEL_PYTHON"
+    - name: Upload macOS DuckDB wheel
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: sparkless-server-duckdb-macosx-14-0-arm64
+        path: dist/duckdb/*.whl
+    - name: Upload Quack owner fixture
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: duckdb-quack-fixture-owner-osx-arm64
+        path: target/server-duckdb/release/examples/duckdb_quack_fixture_owner
+  server-feature-graphs:
+    name: Server product feature isolation
+    needs:
+    - release-metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+      with:
+        toolchain: 1.93.1
+    - name: Cache cargo
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      continue-on-error: true
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml',
+          '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
+        restore-keys: |
+          ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
+    - name: Record isolated product feature graphs
+      run: python3 scripts/verify_server_feature_graphs.py --output-dir "$RUNNER_TEMP/server-feature-graphs"
+      env:
+        RUSTUP_TOOLCHAIN: 1.93.1
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: server-product-feature-graphs
+        path: ${{ runner.temp }}/server-feature-graphs/*
+        if-no-files-found: error
   server-container:
-    name: Native server container build and smoke
-    needs: [server-bin-manylinux-x86_64]
+    name: Base and DuckDB server container builds and smoke
+    needs: [server-base-manylinux-x86_64, server-duckdb-manylinux-x86_64]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -474,86 +699,114 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      - name: Select candidate image name
-        id: image
-        run: |
-          echo "image=sparkless-server:candidate-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: sparkless-server-bin-manylinux-2-28-x86_64
-          path: server-wheel
-      - name: Build image from the tested server executable
+          name: sparkless-server-base-manylinux-2-28-x86_64
+          path: server-base-wheel
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-server-duckdb-manylinux-2-28-x86_64
+          path: server-duckdb-wheel
+      - name: Build images from the tested product executables
         run: |
-          python -m pip install --target "$RUNNER_TEMP/server-image" server-wheel/*.whl
-          cp "$RUNNER_TEMP/server-image/sparkless_server_bin/sparkless-server" "$RUNNER_TEMP/server-image/sparkless-server"
-          chmod +x "$RUNNER_TEMP/server-image/sparkless-server"
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/server-image/base" "$RUNNER_TEMP/server-image/duckdb"
+          python -m pip install --no-deps --target "$RUNNER_TEMP/server-image/base" server-base-wheel/*.whl
+          python -m pip install --no-deps --target "$RUNNER_TEMP/server-image/duckdb" server-duckdb-wheel/*.whl
+          cp "$RUNNER_TEMP/server-image/base/sparkless_server/sparkless-server" "$RUNNER_TEMP/server-image/base/sparkless-server"
+          cp "$RUNNER_TEMP/server-image/duckdb/sparkless_server_duckdb/sparkless-server-duckdb" "$RUNNER_TEMP/server-image/duckdb/sparkless-server-duckdb"
+          cp "$RUNNER_TEMP/server-image/duckdb/sparkless_server_duckdb/quack.duckdb_extension" "$RUNNER_TEMP/server-image/duckdb/quack.duckdb_extension"
+          cp "$RUNNER_TEMP/server-image/duckdb/sparkless_server_duckdb/NOTICE-quack.txt" "$RUNNER_TEMP/server-image/duckdb/NOTICE-quack.txt"
+          chmod +x "$RUNNER_TEMP/server-image/base/sparkless-server" "$RUNNER_TEMP/server-image/duckdb/sparkless-server-duckdb"
           docker build -f crates/sparkless-server/Dockerfile.release \
-            -t "${{ steps.image.outputs.image }}" "$RUNNER_TEMP/server-image"
-      - name: Verify non-root runtime user
-        env:
-          IMAGE: ${{ steps.image.outputs.image }}
+            -t "sparkless-server:candidate-${GITHUB_SHA}" "$RUNNER_TEMP/server-image/base"
+          docker build -f crates/sparkless-server/Dockerfile.duckdb.release \
+            -t "sparkless-server-duckdb:candidate-${GITHUB_SHA}" "$RUNNER_TEMP/server-image/duckdb"
+      - name: Verify non-root users, SQL and graceful shutdown for both images
         run: |
           set -euo pipefail
-          configured_user="$(docker image inspect --format '{{.Config.User}}' "$IMAGE")"
-          uid="${configured_user%%:*}"
-          if [[ -z "$uid" || "$uid" == 0 || "$uid" == root ]]; then
-            echo "server image must run as a non-root user; configured user: ${configured_user:-unset}"
-            exit 1
-          fi
-          echo "Container runtime user: $configured_user"
-      - name: Run native SQL and shutdown smoke test
-        env:
-          IMAGE: ${{ steps.image.outputs.image }}
-        run: |
-          set -euo pipefail
-          name="sparkless-server-release-smoke-${GITHUB_RUN_ID}"
           python3 -m pip install --require-hashes -r tests/connect/client-py311.lock
-          docker run -d --name "$name" -p 127.0.0.1:18099:8099 -p 127.0.0.1:15002:15002 "$IMAGE"
-          cleanup() {
-            docker logs "$name" || true
-            docker rm -f "$name" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          python3 scripts/verify_server_http.py http://127.0.0.1:18099 --mutations
-          SPARKLESS_CONNECT_URL=sc://127.0.0.1:15002 python3 tests/connect/smoke_public_client.py
-          docker stop --time 10 "$name"
-          exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
-          if [[ "$exit_code" != 0 ]]; then
-            echo "container exited with status $exit_code after graceful stop"
-            exit 1
-          fi
-      - name: Save verified native image
-        env:
-          IMAGE: ${{ steps.image.outputs.image }}
+          for product in base duckdb; do
+            if [[ "$product" == base ]]; then
+              image="sparkless-server:candidate-${GITHUB_SHA}"
+              port=18099
+              connect_port=15002
+            else
+              image="sparkless-server-duckdb:candidate-${GITHUB_SHA}"
+              port=18100
+              connect_port=15003
+            fi
+            configured_user="$(docker image inspect --format '{{.Config.User}}' "$image")"
+            uid="${configured_user%%:*}"
+            if [[ -z "$uid" || "$uid" == 0 || "$uid" == root ]]; then echo "image $image must run as non-root"; exit 1; fi
+            name="sparkless-server-${product}-release-smoke-${GITHUB_RUN_ID}"
+            docker run -d --name "$name" -p "127.0.0.1:${port}:8099" -p "127.0.0.1:${connect_port}:15002" "$image"
+            cleanup() { docker logs "$name" || true; docker rm -f "$name" >/dev/null 2>&1 || true; }
+            trap cleanup EXIT
+            python3 scripts/verify_server_http.py "http://127.0.0.1:${port}" --mutations
+            SPARKLESS_CONNECT_URL="sc://127.0.0.1:${connect_port}" python3 tests/connect/smoke_public_client.py
+            docker stop --time 10 "$name"
+            exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$name")"
+            if [[ "$exit_code" != 0 ]]; then echo "image $image exited with status $exit_code"; exit 1; fi
+            docker rm "$name" >/dev/null
+            trap - EXIT
+          done
+      - name: Save verified product images
         run: |
           set -euo pipefail
           mkdir -p dist
-          docker save --output dist/sparkless-server.tar "$IMAGE"
-          (cd dist && sha256sum sparkless-server.tar > sparkless-server.tar.sha256)
-      - name: Upload verified native image
+          docker save --output dist/sparkless-server.tar "sparkless-server:candidate-${GITHUB_SHA}"
+          docker save --output dist/sparkless-server-duckdb.tar "sparkless-server-duckdb:candidate-${GITHUB_SHA}"
+          (cd dist && sha256sum sparkless-server.tar sparkless-server-duckdb.tar > sparkless-server-images.sha256)
+      - name: Upload verified product images
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: sparkless-server-container-image
+          name: sparkless-server-container-images
           path: |
             dist/sparkless-server.tar
-            dist/sparkless-server.tar.sha256
+            dist/sparkless-server-duckdb.tar
+            dist/sparkless-server-images.sha256
           retention-days: 7
 
-  server-extra-consumer:
-    name: Server extra (${{ matrix.runner }})
-    needs: [build-wheels, source-dist, server-bin-manylinux-x86_64, server-bin-macos-arm64]
+  server-product-consumer:
+    name: ${{ matrix.product }} server install (${{ matrix.runner }})
+    needs: [build-wheels, source-dist, server-base-manylinux-x86_64, server-duckdb-manylinux-x86_64, server-base-macos-arm64, server-duckdb-macos-arm64]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-24.04
             sparkless: manylinux-x86_64
-            server: manylinux-2-28-x86_64
+            server-platform: manylinux-2-28-x86_64
+            product: base
+            server_extras: "server connect"
+            wheel-artifact: sparkless-server-base-manylinux-2-28-x86_64
+            companion-wheel-artifact: sparkless-server-duckdb-manylinux-2-28-x86_64
+          - runner: ubuntu-24.04
+            sparkless: manylinux-x86_64
+            server-platform: manylinux-2-28-x86_64
+            product: duckdb
+            server_extras: "server-duckdb connect-duckdb"
+            wheel-artifact: sparkless-server-duckdb-manylinux-2-28-x86_64
+            companion-wheel-artifact: sparkless-server-base-manylinux-2-28-x86_64
+            quack-fixture: linux-amd64
           - runner: macos-15
             sparkless: macos-aarch64
-            server: macosx-14-0-arm64
+            server-platform: macosx-14-0-arm64
+            product: base
+            server_extras: "server connect"
+            wheel-artifact: sparkless-server-base-macosx-14-0-arm64
+            companion-wheel-artifact: sparkless-server-duckdb-macosx-14-0-arm64
+          - runner: macos-15
+            sparkless: macos-aarch64
+            server-platform: macosx-14-0-arm64
+            product: duckdb
+            server_extras: "server-duckdb connect-duckdb"
+            wheel-artifact: sparkless-server-duckdb-macosx-14-0-arm64
+            companion-wheel-artifact: sparkless-server-base-macosx-14-0-arm64
+            quack-fixture: osx-arm64
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -569,16 +822,149 @@ jobs:
           path: dist
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: sparkless-server-bin-${{ matrix.server }}
+          name: ${{ matrix.wheel-artifact }}
           path: dist
-      - name: Install and exercise the matching server extra
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-connect-dist
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-testing-dist
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ matrix.companion-wheel-artifact }}
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: matrix.product == 'duckdb'
+        with:
+          name: duckdb-quack-fixture-owner-${{ matrix.quack-fixture }}
+          path: quack-fixture
+      - name: Exercise the product-only install
         run: |
           version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
-          python -m venv .venv
-          .venv/bin/python -m pip install --no-index --find-links dist "sparkless[server]==${version}"
-          .venv/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
-          .venv/bin/python -m pip check
-          .venv/bin/python scripts/verify_server_extra_install.py "$version" --mutations --connect-client --client-python .venv/bin/python
+          if [[ "${{ matrix.product }}" == base ]]; then distribution=sparkless-server; else distribution=sparkless-server-duckdb; fi
+          python -m venv .venv-product
+          .venv-product/bin/python -m pip install --no-index --find-links dist "${distribution}==${version}"
+          .venv-product/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+          .venv-product/bin/python -m pip check
+          .venv-product/bin/python scripts/verify_server_extra_install.py "$version" --product "${{ matrix.product }}" --mutations --connect-client --client-python .venv-product/bin/python
+      - name: Exercise the sparkless server extra
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          index=0
+          for extra in ${{ matrix.server_extras }}; do
+            venv=".venv-api-${index}"
+            python -m venv "$venv"
+            if [[ "$extra" == connect* ]]; then
+              "$venv/bin/python" -m pip install --require-hashes -r tests/connect/client-py311.lock
+            fi
+            "$venv/bin/python" -m pip install --no-index --find-links dist "sparkless[${extra}]==${version}"
+            "$venv/bin/python" -m pip install --require-hashes -r tests/connect/client-py311.lock
+            "$venv/bin/python" -m pip check
+            "$venv/bin/python" scripts/verify_server_extra_install.py "$version" --product "${{ matrix.product }}" --api-extra --mutations --connect-client --client-python "$venv/bin/python"
+            index=$((index + 1))
+          done
+      - name: Exercise client-only install
+        if: matrix.product == 'base'
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python -m venv .venv-client-only
+          .venv-client-only/bin/python -m pip install --require-hashes -r tests/connect/client-py311.lock
+          .venv-client-only/bin/python -m pip install --no-index --find-links dist "sparkless-connect[client]==${version}"
+          .venv-client-only/bin/python -m pip check
+          .venv-client-only/bin/python scripts/verify_server_extra_install.py "$version" --profile client-only
+      - name: Exercise local-only install
+        if: matrix.product == 'base'
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python -m venv .venv-local-only
+          .venv-local-only/bin/python -m pip install --no-index --find-links dist "sparkless==${version}"
+          .venv-local-only/bin/python -m pip check
+          .venv-local-only/bin/python scripts/verify_server_extra_install.py "$version" --profile local-only
+      - name: Exercise both server products in one environment
+        if: matrix.product == 'base'
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python -m venv .venv-coinstall
+          .venv-coinstall/bin/python -m pip install --no-index --find-links dist "sparkless-server==${version}" "sparkless-server-duckdb==${version}"
+          .venv-coinstall/bin/python -m pip check
+          .venv-coinstall/bin/python scripts/verify_server_extra_install.py "$version" --profile coinstall
+      - name: Exercise the standalone testing extra
+        if: matrix.product == 'base'
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python -m venv .venv-testing
+          .venv-testing/bin/python -m pip install 'pytest>=7'
+          .venv-testing/bin/python -m pip install --no-index --find-links dist "sparkless[testing]==${version}"
+          .venv-testing/bin/python -m pip check
+          .venv-testing/bin/python -c "from importlib.metadata import version; import sparkless_testing; assert version('sparkless-testing') == '${version}'"
+          .venv-testing/bin/python scripts/check_testing_package_boundary.py
+      - name: Exercise DuckDB source modes
+        if: matrix.product == 'duckdb'
+        run: |
+          .venv-product/bin/python -m pip install --require-hashes -r tests/connect/duckdb-source-py311.lock
+          server_bin="$(.venv-product/bin/python -c 'from sparkless_server_duckdb import executable_path; print(executable_path())')"
+          quack_extension="$(.venv-product/bin/python -c 'from sparkless_server_duckdb import quack_extension_path; print(quack_extension_path())')"
+          owner_bin="$GITHUB_WORKSPACE/quack-fixture/duckdb_quack_fixture_owner"
+          chmod +x "$owner_bin"
+          .venv-product/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin"
+          .venv-product/bin/python tests/connect/smoke_phase419_duckdb_client.py --server-bin "$server_bin" --quack-owner-bin "$owner_bin" --quack-extension-path "$quack_extension"
+          .venv-product/bin/python tests/connect/smoke_phase419_duckdb_shutdown.py --server-bin "$server_bin" --quack-owner-bin "$owner_bin" --quack-extension-path "$quack_extension"
+      - name: Install the locked Spark oracle
+        if: matrix.product == 'duckdb'
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compare the packaged DuckDB product with Spark
+        if: matrix.product == 'duckdb'
+        run: |
+          set -euo pipefail
+          version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          python -m venv .venv-differential
+          .venv-differential/bin/python -m pip install --require-hashes -r tests/connect/oracle-py311.lock
+          .venv-differential/bin/python -m pip install --require-hashes -r tests/connect/duckdb-source-py311.lock
+          .venv-differential/bin/python -m pip install --no-index --find-links dist "sparkless==$version" "sparkless-server-duckdb==$version"
+          server_bin="$(.venv-differential/bin/python -c 'from sparkless_server_duckdb import executable_path; print(executable_path())')"
+          .venv-differential/bin/python tests/connect/differential_phase419_duckdb.py \
+            --server-bin "$server_bin" \
+            --output "$RUNNER_TEMP/phase419-duckdb-differential-${{ matrix.sparkless }}.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.product == 'duckdb'
+        with:
+          name: phase419-duckdb-differential-${{ matrix.sparkless }}
+          path: ${{ runner.temp }}/phase419-duckdb-differential-${{ matrix.sparkless }}.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Measure four-reader DuckDB source resource envelope
+        if: matrix.product == 'duckdb'
+        run: |
+          server_bin="$(.venv-product/bin/python -c 'from sparkless_server_duckdb import executable_path; print(executable_path())')"
+          for rows in 100000 350000; do
+            allow_result_rejection=()
+            if [[ "$rows" == 350000 ]]; then
+              allow_result_rejection+=(--allow-result-rejection)
+            fi
+            .venv-product/bin/python tests/connect/benchmark_phase419_duckdb_source.py \
+              --server-bin "$server_bin" \
+              --rows "$rows" \
+              --payload-bytes 16 \
+              --iterations 3 \
+              --concurrent-readers 4 \
+              --slow-reader-delay-ms 10 \
+              "${allow_result_rejection[@]}" \
+              --output "$RUNNER_TEMP/phase419-source-resource-${{ matrix.sparkless }}-${rows}.json"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: phase419-source-resource-${{ matrix.sparkless }}-${{ matrix.product }}
+          path: ${{ runner.temp }}/phase419-source-resource-${{ matrix.sparkless }}-*.json
+          if-no-files-found: warn
+          retention-days: 30
 
   release-validation-gate:
     name: Release validation acceptance gate
@@ -590,9 +976,12 @@ jobs:
       - python-tests
       - wheel-smoke-linux
       - wheel-smoke-native
-      - server-bin-manylinux-x86_64
-      - server-bin-macos-arm64
-      - server-extra-consumer
+      - server-base-manylinux-x86_64
+      - server-duckdb-manylinux-x86_64
+      - server-base-macos-arm64
+      - server-duckdb-macos-arm64
+      - server-feature-graphs
+      - server-product-consumer
       - server-container
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -621,49 +1010,38 @@ jobs:
           path: dist/sparkless
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: sparkless-server-bin-*
-          path: dist/server-bin
+          name: sparkless-testing-dist
+          path: dist/testing
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: sparkless-server-base-*
+          path: dist/server-base
           merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: sparkless-server-duckdb-*
+          path: dist/server-duckdb
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sparkless-connect-dist
+          path: dist/connect
       - name: Verify complete wheel and source distribution inventory
         run: |
-          set -euo pipefail
-          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
-          engine_version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/sparkless --project sparkless --version "$version" \
-            --wheels 1 --sdists 1 --platform any --requires "sparkless-native==$engine_version"
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/native \
-            --project sparkless-native \
-            --version "$engine_version" \
-            --wheels 8 \
-            --sdists 1 \
-            --platform macosx_10_12_x86_64 \
-            --platform macosx_11_0_arm64 \
-            --platform manylinux2014_x86_64.manylinux_2_17_x86_64 \
-            --platform manylinux_2_28_aarch64 \
-            --platform musllinux_1_2_aarch64 \
-            --platform musllinux_1_2_x86_64 \
-            --platform win_amd64 \
-            --platform win_arm64
-          python3 scripts/verify_release_distributions.py \
-            --directory dist/server-bin \
-            --project sparkless-server-bin \
-            --version "$engine_version" \
-            --wheels 2 \
-            --sdists 0 \
-            --platform manylinux_2_28_x86_64 \
-            --platform macosx_14_0_arm64
+          python3 scripts/verify_candidate_inventory.py --root . --output dist/candidate-inventory.json
       - name: Check candidate distributions
         run: |
           python3 -m pip install twine
-          python3 -m twine check dist/sparkless/* dist/native/* dist/server-bin/*
+          python3 -m twine check dist/sparkless/* dist/native/* dist/server-base/* dist/server-duckdb/* dist/connect/* dist/testing/*
       - name: Check current PyPI storage before publishing
         run: |
           python3 scripts/check_pypi_storage.py \
             --distribution sparkless=dist/sparkless \
             --distribution sparkless-native=dist/native \
-            --distribution sparkless-server-bin=dist/server-bin
+            --distribution sparkless-server=dist/server-base \
+            --distribution sparkless-server-duckdb=dist/server-duckdb \
+            --distribution sparkless-connect=dist/connect \
+            --distribution sparkless-testing=dist/testing
       - name: Preserve checked distributions for publication
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -677,9 +1055,30 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: verified-server-bin-candidate
-          path: dist/server-bin/*
+          name: verified-server-base-candidate
+          path: dist/server-base/*
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-server-duckdb-candidate
+          path: dist/server-duckdb/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-connect-candidate
+          path: dist/connect/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-testing-candidate
+          path: dist/testing/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-candidate-inventory
+          path: dist/candidate-inventory.json
+          if-no-files-found: error
+          retention-days: 90
 
   publish:
     name: Publish Rust crates
@@ -702,7 +1101,7 @@ jobs:
           key: ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/.cargo/config.toml', '.cargo/config.toml', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ github.workflow }}-cargo-downloads-v1-${{ runner.os }}-${{ runner.arch }}-
-      - name: "Publish to crates.io (dependency order: spark-sql-parser, core, polars, main, server)"
+      - name: "Publish to crates.io in dependency order"
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
@@ -729,9 +1128,21 @@ jobs:
 
           publish_one spark-sql-parser
           publish_one robin-sparkless-core
+          publish_one robin-sparkless-plan
+          publish_one robin-sparkless-sql
+          publish_one robin-sparkless-delta
+          publish_one robin-sparkless-jdbc
+          publish_one robin-sparkless-jdbc-polars
+          publish_one robin-sparkless-duckdb
           publish_one robin-sparkless-polars
           publish_one robin-sparkless
+          publish_one sparkless-server-core
+          publish_one sparkless-server-runtime
+          publish_one sparkless-server-http
+          publish_one sparkless-server-connect
+          publish_one sparkless-server-polars
           publish_one sparkless-server
+          publish_one sparkless-server-duckdb
 
   publish-native:
     name: Publish native engine distributions to PyPI
@@ -744,17 +1155,25 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-native-candidate
           path: dist
+      - name: Verify native publisher bytes
+        run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-native
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
           skip-existing: true
 
-  publish-server-bin:
-    name: Publish server binary wheels to PyPI
+  publish-connect:
+    name: Publish new shared Sparkless Connect project to PyPI
     if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
     needs: [release-metadata, release-validation-gate, publish]
@@ -762,70 +1181,150 @@ jobs:
       name: pypi
     permissions:
       contents: read
-      id-token: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
       - name: Download verified server binary distributions
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: verified-server-bin-candidate
+          name: verified-connect-candidate
           path: dist
-      - name: Publish server binary distributions to PyPI
+      - name: Verify shared launcher publisher bytes
+        run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-connect
+      - name: Publish shared launcher distribution to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          attestations: false
+          skip-existing: true
+
+  publish-server-products:
+    name: Publish new base and DuckDB server projects to PyPI
+    if: needs.release-metadata.outputs.publish_python == 'true'
+    runs-on: ubuntu-latest
+    needs: [release-metadata, release-validation-gate, publish, publish-connect]
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-server-base-candidate
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-server-duckdb-candidate
+          path: dist
+      - name: Verify both server product publisher bytes
+        run: |
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-server --project sparkless-server-duckdb
+      - name: Publish both native server products to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          attestations: false
+          skip-existing: true
+
+  publish-testing:
+    name: Publish sparkless-testing to PyPI
+    if: needs.release-metadata.outputs.publish_python == 'true'
+    runs-on: ubuntu-latest
+    needs: [release-metadata, release-validation-gate]
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-testing-candidate
+          path: dist
+      - name: Verify standalone testing publisher bytes
+        run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless-testing
+      - name: Publish sparkless-testing to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          attestations: false
           skip-existing: true
 
   publish-server-container:
-    name: Publish verified native server container
+    name: Publish both verified native server containers
     if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    needs: [release-metadata, release-validation-gate, publish]
+    needs: [release-metadata, release-validation-gate, publish, publish-server-products]
     outputs:
-      image_digest: ${{ steps.publish.outputs.digest }}
+      base_image_digest: ${{ steps.publish.outputs.base_digest }}
+      duckdb_image_digest: ${{ steps.publish.outputs.duckdb_digest }}
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: sparkless-server-container-image
+          name: sparkless-server-container-images
           path: dist
       - name: Verify and load the tested image
         run: |
           set -euo pipefail
-          (cd dist && sha256sum --check sparkless-server.tar.sha256)
+          (cd dist && sha256sum --check sparkless-server-images.sha256)
           docker load --input dist/sparkless-server.tar
+          docker load --input dist/sparkless-server-duckdb.tar
       - name: Log in to GitHub Container Registry
         env:
           GH_TOKEN: ${{ github.token }}
         run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-      - name: Publish verified image and record digest
+      - name: Publish verified base and DuckDB images and record digests
         id: publish
         run: |
           set -euo pipefail
-          source="sparkless-server:candidate-${GITHUB_SHA}"
-          target="ghcr.io/eddiethedean/sparkless-server:${GITHUB_REF_NAME}"
-          docker tag "$source" "$target"
-          if docker manifest inspect "$target" > "$RUNNER_TEMP/published-image.json" 2>/dev/null; then
-            existing="$(jq -r '.config.digest' "$RUNNER_TEMP/published-image.json")"
-            candidate="$(docker image inspect --format '{{.Id}}' "$source")"
-            if [[ "$existing" != "$candidate" ]]; then
-              echo 'Container tag already exists with different contents; refusing to overwrite it.'
-              exit 1
+          for product in base duckdb; do
+            if [[ "$product" == base ]]; then
+              source="sparkless-server:candidate-${GITHUB_SHA}"
+              target="ghcr.io/eddiethedean/sparkless-server:${GITHUB_REF_NAME}"
+            else
+              source="sparkless-server-duckdb:candidate-${GITHUB_SHA}"
+              target="ghcr.io/eddiethedean/sparkless-server-duckdb:${GITHUB_REF_NAME}"
             fi
-            docker pull "$target"
-          else
-            docker push "$target"
-          fi
-          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
-          echo "digest=${digest##*@}" >> "$GITHUB_OUTPUT"
-          echo "Published and smoke-tested $digest" >> "$GITHUB_STEP_SUMMARY"
+            docker tag "$source" "$target"
+            if docker manifest inspect "$target" > "$RUNNER_TEMP/published-${product}-image.json" 2>/dev/null; then
+              existing="$(jq -r '.config.digest' "$RUNNER_TEMP/published-${product}-image.json")"
+              candidate="$(docker image inspect --format '{{.Id}}' "$source")"
+              if [[ "$existing" != "$candidate" ]]; then echo "${product} image tag already has different contents"; exit 1; fi
+              docker pull "$target"
+            else
+              docker push "$target"
+            fi
+            digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$target")"
+            echo "${product}_digest=${digest##*@}" >> "$GITHUB_OUTPUT"
+            echo "Published and smoke-tested ${product} image $digest" >> "$GITHUB_STEP_SUMMARY"
+          done
 
   publish-sparkless:
     name: Publish sparkless distributions to PyPI
     if: needs.release-metadata.outputs.publish_python == 'true'
     runs-on: ubuntu-latest
-    needs: [release-metadata, release-validation-gate, publish-native, publish-server-bin, publish-server-container]
+    needs: [release-metadata, release-validation-gate, publish-native, publish-connect, publish-server-products, publish-server-container, publish-testing]
     environment:
       name: pypi
     permissions:
@@ -840,6 +1339,13 @@ jobs:
         with:
           name: verified-sparkless-candidate
           path: dist
+      - name: Download the verified candidate inventory
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-candidate-inventory
+          path: candidate-inventory
+      - name: Verify the API publisher bytes
+        run: python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless
       - name: Publish sparkless distributions to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
@@ -847,15 +1353,38 @@ jobs:
           skip-existing: true
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: verified-server-bin-candidate
-          path: public-server-bin
+          name: verified-testing-candidate
+          path: public-testing
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-connect-candidate
+          path: public-connect
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-server-base-candidate
+          path: public-server-base
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-server-duckdb-candidate
+          path: public-server-duckdb
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: verified-native-candidate
           path: public-native
+      - name: Verify every candidate package before public hash checks
+        run: |
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory dist --project sparkless
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-native --project sparkless-native
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-server-base --project sparkless-server
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-server-duckdb --project sparkless-server-duckdb
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-connect --project sparkless-connect
+          python scripts/verify_candidate_inventory.py --manifest candidate-inventory/candidate-inventory.json --directory public-testing --project sparkless-testing
       - name: Verify public package inventory and hashes
         run: |
           python scripts/verify_public_release_416.py --version "${GITHUB_REF_NAME#v}" \
-            --sparkless-directory dist --server-bin-directory public-server-bin \
+            --sparkless-directory dist --testing-directory public-testing \
             --native-directory public-native \
+            --connect-directory public-connect \
+            --server-base-directory public-server-base \
+            --server-duckdb-directory public-server-duckdb \
             --engine-version "$(python -c 'import tomllib; print(tomllib.load(open("python/native/pyproject.toml", "rb"))["project"]["version"])')"

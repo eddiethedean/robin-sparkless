@@ -1,7 +1,7 @@
 """PySpark parity test for approx_count_distinct with rsd parameter (Issue #266)."""
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestApproxCountDistinctRsdParity(ParityTestBase):

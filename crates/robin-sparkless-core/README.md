@@ -13,10 +13,11 @@ Shared types, config, error, and engine-agnostic expression IR for [robin-sparkl
 | **Config** | `SparklessConfig` for session/engine configuration |
 | **Schema** | `DataType`, `StructField`, `StructType` (engine-agnostic) |
 | **Error** | `EngineError` used across backends |
-| **Engine traits** | `SparkSessionBackend`, `DataFrameReaderBackend`, `DataFrameBackend`, `GroupedDataBackend`, `PlanExecutor`, `JoinType`, `CollectedRows` |
+| **Engine contracts** | `SparkSessionBackend`, `DataFrameReaderBackend`, `FrameTransform`, `FrameActions`, `FrameSchema`, `GroupedData`, `ExecutionContext`, `JoinType`, `CollectedRows` |
+| **Catalog contracts** | `CatalogResolver`, `CatalogReader`, `CatalogBatchWriter`, owner/capability and commit outcome types |
 | **Expression IR** | `ExprIr`, `LiteralValue`, and builders: `col`, `when`, `lit_i64`, `lit_str`, `lit_bool`, `lit_f64`, `lit_i32`, `lit_null`, `gt`, `lt`, `eq`, `and_`, `or_`, `between`, `is_in`, `call`, etc. |
 
-Backends (e.g. `robin-sparkless-polars`) implement the engine traits and convert `ExprIr` into their native representation. The root crate `robin-sparkless` re-exports the public API and wires in one backend.
+Backends (e.g. `robin-sparkless-polars`) implement the typed engine capabilities and convert `ExprIr` into their native representation. The root crate `robin-sparkless` re-exports the public API and wires in one backend.
 
 ## Usage
 

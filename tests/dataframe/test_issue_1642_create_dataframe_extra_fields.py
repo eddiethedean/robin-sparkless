@@ -17,7 +17,7 @@ def test_create_dataframe_extra_tuple_fields_names_only_schema_issue_1642(spark)
 
 
 def test_create_dataframe_structtype_still_rejects_extra_fields(spark):
-    from sparkless.testing import get_imports
+    from sparkless_testing import get_imports
 
     T = get_imports()
     schema = T.StructType(

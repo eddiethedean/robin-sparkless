@@ -41,7 +41,7 @@ class TestIssue361CreateDataFrameRdd:
 
     def test_createDataFrame_from_rdd_empty_dataframe(self, spark):
         """createDataFrame(empty_df.rdd, schema=...) with explicit StructType schema."""
-        from sparkless.testing import get_imports
+        from sparkless_testing import get_imports
 
         imports = get_imports()
         schema = imports.StructType(

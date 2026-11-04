@@ -1,60 +1,232 @@
-//! Engine error type for embedders.
-//!
-//! Use [`EngineError`] when you want to map robin-sparkless and Polars errors
-//! to a single type (e.g. for FFI or CLI) without depending on Polars error types.
-//!
-//! Note: `From<PolarsError>` for `EngineError` is implemented in the Polars backend
-//! crate (`robin-sparkless-polars`), which has a Polars dependency.
-//!
-//! Payloads are currently strings so Python/FFI can surface stable messages without
-//! coupling to Polars' error enum. Prefer matching on the variant for recovery logic;
-//! use [`EngineError::user_message`] for host-facing text.
+//! Structured engine errors with stable categories and machine-readable codes.
 
-use thiserror::Error;
+use std::collections::BTreeMap;
+use std::fmt;
 
-/// Unified error type for robin-sparkless operations.
-///
-/// Embedders (Python, Node, CLI) can map these variants to native errors
-/// without depending on `PolarsError`.
-#[derive(Debug, Error)]
-pub enum EngineError {
-    /// User-facing error (invalid input, unsupported operation).
-    #[error("user error: {0}")]
-    User(String),
-    /// Internal / compute error.
-    #[error("internal error: {0}")]
-    Internal(String),
-    /// I/O error (file not found, permission, etc.).
-    #[error("io error: {0}")]
-    Io(String),
-    /// SQL parsing or execution error.
-    #[error("sql error: {0}")]
-    Sql(String),
-    /// Resource not found (column, table, file).
-    #[error("not found: {0}")]
-    NotFound(String),
-    /// An action reached a safe point after cancellation was requested.
-    #[error("cancelled: {0}")]
-    Cancelled(String),
-    /// Other / unclassified.
-    #[error("{0}")]
-    Other(String),
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ErrorCategory {
+    InvalidInput,
+    Execution,
+    Io,
+    Sql,
+    NotFound,
+    Cancelled,
+    Provider,
+    Capability,
+    Conflict,
+    Internal,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ErrorRetryability {
+    Unspecified,
+    Retryable,
+    Terminal,
+    OutcomeUnknown,
+}
+
+/// Machine-readable error payload shared by Rust, Python, HTTP, and Connect boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ErrorDetail {
+    pub category: ErrorCategory,
+    pub code: String,
+    pub message: String,
+    pub operation: Option<String>,
+    pub retryability: ErrorRetryability,
+    pub metadata: BTreeMap<String, String>,
+    pub cause: Option<String>,
+}
+
+impl ErrorDetail {
+    pub fn new(
+        category: ErrorCategory,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            category,
+            code: code.into(),
+            message: message.into(),
+            operation: None,
+            retryability: ErrorRetryability::Unspecified,
+            metadata: BTreeMap::new(),
+            cause: None,
+        }
+    }
+
+    pub fn with_operation(mut self, operation: impl Into<String>) -> Self {
+        self.operation = Some(operation.into());
+        self
+    }
+
+    pub fn with_retryability(mut self, retryability: ErrorRetryability) -> Self {
+        self.retryability = retryability;
+        self
+    }
+
+    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_cause(mut self, cause: impl Into<String>) -> Self {
+        self.cause = Some(cause.into());
+        self
+    }
+}
+
+/// Unified structured error type. Prefixes preserve familiar display strings while callers
+/// should branch on [`ErrorDetail::category`] and `code()` instead of parsing messages.
+#[derive(Debug)]
+pub struct EngineError {
+    detail: Box<ErrorDetail>,
+    display_prefix: &'static str,
 }
 
 impl EngineError {
-    /// User-facing message without variant prefixes (for FFI / Python bindings).
-    pub fn user_message(&self) -> &str {
-        match self {
-            EngineError::User(s)
-            | EngineError::Internal(s)
-            | EngineError::Io(s)
-            | EngineError::Sql(s)
-            | EngineError::NotFound(s)
-            | EngineError::Cancelled(s)
-            | EngineError::Other(s) => s.as_str(),
+    pub fn from_detail(detail: ErrorDetail) -> Self {
+        let display_prefix = Self::display_prefix(detail.category);
+        Self {
+            detail: Box::new(detail),
+            display_prefix,
         }
     }
+
+    fn display_prefix(category: ErrorCategory) -> &'static str {
+        match category {
+            ErrorCategory::InvalidInput | ErrorCategory::Capability => "user error: ",
+            ErrorCategory::Execution | ErrorCategory::Internal => "internal error: ",
+            ErrorCategory::Io => "io error: ",
+            ErrorCategory::Sql => "sql error: ",
+            ErrorCategory::NotFound => "not found: ",
+            ErrorCategory::Cancelled => "cancelled: ",
+            ErrorCategory::Provider => "provider error: ",
+            ErrorCategory::Conflict => "conflict: ",
+            ErrorCategory::Other => "",
+        }
+    }
+
+    pub fn detail(&self) -> &ErrorDetail {
+        &self.detail
+    }
+
+    pub fn category(&self) -> ErrorCategory {
+        self.detail.category
+    }
+
+    pub fn code(&self) -> &str {
+        &self.detail.code
+    }
+
+    pub fn operation(&self) -> Option<&str> {
+        self.detail.operation.as_deref()
+    }
+
+    pub fn retryability(&self) -> ErrorRetryability {
+        self.detail.retryability
+    }
+
+    pub fn user_message(&self) -> &str {
+        &self.detail.message
+    }
+
+    pub fn with_detail(mut self, detail: ErrorDetail) -> Self {
+        self.display_prefix = Self::display_prefix(detail.category);
+        self.detail = Box::new(detail);
+        self
+    }
+
+    pub fn with_operation(mut self, operation: impl Into<String>) -> Self {
+        self.detail.operation = Some(operation.into());
+        self
+    }
+
+    pub fn with_retryability(mut self, retryability: ErrorRetryability) -> Self {
+        self.detail.retryability = retryability;
+        self
+    }
+
+    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.detail.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_cause(mut self, cause: impl Into<String>) -> Self {
+        self.detail.cause = Some(cause.into());
+        self
+    }
+
+    pub fn invalid_input(message: String) -> Self {
+        Self::from_detail(
+            ErrorDetail::new(ErrorCategory::InvalidInput, "INVALID_INPUT", message)
+                .with_retryability(ErrorRetryability::Terminal),
+        )
+    }
+
+    pub fn internal(message: String) -> Self {
+        Self::from_detail(
+            ErrorDetail::new(ErrorCategory::Internal, "INTERNAL", message)
+                .with_retryability(ErrorRetryability::Unspecified),
+        )
+    }
+
+    pub fn io(message: String) -> Self {
+        Self::from_detail(ErrorDetail::new(ErrorCategory::Io, "IO_ERROR", message))
+    }
+
+    pub fn sql(message: String) -> Self {
+        Self::from_detail(ErrorDetail::new(ErrorCategory::Sql, "SQL_ERROR", message))
+    }
+
+    pub fn not_found(message: String) -> Self {
+        Self::from_detail(
+            ErrorDetail::new(ErrorCategory::NotFound, "NOT_FOUND", message)
+                .with_retryability(ErrorRetryability::Terminal),
+        )
+    }
+
+    pub fn cancelled(message: String) -> Self {
+        Self::from_detail(
+            ErrorDetail::new(ErrorCategory::Cancelled, "CANCELLED", message)
+                .with_retryability(ErrorRetryability::Terminal),
+        )
+    }
+
+    pub fn other(message: String) -> Self {
+        Self::from_detail(ErrorDetail::new(ErrorCategory::Other, "OTHER", message))
+    }
+
+    pub fn provider(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        retryability: ErrorRetryability,
+    ) -> Self {
+        Self::from_detail(
+            ErrorDetail::new(ErrorCategory::Provider, code, message)
+                .with_retryability(retryability),
+        )
+    }
+
+    pub fn capability(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::from_detail(
+            ErrorDetail::new(ErrorCategory::Capability, code, message)
+                .with_retryability(ErrorRetryability::Terminal),
+        )
+    }
 }
+
+impl fmt::Display for EngineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", self.display_prefix, self.detail.message)
+    }
+}
+
+impl std::error::Error for EngineError {}
 
 /// Normalize column-not-found text to PySpark-style "cannot be resolved" wording.
 pub fn normalize_unresolved_column_message(msg: &str) -> String {
@@ -82,65 +254,13 @@ pub fn normalize_unresolved_column_message(msg: &str) -> String {
 }
 
 impl From<serde_json::Error> for EngineError {
-    fn from(e: serde_json::Error) -> Self {
-        EngineError::Internal(e.to_string())
+    fn from(error: serde_json::Error) -> Self {
+        Self::internal(error.to_string()).with_cause(error.to_string())
     }
 }
 
 impl From<std::io::Error> for EngineError {
-    fn from(e: std::io::Error) -> Self {
-        EngineError::Io(e.to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn engine_error_display() {
-        assert_eq!(
-            EngineError::User("bad input".into()).to_string(),
-            "user error: bad input"
-        );
-        assert_eq!(
-            EngineError::Internal("panic".into()).to_string(),
-            "internal error: panic"
-        );
-        assert_eq!(
-            EngineError::Io("file not found".into()).to_string(),
-            "io error: file not found"
-        );
-        assert_eq!(
-            EngineError::Sql("parse error".into()).to_string(),
-            "sql error: parse error"
-        );
-        assert_eq!(
-            EngineError::NotFound("column x".into()).to_string(),
-            "not found: column x"
-        );
-        assert_eq!(EngineError::Other("misc".into()).to_string(), "misc");
-    }
-
-    #[test]
-    fn engine_error_is_std_error() {
-        let err: Box<dyn std::error::Error> = Box::new(EngineError::User("x".into()));
-        assert!(err.to_string().contains("user error"));
-    }
-
-    #[test]
-    fn engine_error_from_io() {
-        let e = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
-        let err: EngineError = e.into();
-        assert!(err.to_string().contains("file missing"));
-        assert!(err.to_string().contains("io error"));
-    }
-
-    #[test]
-    fn engine_error_from_serde_json() {
-        let bad = b"\x80";
-        let e: Result<(), _> = serde_json::from_slice(bad);
-        let err: EngineError = e.unwrap_err().into();
-        assert!(err.to_string().contains("internal error"));
+    fn from(error: std::io::Error) -> Self {
+        Self::io(error.to_string()).with_cause(error.to_string())
     }
 }

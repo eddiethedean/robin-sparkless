@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import List
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _create_person_df(spark):

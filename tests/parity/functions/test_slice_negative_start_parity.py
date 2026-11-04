@@ -6,7 +6,7 @@ slice(arr, -2, 2) should return the last 2 elements, not the first 2.
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestSliceNegativeStartParity(ParityTestBase):

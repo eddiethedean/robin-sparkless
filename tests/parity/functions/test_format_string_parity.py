@@ -5,7 +5,7 @@ Tests validate that Sparkless format_string function behaves identically to PySp
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 class TestFormatStringParity(ParityTestBase):

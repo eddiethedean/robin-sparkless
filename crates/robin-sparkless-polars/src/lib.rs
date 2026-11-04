@@ -26,6 +26,9 @@ pub mod udfs;
 
 #[cfg(feature = "delta")]
 pub mod delta;
+
+#[cfg(feature = "duckdb-source")]
+pub(crate) use robin_sparkless_duckdb as duckdb_source;
 #[cfg(any(
     feature = "jdbc",
     feature = "jdbc_mysql",
@@ -62,9 +65,14 @@ pub use error::{EngineError, polars_to_core_error};
 pub use expression::{column_to_expr, lit_bool, lit_f64, lit_i32, lit_i64, lit_str};
 pub use functions::*;
 pub use robin_sparkless_core::engine::{
-    ArrowIpcBatchStream, ArrowIpcStream, ExternalCatalogProvider, ExternalTableDescriptor,
+    ArrowIpcBatchStream, ArrowIpcStream, CatalogBatchWriter, CatalogCapabilities, CatalogOwnership,
+    CatalogReadSnapshot, CatalogReader, CatalogResolver, ExternalCatalog, ExternalTableDescriptor,
     ExternalTableFormat, ExternalTableSaveMode, ExternalTableWriteBatchRequest,
-    ExternalTableWriteRequest, ExternalTableWriteResult,
+    ExternalTableWriteOutcome, ExternalTableWriteResult, PreparedCatalogWrite,
+};
+#[cfg(feature = "duckdb-source")]
+pub use robin_sparkless_duckdb::{
+    DuckDbCatalog, DuckDbQuackSourceConfig, DuckDbSourceConfig, DuckDbSourceSpec,
 };
 pub use schema::{DataType, StructField, StructType, StructTypePolarsExt, schema_from_json};
 pub use session::{

@@ -1,61 +1,64 @@
-//! Engine-agnostic SparkSession backend trait.
+//! Session construction and catalog-registration capabilities.
 
 use crate::engine::{
-    CancellationToken, DataFrameBackend, DataFrameReaderBackend, ExternalCatalogProvider,
+    CancellationToken, DataFrameReaderBackend, ExecutionContext, ExternalCatalog, FrameActions,
+    FrameSchema, FrameTransform,
 };
 use crate::error::EngineError;
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Backend for SparkSession: creates readers, tables, and DataFrames from data.
+/// Backend session contract. Frame and reader values remain statically associated with the
+/// selected backend; runtime erasure belongs in server execution handles.
 pub trait SparkSessionBackend: Send + Sync {
-    fn read(&self) -> Box<dyn DataFrameReaderBackend>;
-    fn table(&self, name: &str) -> Result<Box<dyn DataFrameBackend>, EngineError>;
+    type Frame: FrameTransform + FrameActions + FrameSchema;
+    type Reader: DataFrameReaderBackend<Frame = Self::Frame>;
+
+    fn read(&self) -> Self::Reader;
+    fn table(&self, name: &str) -> Result<Self::Frame, EngineError>;
     fn create_dataframe_from_rows(
         &self,
         rows: Vec<Vec<JsonValue>>,
         schema: Vec<(String, String)>,
         verify_schema: bool,
         schema_was_inferred: bool,
-    ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn create_dataframe(
-        &self,
-        data: Vec<(i64, i64, String)>,
-        column_names: Vec<&str>,
-    ) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    fn sql(&self, query: &str) -> Result<Box<dyn DataFrameBackend>, EngineError>;
-    /// Execute SQL while sharing a cancellation signal with any eager statement work.
-    /// The default checks around SQL planning; backends that perform writes during planning
-    /// should override this method and fence cancellation before commit acceptance.
+    ) -> Result<Self::Frame, EngineError>;
+    fn sql(&self, query: &str) -> Result<Self::Frame, EngineError>;
+
     fn sql_with_cancellation(
         &self,
         query: &str,
         token: &CancellationToken,
-    ) -> Result<Box<dyn DataFrameBackend>, EngineError> {
+    ) -> Result<Self::Frame, EngineError> {
         token.check_cancelled()?;
         let dataframe = self.sql(query)?;
         token.check_cancelled()?;
         Ok(dataframe)
     }
-    /// Register `df` under `name` in the session catalog.
-    ///
-    /// Returns [`EngineError::User`] if `df` is not from the same backend as `self`.
-    fn register_table(&self, name: &str, df: &dyn DataFrameBackend) -> Result<(), EngineError>;
-    /// Attach an external catalog resolver to this logical session.
-    ///
-    /// Backends that do not implement external catalog resolution may keep the default
-    /// explicit unsupported error. Clones of one session may share this resolver, but a
-    /// backend's `new_session` operation must create an isolated resolver slot.
-    fn set_external_catalog_provider(
+
+    fn sql_with_context(
         &self,
-        _provider: Option<Arc<dyn ExternalCatalogProvider>>,
+        query: &str,
+        context: &ExecutionContext,
+    ) -> Result<Self::Frame, EngineError> {
+        context.check_cancelled()?;
+        let dataframe = self.sql_with_cancellation(query, context.cancellation())?;
+        context.check_cancelled()?;
+        Ok(dataframe)
+    }
+
+    fn register_table(&self, name: &str, df: &Self::Frame) -> Result<(), EngineError>;
+
+    fn set_external_catalog(
+        &self,
+        _catalog: Option<Arc<ExternalCatalog>>,
     ) -> Result<(), EngineError> {
-        Err(EngineError::User(
-            "this SparkSession backend does not support external catalog providers".into(),
+        Err(EngineError::invalid_input(
+            "this SparkSession backend does not support external catalogs".into(),
         ))
     }
-    fn is_case_sensitive(&self) -> bool;
-    fn get_config(&self) -> &std::collections::HashMap<String, String>;
-}
 
-// Session builder is backend-specific (not a trait) so root uses the concrete backend's builder.
+    fn is_case_sensitive(&self) -> bool;
+    fn get_config(&self) -> &HashMap<String, String>;
+}

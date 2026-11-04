@@ -41,7 +41,7 @@ client because file readers, SQL, joins, and writes are outside this Connect sub
 
 See [docs/python_getting_started.md](../../docs/python_getting_started.md) and [docs/TESTING_GUIDE.md](../../docs/TESTING_GUIDE.md).
 
-Use the adjacent `conftest.py` to activate `sparkless.testing.plugin`. To check
+Use the adjacent `conftest.py` to activate `sparkless_testing.plugin`. To check
 all pytest examples on real Spark (Java and the appropriate extra required):
 
 ```bash

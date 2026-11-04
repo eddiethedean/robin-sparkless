@@ -4,7 +4,7 @@ PySpark supports F.round() on string columns that contain numeric values.
 Uses get_imports from fixture only.
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

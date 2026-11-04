@@ -8,7 +8,7 @@ https://github.com/eddiethedean/sparkless/issues/432
 
 import datetime
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_cast_datetime_to_timestamp_noop(spark, spark_mode):

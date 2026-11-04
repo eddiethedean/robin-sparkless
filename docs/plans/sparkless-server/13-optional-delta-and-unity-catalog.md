@@ -15,6 +15,10 @@ search:
 
 Add explicitly enabled native storage/catalog interoperability with independently verified transactions.
 
+## Existing local storage/provider baseline
+
+[SS-22](22-local-sql-feature-parity.md) requires LSQL-03/V56/V57 for all existing Delta read/write/version-selection and external catalog provider APIs: registration/resolution, descriptors and validation, materialized and lazy batch writes, save modes/options, permissions, receipts and structured errors. D13/D21 maps Python callback registration to the documented client bridge and SS-12 workers; native provider/storage execution stays shared. Test early iterator close, callback failure/cancellation and provider ownership across sessions. Existing local storage/provider behavior is required scope even where broader Delta/UC features remain optional or unsupported.
+
 ## Dependencies and delivery slices
 
 SS-07 catalog/mutation contracts, SS-08 exact types, SS-11 reproducible integration infrastructure. Python workers are not a dependency.

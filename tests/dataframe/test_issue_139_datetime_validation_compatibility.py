@@ -5,7 +5,7 @@ Test for issue #139: datetime validation compatibility. Uses get_imports from fi
 from datetime import date, datetime
 
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 SparkSession = _imports.SparkSession

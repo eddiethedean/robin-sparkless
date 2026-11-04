@@ -5,7 +5,7 @@ PySpark uses regexp_replace for string replacement; sparkless may have replace(o
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

@@ -1,6 +1,6 @@
-# sparkless.testing Guide
+# sparkless_testing Guide
 
-The `sparkless.testing` module provides a unified framework for writing tests that run against both **sparkless** (Rust/Polars backend) and **PySpark** (JVM backend). This enables you to:
+The `sparkless_testing` module provides a unified framework for writing tests that run against both **sparkless** (Rust/Polars backend) and **PySpark** (JVM backend). This enables you to:
 
 - Write tests once, run against both backends
 - Validate your code produces identical results on both engines
@@ -14,7 +14,7 @@ The `sparkless.testing` module provides a unified framework for writing tests th
 Install the package and pytest in your test environment:
 
 ```bash
-python -m pip install "sparkless>=4,<5" pytest
+python -m pip install "sparkless[testing]>=4,<5"
 ```
 
 For the PySpark run, install `"sparkless[pyspark]>=4,<5"` and a compatible Java
@@ -25,12 +25,12 @@ for PySpark 4. See [installation and extras](python_getting_started.md#optional-
 
 ```python
 # conftest.py
-pytest_plugins = ["sparkless.testing.plugin"]
+pytest_plugins = ["sparkless_testing.plugin"]
 ```
 
 Use the `.plugin` entry point to register both fixtures (`spark`, `spark_mode`,
 `spark_imports`, etc.) and marker/collection hooks. Loading only
-`"sparkless.testing"` exposes the fixtures but does not activate those hooks.
+`"sparkless_testing"` exposes the fixtures but does not activate those hooks.
 
 ### 2. Write a test using the `spark` fixture
 
@@ -132,7 +132,7 @@ def test_create_dataframe(spark):
 Returns the current `Mode` enum (`Mode.SPARKLESS` or `Mode.PYSPARK`).
 
 ```python
-from sparkless.testing import Mode
+from sparkless_testing import Mode
 
 def test_mode_specific_behavior(spark, spark_mode):
     df = spark.createDataFrame([{"id": 1}])
@@ -220,12 +220,12 @@ See [compatibility profiles](PYSPARK_COMPAT_PROFILES.md) for semantic settings.
 
 ## Direct API Usage
 
-You can also use `sparkless.testing` directly without pytest fixtures.
+You can also use `sparkless_testing` directly without pytest fixtures.
 
 ### Mode Detection
 
 ```python
-from sparkless.testing import Mode, get_mode, is_pyspark_mode, is_sparkless_mode
+from sparkless_testing import Mode, get_mode, is_pyspark_mode, is_sparkless_mode
 
 mode = get_mode()  # Mode.SPARKLESS or Mode.PYSPARK
 
@@ -238,7 +238,7 @@ elif is_sparkless_mode():
 ### Session Creation
 
 ```python
-from sparkless.testing import create_session, Mode
+from sparkless_testing import create_session, Mode
 
 # Create session for current mode
 spark = create_session(app_name="my_test")
@@ -251,7 +251,7 @@ pyspark_spark = create_session(app_name="test", mode=Mode.PYSPARK)
 ### Unified Imports
 
 ```python
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 
@@ -280,7 +280,7 @@ The module provides utilities for comparing DataFrames, which is essential for p
 Assert two DataFrames are equivalent.
 
 ```python
-from sparkless.testing import assert_dataframes_equal
+from sparkless_testing import assert_dataframes_equal
 
 def test_transform(spark):
     input_df = spark.createDataFrame([{"x": 1}, {"x": 2}])
@@ -308,7 +308,7 @@ assert_dataframes_equal(
 Get detailed comparison results without raising an exception.
 
 ```python
-from sparkless.testing import compare_dataframes
+from sparkless_testing import compare_dataframes
 
 result = compare_dataframes(df1, df2)
 
@@ -325,7 +325,7 @@ else:
 Compare row collections directly.
 
 ```python
-from sparkless.testing import assert_rows_equal
+from sparkless_testing import assert_rows_equal
 
 rows1 = df1.collect()
 rows2 = df2.collect()
@@ -337,13 +337,13 @@ assert_rows_equal(rows1, rows2, check_order=False)
 
 ## Complete Example: Dual-Mode Test Suite
 
-Here's a complete example of a test file using `sparkless.testing`:
+Here's a complete example of a test file using `sparkless_testing`:
 
 ```python
 """Tests for my_transform module."""
 
 import pytest
-from sparkless.testing import (
+from sparkless_testing import (
     Mode,
     get_imports,
     assert_dataframes_equal,
@@ -464,7 +464,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install "sparkless>=4,<5" pytest
+      - run: python -m pip install "sparkless[testing]>=4,<5"
       - run: pytest tests/ -v
 
   test-pyspark:
@@ -489,7 +489,7 @@ jobs:
 ### Mode Enum
 
 ```python
-from sparkless.testing import Mode
+from sparkless_testing import Mode
 
 Mode.SPARKLESS  # Sparkless backend
 Mode.PYSPARK    # PySpark backend
@@ -608,12 +608,12 @@ Check the selected runtime and environment before comparing results across
 engines. The standalone Connect client does not require a local Spark JVM;
 see [Spark Connect](SPARK_CONNECT.md).
 
-### Import errors for sparkless.testing
+### Import errors for sparkless_testing
 
 Install the package in the same environment as pytest:
 
 ```bash
-python -m pip install "sparkless>=4,<5" pytest
+python -m pip install "sparkless[testing]>=4,<5"
 ```
 
 For repository development, use the [contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup) and rebuild the native extension after Rust changes.

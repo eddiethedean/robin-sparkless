@@ -7,7 +7,7 @@ unique names; we select with those aliases and orderBy id for stable comparison.
 """
 
 from tests.tools.parity_base import ParityTestBase
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 F = get_imports().F
 

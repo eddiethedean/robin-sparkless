@@ -7,7 +7,7 @@ as the key so row["map_col"] works. PySpark uses output column names (aliases) a
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 _imports = get_imports()
 F = _imports.F

@@ -7,7 +7,7 @@ Robin previously raised RuntimeError: array requires at least one column.
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 _imports = get_imports()

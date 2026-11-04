@@ -10,7 +10,7 @@ Run with PySpark first: SPARKLESS_TEST_MODE=pyspark pytest tests/test_issue_422_
 Then mock: pytest tests/test_issue_422_fillna_float.py -v
 """
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def _row_val(row: object, key: str) -> object:

@@ -10,17 +10,16 @@ use crate::dataframe::joins::{
     try_extract_join_eq_columns_all,
 };
 use crate::dataframe::{DataFrame, JoinType, disambiguate_agg_output_names};
-use crate::functions::{
-    SortOrder, asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last,
-};
+use crate::functions::{asc_nulls_first, asc_nulls_last, col, desc_nulls_first, desc_nulls_last};
 use crate::plan::expr::{expr_from_value, try_column_from_udf_value};
 use crate::session::{SparkSession, set_thread_udf_session};
 pub use expr::PlanExprError;
 pub use logical::LogicalPlan;
 use polars::prelude::Expr;
 use polars::prelude::PolarsError;
-use robin_sparkless_core::engine::{DataFrameBackend, PlanExecutor as CorePlanExecutor};
-use robin_sparkless_core::error::EngineError;
+use robin_sparkless_plan::{
+    BinaryInput, GroupInput, LogicalPlan as PortablePlan, OperationKind, PlanOperation, PlanPayload,
+};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -37,51 +36,114 @@ pub fn execute_plan(
     schema: Vec<(String, String)>,
     plan: &[Value],
 ) -> Result<DataFrame, PlanError> {
+    let plan = PortablePlan::decode(plan).map_err(|error| {
+        if error.code() == "UNSUPPORTED_PLAN_OPERATION" {
+            PlanError::UnsupportedOp(error.user_message().to_string())
+        } else {
+            PlanError::InvalidPlan(error.user_message().to_string())
+        }
+    })?;
+    execute_typed_plan(session, data, schema, plan)
+}
+
+/// Execute a decoded portable plan after validating every operation at the input boundary.
+pub fn execute_typed_plan(
+    session: &SparkSession,
+    data: Vec<Vec<Value>>,
+    schema: Vec<(String, String)>,
+    plan: PortablePlan,
+) -> Result<DataFrame, PlanError> {
     set_thread_udf_session(session.clone());
+    validate_plan_expressions(&plan)?;
     let mut df = session
         .create_dataframe_from_rows(data, schema, false, false)
         .map_err(PlanError::Session)?
         .with_case_insensitive_column_resolution();
 
-    for op_value in plan {
-        let op_obj = op_value
-            .as_object()
-            .ok_or_else(|| PlanError::InvalidPlan("each plan step must be a JSON object".into()))?;
-        let op_name = op_obj
-            .get("op")
-            .and_then(Value::as_str)
-            .ok_or_else(|| PlanError::InvalidPlan("each plan step must have 'op' string".into()))?;
-        let mut payload = op_obj.get("payload").cloned().unwrap_or(Value::Null);
-        // Sparkless may put other_data/other_schema at op level (sibling to payload) or use camelCase.
-        // Merge into payload so apply_op finds them (issue #510).
-        if matches!(op_name, "join" | "union" | "unionByName" | "crossJoin") {
-            payload = merge_other_into_payload(payload, op_obj);
-        }
-
-        df = apply_op(session, df, op_name, payload)?;
+    for operation in plan.operations {
+        df = apply_op(session, df, operation)?;
     }
 
     Ok(df)
 }
 
-/// Polars-backed implementation of the core [`PlanExecutor`] trait.
-///
-/// This adapter allows high-level code (e.g. the root crate) to execute JSON plans using
-/// the engine-agnostic [`DataFrameBackend`] and [`EngineError`] types, while reusing the
-/// existing Polars plan interpreter.
-pub struct PolarsPlanExecutor;
+fn validate_plan_expressions(plan: &PortablePlan) -> Result<(), PlanError> {
+    for operation in &plan.operations {
+        match operation.payload() {
+            PlanPayload::Expression(expression) => {
+                validate_expression_value(&expression.to_json_value())?;
+            }
+            PlanPayload::Select(items) => {
+                for item in items {
+                    validate_expression_candidate(item)?;
+                }
+            }
+            PlanPayload::WithColumn { expression, .. } => {
+                validate_with_column_expression(&expression.to_json_value())?;
+            }
+            PlanPayload::GroupBy { keys, aggregations } => {
+                for key in keys {
+                    validate_expression_candidate(key)?;
+                }
+                for aggregation in aggregations {
+                    validate_expression_candidate(aggregation)?;
+                }
+            }
+            PlanPayload::Join(input) => {
+                if let Some(on) = &input.on {
+                    validate_expression_candidate(on)?;
+                }
+            }
+            PlanPayload::Rollup(input) | PlanPayload::Cube(input) => {
+                for key in &input.keys {
+                    validate_expression_candidate(key)?;
+                }
+                for aggregation in &input.aggregations {
+                    validate_expression_candidate(aggregation)?;
+                }
+            }
+            PlanPayload::Empty
+            | PlanPayload::Limit { .. }
+            | PlanPayload::Offset { .. }
+            | PlanPayload::OrderBy { .. }
+            | PlanPayload::Drop { .. }
+            | PlanPayload::Rename { .. }
+            | PlanPayload::Union(_)
+            | PlanPayload::UnionByName(_)
+            | PlanPayload::CrossJoin(_) => {}
+        }
+    }
+    Ok(())
+}
 
-impl CorePlanExecutor<SparkSession> for PolarsPlanExecutor {
-    fn execute_plan(
-        session: &SparkSession,
-        data: Vec<Vec<Value>>,
-        schema: Vec<(String, String)>,
-        plan: &[Value],
-    ) -> Result<Box<dyn DataFrameBackend>, EngineError> {
-        // Delegate to the existing JSON plan interpreter and then box the backend DataFrame.
-        let df = execute_plan(session, data, schema, plan)
-            .map_err(|e| EngineError::Internal(e.to_string()))?;
-        Ok(Box::new(df))
+fn validate_expression_candidate(value: &Value) -> Result<(), PlanError> {
+    if let Some(expression) = value.get("expr") {
+        return validate_expression_value(expression);
+    }
+    if value.as_object().is_some_and(|object| {
+        ["fn", "function", "op", "udf"]
+            .iter()
+            .any(|key| object.contains_key(*key))
+    }) {
+        return validate_expression_value(value);
+    }
+    if let Some(items) = value.as_array() {
+        for item in items {
+            validate_expression_candidate(item)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_expression_value(value: &Value) -> Result<(), PlanError> {
+    expr_from_value(value).map(|_| ()).map_err(PlanError::Expr)
+}
+
+fn validate_with_column_expression(value: &Value) -> Result<(), PlanError> {
+    if let Some(column) = try_column_from_udf_value(value) {
+        column.map(|_| ()).map_err(PlanError::Expr)
+    } else {
+        validate_expression_value(value)
     }
 }
 
@@ -106,52 +168,6 @@ impl std::fmt::Display for PlanError {
 }
 
 impl std::error::Error for PlanError {}
-
-/// Merge other_data/other_schema from op into payload if missing. Supports snake_case and camelCase.
-fn merge_other_into_payload(payload: Value, op: &serde_json::Map<String, Value>) -> Value {
-    fn get(obj: &serde_json::Map<String, Value>, snake: &str, camel: &str) -> Option<Value> {
-        obj.get(snake).or_else(|| obj.get(camel)).cloned()
-    }
-    let mut p = match payload {
-        Value::Object(m) => m,
-        _ => return payload,
-    };
-    if p.get("other_data").or_else(|| p.get("otherData")).is_none() {
-        if let Some(v) = get(op, "other_data", "otherData") {
-            p.insert("other_data".into(), v);
-        }
-    }
-    if p.get("other_schema")
-        .or_else(|| p.get("otherSchema"))
-        .is_none()
-    {
-        if let Some(v) = get(op, "other_schema", "otherSchema") {
-            p.insert("other_schema".into(), v);
-        }
-    }
-    if p.get("on").is_none() {
-        if let Some(v) = get(op, "on", "on") {
-            p.insert("on".into(), v);
-        }
-    }
-    Value::Object(p)
-}
-
-/// Get other_data from payload (snake_case or camelCase).
-fn get_other_data(payload: &Value) -> Option<&Vec<Value>> {
-    payload
-        .get("other_data")
-        .or_else(|| payload.get("otherData"))
-        .and_then(Value::as_array)
-}
-
-/// Get other_schema from payload (snake_case or camelCase).
-fn get_other_schema(payload: &Value) -> Option<&Vec<Value>> {
-    payload
-        .get("other_schema")
-        .or_else(|| payload.get("otherSchema"))
-        .and_then(Value::as_array)
-}
 
 /// Parse one orderBy column element into zero or more (column_name, ascending) pairs.
 /// Accepts: "col", "col DESC", "col ASC", "['a','b']" (Python repr), {"col":"x"}, {"name":"x"}.
@@ -374,7 +390,10 @@ fn schema_field_to_pair(v: &Value) -> Option<(String, String)> {
         .and_then(Value::as_str)
         .or_else(|| {
             // dataType may be nested: {"type":"string"} or {"typeName":"string"}
-            obj.get("dataType")?.get("typeName").and_then(Value::as_str)
+            obj.get("dataType")?
+                .get("typeName")
+                .or_else(|| obj.get("dataType")?.get("type"))
+                .and_then(Value::as_str)
         })?
         .to_string();
     Some((name, ty))
@@ -383,320 +402,268 @@ fn schema_field_to_pair(v: &Value) -> Option<(String, String)> {
 fn apply_op(
     session: &SparkSession,
     df: DataFrame,
-    op_name: &str,
-    payload: Value,
+    operation: PlanOperation,
 ) -> Result<DataFrame, PlanError> {
-    match op_name {
-        "stop" => {
-            let _ = payload;
+    match (operation.kind(), operation.payload()) {
+        (OperationKind::Stop, PlanPayload::Empty) => {
             session.stop();
             Ok(df)
         }
-        "filter" => {
-            let expr = expr_from_value(&payload).map_err(PlanError::Expr)?;
-            df.filter(expr).map_err(PlanError::Session)
+        (OperationKind::Filter, PlanPayload::Expression(expression)) => {
+            let expression = expression.to_json_value();
+            let expression = expr_from_value(&expression).map_err(PlanError::Expr)?;
+            df.filter(expression).map_err(PlanError::Session)
         }
-        "select" => {
-            // Accept payload as array or as object with "columns" (Sparkless: {"columns": [...]}).
-            // #689, #688: Accept mixed Column/string: each item may be string, {col/column/name}, or {name, expr}.
-            let arr = payload
-                .as_array()
-                .or_else(|| payload.get("columns").and_then(Value::as_array));
-            if let Some(arr) = arr {
-                if arr.is_empty() {
-                    return Err(PlanError::InvalidPlan(
-                        "select payload must be non-empty array".into(),
-                    ));
-                }
-                let mut exprs = Vec::with_capacity(arr.len());
-                for (idx, v) in arr.iter().enumerate() {
-                    if let Some(obj) = v.as_object() {
-                        if let Some(expr_val) = obj.get("expr") {
-                            // Column-like expression: {name: "<alias>", expr: <expr>}
-                            let name = obj.get("name").and_then(Value::as_str).unwrap_or("_c"); // default alias if Sparkless omits
-                            let expr = expr_from_value(expr_val).map_err(PlanError::Expr)?;
-                            let resolved = df
-                                .resolve_expr_column_names(expr)
-                                .map_err(PlanError::Session)?;
-                            exprs.push(resolved.alias(name));
-                            continue;
-                        }
-                        // #970: accept bare expression object (e.g. {"fn": "alias", "args": [...]} or {"op": "add", ...})
-                        if obj.contains_key("fn") || obj.contains_key("op") {
-                            if let Ok(expr) = expr_from_value(v) {
-                                let resolved = df
-                                    .resolve_expr_column_names(expr)
-                                    .map_err(PlanError::Session)?;
-                                let alias = obj
-                                    .get("fn")
-                                    .and_then(Value::as_str)
-                                    .filter(|s| *s == "alias")
-                                    .and_then(|_| obj.get("args").and_then(Value::as_array))
-                                    .and_then(|a| a.last())
-                                    .and_then(Value::as_str)
-                                    .map(String::from)
-                                    .unwrap_or_else(|| format!("_c{idx}"));
-                                exprs.push(resolved.alias(alias));
-                                continue;
-                            }
-                        }
+        (OperationKind::Select, PlanPayload::Select(items)) => {
+            let mut expressions = Vec::with_capacity(items.len());
+            for (index, item) in items.iter().enumerate() {
+                if let Some(object) = item.as_object() {
+                    if let Some(value) = object.get("expr") {
+                        let name = object.get("name").and_then(Value::as_str).unwrap_or("_c");
+                        let expression = expr_from_value(value).map_err(PlanError::Expr)?;
+                        let expression = df
+                            .resolve_expr_column_names(expression)
+                            .map_err(PlanError::Session)?;
+                        expressions.push(expression.alias(name));
+                        continue;
                     }
-                    // Column name: string or {col/column/name}
-                    let name_str: String = if let Some(s) = v.as_str() {
-                        s.to_string()
-                    } else if let Some(obj) = v.as_object() {
-                        expr_to_col_name(v)
-                            .or_else(|| obj.get("name").and_then(Value::as_str).map(String::from))
-                            .ok_or_else(|| {
-                                PlanError::InvalidPlan(
-                                    "select item must be string, {col/column/name}, or {name, expr}".into(),
-                                )
-                            })?
-                    } else {
-                        return Err(PlanError::InvalidPlan(
-                            "select payload must be list of column name strings or {name, expr} or {col/column/name} objects".into(),
-                        ));
-                    };
-                    // #794: "concat(a, b) as full_name" -> parse concat expr if present
-                    let s = name_str.trim();
-                    let (expr_str, alias_override) = if let Some(ix) = s.rfind(" as ") {
-                        (s[..ix].trim(), Some(s[ix + 4..].trim())) // 4 = len(" as ")
-                    } else {
-                        (s, None)
-                    };
-                    if let Some(expr) =
-                        crate::plan::expr::try_parse_concat_expr_from_string(expr_str)
+                    if object.contains_key("fn")
+                        || object.contains_key("op")
+                        || object.contains_key("udf")
                     {
-                        let resolved = df
-                            .resolve_expr_column_names(expr)
+                        let expression = expr_from_value(item).map_err(PlanError::Expr)?;
+                        let expression = df
+                            .resolve_expr_column_names(expression)
                             .map_err(PlanError::Session)?;
-                        let alias = alias_override.unwrap_or(s);
-                        exprs.push(resolved.alias(alias));
-                    } else {
-                        // #1055: col("StructValue.E1") / dot notation – resolve as expression so struct field access works.
-                        let col_expr = polars::prelude::col::<&str>(expr_str);
-                        let resolved = df
-                            .resolve_expr_column_names(col_expr)
-                            .map_err(PlanError::Session)?;
-                        // #1014, #1022: Preserve requested column name as output (e.g. "NaMe", "StructValue.E1") so row keys match.
-                        exprs.push(resolved.alias(name_str.as_str()));
+                        let alias = object
+                            .get("fn")
+                            .and_then(Value::as_str)
+                            .filter(|name| *name == "alias")
+                            .and_then(|_| object.get("args").and_then(Value::as_array))
+                            .and_then(|arguments| arguments.last())
+                            .and_then(Value::as_str)
+                            .map(String::from)
+                            .unwrap_or_else(|| format!("_c{index}"));
+                        expressions.push(expression.alias(alias));
+                        continue;
                     }
                 }
-                df.select_exprs(exprs).map_err(PlanError::Session)
-            } else {
-                Err(PlanError::InvalidPlan(
-                    "select payload must be array of column names or {name, expr} objects, or object with 'columns' array".into(),
-                ))
+
+                let name = item
+                    .as_str()
+                    .map(String::from)
+                    .or_else(|| expr_to_col_name(item))
+                    .or_else(|| item.get("name").and_then(Value::as_str).map(String::from))
+                    .ok_or_else(|| {
+                        PlanError::InvalidPlan(
+                            "validated select item has no column or expression".into(),
+                        )
+                    })?;
+                let trimmed = name.trim();
+                let (expression_text, alias_override) = if let Some(index) = trimmed.rfind(" as ") {
+                    (trimmed[..index].trim(), Some(trimmed[index + 4..].trim()))
+                } else {
+                    (trimmed, None)
+                };
+                if let Some(expression) =
+                    crate::plan::expr::try_parse_concat_expr_from_string(expression_text)
+                {
+                    let expression = df
+                        .resolve_expr_column_names(expression)
+                        .map_err(PlanError::Session)?;
+                    expressions.push(expression.alias(alias_override.unwrap_or(trimmed)));
+                } else {
+                    let expression = polars::prelude::col::<&str>(expression_text);
+                    let expression = df
+                        .resolve_expr_column_names(expression)
+                        .map_err(PlanError::Session)?;
+                    expressions.push(expression.alias(name.as_str()));
+                }
             }
+            df.select_exprs(expressions).map_err(PlanError::Session)
         }
-        "limit" => {
-            let n = payload.get("n").and_then(Value::as_u64).ok_or_else(|| {
-                PlanError::InvalidPlan("limit payload must have 'n' number".into())
-            })?;
-            let n = usize::try_from(n).map_err(|_| {
-                PlanError::InvalidPlan("limit n is too large for this platform".into())
+        (OperationKind::Limit, PlanPayload::Limit { n }) => {
+            let n = usize::try_from(*n).map_err(|_| {
+                PlanError::InvalidPlan("validated limit exceeds the platform limit".into())
             })?;
             df.limit(n).map_err(PlanError::Session)
         }
-        "offset" => {
-            let n = payload.get("n").and_then(Value::as_u64).unwrap_or(0);
-            df.offset(n as usize).map_err(PlanError::Session)
+        (OperationKind::Offset, PlanPayload::Offset { n }) => {
+            let n = usize::try_from(*n).map_err(|_| {
+                PlanError::InvalidPlan("validated offset exceeds the platform limit".into())
+            })?;
+            df.offset(n).map_err(PlanError::Session)
         }
-        "orderBy" => {
-            let columns = payload
-                .get("columns")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    PlanError::InvalidPlan("orderBy payload must have 'columns' array".into())
-                })?;
-            // Each element: string ("col", "col DESC", "col ASC", "['a','b']"), or object {"col":"name"} / {"name":"x"} (PR-D).
-            let mut pairs: Vec<(String, bool)> = Vec::new();
-            for v in columns.iter() {
-                if let Some(parsed) = parse_order_by_element(v) {
+        (
+            OperationKind::OrderBy,
+            PlanPayload::OrderBy {
+                columns,
+                nulls_last,
+            },
+        ) => {
+            let mut pairs = Vec::new();
+            for column in columns {
+                if let Some(parsed) = parse_order_by_element(column) {
                     pairs.extend(parsed);
                 }
             }
             if pairs.is_empty() {
                 return Err(PlanError::InvalidPlan(
-                    "orderBy columns could not be parsed (expect column names, 'col ASC'/'col DESC', or ['a','b'])".into(),
+                    "orderBy columns could not be resolved to sortable names".into(),
                 ));
             }
-            let col_names: Vec<String> = pairs
+            let names = pairs
                 .iter()
-                .map(|(s, _)| df.resolve_column_name(s.as_str()))
+                .map(|(name, _)| df.resolve_column_name(name))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(PlanError::Session)?;
-            let ascending: Vec<bool> = pairs.iter().map(|(_, asc)| *asc).collect();
-            let nulls_last = payload
-                .get("nulls_last")
-                .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|v| v.as_bool()).collect::<Vec<_>>());
-            if let Some(nl) = nulls_last {
-                let mut sort_orders: Vec<SortOrder> = Vec::with_capacity(col_names.len());
-                for (i, name) in col_names.iter().enumerate() {
-                    let asc = ascending.get(i).copied().unwrap_or(true);
-                    let nlast = nl.get(i).copied().unwrap_or(asc);
-                    let column = col(name.as_str());
-                    let so = if asc {
-                        if nlast {
-                            asc_nulls_last(&column)
-                        } else {
-                            asc_nulls_first(&column)
+            let ascending = pairs
+                .iter()
+                .map(|(_, ascending)| *ascending)
+                .collect::<Vec<_>>();
+            if let Some(nulls_last) = nulls_last {
+                let nulls_last = nulls_last
+                    .iter()
+                    .filter_map(Value::as_bool)
+                    .collect::<Vec<_>>();
+                let orders = names
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| {
+                        let asc = ascending.get(index).copied().unwrap_or(true);
+                        let last = nulls_last.get(index).copied().unwrap_or(asc);
+                        let column = col(name.as_str());
+                        match (asc, last) {
+                            (true, true) => asc_nulls_last(&column),
+                            (true, false) => asc_nulls_first(&column),
+                            (false, true) => desc_nulls_last(&column),
+                            (false, false) => desc_nulls_first(&column),
                         }
-                    } else if nlast {
-                        desc_nulls_last(&column)
-                    } else {
-                        desc_nulls_first(&column)
-                    };
-                    sort_orders.push(so);
-                }
-                df.order_by_exprs(sort_orders).map_err(PlanError::Session)
+                    })
+                    .collect::<Vec<_>>();
+                df.order_by_exprs(orders).map_err(PlanError::Session)
             } else {
-                let refs: Vec<&str> = col_names.iter().map(|s| s.as_str()).collect();
+                let refs = names.iter().map(String::as_str).collect::<Vec<_>>();
                 df.order_by(refs, ascending).map_err(PlanError::Session)
             }
         }
-        "distinct" => df.distinct(None).map_err(PlanError::Session),
-        "drop" => {
-            let columns = payload
-                .get("columns")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    PlanError::InvalidPlan("drop payload must have 'columns' array".into())
-                })?;
-            let names: Vec<String> = columns
+        (OperationKind::Distinct, PlanPayload::Empty) => {
+            df.distinct(None).map_err(PlanError::Session)
+        }
+        (OperationKind::Drop, PlanPayload::Drop { columns }) => {
+            let names = columns
                 .iter()
-                .filter_map(|v| v.as_str().map(String::from).or_else(|| expr_to_col_name(v)))
-                .map(|s| df.resolve_column_name(s.as_str()))
+                .filter_map(|value| {
+                    value
+                        .as_str()
+                        .map(String::from)
+                        .or_else(|| expr_to_col_name(value))
+                })
+                .map(|name| df.resolve_column_name(&name))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(PlanError::Session)?;
-            let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+            let refs = names.iter().map(String::as_str).collect::<Vec<_>>();
             df.drop(refs).map_err(PlanError::Session)
         }
-        "withColumnRenamed" => {
-            let old_name = payload.get("old").and_then(Value::as_str).ok_or_else(|| {
-                PlanError::InvalidPlan("withColumnRenamed must have 'old'".into())
-            })?;
-            let new_name = payload.get("new").and_then(Value::as_str).ok_or_else(|| {
-                PlanError::InvalidPlan("withColumnRenamed must have 'new'".into())
-            })?;
-            let resolved_old = df
-                .resolve_column_name(old_name)
-                .map_err(PlanError::Session)?;
-            df.with_column_renamed(&resolved_old, new_name)
+        (OperationKind::WithColumnRenamed, PlanPayload::Rename { old, new }) => {
+            let old = df.resolve_column_name(old).map_err(PlanError::Session)?;
+            df.with_column_renamed(&old, new)
                 .map_err(PlanError::Session)
         }
-        "withColumn" => {
-            // #767, #766: column name from "name" or "alias" so cast column appears in schema.
-            let name = payload
-                .get("name")
-                .or_else(|| payload.get("alias"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    PlanError::InvalidPlan("withColumn must have 'name' or 'alias'".into())
-                })?;
-            let expr_val = payload
-                .get("expr")
-                .ok_or_else(|| PlanError::InvalidPlan("withColumn must have 'expr'".into()))?;
-            if let Some(res) = try_column_from_udf_value(expr_val) {
-                let col = res.map_err(PlanError::Expr)?;
-                df.with_column(name, &col).map_err(PlanError::Session)
+        (OperationKind::WithColumn, PlanPayload::WithColumn { name, expression }) => {
+            let expression = expression.to_json_value();
+            if let Some(column) = try_column_from_udf_value(&expression) {
+                let column = column.map_err(PlanError::Expr)?;
+                df.with_column(name, &column).map_err(PlanError::Session)
             } else {
-                let expr = expr_from_value(expr_val).map_err(PlanError::Expr)?;
-                df.with_column_expr(name, expr).map_err(PlanError::Session)
+                let expression = expr_from_value(&expression).map_err(PlanError::Expr)?;
+                df.with_column_expr(name, expression)
+                    .map_err(PlanError::Session)
             }
         }
-        "groupBy" => {
-            let group_by = payload
-                .get("group_by")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    PlanError::InvalidPlan("groupBy must have 'group_by' array".into())
-                })?;
-            // Each element: string, {"col"/"name": "x"}, or {"expr": <expr>} (#800: Column/expr as group key).
-            let cols: Vec<String> = group_by
-                .iter()
-                .filter_map(|v| {
-                    v.as_str()
-                        .map(|s| s.to_string())
-                        .or_else(|| {
-                            v.get("col")
-                                .and_then(Value::as_str)
-                                .map(|s| s.to_string())
-                                .or_else(|| {
-                                    v.get("name").and_then(Value::as_str).map(|s| s.to_string())
-                                })
-                        })
-                        .or_else(|| {
-                            // Expression form: resolve to output column name for group key.
-                            v.get("expr")
-                                .and_then(|e| expr_from_value(e).ok())
-                                .and_then(|expr| {
-                                    polars_plan::utils::expr_output_name(&expr)
-                                        .ok()
-                                        .map(|s| s.as_str().to_string())
-                                })
+        (OperationKind::GroupBy, PlanPayload::GroupBy { keys, aggregations }) => {
+            let keys = grouping_columns(keys, &df)?;
+            let refs = keys.iter().map(String::as_str).collect::<Vec<_>>();
+            let grouped = df.group_by(refs).map_err(PlanError::Session)?;
+            let aggregations = parse_aggs(aggregations, &df)?;
+            grouped
+                .agg(disambiguate_agg_output_names(aggregations))
+                .map_err(PlanError::Session)
+        }
+        (OperationKind::Join, PlanPayload::Join(input)) => handle_join_op(session, df, input),
+        (OperationKind::Union, PlanPayload::Union(input)) => handle_union_op(session, df, input),
+        (OperationKind::UnionByName, PlanPayload::UnionByName(input)) => {
+            handle_union_by_name_op(session, df, input)
+        }
+        (OperationKind::CrossJoin, PlanPayload::CrossJoin(input)) => {
+            handle_cross_join_op(session, df, input)
+        }
+        (OperationKind::Rollup, PlanPayload::Rollup(input)) => {
+            handle_cube_rollup_op(df, input, false)
+        }
+        (OperationKind::Cube, PlanPayload::Cube(input)) => handle_cube_rollup_op(df, input, true),
+        _ => unreachable!("portable plan decoder guarantees operation/payload pairing"),
+    }
+}
+
+fn grouping_columns(values: &[Value], df: &DataFrame) -> Result<Vec<String>, PlanError> {
+    values
+        .iter()
+        .filter_map(|value| {
+            value
+                .as_str()
+                .map(String::from)
+                .or_else(|| {
+                    value
+                        .get("col")
+                        .and_then(Value::as_str)
+                        .or_else(|| value.get("name").and_then(Value::as_str))
+                        .map(String::from)
+                })
+                .or_else(|| {
+                    value
+                        .get("expr")
+                        .and_then(|expression| expr_from_value(expression).ok())
+                        .and_then(|expression| {
+                            polars_plan::utils::expr_output_name(&expression)
+                                .ok()
+                                .map(|name| name.as_str().to_string())
                         })
                 })
-                .map(|s| df.resolve_column_name(s.as_str()))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(PlanError::Session)?;
-            let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-            let grouped = df.group_by(refs).map_err(PlanError::Session)?;
-            // Sparkless may send "aggregations" instead of "aggs" (fixes #828–#838).
-            let aggs = payload
-                .get("aggs")
-                .or_else(|| payload.get("aggregations"))
-                .and_then(Value::as_array);
-            match aggs {
-                Some(aggs_arr) => {
-                    let agg_exprs = parse_aggs(aggs_arr, &df)?;
-                    let disambiguated = disambiguate_agg_output_names(agg_exprs);
-                    grouped.agg(disambiguated).map_err(PlanError::Session)
-                }
-                None => Err(PlanError::InvalidPlan(
-                    "groupBy payload must include 'aggs' array (e.g. [{\"agg\": \"sum\", \"column\": \"b\"}])".into(),
-                )),
-            }
-        }
-        "join" => handle_join_op(session, df, payload),
-        "union" => handle_union_op(session, df, payload),
-        "unionByName" => handle_union_by_name_op(session, df, payload),
-        "crossJoin" | "cross_join" => handle_cross_join_op(session, df, payload),
-        "rollup" => handle_cube_rollup_op(df, payload, false),
-        "cube" => handle_cube_rollup_op(df, payload, true),
-        _ => Err(PlanError::UnsupportedOp(format!(
-            "Plan op '{op_name}' is not supported. See docs for supported operations (e.g. select, filter, groupBy, join, orderBy, limit)."
-        ))),
-    }
+        })
+        .map(|name| df.resolve_column_name(&name).map_err(PlanError::Session))
+        .collect()
+}
+fn binary_input_frame(session: &SparkSession, input: &BinaryInput) -> Result<DataFrame, PlanError> {
+    let schema = input
+        .schema
+        .iter()
+        .map(schema_field_to_pair)
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            PlanError::InvalidPlan("validated binary input has an invalid schema field".into())
+        })?;
+    let names = schema
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let rows = other_data_to_rows(&input.data, &names);
+    session
+        .create_dataframe_from_rows(rows, schema, false, false)
+        .map_err(PlanError::Session)
 }
 
 fn handle_join_op(
     session: &SparkSession,
     df: DataFrame,
-    payload: Value,
+    input: &BinaryInput,
 ) -> Result<DataFrame, PlanError> {
-    let other_data = get_other_data(&payload)
-        .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_data'".into()))?;
-    let other_schema = get_other_schema(&payload)
-        .ok_or_else(|| PlanError::InvalidPlan("join must have 'other_schema'".into()))?;
-    let on = payload
-        .get("on")
-        .ok_or_else(|| PlanError::InvalidPlan("join must have 'on' array or string".into()))?;
-    let how = payload
-        .get("how")
-        .and_then(Value::as_str)
-        .unwrap_or("inner");
-
-    let schema_vec: Vec<(String, String)> = other_schema
-        .iter()
-        .filter_map(schema_field_to_pair)
-        .collect();
-    let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
-    let rows = other_data_to_rows(other_data, &schema_names);
-    let mut other_df = session
-        .create_dataframe_from_rows(rows, schema_vec, false, false)
-        .map_err(PlanError::Session)?;
+    let on = input
+        .on
+        .as_ref()
+        .ok_or_else(|| PlanError::InvalidPlan("validated join input has no join key".into()))?;
+    let how = input.how.as_deref().unwrap_or("inner");
+    let mut other_df = binary_input_frame(session, input)?;
 
     let join_type = match how {
         "left" => JoinType::Left,
@@ -715,26 +682,25 @@ fn handle_join_op(
     match parse_join_on_spec(on, &df)? {
         JoinOnSpec::Keys(on_keys_left) => {
             let on_keys_right = parse_join_on(on, &other_df)?;
-            for (i, left_name) in on_keys_left.iter().enumerate() {
-                if let Some(right_name) = on_keys_right.get(i) {
-                    if left_name != right_name {
-                        other_df = other_df
-                            .with_column_renamed(right_name, left_name)
-                            .map_err(PlanError::Session)?;
-                    }
+            for (index, left_name) in on_keys_left.iter().enumerate() {
+                if let Some(right_name) = on_keys_right.get(index)
+                    && left_name != right_name
+                {
+                    other_df = other_df
+                        .with_column_renamed(right_name, left_name)
+                        .map_err(PlanError::Session)?;
                 }
             }
-            let left_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
-            let right_refs: Vec<&str> = on_keys_left.iter().map(|s| s.as_str()).collect();
+            let left_refs = on_keys_left.iter().map(String::as_str).collect::<Vec<_>>();
+            let right_refs = on_keys_left.iter().map(String::as_str).collect::<Vec<_>>();
             df.join_with_keys(&other_df, left_refs, right_refs, join_type, false)
                 .map_err(PlanError::Session)
         }
-        JoinOnSpec::Condition(expr) => {
-            execute_plan_join_on_expression(df, other_df, expr, join_type)
+        JoinOnSpec::Condition(expression) => {
+            execute_plan_join_on_expression(df, other_df, expression, join_type)
         }
     }
 }
-
 /// Join using a boolean expression (e.g. array_contains). Uses key-based join when the
 /// expression is only column equalities; otherwise cross join + filter.
 fn execute_plan_join_on_expression(
@@ -805,122 +771,49 @@ fn execute_plan_join_on_expression(
 fn handle_union_op(
     session: &SparkSession,
     df: DataFrame,
-    payload: Value,
+    input: &BinaryInput,
 ) -> Result<DataFrame, PlanError> {
-    let other_data = get_other_data(&payload)
-        .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_data'".into()))?;
-    let other_schema = get_other_schema(&payload)
-        .ok_or_else(|| PlanError::InvalidPlan("union must have 'other_schema'".into()))?;
-    let schema_vec: Vec<(String, String)> = other_schema
-        .iter()
-        .filter_map(schema_field_to_pair)
-        .collect();
-    let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
-    let rows = other_data_to_rows(other_data, &schema_names);
-    let other_df = session
-        .create_dataframe_from_rows(rows, schema_vec, false, false)
-        .map_err(PlanError::Session)?;
+    let other_df = binary_input_frame(session, input)?;
     df.union(&other_df).map_err(PlanError::Session)
 }
 
 fn handle_union_by_name_op(
     session: &SparkSession,
     df: DataFrame,
-    payload: Value,
+    input: &BinaryInput,
 ) -> Result<DataFrame, PlanError> {
-    let other_data = get_other_data(&payload)
-        .ok_or_else(|| PlanError::InvalidPlan("unionByName must have 'other_data'".into()))?;
-    let other_schema = get_other_schema(&payload)
-        .ok_or_else(|| PlanError::InvalidPlan("unionByName must have 'other_schema'".into()))?;
-    let schema_vec: Vec<(String, String)> = other_schema
-        .iter()
-        .filter_map(schema_field_to_pair)
-        .collect();
-    let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
-    let rows = other_data_to_rows(other_data, &schema_names);
-    let other_df = session
-        .create_dataframe_from_rows(rows, schema_vec, false, false)
-        .map_err(PlanError::Session)?;
+    let other_df = binary_input_frame(session, input)?;
     df.union_by_name(&other_df, true)
         .map_err(PlanError::Session)
 }
 
-/// Cube or rollup: parse grouping columns and aggs, delegate to DataFrame::cube/rollup.
+/// Cube or rollup: compile validated grouping keys and aggregations for Polars.
 fn handle_cube_rollup_op(
     df: DataFrame,
-    payload: Value,
+    input: &GroupInput,
     is_cube: bool,
 ) -> Result<DataFrame, PlanError> {
-    let group_by = payload
-        .get("group_by")
-        .or_else(|| payload.get("columns"))
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            PlanError::InvalidPlan("cube/rollup must have 'group_by' or 'columns' array".into())
-        })?;
-    let cols: Vec<String> = group_by
-        .iter()
-        .filter_map(|v| {
-            v.as_str()
-                .map(|s| s.to_string())
-                .or_else(|| {
-                    v.get("col")
-                        .and_then(Value::as_str)
-                        .map(|s| s.to_string())
-                        .or_else(|| v.get("name").and_then(Value::as_str).map(|s| s.to_string()))
-                })
-                .or_else(|| {
-                    v.get("expr")
-                        .and_then(|e| expr_from_value(e).ok())
-                        .and_then(|expr| {
-                            polars_plan::utils::expr_output_name(&expr)
-                                .ok()
-                                .map(|s| s.as_str().to_string())
-                        })
-                })
-        })
-        .map(|s| df.resolve_column_name(s.as_str()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(PlanError::Session)?;
-    let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
-    let cube_rollup = if is_cube {
+    let columns = grouping_columns(&input.keys, &df)?;
+    let refs = columns.iter().map(String::as_str).collect::<Vec<_>>();
+    let grouped = if is_cube {
         df.cube(refs).map_err(PlanError::Session)?
     } else {
         df.rollup(refs).map_err(PlanError::Session)?
     };
-    let aggs = payload
-        .get("aggs")
-        .or_else(|| payload.get("aggregations"))
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            PlanError::InvalidPlan("cube/rollup must include 'aggs' or 'aggregations' array".into())
-        })?;
-    let agg_exprs = parse_aggs(aggs, &df)?;
-    let disambiguated = disambiguate_agg_output_names(agg_exprs);
-    cube_rollup.agg(disambiguated).map_err(PlanError::Session)
+    let aggregations = parse_aggs(&input.aggregations, &df)?;
+    grouped
+        .agg(disambiguate_agg_output_names(aggregations))
+        .map_err(PlanError::Session)
 }
 
 fn handle_cross_join_op(
     session: &SparkSession,
     df: DataFrame,
-    payload: Value,
+    input: &BinaryInput,
 ) -> Result<DataFrame, PlanError> {
-    let other_data = get_other_data(&payload)
-        .ok_or_else(|| PlanError::InvalidPlan("crossJoin must have 'other_data'".into()))?;
-    let other_schema = get_other_schema(&payload)
-        .ok_or_else(|| PlanError::InvalidPlan("crossJoin must have 'other_schema'".into()))?;
-    let schema_vec: Vec<(String, String)> = other_schema
-        .iter()
-        .filter_map(schema_field_to_pair)
-        .collect();
-    let schema_names: Vec<String> = schema_vec.iter().map(|(n, _)| n.clone()).collect();
-    let rows = other_data_to_rows(other_data, &schema_names);
-    let other_df = session
-        .create_dataframe_from_rows(rows, schema_vec, false, false)
-        .map_err(PlanError::Session)?;
+    let other_df = binary_input_frame(session, input)?;
     df.cross_join(&other_df).map_err(PlanError::Session)
 }
-
 fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Expr>, PlanError> {
     use crate::Column;
     use crate::functions::{avg, count, first as rs_first, max, min, sum as rs_sum};
@@ -1052,6 +945,26 @@ fn parse_aggs(aggs: &[Value], df: &DataFrame) -> Result<Vec<polars::prelude::Exp
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn malformed_plan_is_rejected_before_initial_dataframe_validation() {
+        let session = crate::session::SparkSession::builder()
+            .app_name("plan_decode_before_dataframe")
+            .get_or_create();
+        let result = execute_plan(
+            &session,
+            vec![vec![json!(1), json!(2)]],
+            vec![("id".to_string(), "bigint".to_string())],
+            &[json!({"op": "limit", "payload": {"n": -1}})],
+        );
+        let error = match result {
+            Ok(_) => panic!("plan decoding must fail before dataframe construction"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(error, PlanError::InvalidPlan(_)));
+        assert!(error.to_string().contains("nonnegative integer"));
+    }
 
     /// #672: groupBy + agg without alias produces PySpark-style column name (e.g. avg(Value)).
     #[test]
@@ -1291,37 +1204,5 @@ mod tests {
         let rows = df.collect_as_json_rows().unwrap();
         assert_eq!(rows[0].get("value"), Some(&serde_json::Value::Null));
         assert_eq!(rows[1].get("name"), Some(&serde_json::Value::Null));
-    }
-
-    /// Ensure the core PlanExecutor trait implementation stays in sync with execute_plan.
-    #[test]
-    fn test_plan_executor_trait_matches_execute_plan() {
-        use robin_sparkless_core::engine::PlanExecutor as _;
-
-        let session = crate::session::SparkSession::builder()
-            .app_name("plan_executor_trait")
-            .get_or_create();
-        let data = vec![vec![json!(1)], vec![json!(2)]];
-        let schema = vec![("x".to_string(), "bigint".to_string())];
-        let plan = vec![json!({
-            "op": "filter",
-            "payload": {"op": "gt", "left": {"col": "x"}, "right": {"lit": 1}}
-        })];
-
-        // Direct call.
-        let df_direct = execute_plan(&session, data.clone(), schema.clone(), &plan).unwrap();
-
-        // Trait-based call returns boxed backend; downcast to DataFrame and compare.
-        let boxed = PolarsPlanExecutor::execute_plan(&session, data, schema, &plan).unwrap();
-        let backend_df = boxed
-            .as_any()
-            .downcast_ref::<crate::dataframe::DataFrame>()
-            .expect("expected Polars DataFrame backend")
-            .clone();
-
-        assert_eq!(
-            df_direct.collect_inner().unwrap(),
-            backend_df.collect_inner().unwrap()
-        );
     }
 }

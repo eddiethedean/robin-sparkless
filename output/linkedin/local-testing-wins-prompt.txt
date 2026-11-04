@@ -1,0 +1,92 @@
+Generated with built-in image_gen.
+
+Edit the latest Sparkless navy/teal/yellow LinkedIn graphic to showcase realistic, clearly scoped advantages against classic local PySpark testing. Preserve the shared 1,000-order test and three numbered code cards. Prioritize readable exact Python, clear dependency commands, generous spacing. No claim this is the most common setup. This compares practical deployment choices, not identical architectures.
+
+Header brand: "Sparkless"
+Title: "Less setup. Faster PySpark tests."
+Subtitle: "Real PySpark code. A lighter local testing workflow."
+
+Shared test heading "THE TEST · 1,000 orders"
+Exact Python:
+def check_orders(spark):
+    orders = spark.createDataFrame(
+        [(i, i % 200) for i in range(1000)],
+        "order_id LONG, total LONG",
+    )
+    assert orders.filter("total > 99").count() == 500
+
+Card 1 heading "1 · Sparkless directly"
+Install, two lines with visible shell continuation backslash:
+pip install \
+    "sparkless==4.18.1"
+Python:
+from sparkless.sql import (
+    SparkSession,
+)
+
+with (
+    SparkSession.builder.app_name("test")
+    .get_or_create()
+) as spark:
+    check_orders(spark)
+
+Card 2 heading "2 · PySpark + Sparkless"
+Install, two lines with backslash:
+pip install "sparkless[server]==4.18.1" \
+    "pyspark-client==4.0.5"
+Python:
+from pyspark.sql import SparkSession
+from sparkless import SparklessServer
+
+with SparklessServer() as server:
+    spark = SparkSession.builder.remote(
+        server.spark_connect_url
+    ).create()
+    try:
+        check_orders(spark)
+    finally:
+        spark.stop()
+Small distinct note beneath this card: "For xdist: start one server for the run; each worker opens its own session." This is a deployment note, not Python code.
+
+Card 3 heading "3 · Local PySpark + JVM"
+Install, two lines with backslash:
+pip install \
+    "pyspark==4.0.5"
+Prerequisite "Java 17+"
+Python:
+from pyspark.sql import (
+    SparkSession,
+)
+
+with (
+    SparkSession.builder.master("local[4]")
+    .appName("test").getOrCreate()
+) as spark:
+    check_orders(spark)
+
+Results heading: "MEASURED LOCAL TESTING WINS"
+Two prominent metric tiles, EXACT text:
+"2.2× faster"
+"38-test suite · 4 pytest workers"
+"Sparkless 3.04 s"
+"Local PySpark 6.60 s"
+Directly within this tile, conspicuous smaller description:
+"One shared Sparkless server vs."
+"one local[1] JVM per worker."
+
+Second tile:
+"4.7× faster"
+"1,000-order test · warm execution"
+"Sparkless Connect 16.3 ms"
+"Local PySpark local[4] 76.2 ms"
+
+Footer, readable text:
+"Apple M4 Pro · Python 3.11 · Spark / client 4.0.5"
+"Sparkless API 4.18.1 · native/server 4.18.0"
+"Suite: median of 3 runs, including startup and cleanup."
+"Order test: median of 30 actions across 3 runs; startup excluded."
+"These compare the named testing setups; results vary by workload."
+"Sparkless Connect supports a focused DataFrame subset."
+"Server packages: macOS Apple Silicon or Linux x86_64."
+
+Remove the previous shared-server 1.7x / 1.5x metrics, FAIR scheduler details, active=4 environment code and shared-JVM client card. Restore default SparklessServer() and classic local PySpark example as exact above. No speed metric for in-process Sparkless. No unsupported assertion of universally faster execution. Overall upbeat confident marketing aesthetic. Ensure valid syntax with parenthesized multiline imports; never wrap a bare import into invalid lines. Canvas can grow vertically to maintain legibility.

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel>=0.41"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sparkless-server"
+version = "4.19.0"
+description = "Platform-specific native Polars HTTP and Spark Connect server"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = ["sparkless-connect==4.19.0"]
+
+[project.optional-dependencies]
+connect = ["pyspark-client==4.0.5"]
+
+[tool.setuptools]
+packages = ["sparkless_server"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+sparkless_server = ["sparkless-server", "sparkless-server.exe", "py.typed"]

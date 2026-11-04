@@ -13,7 +13,7 @@ https://github.com/eddiethedean/sparkless/issues/440
 
 from itertools import chain
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 
 def test_create_map_list_exact_issue_440(spark, spark_mode):

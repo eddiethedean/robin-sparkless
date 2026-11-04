@@ -36,22 +36,35 @@ The optional native server has a smaller platform set: Linux x86_64 with glibc
 
 | Extra | Dependencies and purpose |
 | --- | --- |
-| `sparkless[dev]` | Development/tests: pytest, pandas, PyArrow, Polars, pytest-xdist, and other test tools |
+| `sparkless[dev]` | Development tools: pandas, PyArrow, Polars, pytest-xdist, and related test tools |
+| `sparkless[testing]` | Backend-independent pytest fixtures and helpers from `sparkless-testing` |
 | `sparkless[pyspark]` | PySpark 3.5 and its Delta integration; requires a compatible Java runtime |
 | `sparkless[pyspark4]` | PySpark 4 and its Delta integration; requires a compatible Java runtime |
-| `sparkless[server]` | The exactly matching `sparkless-server-bin` distribution |
+| `sparkless[server]` | The exactly matching base `sparkless-server` product |
+| `sparkless[server-duckdb]` | The exactly matching DuckDB-source `sparkless-server-duckdb` product |
+| `sparkless[connect]` | Base server and pinned `pyspark-client==4.0.5` |
+| `sparkless[connect-duckdb]` | DuckDB server and pinned `pyspark-client==4.0.5` |
+| `sparkless-connect[client]` | Shared remote client/launcher, without either server binary |
 | `sparkless[jdbc]` | Database integration test tools, testcontainers, and database drivers |
 
 For example:
 
 ```bash
-python -m pip install "sparkless[dev]>=4,<5"
+python -m pip install "sparkless[testing]>=4,<5"
 ```
 
 Use separate environments for `pyspark` and `pyspark4`; they require different
 Spark versions. The `jdbc` extra supplies test dependencies rather than enabling
 every native database backend. Backend support and options depend on the build
 and connection configuration.
+
+For an existing server endpoint, install `sparkless-connect[client]` and use
+`pyspark.sql.SparkSession.builder.remote(...)`. To own a local base server,
+install `sparkless-server` and import `SparklessServer` from `sparkless_server`.
+To use trusted read-only DuckDB aliases, install `sparkless-server-duckdb` and
+import its product-bound helper from `sparkless_server_duckdb`. Both 4.19 server
+products run transformations through Polars; the DuckDB product adds table
+sources and its matching Quack extension.
 
 ### From source (contributors)
 
@@ -149,14 +162,14 @@ Transformations (filter, select, join, etc.) are queued; execution happens on **
 
 ## Testing with Sparkless v4
 
-The `sparkless.testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
+The `sparkless_testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
 
 ### Quick Setup
 
 Add to your `conftest.py`:
 
 ```python
-pytest_plugins = ["sparkless.testing.plugin"]
+pytest_plugins = ["sparkless_testing.plugin"]
 ```
 
 ### Unit Test Example
@@ -237,7 +250,7 @@ in Python, and bounded Arrow batches do not bound total query memory.
 
 ## Next Steps
 
-- [Testing Guide](TESTING_GUIDE.md) — Full guide to `sparkless.testing` (dual-mode testing, fixtures, comparison utilities)
+- [Testing Guide](TESTING_GUIDE.md) — Full guide to `sparkless_testing` (dual-mode testing, fixtures, comparison utilities)
 - [Python API reference](PYTHON_API_REFERENCE.md) — API overview and Arrow export
 - [Spark Connect](SPARK_CONNECT.md) — Native server and remote API contract
 - [PySpark differences](PYSPARK_DIFFERENCES.md) — Known divergences and caveats

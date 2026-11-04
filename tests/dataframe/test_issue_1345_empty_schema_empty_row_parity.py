@@ -6,7 +6,7 @@ PySpark accepts both; sparkless now matches (empty schema + empty row -> 1 row, 
 
 from __future__ import annotations
 
-from sparkless.testing import get_imports
+from sparkless_testing import get_imports
 
 imports = get_imports()
 SparkSession = imports.SparkSession

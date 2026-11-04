@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.19.0] - 2026-11-01
+
+**Breaking changes:** 4.19 changes Rust engine/server contracts and reorganizes Python package boundaries despite the minor-version number. See the [4.19 migration guide](docs/MIGRATION_4_19.md) and [Python package migration](docs/python_migration.md).
+
+### Added
+
+- **Optional DuckDB table sources** — configured standalone and shared Quack owners can serve typed, read-only tables to Spark Connect through bounded, cancellable Arrow batches. The supported plan subset includes filtering, projection, limits, counts, same-owner inner joins, and grouped count/sum.
+- **Owned Spark Connect sessions** — `SparklessConnect` starts a native server and returns an independently owned public client session with deterministic cleanup.
+
+### Changed
+
+- **Separate server products** — split the 4.19 server into a DuckDB-free `sparkless-server` product and a `sparkless-server-duckdb` product that owns the read-only DuckDB source and matching Quack extension. Both execute through Polars in 4.19 and report distinct product/source capabilities.
+- **Separate Python server packages** — move launcher helpers into `sparkless-connect`, keep local `sparkless` focused on the local engine, and remove the `sparkless.server` and `sparkless-server-bin` compatibility forwards. Import shared helpers from `sparkless_connect`, or select a product-bound helper from `sparkless_server` or `sparkless_server_duckdb`.
+- **Standalone testing helpers** — publish the backend-independent pytest plugin and utilities as `sparkless-testing`; use `sparkless_testing` or install `sparkless[testing]`.
+- **Canonical native import** — remove the `sparkless._native` bridge and its duplicate typing stub. Direct extension consumers use `sparkless_native._native`; ordinary applications import the `sparkless` API.
+- **Private SQL function modules and launcher modules** — split implementations by responsibility while keeping the supported `sparkless.sql.functions` and `sparkless_connect.server` entry points.
+- **Arrow export and range counts** — consume range and local-relation batches in bounded columnar chunks and use an exact fast path for supported dynamic integer range counts.
+- **Connect operation cleanup** — `ReleaseAll` for a completed non-reattachable query now frees its idempotency and replay history.
+
+### Fixed
+
+- **SQL string literals and session settings** — preserve decoded quotes and backslashes through SELECT lowering. Reentrant SQL uses the calling session's settings and restores the outer query's settings when it returns.
+- **Connect column binding and plan errors** — preserve bound inline DataFrame columns through aliases and joins. Joins on shared column names emit each key once even when the inputs order their columns differently. Analysis and execution distinguish missing plan fields from unsupported variants.
+- **External catalog INSERT** — reject a read-only target with `WRITE_CAPABILITY_DENIED` before requesting its table metadata. Existing local targets retain lookup precedence.
+
 ## [4.18.1] - 2026-10-31
 
 Published from tag [`v4.18.1`](https://github.com/eddiethedean/robin-sparkless/tree/v4.18.1) at commit [`0ad225677ec47b20c9c6225fa9f4b73b00e54aba`](https://github.com/eddiethedean/robin-sparkless/commit/0ad225677ec47b20c9c6225fa9f4b73b00e54aba). Exact-commit [CI run 41168209494](https://github.com/eddiethedean/robin-sparkless/actions/runs/41168209494) and [Release run 41170498256](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256) passed, including final PyPI inventory and hash verification. See [release evidence](docs/RELEASE_EVIDENCE.md).

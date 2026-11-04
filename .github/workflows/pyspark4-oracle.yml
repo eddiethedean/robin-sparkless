@@ -52,6 +52,8 @@ jobs:
           # Stale cargo-fmt/rustfmt shims from cached ~/.cargo can shadow rustup; remove before maturin.
           rm -f ~/.cargo/bin/cargo-fmt ~/.cargo/bin/rustfmt
           (cd python/native && ../../.venv/bin/maturin develop --release)
+          .venv/bin/pip install --no-deps -e python/connect
+          .venv/bin/pip install --no-deps -e python/testing
           .venv/bin/pip install --no-deps -e python
           cd ..
           .venv/bin/pip install -r tests/requirements-pyspark4.txt pytest pytest-xdist pytest-timeout
