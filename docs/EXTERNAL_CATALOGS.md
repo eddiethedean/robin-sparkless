@@ -64,6 +64,9 @@ and identifies the committed version or provider commit ID. Never retry an unkno
 outcome until the provider has reconciled that operation ID. `DataFrameWriter.saveAsTable()`
 and SQL `INSERT INTO` delegate writes to the external owner when its capability permits
 it. Session-local tables and views still shadow the external catalog.
+Once ownership is established for an external INSERT target, Sparkless checks write
+capability and batch-writer availability before looking up the table descriptor. A
+read-only owner returns `WRITE_CAPABILITY_DENIED` even when the target table is absent.
 `ErrorIfExists` rejects a resolved external table and `Ignore` leaves it unchanged.
 Rust callers that need to distinguish an external provider error from a miss can use
 `SparkSession::try_table_exists`; the legacy boolean `table_exists` remains best-effort.

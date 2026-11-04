@@ -745,6 +745,28 @@ def test_read_only_external_owner_does_not_block_local_insert(session):
     assert [row.id for row in session.table(IDENTIFIER).collect()] == [1, 2]
 
 
+def test_read_only_external_owner_rejects_insert_before_table_lookup(session):
+    class ReadOnlyOwner:
+        def resolve_ownership(self, identifier):
+            if identifier == IDENTIFIER:
+                return ExternalCatalogOwnership(
+                    owner_id="catalog.schema",
+                    read=True,
+                    write=False,
+                    batch_write=False,
+                )
+            return None
+
+        def resolve_table(self, identifier):
+            raise AssertionError("read-only INSERT should be rejected before table lookup")
+
+    session.set_external_catalog_provider(ReadOnlyOwner())
+    with pytest.raises(SparklessError) as exc_info:
+        session.sql(f"INSERT INTO {IDENTIFIER} VALUES (2)")
+
+    assert exc_info.value.code == "WRITE_CAPABILITY_DENIED"
+
+
 @pytest.mark.delta
 def test_python_catalog_retains_map_metadata_for_reads_and_rejects_map_writes(
     session, tmp_path

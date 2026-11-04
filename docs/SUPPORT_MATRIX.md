@@ -8,16 +8,16 @@ installation](INSTALLATION.md).
 “Behavior-tested” means linked regression/example coverage exists. “Unsupported”
 is outside the published contract; “unknown” requires workload validation.
 
-The branch now contains separate local, base-server, and DuckDB-server package
-boundaries and a shared lightweight Python launcher. The final split-product
-artifacts and dependency-isolation checks remain unvalidated; the earlier
-evidence below records the pre-separation candidate and cannot certify the new
-product builds. Both 4.19 server products execute through Polars; DuckDB
-execution remains later work.
+The branch contains separate local, base-server, and DuckDB-server package
+boundaries and a shared lightweight Python launcher. The
+[Phase 7 record](plans/solid-refactor-4.19.md#phase-7-implementation-record-2026-11-03)
+identifies the split-product revision that passed acceptance. The subsequent
+[review fixes](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md#local-review-verification)
+have local regression coverage. Both 4.19 server products execute through Polars.
 
 | Capability | Local Python | Rust embedding | Base server | DuckDB server | Spark Connect |
 | --- | --- | --- | --- | --- | --- |
-| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Same Polars SQL service surface | Range/local relation and the documented read-only source subset below; general Connect SQL remains unsupported |
+| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Same Polars SQL service surface | [Supported Connect plan subset](SPARK_CONNECT.md#phase-419-branch-additions-pre-release) for range, inline DataFrames, and configured table sources |
 | SQL queries | SQL enabled in official wheel | Requires `sql` | Bounded SELECT on managed catalog | Bounded SELECT on managed and configured source catalogs | Unsupported SQL commands |
 | Scalar Python UDF | Behavior-tested in withColumn/select/scalar comparison filters | Native expression callbacks, separate API | Unsupported | Unsupported | Unsupported |
 | pandas/vectorized/grouped Python UDF, UDTF | Unsupported public API | No equivalent public Python contract | Unsupported | Unsupported | Unsupported |

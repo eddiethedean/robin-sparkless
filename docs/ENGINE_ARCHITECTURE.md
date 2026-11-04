@@ -37,6 +37,11 @@ live in the Connect crate. The DuckDB server product still adds only the read-on
 source capability; a source provider does not imply DuckDB writes or DuckDB query
 execution.
 
+The Connect execution port accepts a typed `ConnectExecutionPlan` and returns a
+logical schema with Arrow IPC batches. The Polars adapter converts the incoming wire
+plan to that core type before dispatch. It currently reconstructs adapter-private
+protobuf nodes to reuse the checked translator.
+
 ## Core engine contracts
 
 The core frame contract is separated by responsibility:
@@ -53,6 +58,9 @@ The core frame contract is separated by responsibility:
 `ExecutionContext` carries an operation ID, immutable settings snapshot, cancellation
 token, and optional catalog source snapshot. Session convenience APIs build this
 context automatically; embedders can supply one with `sql_with_context`.
+Only the owning session reads an active context's settings, cancellation token, and
+source snapshot. SQL translation scopes thread settings and restores them when it
+returns, so provider callbacks can run SQL in another session.
 
 `EngineError` is a structured value with category, stable code, retryability, operation,
 metadata, and cause. Rust callers branch on `category()` and `code()` rather than
@@ -93,11 +101,11 @@ breaking-change details.
 ## Phase status
 
 P0 inventory, P1/P2, and local P4 contract checks passed on 2026-11-02. Live JDBC
-integration and the protocol-neutral typed Connect plan boundary remain open; see the
-[4.19 SOLID plan](plans/solid-refactor-4.19.md#gate-closure-addendum-2026-11-02).
+integration remains open. See the
+[4.19 SOLID plan](plans/solid-refactor-4.19.md#phase-419-review-follow-up)
+for the current Connect boundary and local review evidence.
 Phase 3's targeted corpus verifies matching values, schemas, and missing-column errors
 across JSON, local SQL, and Connect, plus rejection of malformed plans before Connect
 source scans. Phase 5's HTTP-only, Connect-only, and combined feature matrix has been
-checked, while its Connect execution port still carries serialized protobuf data. P6/P7
-and exact-candidate release acceptance remain tracked separately; D14/V35/V36 platform
-and source/resource acceptance is still open.
+checked. The [release evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md)
+tracks product acceptance and records which source revisions and artifacts were tested.

@@ -9,6 +9,11 @@ search:
 
 [Roadmap](ROADMAP.md) · [Epic](EPIC.md) · [Decisions](DECISIONS.md) · [Validation](VALIDATION.md) · [Release procedure](../../RELEASING.md)
 
+The [Phase 7 record](../solid-refactor-4.19.md#phase-7-implementation-record-2026-11-03)
+identifies the earlier revision that passed product acceptance. The subsequent
+[review verification](RELEASE_4_19_EVIDENCE.md#local-review-verification) covers the
+review fixes with local checks.
+
 ## Outcome and implementation baseline
 
 An unmodified `pyspark-client==4.0.5` can read configured DuckDB tables and run the declared transformations through Polars. `with SparklessConnect() as spark:` owns a real Connect session and native server, with deterministic cleanup. Existing range/local-relation workloads gain measured collection, count, and concurrency improvements while retaining small-query latency and bounded transport/replay accounting.

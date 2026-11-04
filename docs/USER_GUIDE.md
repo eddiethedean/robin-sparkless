@@ -213,6 +213,10 @@ let result = spark.sql("SELECT name, age FROM people WHERE age > 25 ORDER BY age
 
 Supports: `SELECT`, `FROM`, `JOIN`, `WHERE`, `GROUP BY`, `ORDER BY`, `LIMIT`. Built-in functions (e.g. `UPPER`, `LOWER`) and registered UDFs work in SQL.
 
+In SELECT expressions, single and double quotes delimit string literals. Use
+backticks for quoted identifiers. String escapes are decoded when Sparkless parses
+the query and the resulting values are preserved through execution.
+
 ---
 
 ## User-Defined Functions

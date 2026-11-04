@@ -1060,6 +1060,29 @@ mod tests {
             rows[0].get("parsed_date").and_then(|v| v.as_str()),
             Some("2024-01-15")
         );
+
+        let literal = spark.sql(r#"SELECT "abc" AS value"#).unwrap();
+        assert_eq!(
+            literal.collect_as_json_rows().unwrap()[0]
+                .get("value")
+                .and_then(|value| value.as_str()),
+            Some("abc")
+        );
+    }
+
+    #[test]
+    fn test_lowered_select_preserves_decoded_backslashes() {
+        let spark = SparkSession::builder().get_or_create();
+        for (query, expected) in [
+            (r"SELECT 'a\\b' AS x", r"a\b"),
+            (r#"SELECT "a\\b" AS x"#, r"a\b"),
+            (r"SELECT 'a\\' AS x", "a\\"),
+            (r#"SELECT "a\\'b''c" AS x"#, r"a\'b''c"),
+            (r#"SELECT x FROM (SELECT "a\\b" AS x) AS t"#, r"a\b"),
+        ] {
+            let rows = spark.sql(query).unwrap().collect_as_json_rows().unwrap();
+            assert_eq!(rows[0]["x"].as_str(), Some(expected), "{query}");
+        }
     }
 
     #[test]

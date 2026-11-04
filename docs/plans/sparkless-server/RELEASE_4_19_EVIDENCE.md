@@ -17,7 +17,42 @@ The release workflow now records isolated Rust graphs, the compatibility map, cl
 
 ## Correctness and build checks
 
-The following commands passed on the current implementation, after the Connect logical-to-physical alias-resolution fix:
+### Local review verification
+
+The review patches were checked locally on the working tree based on `303919a6`.
+The Polars library suite passed 414 tests with two ignored, the SQL plan library
+suite passed three, and the Connect server library suite passed 57. The regressions
+cover escaped SQL literals, session settings restoration, bound inline columns, and
+matching Connect error statuses. A separate catalog callback probe confirmed that the
+outer SQL operation kept its UTC timezone after the callback ran SQL in another session.
+
+```sh
+cargo test --offline --locked -p robin-sparkless-polars --features sql --lib
+cargo test --offline --locked -p robin-sparkless-sql --lib
+cargo test --offline --locked -p sparkless-server-polars --no-default-features --features connect --lib -- --skip generated_grpc_listener_enforces_the_wire_message_limit
+cargo clippy --offline --locked -p robin-sparkless-polars -p robin-sparkless-sql --features robin-sparkless-polars/sql --lib -- -D warnings
+cargo clippy --offline --locked -p sparkless-server-polars --no-default-features --features connect --all-targets -- -D warnings
+cargo check --offline --locked -p robin-sparkless-polars --no-default-features --lib
+cargo fmt --all -- --check
+git diff --check
+```
+
+The Connect listener test was excluded because the local environment denied socket
+binding. The build without SQL passed with existing dead-code warnings. The earlier
+external catalog regression run passed 71 Python tests, including the INSERT
+capability check. It used a local native build without Delta and deselected 12
+Delta-marked tests. Exact-artifact and public-client results below apply to the
+revisions and binaries recorded for those runs.
+
+The reordered USING-key follow-up passed 58 Connect library tests with the same
+listener exclusion. Its regression checks key order, row values, right-only full
+outer join keys, and right-side bindings. The public-client smoke also gained the
+reordered-input case. That smoke was not run locally.
+
+### Earlier Connect implementation checks
+
+The following commands passed at an earlier implementation checkpoint, after the
+Connect logical-to-physical alias-resolution fix:
 
 ```sh
 CARGO_HOME=/tmp/sparkless-cargo-home cargo build --locked --release -p sparkless-server --features connect

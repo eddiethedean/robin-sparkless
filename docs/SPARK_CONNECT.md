@@ -106,6 +106,16 @@ count/sum, global `count(column)`, and the `SparklessConnect` helper. The helper
 described above. The local branch contains the product/package split, but its new wheels and
 install matrix still need final acceptance; release remains open.
 
+For supported inline DataFrame projections, filters, and join projections, use public
+schema names or column references bound to the input DataFrame. Bound references retain
+their input through aliases and joins. Names generated internally during Arrow import
+cannot be used to address hidden columns. A join on shared column names returns one
+column per key, in the requested key order, even when the inputs order those columns
+differently. A missing relation type, projection
+expression type, or projection literal type returns `INVALID_ARGUMENT` in both analysis
+and execution. A supplied but unsupported variant in those positions returns
+`UNIMPLEMENTED`.
+
 The 4.19 base `sparkless-server` product has no DuckDB feature. The separate
 `sparkless-server-duckdb` product enables the read-only source adapter and carries the matching
 DuckDB 2.0.0 Quack extension. Both products execute transformations in Polars. Configure trusted

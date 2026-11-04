@@ -106,6 +106,10 @@ Use `SparkSession::execution_context` and `sql_with_context` when an operation m
 carry a stable operation ID, cancellation token, settings snapshot, or source snapshot.
 The convenience `sql` and `sql_with_cancellation` methods construct a context for
 callers that do not need to provide one.
+An explicit context belongs to the session that captured it. If a provider callback
+enters a different session, that session uses its own settings and source snapshot.
+Nested SQL restores the outer operation's thread settings when it returns, including
+on error.
 
 `EngineError` is a structured type rather than an enum. Replace enum-variant matches
 and message parsing with `category()`, `code()`, `retryability()`, `operation()`, and
@@ -151,6 +155,10 @@ retain targets and nested queries where available, and preserve the canonical SQ
 adapter-specific options. Shared identifier and numeric-promotion helpers live below
 the SQL and Connect adapters.
 
+When a Polars SELECT is reconstructed from the normalized plan, the canonical
+string literals preserve the values decoded by Spark SQL parsing. This applies to
+both single-quoted and double-quoted literals, including embedded quotes and backslashes.
+
 ## Server crates and product selection
 
 The server library is split by responsibility. `sparkless-server-core` owns
@@ -162,6 +170,10 @@ composes the Polars application. Product consumers should depend on
 source-enabled product, rather than reaching into the former monolithic server
 implementation. The DuckDB product uses the same Polars execution path and adds
 read-only DuckDB sources; it does not execute queries in DuckDB or enable writes.
+
+Custom Connect execution-port adapters receive `ConnectExecutionRequest.plan` as
+a `ConnectExecutionPlan`. Return the output `StructType` and `ArrowIpcBatchStream`
+in `ConnectExecutionResult`. The transport encodes the logical schema for the wire.
 
 The product crates re-export the server application types. Embedders that need a
 specific product identity can construct it explicitly:

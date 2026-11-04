@@ -6,9 +6,10 @@
 use crate::ast::{
     Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, JoinConstraint,
     JoinOperator, LimitClause, OrderByKind, Query, SelectItem, SetExpr,
-    SetQuantifier as AstSetQuantifier, TableFactor, Value, ValueWithSpan,
+    SetQuantifier as AstSetQuantifier, TableFactor, Value, ValueWithSpan, VisitMut, VisitorMut,
 };
 use serde::{Deserialize, Serialize};
+use std::{convert::Infallible, ops::ControlFlow};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SqlQueryPlan {
@@ -200,6 +201,40 @@ impl std::error::Error for SqlPlanError {}
 
 /// Lower a parsed query into backend-neutral relational nodes and clause records.
 pub fn lower_query(query: &Query) -> Result<SqlQueryPlan, SqlPlanError> {
+    let mut query = query.clone();
+    let _ = VisitMut::visit(&mut query, &mut LoweredStrings::Encode);
+    lower_canonical_query(&query)
+}
+
+pub(crate) enum LoweredStrings {
+    Encode,
+    Decode,
+}
+
+impl VisitorMut for LoweredStrings {
+    type Break = Infallible;
+
+    fn pre_visit_value(&mut self, value: &mut Value) -> ControlFlow<Self::Break> {
+        let (text, constructor): (&mut String, fn(String) -> Value) = match (self, &mut *value) {
+            // AST Display for ordinary quoted strings assumes some quotes are already
+            // escaped. E literals explicitly escape every quote and backslash.
+            (Self::Encode, Value::SingleQuotedString(text) | Value::DoubleQuotedString(text))
+                if text.contains(['\'', '\\']) =>
+            {
+                (text, Value::EscapedStringLiteral)
+            }
+            (Self::Encode, Value::DoubleQuotedString(text))
+            | (Self::Decode, Value::EscapedStringLiteral(text)) => {
+                (text, Value::SingleQuotedString)
+            }
+            _ => return ControlFlow::Continue(()),
+        };
+        *value = constructor(std::mem::take(text));
+        ControlFlow::Continue(())
+    }
+}
+
+fn lower_canonical_query(query: &Query) -> Result<SqlQueryPlan, SqlPlanError> {
     let body = lower_set_expr(query.body.as_ref())?;
     let (recursive, ctes) = match &query.with {
         Some(with) => {
@@ -215,7 +250,7 @@ pub fn lower_query(query: &Query) -> Result<SqlQueryPlan, SqlPlanError> {
                             .iter()
                             .map(|column| column.name.value.clone())
                             .collect(),
-                        query: Box::new(lower_query(&cte.query)?),
+                        query: Box::new(lower_canonical_query(&cte.query)?),
                     })
                 })
                 .collect::<Result<Vec<_>, SqlPlanError>>()?;
@@ -309,7 +344,7 @@ fn lower_set_expr(expr: &SetExpr) -> Result<RelationalNode, SqlPlanError> {
                 having: select.having.as_ref().map(lower_expression),
             }))
         }
-        SetExpr::Query(query) => RelationalNode::Nested(Box::new(lower_query(query)?)),
+        SetExpr::Query(query) => RelationalNode::Nested(Box::new(lower_canonical_query(query)?)),
         SetExpr::SetOperation {
             op,
             set_quantifier,
@@ -406,7 +441,7 @@ fn lower_relation(factor: &TableFactor) -> Result<RelationPlan, SqlPlanError> {
         TableFactor::Derived {
             subquery, alias, ..
         } => RelationPlan::Derived {
-            query: Box::new(lower_query(subquery)?),
+            query: Box::new(lower_canonical_query(subquery)?),
             alias: alias.as_ref().map(|alias| alias.name.value.clone()),
             source_sql: factor.to_string(),
         },

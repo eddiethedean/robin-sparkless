@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Arrow export and range counts** — consume range and local-relation batches in bounded columnar chunks and use an exact fast path for supported dynamic integer range counts.
 - **Connect operation cleanup** — `ReleaseAll` for a completed non-reattachable query now frees its idempotency and replay history.
 
+### Fixed
+
+- **SQL string literals and session settings** — preserve decoded quotes and backslashes through SELECT lowering. Reentrant SQL uses the calling session's settings and restores the outer query's settings when it returns.
+- **Connect column binding and plan errors** — preserve bound inline DataFrame columns through aliases and joins. Joins on shared column names emit each key once even when the inputs order their columns differently. Analysis and execution distinguish missing plan fields from unsupported variants.
+- **External catalog INSERT** — reject a read-only target with `WRITE_CAPABILITY_DENIED` before requesting its table metadata. Existing local targets retain lookup precedence.
+
 ## [4.18.1] - 2026-10-31
 
 Published from tag [`v4.18.1`](https://github.com/eddiethedean/robin-sparkless/tree/v4.18.1) at commit [`0ad225677ec47b20c9c6225fa9f4b73b00e54aba`](https://github.com/eddiethedean/robin-sparkless/commit/0ad225677ec47b20c9c6225fa9f4b73b00e54aba). Exact-commit [CI run 41168209494](https://github.com/eddiethedean/robin-sparkless/actions/runs/41168209494) and [Release run 41170498256](https://github.com/eddiethedean/robin-sparkless/actions/runs/41170498256) passed, including final PyPI inventory and hash verification. See [release evidence](docs/RELEASE_EVIDENCE.md).

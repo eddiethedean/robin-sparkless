@@ -97,15 +97,22 @@ def main() -> None:
         assert condition_rows == [(1, "one"), (1, "one"), (2, "two")], condition_rows
         assert condition_join.schema.fieldNames() == ["key", "label"]
 
-        using_rows = sorted(
-            (tuple(row) for row in left.join(right, on="id", how="inner").collect()),
-            key=lambda row: (row[0], row[1] is not None, row[1] or 0),
+        reordered_right = spark.createDataFrame(
+            [("one", 1), ("two", 2), ("three", 3)],
+            "label STRING, id INT",
         )
-        assert using_rows == [
-            (1, None, "one"),
-            (1, 10, "one"),
-            (2, 20, "two"),
-        ], using_rows
+        for using_right in (right, reordered_right):
+            using_join = left.join(using_right, on="id", how="inner")
+            assert using_join.schema.fieldNames() == ["id", "amount", "label"]
+            using_rows = sorted(
+                (tuple(row) for row in using_join.collect()),
+                key=lambda row: (row[0], row[1] is not None, row[1] or 0),
+            )
+            assert using_rows == [
+                (1, None, "one"),
+                (1, 10, "one"),
+                (2, 20, "two"),
+            ], using_rows
 
         grouped = left.groupBy("id").agg(
             F.count(F.lit(1)).alias("rows"),

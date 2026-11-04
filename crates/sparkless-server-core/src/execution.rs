@@ -146,6 +146,7 @@ pub enum ConnectRelationKind {
         has_grouping_sets: bool,
     },
     Unsupported(String),
+    Missing,
 }
 
 #[derive(Debug, Clone)]

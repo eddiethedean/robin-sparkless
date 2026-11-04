@@ -100,7 +100,7 @@ fn normalize_relation(relation: &proto::Relation, depth: usize) -> Result<Connec
             has_grouping_sets: !aggregate.grouping_sets.is_empty(),
         },
         Some(_) => ConnectRelationKind::Unsupported("relation type".into()),
-        None => ConnectRelationKind::Unsupported("missing relation type".into()),
+        None => ConnectRelationKind::Missing,
     };
     Ok(ConnectRelation {
         plan_id: relation.common.as_ref().and_then(|common| common.plan_id),
@@ -305,18 +305,15 @@ fn materialize_relation(relation: &ConnectRelation) -> proto::Relation {
                 .collect(),
         }))),
         ConnectRelationKind::Unsupported(_) => Some(RelType::Unknown(proto::Unknown::default())),
+        ConnectRelationKind::Missing => None,
     };
-    let mut result = proto::Relation {
+    proto::Relation {
         common: relation.plan_id.map(|plan_id| proto::RelationCommon {
             plan_id: Some(plan_id),
             ..Default::default()
         }),
         rel_type,
-    };
-    if result.rel_type.is_none() {
-        result.rel_type = Some(RelType::Unknown(proto::Unknown::default()));
     }
-    result
 }
 
 fn materialize_expression(expression: &ConnectExpression) -> proto::Expression {
@@ -331,7 +328,10 @@ fn materialize_expression(expression: &ConnectExpression) -> proto::Expression {
                 ConnectLiteral::Long(value) => {
                     Some(proto::expression::literal::LiteralType::Long(*value))
                 }
-                ConnectLiteral::Unsupported(_) | ConnectLiteral::Missing => None,
+                ConnectLiteral::Unsupported(_) => Some(
+                    proto::expression::literal::LiteralType::String(String::new()),
+                ),
+                ConnectLiteral::Missing => None,
             };
             Some(ExprType::Literal(proto::expression::Literal {
                 literal_type,
@@ -380,7 +380,10 @@ fn materialize_expression(expression: &ConnectExpression) -> proto::Expression {
             name: names.clone(),
             metadata: metadata.clone(),
         }))),
-        ConnectExpression::Unsupported(_) | ConnectExpression::Missing => None,
+        ConnectExpression::Unsupported(_) => Some(ExprType::UnresolvedStar(
+            proto::expression::UnresolvedStar::default(),
+        )),
+        ConnectExpression::Missing => None,
     };
     proto::Expression {
         expr_type,

@@ -84,6 +84,13 @@ pub fn parse_query(sql: &str) -> Result<ast::Statement, ParseError> {
     spark_sql_parser::parse_sql(sql)
 }
 
+/// Parse canonical SQL emitted by the lowerer and restore its decoded string values.
+pub fn parse_lowered_query(sql: &str) -> Result<ast::Statement, ParseError> {
+    let mut statement = parse_query(sql)?;
+    let _ = ast::VisitMut::visit(&mut statement, &mut plan::LoweredStrings::Decode);
+    Ok(statement)
+}
+
 pub fn parse_expression(sql: &str) -> Result<ast::Expr, ParseError> {
     spark_sql_parser::parse_single_expression(sql)
 }

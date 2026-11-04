@@ -190,18 +190,30 @@ impl Drop for ExecutionContextGuard {
     }
 }
 
-fn active_operation_id_for(identity: &Arc<()>) -> Option<String> {
-    ACTIVE_EXECUTION_CONTEXT.with(|cell| {
-        cell.borrow().as_ref().and_then(|context| {
-            context
-                .belongs_to_session(identity)
-                .then(|| context.operation_id().to_owned())
-        })
-    })
+#[cfg(feature = "sql")]
+pub(crate) struct SqlThreadContextGuard {
+    _settings: crate::udf_context::ThreadContextGuard,
+    previous_session: Option<SparkSession>,
 }
 
-pub(crate) fn has_active_execution_context() -> bool {
-    ACTIVE_EXECUTION_CONTEXT.with(|cell| cell.borrow().is_some())
+#[cfg(feature = "sql")]
+impl Drop for SqlThreadContextGuard {
+    fn drop(&mut self) {
+        drop(THREAD_UDF_SESSION.with(|cell| cell.replace(self.previous_session.take())));
+    }
+}
+
+fn active_operation_id_for(identity: &Arc<()>) -> Option<String> {
+    active_execution_context_for(identity).map(|context| context.operation_id().to_owned())
+}
+
+fn active_execution_context_for(identity: &Arc<()>) -> Option<ExecutionContext> {
+    ACTIVE_EXECUTION_CONTEXT.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .filter(|context| context.belongs_to_session(identity))
+            .cloned()
+    })
 }
 
 /// Set the thread-local session for UDF resolution (call_udf). Used by get_or_create.
@@ -259,6 +271,21 @@ pub struct SparkSession {
 impl SparkSession {
     pub(crate) fn active_operation_id(&self) -> Option<String> {
         active_operation_id_for(&self.execution_identity)
+    }
+
+    #[cfg(feature = "sql")]
+    pub(crate) fn enter_sql_thread_context(&self) -> SqlThreadContextGuard {
+        let guard = SqlThreadContextGuard {
+            _settings: crate::udf_context::ThreadContextGuard::capture(),
+            previous_session: get_thread_udf_session(),
+        };
+        if let Some(context) = active_execution_context_for(&self.execution_identity) {
+            self.sync_execution_thread_context(&context);
+        } else {
+            self.sync_thread_context();
+        }
+        drop(THREAD_UDF_SESSION.with(|cell| cell.replace(Some(self.clone()))));
+        guard
     }
 
     pub fn new(
@@ -1611,7 +1638,7 @@ impl SparkSession {
         resolve_external: bool,
         provider_configured: bool,
     ) -> Result<DataFrame, PolarsError> {
-        let active_context = ACTIVE_EXECUTION_CONTEXT.with(|cell| cell.borrow().clone());
+        let active_context = active_execution_context_for(&self.execution_identity);
         let source_snapshot = active_context
             .as_ref()
             .and_then(|context| context.source_snapshot().cloned());
@@ -1846,14 +1873,27 @@ impl SparkSession {
         &self,
         name: &str,
     ) -> Result<(Option<ResolvedExternalTable>, bool), PolarsError> {
+        self.resolve_external_table_descriptor_with_write_check(name, false)
+    }
+
+    #[cfg(feature = "sql")]
+    pub(crate) fn resolve_external_table_descriptor_for_write(
+        &self,
+        name: &str,
+    ) -> Result<(Option<ResolvedExternalTable>, bool), PolarsError> {
+        self.resolve_external_table_descriptor_with_write_check(name, true)
+    }
+
+    fn resolve_external_table_descriptor_with_write_check(
+        &self,
+        name: &str,
+        require_write: bool,
+    ) -> Result<(Option<ResolvedExternalTable>, bool), PolarsError> {
         let Some(catalog) = self.external_catalog()? else {
             return Ok((None, false));
         };
-        let snapshot = ACTIVE_EXECUTION_CONTEXT.with(|cell| {
-            cell.borrow()
-                .as_ref()
-                .and_then(|context| context.source_snapshot().cloned())
-        });
+        let snapshot = active_execution_context_for(&self.execution_identity)
+            .and_then(|context| context.source_snapshot().cloned());
         let ownership = match snapshot.as_ref() {
             Some(snapshot) => snapshot.resolve_ownership(name),
             None => catalog.resolve_ownership(name),
@@ -1865,6 +1905,9 @@ impl SparkSession {
         })?;
         if matches!(ownership, CatalogOwnership::Local) {
             return Ok((None, false));
+        }
+        if require_write {
+            self.reject_read_only_external_owner(&ownership)?;
         }
         catalog
             .require_read_capability(&ownership)
@@ -1907,11 +1950,8 @@ impl SparkSession {
         validate_schema: bool,
     ) -> Result<DataFrame, PolarsError> {
         let token = CancellationToken::new();
-        let active_snapshot = ACTIVE_EXECUTION_CONTEXT.with(|cell| {
-            cell.borrow()
-                .as_ref()
-                .and_then(|context| context.source_snapshot().cloned())
-        });
+        let active_snapshot = active_execution_context_for(&self.execution_identity)
+            .and_then(|context| context.source_snapshot().cloned());
         let snapshot = if active_snapshot.is_some() {
             active_snapshot
         } else if descriptor.format == ExternalTableFormat::DuckDb {
@@ -2167,6 +2207,11 @@ impl SparkSession {
         context.check_cancelled()?;
         let _active_context = ExecutionContextGuard::install(context.clone());
         let _thread_context = crate::udf_context::ThreadContextGuard::capture();
+        self.sync_execution_thread_context(context);
+        self.sql_with_cancellation(query, context.cancellation())
+    }
+
+    fn sync_execution_thread_context(&self, context: &ExecutionContext) {
         let configuration = context.configuration();
         crate::set_thread_udf_context_full(
             Arc::new(self.udf_registry.clone()),
@@ -2177,7 +2222,6 @@ impl SparkSession {
         crate::set_thread_decimal_allow_precision_loss(
             configuration.decimal_allow_precision_loss(),
         );
-        self.sql_with_cancellation(query, context.cancellation())
     }
 
     pub fn sync_thread_context(&self) {
@@ -2196,11 +2240,9 @@ impl SparkSession {
     /// Whether column names are case-sensitive (PySpark: spark.sql.caseSensitive).
     /// Default is false (case-insensitive matching).
     pub fn is_case_sensitive(&self) -> bool {
-        if let Some(value) = ACTIVE_EXECUTION_CONTEXT.with(|cell| {
-            cell.borrow()
-                .as_ref()
-                .map(|context| context.configuration().case_sensitive())
-        }) {
+        if let Some(value) = active_execution_context_for(&self.execution_identity)
+            .map(|context| context.configuration().case_sensitive())
+        {
             return value;
         }
         self.config
@@ -4008,6 +4050,49 @@ mod tests {
         ArrowIpcStream, CatalogResolver, ExternalTableWriteBatchRequest, ExternalTableWriteResult,
     };
     use serde_json::json;
+
+    #[cfg(feature = "sql")]
+    #[test]
+    fn active_execution_context_does_not_leak_between_sessions() {
+        let outer = SparkSession::new(
+            Some("outer-context".into()),
+            None,
+            HashMap::from([
+                ("spark.sql.caseSensitive".into(), "true".into()),
+                ("spark.sql.session.timeZone".into(), "UTC".into()),
+            ]),
+        );
+        let inner = SparkSession::new(
+            Some("inner-context".into()),
+            None,
+            HashMap::from([
+                ("spark.sql.caseSensitive".into(), "false".into()),
+                (
+                    "spark.sql.session.timeZone".into(),
+                    "America/Los_Angeles".into(),
+                ),
+            ]),
+        );
+        inner.register_table("context_table", inner.range(0, 1, 1).unwrap());
+        let context = outer
+            .execution_context("outer-operation", CancellationToken::new())
+            .unwrap();
+        let _guard = ExecutionContextGuard::install(context);
+        let _thread_context = crate::udf_context::ThreadContextGuard::capture();
+        outer.sync_thread_context();
+
+        assert!(outer.is_case_sensitive());
+        assert!(!inner.is_case_sensitive());
+        assert_eq!(
+            inner
+                .sql("SELECT ID FROM context_table")
+                .unwrap()
+                .count()
+                .unwrap(),
+            1
+        );
+        assert_eq!(crate::get_thread_session_time_zone(), "UTC");
+    }
 
     #[test]
     fn explicit_double_schema_accepts_non_finite_float_transport_values() {

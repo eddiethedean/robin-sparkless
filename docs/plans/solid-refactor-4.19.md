@@ -467,7 +467,8 @@ this phase record was written it did not close P0/P1/P2/P4; the later addendum r
 P0/P1/P2 and local P4 evidence. Live JDBC behavior remains open. Review also found the
 Connect execution-port request and result still carry serialized protobuf data; the
 required protocol-neutral typed-plan boundary remains unfinished. P6/P7 work and
-exact-candidate release acceptance remain outstanding.
+exact-candidate release acceptance remain outstanding at this checkpoint. See the
+[review follow-up](#phase-419-review-follow-up) for the current Connect boundary.
 
 ### Gate closure addendum (2026-11-02)
 
@@ -667,6 +668,22 @@ and [Release run, attempt 2](https://github.com/eddiethedean/robin-sparkless/act
 The release run passed all four base and DuckDB server wheel builds, the container
 checks, all four exact-product consumer jobs, and the acceptance gate. Phase 7 is
 closed. Public registry verification remains a post-publication stage.
+
+### Phase 4.19 review follow-up
+
+Connect now dispatches a transport-neutral `ConnectExecutionPlan` through the
+server execution port. Results carry a logical schema and Arrow IPC batches. The
+Polars adapter still reconstructs private protobuf nodes for its existing checked
+translator. Direct translation of the typed plan is a separate refactor.
+
+The review fixes preserve SQL literal values during lowering, scope reentrant SQL
+settings to the owning session, resolve Connect public names separately from bound
+physical columns, preserve missing-versus-unsupported plan errors, and check
+external INSERT write capability before table metadata lookup. SQL-only helpers
+are gated on the SQL feature.
+
+See the [local review verification](sparkless-server/RELEASE_4_19_EVIDENCE.md#local-review-verification)
+for commands and limits. The Phase 7 acceptance above applies to its recorded revision.
 
 ## 7. Breaking-change ledger
 

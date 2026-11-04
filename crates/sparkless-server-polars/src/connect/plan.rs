@@ -95,7 +95,7 @@ fn translate_proto_plan_for_execution(
     // lack of a reader must not bypass plan validation or let an earlier source scan happen.
     translate_plan_with_context(
         session,
-        &plan,
+        plan,
         TranslationContext {
             source_snapshot: source_snapshot.clone(),
             token: token.clone(),
@@ -105,7 +105,7 @@ fn translate_proto_plan_for_execution(
     )?;
     translate_plan_with_context(
         session,
-        &plan,
+        plan,
         TranslationContext {
             source_snapshot,
             token: token.clone(),
@@ -371,14 +371,13 @@ fn translate_relation_with_context(
                 .ok_or_else(|| Status::invalid_argument("Filter.condition is required"))?;
             let expr = match condition.expr_type.as_ref() {
                 Some(ExprType::ExpressionString(expression)) => {
-                    parse_filter_string(&expression.expression)?
+                    let (name, value) = parse_filter_string(&expression.expression)?;
+                    ExprIr::Gt(
+                        Box::new(ExprIr::Column(resolve_public_column(&input, &name)?)),
+                        Box::new(ExprIr::Lit(LiteralValue::I64(value))),
+                    )
                 }
-                other => translate_expression(
-                    other,
-                    &input.plan_ids,
-                    ExpressionUse::Filter,
-                    Some(&input),
-                )?,
+                other => translate_expression(other, ExpressionUse::Filter, &input)?,
             };
             if !matches!(expr, ExprIr::Ge(_, _) | ExprIr::Gt(_, _)) {
                 return Err(unsupported(
@@ -386,7 +385,6 @@ fn translate_relation_with_context(
                 ));
             }
             validate_relation_comparison_types(&input, &expr)?;
-            let expr = resolve_logical_columns(&input, expr)?;
             let schema = input.schema.clone();
             let dataframe = input
                 .dataframe
@@ -422,19 +420,14 @@ fn translate_relation_with_context(
                 .map(|expression| {
                     translate_expression(
                         expression.expr_type.as_ref(),
-                        &input.plan_ids,
                         ExpressionUse::Project,
-                        Some(&input),
+                        &input,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let expressions = expressions
-                .into_iter()
-                .map(|expression| {
-                    validate_relation_comparison_types(&input, &expression)?;
-                    resolve_logical_columns(&input, expression)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            for expression in &expressions {
+                validate_relation_comparison_types(&input, expression)?;
+            }
             let dataframe = input
                 .dataframe
                 .select_expr_ir(&expressions)
@@ -494,6 +487,7 @@ fn translate_relation_with_context(
             let join_type = proto::join::JoinType::try_from(join.join_type)
                 .map_err(|_| Status::invalid_argument("Join.join_type is unknown"))?;
             let mut coalesced_right_keys = HashMap::new();
+            let mut right_input_renames = HashMap::new();
             let how = match join_type {
                 proto::join::JoinType::Inner => Some(robin_sparkless::JoinType::Inner),
                 proto::join::JoinType::LeftOuter => Some(robin_sparkless::JoinType::Left),
@@ -522,38 +516,55 @@ fn translate_relation_with_context(
                     .iter()
                     .map(|name| resolve_join_key(&right, name))
                     .collect::<Result<Vec<_>, _>>()?;
-                let keys_coalesce = left_keys.len() == right_keys.len()
-                    && left_keys
-                        .iter()
-                        .zip(&right_keys)
-                        .all(|(left, right)| left.eq_ignore_ascii_case(right));
-                if keys_coalesce {
-                    for (left_key, right_key) in left_keys.iter().zip(&right_keys) {
-                        coalesced_right_keys.insert(right_key.clone(), left_key.clone());
-                    }
-                }
                 validate_connect_join_key_types(&left, &right, &left_keys, &right_keys)?;
-                let left_refs = left_keys.iter().map(String::as_str).collect();
-                let right_refs = right_keys.iter().map(String::as_str).collect();
-                if join_type == proto::join::JoinType::FullOuter && keys_coalesce {
-                    left.dataframe.join_with_keys_using(
-                        &right.dataframe,
-                        left_refs,
-                        right_refs,
-                        how.unwrap(),
-                    )
+                coalesced_right_keys
+                    .extend(right_keys.iter().cloned().zip(left_keys.iter().cloned()));
+                let right_frame = if left_keys == right_keys {
+                    right.dataframe.clone()
                 } else {
-                    left.dataframe.join_with_keys(
-                        &right.dataframe,
-                        left_refs,
-                        right_refs,
-                        how.unwrap(),
-                        false,
+                    let (frame, renames) =
+                        align_using_join_keys(&left, &right, &coalesced_right_keys)?;
+                    right_input_renames = renames;
+                    frame
+                };
+                let left_refs = left_keys.iter().map(String::as_str).collect();
+                let right_refs = right_keys
+                    .iter()
+                    .map(|name| right_input_renames.get(name).unwrap_or(name).as_str())
+                    .collect();
+                let joined = left
+                    .dataframe
+                    .join_with_keys_using(&right_frame, left_refs, right_refs, how.unwrap())
+                    .map_err(|error| {
+                        Status::failed_precondition(format!(
+                            "CONNECT_PLAN_ANALYSIS_FAILED: {error}"
+                        ))
+                    })?;
+                let output = joined.columns_engine().map_err(engine_failure)?;
+                // Spark USING puts the requested keys before the remaining fields.
+                let ordered = left_keys
+                    .iter()
+                    .map(String::as_str)
+                    .chain(
+                        output
+                            .iter()
+                            .filter(|name| !left_keys.contains(name))
+                            .map(String::as_str),
                     )
+                    .collect::<Vec<_>>();
+                if ordered
+                    .iter()
+                    .copied()
+                    .eq(output.iter().map(String::as_str))
+                {
+                    joined
+                } else {
+                    let projection = ordered
+                        .into_iter()
+                        .map(|name| ExprIr::Column(name.to_owned()))
+                        .collect::<Vec<_>>();
+                    joined.select_expr_ir(&projection).map_err(engine_failure)?
                 }
-                .map_err(|error| {
-                    Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
-                })?
             } else if how.is_none() {
                 if join.join_condition.is_some() {
                     return Err(unsupported(
@@ -590,8 +601,13 @@ fn translate_relation_with_context(
                         ))
                     })?
             };
-            let (left_output_columns, right_output_columns) =
-                joined_output_columns(&left, &right, &dataframe, &coalesced_right_keys)?;
+            let (left_output_columns, right_output_columns) = joined_output_columns(
+                &left,
+                &right,
+                &dataframe,
+                &coalesced_right_keys,
+                &right_input_renames,
+            )?;
             let schema = joined_logical_schema(
                 &left,
                 &right,
@@ -655,11 +671,9 @@ fn translate_relation_with_context(
                 .map(|expression| {
                     translate_expression(
                         expression.expr_type.as_ref(),
-                        &input.plan_ids,
                         ExpressionUse::Aggregate,
-                        Some(&input),
+                        &input,
                     )
-                    .and_then(|expression| resolve_logical_columns(&input, expression))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             validate_connect_aggregate_types(&input, &expressions)?;
@@ -695,19 +709,13 @@ fn translate_relation_with_context(
                     .map(|expression| {
                         let ExprIr::Column(name) = translate_expression(
                             expression.expr_type.as_ref(),
-                            &input.plan_ids,
                             ExpressionUse::Project,
-                            Some(&input),
+                            &input,
                         )?
                         else {
                             return Err(unsupported(
                                 "grouping expressions must be simple column references",
                             ));
-                        };
-                        let ExprIr::Column(name) =
-                            resolve_logical_columns(&input, ExprIr::Column(name))?
-                        else {
-                            unreachable!();
                         };
                         Ok(name)
                     })
@@ -902,88 +910,36 @@ fn public_expression_name(
     }
 }
 
-fn resolve_logical_columns(
-    input: &TranslatedRelation,
-    expression: ExprIr,
-) -> Result<ExprIr, Status> {
-    fn resolve(name: &str, input: &TranslatedRelation) -> Result<String, Status> {
-        let physical_schema = input.dataframe.schema_engine().map_err(engine_failure)?;
-        let physical_names = physical_schema
-            .logical_fields()
-            .iter()
-            .map(|field| field.name.clone())
-            .collect::<Vec<_>>();
-        let logical_names = input
-            .schema
-            .logical_fields()
-            .iter()
-            .map(|field| field.name.clone())
-            .collect::<Vec<_>>();
-        let physical_matches =
-            robin_sparkless_plan::matching_indices_ascii_case_insensitive(&physical_names, name);
-        let logical_matches =
-            robin_sparkless_plan::matching_indices_ascii_case_insensitive(&logical_names, name);
-        // Public logical names take precedence over generated physical suffixes such as
-        // `x_1`; this keeps an explicit alias `X_1` from binding to a duplicate `x` column.
-        // Internal physical names remain resolvable when they do not have a logical match.
-        let matches = if logical_matches.is_empty() {
-            &physical_matches
-        } else {
-            &logical_matches
-        };
-        let index = match matches.as_slice() {
-            [index] => *index,
-            [] => {
-                return Err(Status::invalid_argument(format!(
-                    "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
-                )));
-            }
-            _ => {
-                return Err(Status::invalid_argument(format!(
-                    "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
-                )));
-            }
-        };
-        let physical_columns = input.dataframe.columns().map_err(|error| {
+fn resolve_public_column(input: &TranslatedRelation, name: &str) -> Result<String, Status> {
+    let mut matches = input
+        .schema
+        .logical_fields()
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| field.name.eq_ignore_ascii_case(name));
+    let Some((index, _)) = matches.next() else {
+        return Err(Status::invalid_argument(format!(
+            "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
+        )));
+    };
+    if matches.next().is_some() {
+        return Err(Status::invalid_argument(format!(
+            "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
+        )));
+    }
+    input
+        .dataframe
+        .columns()
+        .map_err(|error| {
             Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
-        })?;
-        if physical_columns.len() != physical_schema.logical_fields().len() {
-            return Err(Status::failed_precondition(
-                "Connect logical schema does not match its physical dataframe",
-            ));
-        }
-        physical_columns.get(index).cloned().ok_or_else(|| {
+        })?
+        .get(index)
+        .cloned()
+        .ok_or_else(|| {
             Status::failed_precondition(
                 "Connect logical schema does not match its physical dataframe",
             )
         })
-    }
-    fn visit(expression: ExprIr, input: &TranslatedRelation) -> Result<ExprIr, Status> {
-        Ok(match expression {
-            ExprIr::Column(name) => ExprIr::Column(resolve(&name, input)?),
-            ExprIr::Gt(left, right) => ExprIr::Gt(
-                Box::new(visit(*left, input)?),
-                Box::new(visit(*right, input)?),
-            ),
-            ExprIr::Ge(left, right) => ExprIr::Ge(
-                Box::new(visit(*left, input)?),
-                Box::new(visit(*right, input)?),
-            ),
-            ExprIr::Add(left, right) => ExprIr::Add(
-                Box::new(visit(*left, input)?),
-                Box::new(visit(*right, input)?),
-            ),
-            ExprIr::Call { name, args } => ExprIr::Call {
-                name,
-                args: args
-                    .into_iter()
-                    .map(|argument| visit(argument, input))
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-            other => other,
-        })
-    }
-    visit(expression, input)
 }
 
 fn relation_column_bindings(
@@ -1034,11 +990,66 @@ fn logical_field_for_physical<'a>(
     }
 }
 
+/// Align the right input by its resolved USING keys, which can occupy different
+/// physical columns on the two inputs. Retain original names for lineage.
+fn align_using_join_keys(
+    left: &TranslatedRelation,
+    right: &TranslatedRelation,
+    right_to_left_keys: &OutputColumnNames,
+) -> Result<(robin_sparkless::DataFrame, OutputColumnNames), Status> {
+    let right_names = right.dataframe.columns_engine().map_err(engine_failure)?;
+    let mut reserved = left
+        .dataframe
+        .columns_engine()
+        .map_err(engine_failure)?
+        .into_iter()
+        .chain(right_names.iter().cloned())
+        .map(|name| name.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let targets = right_to_left_keys
+        .values()
+        .map(|key| key.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let mut renames = HashMap::new();
+    let mut projection = Vec::with_capacity(right_names.len());
+    for name in right_names {
+        let target = if let Some(left_key) = right_to_left_keys.get(&name) {
+            left_key.clone()
+        } else if targets.contains(&name.to_ascii_lowercase()) {
+            // A right non-key may already occupy a physical name needed by a key.
+            let base = format!("{name}_right");
+            let mut target = base.clone();
+            for suffix in 1.. {
+                if reserved.insert(target.to_ascii_lowercase()) {
+                    break;
+                }
+                target = format!("{base}_{suffix}");
+            }
+            target
+        } else {
+            name.clone()
+        };
+        let column = ExprIr::Column(name.clone());
+        if name == target {
+            projection.push(column);
+        } else {
+            projection.push(robin_sparkless::alias(column, &target));
+            renames.insert(name, target);
+        }
+    }
+    let frame = right
+        .dataframe
+        .select_expr_ir(&projection)
+        .map_err(engine_failure)?;
+    Ok((frame, renames))
+}
+
 fn joined_output_columns(
     left: &TranslatedRelation,
     right: &TranslatedRelation,
     output: &robin_sparkless::DataFrame,
     coalesced_right_keys: &HashMap<String, String>,
+    right_input_renames: &OutputColumnNames,
 ) -> Result<JoinedOutputColumnNames, Status> {
     let left_names = left.dataframe.columns().map_err(|error| {
         Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
@@ -1066,6 +1077,8 @@ fn joined_output_columns(
         .collect::<HashSet<_>>();
     let untouched_right_names = right_names
         .iter()
+        .filter(|name| !coalesced_right_keys.contains_key(*name))
+        .map(|name| right_input_renames.get(name).unwrap_or(name))
         .filter(|name| !left_set.contains(&name.to_ascii_lowercase()))
         .filter(|name| {
             output_names
@@ -1075,12 +1088,13 @@ fn joined_output_columns(
         .map(|name| name.to_ascii_lowercase())
         .collect::<HashSet<_>>();
     let mut right_map = HashMap::new();
-    for name in right_names {
-        if let Some(left_key) = coalesced_right_keys.get(&name) {
+    for original in right_names {
+        if let Some(left_key) = coalesced_right_keys.get(&original) {
             let output_name = left_map.get(left_key).unwrap_or(left_key);
-            right_map.insert(name.clone(), output_name.clone());
+            right_map.insert(original, output_name.clone());
             continue;
         }
+        let name = right_input_renames.get(&original).unwrap_or(&original);
         let candidates = if used.contains(&name.to_ascii_lowercase()) {
             std::iter::once(format!("{name}_right"))
                 .chain((1..=output_names.len()).map(|index| format!("{name}_right_{index}")))
@@ -1092,12 +1106,12 @@ fn joined_output_columns(
             output_names.iter().find(|output_name| {
                 output_name.eq_ignore_ascii_case(candidate)
                     && !used.contains(&output_name.to_ascii_lowercase())
-                    && (candidate.eq_ignore_ascii_case(&name)
+                    && (candidate.eq_ignore_ascii_case(name)
                         || !untouched_right_names.contains(&output_name.to_ascii_lowercase()))
             })
         }) {
             used.insert(output_name.to_ascii_lowercase());
-            right_map.insert(name, output_name.clone());
+            right_map.insert(original, output_name.clone());
         }
     }
     Ok((left_map, right_map))
@@ -1303,10 +1317,7 @@ fn resolve_join_key(input: &TranslatedRelation, name: &str) -> Result<String, St
             ));
         }
     };
-    match resolve_logical_columns(input, ExprIr::Column(column.to_string()))? {
-        ExprIr::Column(name) => Ok(name),
-        _ => unreachable!(),
-    }
+    resolve_public_column(input, column)
 }
 
 fn validate_connect_join_key_types(
@@ -1600,55 +1611,8 @@ fn validate_relation_comparison_types(
     input: &TranslatedRelation,
     expression: &ExprIr,
 ) -> Result<(), Status> {
-    let physical_columns = input.dataframe.columns().map_err(|error| {
-        Status::failed_precondition(format!("CONNECT_PLAN_ANALYSIS_FAILED: {error}"))
-    })?;
-    if physical_columns.len() != input.schema.logical_fields().len() {
-        return Err(Status::failed_precondition(
-            "Connect logical schema does not match its physical dataframe",
-        ));
-    }
     validate_comparison_types_with(expression, &|name| {
-        let logical_matches = input
-            .schema
-            .logical_fields()
-            .iter()
-            .filter(|field| field.name.eq_ignore_ascii_case(name))
-            .collect::<Vec<_>>();
-        match logical_matches.as_slice() {
-            [field] => return Ok(field.data_type.clone()),
-            [_, _, ..] => {
-                return Err(Status::invalid_argument(format!(
-                    "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
-                )));
-            }
-            [] => {}
-        }
-        let physical_matches = physical_columns
-            .iter()
-            .enumerate()
-            .filter(|(_, column)| column.eq_ignore_ascii_case(name))
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        match physical_matches.as_slice() {
-            [index] => input
-                .schema
-                .logical_fields()
-                .get(*index)
-                .filter(|field| field.name.eq_ignore_ascii_case(name))
-                .map(|field| field.data_type.clone())
-                .ok_or_else(|| {
-                    Status::invalid_argument(format!(
-                        "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
-                    ))
-                }),
-            [] => Err(Status::invalid_argument(format!(
-                "CONNECT_PLAN_ANALYSIS_FAILED: unresolved column {name:?}"
-            ))),
-            _ => Err(Status::invalid_argument(format!(
-                "CONNECT_PLAN_ANALYSIS_FAILED: ambiguous column {name:?}"
-            ))),
-        }
+        logical_field_for_physical(input, name).map(|field| field.data_type.clone())
     })
 }
 
@@ -1804,9 +1768,8 @@ fn translate_child(
 
 fn translate_expression(
     expr_type: Option<&ExprType>,
-    input_plan_ids: &HashSet<i64>,
     usage: ExpressionUse,
-    input: Option<&TranslatedRelation>,
+    input: &TranslatedRelation,
 ) -> Result<ExprIr, Status> {
     match expr_type {
         Some(ExprType::Literal(literal)) => match literal.literal_type.as_ref() {
@@ -1826,7 +1789,7 @@ fn translate_expression(
                     "only simple non-metadata column references are supported",
                 ));
             }
-            validate_expression_plan_id(attribute.plan_id, input_plan_ids)?;
+            validate_expression_plan_id(attribute.plan_id, &input.plan_ids)?;
             let mut identifier_parts = attribute.unparsed_identifier.split('.');
             let first = identifier_parts.next().expect("identifier is non-empty");
             let second = identifier_parts.next();
@@ -1836,7 +1799,7 @@ fn translate_expression(
             };
             let plan_column = attribute
                 .plan_id
-                .and_then(|plan_id| input.and_then(|input| input.plan_columns.get(&plan_id)))
+                .and_then(|plan_id| input.plan_columns.get(&plan_id))
                 .and_then(|columns| {
                     columns
                         .iter()
@@ -1844,8 +1807,7 @@ fn translate_expression(
                         .map(|(_, output_name)| output_name.clone())
                 });
             let qualified_column = qualifier
-                .and_then(|qualifier| input.map(|input| (qualifier, input)))
-                .and_then(|(qualifier, input)| {
+                .and_then(|qualifier| {
                     input
                         .qualifier_columns
                         .get(&qualifier.to_ascii_lowercase())
@@ -1876,7 +1838,7 @@ fn translate_expression(
                     attribute.unparsed_identifier
                 )));
             } else {
-                identifier.to_string()
+                resolve_public_column(input, identifier)?
             };
             Ok(ExprIr::Column(resolved))
         }
@@ -1895,42 +1857,17 @@ fn translate_expression(
                 function.arguments.as_slice(),
             ) {
                 (ExpressionUse::Project, "+", [left, right]) => {
-                    let left = translate_expression(
-                        left.expr_type.as_ref(),
-                        input_plan_ids,
-                        usage,
-                        input,
-                    )?;
-                    let right = translate_expression(
-                        right.expr_type.as_ref(),
-                        input_plan_ids,
-                        usage,
-                        input,
-                    )?;
+                    let left = translate_expression(left.expr_type.as_ref(), usage, input)?;
+                    let right = translate_expression(right.expr_type.as_ref(), usage, input)?;
                     Ok(ExprIr::Add(Box::new(left), Box::new(right)))
                 }
                 (ExpressionUse::Project | ExpressionUse::Filter, ">=", [left, right]) => {
-                    let left = translate_expression(
-                        left.expr_type.as_ref(),
-                        input_plan_ids,
-                        usage,
-                        input,
-                    )?;
-                    let right = translate_expression(
-                        right.expr_type.as_ref(),
-                        input_plan_ids,
-                        usage,
-                        input,
-                    )?;
+                    let left = translate_expression(left.expr_type.as_ref(), usage, input)?;
+                    let right = translate_expression(right.expr_type.as_ref(), usage, input)?;
                     Ok(ExprIr::Ge(Box::new(left), Box::new(right)))
                 }
                 (ExpressionUse::Aggregate, "count", [argument]) => {
-                    let argument = translate_expression(
-                        argument.expr_type.as_ref(),
-                        input_plan_ids,
-                        usage,
-                        input,
-                    )?;
+                    let argument = translate_expression(argument.expr_type.as_ref(), usage, input)?;
                     match argument {
                         ExprIr::Lit(LiteralValue::I32(1) | LiteralValue::I64(1)) => {
                             let row_count = ExprIr::Call {
@@ -1949,12 +1886,7 @@ fn translate_expression(
                     }
                 }
                 (ExpressionUse::Aggregate, "sum", [argument]) => {
-                    let argument = translate_expression(
-                        argument.expr_type.as_ref(),
-                        input_plan_ids,
-                        usage,
-                        input,
-                    )?;
+                    let argument = translate_expression(argument.expr_type.as_ref(), usage, input)?;
                     match argument {
                         column @ ExprIr::Column(_) => Ok(ExprIr::Call {
                             name: "sum".to_string(),
@@ -1987,8 +1919,7 @@ fn translate_expression(
                 .expr
                 .as_deref()
                 .ok_or_else(|| Status::invalid_argument("Alias.expr is required"))?;
-            let expression =
-                translate_expression(expression.expr_type.as_ref(), input_plan_ids, usage, input)?;
+            let expression = translate_expression(expression.expr_type.as_ref(), usage, input)?;
             Ok(robin_sparkless::alias(expression, &alias.name[0]))
         }
         Some(ExprType::ExpressionString(_)) => Err(unsupported(
@@ -2015,7 +1946,7 @@ fn validate_expression_plan_id(
     Ok(())
 }
 
-fn parse_filter_string(expression: &str) -> Result<ExprIr, Status> {
+fn parse_filter_string(expression: &str) -> Result<(String, i64), Status> {
     if expression.len() > MAX_FILTER_EXPRESSION_BYTES {
         return Err(Status::resource_exhausted(format!(
             "Connect filter expression exceeds {MAX_FILTER_EXPRESSION_BYTES} bytes"
@@ -2062,10 +1993,7 @@ fn parse_filter_string(expression: &str) -> Result<ExprIr, Status> {
     let value = value.parse::<i64>().map_err(|_| {
         Status::invalid_argument("Connect filter integer literal is out of signed 64-bit range")
     })?;
-    Ok(ExprIr::Gt(
-        Box::new(ExprIr::Column(column.value)),
-        Box::new(ExprIr::Lit(LiteralValue::I64(value))),
-    ))
+    Ok((column.value, value))
 }
 
 fn is_simple_identifier(identifier: &str) -> bool {
@@ -2615,6 +2543,122 @@ mod tests {
         }
     }
 
+    fn local_relation(schema: &str, plan_id: i64) -> proto::Relation {
+        proto::Relation {
+            common: Some(proto::RelationCommon {
+                plan_id: Some(plan_id),
+                ..Default::default()
+            }),
+            rel_type: Some(RelType::LocalRelation(proto::LocalRelation {
+                data: None,
+                schema: Some(schema.to_string()),
+            })),
+        }
+    }
+
+    #[test]
+    fn inline_relation_resolves_only_public_names_and_keeps_bound_columns() {
+        let session = session();
+        let filter = proto::Relation {
+            rel_type: Some(RelType::Filter(Box::new(proto::Filter {
+                input: Some(Box::new(local_relation("id INT", 101))),
+                condition: Some(connect_expression(ExprType::ExpressionString(
+                    expression::ExpressionString {
+                        expression: "__sparkless_connect_local_0 > 0".into(),
+                    },
+                ))),
+            }))),
+            ..Default::default()
+        };
+        let error = translate_relation(&session, &filter, 1).err().unwrap();
+        assert_eq!(error.code(), Code::InvalidArgument);
+        assert!(error.message().contains("unresolved column"));
+
+        let projection = proto::Relation {
+            rel_type: Some(RelType::Project(Box::new(proto::Project {
+                input: Some(Box::new(local_relation(
+                    "id INT, __sparkless_connect_local_0 STRING",
+                    101,
+                ))),
+                expressions: vec![
+                    connect_attribute("id", Some(101)),
+                    connect_attribute("__sparkless_connect_local_0", None),
+                ],
+            }))),
+            ..Default::default()
+        };
+        let translated = translate_relation(&session, &projection, 1).unwrap();
+        let fields = translated.schema.logical_fields();
+        assert!(matches!(fields[0].data_type, DataType::Integer));
+        assert!(matches!(fields[1].data_type, DataType::String));
+    }
+
+    #[test]
+    fn aliased_inline_relations_keep_bound_columns_through_join_projection() {
+        let session = session();
+        let condition = connect_expression(ExprType::UnresolvedFunction(
+            expression::UnresolvedFunction {
+                function_name: "==".into(),
+                arguments: vec![
+                    connect_attribute("l.id", Some(111)),
+                    connect_attribute("r.id", Some(222)),
+                ],
+                is_distinct: false,
+                is_user_defined_function: false,
+                is_internal: Some(false),
+            },
+        ));
+        let join = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Join(Box::new(proto::Join {
+                left: Some(Box::new(alias_relation(
+                    local_relation("id INT, amount INT", 101),
+                    "l",
+                    111,
+                ))),
+                right: Some(Box::new(alias_relation(
+                    local_relation("id INT, label STRING", 202),
+                    "r",
+                    222,
+                ))),
+                join_condition: Some(condition),
+                join_type: proto::join::JoinType::Inner as i32,
+                using_columns: Vec::new(),
+                join_data_type: None,
+            }))),
+        };
+        let projection = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Project(Box::new(proto::Project {
+                input: Some(Box::new(join)),
+                expressions: vec![
+                    connect_expression(ExprType::Alias(Box::new(expression::Alias {
+                        expr: Some(Box::new(connect_attribute("l.id", Some(111)))),
+                        name: vec!["key".into()],
+                        metadata: Some("{}".into()),
+                    }))),
+                    connect_expression(ExprType::Alias(Box::new(expression::Alias {
+                        expr: Some(Box::new(connect_attribute("r.label", Some(222)))),
+                        name: vec!["label".into()],
+                        metadata: Some("{}".into()),
+                    }))),
+                ],
+            }))),
+        };
+
+        let translated = translate_relation(&session, &projection, 1).unwrap();
+        assert_eq!(
+            translated
+                .schema
+                .logical_fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            ["key", "label"]
+        );
+        assert!(translated.dataframe.collect_rows().unwrap().is_empty());
+    }
+
     #[test]
     fn configured_named_table_relations_resolve_registered_tables_and_reject_options() {
         let session = session();
@@ -2718,6 +2762,135 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn using_join_merges_reordered_inline_keys_and_preserves_right_bindings() {
+        use serde_json::json;
+
+        let session = session();
+        let inline = |fields: Vec<(String, String)>, rows, id| {
+            let frame = session
+                .create_dataframe_from_rows(rows, fields, false, false)
+                .unwrap();
+            let data = frame
+                .to_arrow_ipc_batches_with_cancellation(10, 65536, &CancellationToken::new())
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .bytes;
+            proto::Relation {
+                common: Some(proto::RelationCommon {
+                    plan_id: Some(id),
+                    ..Default::default()
+                }),
+                rel_type: Some(RelType::LocalRelation(proto::LocalRelation {
+                    data: Some(data),
+                    schema: None,
+                })),
+            }
+        };
+        let left = inline(
+            vec![("amount".into(), "int".into()), ("id".into(), "int".into())],
+            vec![vec![json!(10), json!(1)], vec![json!(20), json!(2)]],
+            101,
+        );
+        let right = inline(
+            vec![("id".into(), "int".into()), ("score".into(), "int".into())],
+            vec![vec![json!(1), json!(100)], vec![json!(3), json!(300)]],
+            202,
+        );
+        for (join_type, expected) in [
+            (
+                proto::join::JoinType::Inner,
+                vec![vec![json!(1), json!(10), json!(100)]],
+            ),
+            (
+                proto::join::JoinType::FullOuter,
+                vec![
+                    vec![json!(1), json!(10), json!(100)],
+                    vec![json!(2), json!(20), json!(null)],
+                    vec![json!(3), json!(null), json!(300)],
+                ],
+            ),
+        ] {
+            let join = proto::Relation {
+                common: None,
+                rel_type: Some(RelType::Join(Box::new(proto::Join {
+                    left: Some(Box::new(left.clone())),
+                    right: Some(Box::new(right.clone())),
+                    using_columns: vec!["id".into()],
+                    join_type: join_type as i32,
+                    ..Default::default()
+                }))),
+            };
+            let translated = translate_relation(&session, &join, 1).unwrap();
+            let names = translated
+                .schema
+                .logical_fields()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(names, ["id", "amount", "score"]);
+            let physical = translated.dataframe.columns_engine().unwrap();
+            let mut rows = translated
+                .dataframe
+                .collect_rows()
+                .unwrap()
+                .into_iter()
+                .map(|row| {
+                    physical
+                        .iter()
+                        .map(|name| row[name].clone())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            rows.sort_by_key(|row| row[0].as_i64().unwrap());
+            assert_eq!(rows, expected, "{join_type:?}");
+
+            let projection = proto::Relation {
+                common: None,
+                rel_type: Some(RelType::Project(Box::new(proto::Project {
+                    input: Some(Box::new(join)),
+                    expressions: vec![connect_attribute("score", Some(202))],
+                }))),
+            };
+            let bound = translate_relation(&session, &projection, 1).unwrap();
+            let name = &bound.dataframe.columns_engine().unwrap()[0];
+            let rows = bound.dataframe.collect_rows().unwrap();
+            assert_eq!(rows.len(), expected.len());
+            assert!(rows.iter().any(|row| row[name] == json!(100)));
+        }
+
+        let swapped = inline(
+            vec![("id".into(), "int".into()), ("amount".into(), "int".into())],
+            vec![vec![json!(1), json!(10)], vec![json!(1), json!(20)]],
+            303,
+        );
+        let join = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Join(Box::new(proto::Join {
+                left: Some(Box::new(left)),
+                right: Some(Box::new(swapped)),
+                using_columns: vec!["id".into(), "amount".into()],
+                join_type: proto::join::JoinType::Inner as i32,
+                ..Default::default()
+            }))),
+        };
+        let translated = translate_relation(&session, &join, 1).unwrap();
+        let names = translated
+            .schema
+            .logical_fields()
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["id", "amount"]);
+        let physical = translated.dataframe.columns_engine().unwrap();
+        let rows = translated.dataframe.collect_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][&physical[0]], json!(1));
+        assert_eq!(rows[0][&physical[1]], json!(10));
     }
 
     #[test]
@@ -3608,6 +3781,71 @@ mod tests {
     }
 
     #[test]
+    fn typed_execution_normalization_preserves_missing_and_unsupported_statuses() {
+        let range = proto::Relation {
+            common: None,
+            rel_type: Some(RelType::Range(proto::Range {
+                start: Some(0),
+                end: 1,
+                step: 1,
+                num_partitions: None,
+            })),
+        };
+        let plans = [
+            proto::Plan {
+                op_type: Some(PlanOp::Root(proto::Relation::default())),
+            },
+            proto::Plan {
+                op_type: Some(PlanOp::Root(proto::Relation {
+                    common: None,
+                    rel_type: Some(RelType::Project(Box::new(proto::Project {
+                        input: Some(Box::new(range.clone())),
+                        expressions: vec![connect_expression(ExprType::Literal(
+                            expression::Literal {
+                                literal_type: Some(LiteralType::String("unsupported".into())),
+                            },
+                        ))],
+                    }))),
+                })),
+            },
+            proto::Plan {
+                op_type: Some(PlanOp::Root(proto::Relation {
+                    common: None,
+                    rel_type: Some(RelType::Project(Box::new(proto::Project {
+                        input: Some(Box::new(range.clone())),
+                        expressions: vec![connect_expression(ExprType::UnresolvedStar(
+                            expression::UnresolvedStar::default(),
+                        ))],
+                    }))),
+                })),
+            },
+            proto::Plan {
+                op_type: Some(PlanOp::Root(proto::Relation {
+                    common: None,
+                    rel_type: Some(RelType::Project(Box::new(proto::Project {
+                        input: Some(Box::new(range)),
+                        expressions: vec![proto::Expression::default()],
+                    }))),
+                })),
+            },
+        ];
+
+        for plan in plans {
+            let expected = translate_plan(&session(), &plan).err().unwrap().code();
+            let normalized = super::super::normalize::normalize_plan(&plan).unwrap();
+            let actual =
+                translate_plan_for_execution(&session(), &normalized, &CancellationToken::new())
+                    .err()
+                    .unwrap()
+                    .code();
+            assert_eq!(
+                actual, expected,
+                "plan normalization changed its status code"
+            );
+        }
+    }
+
+    #[test]
     fn ddl_schema_parser_preserves_scalar_types_and_nullability() {
         let schema =
             parse_ddl_schema("id BIGINT NOT NULL, label STRING, amount DECIMAL(12, 2)").unwrap();
@@ -3628,10 +3866,7 @@ mod tests {
 
     #[test]
     fn filter_string_parser_accepts_only_the_frozen_predicate_shape() {
-        assert!(matches!(
-            parse_filter_string("id > 5").unwrap(),
-            ExprIr::Gt(_, _)
-        ));
+        assert_eq!(parse_filter_string("id > 5").unwrap(), ("id".into(), 5));
         for expression in [
             "id >= 5",
             "id > 5, id < 10",

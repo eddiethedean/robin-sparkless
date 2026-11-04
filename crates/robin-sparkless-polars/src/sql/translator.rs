@@ -7,7 +7,7 @@ use crate::column::Column;
 use crate::dataframe::{DataFrame, JoinOptions, JoinType, disambiguate_agg_output_names, join};
 use crate::functions;
 use crate::schema::{DataType as CoreDataType, StructType};
-use crate::session::{SparkSession, set_thread_udf_session};
+use crate::session::SparkSession;
 use crate::temporal::{parse_sql_date, parse_sql_timestamp_micros};
 use polars::prelude::{
     AnyValue, DataFrame as PlDataFrame, Expr, NewChunkedArray, PolarsError, Scalar, col, lit, when,
@@ -219,9 +219,7 @@ pub fn expr_string_to_polars(
 ) -> Result<Expr, PolarsError> {
     let (sql_expr, alias) = spark_sql_parser::parse_select_expr(expr_str)
         .map_err(|e| PolarsError::InvalidOperation(e.to_string().into()))?;
-    if !crate::session::has_active_execution_context() {
-        set_thread_udf_session(session.clone());
-    }
+    let _thread_context = session.enter_sql_thread_context();
     let expr = sql_expr_to_polars(&sql_expr, session, Some(df), None, None)?;
     Ok(match alias {
         Some(a) => expr.alias(a.value.as_str()),
@@ -249,6 +247,7 @@ pub fn translate_with_cancellation(
     token: &CancellationToken,
 ) -> Result<crate::dataframe::DataFrame, PolarsError> {
     check_cancellation(token)?;
+    let _thread_context = session.enter_sql_thread_context();
     // Resolve CREATE TABLE existence before the mutation guard. IF NOT EXISTS is a
     // no-op for an existing external table, while a missing table in any external
     // namespace remains owned by that provider and cannot fall through locally.
@@ -289,9 +288,6 @@ pub fn translate_with_cancellation(
         }
     }
     reject_read_only_external_mutation(session, stmt)?;
-    if !crate::session::has_active_execution_context() {
-        set_thread_udf_session(session.clone());
-    }
     match stmt {
         Statement::Query(q) => translate_query(session, q.as_ref()),
         Statement::CreateView(create_view) => {
@@ -753,11 +749,8 @@ fn translate_insert(
     let (external_target, has_provider) = if local_target {
         (None, false)
     } else {
-        session.resolve_external_table_descriptor(&table_name)?
+        session.resolve_external_table_descriptor_for_write(&table_name)?
     };
-    if let Some((_, ownership, _)) = &external_target {
-        session.reject_read_only_external_owner(ownership)?;
-    }
     let target_df = match &external_target {
         Some((_, _, descriptor)) => {
             session.read_external_table_descriptor(&table_name, descriptor)?
@@ -1202,12 +1195,12 @@ fn translate_select_plan(
     // Interpret the plan's relational clauses. SQL fragments on individual expressions and
     // relations are parsed by the existing Polars expression and table-factor interpreters.
     let sql = select_plan_sql(plan)?;
-    let statement = robin_sparkless_sql::parse_query(&sql).map_err(|error| {
+    let statement = robin_sparkless_sql::parse_lowered_query(&sql).map_err(|error| {
         PolarsError::InvalidOperation(
             format!("SQL: could not interpret lowered SELECT plan: {error}").into(),
         )
     })?;
-    let spark_sql_parser::ast::Statement::Query(query) = statement else {
+    let Statement::Query(query) = statement else {
         return Err(PolarsError::InvalidOperation(
             "SQL: SELECT plan did not contain a query.".into(),
         ));
