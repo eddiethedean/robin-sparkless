@@ -119,7 +119,27 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
     def test_new_pypi_projects_use_token_and_existing_projects_use_oidc(self):
         jobs = workflow("release.yml")["jobs"]
-        token_publishers = ("publish-connect", "publish-server-products")
+        metadata_steps = jobs["release-metadata"]["steps"]
+        token_preflight = next(
+            step
+            for step in metadata_steps
+            if step.get("name") == "Require the PyPI API token for new projects"
+        )
+        self.assertEqual(
+            token_preflight.get("if"),
+            "steps.context.outputs.publish_python == 'true'",
+        )
+        self.assertEqual(
+            token_preflight.get("env", {}).get("PYPI_API_TOKEN"),
+            "${{ secrets.PYPI_API_TOKEN }}",
+        )
+        self.assertIn("-z \"${PYPI_API_TOKEN:-}\"", token_preflight["run"])
+
+        token_publishers = (
+            "publish-connect",
+            "publish-server-products",
+            "publish-testing",
+        )
         for name in token_publishers:
             with self.subTest(publisher=name):
                 job = jobs[name]
@@ -135,7 +155,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 )
                 self.assertIs(publish_step["with"].get("attestations"), False)
 
-        oidc_publishers = ("publish-native", "publish-testing", "publish-sparkless")
+        oidc_publishers = ("publish-native", "publish-sparkless")
         for name in oidc_publishers:
             with self.subTest(publisher=name):
                 job = jobs[name]
