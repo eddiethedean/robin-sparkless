@@ -1,9 +1,15 @@
 # Installation and versions
 
-Documentation contract: **4.18.1 is published**, using the **4.18.0 native
-engine and server**. The API, engine, and optional server binary are separate
-PyPI projects. See [release evidence](RELEASE_EVIDENCE.md) for the exact tag,
-commit, public inventories, and workflow results.
+Choose the version first. **4.18.1** is the published stable Python API
+recorded here. It uses the **4.18.0** native engine and optional server.
+The **4.19.0 candidate** introduces new packages and imports.
+
+| I want to… | Start here |
+| --- | --- |
+| Install a stable release from PyPI | [Install 4.18.1](#install-the-published-api) |
+| Evaluate the 4.19 package split | [Try candidate wheels](#try-the-419-candidate) |
+| Move an existing 4.18 project to 4.19 | [Python migration](python_migration.md#from-sparkless-418-to-419) |
+| Build the engine or a custom native feature | [Python source setup](python_getting_started.md#from-source-contributors) or [Rust quickstart](QUICKSTART.md) |
 
 ## Install the published API
 
@@ -34,13 +40,13 @@ inventories and hashes were checked by the successful [tagged Release run](https
 
 ## 4.19 candidate products
 
-The current `codex/release-4.19` candidate is unpublished. Its package split is
-implemented in this branch, but the new wheels, install matrix, and images still
-need the final candidate acceptance before a 4.19 install is supported.
+The [4.19 candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md)
+records successful split-product wheel and install checks for a specific
+commit. Public distribution is a separate release step.
 
 | Install | Product contents |
 | --- | --- |
-| `sparkless` | Local API and native Polars engine |
+| `sparkless` | Local Python API with a dependency on the matching `sparkless-native` engine |
 | `sparkless-server` or `sparkless[server]` | Base Polars server; no DuckDB/Quack payload |
 | `sparkless-server[connect]` or `sparkless[connect]` | Base server plus pinned `pyspark-client==4.0.5` |
 | `sparkless-server-duckdb` or `sparkless[server-duckdb]` | Polars server, read-only DuckDB sources, matching Quack extension |
@@ -52,11 +58,27 @@ The server products use separate import names: `sparkless_server` and
 `sparkless_server_duckdb`. The shared launcher is `sparkless_connect`; 4.19
 removes the older `sparkless.server` and `sparkless-server-bin` forwarding APIs.
 Source users should select `sparkless_server_duckdb.SparklessServer` explicitly.
-The 4.19 DuckDB
-product still executes transformations in Polars; DuckDB is a read-only source.
+The 4.19 DuckDB product executes transformations in Polars and reads configured
+tables from DuckDB. Follow the [DuckDB guide](DUCKDB_SOURCE.md) for a working example.
 Both server wheel sets currently target Linux x86_64 with glibc 2.28+ and macOS
 14+ ARM64. Product images are `ghcr.io/eddiethedean/sparkless-server` and
 `ghcr.io/eddiethedean/sparkless-server-duckdb`.
+
+### Try the 4.19 candidate
+
+Use a clean Python 3.11+ environment. Put the candidate wheels for your
+platform and the same build revision in a directory called `wheelhouse`.
+Include the companion packages from the same run, such as `sparkless-native`
+for the local API or `sparkless-connect` for either server.
+
+```bash
+python -m pip install --find-links ./wheelhouse "sparkless==4.19.0"
+```
+
+Choose the corresponding package from the table for a server or testing-only
+install. Keep version pins when testing against a local wheel directory.
+For a fully offline install, include third-party dependency wheels and add
+`--no-index`.
 
 ## Platforms and build features
 
@@ -77,8 +99,8 @@ macOS 14+ ARM64 only. Other targets require a source build.
 
 Python extras install Python dependencies, not native feature switches:
 `dev` adds test tools; `jdbc` adds integration tools/drivers; `pyspark` adds Spark
-3.5/Delta3 (Java11+); `pyspark4` adds Spark4/Delta4 (Java17+); `server` adds the
-exact matching binary package. Keep the two PySpark extras in separate environments.
+3.5/Delta3 (Java 11+); `pyspark4` adds Spark4/Delta4 (Java 17+).
+Keep the two PySpark extras in separate environments.
 
 After canonical source setup, a SQLite/Postgres-enabled development extension:
 

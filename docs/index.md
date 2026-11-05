@@ -1,61 +1,86 @@
-# Sparkless / Robin Sparkless
-
-See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SUPPORT_MATRIX.md) before selecting features.
-
-**PySpark-compatible DataFrames without the JVM.** The **`sparkless`** Python package is the primary adoption path for testing and local development. The **`robin-sparkless`** Rust crate powers it (and can be embedded directly).
-
-Install Python package: `pip install "sparkless>=4,<5"`
-
-> **Evaluating Sparkless?** Read [Before you adopt](BEFORE_YOU_ADOPT.md) first — UDF limits, parity gaps, and production caveats.
-
+---
+hide:
+  - navigation
+  - toc
 ---
 
-## Choose your path
+<div class="sparkless-hero" markdown>
 
-| Persona | Start here |
-|---------|------------|
-| **Python user / tester** | [Getting started (Python)](python_getting_started.md) · [Package README](https://github.com/eddiethedean/robin-sparkless/blob/main/python/README.md) |
-| **Rust embedder** | [Quickstart](QUICKSTART.md) · [User guide](USER_GUIDE.md) · [Rust reference fallback](RUST_API_REFERENCE.md) |
-| **Contributor** | [CONTRIBUTING.md](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md) |
-| **Enterprise / production** | [Before you adopt](BEFORE_YOU_ADOPT.md) · [Production deployment](PRODUCTION.md) |
+<div class="sparkless-hero__intro" markdown>
 
----
+<p class="sparkless-eyebrow">Python · Spark Connect · Rust</p>
 
-## Python (Sparkless v4)
+# Run PySpark-style tests **without a JVM**
 
-- [Getting started](python_getting_started.md) — Install from PyPI, quick start, core features
-- [Testing guide](TESTING_GUIDE.md) — Dual-mode pytest with `sparkless_testing`
-- [Migration](python_migration.md) — From PySpark or Sparkless 3.x
-- [FAQ](FAQ.md) · [Troubleshooting (Python)](TROUBLESHOOTING_PYTHON.md)
-- [Python API reference](PYTHON_API_REFERENCE.md)
-- [Execution cancellation](EXECUTION_CANCELLATION.md) — cancel active DataFrame actions and understand safe-point behavior
-- [PySpark differences](PYSPARK_DIFFERENCES.md) · [Parity status](PARITY_STATUS.md)
+Sparkless runs DataFrame and SQL workloads on a single machine using Rust and
+Polars. Use the local Python API, connect with the PySpark client, or embed the
+engine in a Rust application.
 
-## Native server
+[Install Sparkless](INSTALLATION.md){ .md-button .md-button--primary }
+[See what’s supported](SUPPORT_MATRIX.md){ .md-button }
 
-The optional `sparkless[server]` extra installs a managed native server. See
-[Spark Connect](SPARK_CONNECT.md) for the 4.18 client example, HTTP-only mode,
-platform support, and the supported remote API subset. In-process Python
-features are not automatically available through Connect.
+</div>
 
-## Rust (robin-sparkless)
+<div class="sparkless-hero__example" markdown>
 
-Robin Sparkless provides a **PySpark-like API** in Rust using [Polars](https://www.pola.rs/) for execution. Sparkless v4 calls it via PyO3.
+<p class="sparkless-eyebrow">A local DataFrame test</p>
 
-| Feature | Description |
-|--------|-------------|
-| **Core** | `SparkSession`, `DataFrame`; lazy by default. ExprIr (engine-agnostic) and Column API (Polars-backed) |
-| **Engine** | Polars for fast, native execution |
-| **Optional** | SQL, Delta Lake, JDBC |
+```python
+from sparkless.sql import (
+    SparkSession,
+)
 
-- [Quickstart](QUICKSTART.md) · [User guide](USER_GUIDE.md) · [Persistence guide](PERSISTENCE_GUIDE.md)
-- [Embedding](EMBEDDING.md) · [UDF guide](UDF_GUIDE.md)
-- [Rust API on docs.rs](https://docs.rs/robin-sparkless)
+builder = SparkSession.builder
+spark = builder.get_or_create()
+try:
+    rows = spark.range(5)
+    assert rows.count() == 5
+finally:
+    spark.stop()
+```
 
-## Product history
+</div>
 
-Sparkless **3.x** (Polars Python backend) and **4.x** (this repo, Rust backend) — see [Product history](PRODUCT_HISTORY.md).
+</div>
 
-## License
+## Choose how to run your code
 
-MIT
+<div class="grid cards sparkless-paths" markdown>
+
+-   **[Run DataFrames locally](python_getting_started.md)**
+
+    Use `sparkless.sql` for local Python development, DataFrame tests, and file pipelines.
+
+-   **[Check results against PySpark](TESTING_GUIDE.md)**
+
+    Run the same pytest assertions on local Sparkless and a JVM-backed PySpark reference.
+
+-   **[Connect with the PySpark client](SPARK_CONNECT.md)**
+
+    Keep the `pyspark.sql` client and send supported plans to a native Sparkless server.
+
+-   **[Embed the Rust engine](QUICKSTART.md)**
+
+    Add `robin-sparkless` to a Rust application and select the Cargo features you need.
+
+</div>
+
+## In the 4.19 candidate
+
+- **Own a server and a session together.** `SparklessConnect` starts the native
+  server and creates a fresh PySpark Connect session in one `with` block.
+  [Start a session](SPARK_CONNECT.md#start-a-server-and-session)
+- **Read DuckDB test data.** The optional DuckDB server exposes configured
+  tables as read-only sources and runs supported transformations in Polars.
+  [Query a DuckDB file](DUCKDB_SOURCE.md)
+- **Install the components you use.** The base server, DuckDB server, shared
+  launcher, and pytest helpers are separate packages.
+  [Compare the packages](INSTALLATION.md#419-candidate-products) ·
+  [Upgrade from 4.18](python_migration.md#from-sparkless-418-to-419)
+
+## What to check before adopting Sparkless
+
+Sparkless implements a subset of PySpark on a single machine. The in-process
+API and Spark Connect support different operations. Compare representative
+inputs, schemas, and results with your production Spark version when exact
+behavior matters. [Before you adopt](BEFORE_YOU_ADOPT.md)

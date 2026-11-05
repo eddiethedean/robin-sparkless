@@ -214,13 +214,14 @@ Replace removed imports as follows:
 | Removed in 4.19 | Replacement |
 | --- | --- |
 | `from sparkless.server import SparklessServer` | `from sparkless_server import SparklessServer` for the base product, or `from sparkless_server_duckdb import SparklessServer` for the source-enabled product |
-| `from sparkless.server import AsyncSparklessServer, SparklessConnect` | Import from `sparkless_server` or `sparkless_server_duckdb` to bind to a product; use `sparkless_connect` for the shared launcher and explicit product selection |
+| `from sparkless.server import AsyncSparklessServer` | Import from `sparkless_server` or `sparkless_server_duckdb` to bind to a product. Use `sparkless_connect` for the shared launcher. |
 | `import sparkless.testing` | `import sparkless_testing` |
-| `pytest_plugins = ["sparkless.testing"]` | `pytest_plugins = ["sparkless_testing"]` |
+| `pytest_plugins = ["sparkless.testing"]` | `pytest_plugins = ["sparkless_testing.plugin"]` to register fixtures and hooks |
 | `sparkless._native` | `sparkless_native._native` for integrations that intentionally use the internal extension |
 | `sparkless-server-bin` | `sparkless-server` or `sparkless-server-duckdb`, according to the required product |
 
-`SparklessConnect` owns both the server process and a new public client session.
+`SparklessConnect` is new in 4.19. It owns both the server process and a new
+public client session.
 Its product-bound import determines the executable. The shared
 `sparkless_connect.SparklessServer` can use an explicit executable path or a
 product selection; it does not search `PATH`, download a binary, or infer that the

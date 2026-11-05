@@ -1,8 +1,8 @@
 # MkDocs configuration for Read the Docs and local builds
 # https://www.mkdocs.org/user-guide/configuration/
 
-site_name: Sparkless / Robin Sparkless
-site_description: PySpark-compatible DataFrames without the JVM — Python testing and Rust embedding on Polars
+site_name: Sparkless
+site_description: Local DataFrame development and PySpark testing with a native Rust engine
 site_url: https://robin-sparkless.readthedocs.io/
 repo_url: https://github.com/eddiethedean/robin-sparkless
 repo_name: eddiethedean/robin-sparkless
@@ -11,25 +11,36 @@ copyright: Robin Sparkless contributors
 
 theme:
   name: material
+  font: false
+  logo: assets/sparkless.svg
+  favicon: assets/sparkless.svg
   palette:
-    - scheme: default
-      primary: indigo
-      accent: indigo
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    - scheme: slate
-      primary: indigo
-      accent: indigo
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
   features:
     - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
     - navigation.top
+    - navigation.footer
+    - content.code.copy
     - search.suggest
     - search.highlight
+
+extra_css:
+  - assets/stylesheets/sparkless.css
 
 hooks:
   - scripts/docs_hooks.py
@@ -45,7 +56,9 @@ plugins:
 
 markdown_extensions:
   - attr_list
+  - md_in_html
   - admonition
+  - pymdownx.details
   - pymdownx.superfences
   - pymdownx.highlight:
       anchor_linenums: true
@@ -55,14 +68,14 @@ markdown_extensions:
 nav:
   - Start here:
     - Overview: index.md
-    - Installation and versions: INSTALLATION.md
+    - Install Sparkless: INSTALLATION.md
+    - Python quickstart: python_getting_started.md
     - Before you adopt: BEFORE_YOU_ADOPT.md
     - Support matrix: SUPPORT_MATRIX.md
-    - Quick start (Python): python_getting_started.md
-    - File pipeline tutorial: PIPELINE_TUTORIAL.md
     - FAQ: FAQ.md
-  - Use Sparkless:
-    - Testing both engines: TESTING_GUIDE.md
+  - Python guides:
+    - Test with Sparkless and PySpark: TESTING_GUIDE.md
+    - File pipeline tutorial: PIPELINE_TUTORIAL.md
     - Migration: python_migration.md
     - 4.19 Rust and package changes: MIGRATION_4_19.md
     - Persistence and tables: PERSISTENCE_GUIDE.md
@@ -90,9 +103,10 @@ nav:
     - Engine architecture: ENGINE_ARCHITECTURE.md
     - Logical plan format: LOGICAL_PLAN_FORMAT.md
     - Database integration tests: JDBC_TESTING.md
-  - Run a server:
+  - Servers:
+    - Spark Connect quickstart: SPARK_CONNECT.md
+    - Read DuckDB tables: DUCKDB_SOURCE.md
     - HTTP API: HTTP_API.md
-    - Spark Connect: SPARK_CONNECT.md
     - Deployment and operations: PRODUCTION.md
     - Performance and sizing: PERFORMANCE.md
   - Project:

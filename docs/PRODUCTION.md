@@ -1,14 +1,16 @@
 # Native server deployment and operations
 
-Scope: **Sparkless 4.18.0 in a trusted single-node environment**. The project
-primarily targets local development/testing. This runbook does not establish an
-enterprise SLA, multi-tenant isolation, distributed recovery, or Spark cluster
-replacement. See the [support policy](SUPPORT.md) and [surface contract](SUPPORT_MATRIX.md).
+This runbook covers native Sparkless servers in a trusted single-node
+environment. The project primarily targets local development and testing.
+See the [support policy](SUPPORT.md) and [support matrix](SUPPORT_MATRIX.md)
+for compatibility and deployment scope.
 
 ## Deployment boundary
 
 Use the packaged native executable or repository-built image on a supported
-platform. Bind both listeners to loopback by default. For remote access, place
+platform. In 4.19, choose the base server for standard use or the
+[DuckDB server](DUCKDB_SOURCE.md) for configured read-only table sources.
+Bind both listeners to loopback by default. For remote access, place
 an authenticated TLS proxy/network boundary in front of **both HTTP and gRPC**,
 allow only intended callers, and test gRPC streaming/timeout behavior through
 that exact proxy. Connect user/session IDs are not authentication credentials.

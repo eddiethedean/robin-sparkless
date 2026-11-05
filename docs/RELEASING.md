@@ -114,7 +114,9 @@ matching published files by SHA-256 before running its smoke checks; validation
 and publication therefore consume the immutable published bytes. Publishers
 download the checked artifacts and verify their candidate manifest; they do not
 rebuild wheels or containers. Rust publication uses `--no-verify`
-because the same commit has already passed CI and package-archive checks.
+because the same commit has already passed CI and package-archive checks. The
+Rust publisher waits at least five minutes between crate uploads and honors
+crates.io's requested retry time when rate-limited.
 
 For interrupted publication, use **Re-run failed jobs** on the original tagged run
 while its artifacts are retained. Crates.io skips only an already-uploaded version;
@@ -152,6 +154,8 @@ starting Python publication. These token-backed uploads disable PyPI
 attestations; the OIDC jobs keep them enabled. The token must be account-scoped
 so it can create the new projects and upload to each one; see the
 [PyPI API token guidance](https://docs.pypi.org/publishing/publishing-to-pypi/).
+All target projects must also be unarchived before a release; PyPI blocks new
+uploads to archived projects.
 GHCR publication uses the workflow token's `packages: write` permission for
 `ghcr.io/eddiethedean/sparkless-server`.
 
