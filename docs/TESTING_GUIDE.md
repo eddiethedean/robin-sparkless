@@ -10,26 +10,13 @@ this page select either local engine.
 
 ## Quick Start
 
-In 4.19, `sparkless[testing]` installs the local engine, the separate
+In a Python 3.11 [virtual environment](INSTALLATION.md), install
+`sparkless[testing]` to get the local engine, the separate
 `sparkless-testing` package, and pytest.
 For 4.18, follow the [guide at the published tag](https://github.com/eddiethedean/robin-sparkless/blob/v4.18.1/docs/TESTING_GUIDE.md).
 
 ```bash
 python -m pip install "sparkless[testing]==4.19.0"
-```
-
-For the PySpark comparison, use a separate environment and pin the same oracle
-version used in the project's docs checks. PySpark 3.5 uses Java 11 or newer.
-PySpark 4.0.5 uses Java 17 and the `4.0` compatibility profile. These commands
-pin the actual runtime instead of relying on the extra's supported version
-range. See [installation and extras](python_getting_started.md#optional-extras).
-
-```bash
-# Separate environment for PySpark 3.5.8
-python -m pip install "sparkless[testing]==4.19.0" "pyspark==3.5.8"
-
-# Separate environment for PySpark 4.0.5
-python -m pip install "sparkless[testing]==4.19.0" "pyspark==4.0.5"
 ```
 
 ### 1. Add the pytest plugin to your `conftest.py`
@@ -40,8 +27,9 @@ pytest_plugins = ["sparkless_testing.plugin"]
 ```
 
 Use the `.plugin` entry point to register both fixtures (`spark`, `spark_mode`,
-`spark_imports`, etc.) and marker/collection hooks. Loading only
-`"sparkless_testing"` exposes the fixtures but does not activate those hooks.
+`spark_imports`, etc.) and marker hooks. If you copied the snippet from the
+4.19.0 PyPI description, replace `"sparkless_testing"` with
+`"sparkless_testing.plugin"` so pytest applies backend and compatibility markers.
 
 ### 2. Save a test as `test_example.py`
 
@@ -60,13 +48,28 @@ def test_filter(spark):
 
 ```bash
 # In the directory containing conftest.py and test_example.py
-SPARKLESS_TEST_MODE=sparkless python -m pytest test_example.py
-
-# In the separate PySpark 3.5.8 environment
-SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=3.5 python -m pytest test_example.py
+python -m pytest test_example.py
 ```
 
-For PySpark 4.0.5, set `SPARKLESS_PYSPARK_COMPAT=4.0` on the last command.
+Expect one passing test. Sparkless is the default when `SPARKLESS_TEST_MODE`
+is unset.
+
+### Run the same test with PySpark
+
+Use a separate virtual environment and set `JAVA_HOME` to a JDK 17 installation.
+The project's docs checks use JDK 17 for both pinned PySpark versions. Choose
+one of these installs and run from the same test directory.
+
+```bash
+# PySpark 3.5.8
+python -m pip install "sparkless[testing]==4.19.0" "pyspark==3.5.8"
+SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=3.5 python -m pytest test_example.py
+
+# PySpark 4.0.5
+python -m pip install "sparkless[testing]==4.19.0" "pyspark==4.0.5"
+SPARKLESS_TEST_MODE=pyspark SPARKLESS_PYSPARK_COMPAT=4.0 python -m pytest test_example.py
+```
+
 The selector chooses a backend. The compatibility profile does not install an
 oracle or certify every Spark behavior. Check `python -m pip show pyspark` and
 run the [backend identity example](https://github.com/eddiethedean/robin-sparkless/blob/main/examples/python/test_dual_mode_example.py)
@@ -74,8 +77,9 @@ before using a suite as parity evidence.
 
 ---
 
-PowerShell users can set the backend with
-`$env:SPARKLESS_TEST_MODE = "pyspark"` before running pytest.
+In PowerShell, set `$env:SPARKLESS_TEST_MODE = "pyspark"` and
+`$env:SPARKLESS_PYSPARK_COMPAT = "4.0"` on separate lines before running pytest.
+Use `"3.5"` for PySpark 3.5.8.
 
 ## Maintainer checks and CI
 
@@ -179,13 +183,15 @@ def test_with_imports(spark, spark_imports):
 
 ### `isolated_session`
 
-Creates a fresh, isolated SparkSession (useful for tests that modify session state).
+Use `isolated_session` in place of `spark` for a test that modifies session
+state. It bypasses the plugin's shared-session cache. Run in a separate test
+process if another application session must remain active. See the
+[session lifecycle](TESTING_PYTHON_API.md#session-lifecycle).
 
 ```python
 def test_isolated(isolated_session):
     spark = isolated_session
     spark.conf.set("my.custom.config", "value")
-    # This session is independent of other tests
 ```
 
 ### `table_prefix`
@@ -257,16 +263,22 @@ elif is_sparkless_mode():
 
 ### Session Creation
 
+Use direct session creation in a test process where you control the session
+lifecycle. Sparkless may reuse an active session, and PySpark mode can stop an
+existing one. See the [session lifecycle](TESTING_PYTHON_API.md#session-lifecycle).
+
 ```python
-from sparkless_testing import create_session, Mode
+from sparkless_testing import create_session
 
-# Create session for current mode
 spark = create_session(app_name="my_test")
-
-# Create session for specific mode
-sparkless_spark = create_session(app_name="test", mode=Mode.SPARKLESS)
-pyspark_spark = create_session(app_name="test", mode=Mode.PYSPARK)
+try:
+    assert spark.range(3).count() == 3
+finally:
+    spark.stop()
 ```
+
+Pass `mode=Mode.SPARKLESS` or `mode=Mode.PYSPARK` to select a backend explicitly.
+Import `Mode` from `sparkless_testing`.
 
 ### Unified Imports
 
@@ -295,13 +307,10 @@ IntegerType = imports.IntegerType
 
 The module provides utilities for comparing DataFrames, which is essential for parity testing.
 
-`check_schema=True` compares ordered fields, field names, types, nested types,
-decimal precision and scale, nullability, and field metadata. A mapping
-expectation can provide a schema field such as `{"name": "id", "type": "long"}`.
-If the mapping omits its schema, only row values and columns inferred from those
-rows can be checked. These helpers collect their DataFrames; see the
-[comparison API contract](TESTING_PYTHON_API.md#comparison-semantics) for nested
-schema and ordering behavior.
+In 4.19.0, `check_schema=True` checks field order, names, and top-level type
+classes. Assert properties such as nullability and nested types separately.
+See the [comparison API contract](TESTING_PYTHON_API.md#comparison-semantics)
+for the full version-specific behavior and dictionary expectations.
 
 ### `assert_dataframes_equal`
 
@@ -660,7 +669,7 @@ and expected and observed results.
 
 `SPARKLESS_SHARED_SESSION=1` enables shared sessions only for local Sparkless
 runs outside pytest-xdist workers and outside Delta tests. The fixture disables
-sharing for PySpark. Use `isolated_session` for tests that must not share state,
+sharing for PySpark. Use `isolated_session` to bypass the shared-session cache,
 and `table_prefix` to avoid catalog-name collisions.
 
 ---

@@ -50,6 +50,7 @@ def main() -> None:
         work = Path(directory)
         if args.profile == "local":
             run(work, str(examples / "basic_usage.py"))
+            run_quickstart(work, "python_getting_started.md")
             run_readme_examples(work, "README.md")
             run_readme_examples(work, "python/README.md")
         elif args.profile == "testing":

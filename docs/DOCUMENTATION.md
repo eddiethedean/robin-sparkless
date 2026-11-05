@@ -70,21 +70,25 @@ or provide a redirect/signpost when renaming a current page.
 
 1. Confirm the source tag and public PyPI and crates.io records. Link the
    version-specific file lists and record any missing hosted artifacts in
-   [release evidence](RELEASE_EVIDENCE.md).
+   [release evidence](RELEASE_EVIDENCE.md). Check each new PyPI version's
+   rendered package description against its guide, including the
+   `sparkless_testing.plugin` registration for `sparkless-testing`.
 2. Update `docs/reference/release.json` and use the public install commands.
    The **Published documentation examples** workflow runs the local, pytest,
    HTTP, Connect, and DuckDB guides in separate PyPI environments. Run it after
    the publication update lands. The normal docs example job also checks the
    built wheel and the two pinned PySpark reference runtimes.
-3. In the Read the Docs project **Versions** settings, activate the new release
-   tag and point the `stable` alias at it after publication. Verify the rendered
+3. Check the docs at the source tag before promoting them. By default,
+   [Read the Docs](https://docs.readthedocs.com/platform/stable/versions.html)
+   tracks the highest stable release tag at `stable`. If the tag still has
+   candidate docs, as `v4.19.0` does, use a dedicated `stable` branch based on
+   that release and apply the reviewed documentation fixes for its published
+   packages. Keep the source tag fixed and update the branch for subsequent
+   releases if it is in use. Verify the install command, version banner,
+   migration links, and quickstarts on the rendered
    [latest site](https://robin-sparkless.readthedocs.io/en/latest/) and
-   [stable site](https://robin-sparkless.readthedocs.io/en/stable/) separately;
-   check the install command, version banner, migration links, and quickstart
-   examples on both. The versioned route uses the slug configured by Read the
-   Docs, so copy it from the Versions page instead of assuming a `v` prefix.
-   Source tags record the docs at the cut. Fixes merged later appear in the
-   main branch's manual after the host rebuilds it.
+   [stable site](https://robin-sparkless.readthedocs.io/en/stable/) separately.
+   For a versioned link, copy the slug from the Read the Docs **Versions** page.
 4. Open the versioned docs.rs API route and record its availability. Keep the
    [pinned rustdoc build](RUST_API_REFERENCE.md) available for offline use.
 

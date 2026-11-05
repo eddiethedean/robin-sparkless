@@ -8,23 +8,7 @@ This guide is for the **Sparkless v4** Python package: a PySpark-like API backed
 
 ## First run
 
-Install the local API in a Python 3.11 virtual environment, save the example as
-`first_dataframe.py`, and run it with the same interpreter. It prints one row
-whose name is `Bob`.
-
-```bash
-python3.11 -m venv .venv
-.venv/bin/python -m pip install "sparkless==4.19.0"
-.venv/bin/python first_dataframe.py
-```
-
-On Windows PowerShell, use the virtual environment's interpreter directly:
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install "sparkless==4.19.0"
-.\.venv\Scripts\python.exe first_dataframe.py
-```
+Save this example as `first_dataframe.py`.
 
 ```python
 from sparkless.sql import SparkSession, functions as F
@@ -41,6 +25,24 @@ finally:
     spark.stop()
 ```
 
+From the directory containing the file, install Sparkless in a Python 3.11
+virtual environment and run it with the same interpreter. On macOS or Linux:
+
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install "sparkless==4.19.0"
+.venv/bin/python first_dataframe.py
+```
+
+On Windows PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "sparkless==4.19.0"
+.\.venv\Scripts\python.exe first_dataframe.py
+```
+
+Expect one row with the name `Bob`.
 No Java, PySpark, or Polars Python install is required for this local example.
 For wheel support by OS and architecture, see the
 [installation guide](INSTALLATION.md#platforms-and-build-features).
@@ -177,51 +179,10 @@ Transformations (filter, select, join, etc.) are queued; execution happens on **
 
 ## Testing with Sparkless v4
 
-The `sparkless_testing` module provides a unified framework for writing tests that run against both sparkless and PySpark backends.
-
-### Quick Setup
-
-Add to your `conftest.py`:
-
-```python
-pytest_plugins = ["sparkless_testing.plugin"]
-```
-
-### Unit Test Example
-
-```python
-def test_data_transformation(spark, spark_imports):
-    """Test DataFrame logic against sparkless or PySpark."""
-    F = spark_imports.F
-    
-    data = [{"value": 10}, {"value": 20}, {"value": 30}]
-    df = spark.createDataFrame(data)
-
-    result = df.filter(F.col("value") > 15).orderBy("value")
-
-    assert result.count() == 2
-    rows = result.collect()
-    assert rows[0]["value"] == 20
-    assert rows[1]["value"] == 30
-```
-
-### Running Tests
-
-```bash
-# Fast local tests (sparkless backend)
-pytest tests -v
-
-# Validate against PySpark (requires Java)
-SPARKLESS_TEST_MODE=pyspark pytest tests -v
-```
-
-### Key Features
-
-- **Fixtures:** `spark`, `spark_mode`, `spark_imports`, `isolated_session`, `table_prefix`
-- **Markers:** `@pytest.mark.sparkless_only`, `@pytest.mark.pyspark_only`
-- **Comparison utilities:** `assert_dataframes_equal()`, `compare_dataframes()`
-
-For the complete guide, see [Testing Guide](TESTING_GUIDE.md).
+Follow the [pytest quickstart](TESTING_GUIDE.md#quick-start) to install the
+`[testing]` extra, register the plugin, and run your first test. Use the same
+virtual environment as the first run. The guide also shows how to run the same
+test against PySpark in a separate environment.
 
 ## Read and write files
 
