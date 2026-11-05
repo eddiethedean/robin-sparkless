@@ -12,11 +12,22 @@ The **Rust engine** in this repository. Most Python users only install `sparkles
 
 ### Is this a drop-in replacement for PySpark?
 
-For **local tests and development**, often yes — swap the import to `from sparkless.sql import SparkSession`. For **production Spark clusters**, no. See [Before you adopt](BEFORE_YOU_ADOPT.md).
+The local API supports a subset of PySpark. Start with
+`from sparkless.sql import SparkSession` and check the behavior your code uses
+against your production Spark version. See [Before you adopt](BEFORE_YOU_ADOPT.md).
 
 ### Do I need Java?
 
-**No** for normal Sparkless usage. Java is only required if you run tests with `SPARKLESS_TEST_MODE=pyspark` to compare against real PySpark.
+The local Sparkless API and the standalone PySpark Connect client can run
+against Sparkless without Java. Running the testing plugin in
+`SPARKLESS_TEST_MODE=pyspark` starts a local Spark JVM and requires Java.
+
+### Can Sparkless read my DuckDB test database?
+
+The 4.19 candidate can read configured tables through the optional
+`sparkless-server-duckdb` product. The server opens the database read-only,
+and tests access tables by name using the PySpark Connect client.
+See [read DuckDB tables](DUCKDB_SOURCE.md).
 
 ### How is Sparkless different from Polars?
 

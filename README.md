@@ -29,8 +29,8 @@ spark.stop()
 ```
 
 Sparkless supports common transformations, joins, aggregations, windows, SQL,
-and file I/O. The `sparkless_testing` plugin lets you run the same pytest tests
-with Sparkless and real PySpark.
+and file I/O. The [testing guide](docs/TESTING_GUIDE.md) shows how to run the
+same pytest tests with Sparkless and real PySpark.
 
 It runs on one machine and implements a subset of PySpark behavior. Read
 [Before you adopt](docs/BEFORE_YOU_ADOPT.md) for compatibility and limitations.
@@ -42,7 +42,9 @@ It runs on one machine and implements a subset of PySpark behavior. Read
 | [Python getting started](docs/python_getting_started.md) | Installation, platforms, extras, and examples |
 | [Python API](docs/PYTHON_API_REFERENCE.md) | DataFrames, functions, SQL, and Arrow export |
 | [Testing](docs/TESTING_GUIDE.md) | One test suite with Sparkless and PySpark |
-| [Spark Connect server](docs/SPARK_CONNECT.md) | Native server setup and the 4.18 supported subset |
+| [Spark Connect server](docs/SPARK_CONNECT.md) | Run the real PySpark client against a native Sparkless server |
+| [DuckDB table sources](docs/DUCKDB_SOURCE.md) | Read a local DuckDB test database in the 4.19 candidate |
+| [4.19 migration](docs/python_migration.md#from-sparkless-418-to-419) | Choose the new packages and update your imports |
 | [Rust quickstart](docs/QUICKSTART.md) | Embed the `robin-sparkless` engine |
 
 Full documentation: [Read the Docs](https://robin-sparkless.readthedocs.io/).

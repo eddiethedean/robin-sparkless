@@ -1,24 +1,27 @@
-# sparkless_testing Guide
+# Test with Sparkless and PySpark
 
-The `sparkless_testing` module provides a unified framework for writing tests that run against both **sparkless** (Rust/Polars backend) and **PySpark** (JVM backend). This enables you to:
+Use `sparkless_testing` to run the same pytest assertions with the in-process
+Sparkless engine and a local JVM-backed PySpark reference. Compare results
+and schemas on the inputs your application depends on.
 
-- Write tests once, run against both backends
-- Validate your code produces identical results on both engines
-- Run fast local tests with sparkless, and integration tests with PySpark
-- Use consistent fixtures and comparison utilities
-
----
+For tests that use the real PySpark client with a native server, follow
+the separate [Spark Connect guide](SPARK_CONNECT.md). The fixture modes on
+this page select either local engine.
 
 ## Quick Start
 
-Install the package and pytest in your test environment:
+In the 4.19 candidate, `sparkless[testing]` installs `sparkless-testing`,
+which includes pytest as a dependency. Use a
+[candidate wheel directory](INSTALLATION.md#try-the-419-candidate).
+For 4.18, follow the [guide at the published tag](https://github.com/eddiethedean/robin-sparkless/blob/v4.18.1/docs/TESTING_GUIDE.md).
 
 ```bash
-python -m pip install "sparkless[testing]>=4,<5"
+python -m pip install --find-links ./wheelhouse "sparkless[testing]==4.19.0"
 ```
 
-For the PySpark run, install `"sparkless[pyspark]>=4,<5"` and a compatible Java
-runtime. This extra selects PySpark 3.5; use `pyspark4` in a separate environment
+For the PySpark run, use a separate environment and install
+`sparkless[testing,pyspark]==4.19.0` with the same wheel directory and a
+compatible Java runtime. This selects PySpark 3.5. Use `testing,pyspark4`
 for PySpark 4. See [installation and extras](python_getting_started.md#optional-extras).
 
 ### 1. Add the pytest plugin to your `conftest.py`
@@ -451,6 +454,10 @@ class TestMyTransform:
 
 ### GitHub Actions Example
 
+This example uses the 4.19 packages after public distribution. For candidate
+CI, supply the wheel directory from your build and use the
+[candidate install commands](#quick-start).
+
 ```yaml
 name: Tests
 
@@ -464,7 +471,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install "sparkless[testing]>=4,<5"
+      - run: python -m pip install "sparkless[testing]==4.19.0"
       - run: pytest tests/ -v
 
   test-pyspark:
@@ -478,7 +485,7 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
-      - run: python -m pip install "sparkless[pyspark]>=4,<5" pytest
+      - run: python -m pip install "sparkless[testing,pyspark4]==4.19.0"
       - run: SPARKLESS_TEST_MODE=pyspark pytest tests/ -v
 ```
 
@@ -610,10 +617,11 @@ see [Spark Connect](SPARK_CONNECT.md).
 
 ### Import errors for sparkless_testing
 
-Install the package in the same environment as pytest:
+Install `sparkless-testing` in the same environment as pytest. For the 4.19
+candidate, point pip at your candidate wheel directory:
 
 ```bash
-python -m pip install "sparkless[testing]>=4,<5"
+python -m pip install --find-links ./wheelhouse "sparkless-testing==4.19.0"
 ```
 
 For repository development, use the [contributor setup](https://github.com/eddiethedean/robin-sparkless/blob/main/CONTRIBUTING.md#setup) and rebuild the native extension after Rust changes.

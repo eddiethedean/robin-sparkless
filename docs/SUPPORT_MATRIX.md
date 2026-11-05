@@ -17,7 +17,7 @@ have local regression coverage. Both 4.19 server products execute through Polars
 
 | Capability | Local Python | Rust embedding | Base server | DuckDB server | Spark Connect |
 | --- | --- | --- | --- | --- | --- |
-| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Same Polars SQL service surface | [Supported Connect plan subset](SPARK_CONNECT.md#phase-419-branch-additions-pre-release) for range, inline DataFrames, and configured table sources |
+| DataFrame filter/project/aggregate/join/window | Implemented, behavior-tested | Implemented, feature/context dependent | SQL allowlist only | Same Polars SQL service surface | [Supported Connect plan subset](SPARK_CONNECT.md#supported-request-surface) for range, inline DataFrames, and configured table sources |
 | SQL queries | SQL enabled in official wheel | Requires `sql` | Bounded SELECT on managed catalog | Bounded SELECT on managed and configured source catalogs | Unsupported SQL commands |
 | Scalar Python UDF | Behavior-tested in withColumn/select/scalar comparison filters | Native expression callbacks, separate API | Unsupported | Unsupported | Unsupported |
 | pandas/vectorized/grouped Python UDF, UDTF | Unsupported public API | No equivalent public Python contract | Unsupported | Unsupported | Unsupported |
@@ -27,7 +27,7 @@ have local regression coverage. Both 4.19 server products execute through Polars
 | CREATE TABLE / INSERT / database DDL | SQL subset | SQL subset | Bounded mutations with identity | Same bounded mutations | Unsupported commands |
 | Warehouse persistence | Parquet with explicit warehouse config | Same engine mechanism | In-memory service catalog only | In-memory service catalog only | In-memory session/operation state |
 | External catalog provider | Local callback contract | Core provider trait | No general provider configuration contract | No general provider configuration contract | Unsupported |
-| Optional DuckDB table source | Not applicable | `robin-sparkless-duckdb`; optional source feature | Unsupported; rejects DuckDB source configuration | Trusted read-only standalone or shared Quack owner; no client-selected paths or credentials | Available only through the DuckDB server product; tested source subset below |
+| Optional DuckDB table source | Not applicable | `robin-sparkless-duckdb`, optional source feature | Rejects DuckDB source configuration | [Read-only local file or shared Quack owner](DUCKDB_SOURCE.md) configured by the operator | Available through the DuckDB server product |
 | Distributed scheduling / Structured Streaming | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
 | Repartition/cache/broadcast hints | Local compatibility behavior; no Spark cluster semantics | Local only | Unsupported | Unsupported | Unsupported |
 

@@ -1,85 +1,96 @@
-# Spark Connect server
+# Run PySpark tests over Spark Connect
 
-See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SUPPORT_MATRIX.md) before selecting features.
+Use the real PySpark Connect client with a Sparkless server running on one
+machine. The server executes supported DataFrame plans in Rust and Polars.
+This setup needs no Java installation or Spark cluster.
 
-The 4.18.0 native server distribution adds an optional Spark Connect endpoint that speaks the
-Apache Spark 4.0.5 protocol. It runs Rust/Polars execution without a Python worker or JVM in the
-server process. This page describes the 4.18 capability contract. The published inventories and
-exact-SHA validation are recorded in [release evidence](RELEASE_EVIDENCE.md).
+!!! info "Choose the guide for your version"
 
-## Start an owned server
+    The examples below target the **4.19.0 candidate** and use a candidate
+    wheel directory. Sparkless shipped the server in 4.18. In that release,
+    use `SparklessServer` and create the client session yourself. Follow the
+    [published 4.18.1 Connect guide](https://github.com/eddiethedean/robin-sparkless/blob/v4.18.1/docs/SPARK_CONNECT.md)
+    for the matching install and imports.
 
-Install the native server extra and the standalone public client in the client environment:
+## Start a server and session
 
-```sh
-python -m pip install "sparkless[server]==4.18.1" "pyspark-client==4.0.5"
+Install the base server and the pinned `pyspark-client==4.0.5` dependency from
+a [candidate wheel directory](INSTALLATION.md#try-the-419-candidate).
+Packaged server wheels target Linux x86_64 with glibc 2.28+ and macOS 14+
+on Apple Silicon.
+
+```bash
+python -m pip install --find-links ./wheelhouse \
+  "sparkless-server[connect]==4.19.0"
 ```
-
-These commands install the published 4.18.1 API with its 4.18.0 native/server
-components. The packaged server wheels support Linux x86_64 with glibc 2.28+
-and macOS 14+ on Apple Silicon;
-this is a smaller platform set than the in-process Python extension.
-
-The launcher owns a native server process, waits for its readiness record, and allocates loopback
-ports for HTTP and gRPC:
 
 ```python
-from pyspark.sql import SparkSession
-from sparkless import SparklessServer
-
-with SparklessServer() as server:
-    spark = SparkSession.builder.remote(server.spark_connect_url).create()
-    try:
-        assert spark.range(10).filter("id > 5").count() == 4
-    finally:
-        spark.stop()
-```
-
-`AsyncSparklessServer` supports the same lifecycle with `async with`. Set `connect_port=None` to
-disable gRPC; reading `spark_connect_url` then raises `UnsupportedSparkConnectError`. The installed
-server binary also supports `--disable-connect` and `--disable-http`. Readiness publishes each
-endpoint only after its socket is bound and includes the server instance identity and versioned
-capability record. The launcher does not import PySpark, download a binary, or compile a server.
-
-For a convenience context that owns both a fresh server and an independent Connect session,
-install the optional Connect extra:
-
-```sh
-python -m pip install "sparkless[connect]==4.19.0"
-```
-
-Then use `SparklessConnect`; it returns the actual `pyspark-client` session and always attempts to
-stop that session before shutting down the server:
-
-```python
-from sparkless_connect import SparklessConnect
+from sparkless_server import SparklessConnect
 
 with SparklessConnect() as spark:
     assert spark.range(10).filter("id > 5").count() == 4
 ```
 
-The helper imports the optional client only when entering the context. It can be reused after
-successful cleanup, and a server-shutdown failure keeps ownership attached so cleanup can be
-retried. Same-instance nesting and use after fork raise `SparklessServerError`.
+`SparklessConnect` starts a fresh server on loopback, waits for readiness, and
+returns an independent PySpark Connect session. On exit it attempts to stop the
+session before shutting down the server. Use a new helper in each process.
+An active instance cannot be nested, and failed cleanup can retain ownership
+for retry.
 
-For a manually managed server, compile the `connect` Cargo feature and use `--connect-host` and
-`--connect-port`. The CLI defaults to `127.0.0.1:15002`; port `0` asks the OS for an available
-port. Keep listeners on loopback unless deployment configuration supplies an explicit network
-trust boundary.
+For read-only DuckDB tables, use the [DuckDB server product](DUCKDB_SOURCE.md)
+and import `SparklessConnect` from `sparkless_server_duckdb`.
+
+## Connect to a server you already run
+
+Use this pattern for a separately managed server or when several test workers
+share a server. Start the server once outside the workers and give each worker
+the endpoint URL. Each worker creates and stops its own session.
+
+```bash
+python -m pip install --find-links ./wheelhouse \
+  "sparkless-connect[client]==4.19.0"
+```
+
+```python
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.remote("sc://127.0.0.1:15002").create()
+try:
+    assert spark.range(10).filter("id > 5").count() == 4
+finally:
+    spark.stop()
+```
+
+When you own the process but want to manage the session yourself, use
+`SparklessServer` from the chosen server package. Its `spark_connect_url` and
+`http_url` are available once ready. `AsyncSparklessServer` supports
+`async with`. The Python launchers default to ephemeral loopback ports.
+Pass `connect_port=None` to run an HTTP-only server.
+
+For a manually managed binary built with the `connect` Cargo feature, set
+`--connect-host` and `--connect-port` on the `serve` command. The default Connect
+address is `127.0.0.1:15002`. See the [deployment runbook](PRODUCTION.md) for
+network boundaries and readiness checks.
 
 ## Supported request surface
 
-The server executes the declared DataFrame subset through its native engine:
-
-| Area | Supported in the 4.18 contract |
+| Area | Supported in the 4.19 candidate |
 | --- | --- |
-| Relations | `SparkSession.range`, bounded scalar local relations with explicit schemas |
-| Transformations | Filter, projection/alias, and limit for supported expressions |
-| Aggregation | Global `count(1)` and the range/filter/count witness shown above |
-| Analysis | Supported relation schemas, scalar schemas, bounded DDL analysis |
-| Configuration | Captured Spark 4.0.5 session profile; same-value sets are idempotent and unsupported changes fail |
-| Results | Spark Connect logical descriptors and bounded, independently decodable Arrow IPC batches |
-| Lifecycle | Execute, reattach, prefix/all release, session release, interrupt, enriched error lookup, stale identity rejection |
+| Relations | `SparkSession.range`, bounded inline scalar DataFrames with explicit schemas, and configured named DuckDB tables with the source-enabled server |
+| Transformations | Filter, projection, alias, limit, and supported inner joins |
+| Aggregation | Global row and non-null-column counts, grouped count and sum |
+| Analysis | Supported relation schemas, scalar schemas, and bounded DDL analysis |
+| Configuration | Spark 4.0.5 session profile. Same-value sets are idempotent and unsupported changes fail. |
+| Results | Spark logical descriptors and bounded, independently decodable Arrow IPC batches |
+| Lifecycle | Execute, reattach, prefix/all release, session release, interrupt, enriched error lookup, and stale identity rejection |
+
+Use public column names or column references bound to their input DataFrames.
+Bound references retain their input through aliases and joins. Joins on shared
+column names return one column per key, in the requested key order.
+Filters support `column > integer` strings and the `>=` column expression.
+Equality between column references is supported in inner join conditions.
+A missing relation, projection expression, or projection literal type returns
+`INVALID_ARGUMENT`. An unsupported variant returns `UNIMPLEMENTED`.
 
 Supported logical values are deliberately limited:
 
@@ -95,93 +106,15 @@ Supported logical values are deliberately limited:
 | TIMESTAMP under the UTC session profile | `timestamp[us, tz=UTC]` |
 | DECIMAL(p, s), where 1 ≤ p ≤ 38 and 0 ≤ s ≤ p | `decimal128(p, s)` |
 
-Field labels, nullability and supported metadata are preserved through the checked Arrow path.
-Empty results carry their schema. The 4.18 feature matrix is narrower than the Spark Connect
-protocol: an operation is supported only when it is listed here and covered by the 4.18 tests.
+Field labels, nullability, and supported metadata are preserved through the
+checked Arrow path. Empty results carry their schema.
 
 ## Phase 4.19 branch additions (pre-release)
 
-The `codex/release-4.19` branch adds optional named-table relations, aliases, joins, grouped
-count/sum, global `count(column)`, and the `SparklessConnect` helper. The helper behavior is
-described above. The local branch contains the product/package split, but its new wheels and
-install matrix still need final acceptance; release remains open.
-
-For supported inline DataFrame projections, filters, and join projections, use public
-schema names or column references bound to the input DataFrame. Bound references retain
-their input through aliases and joins. Names generated internally during Arrow import
-cannot be used to address hidden columns. A join on shared column names returns one
-column per key, in the requested key order, even when the inputs order those columns
-differently. A missing relation type, projection
-expression type, or projection literal type returns `INVALID_ARGUMENT` in both analysis
-and execution. A supplied but unsupported variant in those positions returns
-`UNIMPLEMENTED`.
-
-The 4.19 base `sparkless-server` product has no DuckDB feature. The separate
-`sparkless-server-duckdb` product enables the read-only source adapter and carries the matching
-DuckDB 2.0.0 Quack extension. Both products execute transformations in Polars. Configure trusted
-aliases at startup; clients provide table names only. To run a source-enabled development build:
-
-```sh
-cargo run -p sparkless-server-duckdb --features http,connect -- serve
-```
-
-Standalone mode maps an alias to a local read-only file:
-
-```sh
-SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","database_path":"/srv/data/warehouse.duckdb"}]' \
-  sparkless-server-duckdb
-```
-
-For shared-owner mode, the configured Quack endpoint must already be serving the DuckDB database.
-The installed 4.19 server wheel uses its bundled extension when `extension_path` is omitted. A
-source-built executable can use an explicit local DuckDB 2.0.0 `quack.duckdb_extension` built for
-the same platform. The DuckDB product loads that exact file and does not install or download
-extensions at runtime. Quack itself is an [experimental, pre-release DuckDB extension](https://github.com/duckdb/duckdb-quack):
-keep this source mode opt-in and pin the owner to the tested DuckDB 2.0.0 line:
-
-```sh
-SPARKLESS_DUCKDB_SOURCES='[{"alias":"warehouse","quack_uri":"quack:localhost:9494","token":"replace-with-secret"}]' \
-  sparkless-server-duckdb
-```
-
-For an installed Python product, use `sparkless-server-duckdb[connect]` and
-`sparkless_server_duckdb.SparklessServer` (or its product-bound `SparklessConnect`). The legacy
-`sparkless_connect` helper keeps the base default even when both products are installed.
-
-Pass the JSON through the deployment's secret mechanism so the token does not appear in a shell
-history. Configure Quack authorization on the owner to restrict that token to the intended
-read-only queries; DuckDB's default Quack authorization permits the full SQL surface, so possession
-of the token is broader than Sparkless's read-only source API.
-
-The client can read `warehouse.main.events` or `warehouse.events`. Schema analysis resolves
-metadata without scanning rows. Execution opens the configured database read-only and retains one
-statement transaction while it exports typed batches to Polars. Quack mode uses one transaction on
-the attached remote owner; an independent writer's commit becomes visible to the next statement.
-A statement can read only one configured database owner. Configured aliases reserve their
-qualified namespace; a missing source table does not fall through to a managed table with the same
-name. Per catalog, at most four source connections are open and sixteen operations can wait for a
-connection. Enforced source limits are 1,000,000 rows, 32 MiB of Arrow IPC input, and 64 MiB of
-decoded data per statement, plus 16,384 rows and 1 MiB per batch.
-The source mapping supports BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE, VARCHAR, DATE,
-TIMESTAMPTZ, and DECIMAL with precision at most 38 and scale no greater than precision. The
-retained public smoke/differential covers BOOLEAN, SMALLINT, INTEGER, BIGINT, finite DOUBLE,
-VARCHAR, DATE, UTC TIMESTAMPTZ, and DECIMAL(12, 2); it does not certify every decimal boundary.
-The branch's public-client source smoke covers table reads, filter/project/limit, row and
-non-null-column counts, same-owner inner joins, grouped count/sum, and source DDL/DML plus append
-and overwrite rejection with an unchanged row count. It runs against both a local file and a live
-Quack owner.
-
-Cancelling a Quack scan interrupts the local DuckDB client and sends `quack_cancel` to the shared
-owner. The control connection is reserved with the scan under the four-connection cap and uses a
-three-second HTTP timeout.
-
-Quack mode and an independent writer fixture are implemented. Exact-commit Linux x86_64 and macOS
-arm64 server-extra installs, packaged Quack public source smokes, and four-reader 100k-row
-slow-consumer checks passed in [release run 41351811918](https://github.com/eddiethedean/robin-sparkless/actions/runs/41351811918).
-Each measured reader completed; observed server-child RSS was 192.9 MiB on Linux and 137.8 MiB on
-macOS. These are single-run observations, not a hard cross-platform memory limit. D14 and V36
-remain open for broader source/resource evidence. DuckDB writes, unsupported types, arbitrary
-client-supplied paths, and cross-owner joins fail explicitly.
+4.19 adds the owned session helper, named DuckDB table relations, grouped
+aggregations, and joins within the [supported surface](#supported-request-surface).
+See [read DuckDB tables](DUCKDB_SOURCE.md) for source configuration, types, and
+per-statement limits.
 
 ## Limits and unsupported operations
 
@@ -213,14 +146,10 @@ session state; they do not authenticate clients. The server does not provide Con
 authentication by itself. Keep the listener on loopback unless deployment supplies an
 authenticated TLS boundary in front of it.
 
-The optional MiniLake proxy route is not advertised as a supported 4.18 transport. A locally
-available route harness or direct-server success does not certify authentication, cluster routing,
-or lifecycle behavior of a third-party proxy.
-
 ## Verification
 
-The 4.18 release candidate runs the pinned public client against the Spark 4.0.5 reference for the
-value, schema, configuration, retry, lifecycle and error corpus. The candidate also verifies
-Connect-enabled native wheels, the owned launcher, and the native container. See the [4.18 release
-plan](plans/sparkless-server/RELEASE_4_18.md) and [validation record](plans/sparkless-server/VALIDATION.md)
-for candidate evidence and remaining release gates.
+The [4.19 candidate evidence](plans/sparkless-server/RELEASE_4_19_EVIDENCE.md)
+records the split-product wheel, clean-install, source smoke, and Spark
+4.0.5 differential checks. For earlier results see the
+[4.18 release evidence](RELEASE_EVIDENCE.md). The MiniLake proxy route requires
+separate validation of authentication, routing, and lifecycle behavior.

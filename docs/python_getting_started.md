@@ -1,6 +1,8 @@
 # Getting Started (Python — Sparkless v4)
 
-See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SUPPORT_MATRIX.md) before selecting features.
+Use this guide for the in-process Python API. If your tests import
+`pyspark.sql` and you want to keep that client, follow the
+[Spark Connect quickstart](SPARK_CONNECT.md).
 
 This guide is for the **Sparkless v4** Python package: a PySpark-like API backed by the [robin-sparkless](https://github.com/eddiethedean/robin-sparkless) Rust engine. Sparkless 3.x uses the Polars **Python** package; 4.x uses the **Rust** crate (no Polars Python at runtime).
 
@@ -27,12 +29,15 @@ The release workflow builds `cp311-abi3` extension wheels for Python 3.11–3.14
 | macOS | Intel, Apple Silicon |
 | Windows | x86_64, ARM64 |
 
-Check the [PyPI file inventory](https://pypi.org/project/sparkless/#files) for
-your release. A platform without a matching wheel requires a source build.
+Check the [native engine file inventory](https://pypi.org/project/sparkless-native/#files)
+for your release. A platform without a matching wheel requires a source build.
 The optional native server has a smaller platform set: Linux x86_64 with glibc
 2.28+ and macOS 14+ on Apple Silicon. See [Spark Connect](SPARK_CONNECT.md).
 
 ### Optional extras
+
+The table describes the **4.19 candidate**. For the published 4.18
+packages and their install commands, see [installation and versions](INSTALLATION.md).
 
 | Extra | Dependencies and purpose |
 | --- | --- |
@@ -50,7 +55,7 @@ The optional native server has a smaller platform set: Linux x86_64 with glibc
 For example:
 
 ```bash
-python -m pip install "sparkless[testing]>=4,<5"
+python -m pip install --find-links ./wheelhouse "sparkless[testing]==4.19.0"
 ```
 
 Use separate environments for `pyspark` and `pyspark4`; they require different
@@ -235,11 +240,11 @@ exports are covered in the [Python API reference](PYTHON_API_REFERENCE.md#action
 
 ## Native server and Spark Connect
 
-The `server` extra installs a native executable. `SparklessServer` and
-`AsyncSparklessServer` own its startup, readiness, and shutdown. Follow the
-[Spark Connect guide](SPARK_CONNECT.md) for the pinned 4.18 client example,
-HTTP-only operation, supported platforms, and the exact remote API/type limits.
-The remote contract is narrower than the in-process Python API on this page.
+In 4.19, `SparklessConnect` can own both a server process and a PySpark
+Connect session. Follow the [Spark Connect quickstart](SPARK_CONNECT.md)
+for a base server, or [read DuckDB tables](DUCKDB_SOURCE.md) for the optional
+source-enabled product. The remote API has a narrower support contract than
+the in-process Python API on this page.
 
 ## Performance
 

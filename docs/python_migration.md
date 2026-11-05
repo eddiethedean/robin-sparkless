@@ -48,9 +48,8 @@ the package boundary:
 | 4.18 | 4.19 |
 | --- | --- |
 | `from sparkless.server import SparklessServer` | `from sparkless_connect import SparklessServer` for the shared launcher, or `from sparkless_server import SparklessServer` for the base product |
-| `from sparkless.server import AsyncSparklessServer, SparklessConnect` | `from sparkless_connect import AsyncSparklessServer, SparklessConnect` |
-| `from sparkless.server import SparklessConnect` when using DuckDB sources | `from sparkless_server_duckdb import SparklessConnect` to bind the owned helper to the DuckDB-source product |
-| `import sparkless.testing` | `import sparkless_testing` |
+| `from sparkless.server import AsyncSparklessServer` | `from sparkless_connect import AsyncSparklessServer` or use the helper from your server product |
+| `import sparkless.testing` | `import sparkless_testing`. In `conftest.py`, register `pytest_plugins = ["sparkless_testing.plugin"]` to load fixtures and hooks. |
 | `pip install "sparkless[dev]"` for shared pytest helpers | `pip install "sparkless[testing]"` or `pip install sparkless-testing` |
 | `sparkless._native` | `sparkless_native._native` for internal extension integrations |
 
@@ -60,6 +59,11 @@ distribution are removed from the 4.19 package graph. Install
 the client-only `sparkless-connect[client]` install does not include a server or
 the local native engine. The `sparkless-testing` package has no runtime
 dependency on Sparkless, its native extension, or PySpark.
+
+Sparkless 4.18 shipped the Spark Connect server and its process launcher.
+Callers created and stopped the PySpark session separately. The new 4.19
+[`SparklessConnect` context manager](SPARK_CONNECT.md#start-a-server-and-session)
+owns the process and the client session together.
 
 When both server products are installed, choose the package import explicitly:
 `sparkless_server.SparklessConnect` owns a base server, while

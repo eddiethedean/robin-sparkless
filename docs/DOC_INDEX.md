@@ -9,7 +9,7 @@ Start with [installation/version selection](INSTALLATION.md), then choose a path
 | Experienced developer | [API contracts](PYTHON_API_REFERENCE.md), [symbols](PYTHON_API_SYMBOLS.md), [types/errors](TYPES_AND_ERRORS.md), [differences](PYSPARK_DIFFERENCES.md) |
 | Rust consumer | [Quick start](QUICKSTART.md), [Rust reference fallback](RUST_API_REFERENCE.md), [security notice](security/zstd-4.18-exception.md) |
 | Extension author | [Architecture](ARCHITECTURE.md), [extensions](EXTENDING.md), [external catalogs](EXTERNAL_CATALOGS.md) |
-| Operator/evaluator | [HTTP](HTTP_API.md), [Connect](SPARK_CONNECT.md), [runbook](PRODUCTION.md), [sizing](PERFORMANCE.md), [support](SUPPORT.md), [security](SECURITY.md) |
+| Server user or operator | [Spark Connect](SPARK_CONNECT.md), [DuckDB sources](DUCKDB_SOURCE.md), [HTTP](HTTP_API.md), [runbook](PRODUCTION.md), [sizing](PERFORMANCE.md), [security](SECURITY.md) |
 | Contributor | [Regression walkthrough](TEST_CREATION_GUIDE.md), [documentation checks](DOCUMENTATION.md), [release process](RELEASING.md), [4.19 migration guide](MIGRATION_4_19.md), [4.19 SOLID refactor plan](plans/solid-refactor-4.19.md) |
 
 [Archived plans and historical evidence](ARCHIVE.md) are retained for traceability;

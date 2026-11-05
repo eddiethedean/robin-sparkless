@@ -1,6 +1,7 @@
 # Before You Adopt Sparkless
 
-See [versions/install paths](INSTALLATION.md) and the [4.18 surface contract](SUPPORT_MATRIX.md) before selecting features.
+See [installation and versions](INSTALLATION.md) and the
+[support matrix](SUPPORT_MATRIX.md) before selecting features.
 
 Sparkless is a strong fit for **local PySpark-style development and testing** without a JVM. Read this page before treating it as a drop-in replacement for a production Spark cluster.
 
@@ -27,11 +28,12 @@ Sparkless is a strong fit for **local PySpark-style development and testing** wi
 
 ## Native server and Spark Connect
 
-The 4.18 server provides HTTP and a supported subset of the Spark 4.0.5 Connect
-protocol. Its remote API and logical types are narrower than the in-process
-Python API. See [Spark Connect](SPARK_CONNECT.md) for supported operations,
-platforms, resource budgets, and network trust boundaries. Arrow response
-streaming does not provide Structured Streaming.
+The native server provides HTTP and a subset of the Spark 4.0.5 Connect
+protocol. The remote API supports fewer operations and logical types than
+the in-process Python API. The 4.19 candidate adds an optional server product
+for configured read-only DuckDB tables. See the
+[Connect limits](SPARK_CONNECT.md#limits-and-unsupported-operations) and
+[DuckDB source guide](DUCKDB_SOURCE.md).
 
 ## Production and security
 

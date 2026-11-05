@@ -1,6 +1,7 @@
 # Configuration reference
 
-Applies to 4.18.0. Set environment hardening variables **before** creating sessions.
+Affects the local engine and the native server as shown below. Set hardening
+environment variables before creating sessions or launching the server.
 A Spark configuration key being retained does not mean Sparkless implements the
 Spark subsystem it names. Configuration profiles adjust documented compatibility,
 not the actual installed PySpark oracle version.
@@ -34,6 +35,7 @@ port. Query `/capabilities` after launch for the effective limits.
 | --- | ---: |
 | `SPARKLESS_SERVER_HOST` | 127.0.0.1 |
 | `SPARKLESS_SERVER_PORT` | 8099 |
+| `SPARKLESS_DUCKDB_SOURCES` | Unset. Configure read-only source aliases on the [4.19 DuckDB server](DUCKDB_SOURCE.md). |
 | `SPARKLESS_MAX_REQUEST_BYTES` | 1,048,576 |
 | `SPARKLESS_MAX_SQL_BYTES` | 262,144 |
 | `SPARKLESS_MAX_RESULT_ROWS` | 10,000 |
